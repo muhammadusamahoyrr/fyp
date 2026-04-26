@@ -188,7 +188,7 @@ export default function RegisterPage() {
       t={DARK}
       role={role}
       goBack={() => setRole(r => r === 'client' ? 'lawyer' : 'client')}
-      onNext={() => router.push('/login')}
+      onNext={() => { try { localStorage.setItem('aai-role', role); } catch {} router.push(role === 'lawyer' ? '/lawyer' : '/login'); }}
     />
   );
 }

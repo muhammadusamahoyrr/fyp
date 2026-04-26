@@ -7,7 +7,7 @@ import { Ic } from '@/app/Icons';
 
 import { DARK } from '@/components/admin/themes.js';
 
-function LoginScreen({ t, onSuccess, onForgot, onCreateAccount, goBack }) {
+function LoginScreen({ t, role, setRole, onSuccess, onForgot, onCreateAccount, goBack }) {
   const [spw, setSPW] = useState(false);
   const [rem, setRem] = useState(false);
   return (
@@ -16,6 +16,17 @@ function LoginScreen({ t, onSuccess, onForgot, onCreateAccount, goBack }) {
         <button onClick={goBack} className="aBtn" style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"none",cursor:"pointer",color:t.textMuted,fontSize:13,fontWeight:500,marginBottom:22,padding:0}}>
           {Ic.arrowL(t.textFaint)} Back
         </button>
+        {/* Role selector */}
+        <div style={{display:"flex",gap:6,marginBottom:20,padding:4,background:t.inputBg,borderRadius:t.r.md,border:`1px solid ${t.border}`}}>
+          {["client","lawyer"].map(r => (
+            <button key={r} onClick={() => setRole(r)} style={{
+              flex:1, padding:"7px 0", borderRadius:8, border:"none", cursor:"pointer",
+              background: role===r ? t.grad1 : "transparent",
+              color: role===r ? (t.mode==="dark"?"#182B32":"#fff") : t.textMuted,
+              fontSize:12.5, fontWeight:600, textTransform:"capitalize", transition:"all .2s",
+            }}>{r==="lawyer" ? "Lawyer" : "Client"}</button>
+          ))}
+        </div>
         <div style={{marginBottom:18}}>
           <h1 style={{fontFamily:"'Cormorant Garamond',serif",fontSize:28,fontWeight:700,color:t.text,lineHeight:1.15,marginBottom:4,animation:"fadeUp .4s ease both"}}>Welcome back</h1>
           <p style={{color:t.textMuted,fontSize:13,animation:"fadeUp .4s ease .04s both"}}>Sign in to your AttorneyAI workspace</p>
@@ -52,5 +63,16 @@ function LoginScreen({ t, onSuccess, onForgot, onCreateAccount, goBack }) {
 
 export default function LoginPage() {
   const router = useRouter();
-  return <LoginScreen t={DARK} onSuccess={() => router.push('/dashboard')} onForgot={() => router.push('/reset-password')} onCreateAccount={() => router.push('/register')} goBack={() => router.push('/')} />;
+  const [role, setRole] = useState('client');
+  return (
+    <LoginScreen
+      t={DARK}
+      role={role}
+      setRole={setRole}
+      onSuccess={() => { try { localStorage.setItem('aai-role', role); } catch {} router.push(role === 'lawyer' ? '/lawyer' : '/dashboard'); }}
+      onForgot={() => router.push('/reset-password')}
+      onCreateAccount={() => router.push('/register')}
+      goBack={() => router.push('/')}
+    />
+  );
 }

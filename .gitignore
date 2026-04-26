@@ -8,6 +8,8 @@ pnpm-lock.yaml
 dist/
 build/
 *.tgz
+.next/
+frontend/.next/
 
 # Environment variables
 .env

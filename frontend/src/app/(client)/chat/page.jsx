@@ -1,1 +1,2 @@
-export default function Page() { return null; }
+import ClientApp from '@/components/client/ClientApp';
+export default function Page() { return <ClientApp initialTab="chatbot" />; }
