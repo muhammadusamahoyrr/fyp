@@ -1,7 +1,9 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { Logo } from './UIComponents';
-import { Ic } from './Icons';
+import { Logo } from '@/app/UIComponents';
+import { Ic } from '@/app/Icons';
+
+export const ONBOARDED_KEY = "attorney_ai_lawyer_onboarded";
 
 const LSTEPS = [
   { l:"Professional Profile", s:"Name, license & specialization" },
@@ -297,3 +299,5 @@ export function Onboarding({ t, role, onComplete }) {
     </div>
   );
 }
+
+export const OnboardingPage = Onboarding;

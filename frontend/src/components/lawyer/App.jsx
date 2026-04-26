@@ -30,10 +30,14 @@ const SEED_NOTIFS = [
     { id: 4, type: "appointment", title: "Appointment Request", body: "Neha Verma — New Client Consultation", time: "1d ago", unread: false },
 ];
 
-export default function App() {
+export default function App({ initialPage = "dashboard" }) {
     const [isDark, setIsDark] = useState(true);
     const t = isDark ? DARK : LIGHT;
-    const [page, setPage] = useState("login");
+    const [page, setPage] = useState(initialPage);
+
+    useEffect(() => {
+        try { if (localStorage.getItem(ONBOARDED_KEY) !== "1") setPage("onboarding"); } catch {}
+    }, []);
     const [collapsed, setCollapsed] = useState(false);
     const [activeCase, setActiveCaseState] = useState(null);
     const [openCaseId, setOpenCaseId] = useState(null);           // FIX: global workspace state
@@ -81,7 +85,7 @@ export default function App() {
         <ThemeCtx.Provider value={t}><ToggleCtx.Provider value={toggle}>
             <CaseCtx.Provider value={caseCtxVal}><NotifCtx.Provider value={notifCtxVal}>
                 <div style={{ display: "flex", minHeight: "100vh", background: t.bg }}>
-                    <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} unreadMsgs={unreadMsgs} toggleTheme={toggle} isDark={isDark} />
+                    {page !== "onboarding" && <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} unreadMsgs={unreadMsgs} toggleTheme={toggle} isDark={isDark} />}
                     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
                         {!hideTopbar && <Topbar page={page} collapsed={collapsed} setCollapsed={setCollapsed} toggleTheme={toggle} />}
                         {/* Active case banner — visible on all pages except communications/ai-legal */}
@@ -89,8 +93,14 @@ export default function App() {
                             <ActiveCaseBanner caseId={activeCase} onClear={() => { setActiveCaseState(null); setOpenCaseId(null); }} />
                         )}
                         {/* FIX: removed key={page} — was destroying all page state on every navigation */}
-                        <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: ["ai-legal", "communications", "cases", "doc-automation"].includes(page) ? "hidden" : "auto", padding: ["ai-legal", "cases", "doc-automation"].includes(page) ? 0 : 24 }}>
-                            <Page />
+                        <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: ["ai-legal", "communications", "cases", "doc-automation", "onboarding"].includes(page) ? "hidden" : "auto", padding: ["ai-legal", "cases", "doc-automation", "onboarding"].includes(page) ? 0 : 24 }}>
+                            {page === "onboarding"
+                                ? <OnboardingPage t={t} role="lawyer" onComplete={() => {
+                                    try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch {}
+                                    setPage("dashboard");
+                                }} />
+                                : <Page />
+                            }
                         </main>
                     </div>
                 </div>

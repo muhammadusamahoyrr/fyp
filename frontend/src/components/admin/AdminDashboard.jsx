@@ -1,4 +1,4 @@
-// Admin Dashboard — paste your code here
+'use client';
 import { StatCard, IconBox, Ic } from "./components.jsx";
 import { BarChart, DonutChart } from "./charts.jsx";
 import { IC } from "./icons.js";

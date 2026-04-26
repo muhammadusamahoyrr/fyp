@@ -2,7 +2,7 @@
 // Lawyer Profile Page — paste your code here
 import { useState } from "react";
 import { useTheme } from "./theme.js";
-import { Card, Btn, Label, Badge, Divider } from "./components.jsx";
+import { Card, Btn, Label, Badge, Divider, Input } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 
 // ============================================================

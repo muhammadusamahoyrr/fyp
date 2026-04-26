@@ -92,7 +92,7 @@ function Header({ isDark, toggleTheme }) {
 
         {/* Auth Buttons */}
         <div className="hidden items-center lg:flex lg:flex-1 lg:justify-end gap-6">
-          <a className="font-bold text-[#025E56] border-b border-transparent hover:border-b-2 hover:border-[#025E56]" href="/registration">Sign Up</a>
+          <a className="font-bold text-[#025E56] border-b border-transparent hover:border-b-2 hover:border-[#025E56]" href="/register">Sign Up</a>
           <a className="font-bold bg-gradient-to-br from-[#004743] to-[#025E56] hover:bg-gradient-to-tl text-white text-sm py-4 px-10 rounded-full shadow-lg" href="/login">Login</a>
           <button onClick={toggleTheme} className="p-2 rounded-full bg-gray-100 hover:bg-gray-200">
             {isDark ? '☀️' : '🌙'}
@@ -109,7 +109,7 @@ function Header({ isDark, toggleTheme }) {
             <a className="text-base font-semibold text-[#004743]" href="/plans">Pricing</a>
             <a className="text-base font-semibold text-[#004743]" href="/about">About Us</a>
             <hr className="border-gray-200" />
-            <a className="font-bold text-[#025E56]" href="/registration">Sign Up</a>
+            <a className="font-bold text-[#025E56]" href="/register">Sign Up</a>
             <a className="font-bold bg-gradient-to-br from-[#004743] to-[#025E56] text-white text-sm py-3 px-8 rounded-full text-center" href="/login">Login</a>
           </div>
         </div>
@@ -497,18 +497,18 @@ function Footer() {
 
 // Main Landing Page Component
 export default function LandingPage() {
-  const [isDark, setIsDark] = useState(() => {
-    try { 
-      const s = localStorage.getItem("aai-theme"); 
-      return s ? s === "dark" : false; 
-    } catch { 
-      return false; 
-    }
-  });
+  const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
-    try { 
-      localStorage.setItem("aai-theme", isDark ? "dark" : "light"); 
+    try {
+      const s = localStorage.getItem("aai-theme");
+      if (s) setIsDark(s === "dark");
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("aai-theme", isDark ? "dark" : "light");
     } catch {}
   }, [isDark]);
 

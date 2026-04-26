@@ -6,7 +6,7 @@ import { useCase } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
 import { casesData } from "./data.js";
-import logo from "./logo.png";
+const logo = "/logo.png";
 
 // ============================================================
 // CASE DRAWER — slides in from right, shows full case detail

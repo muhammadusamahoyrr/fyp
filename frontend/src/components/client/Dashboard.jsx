@@ -190,10 +190,10 @@ const NotifDrawer = ({ open, onClose, onGoTracking, t }) => {
 };
 
 /* ─── Inner Dashboard ───────────────────────────────────────── */
-const DashboardInner = ({ go, isDark, toggleTheme }) => {
+const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) => {
     const t = isDark ? DARK : LIGHT;
     const { unreadCount } = useCase();
-    const [tab, setTab] = useState("overview");
+    const [tab, setTab] = useState(initialTab);
     const [headerActions, setHeaderActions] = useState(null);
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(false);
@@ -563,9 +563,9 @@ const DashboardInner = ({ go, isDark, toggleTheme }) => {
 };
 
 /* ─── Public export ─────────────────────────────────────────── */
-const Dashboard = ({ go, isDark, toggleTheme }) => (
+const Dashboard = ({ go, isDark, toggleTheme, initialTab = "overview" }) => (
     <CaseProvider>
-        <DashboardInner go={go} isDark={isDark} toggleTheme={toggleTheme} />
+        <DashboardInner go={go} isDark={isDark} toggleTheme={toggleTheme} initialTab={initialTab} />
     </CaseProvider>
 );
 
