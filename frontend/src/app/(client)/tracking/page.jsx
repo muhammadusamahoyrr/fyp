@@ -1,1 +1,1 @@
-// Case progress tracking (M7)
+export default function Page() { return null; }

@@ -1,10 +1,13 @@
-// Reset password page — TODO
+'use client';
 import React, { useState } from 'react';
-import { Logo, InputField } from '../UIComponents';
-import { AuthLayout } from '../LayoutComponents';
-import { Ic } from '../Icons';
+import { useRouter } from 'next/navigation';
+import { Logo, InputField } from '@/app/UIComponents';
+import { AuthLayout } from '@/app/LayoutComponents';
+import { Ic } from '@/app/Icons';
 
-export function ForgotPw({ t, goBack }) {
+import { DARK } from '@/components/admin/themes.js';
+
+function ForgotPw({ t, goBack }) {
   const [sub, setSub] = useState(0);
   const [spw, setSPW] = useState(false);
   const [scf, setSCF] = useState(false);
@@ -101,4 +104,9 @@ export function ForgotPw({ t, goBack }) {
       </div>
     </AuthLayout>
   );
+}
+
+export default function ResetPasswordPage() {
+  const router = useRouter();
+  return <ForgotPw t={DARK} goBack={() => router.push('/login')} />;
 }

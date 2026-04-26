@@ -1,3 +1,4 @@
+'use client';
 // Paste your Dashboard.jsx code here
 import React, { useState, useRef, useEffect } from "react";
 import { DARK, LIGHT, ThemeCtx, HeaderActionsCtx } from "./theme.js";

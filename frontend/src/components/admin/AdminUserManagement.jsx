@@ -1,3 +1,4 @@
+'use client';
 // Admin User Management — paste your code here
 import { useState, useMemo } from "react";
 import { Avatar, Badge, Btn, Modal, Input, EmptyState, Paginator, ActionMenu, SortTh, Ic } from "./components.jsx";

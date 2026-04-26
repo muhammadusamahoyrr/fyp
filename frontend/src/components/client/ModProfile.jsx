@@ -1,9 +1,10 @@
+'use client';
 // Paste your ModProfile.jsx code here
 import React, { useState, useRef } from "react";
 import { useT } from "./theme.js";
-import { useToast } from "./Toast.jsx";
+import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
-import { Card, BtnPrimary, BtnOutline, ThemedInput, ConfirmDialog, Tooltip, Badge } from "./shared.jsx";
+import { Card, BtnPrimary, BtnOutline, ThemedInput, ConfirmDialog, Tooltip, Badge } from "@/components/shared/shared.jsx";
 
 /* ─────────────────────────────────────────────────────────────
    DESIGN TOKENS — derived from theme but boosted for contrast

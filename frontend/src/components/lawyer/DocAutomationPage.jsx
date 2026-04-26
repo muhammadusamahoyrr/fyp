@@ -1,3 +1,4 @@
+'use client';
 // Lawyer Document Automation Page — paste your code here
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "./theme.js";

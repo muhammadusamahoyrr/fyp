@@ -1,1 +1,1 @@
-// Document automation & drafting (M6)
+export default function Page() { return null; }

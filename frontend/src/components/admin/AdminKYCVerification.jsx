@@ -1,3 +1,4 @@
+'use client';
 // Admin KYC Verification — paste your code here
 import { useState, useMemo } from "react";
 import { StatCard, IconBox, Badge, DocTag, Avatar, Btn, Modal, EmptyState, Ic } from "./components.jsx";

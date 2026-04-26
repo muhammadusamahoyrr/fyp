@@ -1,3 +1,4 @@
+'use client';
 // Lawyer AI Legal Page — paste your code here
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "./theme.js";

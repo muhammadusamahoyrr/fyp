@@ -1,6 +1,6 @@
-// Paste your theme.js code here
+'use client';
 import React, { createContext, useContext, useState } from "react";
-import Ic from "./Ic.jsx";
+import Ic from "@/components/shared/Ic.jsx";
 
 export const ToastCtx = createContext(null);
 export const useToast = () => {

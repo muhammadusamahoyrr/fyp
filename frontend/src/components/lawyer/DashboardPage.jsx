@@ -1,3 +1,4 @@
+'use client';
 // Lawyer Dashboard Page — paste your code here
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";

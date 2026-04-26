@@ -1,9 +1,10 @@
+'use client';
 // Paste your ModDocuments.jsx code here
 import React, { useState, Fragment, useEffect } from "react";
 import { useT, useHeaderActions } from "./theme.js";
-import { useToast } from "./Toast.jsx";
+import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
-import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "./shared.jsx";
+import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 
 const STitle = ({ icon, sub, children }) => {
     const t = useT();

@@ -1,3 +1,4 @@
+'use client';
 // Admin Case Tracking — paste your code here
 import { useState } from "react";
 import { Badge, Btn, Modal, Ic } from "./components.jsx";

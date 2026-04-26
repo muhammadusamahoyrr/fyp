@@ -1,6 +1,6 @@
 // Paste your ThemeToggle.jsx code here
 import React from "react";
-import { DARK, LIGHT } from "./theme.js";
+import { DARK, LIGHT } from "@/components/admin/themes.js";
 import Ic from "./Ic.jsx";
 
 const ThemeToggle = ({ isDark, toggle }) => {

@@ -1,4 +1,4 @@
-// Paste your Toast.jsx code here
+'use client';
 import React, { createContext, useContext, useState } from "react";
 import Ic from "./Ic.jsx";
 

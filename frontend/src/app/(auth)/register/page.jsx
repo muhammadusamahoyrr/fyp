@@ -1,9 +1,12 @@
-// Register page — TODO
+'use client';
 import React, { useState } from 'react';
-import { Logo, PillInput, FieldLabel, Checkbox } from '../UIComponents';
-import { Ic } from '../Icons';
+import { useRouter } from 'next/navigation';
+import { Logo, PillInput, FieldLabel, Checkbox } from '@/app/UIComponents';
+import { Ic } from '@/app/Icons';
 
-export function SignUp({ t, role, goBack, onNext }) {
+import { DARK } from '@/components/admin/themes.js';
+
+function SignUp({ t, role, goBack, onNext }) {
   const [spw, setSPW] = useState(false);
   const [terms, setTerms] = useState(false);
   const [pw, setPw] = useState("");
@@ -28,11 +31,11 @@ export function SignUp({ t, role, goBack, onNext }) {
       {/* Card */}
       <div style={{
         width:"100%", maxWidth:500,
-        background: t.mode==="dark" ? "rgba(32,55,63,0.98)" : t.panel,
+        background: t.mode==="dark" ? "rgba(32,55,63,0.98)" : t.surface,
         borderRadius: t.r.xl,
         border:`1px solid ${t.border}`,
         padding:"24px 22px 20px",
-        boxShadow: t.shadow,
+        boxShadow: t.shadowCard,
         position:"relative", zIndex:1,
         backdropFilter:"blur(20px)",
         animation:"scaleUp .35s cubic-bezier(.4,0,.2,1) both",
@@ -174,5 +177,18 @@ export function SignUp({ t, role, goBack, onNext }) {
 
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  const router = useRouter();
+  const [role, setRole] = React.useState('client');
+  return (
+    <SignUp
+      t={DARK}
+      role={role}
+      goBack={() => setRole(r => r === 'client' ? 'lawyer' : 'client')}
+      onNext={() => router.push('/login')}
+    />
   );
 }

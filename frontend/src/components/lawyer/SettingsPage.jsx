@@ -1,3 +1,4 @@
+'use client';
 import { useState } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";

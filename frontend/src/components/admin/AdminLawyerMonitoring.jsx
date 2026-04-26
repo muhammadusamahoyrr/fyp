@@ -1,3 +1,4 @@
+'use client';
 // Admin Lawyer Monitoring — paste your code here
 import { useState, useMemo } from "react";
 import { StatCard, IconBox, Badge, Avatar, Btn, Modal, Ic, SortTh } from "./components.jsx";

@@ -1,10 +1,13 @@
-// Login page — TODO
+'use client';
 import React, { useState } from 'react';
-import { Logo, InputField, PrimaryBtn, Checkbox, Divider, GoogleBtn } from '../UIComponents';
-import { AuthLayout } from '../LayoutComponents';
-import { Ic } from '../Icons';
+import { useRouter } from 'next/navigation';
+import { Logo, InputField, PrimaryBtn, Checkbox, Divider, GoogleBtn } from '@/app/UIComponents';
+import { AuthLayout } from '@/app/LayoutComponents';
+import { Ic } from '@/app/Icons';
 
-export function LoginScreen({ t, onSuccess, onForgot, onCreateAccount, goBack }) {
+import { DARK } from '@/components/admin/themes.js';
+
+function LoginScreen({ t, onSuccess, onForgot, onCreateAccount, goBack }) {
   const [spw, setSPW] = useState(false);
   const [rem, setRem] = useState(false);
   return (
@@ -45,4 +48,9 @@ export function LoginScreen({ t, onSuccess, onForgot, onCreateAccount, goBack })
       </div>
     </AuthLayout>
   );
+}
+
+export default function LoginPage() {
+  const router = useRouter();
+  return <LoginScreen t={DARK} onSuccess={() => router.push('/dashboard')} onForgot={() => router.push('/reset-password')} onCreateAccount={() => router.push('/register')} goBack={() => router.push('/')} />;
 }

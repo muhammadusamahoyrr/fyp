@@ -1,3 +1,4 @@
+'use client';
 // Paste your casecontent.jsx code here
 import { createContext, useContext, useState } from "react";
 

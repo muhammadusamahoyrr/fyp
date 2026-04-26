@@ -1,9 +1,10 @@
+'use client';
 // Paste your ModChatbot.jsx code here
 import React, { useState } from "react";
 import { useT } from "./theme.js";
-import { useToast } from "./Toast.jsx";
+import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
-import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge, Tooltip } from "./shared.jsx";
+import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge, Tooltip } from "@/components/shared/shared.jsx";
 
 /* ══════════════════════════════════════════════════════
    MODULE: AI CHATBOT

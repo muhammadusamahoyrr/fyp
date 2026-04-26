@@ -1,1 +1,3 @@
-// Lawyer layout + lawyer auth guard
+export default function LawyerLayout({ children }) {
+  return <>{children}</>;
+}

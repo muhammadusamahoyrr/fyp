@@ -2,7 +2,7 @@
 import React from "react";
 import { useT } from "./theme.js";
 import Ic from "./Ic.jsx";
-import { Card, Badge } from "./shared.jsx";
+import { Card, Badge } from "@/components/shared/shared.jsx";
 
 const STitle = ({ icon, sub, children }) => {
     const t = useT();

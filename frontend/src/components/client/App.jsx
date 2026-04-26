@@ -1,12 +1,16 @@
+'use client';
 // Paste your App.jsx code here
 import React, { useState, useEffect } from "react";
-import { DARK, LIGHT, ThemeCtx } from "./theme.js";
-import { FONTS, makeGlobal } from "./styles.js";
-import ErrorBoundary from "./ErrorBoundary.jsx";
-import { ToastContainer } from "./Toast.jsx";
+import { DARK, LIGHT } from "@/components/admin/themes.js";
+import { ThemeCtx } from "@/components/lawyer/theme.js";
+import { FONTS, makeGlobal } from "@/lib/styles.js";
+import ErrorBoundary from "@/components/shared/ErrorBoundary.jsx";
+import { ToastContainer } from "@/components/shared/Toast.jsx";
 import Dashboard from "./Dashboard.jsx";
-import AuthPage from "./AuthPage.jsx";
-import Landing from "./Landing.jsx";
+import Landing from "@/components/shared/Landing.jsx";
+
+// AuthPage not yet implemented
+const AuthPage = () => null;
 
 export default function App() {
     const [page, setPage] = useState("landing");

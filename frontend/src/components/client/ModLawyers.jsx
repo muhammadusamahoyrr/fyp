@@ -1,9 +1,10 @@
+'use client';
 // Paste your ModLawyers.jsx code here
 import React, { useState } from "react";
 import { useT } from "./theme.js";
 import { useCase } from "./CaseContext.jsx";
 import Ic from "./Ic.jsx";
-import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "./shared.jsx";
+import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 
 /* ══════════════════════════════════════════════════════
    MODULE: LAWYER DISCOVERY

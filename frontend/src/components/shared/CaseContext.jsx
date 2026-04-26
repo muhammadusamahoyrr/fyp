@@ -1,4 +1,4 @@
-// Paste your CaseContext.jsx code here
+'use client';
 import { createContext, useContext, useState } from "react";
 
 /* ═══════════════════════════════════════════════════════════════

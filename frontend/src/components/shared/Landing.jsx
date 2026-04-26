@@ -1,3 +1,4 @@
+'use client';
 import React, { useState, useEffect } from 'react';
 import { DARK, LIGHT } from './themes';
 
@@ -62,11 +63,11 @@ function Header({ isDark, toggleTheme }) {
         {/* Logo */}
         <div className="hidden lg:flex lg:flex-1">
           <a href="/">
-            <img alt="AI Attorney Logo" src="/assets/CheckoutLogo-D7kKgf2i.svg" className="h-8 w-auto md:h-12 lg:w-24 lg:h-14" />
+            <img alt="AI Attorney Logo" src="/logo.png" className="h-8 w-auto md:h-12 lg:w-24 lg:h-14" />
           </a>
         </div>
         <a className="flex lg:hidden ml-1" href="/">
-          <img alt="AI Attorney Logo" src="/assets/CheckoutLogo-D7kKgf2i.svg" className="h-8 w-auto md:h-12 px-1" />
+          <img alt="AI Attorney Logo" src="/logo.png" className="h-8 w-auto md:h-12 px-1" />
         </a>
 
         {/* Mobile Menu Button */}
@@ -348,7 +349,7 @@ function TestimonialsSection() {
               <div key={idx} className="flex-shrink-0 min-w-[300px] md:min-w-[350px] py-6 px-4 rounded-3xl bg-white">
                 <div className="flex justify-between items-center gap-5 w-full mb-4">
                   <div className="flex text-[#004743]">
-                    {[1,2,3,4,5].map(i => Icons.star("h-4 w-4 mr-1"))}
+                    {[1,2,3,4,5].map(i => <React.Fragment key={i}>{Icons.star("h-4 w-4 mr-1")}</React.Fragment>)}
                   </div>
                   <div className="flex items-center justify-center py-2 gap-2">
                     <div className="bg-[#004743] rounded-full p-1">
@@ -442,7 +443,7 @@ function Footer() {
         <div className="flex flex-col md:flex-row md:justify-between gap-y-8">
           <div className="space-y-4">
             <div className="w-24 h-24 2xl:w-32 2xl:h-32 mb-8">
-              <img src="/assets/CheckoutLogo-D7kKgf2i.svg" alt="AI Attorney Logo" className="w-full h-full object-contain brightness-0 invert" />
+              <img src="/logo.png" alt="AI Attorney Logo" className="w-full h-full object-contain brightness-0 invert" />
             </div>
             <p className="text-balance text-sm text-gray-300">
               Copyright © 2026 Firefly Tech Solutions Ltd.<br />All rights reserved

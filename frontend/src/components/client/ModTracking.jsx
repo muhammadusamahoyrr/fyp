@@ -1,3 +1,4 @@
+'use client';
 // Paste your ModTracking.jsx code here
 import { useState, useEffect, useRef } from "react";
 import { DARK, LIGHT, useT } from "./theme.js";

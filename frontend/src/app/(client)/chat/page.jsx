@@ -1,1 +1,1 @@
-// AI legal guidance & consultation chatbot (M3)
+export default function Page() { return null; }

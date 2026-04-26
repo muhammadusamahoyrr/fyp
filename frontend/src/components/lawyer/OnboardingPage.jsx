@@ -1,3 +1,4 @@
+'use client';
 import React, { useState, useEffect } from 'react';
 import { Logo } from './UIComponents';
 import { Ic } from './Icons';

@@ -1,3 +1,4 @@
+'use client';
 // Paste your shared.jsx code here
 import React, { useState } from "react";
 import { useT } from "./theme.js";

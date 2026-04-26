@@ -1,1 +1,1 @@
-// Legal query intake & case structuring (M2)
+export default function Page() { return null; }

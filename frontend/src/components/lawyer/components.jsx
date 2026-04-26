@@ -1,3 +1,4 @@
+'use client';
 // Lawyer shared components — paste your code here
 import { useState } from "react";
 import { useTheme } from "./theme.js";

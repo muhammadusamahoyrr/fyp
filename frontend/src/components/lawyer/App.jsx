@@ -1,3 +1,4 @@
+'use client';
 // Lawyer App — paste your code here
 import { useState, useEffect } from "react";
 import { DARK, LIGHT, ThemeCtx, ToggleCtx, CaseCtx, NotifCtx } from "./theme.js";
@@ -14,10 +15,11 @@ import { UploadPage } from "./UploadPage.jsx";
 import { CommunicationsPage } from "./CommunicationsPage.jsx";
 import { ProfilePage } from "./ProfilePage.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
-import { LoginPage } from "./LoginPage.jsx";
 import { OnboardingPage, ONBOARDED_KEY } from "./OnboardingPage.jsx";
 import { seedDocs } from "./data.js";
 
+// LoginPage not yet implemented
+const LoginPage = () => null;
 const DocumentsPage = DocWorkflowApp;
 const pageMap = { dashboard: DashboardPage, cases: CasesPage, documents: DocumentsPage, appointments: AppointmentsPage, clients: ClientsPage, "ai-legal": AILegalPage, "doc-automation": DocAutomationPage, upload: UploadPage, communications: CommunicationsPage, profile: ProfilePage, settings: SettingsPage, onboarding: OnboardingPage };
 

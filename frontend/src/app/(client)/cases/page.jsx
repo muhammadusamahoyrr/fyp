@@ -1,1 +1,1 @@
-// Client cases overview
+export default function Page() { return null; }

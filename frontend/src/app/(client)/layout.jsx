@@ -1,1 +1,3 @@
-// Client layout + client auth guard
+export default function ClientLayout({ children }) {
+  return <>{children}</>;
+}

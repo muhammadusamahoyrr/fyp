@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from "react";
-import { DARK, LIGHT } from "../admin/themes";
+import { DARK, LIGHT } from "../admin/themes.js";
 
 export { DARK, LIGHT };
 

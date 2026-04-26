@@ -1,1 +1,3 @@
-// Admin layout + admin auth guard
+export default function AdminLayout({ children }) {
+  return <>{children}</>;
+}
