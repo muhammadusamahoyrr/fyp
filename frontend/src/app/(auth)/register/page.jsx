@@ -5,6 +5,7 @@ import { Logo, PillInput, FieldLabel, Checkbox } from '@/app/UIComponents';
 import { Ic } from '@/app/Icons';
 
 import { DARK } from '@/components/admin/themes.js';
+import { ONBOARDED_KEY } from '@/components/lawyer/OnboardingPage.jsx';
 
 function SignUp({ t, role, goBack, onNext }) {
   const [spw, setSPW] = useState(false);
@@ -188,7 +189,16 @@ export default function RegisterPage() {
       t={DARK}
       role={role}
       goBack={() => setRole(r => r === 'client' ? 'lawyer' : 'client')}
-      onNext={() => { try { localStorage.setItem('aai-role', role); } catch {} router.push(role === 'lawyer' ? '/lawyer' : '/login'); }}
+      onNext={() => {
+        try {
+          localStorage.setItem('aai-role', role);
+          if (role === 'lawyer') {
+            // Ensure each new lawyer signup gets onboarding flow.
+            localStorage.removeItem(ONBOARDED_KEY);
+          }
+        } catch {}
+        router.push(role === 'lawyer' ? '/lawyer' : '/login');
+      }}
     />
   );
 }
