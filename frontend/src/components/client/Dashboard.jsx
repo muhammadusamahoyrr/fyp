@@ -1,6 +1,7 @@
 'use client';
 // Paste your Dashboard.jsx code here
 import React, { useState, useRef, useEffect } from "react";
+import { usePathname, useRouter as useNextRouter } from "next/navigation";
 import { DARK, LIGHT, ThemeCtx, HeaderActionsCtx } from "./theme.js";
 import { CaseProvider, useCase } from "./CaseContext.jsx";
 import Ic from "./Ic.jsx";
@@ -198,6 +199,28 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(false);
 
+    const navRouter = useNextRouter();
+
+    // Sync tab with URL so router.push('/lawyers') correctly switches the active tab
+    // even when React reuses this component instance across same-layout navigations.
+    const pathname = usePathname();
+    useEffect(() => {
+        const PATH_TAB = {
+            "/dashboard":  "overview",
+            "/intake":     "intake",
+            "/chat":       "chatbot",
+            "/lawyers":    "lawyers",
+            "/cases":      "cases",
+            "/documents":  "documents",
+            "/agreements": "agreements",
+            "/tracking":   "tracking",
+            "/profile":    "profile",
+        };
+        const next = PATH_TAB[pathname];
+        if (next && next !== tab) setTab(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pathname]);
+
     const liveDate = getLiveDate();
 
     const modules = {
@@ -321,7 +344,18 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                                 return (
                                     <button
                                         key={item.id}
-                                        onClick={() => setTab(item.id)}
+                                        onClick={() => {
+                                            const TAB_PATH = {
+                                                overview: "/dashboard", intake: "/intake",
+                                                chatbot: "/chat", lawyers: "/lawyers",
+                                                cases: "/cases", documents: "/documents",
+                                                agreements: "/agreements", tracking: "/tracking",
+                                                profile: "/profile",
+                                            };
+                                            const path = TAB_PATH[item.id];
+                                            if (path) navRouter.push(path);
+                                            else setTab(item.id);
+                                        }}
                                         style={{
                                             display: "flex",
                                             alignItems: "center",

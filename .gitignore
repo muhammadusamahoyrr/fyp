@@ -40,3 +40,38 @@ coverage/
 # Misc
 .cache/
 *.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# ChromaDB / AI vector store
+chroma_data/
+backend/chroma_data/
+
+# Knowledge base raw/pipeline data
+knowledge_base/pipeline/
+knowledge_base/processed/
+knowledge_base/raw/
+backend/knowledge_base/
+
+# Claude AI settings
+.claude/
+
+# Test scripts
+backend/test_*.py
+backend/debug_*.py
+backend/verify_*.py

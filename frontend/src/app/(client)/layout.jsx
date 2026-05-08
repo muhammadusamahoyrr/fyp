@@ -1,6 +1,6 @@
 'use client';
-import AuthGuard from '@/components/shared/AuthGuard';
+import ProtectedRoute from '@/components/shared/ProtectedRoute';
 
 export default function ClientLayout({ children }) {
-  return <AuthGuard requiredRole="client">{children}</AuthGuard>;
+  return <ProtectedRoute allowedRoles={['client']}>{children}</ProtectedRoute>;
 }

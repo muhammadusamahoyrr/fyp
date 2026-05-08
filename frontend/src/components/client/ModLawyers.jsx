@@ -1,17 +1,38 @@
 'use client';
-// Paste your ModLawyers.jsx code here
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { useT } from "./theme.js";
 import { useCase } from "./CaseContext.jsx";
+import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
+import { searchLawyers, matchLawyers, submitReview } from "@/lib/api.js";
+
+// Province and case-type mappings for server-side filter requests
+const CITY_TO_PROVINCE = {
+    lahore: "punjab", rawalpindi: "punjab", multan: "punjab", faisalabad: "punjab",
+    karachi: "sindh", hyderabad: "sindh",
+    islamabad: "federal",
+    peshawar: "kpk",
+    quetta: "balochistan",
+    punjab: "punjab", sindh: "sindh", kpk: "kpk", balochistan: "balochistan", federal: "federal",
+};
+const SPEC_TO_CASE_TYPE = {
+    "employment law": "civil", "civil rights": "civil", "contract": "civil", "property": "civil",
+    "criminal defense": "criminal", "criminal": "criminal",
+    "family law": "family", "family": "family",
+    "constitutional": "constitutional",
+    "civil": "civil",
+};
 
 /* ══════════════════════════════════════════════════════
    MODULE: LAWYER DISCOVERY
 ══════════════════════════════════════════════════════ */
 const ModLawyers = () => {
-    const t = useT();
+    const t          = useT();
+    const searchParams = useSearchParams();
     const { selectLawyer, confirmAppointment, addNotification, caseType } = useCase();
+    const toast = useToast();
     const [query, setQuery] = useState("");
     const [filter, setFilter] = useState("All");
     const [activeView, setActiveView] = useState("list");
@@ -35,8 +56,168 @@ const ModLawyers = () => {
     const [reviewSort, setReviewSort] = useState("date");
     const [locationInput, setLocationInput] = useState("");
     const [searchMode, setSearchMode] = useState("name");
+    const [apiLawyers, setApiLawyers] = useState([]);
+    const [loadingLawyers, setLoadingLawyers] = useState(true);
+    const [aiMatch, setAiMatch] = useState(null);
+    const [loadingMatch, setLoadingMatch] = useState(false);
+    const [showReviewForm, setShowReviewForm]     = useState(false);
+    const [reviewStars, setReviewStars]           = useState(5);
+    const [reviewComment, setReviewComment]       = useState("");
+    const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
-    const lawyers = [
+    // Map a backend user document to the shape the UI expects
+    const mapApiLawyer = (raw, idx) => {
+        const lp = raw.lawyer_profile || {};
+        const specs = lp.specializations || [];
+        return {
+            _id: raw._id || `api-${idx}`,
+            name: raw.full_name || "Unknown",
+            spec: specs.join(", ") || "General Practice",
+            city: raw.province
+                ? raw.province.charAt(0).toUpperCase() + raw.province.slice(1)
+                : "Pakistan",
+            exp: lp.experience_years || 0,
+            fee: 5000,
+            rating: lp.rating || 0,
+            avail: !!lp.availability,
+            reviews: lp.total_reviews || 0,
+            bar: lp.bar_number || `BAR-API-${String(idx + 1).padStart(3, "0")}`,
+            distance: null,
+            hours: "Mon–Fri: 9am–5pm",
+            address: raw.province
+                ? `${raw.province.charAt(0).toUpperCase() + raw.province.slice(1)}, Pakistan`
+                : "Pakistan",
+            credentials: specs,
+            reviewList: [],
+            match_score: raw.match_score,
+            match_reason: raw.match_reason,
+        };
+    };
+
+    // Initial load — no filters
+    useEffect(() => {
+        searchLawyers({ page_size: 20 }).then(({ data, error }) => {
+            if (!error && data) {
+                const items = Array.isArray(data) ? data : (data.items || []);
+                if (items.length) setApiLawyers(items.map((l, i) => mapApiLawyer(l, i)));
+            }
+            setLoadingLawyers(false);
+        }).catch(() => setLoadingLawyers(false));
+    }, []);
+
+    // Re-fetch from server when user changes filterable params (debounced 400 ms)
+    useEffect(() => {
+        const allDefault = filters.city === "All" && filters.specialization === "All"
+            && filters.rating === 0 && filters.availability === "All";
+        if (allDefault) return; // initial state — covered by the mount effect above
+
+        let cancelled = false;
+        setLoadingLawyers(true);
+        const timer = setTimeout(async () => {
+            const params = { page: 1, page_size: 20 };
+            if (filters.city !== "All") {
+                const prov = CITY_TO_PROVINCE[filters.city.toLowerCase()];
+                if (prov) params.province = prov;
+            }
+            if (filters.specialization !== "All") {
+                const ct = SPEC_TO_CASE_TYPE[filters.specialization.toLowerCase()];
+                if (ct) params.case_type = ct;
+            }
+            if (filters.rating > 0) params.min_rating = filters.rating;
+            if (filters.availability === "Available") params.availability = true;
+            else if (filters.availability === "Busy") params.availability = false;
+
+            const { data, error } = await searchLawyers(params);
+            if (!cancelled) {
+                if (!error && data) {
+                    const items = Array.isArray(data) ? data : (data.items || []);
+                    setApiLawyers(items.map((l, i) => mapApiLawyer(l, i)));
+                }
+                setLoadingLawyers(false);
+            }
+        }, 400);
+        return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filters.city, filters.specialization, filters.rating, filters.availability]);
+
+    // Reset review form whenever the selected lawyer changes
+    useEffect(() => {
+        setShowReviewForm(false);
+        setReviewComment("");
+        setReviewStars(5);
+    }, [selectedLawyer]);
+
+    const getCaseId = () =>
+        searchParams?.get("case_id") || localStorage.getItem("aai-case-id") || null;
+
+    const MAX_POLL_ATTEMPTS = 5;
+    const POLL_INTERVAL_MS  = 3000;
+
+    const handleAiMatch = async () => {
+        const caseId = getCaseId();
+        if (!caseId) {
+            toast.show("Complete the intake form first to get AI-matched lawyers.", "info", 3500);
+            return;
+        }
+        setLoadingMatch(true);
+
+        let items = [];
+        let lastError = null;
+
+        for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+            // Wait 3 s before every retry (not before the first try)
+            if (attempt > 0) {
+                await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+            }
+
+            const { data, error, status } = await matchLawyers(caseId);
+
+            if (error) {
+                if (status === 401 || status === 403) {
+                    // Auth failure — no point retrying
+                    lastError = status === 401
+                        ? "Session expired. Please sign in again."
+                        : "Access denied. This case does not belong to your account.";
+                    break;
+                }
+                if (status === 404) {
+                    // Case not created yet (race condition) — treat as empty and keep polling
+                } else {
+                    lastError = error?.error || error?.detail || JSON.stringify(error);
+                    break;
+                }
+            }
+
+            items = Array.isArray(data) ? data : (data?.matches || data?.items || []);
+            if (items.length > 0) break; // got results — stop polling
+            // else: background task still running, poll again
+        }
+
+        if (lastError) {
+            console.error("matchLawyers error:", lastError);
+            toast.show(lastError, "error", 4000);
+        } else if (items.length) {
+            const top = mapApiLawyer(items[0], 0);
+            setAiMatch(top);
+            toast.show(`AI matched you with ${top.name}`, "success", 3000);
+        } else {
+            toast.show("Lawyer matching is still processing — try again in a moment.", "info", 3500);
+        }
+
+        setLoadingMatch(false);
+    };
+
+    // Auto-trigger match when arriving from intake (?case_id= URL) OR when a
+    // completed intake case_id exists in localStorage and the user opens /lawyers directly.
+    useEffect(() => {
+        const caseId = searchParams?.get("case_id") || localStorage.getItem("aai-case-id");
+        if (caseId && !aiMatch) {
+            handleAiMatch();
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams]);
+
+    const MOCK_LAWYERS = [
         { name: "Ahmad Raza Khan", spec: "Employment Law", city: "Lahore", exp: 12, fee: 8000, rating: 4.9, avail: true, reviews: 84, bar: "BAR-001", lat: 31.5204, lng: 74.3587, distance: 2.4, hours: "Mon–Fri: 9am–6pm", address: "12 Mall Road, Lahore", credentials: ["LLB – Punjab University", "LLM – Harvard Law", "10+ Supreme Court Cases"], reviewList: [{ user: "Kamran A.", rating: 5, date: "2026-01-10", text: "Excellent counsel, won my wrongful termination case." }, { user: "Sana M.", rating: 5, date: "2026-01-05", text: "Very professional and thorough." }, { user: "Usman T.", rating: 4, date: "2025-12-28", text: "Good communication throughout the process." }] },
         { name: "Sara Minhas", spec: "Family Law", city: "Karachi", exp: 8, fee: 5500, rating: 4.7, avail: true, reviews: 61, bar: "BAR-002", lat: 24.8607, lng: 67.0011, distance: 5.1, hours: "Mon–Sat: 10am–5pm", address: "45 Clifton Block 4, Karachi", credentials: ["LLB – Karachi University", "Family Law Specialist Cert."], reviewList: [{ user: "Ayesha K.", rating: 5, date: "2026-01-15", text: "Handled my divorce case with sensitivity." }, { user: "Rehman B.", rating: 4, date: "2026-01-01", text: "Professional and responsive." }] },
         { name: "Bilal Chaudhry", spec: "Property", city: "Islamabad", exp: 15, fee: 10000, rating: 4.8, avail: false, reviews: 102, bar: "BAR-003", lat: 33.6844, lng: 73.0479, distance: 1.8, hours: "Mon–Fri: 8am–5pm", address: "F-7 Markaz, Islamabad", credentials: ["LLB – LUMS", "LLM – Oxford", "Property Law Expert"], reviewList: [{ user: "Imran C.", rating: 5, date: "2026-01-12", text: "Resolved complex property dispute efficiently." }, { user: "Hina F.", rating: 5, date: "2025-12-20", text: "Very knowledgeable about land laws." }] },
@@ -44,6 +225,9 @@ const ModLawyers = () => {
         { name: "Tariq Mehmood", spec: "Contract", city: "Lahore", exp: 6, fee: 4800, rating: 4.5, avail: true, reviews: 39, bar: "BAR-005", lat: 31.5497, lng: 74.3436, distance: 4.7, hours: "Mon–Fri: 10am–6pm", address: "Gulberg III, Lahore", credentials: ["LLB – UCP", "Contract & Commercial Law Cert."], reviewList: [{ user: "Zainab R.", rating: 4, date: "2026-01-03", text: "Helped draft airtight business contracts." }] },
         { name: "Zara Ali", spec: "Civil Rights", city: "Karachi", exp: 9, fee: 6300, rating: 4.8, avail: false, reviews: 77, bar: "BAR-006", lat: 24.8906, lng: 67.0022, distance: 6.3, hours: "Mon–Fri: 9am–5pm", address: "Defence Phase 2, Karachi", credentials: ["LLB – IBA", "Human Rights Law Fellow", "UN Advocacy Training"], reviewList: [{ user: "Mariam Q.", rating: 5, date: "2026-01-11", text: "Fought my civil rights case fearlessly." }, { user: "Shahid O.", rating: 5, date: "2025-12-30", text: "Exceptional dedication to justice." }] },
     ];
+
+    // Use real API data when available, fall back to mock for demo
+    const lawyers = apiLawyers.length > 0 ? apiLawyers : MOCK_LAWYERS;
 
     // Accent color palette — one per lawyer slot, cycles if more lawyers added
     const accentPalette = [
@@ -91,6 +275,25 @@ const ModLawyers = () => {
     const sortedReviews = (list) => [...list].sort((a, b) =>
         reviewSort === "date" ? new Date(b.date) - new Date(a.date) : b.rating - a.rating
     );
+
+    // ── REVIEW SUBMISSION ─────────────────────────────────────────
+    const submitUserReview = async (lawyerId) => {
+        if (!lawyerId || lawyerId.startsWith("api-")) {
+            toast.show("Reviews can only be submitted for verified API lawyers.", "warn", 3000);
+            return;
+        }
+        setReviewSubmitting(true);
+        const { error } = await submitReview(lawyerId, reviewStars, reviewComment.trim() || null);
+        setReviewSubmitting(false);
+        if (error) {
+            toast.show(error.detail || "Failed to submit review. Please try again.", "error", 3000);
+        } else {
+            toast.show("Review submitted — thank you!", "success", 3000);
+            setShowReviewForm(false);
+            setReviewComment("");
+            setReviewStars(5);
+        }
+    };
 
     // ── STAR RENDERER ─────────────────────────────────────────────
     const StarRow = ({ rating, color, size = 12 }) => (
@@ -324,6 +527,46 @@ const ModLawyers = () => {
                                     <p style={{ fontSize: 12, color: t.textDim, margin: 0, lineHeight: 1.6 }}>{r.text}</p>
                                 </div>
                             ))}
+
+                            {/* Write a Review */}
+                            <div style={{ marginTop: 12, borderTop: `1px solid ${t.border}`, paddingTop: 12 }}>
+                                {!showReviewForm ? (
+                                    <button onClick={() => setShowReviewForm(true)}
+                                        style={{ width: "100%", padding: "9px", borderRadius: 10, border: `1.5px solid ${t.primary}`, background: "transparent", color: t.primary, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                        Write a Review
+                                    </button>
+                                ) : (
+                                    <div>
+                                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 8 }}>Your Rating</div>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 12 }}>
+                                            {[1, 2, 3, 4, 5].map(s => (
+                                                <button key={s} onClick={() => setReviewStars(s)}
+                                                    style={{ background: "none", border: "none", cursor: "pointer", padding: 2, lineHeight: 0 }}>
+                                                    <svg width={22} height={22} viewBox="0 0 24 24">
+                                                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+                                                            fill={s <= reviewStars ? t.warn : "transparent"}
+                                                            stroke={s <= reviewStars ? t.warn : t.border} strokeWidth="1.5" />
+                                                    </svg>
+                                                </button>
+                                            ))}
+                                            <span style={{ fontSize: 12, color: t.textMuted, marginLeft: 4 }}>{reviewStars} / 5</span>
+                                        </div>
+                                        <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)}
+                                            placeholder="Share your experience with this lawyer…"
+                                            style={{ width: "100%", minHeight: 72, padding: "8px 12px", borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.inputBg, color: t.text, fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }} />
+                                        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                                            <button onClick={() => setShowReviewForm(false)}
+                                                style={{ flex: 1, padding: "8px", borderRadius: 8, border: `1px solid ${t.border}`, background: "transparent", color: t.textMuted, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                                                Cancel
+                                            </button>
+                                            <button onClick={() => submitUserReview(l._id)} disabled={reviewSubmitting}
+                                                style={{ flex: 2, padding: "8px", borderRadius: 8, border: "none", background: t.primary, color: t.mode === "dark" ? "#1A2E35" : "#fff", fontSize: 12, fontWeight: 700, cursor: reviewSubmitting ? "not-allowed" : "pointer", opacity: reviewSubmitting ? 0.7 : 1, fontFamily: "inherit" }}>
+                                                {reviewSubmitting ? "Submitting…" : "Submit Review"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </Card>
                     </div>
                 </div>
@@ -361,7 +604,7 @@ const ModLawyers = () => {
                             const positions = [{ top: "30%", left: "25%" }, { top: "50%", left: "55%" }, { top: "25%", left: "68%" }, { top: "65%", left: "35%" }];
                             const ac = getAccent(l);
                             return (
-                                <div key={l.bar} onClick={() => { setSelectedLawyer(l); setActiveView("profile"); }} style={{ position: "absolute", ...positions[i], cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, zIndex: 2 }}>
+                                <div key={l._id || l.bar} onClick={() => { setSelectedLawyer(l); setActiveView("profile"); }} style={{ position: "absolute", ...positions[i], cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, zIndex: 2 }}>
                                     <div style={{ background: t.card, border: `2px solid ${ac.solid}`, borderRadius: 10, padding: "6px 10px", fontSize: 11, fontWeight: 700, color: t.text, whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.3)" }}>
                                         {l.name.split(" ")[0]} · ₨{(l.fee / 1000).toFixed(1)}k
                                     </div>
@@ -379,7 +622,7 @@ const ModLawyers = () => {
                     {[...filtered].sort((a, b) => a.distance - b.distance).map((l) => {
                         const ac = getAccent(l);
                         return (
-                            <Card key={l.bar} style={{ display: "flex", alignItems: "center", gap: 14, cursor: "pointer", transition: "all 0.2s" }}
+                            <Card key={l._id || l.bar} style={{ display: "flex", alignItems: "center", gap: 14, cursor: "pointer", transition: "all 0.2s" }}
                                 onMouseEnter={e => e.currentTarget.style.boxShadow = t.shadowHover}
                                 onMouseLeave={e => e.currentTarget.style.boxShadow = t.shadowCard}
                                 onClick={() => { setSelectedLawyer(l); setActiveView("profile"); }}>
@@ -590,9 +833,24 @@ const ModLawyers = () => {
                 </div>
                 <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, color: t.text, fontSize: 13 }}>AI-Recommended Match</div>
-                    <div style={{ fontSize: 12, color: t.textMuted }}>Ahmad Raza Khan — employment specialist — 97% case-type compatibility</div>
+                    <div style={{ fontSize: 12, color: t.textMuted }}>
+                        {aiMatch
+                            ? `${aiMatch.name} — ${aiMatch.spec} — ${Math.round((aiMatch.match_score || 0.97) * 100)}% case compatibility`
+                            : getCaseId()
+                                ? "Click to find your AI-matched lawyer"
+                                : "Complete intake form first to get your AI match"}
+                    </div>
                 </div>
-                <BtnPrimary onClick={() => { setSelectedLawyer(lawyers[0]); setActiveView("profile"); }} style={{ fontSize: 12, padding: "10px 18px", flexShrink: 0 }}>View Match</BtnPrimary>
+                <BtnPrimary
+                    disabled={loadingMatch}
+                    onClick={aiMatch
+                        ? () => { setSelectedLawyer(aiMatch); setActiveView("profile"); }
+                        : handleAiMatch
+                    }
+                    style={{ fontSize: 12, padding: "10px 18px", flexShrink: 0, opacity: loadingMatch ? 0.7 : 1 }}
+                >
+                    {loadingMatch ? "Matching…" : aiMatch ? "View Match" : "Find My Match"}
+                </BtnPrimary>
             </div>
 
             {/* Results count */}
@@ -606,7 +864,7 @@ const ModLawyers = () => {
                     const ac = getAccent(l);
                     return (
                         <div
-                            key={l.bar}
+                            key={l._id || l.bar}
                             onClick={() => { setSelectedLawyer(l); setActiveView("profile"); }}
                             style={{
                                 background: t.card,

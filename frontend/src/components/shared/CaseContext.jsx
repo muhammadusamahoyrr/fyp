@@ -21,10 +21,12 @@ export const useCase = () => {
 const INITIAL = {
     // ── Intake (Module 2) ───────────────────────────────────────
     intakeDone: false,          // true once Step 5 is submitted
+    caseId: null,               // MongoDB _id returned by /intake/{token}/convert
     caseRef: "AIQ-2026-0042",
     role: "",             // "Plaintiff" | "Defendant"
-    caseType: "",             // e.g. "Employment Law"
+    caseType: "",             // e.g. "civil" | "criminal" | "family" | "constitutional"
     caseSubtype: "",             // e.g. "Wrongful Termination"
+    province: "",               // e.g. "punjab" | "sindh" | "kpk" | "balochistan" | "federal"
     description: "",
     evidenceDocs: [],             // [{name, size, type}]
 
@@ -57,8 +59,8 @@ export const CaseProvider = ({ children }) => {
         setCaseData(prev => ({ ...prev, ...patch }));
 
     /* ── Intake helpers ─────────────────────────────────────── */
-    const completeIntake = ({ role, caseType, caseSubtype, description, evidenceDocs }) => {
-        updateCase({ intakeDone: true, role, caseType, caseSubtype, description, evidenceDocs });
+    const completeIntake = ({ role, caseType, caseSubtype, province, caseId, description, evidenceDocs }) => {
+        updateCase({ intakeDone: true, role, caseType, caseSubtype, province, caseId, description, evidenceDocs });
     };
 
     /* ── Lawyer / appointment helpers ──────────────────────── */

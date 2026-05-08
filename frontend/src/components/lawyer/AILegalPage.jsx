@@ -290,7 +290,7 @@ function AILegalPage() {
                         {/* Text input */}
                         <input value={query} onChange={e => setQuery(e.target.value)}
                             onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
-                            placeholder="Ask AI Attorney..."
+                            placeholder="Ask Attorney AI..."
                             style={{
                                 width: "100%", background: "transparent", border: "none", outline: "none",
                                 color: t.text, fontSize: 14, padding: "3px 0 10px", lineHeight: 1.6

@@ -1,2 +1,3 @@
 'use client';
-export { default } from './Landing';
+import LandingPage from './Landing';
+export default LandingPage;

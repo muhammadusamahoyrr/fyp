@@ -1,8 +1,9 @@
 'use client';
-// Paste your ModProfile.jsx code here
 import React, { useState, useRef } from "react";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
+import { useAuth } from "@/context/AuthContext.jsx";
+import { updateMe } from "@/lib/api.js";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, ConfirmDialog, Tooltip, Badge } from "@/components/shared/shared.jsx";
 
@@ -147,8 +148,8 @@ const ContactCell = ({ icon, label, value, extra, last }) => {
     );
 };
 
-/** Edit input field */
-const EditField = ({ label, value, icon, type = "text" }) => {
+/** Edit input field — supports both controlled (value+onChange) and uncontrolled (defaultValue) */
+const EditField = ({ label, value, onChange, icon, type = "text" }) => {
     const tk = useTokens();
     return (
         <div>
@@ -156,7 +157,10 @@ const EditField = ({ label, value, icon, type = "text" }) => {
                 {icon && <Ic n={icon} s={11} c={tk.textMuted} />}
                 {label}
             </div>
-            <ThemedInput defaultValue={value} type={type} />
+            {onChange
+                ? <ThemedInput value={value} onChange={onChange} type={type} />
+                : <ThemedInput defaultValue={value} type={type} />
+            }
         </div>
     );
 };
@@ -232,6 +236,7 @@ const ModProfile = () => {
     const tk = useTokens();
     const t = useT();
     const toast = useToast();
+    const { user, updateUser } = useAuth();
     const [edit, setEdit] = useState(false);
     const [pwdMode, setPwdMode] = useState(false);
     const [delConfirm, setDelConfirm] = useState(false);
@@ -239,7 +244,17 @@ const ModProfile = () => {
     const [activeTab, setActiveTab] = useState("profile");
     const [avatarHover, setAvatarHover] = useState(false);
     const [photoSrc, setPhotoSrc] = useState(null);
+    const [saving, setSaving] = useState(false);
+    const [editData, setEditData] = useState({ full_name: "", email: "", phone: "", address: "" });
     const fileInputRef = useRef(null);
+
+    const displayName = user?.full_name || "Muhammad Usama";
+    const displayEmail = user?.email || "musamahoy@gmail.com";
+    const displayPhone = user?.phone || "+92 300 0000000";
+    const displayAddress = user?.province
+        ? `${user.province.charAt(0).toUpperCase() + user.province.slice(1)}, Pakistan`
+        : "Rawalpindi, Punjab, PK";
+    const initials = displayName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "MU";
 
     const handlePhotoChange = (e) => {
         const file = e.target.files?.[0];
@@ -249,7 +264,29 @@ const ModProfile = () => {
         reader.readAsDataURL(file);
     };
 
-    const handleSave = () => { setEdit(false); toast.show("Profile updated successfully!", "success"); };
+    const startEdit = () => {
+        setEditData({
+            full_name: displayName,
+            email: displayEmail,
+            phone: displayPhone,
+            address: displayAddress,
+        });
+        setEdit(true);
+    };
+
+    const handleSave = async () => {
+        setSaving(true);
+        const { error } = await updateMe({ full_name: editData.full_name, phone: editData.phone });
+        if (error) {
+            toast.show(error.detail || "Failed to save profile. Please try again.", "error");
+        } else {
+            updateUser({ full_name: editData.full_name, phone: editData.phone });
+            toast.show("Profile updated successfully!", "success");
+            setEdit(false);
+        }
+        setSaving(false);
+    };
+
     const handlePasswordUpdate = () => { setPwdMode(false); toast.show("Password changed successfully!", "success"); };
     const handleDeleteConfirm = () => {
         setDelConfirm(false);
@@ -316,7 +353,7 @@ const ModProfile = () => {
                                 }}>
                                     {photoSrc
                                         ? <img src={photoSrc} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                        : "MU"
+                                        : initials
                                     }
                                     <div style={{
                                         position: "absolute", inset: 0, borderRadius: "50%",
@@ -341,32 +378,37 @@ const ModProfile = () => {
                         <div style={{ flex: 1, paddingBottom: 6 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                                 <h2 style={{ fontSize: 22, fontWeight: 900, color: t.text, margin: 0, fontFamily: "'Playfair Display', serif", letterSpacing: "-0.3px" }}>
-                                    Muhammad Usama
+                                    {displayName}
                                 </h2>
-                                <Badge type="primary" style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px" }}>Client</Badge>
+                                <Badge type="primary" style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px" }}>
+                                    {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : "Client"}
+                                </Badge>
                                 <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: t.success, fontWeight: 600 }}>
                                     <Ic n="check" s={12} c={t.success} /> Verified
                                 </div>
                             </div>
                             <div style={{ fontSize: 12, color: t.textMuted, marginTop: 5 }}>
-                                musamahoy@gmail.com · Member since December 2025
+                                {displayEmail} · Member since {user?.created_at
+                                    ? new Date(user.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+                                    : "December 2025"}
                             </div>
                         </div>
 
                         {/* CTA */}
                         <div style={{ display: "flex", gap: 8, paddingBottom: 6 }}>
                             {!edit ? (
-                                <BtnOutline onClick={() => setEdit(true)} style={{ fontSize: 13, padding: "10px 20px" }}>
+                                <BtnOutline onClick={startEdit} style={{ fontSize: 13, padding: "10px 20px" }}>
                                     <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
                                         <Ic n="edit" s={13} c={t.primary} /> Edit Profile
                                     </span>
                                 </BtnOutline>
                             ) : (
                                 <>
-                                    <BtnOutline onClick={() => setEdit(false)} style={{ fontSize: 13, padding: "10px 18px" }}>Cancel</BtnOutline>
-                                    <BtnPrimary onClick={handleSave} style={{ fontSize: 13, padding: "10px 20px" }}>
+                                    <BtnOutline onClick={() => setEdit(false)} disabled={saving} style={{ fontSize: 13, padding: "10px 18px" }}>Cancel</BtnOutline>
+                                    <BtnPrimary onClick={handleSave} disabled={saving} style={{ fontSize: 13, padding: "10px 20px", opacity: saving ? 0.7 : 1 }}>
                                         <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                                            <Ic n="check" s={13} c={t.mode === "dark" ? "#1A2E35" : "#fff"} /> Save Changes
+                                            <Ic n="check" s={13} c={t.mode === "dark" ? "#1A2E35" : "#fff"} />
+                                            {saving ? "Saving…" : "Save Changes"}
                                         </span>
                                     </BtnPrimary>
                                 </>
@@ -419,9 +461,9 @@ const ModProfile = () => {
                                     background: tk.cardSurface,
                                     overflow: "hidden",
                                 }}>
-                                    <ContactCell icon="mail" label="Primary Email" value="musamahoy@gmail.com" extra="Add Recovery Email" />
-                                    <ContactCell icon="phone" label="Phone" value="+92 300 0000000" />
-                                    <ContactCell icon="map" label="Location" value="Rawalpindi, Punjab, PK" last />
+                                    <ContactCell icon="mail" label="Primary Email" value={displayEmail} extra="Add Recovery Email" />
+                                    <ContactCell icon="phone" label="Phone" value={displayPhone} />
+                                    <ContactCell icon="map" label="Location" value={displayAddress} last />
                                 </div>
                             </div>
 
@@ -429,10 +471,12 @@ const ModProfile = () => {
                             <div>
                                 <SectionLabel>Personal Details</SectionLabel>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
-                                    <FieldTile label="First Name" value="Muhammad" icon="user" />
-                                    <FieldTile label="Last Name" value="Usama" icon="user" />
-                                    <FieldTile label="Member Since" value="December 2025" icon="clock" />
-                                    <FieldTile label="Account Type" value="Free Client" icon="briefcase" />
+                                    <FieldTile label="First Name" value={displayName.split(" ")[0] || displayName} icon="user" />
+                                    <FieldTile label="Last Name" value={displayName.split(" ").slice(1).join(" ") || "—"} icon="user" />
+                                    <FieldTile label="Member Since" value={user?.created_at
+                                        ? new Date(user.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+                                        : "December 2025"} icon="clock" />
+                                    <FieldTile label="Account Type" value={user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : "Free Client"} icon="briefcase" />
                                 </div>
                             </div>
                         </div>
@@ -444,16 +488,26 @@ const ModProfile = () => {
                             <div>
                                 <SectionLabel>Contact Information</SectionLabel>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                                    <EditField label="Email" value="musamahoy@gmail.com" icon="mail" type="email" />
-                                    <EditField label="Phone" value="+92 300 0000000" icon="phone" type="tel" />
+                                    <EditField label="Email" value={editData.email} icon="mail" type="email" />
+                                    <EditField
+                                        label="Phone"
+                                        value={editData.phone}
+                                        onChange={e => setEditData(d => ({ ...d, phone: e.target.value }))}
+                                        icon="phone"
+                                        type="tel"
+                                    />
                                 </div>
                             </div>
                             <div>
                                 <SectionLabel>Personal Details</SectionLabel>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                                    <EditField label="First Name" value="Muhammad" icon="user" />
-                                    <EditField label="Last Name" value="Usama" icon="user" />
-                                    <EditField label="Address" value="Rawalpindi, Punjab, PK" icon="map" />
+                                    <EditField
+                                        label="Full Name"
+                                        value={editData.full_name}
+                                        onChange={e => setEditData(d => ({ ...d, full_name: e.target.value }))}
+                                        icon="user"
+                                    />
+                                    <EditField label="Address" value={editData.address} icon="map" />
                                 </div>
                             </div>
                         </div>
