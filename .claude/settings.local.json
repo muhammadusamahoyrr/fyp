@@ -3,7 +3,25 @@
     "allow": [
       "Bash(npm install *)",
       "Bash(node -e \"const p=require\\('./node_modules/next/package.json'\\); console.log\\('next:', p.version\\)\")",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "Bash(python -c ' *)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(venv/Scripts/python -c \"from app.ai.graph.supervisor import intake_graph; print\\('venv import OK'\\)\")",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; cd \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\backend\"; venv\\\\Scripts\\\\python debug_retrieval.py 2>&1 | Select-String -NotMatch \"^venv|Warning|higher rate|CategoryInfo|FullyQualified|NativeCommand|Loading\")",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; cd \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\backend\"; venv\\\\Scripts\\\\python debug_retrieval.py)",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; cd \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\backend\"; venv\\\\Scripts\\\\python test_pipeline_nodes.py)",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; cd \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\backend\"; venv\\\\Scripts\\\\python test_chat_ws.py)",
+      "WebFetch(domain:api.github.com)",
+      "PowerShell(Start-Sleep -Seconds 6; Invoke-WebRequest -Uri \"http://localhost:8000/health\" -UseBasicParsing -ErrorAction SilentlyContinue | Select-Object StatusCode, Content)",
+      "Bash('C:/Users/The Laptop Hut/Desktop/attorney-ai/backend/venv/Scripts/python.exe' -c ' *)",
+      "Bash(\"C:/Users/The Laptop Hut/Desktop/attorney-ai/backend/venv/Scripts/python.exe\" -c \"import langchain; print\\(langchain.__version__\\)\")",
+      "Bash(venv/Scripts/python.exe -m py_compile app/ai/graph/state.py app/ai/graph/edges.py app/ai/graph/supervisor.py app/ai/nodes/triage_node.py app/ai/nodes/fact_gap_node.py app/ai/nodes/retrieval_grader_node.py app/ai/nodes/finalizer_node.py app/ai/nodes/retrieval_node.py app/ai/nodes/generation_node.py app/ai/nodes/hallucination_node.py app/websockets/chat_socket.py)",
+      "Bash(curl *)",
+      "PowerShell(cd \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\backend\"; Start-Process powershell -ArgumentList \"-NoExit\", \"-Command\", \"cd 'C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\backend'; .\\\\venv\\\\Scripts\\\\uvicorn app.main:app --reload --port 8000\" -WindowStyle Normal)",
+      "PowerShell(cd \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\frontend\"; Start-Process powershell -ArgumentList \"-NoExit\", \"-Command\", \"cd 'C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\frontend'; npm run dev\" -WindowStyle Normal)",
+      "PowerShell(Start-Sleep -Seconds 15; try { \\(Invoke-WebRequest -Uri \"http://localhost:8000/health\" -UseBasicParsing\\).Content } catch { \"still-down\" })",
+      "PowerShell(Start-Sleep -Seconds 20; try { \\(Invoke-WebRequest -Uri \"http://localhost:8000/health\" -UseBasicParsing\\).Content } catch { \"down\" })",
+      "Bash(.\\\\venv\\\\Scripts\\\\python.exe test_full_e2e.py)"
     ]
   }
 }

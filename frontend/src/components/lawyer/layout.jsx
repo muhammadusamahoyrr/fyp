@@ -257,7 +257,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
                         <img
                             src={logo}
                             alt="AttorneyAI"
-                            style={{ width: 34, height: 34, objectFit: "contain", display: "block" }}
+                            style={{ width: 28, height: 28, objectFit: "contain", display: "block", borderRadius: 6 }}
                         />
                     </button>
                 ) : (
@@ -265,7 +265,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
                         <img
                             src={logo}
                             alt="AttorneyAI"
-                            style={{ width: 34, height: 34, objectFit: "contain", display: "block", flexShrink: 0 }}
+                            style={{ width: 28, height: 28, objectFit: "contain", display: "block", flexShrink: 0, borderRadius: 6 }}
                         />
                         <div style={{ flex: 1, minWidth: 0 }}>
                             <div className="serif" style={{
@@ -429,8 +429,8 @@ function Topbar({ page, collapsed, setCollapsed, toggleTheme, children }) {
 
             {/* Centre — Global search bar */}
             {!hideSearch && (
-                <div style={{ flex: 1, maxWidth: 480, position: "relative", display: "flex", alignItems: "center" }}>
-                    <Icon d={I.search} size={15} style={{ position: "absolute", left: 13, color: t.textFaint, pointerEvents: "none" }} />
+                <div style={{ flex: 1, maxWidth: 480, position: "relative", display: "flex", alignItems: "center", zIndex: 1 }}>
+                    <Icon d={I.search} size={16} style={{ position: "absolute", left: 12, color: t.textMuted, pointerEvents: "none", zIndex: 2 }} />
                     <input
                         value={searchVal}
                         onChange={e => setSearchVal(e.target.value)}
@@ -465,9 +465,9 @@ function Topbar({ page, collapsed, setCollapsed, toggleTheme, children }) {
             {isComm && (
                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12, maxWidth: 600 }}>
                     <div style={{ flex: 1, position: "relative" }}>
-                        <Icon d={I.search} size={13} style={{
+                        <Icon d={I.search} size={14} style={{
                             position: "absolute", left: 11, top: "50%",
-                            transform: "translateY(-50%)", color: t.textMuted, pointerEvents: "none",
+                            transform: "translateY(-50%)", color: t.textMuted, pointerEvents: "none", zIndex: 2
                         }} />
                         <input
                             placeholder="Search conversations…"

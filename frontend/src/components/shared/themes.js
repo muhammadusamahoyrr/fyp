@@ -1,1 +1,1 @@
-export { DARK, LIGHT } from '../admin/themes.js';
+export { DARK, LIGHT } from '@/components/admin/themes.js';

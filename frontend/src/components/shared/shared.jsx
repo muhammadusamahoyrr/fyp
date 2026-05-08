@@ -157,9 +157,9 @@ export const BtnOutline = ({ children, onClick, style = {} }) => {
     );
 };
 
-export const ThemedInput = ({ style = {}, error, helperText, validator, onChange, onBlur, ...props }) => {
+export const ThemedInput = ({ style = {}, error, helperText, validator, onChange, onBlur, value, defaultValue, ...props }) => {
     const t = useT();
-    const [val, setVal] = useState(props.value || "");
+    const [val, setVal] = useState(value ?? defaultValue ?? "");
     const [err, setErr] = useState(null);
     const [touched, setTouched] = useState(false);
 

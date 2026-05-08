@@ -1,6 +1,6 @@
 'use client';
-import AuthGuard from '@/components/shared/AuthGuard';
+import ProtectedRoute from '@/components/shared/ProtectedRoute';
 
 export default function AdminLayout({ children }) {
-  return <AuthGuard requiredRole="admin">{children}</AuthGuard>;
+  return <ProtectedRoute allowedRoles={['admin']}>{children}</ProtectedRoute>;
 }
