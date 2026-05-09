@@ -2,6 +2,7 @@ import json
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
+from app.ai.nodes._history import format_history
 
 DISCLAIMER = (
     "\n\n---\n"
@@ -93,12 +94,16 @@ def generation_node(state: AgentState) -> dict:
         chunks_to_use = state.get("reranked_chunks", [])[:4]
         context = _format_chunks(chunks_to_use)
 
+    history = format_history(state, max_turns=3)
+    history_section = f"\nConversation context:\n{history}\n" if history else ""
+
     response = llm.invoke([
         {"role": "system", "content": system},
         {"role": "user", "content": (
             f"Question: {question}\n"
             f"Case type: {state.get('case_type', 'civil')}\n"
-            f"Province: {state.get('province', 'federal')}\n\n"
+            f"Province: {state.get('province', 'federal')}\n"
+            f"{history_section}\n"
             f"Retrieved law sections:\n{context}"
         )},
     ])
