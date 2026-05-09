@@ -37,7 +37,7 @@ async def _fetch_matched_lawyers(session: dict, n: int = 3) -> list[dict]:
 
 def _build_state(query: str, session_id: str, session: dict, data: dict) -> dict:
     """Build AgentState for a fresh graph invocation from a new user message."""
-    case_type = data.get("case_type") or session.get("case_type") or "criminal"
+    case_type = data.get("case_type") or session.get("case_type") or "civil"
     province  = data.get("province")  or session.get("province")  or "federal"
     language  = data.get("language")  or "en"
 
@@ -94,8 +94,11 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, token: str = ""):
     user_id = payload["sub"]
     await websocket.accept()
 
-    # Ensure session document exists
+    # Ensure session document exists and belongs to this user
     session = await chat_repo.find_by_session(session_id)
+    if session and session.get("client_id") != user_id:
+        await websocket.close(code=4003)
+        return
     if not session:
         await chat_repo.insert({
             "_id":                  secrets.token_urlsafe(16),

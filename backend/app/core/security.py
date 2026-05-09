@@ -60,8 +60,8 @@ def create_refresh_token(user_id: str) -> str:
     )
 
 
-def decode_token(token: str) -> dict[str, Any]:
+def decode_token(token: str) -> dict[str, Any] | None:
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
     except JWTError:
-        return {}
+        return None

@@ -56,6 +56,24 @@ def _bm25(collection_name: str, k: int = 10) -> BM25Retriever:
     return BM25Retriever.from_documents(docs, preprocess_func=word_tokenize, k=k)
 
 
+class _FilteredBM25Retriever:
+    """Wraps BM25Retriever with post-retrieval province filtering."""
+
+    def __init__(self, bm25: BM25Retriever, province: str):
+        self._bm25 = bm25
+        self._province = province
+
+    def invoke(self, query: str) -> List[Document]:
+        docs = self._bm25.invoke(query)
+        return [
+            doc for doc in docs
+            if doc.metadata.get("province", "federal") in (self._province, "federal")
+        ]
+
+    def get_relevant_documents(self, query: str) -> List[Document]:
+        return self.invoke(query)
+
+
 def build_retriever(case_type: str, province: str) -> EnsembleRetriever:
     collection_name = CASE_TYPE_TO_COLLECTION.get(case_type, "civil_collection")
 
@@ -75,9 +93,10 @@ def build_retriever(case_type: str, province: str) -> EnsembleRetriever:
         search_kwargs={"k": 10, "filter": where_filter}
     )
 
-    bm25 = _bm25(collection_name)
+    bm25_raw = _bm25(collection_name)
+    bm25_filtered = _FilteredBM25Retriever(bm25_raw, province)
 
     return EnsembleRetriever(
-        retrievers=[bm25, semantic],
+        retrievers=[bm25_filtered, semantic],
         weights=[0.6, 0.4],
     )
