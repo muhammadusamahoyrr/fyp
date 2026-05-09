@@ -52,3 +52,31 @@ class UserRepository(BaseRepository):
                 "lawyer_profile.total_reviews": total,
             }},
         )
+
+    async def update_rating_atomic(self, lawyer_id: str, stars: int) -> None:
+        """Atomically update lawyer rating using MongoDB aggregation pipeline."""
+        await self.col.update_one(
+            {"_id": lawyer_id},
+            [
+                {"$set": {
+                    "lawyer_profile.rating": {
+                        "$round": [
+                            {"$divide": [
+                                {"$add": [
+                                    {"$multiply": [
+                                        {"$ifNull": ["$lawyer_profile.rating", 0.0]},
+                                        {"$ifNull": ["$lawyer_profile.total_reviews", 0]},
+                                    ]},
+                                    stars,
+                                ]},
+                                {"$add": [{"$ifNull": ["$lawyer_profile.total_reviews", 0]}, 1]},
+                            ]},
+                            2,
+                        ]
+                    },
+                    "lawyer_profile.total_reviews": {
+                        "$add": [{"$ifNull": ["$lawyer_profile.total_reviews", 0]}, 1]
+                    },
+                }},
+            ],
+        )

@@ -35,7 +35,7 @@ def intake_hallucination_node(state: AgentState) -> dict:
     try:
         parsed = json.loads(answer)
     except Exception:
-        return {"is_grounded": True}
+        return {"is_grounded": False}
 
     actions = parsed.get("recommended_actions", [])
     if not actions:
@@ -70,4 +70,8 @@ def intake_hallucination_node(state: AgentState) -> dict:
         }
 
     except Exception:
-        return {"is_grounded": True}
+        parsed["summary"] = parsed.get("summary", "") + _CAUTION
+        return {
+            "is_grounded": False,
+            "answer":      json.dumps(parsed, ensure_ascii=False),
+        }

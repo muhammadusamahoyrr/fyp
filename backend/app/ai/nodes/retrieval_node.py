@@ -40,6 +40,14 @@ def _normalise_aliases(query: str) -> str:
     return query
 
 
+_LEGAL_KEYWORDS = re.compile(
+    r'\b(PPC|CrPC|MFLO|QSO|PECA|CPC|FIR|Section|Act|Ordinance|Article|'
+    r'criminal|civil|family|murder|theft|fraud|assault|divorce|custody|'
+    r'property|contract|bail|arrest|court|lawyer|petition|writ)\b',
+    re.IGNORECASE
+)
+
+
 def _expand_query(query: str) -> str:
     """Normalise statute aliases, then rewrite to legal terminology for better BM25 recall."""
     query = _normalise_aliases(query)
@@ -50,8 +58,10 @@ def _expand_query(query: str) -> str:
             {"role": "user",   "content": query},
         ])
         rewritten = result.content.strip()
-        # Combined: original preserves semantic recall, rewritten improves BM25
-        return f"{query} {rewritten}"
+        # Only use rewrite if it contains legal terminology (guards against hallucinated output)
+        if _LEGAL_KEYWORDS.search(rewritten):
+            return f"{query} {rewritten}"
+        return query
     except Exception:
         return query
 
