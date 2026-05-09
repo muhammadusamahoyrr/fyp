@@ -56,11 +56,23 @@ _CLARIFY_TEMPLATES = {
 _CLARIFY_SYSTEM = """\
 You are a Pakistani legal intake specialist. The user has described their legal issue.
 
-Based on the context below, decide if any CRITICAL fact is still missing.
-If all key facts are present, respond with exactly: DONE
+INSTRUCTIONS:
+1. Review what the user has ALREADY provided in their description and prior answers below.
+2. Identify the ONE most critical fact still missing that would significantly improve legal analysis for THIS specific situation.
+3. If all key facts for this situation are present, respond with exactly: DONE
 
-Otherwise, ask the ONE most important missing question using the domain templates as a guide.
-Ask in the same language the user used (English or Urdu). No explanations — just the question."""
+Your question MUST be specific to what THIS user described — reference details from their description.
+Ask in the same language the user used (English or Urdu). No explanations — just the question.
+
+GOOD example: "You mentioned your landlord beat you — did you sustain injuries that required medical attention?"
+BAD example: "What is the nature and severity of harm?" (too generic, ignores what user said)"""
+
+_FALLBACK_QUESTIONS = {
+    "criminal": "Can you describe what happened, including the date and location of the incident?",
+    "family": "Can you describe the family dispute and who is involved?",
+    "civil": "Can you describe the dispute, including what property or amount is involved?",
+    "constitutional": "Which government authority or institution is involved in your matter?",
+}
 
 
 async def start_intake(client_id: str) -> dict:
@@ -165,8 +177,10 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
         ])
         text = response.content.strip()
     except Exception:
+        fallback_q = _FALLBACK_QUESTIONS.get(case_type, "Please describe your legal situation in more detail.")
+        qa_list.append({"q": fallback_q, "a": None})
         await intake_repo.save_clarification_qa(token, qa_list)
-        return {"question": None, "done": True, "round": answered_rounds}
+        return {"question": fallback_q, "done": False, "round": answered_rounds + 1}
 
     if text.upper().startswith("DONE"):
         await intake_repo.save_clarification_qa(token, qa_list)

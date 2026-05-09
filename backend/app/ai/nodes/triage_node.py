@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
+from app.ai.nodes._history import format_history
 
 _CANNED_OFF_TOPIC = (
     "I can only assist with Pakistani legal matters. "
@@ -73,9 +74,17 @@ class TriageOutput(BaseModel):
 def triage_node(state: AgentState) -> dict:
     llm = get_llm().with_structured_output(TriageOutput)
 
+    history = format_history(state)
+    user_content = state["query"]
+    if history:
+        user_content = (
+            f"Conversation so far:\n{history}\n\n"
+            f"Current message: {state['query']}"
+        )
+
     result: TriageOutput = llm.invoke([
         {"role": "system", "content": _SYSTEM},
-        {"role": "user",   "content": state["query"]},
+        {"role": "user",   "content": user_content},
     ])
 
     if result.category == "off_topic":

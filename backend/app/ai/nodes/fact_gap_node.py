@@ -1,8 +1,10 @@
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
+from app.ai.nodes._history import format_history
 
 _MAX_CLARIFICATION_ATTEMPTS = 2
-_MIN_FACTS_FOR_SIMPLE_PATH  = 2
+_MIN_FACTS_FOR_SIMPLE_PATH  = 1
+_MIN_FACTS_FOR_COMPLEX_PATH = 3
 
 # Case-type specific missing-fact templates — one key question per domain.
 # The LLM picks the MOST CRITICAL missing item; templates guide its framing.
@@ -47,10 +49,16 @@ You are a Pakistani legal intake specialist assessing whether a user has provide
 Case type detected: {case_type}
 {template_section}
 
-If the query already conveys a clear legal issue with at least one of (province, case_type, specific situation), respond with exactly:
-PROCEED
+INSTRUCTIONS:
+1. First, identify what the user HAS already told you (province, dates, parties, events, documents).
+2. Then identify the SPECIFIC gap that would most improve legal research for THIS user's situation.
+3. If the user has provided a clear legal issue with sufficient context, respond with exactly: PROCEED
+4. Otherwise, ask ONE targeted question about what is ACTUALLY missing — do NOT repeat a generic template question if it does not apply to this situation.
 
-Otherwise generate ONE concise clarifying question — the single most critical missing piece from the list above.
+Your question MUST reference details the user already provided.
+GOOD: "You mentioned a property dispute in Lahore — is there a registered sale deed or only a verbal agreement?"
+BAD: "Is there a written contract?" (generic, ignores what user said)
+
 Ask in the same language the user used (English or Urdu). Do NOT add explanations or multiple questions."""
 
 
@@ -59,20 +67,27 @@ def fact_gap_node(state: AgentState) -> dict:
     known_facts = state.get("known_facts", [])
     complexity  = state.get("complexity", "simple")
 
-    # ── Simple-path bypass: enough facts, already asked once, or simple query ──
-    # Simple complexity queries never trigger HITL (plan flag 1).
-    if complexity == "simple" or len(known_facts) >= _MIN_FACTS_FOR_SIMPLE_PATH or attempts >= 1:
+    # ── Simple-path bypass: fast-track if we have a fact OR already asked once ──
+    if complexity == "simple" and (len(known_facts) >= _MIN_FACTS_FOR_SIMPLE_PATH or attempts >= 1):
         return {
             "fact_delta":          len(known_facts),
             "needs_clarification": False,
         }
 
-    # ── Structural check: minimum viable context ──────────────────────────────
+    # ── Complex-path bypass: only after 2 attempts OR 3+ known facts ──────────
+    if complexity == "complex" and (attempts >= _MAX_CLARIFICATION_ATTEMPTS or len(known_facts) >= _MIN_FACTS_FOR_COMPLEX_PATH):
+        return {
+            "fact_delta":          len(known_facts),
+            "needs_clarification": False,
+        }
+
+    # ── Structural check: need BOTH province AND case_type + meaningful description + facts
     has_province    = state.get("province")   not in (None, "", "unknown")
     has_case_type   = state.get("case_type")  not in (None, "", "unknown")
-    has_description = len((state.get("query") or "").split()) >= 8
+    has_description = len((state.get("query") or "").split()) >= 12
+    has_facts       = len(known_facts) >= 2
 
-    if (has_province or has_case_type) and has_description:
+    if has_province and has_case_type and has_description and has_facts:
         return {
             "fact_delta":          len(known_facts),
             "needs_clarification": False,
@@ -88,6 +103,9 @@ def fact_gap_node(state: AgentState) -> dict:
         template_section=template_section,
     )
 
+    history = format_history(state, max_turns=4)
+    history_section = f"\nConversation history:\n{history}\n" if history else ""
+
     llm      = get_llm()
     response = llm.invoke([
         {"role": "system", "content": system},
@@ -97,6 +115,7 @@ def fact_gap_node(state: AgentState) -> dict:
             f"Case type: {case_type} (confidence: {state.get('case_type_confidence', 0.0):.0%})\n"
             f"Known facts: {', '.join(known_facts) if known_facts else 'none'}\n"
             f"Urgency: {state.get('urgency', 'low')}"
+            f"{history_section}"
         )},
     ])
 
