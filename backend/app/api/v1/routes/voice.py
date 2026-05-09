@@ -25,7 +25,7 @@ async def transcribe_audio(
     try:
         # Queued: _alock in the service serialises CPU inference across concurrent requests
         result = await whisper_service.transcribe_async(content, audio.filename or "audio.wav")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Transcription failed. Please try again.")
 
     return result

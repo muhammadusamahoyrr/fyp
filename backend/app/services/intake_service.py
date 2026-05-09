@@ -364,6 +364,6 @@ async def get_intake(token: str, client_id: str) -> dict:
 
 def _validate_step(step: int, data: dict) -> None:
     required = STEP_REQUIRED_FIELDS.get(step, [])
-    missing  = [f for f in required if not data.get(f)]
+    missing  = [f for f in required if not str(data.get(f, "")).strip()]
     if missing:
         raise AppValidationError(f"Missing required fields for step {step}: {missing}")
