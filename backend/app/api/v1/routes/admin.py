@@ -35,11 +35,3 @@ async def embed_all_lawyers(current_user: dict = Depends(require_admin)):
     from app.ai.lawyer_embeddings import embed_all_lawyers as _embed_all
     count = await _embed_all()
     return StatusResponse(success=True, message=f"Embedded {count} lawyer profiles")
-
-
-@router.post("/lawyers/embed-all", response_model=StatusResponse)
-async def embed_all_lawyers(current_user: dict = Depends(require_admin)):
-    """Batch-embed all KYC-verified active lawyers into the vector store."""
-    from app.ai.lawyer_embeddings import embed_all_lawyers
-    count = await embed_all_lawyers()
-    return StatusResponse(success=True, message=f"Embedded {count} lawyers")

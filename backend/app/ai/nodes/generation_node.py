@@ -73,7 +73,7 @@ def _format_chunks(chunks: list[dict]) -> str:
     for i, c in enumerate(chunks[:8], 1):
         statute = c.get("statute") or c.get("source_file", "Pakistani Law")
         section = f" Section {c['section_number']}" if c.get("section_number") else ""
-        lines.append(f"[{i}] {statute}{section}\n{c['content'][:400]}")
+        lines.append(f"[{i}] {statute}{section}\n{c['content'][:600]}")
     return "\n\n".join(lines)
 
 
@@ -109,12 +109,12 @@ def generation_node(state: AgentState) -> dict:
     ])
 
     raw        = response.content.strip()
-    confidence = 0.7
+    confidence = 0.3
 
     lines = raw.splitlines()
     try:
         last       = json.loads(lines[-1])
-        confidence = float(last.get("confidence", 0.7))
+        confidence = float(last.get("confidence", 0.3))
         raw        = "\n".join(lines[:-1]).strip()
     except (json.JSONDecodeError, IndexError, ValueError):
         pass
