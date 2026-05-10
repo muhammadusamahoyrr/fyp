@@ -17,6 +17,11 @@ class AgentState(TypedDict):
     province: str               # punjab | sindh | kpk | balochistan | federal
     language: str               # en | ur | roman_urdu
 
+    # ── Classifier output (fast keyword pass, no LLM) ─────────────────────────
+    classifier_case_type:  str   # best guess from keyword signals (may differ from triage)
+    classifier_confidence: float # 0.0–1.0 confidence from classifier_node
+    routing_mode:          str   # "single" | "hybrid" (hybrid = unknown case_type)
+
     # ── Clarification ─────────────────────────────────────────────────────────
     needs_clarification: bool
     clarification_question: str

@@ -6,7 +6,7 @@ import { useCase } from "./CaseContext.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
-import { searchLawyers, matchLawyers, submitReview } from "@/lib/api.js";
+import { searchLawyers, matchLawyers, submitReview, bookAppointment, getLawyerAvailability } from "@/lib/api.js";
 
 // Province and case-type mappings for server-side filter requests
 const CITY_TO_PROVINCE = {
@@ -44,6 +44,9 @@ const ModLawyers = () => {
     const [apptDate, setApptDate] = useState("");
     const [apptTime, setApptTime] = useState("10:00");
     const [apptDetails, setApptDetails] = useState("");
+    const [apptMode, setApptMode] = useState("video");
+    const [apptSubmitting, setApptSubmitting] = useState(false);
+    const [bookedSlots, setBookedSlots] = useState([]);
     const [sortBy, setSortBy] = useState("Rating: High to Low");
     const [filters, setFilters] = useState({
         specialization: "All",
@@ -146,6 +149,29 @@ const ModLawyers = () => {
         setReviewComment("");
         setReviewStars(5);
     }, [selectedLawyer]);
+
+    // Fetch booked slots when date or lawyer changes inside the booking modal
+    useEffect(() => {
+        if (!apptDate || !apptLawyer?._id || apptLawyer._id.startsWith("api-")) {
+            setBookedSlots([]);
+            return;
+        }
+        getLawyerAvailability(apptLawyer._id, apptDate).then(({ data }) => {
+            setBookedSlots(data?.booked_slots || []);
+        });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [apptDate, apptLawyer?._id]);
+
+    const isSlotBooked = (timeStr) => {
+        if (!apptDate || !bookedSlots.length) return false;
+        const slotStart = new Date(`${apptDate}T${timeStr}:00`);
+        const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
+        return bookedSlots.some(b => {
+            const bStart = new Date(b.start);
+            const bEnd = new Date(b.end);
+            return slotStart < bEnd && slotEnd > bStart;
+        });
+    };
 
     const getCaseId = () =>
         searchParams?.get("case_id") || localStorage.getItem("aai-case-id") || null;
@@ -315,16 +341,36 @@ const ModLawyers = () => {
     // Fix #5: opens the modal and pre-selects the lawyer in CaseContext
     const openBooking = (lawyer) => {
         setApptLawyer(lawyer);
-        selectLawyer(lawyer);                 // write to CaseContext immediately
+        selectLawyer(lawyer);
         setApptDate("");
         setApptTime("10:00");
         setApptDetails("");
+        setApptMode("video");
+        setBookedSlots([]);
         setShowApptModal(true);
     };
 
-    const submitBooking = () => {
+    const submitBooking = async () => {
         if (!apptDate) return;
-        // Fix #5: writes appointment into CaseContext → creates milestone in Module 7
+        const isApiLawyer = apptLawyer?._id && !apptLawyer._id.startsWith("api-");
+        if (isApiLawyer) {
+            setApptSubmitting(true);
+            const scheduled_at = new Date(`${apptDate}T${apptTime}:00`).toISOString();
+            const { error } = await bookAppointment({
+                lawyer_id: apptLawyer._id,
+                case_id: getCaseId(),
+                scheduled_at,
+                duration_minutes: 60,
+                mode: apptMode,
+                notes: apptDetails || null,
+            });
+            setApptSubmitting(false);
+            if (error) {
+                toast.show(error.detail || "Booking failed. Please try again.", "error", 4000);
+                return;
+            }
+            toast.show("Appointment request sent!", "success", 3000);
+        }
         confirmAppointment({ date: apptDate, time: apptTime, details: apptDetails || `Consultation with ${apptLawyer?.name}` });
         addNotification({
             type: "hearing",
@@ -332,7 +378,7 @@ const ModLawyers = () => {
             title: `Appointment — ${apptLawyer?.name}`,
             date: new Date(apptDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
             time: apptTime,
-            desc: `Consultation confirmed · ${apptLawyer?.spec} · ₨${apptLawyer?.fee?.toLocaleString()}/hr`,
+            desc: `Consultation booked · ${apptLawyer?.spec} · ₨${apptLawyer?.fee?.toLocaleString()}/hr`,
         });
         setShowApptModal(false);
     };
@@ -375,12 +421,15 @@ const ModLawyers = () => {
                 <div style={{ marginBottom: 14 }}>
                     <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Preferred Time</label>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"].map(slot => (
-                            <button key={slot} onClick={() => setApptTime(slot)}
-                                style={{ padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${apptTime === slot ? t.primary : t.border}`, background: apptTime === slot ? t.primaryGlow : "transparent", color: apptTime === slot ? t.primary : t.textMuted, fontSize: 12, fontWeight: 700, cursor: "pointer", transition: "all 0.15s" }}>
-                                {slot}
-                            </button>
-                        ))}
+                        {["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"].map(slot => {
+                            const booked = isSlotBooked(slot);
+                            return (
+                                <button key={slot} disabled={booked} onClick={() => !booked && setApptTime(slot)}
+                                    style={{ padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${booked ? t.border : apptTime === slot ? t.primary : t.border}`, background: booked ? t.inputBg : apptTime === slot ? t.primaryGlow : "transparent", color: booked ? t.border : apptTime === slot ? t.primary : t.textMuted, fontSize: 12, fontWeight: 700, cursor: booked ? "not-allowed" : "pointer", transition: "all 0.15s", textDecoration: booked ? "line-through" : "none", opacity: booked ? 0.45 : 1 }}>
+                                    {slot}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
@@ -392,6 +441,19 @@ const ModLawyers = () => {
                         style={{ width: "100%", minHeight: 72, padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
                 </div>
 
+                {/* Consultation mode */}
+                <div style={{ marginBottom: 14 }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Consultation Mode</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                        {[["video", "Video Call"], ["in_person", "In-Person"], ["phone", "Phone"]].map(([val, label]) => (
+                            <button key={val} onClick={() => setApptMode(val)}
+                                style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${apptMode === val ? t.primary : t.border}`, background: apptMode === val ? t.primaryGlow : "transparent", color: apptMode === val ? t.primary : t.textMuted, fontSize: 12, fontWeight: 700, cursor: "pointer", transition: "all 0.15s" }}>
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
                 {/* Working hours info */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, marginBottom: 18 }}>
                     <Ic n="clock" s={13} c={t.textMuted} />
@@ -401,8 +463,8 @@ const ModLawyers = () => {
                 {/* Actions */}
                 <div style={{ display: "flex", gap: 10 }}>
                     <BtnOutline onClick={() => setShowApptModal(false)} style={{ flex: 1, fontSize: 13 }}>Cancel</BtnOutline>
-                    <BtnPrimary disabled={!apptDate} onClick={submitBooking} style={{ flex: 2, fontSize: 13, padding: "12px" }}>
-                        Confirm Appointment →
+                    <BtnPrimary disabled={!apptDate || apptSubmitting} onClick={submitBooking} style={{ flex: 2, fontSize: 13, padding: "12px", opacity: apptSubmitting ? 0.7 : 1 }}>
+                        {apptSubmitting ? "Booking…" : "Confirm Appointment →"}
                     </BtnPrimary>
                 </div>
             </div>

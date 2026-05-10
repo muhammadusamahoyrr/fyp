@@ -1,5 +1,7 @@
 import re
 
+from langchain_core.messages import AIMessage
+
 from app.ai.graph.state import AgentState
 
 _REFUSE = (
@@ -46,7 +48,10 @@ def finalizer_node(state: AgentState) -> dict:
     # Off-topic: triage_node already set the answer — just sanitise it.
     if state.get("convergence_status") == "off_topic":
         answer = state.get("answer", "")
-        return {"answer": _sanitise(answer)} if answer else {}
+        if answer:
+            clean = _sanitise(answer)
+            return {"answer": clean, "messages": [AIMessage(content=clean[:500])]}
+        return {}
 
     # No answer was ever generated.
     if not state.get("answer"):
@@ -55,6 +60,7 @@ def finalizer_node(state: AgentState) -> dict:
             "confidence":         0.0,
             "is_grounded":        False,
             "convergence_status": "max_attempts",
+            "messages":           [AIMessage(content=_REFUSE)],
         }
 
     is_grounded = state.get("is_grounded", False)
@@ -63,4 +69,5 @@ def finalizer_node(state: AgentState) -> dict:
     return {
         "answer":             clean,
         "convergence_status": "converged" if is_grounded else "max_attempts",
+        "messages":           [AIMessage(content=clean[:500])],
     }

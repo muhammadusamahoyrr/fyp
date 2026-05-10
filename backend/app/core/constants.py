@@ -69,3 +69,22 @@ class NotificationType(str, Enum):
     KYC_APPROVED = "kyc_approved"
     KYC_REJECTED = "kyc_rejected"
     REVIEW_RECEIVED = "review_received"
+    APPOINTMENT_BOOKED = "appointment_booked"
+    APPOINTMENT_CONFIRMED = "appointment_confirmed"
+    APPOINTMENT_CANCELLED = "appointment_cancelled"
+    APPOINTMENT_COMPLETED = "appointment_completed"
+    APPOINTMENT_REMINDER = "appointment_reminder"
+
+
+class AppointmentStatus(str, Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
+    COMPLETED = "completed"
+    NO_SHOW = "no_show"
+
+
+class AppointmentMode(str, Enum):
+    VIDEO = "video"
+    IN_PERSON = "in_person"
+    PHONE = "phone"

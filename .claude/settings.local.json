@@ -21,7 +21,10 @@
       "PowerShell(cd \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\frontend\"; Start-Process powershell -ArgumentList \"-NoExit\", \"-Command\", \"cd 'C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\frontend'; npm run dev\" -WindowStyle Normal)",
       "PowerShell(Start-Sleep -Seconds 15; try { \\(Invoke-WebRequest -Uri \"http://localhost:8000/health\" -UseBasicParsing\\).Content } catch { \"still-down\" })",
       "PowerShell(Start-Sleep -Seconds 20; try { \\(Invoke-WebRequest -Uri \"http://localhost:8000/health\" -UseBasicParsing\\).Content } catch { \"down\" })",
-      "Bash(.\\\\venv\\\\Scripts\\\\python.exe test_full_e2e.py)"
+      "Bash(.\\\\venv\\\\Scripts\\\\python.exe test_full_e2e.py)",
+      "Bash(.\\\\venv\\\\Scripts\\\\python.exe -c \"from app.api.v1.routes.appointments import router; from app.services.appointment_service import book_appointment; from app.repositories.appointment_repo import AppointmentRepository; print\\('All imports OK'\\)\")",
+      "Bash(grep -r \"bookAppointment\\\\|listAppointments\\\\|getAppointment\\\\|confirmAppointment\\\\|cancelAppointment\\\\|completeAppointment\\\\|markNoShow\\\\|getLawyerAvailability\" frontend/src/app/lawyer --include=\"*.jsx\" --include=\"*.js\" -l)",
+      "Bash(grep -r \"appointment\" frontend/src/app/lawyer --include=\"*.jsx\" -l)"
     ]
   }
 }

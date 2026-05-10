@@ -2,13 +2,15 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from app.ai.graph.edges import (
-    route_after_fact_gap,
+    route_after_classifier,
     route_after_grader,
     route_after_grader_intake,
     route_after_hallucination,
     route_after_triage,
 )
 from app.ai.graph.state import AgentState
+from app.ai.nodes.classifier_node       import classifier_node
+from app.ai.nodes.clarification_node    import clarification_node
 from app.ai.nodes.fact_gap_node         import fact_gap_node
 from app.ai.nodes.finalizer_node        import finalizer_node
 from app.ai.nodes.generation_node       import generation_node
@@ -20,30 +22,28 @@ from app.ai.nodes.triage_node           import triage_node
 
 def build_chat_graph():
     """
-    7-node chat graph with convergence control.
+    9-node chat graph with classifier-first routing and interrupt() HITL.
 
     Flow:
-        triage_node
-          ├─ off_topic ──────────────────────────────────────► finalizer_node → END
-          └─ legal ──► fact_gap_node
-                         ├─ needs_clarification ─────────────► END  (HITL breakpoint)
-                         └─ proceed ──► retrieval_node
-                                          └─ retrieval_grader_node
-                                               ├─ poor + budget ──► retrieval_node  (≤3 retries)
-                                               └─ ok ──► generation_node
-                                                           └─ hallucination_node
-                                                                ├─ not grounded + budget ──► generation_node  (≤2 retries)
-                                                                └─ done ──► finalizer_node → END
-
-    Simple path (enough facts from triage):
-        triage → fact_gap (single check, no HITL) → retrieval → grader → generation → hallucination → finalizer
-
-    HITL path (critical facts missing):
-        triage → fact_gap → END  [client sends clarification answer]
-        triage → fact_gap (clarification_attempts≥1 → bypass) → retrieval → ...
+        classifier_node
+          └───────────────────────────────► triage_node
+                                              ├─ off_topic ────────► finalizer_node → END
+                                              ├─ missing_info ─────► clarification_node (interrupt)
+                                              │                        └─────────────────► fact_gap_node
+                                              └─ ok ───────────────► fact_gap_node
+                                                                       └─ proceed ► retrieval_node
+                                                                                    └─ retrieval_grader_node
+                                                                                         ├─ poor+budget ► retrieval_node
+                                                                                         └─ ok ► generation_node
+                                                                                                   └─ hallucination_node
+                                                                                                        ├─ not grounded+budget ► generation_node
+                                                                                                        └─ done ► finalizer_node → END
     """
     builder = StateGraph(AgentState)
 
+    # Register all nodes
+    builder.add_node("classifier_node",       classifier_node)
+    builder.add_node("clarification_node",    clarification_node)  # uses interrupt()
     builder.add_node("triage_node",           triage_node)
     builder.add_node("fact_gap_node",         fact_gap_node)
     builder.add_node("retrieval_node",        retrieval_node)
@@ -52,21 +52,29 @@ def build_chat_graph():
     builder.add_node("hallucination_node",    hallucination_node)
     builder.add_node("finalizer_node",        finalizer_node)
 
-    builder.set_entry_point("triage_node")
+    # Entry point is now classifier (fast, no LLM cost)
+    builder.set_entry_point("classifier_node")
 
+    # classifier ALWAYS proceeds to triage first to catch gibberish
+    builder.add_edge("classifier_node", "triage_node")
+
+    # triage branches based on off-topic vs missing info vs ready
     builder.add_conditional_edges(
         "triage_node",
         route_after_triage,
-        {"finalizer_node": "finalizer_node", "fact_gap_node": "fact_gap_node"},
+        {
+            "finalizer_node": "finalizer_node",
+            "clarification_node": "clarification_node",
+            "fact_gap_node": "fact_gap_node"
+        },
     )
 
-    builder.add_conditional_edges(
-        "fact_gap_node",
-        route_after_fact_gap,
-        {"retrieval_node": "retrieval_node", "END": END},
-    )
+    # clarification always proceeds to fact_gap after collecting user input
+    builder.add_edge("clarification_node", "fact_gap_node")
 
-    # retrieval_node always feeds into the grader
+    # fact_gap_node now uses interrupt() internally — always proceeds to retrieval
+    builder.add_edge("fact_gap_node", "retrieval_node")
+
     builder.add_edge("retrieval_node", "retrieval_grader_node")
 
     builder.add_conditional_edges(
@@ -75,7 +83,6 @@ def build_chat_graph():
         {"retrieval_node": "retrieval_node", "generation_node": "generation_node"},
     )
 
-    # generation always feeds into hallucination check
     builder.add_edge("generation_node", "hallucination_node")
 
     builder.add_conditional_edges(
@@ -86,6 +93,7 @@ def build_chat_graph():
 
     builder.add_edge("finalizer_node", END)
 
+    # interrupt() inside clarification_node requires MemorySaver to persist state
     return builder.compile(checkpointer=MemorySaver())
 
 

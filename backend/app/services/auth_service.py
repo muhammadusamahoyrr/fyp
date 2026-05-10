@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pymongo.errors import DuplicateKeyError
 
@@ -133,6 +133,11 @@ async def reset_password(token: str, new_password: str) -> None:
 
     record = await get_password_reset_col().find_one({"token": token})
     if not record:
+        raise AuthError("Invalid or expired reset token")
+
+    created_at = record.get("created_at")
+    if created_at and (datetime.utcnow() - created_at) > timedelta(hours=1):
+        await get_password_reset_col().delete_one({"token": token})
         raise AuthError("Invalid or expired reset token")
 
     user = await user_repo.find_by_email(record["email"])

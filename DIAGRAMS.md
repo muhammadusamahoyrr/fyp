@@ -531,50 +531,164 @@ sequenceDiagram
 
 ---
 
+## SD-7: Lifecycle Transition Sequences (ST-1 to ST-4)
+
+These compact sequences mirror the requested transition paths and the backend triggers from intake, agreements, KYC, and chat flows.
+
+### ST-1 Sequence: Case Lifecycle Trigger Path
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as Intake/Cases API
+    participant DB as MongoDB
+
+    C->>API: Complete intake and POST /intake/{token}/convert
+    API->>DB: Create case with status=OPEN
+
+    alt No lawyer assigned yet
+        API->>DB: status=OPEN -> PENDING_LAWYER
+    else Lawyer assigned immediately
+        API->>DB: status=OPEN -> IN_PROGRESS
+    end
+
+    opt Lawyer selected later
+        C->>API: PATCH /cases/{id} assign lawyer
+        API->>DB: status=PENDING_LAWYER -> IN_PROGRESS
+    end
+
+    alt Case resolved
+        API->>DB: status=IN_PROGRESS -> CLOSED
+    else Case dismissed
+        API->>DB: status=IN_PROGRESS -> DISMISSED
+    end
+```
+
+### ST-2 Sequence: Agreement Lifecycle Trigger Path
+
+```mermaid
+sequenceDiagram
+    participant U1 as Party A
+    participant U2 as Party B
+    participant API as Agreements API
+    participant SVC as agreement_service
+    participant DB as MongoDB
+
+    U1->>API: Create agreement
+    API->>DB: Insert agreement status=PENDING
+
+    U1->>API: Submit signature
+    API->>SVC: submit_signature()
+    SVC->>DB: Keep status=PENDING (partial signatures)
+
+    alt Remaining signatures complete
+        U2->>API: Submit final signature
+        API->>SVC: submit_signature()
+        SVC->>DB: status=PENDING -> EXECUTED
+    else Agreement cancelled
+        U1->>API: Cancel agreement
+        API->>DB: status=PENDING -> CANCELLED
+    end
+```
+
+### ST-3 Sequence: Lawyer KYC Trigger Path
+
+```mermaid
+sequenceDiagram
+    participant L as Lawyer
+    participant A as Admin
+    participant API as Admin API
+    participant DB as MongoDB
+
+    L->>API: Register lawyer account
+    API->>DB: State REGISTERED
+
+    L->>API: Submit KYC details
+    API->>DB: State REGISTERED -> PENDING_KYC
+
+    alt KYC approved
+        A->>API: PATCH /admin/kyc/{id} approved=true
+        API->>DB: State PENDING_KYC -> VERIFIED_ACTIVE
+    else KYC rejected
+        A->>API: PATCH /admin/kyc/{id} approved=false
+        API->>DB: State PENDING_KYC -> KYC_REJECTED
+        L->>API: Resubmit corrected documents
+        API->>DB: State KYC_REJECTED -> PENDING_KYC
+    end
+
+    alt Policy or trust action
+        A->>API: Suspend account
+        API->>DB: State VERIFIED_ACTIVE -> SUSPENDED
+    else Account deactivated
+        L->>API: Deactivate account
+        API->>DB: State VERIFIED_ACTIVE -> DEACTIVATED
+    end
+```
+
+### ST-4 Sequence: AI Chat Session Trigger Path
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as ModChatbot
+    participant WS as /ws/chat/{session_id}
+    participant G as Chat Graph
+
+    U->>FE: Open chat page
+    FE->>WS: Connect WebSocket
+    WS-->>FE: CONNECTED
+
+    loop Conversation turns
+        U->>FE: Send message
+        FE->>WS: {content, context}
+        WS->>G: PROCESSING
+
+        alt Grounded response
+            G-->>WS: final response
+            WS-->>FE: RESPONSE_COMPLETE
+            FE-->>U: Render answer and wait for next input
+        else Hallucination gate fails
+            G-->>WS: block unsafe response
+            WS-->>FE: HALLUCINATION_BLOCKED
+            FE-->>U: Safe warning and await new input
+        end
+    end
+
+    alt Network issue
+        WS-->>FE: DISCONNECTED
+        FE->>WS: reconnect
+    end
+```
+
+---
+
 # STATE TRANSITION DIAGRAMS
 
 > All states, transitions, and triggers are sourced directly from backend constants, models, and services.
 
 ---
 
-## STD-1: Case Lifecycle
+## STD-1: Case Lifecycle (Requested ST-1)
 
 **Entity:** `Case` document in MongoDB
 **State field:** `case.status` (enum `CaseStatus` in `core/constants.py`)
 
-**Real states from `constants.py`:** `OPEN`, `IN_PROGRESS`, `PENDING_LAWYER`, `CLOSED`, `DISMISSED`
-**Case number format:** `ATT-{year}-{hex}` (generated at creation in `case_service.py`)
+**Target transition:** `INTAKE -> OPEN -> (PENDING_LAWYER or IN_PROGRESS) -> (CLOSED or DISMISSED)`
+**Backed by:** `intake_service.py`, `case_service.py`, `core/constants.py`
 
 ```mermaid
 stateDiagram-v2
-    [*] --> INTAKE_IN_PROGRESS : Client starts intake\n(POST /intake/start)
+    [*] --> INTAKE : Intake session active\n(POST /intake/start and step saves)
 
-    INTAKE_IN_PROGRESS --> INTAKE_STEP_1 : Step 1 saved — Role + Province\n(PATCH /intake/token/step/1)
-    INTAKE_STEP_1 --> INTAKE_STEP_2 : Step 2 saved — Case Type + Urgency\n(PATCH /intake/token/step/2)
-    INTAKE_STEP_2 --> INTAKE_STEP_3 : Step 3 saved — Incident Description\n(PATCH /intake/token/step/3)
-    INTAKE_STEP_3 --> INTAKE_STEP_4 : Step 4 saved — Evidence Info\n(PATCH /intake/token/step/4)
-    INTAKE_STEP_4 --> INTAKE_STEP_5 : Step 5 saved — Desired Outcome\n(PATCH /intake/token/step/5)
+    INTAKE --> OPEN : Intake converted to case\n(POST /intake/{token}/convert)
 
-    INTAKE_STEP_5 --> OPEN : convert_to_case() success\n(POST /intake/token/convert)\nCase created — ATT-{year}-{hex}
+    OPEN --> PENDING_LAWYER : No lawyer assigned yet\nAwaiting selection/match
+    OPEN --> IN_PROGRESS : Lawyer assigned immediately\nassigned_lawyer_id set
 
-    OPEN --> PENDING_LAWYER : Case awaiting lawyer assignment\n(No lawyer yet matched/hired)
+    PENDING_LAWYER --> IN_PROGRESS : Client hires lawyer\nPATCH /cases/{id}
 
-    OPEN --> IN_PROGRESS : Lawyer hired directly\n(Case update — assigned_lawyer_id set)
-
-    PENDING_LAWYER --> IN_PROGRESS : Client hires a lawyer\n(PATCH /cases/{id} status=IN_PROGRESS)
-
-    IN_PROGRESS --> IN_PROGRESS : Milestone added\n(POST /cases/{id}/milestones)
-
-    IN_PROGRESS --> IN_PROGRESS : Hearing scheduled\n(POST /cases/{id}/hearings)
-    Note on IN_PROGRESS: Notification: HEARING_SCHEDULED\nsent to client
-
-    IN_PROGRESS --> CLOSED : Lawyer marks case resolved\n(PATCH /cases/{id} status=CLOSED)
-
-    IN_PROGRESS --> DISMISSED : Case dismissed by court or admin\n(PATCH /cases/{id} status=DISMISSED)
-
-    OPEN --> CLOSED : Client abandons case\n(inactivity or manual close)
-
-    PENDING_LAWYER --> CLOSED : Client cancels before assignment
+    IN_PROGRESS --> CLOSED : Matter resolved\nPATCH /cases/{id} status=CLOSED
+    IN_PROGRESS --> DISMISSED : Dismissed by court/admin\nPATCH /cases/{id} status=DISMISSED
 
     CLOSED --> [*]
     DISMISSED --> [*]
@@ -632,45 +746,24 @@ stateDiagram-v2
 
 ---
 
-## STD-3: Agreement Lifecycle
+## STD-3: Agreement Lifecycle (Requested ST-2)
 
 **Entity:** `Agreement` document in MongoDB
 **State field:** `agreement.status` (enum `AgreementStatus` in `models/agreement.py`)
 
-**Real states from model:** `DRAFT`, `PENDING`, `EXECUTED`, `CANCELLED`
-**Service behaviour:** `create_agreement()` sets status = `PENDING` (DRAFT is model default, overridden immediately)
-**Auto-transition rule:** When all `party.signed == True` → status auto-set to `EXECUTED`
+**Target transition:** `PENDING -> EXECUTED or CANCELLED`
+**Backed by:** `models/agreement.py`, `services/agreement_service.py`
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING : POST /agreements\ncreate_agreement()\nAll party.signed = false\nAudit log: "created"
+    [*] --> PENDING : Agreement created\nWaiting for required signatures
 
-    note right of PENDING
-        Agreement terms visible to both parties.
-        Either party can sign in any order.
-        Prevents double-sign (guard check).
-    end note
+    PENDING --> PENDING : Partial signing in progress\nOne party signed, others pending
+    PENDING --> EXECUTED : All required parties signed\nAuto status update in service
+    PENDING --> CANCELLED : Cancelled before completion
 
-    PENDING --> PENDING : First party signs\n(CANVAS / TYPED / IMAGE_UPLOAD)\nAudit log: "signed" — party_1\nETO 2002 classification applied\nOther party notified: AGREEMENT_SIGNED
-
-    PENDING --> EXECUTED : Last party signs\nAll party.signed = true\nAuto-transition by service\nAudit log: "signed" — party_2\nBoth parties notified: AGREEMENT_SIGNED
-
-    note right of EXECUTED
-        Legally binding under ETO 2002.
-        CANVAS = Advanced Electronic Signature (S.2(d)(i))
-        TYPED/IMAGE = Basic Electronic Signature
-        No further modifications allowed.
-    end note
-
-    PENDING --> CANCELLED : Either party cancels\nbefore all signatures collected
-
-    EXECUTED --> [*] : Agreement active — referenced by Case
+    EXECUTED --> [*]
     CANCELLED --> [*]
-
-    note left of PENDING
-        Guard: submit_signature() rejects if
-        status == EXECUTED (already done).
-    end note
 ```
 
 ---
@@ -709,17 +802,17 @@ stateDiagram-v2
 
 ---
 
-## STD-5: Lawyer Account (KYC) Lifecycle
+## STD-5: Lawyer Account (KYC) Lifecycle (Requested ST-3)
 
 **Entity:** `User` document (role = LAWYER) + `LawyerProfile` in MongoDB
 **State fields:** `user.kyc_verified` (bool), `lawyer_profile.kyc_rejection_reason` (str | null)
 
-**No separate KYC status enum in code** — state is modelled via `kyc_verified` bool + rejection reason.
-**Feature gate:** All lawyer features (case acceptance, post listing, AI Legal Page) require `kyc_verified = True`.
+**Target transition:** `REGISTERED -> PENDING_KYC -> VERIFIED_ACTIVE or KYC_REJECTED (loop) -> SUSPENDED or DEACTIVATED`
+**Backed by:** `models/user.py`, `services/admin_service.py`, `BACKEND_PROGRESS.md`
 
 ```mermaid
 stateDiagram-v2
-    [*] --> REGISTERED : POST /auth/register {role: LAWYER}\nkyc_verified = false\nAccount created but locked
+    [*] --> REGISTERED : POST /auth/register (role=LAWYER)\nkyc_verified = false\nAccount created but locked
 
     REGISTERED --> PENDING_KYC : Lawyer submits KYC documents\n(enrollment_no + CNIC + bar_council)
 
@@ -730,34 +823,22 @@ stateDiagram-v2
         ibc.org.pk (Islamabad)
     end note
 
-    PENDING_KYC --> VERIFIED_ACTIVE : Admin approves\nPATCH /admin/kyc/{id} {approved: true}\nkyc_verified = true\nkyc_rejection_reason = null\nNotification: KYC_APPROVED
+    PENDING_KYC --> VERIFIED_ACTIVE : Admin approval recorded\nkyc_verified set true\nNotification KYC_APPROVED
 
-    note right of VERIFIED_ACTIVE
-        All features unlocked:
-        • Post profile & availability
-        • Receive case assignments
-        • Access AI Legal Page
-        • Sign agreements
-        • Manage clients
-    end note
-
-    PENDING_KYC --> KYC_REJECTED : Admin rejects\nPATCH /admin/kyc/{id} {approved: false}\nkyc_verified = false\nkyc_rejection_reason = "reason"\nNotification: KYC_REJECTED
+    PENDING_KYC --> KYC_REJECTED : Admin rejection recorded\nkyc_verified remains false\nRejection reason stored\nNotification KYC_REJECTED
 
     KYC_REJECTED --> PENDING_KYC : Lawyer resubmits\ncorrected documents
 
-    VERIFIED_ACTIVE --> SUSPENDED : Admin suspends account\n(policy violation / client complaint)
-
-    SUSPENDED --> VERIFIED_ACTIVE : Admin reinstates account
-
-    VERIFIED_ACTIVE --> DEACTIVATED : Lawyer self-deactivates
+    VERIFIED_ACTIVE --> SUSPENDED : Account suspended by admin
+    VERIFIED_ACTIVE --> DEACTIVATED : Account deactivated\n(self or admin action)
 
     DEACTIVATED --> [*]
-    SUSPENDED --> [*] : Permanent ban (admin decision)
+    SUSPENDED --> [*]
 ```
 
 ---
 
-## STD-6: AI Chat Session Lifecycle
+## STD-6: AI Chat Session Lifecycle (Requested ST-4)
 
 **Entity:** WebSocket session at `/ws/chat/{session_id}`
 **State tracked in:** `chat_socket.py` (server-side) + `ModChatbot.jsx` (client-side)
@@ -766,54 +847,100 @@ stateDiagram-v2
 - Client → Server: `{content, case_id?, case_type?, province?}`
 - Server → Client: `{type: "token"}`, `{type: "final", citations, confidence}`, `{type: "clarification", question}`
 
-**Frontend states from `ModChatbot.jsx`:** `msgs[]`, `typing: bool`, `lang: "EN"|"UR"`, `sideOpen: bool`
+**Target transition:** `PAGE_LOADED -> CONNECTING -> CONNECTED -> AWAITING_INPUT -> PROCESSING -> RESPONSE_COMPLETE` with loop back and error states `DISCONNECTED`, `HALLUCINATION_BLOCKED`
+**Backed by:** `websockets/chat_socket.py`, `ModChatbot.jsx`, `intake_lawyer_pipeline.md`
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PAGE_LOADED : User navigates to /chat\nNo WebSocket yet\ntyping = false
+    [*] --> PAGE_LOADED : Chat page rendered
+    PAGE_LOADED --> CONNECTING : Client opens WebSocket
+    CONNECTING --> CONNECTED : Handshake success
 
-    PAGE_LOADED --> CONNECTING : ModChatbot mounts\nWebSocket.connect()\nws://localhost:8000/ws/chat/{session_id}
+    CONNECTED --> AWAITING_INPUT : Ready for user message
+    AWAITING_INPUT --> PROCESSING : User sends message
 
-    CONNECTING --> CONNECTED : WebSocket handshake success\nSession established\nLangGraph checkpointer loaded
+    PROCESSING --> RESPONSE_COMPLETE : Final response returned
+    RESPONSE_COMPLETE --> AWAITING_INPUT : Next turn loop
 
-    CONNECTING --> CONNECTION_FAILED : Network error\nor server down
+    PROCESSING --> HALLUCINATION_BLOCKED : Grounding check failed
+    HALLUCINATION_BLOCKED --> AWAITING_INPUT : Safe-block message shown
 
-    CONNECTION_FAILED --> CONNECTING : Auto-reconnect attempt
+    CONNECTING --> DISCONNECTED : Connection failure
+    CONNECTED --> DISCONNECTED : Network drop or timeout
+    AWAITING_INPUT --> DISCONNECTED : Socket closed
+    DISCONNECTED --> CONNECTING : Auto reconnect
 
-    CONNECTED --> AWAITING_INPUT : Ready for user message\nGreeting shown based on time of day\n(Morning | Afternoon | Evening)
+    DISCONNECTED --> [*] : User exits chat
+```
 
-    AWAITING_INPUT --> SENDING : User types + clicks Send\nor selects Quick Prompt
-    Note on SENDING: Language toggle: EN | UR\nMessage added to msgs[]
+---
 
-    SENDING --> PROCESSING : Server receives message\nAppended to chat history in MongoDB\nIntake node loads case context
+## STD-7: User Authentication Lifecycle (inspired by screenshots)
 
-    PROCESSING --> CLARIFICATION_REQUESTED : Gatekeeper node — query too vague\nServer sends {type:"clarification", question}
+**Entity:** Authentication flow (Sign-in / Registration / Email verification)
 
-    CLARIFICATION_REQUESTED --> SENDING : User provides clarification\nand clicks Send
+```mermaid
+stateDiagram-v2
+    [*] --> AwaitingAction : Entry
 
-    PROCESSING --> RETRIEVING : Gatekeeper passes query\nSupervisor routes to specialist agent
+    AwaitingAction --> SignInForm : Click Sign In / Registration
+    SignInForm --> AuthenticatingUser : Enter credentials
+    AuthenticatingUser --> CheckingCredentials : Validating
 
-    RETRIEVING --> GENERATING : Chunks retrieved + reranked\nGrader score ≥ 0.75
+    CheckingCredentials --> SessionCreated : Valid credentials
+    SessionCreated --> AccountActivated : Account active
+    AccountActivated --> [*]
 
-    RETRIEVING --> CLARIFICATION_REQUESTED : Grader score < 0.75\nLoop back to clarification node
+    CheckingCredentials --> PromptError : Invalid credentials
+    PromptError --> SignInForm : Retry
 
-    GENERATING --> STREAMING : LLM starts generation\ntyping = true\nTokens sent {type:"token"}
+    %% Registration path
+    AwaitingAction --> RegistrationForm : Click Register
+    RegistrationForm --> ValidatingDetails : Fill registration
+    ValidatingDetails --> CreatingUser : Details valid
+    CreatingUser --> SendingVerification : Store user data
+    SendingVerification --> EmailSent : Send verification email
+    EmailSent --> AwaitingVerification : Wait for verification link
+    AwaitingVerification --> VerifyingToken : Click verification link
+    VerifyingToken --> AccountActivated : Valid token
+    VerifyingToken --> PromptError : Invalid token
 
-    STREAMING --> RESPONSE_COMPLETE : Server sends {type:"final"}\ncitations + confidence received\ntyping = false\nmsg added to msgs[] with refs
+    %% Allow resubmit loop
+    PromptError --> RegistrationForm : Re-open registration
+```
 
-    STREAMING --> HALLUCINATION_BLOCKED : Hallucination node fails\nServer sends "Cannot verify — consult a lawyer"\ntyping = false
+---
 
-    HALLUCINATION_BLOCKED --> AWAITING_INPUT : Warning message displayed\nUser can ask new query
+## STD-8: Email Sync Connection Lifecycle (inspired by screenshots)
 
-    RESPONSE_COMPLETE --> AWAITING_INPUT : Turn complete\nSession persisted in MongoDB checkpointer\nReady for next message
+**Entity:** Email sync connection and active syncing
 
-    AWAITING_INPUT --> DISCONNECTED : User closes chat\nor page unloads\nor server timeout
+```mermaid
+stateDiagram-v2
+    [*] --> EmailSyncPage : Navigate to Email Sync
 
-    CONNECTED --> DISCONNECTED : Network drop
+    EmailSyncPage --> SelectingProvider : Click Connect Email
+    SelectingProvider --> EnteringCredentials : Choose provider
+    EnteringCredentials --> AuthenticatingEmail : Submit credentials / OAuth
+    AuthenticatingEmail --> ValidatingConnection : Connection handshake
+    ValidatingConnection --> ConnectionEstablished : Connection successful
+    ValidatingConnection --> ShowingError : Connection failed
+    ShowingError --> EnteringCredentials : Retry credentials
 
-    DISCONNECTED --> CONNECTING : Reconnect (session_id preserved\n— history reloaded from MongoDB)
+    ConnectionEstablished --> ConfiguringSyncSettings : Set sync options
+    ConfiguringSyncSettings --> ActiveSyncing : Save settings
 
-    DISCONNECTED --> [*] : User navigates away permanently
+    ActiveSyncing --> SyncingData : Real-time or scheduled sync
+    SyncingData --> SyncCompleted : Sync successful
+    SyncingData --> SyncFailed : Sync unsuccessful
+    SyncFailed --> ActiveSyncing : Retry sync
+    SyncCompleted --> ReconnectionRequired : Token expired / reconnect needed
+    ReconnectionRequired --> ActiveSyncing : Reconnect and resume
+
+    ActiveSyncing --> ConfirmDisconnect : Click disconnect
+    ConfirmDisconnect --> DisconnectingAccount : Confirm action
+    DisconnectingAccount --> Disconnected : Disconnected
+    Disconnected --> [*]
 ```
 
 ---
