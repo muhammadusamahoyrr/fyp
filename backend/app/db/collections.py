@@ -37,3 +37,7 @@ def get_refresh_blocklist_col() -> AsyncIOMotorCollection:
 
 def get_password_reset_col() -> AsyncIOMotorCollection:
     return get_database()["password_reset_tokens"]
+
+
+def get_appointments_col() -> AsyncIOMotorCollection:
+    return get_database()["appointments"]

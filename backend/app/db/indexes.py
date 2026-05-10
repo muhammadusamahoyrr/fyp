@@ -2,6 +2,7 @@ from pymongo import ASCENDING, DESCENDING, IndexModel
 
 from app.db.collections import (
     get_agreements_col,
+    get_appointments_col,
     get_cases_col,
     get_chat_sessions_col,
     get_documents_col,
@@ -21,6 +22,7 @@ async def create_all_indexes() -> None:
     await _agreements_indexes()
     await _notifications_indexes()
     await _chat_sessions_indexes()
+    await _appointments_indexes()
     await _auth_indexes()
 
 
@@ -93,6 +95,20 @@ async def _chat_sessions_indexes() -> None:
     await col.create_indexes([
         IndexModel([("session_id", ASCENDING)], unique=True),
         IndexModel([("client_id", ASCENDING)]),
+    ])
+
+
+async def _appointments_indexes() -> None:
+    col = get_appointments_col()
+    await col.create_indexes([
+        IndexModel([("client_id", ASCENDING)]),
+        IndexModel([("lawyer_id", ASCENDING)]),
+        IndexModel([("case_id", ASCENDING)], sparse=True),
+        IndexModel([("status", ASCENDING)]),
+        IndexModel([("scheduled_at", ASCENDING)]),
+        # Compound: check double-booking — lawyer + time slot + active statuses
+        IndexModel([("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)]),
+        IndexModel([("created_at", DESCENDING)]),
     ])
 
 

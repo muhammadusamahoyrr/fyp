@@ -1,11 +1,16 @@
 'use client';
-// Lawyer Appointments Page — paste your code here
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTheme } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { Card, Btn, Input, Sel } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
-import { APSB, aptDataInitial } from "./data.js";
+import { APSB } from "./data.js";
+import {
+    listAppointments,
+    confirmAppointment as apiConfirm,
+    cancelAppointment as apiCancel,
+    completeAppointment as apiComplete,
+} from "@/lib/api.js";
 
 // ============================================================
 // APPOINTMENTS PAGE
@@ -277,7 +282,8 @@ function AppointmentsPage() {
     const [viewMode, setViewMode] = useState("list");
     const [statusF, setStatusF] = useState("All");
     const [search, setSearch] = useState("");
-    const [appointments, setAppointments] = useState(aptDataInitial);
+    const [appointments, setAppointments] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [scheduleModal, setScheduleModal] = useState(undefined); // undefined=closed, null=new, apt=reschedule
     const [joinModal, setJoinModal] = useState(null);
     const tabs = ["All", "Upcoming", "Pending", "Completed", "Cancelled"];
@@ -288,15 +294,55 @@ function AppointmentsPage() {
             a.purpose.toLowerCase().includes(search.toLowerCase()))
     );
 
-    const handleAccept = (id) => {
-        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Upcoming" } : a));
+    const mapApiAppt = (a) => ({
+        id: a.id,
+        client: a.client_name || "Client",
+        initials: (a.client_name || "??").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
+        purpose: a.notes || "Consultation",
+        date: new Date(a.scheduled_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        time: new Date(a.scheduled_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        duration: `${a.duration_minutes} min`,
+        type: a.mode === "video" ? "Video Call" : a.mode === "phone" ? "Phone Call" : "In-Person",
+        status: ({ confirmed: "Upcoming", pending: "Pending", completed: "Completed", cancelled: "Cancelled", no_show: "Cancelled" })[a.status] || "Pending",
+        caseId: a.case_id,
+    });
+
+    useEffect(() => {
+        listAppointments({ page_size: 50 }).then(({ data }) => {
+            if (data?.items) setAppointments(data.items.map(mapApiAppt));
+            setLoading(false);
+        }).catch(() => setLoading(false));
+    }, []);
+
+    const handleAccept = async (id) => {
         const apt = appointments.find(a => a.id === id);
+        const { error } = await apiConfirm(id);
+        if (error) {
+            addNotif({ type: "appointment", title: "Failed to Confirm", body: error.detail || "Could not confirm appointment", time: "Just now" });
+            return;
+        }
+        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Upcoming" } : a));
         addNotif({ type: "appointment", title: "Appointment Accepted", body: `Accepted appointment with ${apt?.client}`, time: "Just now" });
     };
-    const handleReject = (id) => {
-        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Cancelled" } : a));
+    const handleReject = async (id) => {
         const apt = appointments.find(a => a.id === id);
+        const { error } = await apiCancel(id);
+        if (error) {
+            addNotif({ type: "appointment", title: "Failed to Cancel", body: error.detail || "Could not cancel appointment", time: "Just now" });
+            return;
+        }
+        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Cancelled" } : a));
         addNotif({ type: "appointment", title: "Appointment Rejected", body: `Rejected with ${apt?.client}`, time: "Just now" });
+    };
+    const handleComplete = async (id) => {
+        const apt = appointments.find(a => a.id === id);
+        const { error } = await apiComplete(id);
+        if (error) {
+            addNotif({ type: "appointment", title: "Failed", body: error.detail || "Could not mark as complete", time: "Just now" });
+            return;
+        }
+        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Completed" } : a));
+        addNotif({ type: "appointment", title: "Appointment Completed", body: `Completed session with ${apt?.client}`, time: "Just now" });
     };
     const confirmSchedule = (form) => {
         if (scheduleModal === null) {
@@ -585,6 +631,9 @@ function AppointmentsPage() {
                                                             <Icon d={I.map} size={12} /> View Details
                                                         </Btn>
                                                     )}
+                                                    <Btn variant="success" size="sm" onClick={() => handleComplete(apt.id)}>
+                                                        <Icon d={I.check} size={12} /> Done
+                                                    </Btn>
                                                     <Btn variant="accent" size="sm" onClick={() => setScheduleModal(apt)}>
                                                         <Icon d={I.clock} size={12} /> Reschedule
                                                     </Btn>
@@ -607,7 +656,12 @@ function AppointmentsPage() {
                                         </Card>
                                     ))}
 
-                                    {filtered.length === 0 && (
+                                    {loading && (
+                                        <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 40, color: t.textMuted, fontSize: 14 }}>
+                                            Loading appointments…
+                                        </div>
+                                    )}
+                                    {!loading && filtered.length === 0 && (
                                         <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 40, color: t.textMuted, fontSize: 14 }}>
                                             No appointments found for "{statusF}" filter.
                                         </div>

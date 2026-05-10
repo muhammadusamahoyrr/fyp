@@ -209,3 +209,58 @@ export async function submitReview(lawyer_id, stars, comment) {
     body: JSON.stringify({ stars, comment: comment || null }),
   });
 }
+
+// ── Appointments ─────────────────────────────────────────────────────────────
+
+export async function bookAppointment({ lawyer_id, case_id, scheduled_at, duration_minutes, mode, notes }) {
+  return apiFetch('/appointments', {
+    method: 'POST',
+    body: JSON.stringify({
+      lawyer_id,
+      case_id: case_id || null,
+      scheduled_at,
+      duration_minutes: duration_minutes || 60,
+      mode: mode || 'video',
+      notes: notes || null,
+    }),
+  });
+}
+
+export async function listAppointments({ status, page, page_size } = {}) {
+  const p = new URLSearchParams();
+  if (status) p.set('status', status);
+  if (page) p.set('page', page);
+  if (page_size) p.set('page_size', page_size);
+  const qs = p.toString() ? `?${p}` : '';
+  return apiFetch(`/appointments${qs}`);
+}
+
+export async function getAppointment(id) {
+  return apiFetch(`/appointments/${id}`);
+}
+
+export async function confirmAppointment(id) {
+  return apiFetch(`/appointments/${id}/confirm`, { method: 'PATCH' });
+}
+
+export async function cancelAppointment(id, reason) {
+  return apiFetch(`/appointments/${id}/cancel`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason: reason || null }),
+  });
+}
+
+export async function completeAppointment(id, { lawyer_notes, meeting_link } = {}) {
+  return apiFetch(`/appointments/${id}/complete`, {
+    method: 'PATCH',
+    body: JSON.stringify({ lawyer_notes: lawyer_notes || null, meeting_link: meeting_link || null }),
+  });
+}
+
+export async function markNoShow(id) {
+  return apiFetch(`/appointments/${id}/no-show`, { method: 'PATCH' });
+}
+
+export async function getLawyerAvailability(lawyer_id, date) {
+  return apiFetch(`/appointments/availability/${lawyer_id}?date=${date}`);
+}

@@ -33,7 +33,7 @@ def retrieval_grader_node(state: AgentState) -> dict:
     context = "\n\n".join(
         f"[{i+1}] {c.get('statute', '')} "
         f"{'Section ' + c['section_number'] if c.get('section_number') else ''}\n"
-        f"{c['content'][:300]}"
+        f"{c['content'][:500]}"
         for i, c in enumerate(to_grade)
     )
 
@@ -54,9 +54,9 @@ def retrieval_grader_node(state: AgentState) -> dict:
         score   = round(n_kept / max(len(to_grade), 1), 3)
 
     except Exception:
-        # Fallback: keep all chunks, score proportional to count
+        # Fail-closed: if grading LLM fails, assume low relevance
         graded = to_grade
-        score  = round(min(len(to_grade) / 10.0, 1.0), 3)
+        score  = 0.0
 
     return {
         "reranked_chunks":      graded + rest,

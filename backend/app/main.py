@@ -8,6 +8,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.api.v1.routes import (
     admin,
     agreements,
+    appointments,
     auth,
     cases,
     documents,
@@ -80,6 +81,7 @@ app.include_router(agreements.router, prefix=API_PREFIX)
 app.include_router(notifications.router, prefix=API_PREFIX)
 app.include_router(admin.router, prefix=API_PREFIX)
 app.include_router(voice.router, prefix=API_PREFIX)
+app.include_router(appointments.router, prefix=API_PREFIX)
 
 app.include_router(chat_socket.router)
 app.include_router(notification_socket.router)

@@ -18,19 +18,25 @@ class ConnectionManager:
             self._connections.pop(user_id, None)
 
     async def send_to_user(self, user_id: str, message: dict) -> None:
+        dead: list[WebSocket] = []
         for ws in self._connections.get(user_id, []):
             try:
                 await ws.send_json(message)
             except Exception:
-                pass
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(user_id, ws)
 
     async def broadcast(self, message: dict) -> None:
-        for conns in self._connections.values():
+        dead_pairs: list[tuple[str, WebSocket]] = []
+        for user_id, conns in self._connections.items():
             for ws in conns:
                 try:
                     await ws.send_json(message)
                 except Exception:
-                    pass
+                    dead_pairs.append((user_id, ws))
+        for uid, ws in dead_pairs:
+            self.disconnect(uid, ws)
 
     def is_connected(self, user_id: str) -> bool:
         return bool(self._connections.get(user_id))

@@ -185,9 +185,4 @@ async def submit_review(
     if not lawyer or lawyer.get("role") != "lawyer":
         raise NotFoundError("Lawyer")
 
-    lp = lawyer.get("lawyer_profile") or {}
-    total = lp.get("total_reviews", 0)
-    current_avg = lp.get("rating", 0.0)
-    new_avg = round((current_avg * total + stars) / (total + 1), 2)
-
-    await user_repo.update_rating(lawyer_id, new_avg, total + 1)
+    await user_repo.update_rating_atomic(lawyer_id, stars)

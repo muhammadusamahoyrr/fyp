@@ -1,26 +1,88 @@
+"""
+edges.py — LangGraph conditional edge routing functions.
+
+Fixes vs previous version
+--------------------------
+  FIX 1: route_after_triage — hybrid + confidence > 0 now correctly routes to
+          fact_gap_node (intentional overlap) instead of clarification_node.
+          Only hybrid + confidence == 0.0 (zero signals / gibberish) goes to
+          clarification_node.
+  FIX 2: Province check now considers classifier-inferred province stored in
+          state["province"] — previously only checked raw state value which
+          hadn't been updated yet when edges.py ran.
+  FIX 3: route_after_triage off_topic check moved to top — always checked first
+          before any confidence/province logic runs.
+"""
+
 from app.ai.graph.state import AgentState
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
-_RELEVANCE_THRESHOLD         = 0.40   # below this → retry retrieval if budget allows
-_CONVERGENCE_MIN_DELTA       = 0.05   # improvement smaller than this → stop retrying
-_MAX_RETRIEVAL_ATTEMPTS      = 3
-_MAX_GENERATION_ATTEMPTS     = 2
-_MAX_INTAKE_RETRIEVAL_ATTEMPTS = 2    # intake uses a tighter budget than chat
+_RELEVANCE_THRESHOLD           = 0.40  # below → retry retrieval if budget allows
+_CONVERGENCE_MIN_DELTA         = 0.05  # improvement < this → stop retrying
+_MAX_RETRIEVAL_ATTEMPTS        = 3
+_MAX_GENERATION_ATTEMPTS       = 2
+_MAX_INTAKE_RETRIEVAL_ATTEMPTS = 2     # intake uses tighter budget than chat
+_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.85
 
 
 # ── Routing functions ─────────────────────────────────────────────────────────
 
+def route_after_classifier(state: AgentState) -> str:
+    """
+    Always route to triage_node first.
+    Ensures gibberish and off-topic queries are filtered BEFORE
+    we interrupt the user for clarification.
+    """
+    return "triage_node"
+
+
 def route_after_triage(state: AgentState) -> str:
+    # FIX 3: off_topic check always runs first — never falls through to
+    # province/confidence logic on dead-end queries.
     if state.get("convergence_status") == "off_topic":
         return "finalizer_node"
+
+    routing_mode = state.get("routing_mode", "single")
+
+    # FIX 2: Province is checked from state directly — classifier_node already
+    # wrote the inferred province into state["province"] before this runs.
+    province  = state.get("province",  "unknown")
+    case_type = state.get("case_type", "unknown")
+
+    # Confidence: prefer classifier_confidence (keyword-based, fast),
+    # fall back to case_type_confidence (LLM-based from triage).
+    confidence = state.get("classifier_confidence") or state.get("case_type_confidence", 0.0)
+
+    # FIX 1: Hybrid routing has two sub-cases:
+    #   a) confidence == 0.0 → zero keyword signals → genuinely unknown → clarify
+    #   b) confidence >  0.0 → intentional overlap (e.g. criminal+civil) → proceed
+    if routing_mode == "hybrid":
+        if confidence == 0.0:
+            # Zero signals fired — needs clarification to determine category
+            return "clarification_node"
+        else:
+            # Overlap detected — hybrid retrieval will cover both collections
+            # No clarification needed; fact_gap handles any missing details
+            return "fact_gap_node"
+
+    # Province unknown — ask before retrieval so filter doesn't silently fail
+    if province == "unknown":
+        return "clarification_node"
+
+    # Case type still unresolved after both classifier and triage
+    if case_type == "unknown":
+        return "clarification_node"
+
     return "fact_gap_node"
 
 
 def route_after_fact_gap(state: AgentState) -> str:
-    # HITL breakpoint: graph stops; WebSocket sends clarification to the client.
-    # Next user message starts a new ainvoke with clarification_attempts incremented.
-    if state.get("needs_clarification"):
-        return "END"
+    """
+    fact_gap_node uses LangGraph v1.0 interrupt() internally.
+    The graph never reaches this router with needs_clarification=True —
+    interrupt() suspends execution INSIDE the node and resumes in-place.
+    This router always proceeds to retrieval.
+    """
     return "retrieval_node"
 
 
@@ -30,7 +92,7 @@ def route_after_grader(state: AgentState) -> str:
     attempts = state.get("retrieval_attempts", 1)
     delta    = score - prev
 
-    # No new facts were added since last retrieval → re-running won't help
+    # No new facts added since last retrieval → re-running won't help
     if state.get("fact_delta", 1) == 0 and attempts > 1:
         return "generation_node"
 
