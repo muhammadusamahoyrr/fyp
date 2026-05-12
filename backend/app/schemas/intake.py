@@ -48,6 +48,7 @@ class IntakeResponse(BaseModel):
     current_step: int
     completed: bool
     case_id: str | None
+    ai_case_type: str | None = None
 
 
 class IntakeDetailResponse(BaseModel):

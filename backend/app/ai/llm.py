@@ -25,3 +25,17 @@ def get_llm():
     raise ValueError(
         f"Unknown LLM_PROVIDER '{settings.llm_provider}' — set to gemini | ollama | groq"
     )
+
+
+def get_fast_llm():
+    """Gemini 2.0 Flash for lightweight classification/grading nodes.
+
+    Always uses Gemini Flash regardless of LLM_PROVIDER so triage, grading,
+    hallucination checks, and intent detection stay fast and cheap while
+    generation_node keeps the full Groq 70B model.
+    """
+    return ChatGoogleGenerativeAI(
+        model="gemini-2.0-flash",
+        google_api_key=settings.gemini_api_key,
+        temperature=0.1,
+    )

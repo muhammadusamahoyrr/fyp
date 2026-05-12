@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 from app.ai.graph.state import AgentState
-from app.ai.llm import get_llm
+from app.ai.llm import get_fast_llm
 
 _SYSTEM = """\
 You are a legal answer validator. Determine whether the given answer is grounded in the provided law sections.
@@ -28,7 +28,7 @@ def hallucination_node(state: AgentState) -> dict:
     if not state.get("answer") or not state.get("reranked_chunks"):
         return {"is_grounded": False, "confidence": 0.0}
 
-    llm     = get_llm().with_structured_output(GroundingOutput)
+    llm     = get_fast_llm().with_structured_output(GroundingOutput)
     context = "\n\n".join(
         f"[{i}] {c.get('statute', '')}\n{c['content'][:300]}"
         for i, c in enumerate(state["reranked_chunks"][:5], 1)

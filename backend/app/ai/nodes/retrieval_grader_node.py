@@ -1,5 +1,5 @@
 from app.ai.graph.state import AgentState
-from app.ai.llm import get_llm
+from app.ai.llm import get_fast_llm
 
 _MAX_TO_GRADE = 8
 
@@ -38,7 +38,7 @@ def retrieval_grader_node(state: AgentState) -> dict:
     )
 
     try:
-        llm      = get_llm()
+        llm      = get_fast_llm()
         response = llm.invoke([
             {"role": "system", "content": _SYSTEM},
             {"role": "user",   "content": (
