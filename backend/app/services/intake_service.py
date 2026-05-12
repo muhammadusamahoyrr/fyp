@@ -177,10 +177,9 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
         ])
         text = response.content.strip()
     except Exception:
-        fallback_q = _FALLBACK_QUESTIONS.get(case_type, "Please describe your legal situation in more detail.")
-        qa_list.append({"q": fallback_q, "a": None})
+        # LLM failed — let user proceed rather than trapping them in a loop
         await intake_repo.save_clarification_qa(token, qa_list)
-        return {"question": fallback_q, "done": False, "round": answered_rounds + 1}
+        return {"question": None, "done": True, "round": answered_rounds}
 
     if text.upper().startswith("DONE"):
         await intake_repo.save_clarification_qa(token, qa_list)
@@ -191,6 +190,16 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
     qa_list.append({"q": text, "a": None})
     await intake_repo.save_clarification_qa(token, qa_list)
     return {"question": text, "done": False, "round": next_round}
+
+
+def _classify_description(description: str) -> str:
+    """Keyword-score the intake description and return the best case_type string."""
+    from app.ai.nodes.classifier_node import _score_query
+    scores = _score_query(description)
+    best_type, (best_score, _) = max(scores.items(), key=lambda x: x[1][0])
+    if best_score == 0.0:
+        return "civil"
+    return best_type.value
 
 
 # ─── Convert + P1 (embedding) + P5 (auto-match) ──────────────────────────────
@@ -262,7 +271,14 @@ async def convert_to_case(
     asyncio.create_task(_auto_match_lawyers(case_id))
 
     await intake_repo.mark_completed(token, case_id)
-    return {"session_token": token, "current_step": 5, "completed": True, "case_id": case_id}
+    ai_case_type = _classify_description(description)
+    return {
+        "session_token": token,
+        "current_step":  5,
+        "completed":     True,
+        "case_id":       case_id,
+        "ai_case_type":  ai_case_type,
+    }
 
 
 async def _embed_case(case_id: str, description: str) -> None:
