@@ -2,14 +2,22 @@ from functools import lru_cache
 from typing import List
 
 import nltk
-from langchain_classic.retrievers.ensemble import EnsembleRetriever
 from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain.retrievers import EnsembleRetriever
 from nltk.tokenize import word_tokenize
 
 from app.db.chroma import get_chroma
+
+
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+    _HF_AVAILABLE = True
+except ImportError:
+    _HF_AVAILABLE = False
 
 try:
     nltk.data.find("tokenizers/punkt_tab")
@@ -26,23 +34,29 @@ CASE_TYPE_TO_COLLECTION = {
 }
 
 
-class E5Embeddings(HuggingFaceEmbeddings):
-    """Adds passage:/query: prefixes required by multilingual-e5-base."""
+if _HF_AVAILABLE:
+    class E5Embeddings(HuggingFaceEmbeddings):
+        """Adds passage:/query: prefixes required by multilingual-e5-base."""
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return super().embed_documents(["passage: " + t for t in texts])
+        def embed_documents(self, texts: List[str]) -> List[List[float]]:
+            return super().embed_documents(["passage: " + t for t in texts])
 
-    def embed_query(self, text: str) -> List[float]:
-        return super().embed_query("query: " + text)
+        def embed_query(self, text: str) -> List[float]:
+            return super().embed_query("query: " + text)
 
-
-@lru_cache(maxsize=1)
-def _embeddings() -> E5Embeddings:
-    return E5Embeddings(
-        model_name=MODEL_NAME,
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},
-    )
+    @lru_cache(maxsize=1)
+    def _embeddings() -> "E5Embeddings":
+        return E5Embeddings(
+            model_name=MODEL_NAME,
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+else:
+    def _embeddings():
+        raise RuntimeError(
+            "sentence-transformers is not installed. "
+            "Run: pip install sentence-transformers langchain-huggingface"
+        )
 
 
 @lru_cache(maxsize=6)
@@ -56,26 +70,31 @@ def _bm25(collection_name: str, k: int = 10) -> BM25Retriever:
     return BM25Retriever.from_documents(docs, preprocess_func=word_tokenize, k=k)
 
 
-class _FilteredBM25Retriever:
-    """Wraps BM25Retriever with post-retrieval province filtering."""
+class _FilteredBM25Retriever(BaseRetriever):
+    """BM25Retriever with post-retrieval province filtering — proper LangChain Runnable."""
 
-    def __init__(self, bm25: BM25Retriever, province: str):
-        self._bm25 = bm25
-        self._province = province
+    bm25: BM25Retriever
+    province: str
 
-    def invoke(self, query: str) -> List[Document]:
-        docs = self._bm25.invoke(query)
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+    ) -> List[Document]:
+        docs = self.bm25.invoke(query)
         return [
             doc for doc in docs
-            if doc.metadata.get("province", "federal") in (self._province, "federal")
+            if doc.metadata.get("province", "federal") in (self.province, "federal")
         ]
 
-    def get_relevant_documents(self, query: str) -> List[Document]:
-        return self.invoke(query)
 
-
-def build_retriever(case_type: str, province: str) -> EnsembleRetriever:
+def build_retriever(case_type: str, province: str):
     collection_name = CASE_TYPE_TO_COLLECTION.get(case_type, "civil_collection")
+
+    bm25_raw = _bm25(collection_name)
+    bm25_filtered = _FilteredBM25Retriever(bm25=bm25_raw, province=province)
+
+    if not _HF_AVAILABLE:
+        # No sentence-transformers installed — BM25-only retrieval
+        return bm25_filtered
 
     where_filter = {
         "$or": [
@@ -92,9 +111,6 @@ def build_retriever(case_type: str, province: str) -> EnsembleRetriever:
     semantic = store.as_retriever(
         search_kwargs={"k": 10, "filter": where_filter}
     )
-
-    bm25_raw = _bm25(collection_name)
-    bm25_filtered = _FilteredBM25Retriever(bm25_raw, province)
 
     return EnsembleRetriever(
         retrievers=[bm25_filtered, semantic],

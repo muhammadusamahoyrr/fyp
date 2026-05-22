@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useTheme } from "./theme.js";
 import { useNotif } from "./theme.js";
+import { useToast } from "@/components/shared/Toast.jsx";
 import { Card, Btn, Input, Sel } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import { APSB } from "./data.js";
@@ -257,16 +258,16 @@ function ScheduleModal({ apt, onClose, onConfirm, t }) {
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 6 }}>
                     <button onClick={onClose} style={{
-                        padding: "10px", borderRadius: 10,
+                        padding: "8px 10px", borderRadius: 8,
                         border: `1px solid ${t.border}`, background: "transparent",
-                        color: t.textMuted, fontSize: 13, fontWeight: 600,
+                        color: t.textMuted, fontSize: 12, fontWeight: 600,
                         fontFamily: "inherit", cursor: "pointer",
                     }}>Cancel</button>
                     <button onClick={() => onConfirm(form)} style={{
-                        padding: "10px", borderRadius: 10, border: "none",
+                        padding: "8px 10px", borderRadius: 8, border: "none",
                         background: `linear-gradient(135deg,${t.primary},#22a898)`,
                         color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                        fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
+                        fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
                         boxShadow: `0 4px 14px ${t.primary}50`,
                     }}>✓ {isNew ? "Book Appointment" : "Confirm Reschedule"}</button>
                 </div>
@@ -279,6 +280,7 @@ function ScheduleModal({ apt, onClose, onConfirm, t }) {
 function AppointmentsPage() {
     const { t } = useTheme();
     const { addNotif } = useNotif();
+    const toast = useToast();
     const [viewMode, setViewMode] = useState("list");
     const [statusF, setStatusF] = useState("All");
     const [search, setSearch] = useState("");
@@ -316,33 +318,53 @@ function AppointmentsPage() {
 
     const handleAccept = async (id) => {
         const apt = appointments.find(a => a.id === id);
-        const { error } = await apiConfirm(id);
+        console.log("🔍 Confirming appointment:", id, apt?.client);
+        
+        const result = await apiConfirm(id);
+        console.log("📡 API Response:", result);
+        
+        const { error } = result;
         if (error) {
-            addNotif({ type: "appointment", title: "Failed to Confirm", body: error.detail || "Could not confirm appointment", time: "Just now" });
+            console.error("❌ Confirmation failed:", error);
+            const errMsg = error.detail || "Could not confirm appointment";
+            toast.show(errMsg, "danger", 4000);
+            addNotif({ type: "appointment", title: "Failed to Confirm", body: errMsg, time: "Just now" });
             return;
         }
+        
+        console.log("✅ Appointment confirmed successfully");
         setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Upcoming" } : a));
-        addNotif({ type: "appointment", title: "Appointment Accepted", body: `Accepted appointment with ${apt?.client}`, time: "Just now" });
+        const msg = `✅ Appointment confirmed with ${apt?.client}`;
+        toast.show(msg, "success", 3000);
+        addNotif({ type: "appointment", title: "Appointment Accepted", body: msg, time: "Just now" });
     };
     const handleReject = async (id) => {
         const apt = appointments.find(a => a.id === id);
         const { error } = await apiCancel(id);
         if (error) {
-            addNotif({ type: "appointment", title: "Failed to Cancel", body: error.detail || "Could not cancel appointment", time: "Just now" });
+            const errMsg = error.detail || "Could not cancel appointment";
+            toast.show(errMsg, "danger", 4000);
+            addNotif({ type: "appointment", title: "Failed to Cancel", body: errMsg, time: "Just now" });
             return;
         }
         setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Cancelled" } : a));
-        addNotif({ type: "appointment", title: "Appointment Rejected", body: `Rejected with ${apt?.client}`, time: "Just now" });
+        const msg = `❌ Appointment rejected with ${apt?.client}`;
+        toast.show(msg, "warn", 3000);
+        addNotif({ type: "appointment", title: "Appointment Rejected", body: msg, time: "Just now" });
     };
     const handleComplete = async (id) => {
         const apt = appointments.find(a => a.id === id);
         const { error } = await apiComplete(id);
         if (error) {
-            addNotif({ type: "appointment", title: "Failed", body: error.detail || "Could not mark as complete", time: "Just now" });
+            const errMsg = error.detail || "Could not mark as complete";
+            toast.show(errMsg, "danger", 4000);
+            addNotif({ type: "appointment", title: "Failed", body: errMsg, time: "Just now" });
             return;
         }
         setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Completed" } : a));
-        addNotif({ type: "appointment", title: "Appointment Completed", body: `Completed session with ${apt?.client}`, time: "Just now" });
+        const msg = `✓ Session completed with ${apt?.client}`;
+        toast.show(msg, "success", 3000);
+        addNotif({ type: "appointment", title: "Appointment Completed", body: msg, time: "Just now" });
     };
     const confirmSchedule = (form) => {
         if (scheduleModal === null) {

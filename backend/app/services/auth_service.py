@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from pymongo.errors import DuplicateKeyError
 
@@ -50,8 +50,8 @@ async def register(data: RegisterRequest) -> dict:
             "bio": None,
             "specialization_embedding": None,
         } if data.role.value == "lawyer" else None,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
     }
     # cnic_encrypted intentionally omitted when not provided — sparse unique index
     # only skips documents where the field is absent (not where it's null)
@@ -104,7 +104,7 @@ async def logout(refresh_token: str) -> None:
     if not payload or payload.get("type") != "refresh":
         return
     await get_refresh_blocklist_col().insert_one(
-        {"token": refresh_token, "created_at": datetime.utcnow()}
+        {"token": refresh_token, "created_at": datetime.now(timezone.utc)}
     )
 
 
@@ -121,7 +121,7 @@ async def forgot_password(email: str) -> None:
         {
             "token": reset_token,
             "email": email.lower(),
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
         }
     )
     await send_password_reset_email(email, reset_token)
@@ -136,7 +136,7 @@ async def reset_password(token: str, new_password: str) -> None:
         raise AuthError("Invalid or expired reset token")
 
     created_at = record.get("created_at")
-    if created_at and (datetime.utcnow() - created_at) > timedelta(hours=1):
+    if created_at and (datetime.now(timezone.utc) - created_at) > timedelta(hours=1):
         await get_password_reset_col().delete_one({"token": token})
         raise AuthError("Invalid or expired reset token")
 
@@ -149,7 +149,7 @@ async def reset_password(token: str, new_password: str) -> None:
         {
             "$set": {
                 "password_hash": hash_password(new_password),
-                "updated_at": datetime.utcnow(),
+                "updated_at": datetime.now(timezone.utc),
             }
         },
     )

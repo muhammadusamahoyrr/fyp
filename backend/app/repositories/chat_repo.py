@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db.collections import get_chat_sessions_col
 from app.repositories.base import BaseRepository
@@ -19,7 +19,7 @@ class ChatRepository(BaseRepository):
             {"session_id": session_id},
             {
                 "$push": {"messages": message},
-                "$set": {"updated_at": datetime.utcnow()},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
             },
         )
 
@@ -29,7 +29,7 @@ class ChatRepository(BaseRepository):
             {
                 "$set": {
                     "langgraph_checkpoint": checkpoint,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 }
             },
         )
@@ -37,5 +37,5 @@ class ChatRepository(BaseRepository):
     async def update_session_meta(self, session_id: str, meta: dict) -> bool:
         return await self.update_one(
             {"session_id": session_id},
-            {"$set": {**meta, "updated_at": datetime.utcnow()}},
+            {"$set": {**meta, "updated_at": datetime.now(timezone.utc)}},
         )

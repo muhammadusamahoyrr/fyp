@@ -1,6 +1,7 @@
 from app.core.exceptions import AppValidationError, NotFoundError
 from app.repositories.case_repo import CaseRepository
 from app.repositories.user_repo import UserRepository
+from app.utils.geocoding import province_coords
 
 user_repo = UserRepository()
 case_repo = CaseRepository()
@@ -10,6 +11,34 @@ def _sanitize(user: dict) -> dict:
     user = dict(user)
     user.pop("password_hash", None)
     user.pop("cnic_encrypted", None)
+    return user
+
+
+def _inject_coords(user: dict) -> dict:
+    """
+    If the lawyer's profile lacks lat/lng (no precise address stored yet),
+    fall back to the approximate province centre so the map always has a pin.
+    A small deterministic offset derived from the user _id prevents all
+    province-mates from stacking on the exact same pixel.
+    """
+    lp = user.get("lawyer_profile") or {}
+    if lp.get("lat") is not None and lp.get("lng") is not None:
+        return user  # already geocoded
+
+    coords = province_coords(user.get("province"))
+    if not coords:
+        return user
+
+    # Deterministic jitter in [-0.4, +0.4] degrees based on id hash
+    uid_hash = sum(ord(c) for c in str(user.get("_id", "")))
+    jitter_lat = ((uid_hash * 7) % 80 - 40) / 100.0
+    jitter_lng = ((uid_hash * 13) % 80 - 40) / 100.0
+
+    user = dict(user)
+    lp = dict(lp)
+    lp["lat"] = round(coords[0] + jitter_lat, 4)
+    lp["lng"] = round(coords[1] + jitter_lng, 4)
+    user["lawyer_profile"] = lp
     return user
 
 
@@ -29,7 +58,7 @@ async def search_lawyers(
         page=page,
         page_size=page_size,
     )
-    result.items = [_sanitize(u) for u in result.items]
+    result.items = [_inject_coords(_sanitize(u)) for u in result.items]
     return result
 
 

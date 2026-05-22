@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.constants import CaseStatus
 from app.core.exceptions import ForbiddenError, NotFoundError
@@ -9,7 +9,7 @@ case_repo = CaseRepository()
 
 
 def _gen_case_number() -> str:
-    return f"ATT-{datetime.utcnow().year}-{secrets.token_hex(4).upper()}"
+    return f"ATT-{datetime.now(timezone.utc).year}-{secrets.token_hex(4).upper()}"
 
 
 async def create_case(client_id: str, data: dict) -> dict:
@@ -28,8 +28,8 @@ async def create_case(client_id: str, data: dict) -> dict:
         "milestones": [],
         "hearing_dates": [],
         "case_embedding": None,  # TODO: AI — embed case description at creation
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
     }
     await case_repo.insert(doc)
     return doc
@@ -59,7 +59,7 @@ async def update_case(
         raise NotFoundError("Case")
     _assert_access(case, requester_id, requester_role)
 
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc)
     await case_repo.update_one({"_id": case_id}, {"$set": updates})
     return await case_repo.find_by_id(case_id)
 

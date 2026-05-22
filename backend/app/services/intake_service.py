@@ -1,7 +1,9 @@
 import asyncio
 import json
 import secrets
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 from app.core.exceptions import AppValidationError, NotFoundError
 from app.repositories.intake_repo import IntakeRepository
@@ -15,7 +17,7 @@ _MAX_CLARIFY_ROUNDS = 4
 
 STEP_REQUIRED_FIELDS = {
     1: ["province"],
-    2: ["case_type", "urgency"],
+    2: [],  # case_type is AI-detected; urgency is optional (defaults to "medium")
     3: ["incident_description"],
     4: [],
     5: ["desired_outcome"],
@@ -96,8 +98,8 @@ async def start_intake(client_id: str) -> dict:
             "recommended_actions":  [],
             "risk_level":           None,
         },
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
     }
     await intake_repo.insert(doc)
     return {"session_token": token, "message": "Intake session started"}
@@ -137,12 +139,21 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
     if not intake or intake.get("client_id") != client_id:
         raise NotFoundError("Intake session")
 
-    qa_list   = list(intake.get("clarification_qa") or [])
-    step2     = intake.get("step2") or {}
-    step3     = intake.get("step3") or {}
-    case_type = step2.get("case_type", "civil")
-    province  = (intake.get("step1") or {}).get("province", "federal")
-    desc      = step3.get("incident_description", "")
+    qa_list  = list(intake.get("clarification_qa") or [])
+    step2    = intake.get("step2") or {}
+    step3    = intake.get("step3") or {}
+    province = (intake.get("step1") or {}).get("province", "federal")
+    desc     = step3.get("incident_description", "")
+
+    # Detect case type from description so we pick the right Q&A template.
+    # The dropdown was removed from the UI, so step2.case_type is unreliable.
+    if desc:
+        from app.ai.nodes.classifier_node import _score_query
+        scores = _score_query(desc)
+        best_type, (best_score, _) = max(scores.items(), key=lambda x: x[1][0])
+        case_type = best_type.value if best_score >= 0.20 else step2.get("case_type", "civil")
+    else:
+        case_type = step2.get("case_type", "civil")
 
     # Save the answer to the last unanswered question
     if answer and qa_list and qa_list[-1].get("a") is None:
@@ -192,14 +203,49 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
     return {"question": text, "done": False, "round": next_round}
 
 
-def _classify_description(description: str) -> str:
-    """Keyword-score the intake description and return the best case_type string."""
+_VALID_CASE_TYPES = {"civil", "criminal", "family", "constitutional"}
+
+_TYPE_CLASSIFY_SYSTEM = """\
+You are a Pakistani legal intake specialist. Based on the case description, classify it into exactly one category:
+- criminal: FIR, murder/قتل, theft/چوری, assault, robbery/ڈکیتی, rape/زنا, bail/بیل, arrest/گرفتاری, cybercrime, PECA, PPC offences
+- family: divorce/طلاق, talaq, khula/خلع, custody/حضانت, maintenance/نفقہ, nikah/نکاح, inheritance/وراثت, dowry/جہیز, mehr/مہر, MFLO, shadi/شادی
+- constitutional: fundamental rights, writ petition, government authority, Supreme/High Court, Article of Constitution
+- civil: property dispute, contract, debt, tenancy, eviction, compensation, damages, CPC matters
+
+The description may be in English, Urdu script, or Romanized Urdu — handle all three.
+Return only the single word: criminal, family, constitutional, or civil. Nothing else."""
+
+
+async def _ai_classify_case_type(description: str, user_selected: str) -> tuple[str, bool]:
+    """
+    Returns (final_case_type, was_corrected).
+    Step 1: keyword classifier (fast, free).
+    Step 2: LLM fallback when keyword confidence < 0.30 (ambiguous description).
+    """
     from app.ai.nodes.classifier_node import _score_query
+
     scores = _score_query(description)
     best_type, (best_score, _) = max(scores.items(), key=lambda x: x[1][0])
-    if best_score == 0.0:
-        return "civil"
-    return best_type.value
+
+    if best_score >= 0.30:
+        ai_type = best_type.value
+    else:
+        # Low keyword signal — let the LLM decide
+        try:
+            from app.ai.llm import get_fast_llm
+            llm = get_fast_llm()
+            response = llm.invoke([
+                {"role": "system", "content": _TYPE_CLASSIFY_SYSTEM},
+                {"role": "user",   "content": description[:1200]},
+            ])
+            ai_type = response.content.strip().lower().split()[0]
+            if ai_type not in _VALID_CASE_TYPES:
+                ai_type = user_selected  # LLM gave unexpected output — trust user
+        except Exception:
+            ai_type = user_selected  # LLM failed — trust user
+
+    was_corrected = ai_type != user_selected
+    return ai_type, was_corrected
 
 
 # ─── Convert + P1 (embedding) + P5 (auto-match) ──────────────────────────────
@@ -224,20 +270,31 @@ async def convert_to_case(
     step2 = intake.get("step2", {})
     step3 = intake.get("step3", {})
 
-    # Enrich description with clarification Q&A if present
-    description = step3.get("incident_description", "")
-    qa_list     = intake.get("clarification_qa") or []
-    answered    = [qa for qa in qa_list if qa.get("a")]
+    # Classify on the base description ONLY — before Q&A is appended.
+    # Appending clarification Q&A first would pollute keyword scores because the
+    # questions themselves contain domain words (e.g. civil template asks about
+    # "contract" and "property value"), which biases the classifier.
+    base_description = step3.get("incident_description", "")
+    user_case_type   = step2.get("case_type", "civil")
+    ai_case_type, type_corrected = await _ai_classify_case_type(base_description, user_case_type)
+
+    # Enrich description with clarification Q&A for AI analysis (after classification)
+    qa_list  = intake.get("clarification_qa") or []
+    answered = [qa for qa in qa_list if qa.get("a")]
     if answered:
-        qa_text = "\n".join(f"Q: {qa['q']}\nA: {qa['a']}" for qa in answered)
-        description = f"{description}\n\nAdditional context from intake:\n{qa_text}"
+        qa_text     = "\n".join(f"Q: {qa['q']}\nA: {qa['a']}" for qa in answered)
+        description = f"{base_description}\n\nAdditional context from intake:\n{qa_text}"
+    else:
+        description = base_description
 
     case_data = {
-        "case_type":   step2.get("case_type"),
-        "province":    step1.get("province"),
-        "title":       description[:80],
-        "description": description,
-        "intake_id":   intake["_id"],
+        "case_type":            ai_case_type,          # AI-verified, not raw user pick
+        "user_selected_type":   user_case_type,        # keep original for audit
+        "type_was_corrected":   type_corrected,
+        "province":             step1.get("province"),
+        "title":                description[:80],
+        "description":          description,
+        "intake_id":            intake["_id"],
     }
     case = await create_case(client_id, case_data)
     case_id = case["_id"]
@@ -248,10 +305,10 @@ async def convert_to_case(
     # Use frontend-provided urgency if given; fall back to what the user stored in step 2
     effective_urgency = urgency or step2.get("urgency", "medium")
 
-    # Run AI structured analysis
+    # Run AI structured analysis using the AI-verified case type
     ai_data = await _run_intake_ai(
         query=description,
-        case_type=step2.get("case_type", "civil"),
+        case_type=ai_case_type,
         province=step1.get("province", "federal"),
         session_id=token,
         case_id=case_id,
@@ -260,24 +317,28 @@ async def convert_to_case(
     )
     await intake_repo.save_ai_structured_case(token, ai_data)
 
-    # Sync the AI summary to the case document so lawyer matching can use it
+    # Sync AI summary + verified type to case document so lawyer matching can use it
     if ai_data and ai_data.get("summary"):
         await case_repo.update_one(
-            {"_id": case_id}, 
-            {"$set": {"ai_summary": ai_data.get("summary")}}
+            {"_id": case_id},
+            {"$set": {
+                "ai_summary": ai_data.get("summary"),
+                "case_type":  ai_case_type,
+            }}
         )
 
     # P5 — auto-match top 5 lawyers (non-blocking, best-effort)
     asyncio.create_task(_auto_match_lawyers(case_id))
 
     await intake_repo.mark_completed(token, case_id)
-    ai_case_type = _classify_description(description)
     return {
-        "session_token": token,
-        "current_step":  5,
-        "completed":     True,
-        "case_id":       case_id,
-        "ai_case_type":  ai_case_type,
+        "session_token":      token,
+        "current_step":       5,
+        "completed":          True,
+        "case_id":            case_id,
+        "ai_case_type":       ai_case_type,
+        "user_case_type":     user_case_type,
+        "type_was_corrected": type_corrected,
     }
 
 
@@ -336,6 +397,10 @@ async def _run_intake_ai(
         "case_id":                case_id,
         "case_type":              case_type,
         "case_type_confidence":   0.0,
+        "classifier_case_type":   case_type,
+        "classifier_confidence":  1.0,
+        "routing_mode":           "single",
+        "followup_intent":        None,
         "complexity":             "simple",
         "urgency":                urgency,
         "province":               province,
@@ -370,6 +435,56 @@ async def _run_intake_ai(
             "recommended_actions": ["Consult a qualified Pakistani lawyer for advice."],
             "risk_level":          "medium",
         }
+
+
+_EVIDENCE_DIR = Path("uploads/evidence")
+_ALLOWED_MIME = {
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+_MAX_EVIDENCE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+async def upload_evidence(token: str, client_id: str, file) -> dict:
+    import aiofiles
+
+    intake = await intake_repo.find_by_token(token)
+    if not intake or intake.get("client_id") != client_id:
+        raise NotFoundError("Intake session")
+
+    if file.content_type not in _ALLOWED_MIME:
+        raise AppValidationError(f"File type not allowed. Accepted: PDF, Word, JPEG, PNG, GIF, WebP")
+
+    content = await file.read()
+    if len(content) > _MAX_EVIDENCE_SIZE:
+        raise AppValidationError("File too large — maximum size is 10 MB")
+
+    save_dir = _EVIDENCE_DIR / token
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    file_id = uuid.uuid4().hex
+    suffix  = Path(file.filename or "file").suffix or ""
+    save_path = save_dir / f"{file_id}{suffix}"
+
+    async with aiofiles.open(save_path, "wb") as f:
+        await f.write(content)
+
+    file_meta = {
+        "file_id":      file_id,
+        "filename":     file.filename,
+        "content_type": file.content_type,
+        "size":         len(content),
+        "path":         str(save_path),
+    }
+    await intake_repo.add_evidence_file(token, file_meta)
+    return {
+        "file_id":      file_id,
+        "filename":     file.filename,
+        "size":         len(content),
+        "content_type": file.content_type,
+    }
 
 
 async def get_intake(token: str, client_id: str) -> dict:

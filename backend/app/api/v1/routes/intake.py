@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Depends, Path
+from fastapi import APIRouter, Body, Depends, File, Path, UploadFile
 
 from app.dependencies import require_client
 from app.schemas.intake import (
@@ -52,6 +52,15 @@ async def clarify_intake(
     Call 2: body.answer = <Q1 answer> → returns Q2 or done=true
     """
     return await intake_service.get_clarification(token, current_user["_id"], body.answer)
+
+
+@router.post("/{token}/evidence")
+async def upload_evidence(
+    token: str,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_client),
+):
+    return await intake_service.upload_evidence(token, current_user["_id"], file)
 
 
 @router.post("/{token}/convert", response_model=IntakeResponse)

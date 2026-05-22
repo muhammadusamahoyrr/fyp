@@ -17,7 +17,7 @@ def format_history(state: AgentState, max_turns: int = 5) -> str:
     lines = []
     for msg in recent:
         role = "User" if msg.type == "human" else "Assistant"
-        content = msg.content[:300] if msg.type == "ai" else msg.content
+        content = msg.content[:800] if msg.type == "ai" else msg.content
         lines.append(f"{role}: {content}")
 
     return "\n".join(lines)

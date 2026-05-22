@@ -1,8 +1,8 @@
 'use client';
-// Paste your ModTracking.jsx code here
 import { useState, useEffect, useRef } from "react";
 import { DARK, LIGHT, useT } from "./theme.js";
 import { useCase } from "./CaseContext.jsx";
+import { listCases, getCaseTimeline, listAppointments } from "@/lib/api.js";
 
 // ─── DATA ─────────────────────────────────────────────────────────────────────
 const CASES = [
@@ -53,6 +53,47 @@ const MESSAGES_INIT = [
     { id: 3, from: "lawyer", text: "Exhibit C covers financial records for Jan–Jun 2025. Focus on the salary discrepancy on pg. 11.", date: "Feb 19, 2:30 PM", milestoneId: "m3", milestoneName: "Discovery Documents", seenByLawyer: true },
     { id: 4, from: "client", text: "Should I attend in person or is virtual attendance allowed for the Feb 25 hearing?", date: "Feb 21, 9:00 AM", status: "pending", milestoneId: "m4", milestoneName: "Court Hearing", seenByLawyer: false },
 ];
+
+// ─── API MAPPERS ──────────────────────────────────────────────────────────────
+function mapApiCase(c) {
+    const hearings = c.hearing_dates || [];
+    const milestones = c.milestones || [];
+    const completedCount = milestones.filter(m => m.completed).length;
+    const total = milestones.length || 5;
+    const pct = total > 0 ? Math.round(completedCount / total * 100) : 0;
+    const nextHearing = hearings[0]?.date
+        ? new Date(hearings[0].date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) + ", " +
+          new Date(hearings[0].date).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+        : "—";
+    return {
+        id:          c._id || c.id,
+        title:       c.title || "Case",
+        status:      c.status || "pending",
+        type:        c.case_type || "civil",
+        filed:       c.created_at ? new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",
+        court:       hearings[0]?.court || "—",
+        judge:       hearings[0]?.judge || "—",
+        lawyer:      c.lawyer_id ? c.lawyer_id.slice(-6) : "—",
+        progress:    completedCount,
+        total,
+        nextHearing,
+        pct,
+    };
+}
+
+function mapApiMilestone(m, idx) {
+    const date = new Date(m.date);
+    return {
+        id:          idx + 1,
+        status:      m.completed ? "done" : "pending",
+        event:       m.title,
+        date:        date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        time:        date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        desc:        m.description || "",
+        tag:         m.completed ? "complete" : "pending",
+        milestoneId: `m${idx + 1}`,
+    };
+}
 
 // ─── PRIMITIVES ───────────────────────────────────────────────────────────────
 const DotGrid = ({ t }) => (
@@ -187,6 +228,7 @@ const TrackIc = ({ name, s = 18, c = "currentColor" }) => {
         notifications: <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></svg>,
         communication: <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>,
         reminders: <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>,
+        appointments: <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><circle cx="12" cy="16" r="2" /></svg>,
     };
     return icons[name] || null;
 };
@@ -206,12 +248,13 @@ const priorityOrder = { critical: 0, overdue: 1, urgent: 2, upcoming: 3, normal:
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 const TRACKING_PAGES = [
-    { key: "overview", label: "Overview", ico: "overview", badge: null },
-    { key: "timeline", label: "Case Timeline", ico: "timeline", badge: null },
-    { key: "documents", label: "Documents", ico: "documents", badge: 6, bv: "primary" },
-    { key: "notifications", label: "Notifications", ico: "notifications", badge: 4, bv: "danger" },
-    { key: "communication", label: "Communication", ico: "communication", badge: 2, bv: "info" },
-    { key: "reminders", label: "Reminders", ico: "reminders", badge: 1, bv: "warn" },
+    { key: "overview",       label: "Overview",       ico: "overview",       badge: null },
+    { key: "appointments",   label: "Appointments",   ico: "appointments",   badge: null },
+    { key: "timeline",       label: "Case Timeline",  ico: "timeline",       badge: null },
+    { key: "documents",      label: "Documents",      ico: "documents",      badge: 6,  bv: "primary" },
+    { key: "notifications",  label: "Notifications",  ico: "notifications",  badge: 4,  bv: "danger" },
+    { key: "communication",  label: "Communication",  ico: "communication",  badge: 2,  bv: "info" },
+    { key: "reminders",      label: "Reminders",      ico: "reminders",      badge: 1,  bv: "warn" },
 ];
 
 const Sidebar = ({ page, onNavigate, collapsed, onToggle }) => {
@@ -1360,6 +1403,93 @@ function PageReminders({ feed, setFeed }) {
     );
 }
 
+// ─── PAGE: APPOINTMENTS ───────────────────────────────────────────────────────
+function PageAppointments({ appointments, loading, t }) {
+    const statusStyle = {
+        pending:   { bg: `${t.warn}18`,    color: t.warn,    label: "⏳ Pending Confirmation" },
+        confirmed: { bg: `${t.primary}18`, color: t.primary, label: "✅ Confirmed" },
+        cancelled: { bg: "rgba(255,107,122,0.12)", color: t.danger, label: "❌ Cancelled" },
+        completed: { bg: `${t.info}14`,    color: t.info,    label: "🏁 Completed" },
+        no_show:   { bg: t.cardHi,          color: t.textMuted, label: "👻 No Show" },
+    };
+    const modeIcon = { video: "📹", in_person: "🏛", phone: "📞" };
+
+    if (loading) return (
+        <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
+            <div style={{ width: 32, height: 32, border: `3px solid ${t.primary}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        </div>
+    );
+
+    if (!appointments.length) return (
+        <div style={{ textAlign: "center", padding: "60px 24px" }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>📅</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 8 }}>No appointments yet</div>
+            <div style={{ fontSize: 13, color: t.textMuted }}>Book a consultation with a lawyer to get started.</div>
+        </div>
+    );
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: t.text, marginBottom: 4 }}>Your Appointments</div>
+            {appointments.map(appt => {
+                const s    = statusStyle[appt.status] || statusStyle.pending;
+                const date = new Date(appt.scheduled_at);
+                const dateStr = date.toLocaleDateString("en-PK", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+                const timeStr = date.toLocaleTimeString("en-PK", { hour: "2-digit", minute: "2-digit" });
+                return (
+                    <Card key={appt.id} t={t} style={{ padding: 0 }}>
+                        {/* Status strip */}
+                        <div style={{ height: 4, borderRadius: "16px 16px 0 0", background: s.color, opacity: 0.7 }} />
+                        <div style={{ padding: "16px 20px" }}>
+                            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+                                <div>
+                                    <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>
+                                        {modeIcon[appt.mode] || "📅"} Consultation{appt.lawyer_name ? ` — ${appt.lawyer_name}` : ""}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: t.textMuted, marginTop: 3 }}>{dateStr} · {timeStr}</div>
+                                </div>
+                                <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 20, background: s.bg, color: s.color, whiteSpace: "nowrap", flexShrink: 0 }}>
+                                    {s.label}
+                                </span>
+                            </div>
+                            <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                                {appt.duration_minutes && (
+                                    <div style={{ fontSize: 12, color: t.textMuted }}>
+                                        <span style={{ fontWeight: 600, color: t.textDim }}>Duration</span> · {appt.duration_minutes} min
+                                    </div>
+                                )}
+                                {appt.mode && (
+                                    <div style={{ fontSize: 12, color: t.textMuted }}>
+                                        <span style={{ fontWeight: 600, color: t.textDim }}>Mode</span> · {appt.mode.replace("_", " ")}
+                                    </div>
+                                )}
+                                {appt.case_id && (
+                                    <div style={{ fontSize: 12, color: t.textMuted }}>
+                                        <span style={{ fontWeight: 600, color: t.textDim }}>Case</span> · {appt.case_id.slice(-8)}
+                                    </div>
+                                )}
+                            </div>
+                            {appt.notes && (
+                                <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: t.inputBg, border: `1px solid ${t.border}`, fontSize: 12, color: t.textMuted, fontStyle: "italic" }}>
+                                    "{appt.notes}"
+                                </div>
+                            )}
+                            {appt.meeting_link && (
+                                <div style={{ marginTop: 10 }}>
+                                    <a href={appt.meeting_link} target="_blank" rel="noreferrer"
+                                        style={{ fontSize: 12, color: t.primary, fontWeight: 700, textDecoration: "none" }}>
+                                        🔗 Join Meeting →
+                                    </a>
+                                </div>
+                            )}
+                        </div>
+                    </Card>
+                );
+            })}
+        </div>
+    );
+}
+
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 // Fix #2: accepts isDark from Dashboard — no longer owns its own theme state.
 // Fix #5: reads appointmentMilestones from CaseContext so booked appointments
@@ -1370,26 +1500,67 @@ export default function Module7({ isDark }) {
     const [page, setPage] = useState("overview");
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [activeCaseId, setActiveCaseId] = useState("C-001");
+    const [apiCases, setApiCases] = useState([]);
+    const [apiMilestones, setApiMilestones] = useState([]);
+    const [apiAppointments, setApiAppointments] = useState([]);
+    const [apptLoading, setApptLoading] = useState(false);
+
+    // Load cases from API on mount
+    useEffect(() => {
+        listCases({ page_size: 20 }).then(({ data }) => {
+            if (data?.items?.length) {
+                const mapped = data.items.map(mapApiCase);
+                setApiCases(mapped);
+                setActiveCaseId(mapped[0].id);
+            }
+        });
+    }, []);
+
+    // Load appointments on mount and whenever the page switches to "appointments"
+    useEffect(() => {
+        if (page !== "appointments") return;
+        setApptLoading(true);
+        listAppointments({ page_size: 50 }).then(({ data }) => {
+            setApiAppointments(data?.items || data || []);
+            setApptLoading(false);
+        }).catch(() => setApptLoading(false));
+    }, [page]);
+
+    // Load timeline when active case changes (skip mock IDs like "C-001")
+    useEffect(() => {
+        if (!activeCaseId || activeCaseId.startsWith("C-")) return;
+        getCaseTimeline(activeCaseId).then(({ data }) => {
+            if (data?.milestones?.length) {
+                setApiMilestones(data.milestones.map(mapApiMilestone));
+            } else {
+                setApiMilestones([]);
+            }
+        });
+    }, [activeCaseId]);
+
+    const displayCases      = apiCases.length ? apiCases : CASES;
+    const displayMilestones = apiMilestones.length ? apiMilestones : MILESTONES;
 
     // Merge static feed with CaseContext notifications so both sources appear
     const feed = notifications;
     const setFeed = () => { }; // mutations go through CaseContext helpers
 
-    // Merge static milestones with any appointment milestones from Module 4
-    const allMilestones = [...MILESTONES, ...appointmentMilestones];
+    // Merge milestones with any appointment milestones from Module 4
+    const allMilestones = [...displayMilestones, ...appointmentMilestones];
 
-    const activeCase = CASES.find(c => c.id === activeCaseId) || CASES[0];
+    const activeCase = displayCases.find(c => c.id === activeCaseId) || displayCases[0];
     const unreadCount = feed.filter(f => !f.done).length;
 
     const pages = {
-        overview: (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} />,
-        timeline: (props) => <PageTimeline      {...props} milestones={allMilestones} />,
-        documents: (props) => <PageDocuments     {...props} />,
+        overview:      (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} />,
+        appointments:  (props) => <PageAppointments  {...props} appointments={apiAppointments} loading={apptLoading} />,
+        timeline:      (props) => <PageTimeline      {...props} milestones={allMilestones} />,
+        documents:     (props) => <PageDocuments     {...props} />,
         notifications: (props) => <PageNotifications {...props} feed={feed}
             onMarkDone={markNotificationDone}
             onMarkAllDone={markAllNotificationsDone} />,
         communication: (props) => <PageCommunication {...props} />,
-        reminders: (props) => <PageReminders     {...props} feed={feed} setFeed={setFeed} />,
+        reminders:     (props) => <PageReminders     {...props} feed={feed} setFeed={setFeed} />,
     };
     const PageComp = pages[page] || pages.overview;
 
@@ -1407,7 +1578,7 @@ export default function Module7({ isDark }) {
                 <Sidebar page={page} onNavigate={setPage} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(p => !p)} t={t} />
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
                     <TopHeader t={t} onBack={() => setPage("overview")}
-                        activeCaseId={activeCaseId} cases={CASES} onCaseSwitch={setActiveCaseId} unreadCount={unreadCount} />
+                        activeCaseId={activeCaseId} cases={displayCases} onCaseSwitch={setActiveCaseId} unreadCount={unreadCount} />
                     <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
                         <PageComp setPage={setPage} t={t} />
                     </div>

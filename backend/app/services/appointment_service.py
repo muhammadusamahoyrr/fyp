@@ -64,7 +64,7 @@ async def book_appointment(
         if case.get("client_id") != client_id:
             raise ForbiddenError("Case does not belong to you")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     end_at = scheduled_at + timedelta(minutes=duration_minutes)
 
     doc = {
@@ -137,7 +137,7 @@ async def confirm_appointment(appt_id: str, lawyer_id: str) -> dict:
     )
 
     appt["status"] = AppointmentStatus.CONFIRMED.value
-    appt["updated_at"] = datetime.utcnow()
+    appt["updated_at"] = datetime.now(timezone.utc)
     return _sanitize(appt)
 
 
@@ -163,7 +163,7 @@ async def cancel_appointment(
     # Clients cannot cancel within the cutoff window
     if user_role == "client":
         cutoff = appt["scheduled_at"] - timedelta(minutes=_CANCEL_CUTOFF_MINUTES)
-        if datetime.utcnow() >= cutoff:
+        if datetime.now(timezone.utc) >= cutoff:
             raise AppValidationError(
                 f"Appointments can only be cancelled at least "
                 f"{_CANCEL_CUTOFF_MINUTES // 60} hours before the scheduled time."
@@ -190,7 +190,7 @@ async def cancel_appointment(
         payload={"appointment_id": appt_id},
     )
 
-    appt.update({"status": AppointmentStatus.CANCELLED.value, **extra, "updated_at": datetime.utcnow()})
+    appt.update({"status": AppointmentStatus.CANCELLED.value, **extra, "updated_at": datetime.now(timezone.utc)})
     return _sanitize(appt)
 
 
@@ -227,7 +227,7 @@ async def complete_appointment(
         payload={"appointment_id": appt_id},
     )
 
-    appt.update({"status": AppointmentStatus.COMPLETED.value, **extra, "updated_at": datetime.utcnow()})
+    appt.update({"status": AppointmentStatus.COMPLETED.value, **extra, "updated_at": datetime.now(timezone.utc)})
     return _sanitize(appt)
 
 
@@ -242,7 +242,7 @@ async def mark_no_show(appt_id: str, lawyer_id: str) -> dict:
 
     await appt_repo.update_status(appt_id, AppointmentStatus.NO_SHOW)
     appt["status"] = AppointmentStatus.NO_SHOW.value
-    appt["updated_at"] = datetime.utcnow()
+    appt["updated_at"] = datetime.now(timezone.utc)
     return _sanitize(appt)
 
 
@@ -300,10 +300,15 @@ async def get_availability(lawyer_id: str, date_str: str) -> dict:
 
     booked = await appt_repo.booked_slots_on_date(lawyer_id, day_start, day_end)
 
+    def _to_utc_iso(dt: datetime) -> str:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat().replace("+00:00", "Z")
+
     slots = [
         {
-            "start": b["scheduled_at"].isoformat(),
-            "end":   b["end_at"].isoformat(),
+            "start": _to_utc_iso(b["scheduled_at"]),
+            "end":   _to_utc_iso(b["end_at"]),
             "duration_minutes": b["duration_minutes"],
         }
         for b in booked

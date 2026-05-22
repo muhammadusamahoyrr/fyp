@@ -148,11 +148,6 @@ const NotifDrawer = ({ open, onClose, onGoTracking, t }) => {
                                         fontSize: 13, fontWeight: 700, color: t.text,
                                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                                     }}>{n.title}</span>
-
-                                    <span style={{
-                                        fontSize: 13, fontWeight: 700, color: t.text,
-                                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                                    }}>{n.title}</span>
                                     {!n.done && (
                                         <span style={{
                                             width: 7, height: 7, borderRadius: "50%",
@@ -210,7 +205,6 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
             "/intake":     "intake",
             "/chat":       "chatbot",
             "/lawyers":    "lawyers",
-            "/cases":      "cases",
             "/documents":  "documents",
             "/agreements": "agreements",
             "/tracking":   "tracking",

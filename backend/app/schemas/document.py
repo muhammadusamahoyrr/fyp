@@ -6,10 +6,15 @@ from pydantic import BaseModel
 from app.core.constants import DocumentTemplate
 
 
+class DocumentExtract(BaseModel):
+    case_id: str
+    template_type: DocumentTemplate
+
+
 class DocumentGenerate(BaseModel):
     case_id: str
     template_type: DocumentTemplate
-    fields: dict[str, Any] = {}
+    fields: dict[str, Any] = {}   # pass {} to trigger auto-extraction
 
 
 class DocumentResponse(BaseModel):

@@ -2,6 +2,7 @@
 // Lawyer App — paste your code here
 import { useState, useEffect } from "react";
 import { DARK, LIGHT, ThemeCtx, ToggleCtx, CaseCtx, NotifCtx } from "./theme.js";
+import { ToastContainer } from "@/components/shared/Toast.jsx";
 import { injectGS } from "./globalStyles.js";
 import { Sidebar, Topbar, ActiveCaseBanner } from "./layout.jsx";
 import { DashboardPage } from "./DashboardPage.jsx";
@@ -16,12 +17,13 @@ import { CommunicationsPage } from "./CommunicationsPage.jsx";
 import { ProfilePage } from "./ProfilePage.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { OnboardingPage, ONBOARDED_KEY } from "./OnboardingPage.jsx";
+import { CourtroomPage } from "./CourtroomPage.jsx";
 import { seedDocs } from "./data.js";
 
 // LoginPage not yet implemented
 const LoginPage = () => null;
 const DocumentsPage = DocWorkflowApp;
-const pageMap = { dashboard: DashboardPage, cases: CasesPage, documents: DocumentsPage, appointments: AppointmentsPage, clients: ClientsPage, "ai-legal": AILegalPage, "doc-automation": DocAutomationPage, upload: UploadPage, communications: CommunicationsPage, profile: ProfilePage, settings: SettingsPage, onboarding: OnboardingPage };
+const pageMap = { dashboard: DashboardPage, cases: CasesPage, documents: DocumentsPage, appointments: AppointmentsPage, clients: ClientsPage, "ai-legal": AILegalPage, "doc-automation": DocAutomationPage, upload: UploadPage, communications: CommunicationsPage, profile: ProfilePage, settings: SettingsPage, onboarding: OnboardingPage, courtroom: CourtroomPage };
 
 const SEED_NOTIFS = [
     { id: 1, type: "hearing", title: "Hearing Tomorrow", body: "CS-2024-089 at High Court Mumbai — 10:00 AM", time: "1h ago", unread: true },
@@ -67,44 +69,48 @@ export default function App({ initialPage = "dashboard" }) {
     const notifCtxVal = { notifs, addNotif, clearNotif, clearAll };
 
     if (page === "login") return (
-        <ThemeCtx.Provider value={t}><ToggleCtx.Provider value={toggle}>
-            <CaseCtx.Provider value={caseCtxVal}><NotifCtx.Provider value={notifCtxVal}>
-                <LoginPage onLogin={() => {
-                    let onboarded = false;
-                    try { onboarded = localStorage.getItem(ONBOARDED_KEY) === "1"; } catch { }
-                    setPage(onboarded ? "dashboard" : "onboarding");
-                }} />
-            </NotifCtx.Provider></CaseCtx.Provider>
-        </ToggleCtx.Provider></ThemeCtx.Provider>
+        <ToastContainer theme={t}>
+            <ThemeCtx.Provider value={t}><ToggleCtx.Provider value={toggle}>
+                <CaseCtx.Provider value={caseCtxVal}><NotifCtx.Provider value={notifCtxVal}>
+                    <LoginPage onLogin={() => {
+                        let onboarded = false;
+                        try { onboarded = localStorage.getItem(ONBOARDED_KEY) === "1"; } catch { }
+                        setPage(onboarded ? "dashboard" : "onboarding");
+                    }} />
+                </NotifCtx.Provider></CaseCtx.Provider>
+            </ToggleCtx.Provider></ThemeCtx.Provider>
+        </ToastContainer>
     );
 
     const Page = pageMap[page] || DashboardPage;
     const hideTopbar = true;
 
     return (
-        <ThemeCtx.Provider value={t}><ToggleCtx.Provider value={toggle}>
-            <CaseCtx.Provider value={caseCtxVal}><NotifCtx.Provider value={notifCtxVal}>
-                <div style={{ display: "flex", minHeight: "100vh", background: t.bg }}>
-                    {page !== "onboarding" && <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} unreadMsgs={unreadMsgs} toggleTheme={toggle} isDark={isDark} />}
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
-                        {!hideTopbar && <Topbar page={page} collapsed={collapsed} setCollapsed={setCollapsed} toggleTheme={toggle} />}
-                        {/* Active case banner — visible on all pages except communications/ai-legal */}
-                        {activeCase && !hideTopbar && page !== "ai-legal" && (
-                            <ActiveCaseBanner caseId={activeCase} onClear={() => { setActiveCaseState(null); setOpenCaseId(null); }} />
-                        )}
-                        {/* FIX: removed key={page} — was destroying all page state on every navigation */}
-                        <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: ["ai-legal", "communications", "cases", "doc-automation", "onboarding"].includes(page) ? "hidden" : "auto", padding: ["ai-legal", "cases", "doc-automation", "onboarding"].includes(page) ? 0 : 24 }}>
-                            {page === "onboarding"
-                                ? <OnboardingPage t={t} role="lawyer" onComplete={() => {
-                                    try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch {}
-                                    setPage("dashboard");
-                                }} />
-                                : <Page />
-                            }
-                        </main>
+        <ToastContainer theme={t}>
+            <ThemeCtx.Provider value={t}><ToggleCtx.Provider value={toggle}>
+                <CaseCtx.Provider value={caseCtxVal}><NotifCtx.Provider value={notifCtxVal}>
+                    <div style={{ display: "flex", minHeight: "100vh", background: t.bg }}>
+                        {page !== "onboarding" && <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} unreadMsgs={unreadMsgs} toggleTheme={toggle} isDark={isDark} />}
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+                            {!hideTopbar && <Topbar page={page} collapsed={collapsed} setCollapsed={setCollapsed} toggleTheme={toggle} />}
+                            {/* Active case banner — visible on all pages except communications/ai-legal */}
+                            {activeCase && !hideTopbar && page !== "ai-legal" && (
+                                <ActiveCaseBanner caseId={activeCase} onClear={() => { setActiveCaseState(null); setOpenCaseId(null); }} />
+                            )}
+                            {/* FIX: removed key={page} — was destroying all page state on every navigation */}
+                            <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: ["ai-legal", "communications", "cases", "doc-automation", "onboarding"].includes(page) ? "hidden" : "auto", padding: ["ai-legal", "cases", "doc-automation", "onboarding"].includes(page) ? 0 : 24 }}>
+                                {page === "onboarding"
+                                    ? <OnboardingPage t={t} role="lawyer" onComplete={() => {
+                                        try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch {}
+                                        setPage("dashboard");
+                                    }} />
+                                    : <Page />
+                                }
+                            </main>
+                        </div>
                     </div>
-                </div>
-            </NotifCtx.Provider></CaseCtx.Provider>
-        </ToggleCtx.Provider></ThemeCtx.Provider>
+                </NotifCtx.Provider></CaseCtx.Provider>
+            </ToggleCtx.Provider></ThemeCtx.Provider>
+        </ToastContainer>
     );
 }
