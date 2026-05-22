@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pymongo import DESCENDING
 
@@ -26,11 +26,11 @@ class NotificationRepository(BaseRepository):
     async def mark_read(self, notification_id: str, user_id: str) -> bool:
         return await self.update_one(
             {"_id": notification_id, "user_id": user_id},
-            {"$set": {"read": True, "read_at": datetime.utcnow()}},
+            {"$set": {"read": True, "read_at": datetime.now(timezone.utc)}},
         )
 
     async def mark_all_read(self, user_id: str) -> None:
         await self.col.update_many(
             {"user_id": user_id, "read": False},
-            {"$set": {"read": True, "read_at": datetime.utcnow()}},
+            {"$set": {"read": True, "read_at": datetime.now(timezone.utc)}},
         )

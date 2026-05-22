@@ -41,3 +41,7 @@ def get_password_reset_col() -> AsyncIOMotorCollection:
 
 def get_appointments_col() -> AsyncIOMotorCollection:
     return get_database()["appointments"]
+
+
+def get_intent_logs_col() -> AsyncIOMotorCollection:
+    return get_database()["intent_logs"]

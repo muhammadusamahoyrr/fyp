@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.dependencies import get_current_user, require_lawyer
-from app.schemas.user import LawyerProfileUpdate, UserUpdate
+from app.schemas.user import LawyerProfileUpdate, PasswordChange, UserUpdate
 from app.services import user_service
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -19,6 +19,15 @@ async def update_me(
 ):
     updates = body.model_dump(exclude_none=True)
     return await user_service.update_profile(current_user["_id"], updates)
+
+
+@router.patch("/me/password", response_model=dict)
+async def change_password(
+    body: PasswordChange,
+    current_user: dict = Depends(get_current_user),
+):
+    await user_service.change_password(current_user["_id"], body.current_password, body.new_password)
+    return {"message": "Password updated successfully"}
 
 
 @router.patch("/me/lawyer-profile", response_model=dict)

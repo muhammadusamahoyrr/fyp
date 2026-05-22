@@ -129,6 +129,12 @@ export async function intakeGet(sessionToken) {
   return apiFetch(`/intake/${sessionToken}`);
 }
 
+export async function uploadIntakeEvidence(sessionToken, file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiFetchMultipart(`/intake/${sessionToken}/evidence`, formData);
+}
+
 // answer = null on first call (get Q1); answer = string on second call (get Q2 or done)
 export async function intakeClarify(sessionToken, answer = null) {
   return apiFetch(`/intake/${sessionToken}/clarify`, {
@@ -178,6 +184,20 @@ export async function transcribeAudio(audioBlob) {
   return apiFetchMultipart('/voice/transcribe', formData);
 }
 
+// ─── Cases ───────────────────────────────────────────────────────────────────
+export async function listCases({ page = 1, page_size = 10 } = {}) {
+  const p = new URLSearchParams({ page, page_size });
+  return apiFetch(`/cases?${p}`);
+}
+
+export async function getCase(caseId) {
+  return apiFetch(`/cases/${caseId}`);
+}
+
+export async function getCaseTimeline(caseId) {
+  return apiFetch(`/cases/${caseId}/timeline`);
+}
+
 // ─── Users ────────────────────────────────────────────────────────────────────
 export async function getMe() {
   return apiFetch('/users/me');
@@ -185,6 +205,10 @@ export async function getMe() {
 
 export async function updateMe(updates) {
   return apiFetch('/users/me', { method: 'PATCH', body: JSON.stringify(updates) });
+}
+
+export async function changePassword(current_password, new_password) {
+  return apiFetch('/users/me/password', { method: 'PATCH', body: JSON.stringify({ current_password, new_password }) });
 }
 
 // ─── Lawyers ─────────────────────────────────────────────────────────────────
@@ -243,6 +267,41 @@ export async function confirmAppointment(id) {
   return apiFetch(`/appointments/${id}/confirm`, { method: 'PATCH' });
 }
 
+// ─── Documents ────────────────────────────────────────────────────────────────
+
+export async function extractDocumentFields(case_id, template_type) {
+  return apiFetch('/documents/extract', {
+    method: 'POST',
+    body: JSON.stringify({ case_id, template_type }),
+  });
+}
+
+export async function generateDocument(case_id, template_type, fields = {}) {
+  return apiFetch('/documents/generate', {
+    method: 'POST',
+    body: JSON.stringify({ case_id, template_type, fields }),
+  });
+}
+
+export async function listDocuments(case_id) {
+  return apiFetch(`/documents/case/${case_id}`);
+}
+
+export async function downloadDocument(doc_id, filename = 'document.pdf') {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('aai-token') : '';
+  const base  = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') + '/api/v1';
+  const res   = await fetch(`${base}/documents/${doc_id}/download`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return { error: 'Download failed' };
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+  return { data: true };
+}
+
 export async function cancelAppointment(id, reason) {
   return apiFetch(`/appointments/${id}/cancel`, {
     method: 'PATCH',
@@ -263,4 +322,17 @@ export async function markNoShow(id) {
 
 export async function getLawyerAvailability(lawyer_id, date) {
   return apiFetch(`/appointments/availability/${lawyer_id}?date=${date}`);
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+export async function getNotifications() {
+  return apiFetch('/notifications');
+}
+
+export async function markNotificationRead(notification_id) {
+  return apiFetch(`/notifications/${notification_id}/read`, { method: 'PATCH' });
+}
+
+export async function markAllNotificationsRead() {
+  return apiFetch('/notifications/read-all', { method: 'POST' });
 }

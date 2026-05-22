@@ -29,11 +29,8 @@ export function AuthProvider({ children }) {
         if (res.ok) setUser(await res.json());
         else clearToken();
       } catch {
-        // Network error — keep token so offline/demo still routes correctly
-        try {
-          const role = localStorage.getItem('aai-role');
-          if (role) setUser({ role });
-        } catch {}
+        // Network error — keep the token for retry but do NOT set user from stale localStorage.
+        // isAuthenticated stays false until a real /users/me succeeds.
       }
       setLoading(false);
     })();

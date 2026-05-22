@@ -25,7 +25,8 @@ class Settings(BaseSettings):
     # LLM
     gemini_api_key: str = ""
     groq_api_key: str = ""
-    llm_provider: str = "gemini"
+    openrouter_api_key: str = ""
+    llm_provider: str = "groq"
 
     # ChromaDB
     chroma_host: str = "chroma"

@@ -6,8 +6,11 @@ class DocumentRepository(BaseRepository):
     def __init__(self):
         super().__init__(get_documents_col)  # pass accessor, not result
 
-    async def find_by_case(self, case_id: str) -> list[dict]:
-        return await self.find_many({"case_id": case_id})
+    async def find_by_case(self, case_id: str, client_id: str | None = None) -> list[dict]:
+        query: dict = {"case_id": case_id}
+        if client_id:
+            query["client_id"] = client_id
+        return await self.find_many(query)
 
     async def find_by_id(self, doc_id: str) -> dict | None:
         return await self.find_one({"_id": doc_id})

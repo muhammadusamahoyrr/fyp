@@ -1,3 +1,11 @@
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="Expected `none` but got",
+    category=UserWarning,
+    module="pydantic",
+)
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -41,6 +49,8 @@ async def lifespan(app: FastAPI):
     set_ws_manager(notification_manager)
     from app.services.whisper_service import whisper_service
     await whisper_service.warmup()
+    from app.ai.intent import warmup as intent_warmup
+    await intent_warmup()
     yield
     await close_db()
     close_chroma()
@@ -57,9 +67,16 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
+_base = settings.frontend_url.rstrip("/")
+_cors_origins = list({
+    _base,
+    _base.replace("localhost", "127.0.0.1"),
+    _base.replace("127.0.0.1", "localhost"),
+})
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.constants import AgreementStatus, SignatureMethod
 from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
@@ -39,13 +39,13 @@ async def create_agreement(
             {
                 "action": "created",
                 "actor_id": creator_id,
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "ip_address": None,
             }
         ],
         "created_by": creator_id,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
     }
     await agreement_repo.insert(doc)
     return doc
@@ -99,7 +99,7 @@ async def submit_signature(
         {
             "action": "signed",
             "actor_id": user_id,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "ip_address": ip_address,
             "note": eto,
         },

@@ -33,12 +33,18 @@ from app.ai.graph.state import AgentState
 
 _CRIMINAL_SIGNALS: list[tuple[re.Pattern, float, str]] = [
     (re.compile(
-        r'\b(FIR|murder|qatl|theft|chor|steal|stole|rob|assault|dakait|dacoity|'
-        r'robbery|rape|zina|kidnap|abduction|bail|arrest|police|challan|accused|'
-        r'convict|acquit|session\s*court|magistrate|CrPC|PPC\s*\d+|'
-        r'section\s*302|section\s*307|section\s*324|section\s*354|'
-        r'section\s*420|section\s*489|PECA|cybercrime)\b', re.IGNORECASE),
+        r'\b(FIR|murder|qatl|qatal|theft|chor|chori|steal|stole|rob|assault|'
+        r'dakait|dacoity|robbery|rape|zina|zinaa|kidnap|abduction|bail|arrest|'
+        r'police|challan|accused|convict|acquit|session\s*court|magistrate|'
+        r'CrPC|PPC\s*\d+|section\s*302|section\s*307|section\s*324|'
+        r'section\s*354|section\s*420|section\s*489|PECA|cybercrime)\b',
+        re.IGNORECASE),
      0.30, "criminal_keyword"),
+    # Urdu script — قتل، چوری، ڈکیتی، بیل، گرفتاری، مقدمہ
+    (re.compile(
+        r'(قتل|چوری|ڈکیتی|بیل|گرفتاری|مقدمہ|پولیس|ملزم|سزا)',
+        re.UNICODE),
+     0.30, "criminal_urdu_script"),
     (re.compile(
         r'\b(crime|criminal|jail|prison|sentence|prosecution|danda|qaid)\b',
         re.IGNORECASE),
@@ -58,13 +64,22 @@ _CIVIL_SIGNALS: list[tuple[re.Pattern, float, str]] = [
 ]
 
 _FAMILY_SIGNALS: list[tuple[re.Pattern, float, str]] = [
+    # ASCII / Romanized Urdu — core legal terms
     (re.compile(
-        r'\b(divorce|talaq|khula|nikah|marriage|shadi|custody|hizanat|'
-        r'maintenance|nafaqa|dowry|jahez|dower|mehr|inheritance|wirsa|'
-        r'succession|MFLO|Family\s*Court|guardian|guardianship)\b', re.IGNORECASE),
+        r'\b(divorce|talaq|talaaq|talaak|khula|khulaah|nikah|nikaah|'
+        r'marriage|shadi|shaadi|custody|hizanat|hizaanat|'
+        r'maintenance|nafaqa|nafqa|dowry|jahez|dower|mehr|mehar|mahr|'
+        r'inheritance|wirsa|wirasat|succession|MFLO|Family\s*Court|'
+        r'guardian|guardianship|iddat|iddah|khul)\b', re.IGNORECASE),
      0.35, "family_keyword"),
+    # Urdu script — خلع، طلاق، نکاح، حضانت، نفقہ، مہر، وراثت، شادی، گھریلو
     (re.compile(
-        r'\b(wife|husband|biwi|shohar|child|bachha|parent|parents|in-laws|sas|susral)\b',
+        r'(خلع|طلاق|نکاح|شادی|حضانت|نفقہ|مہر|وراثت|خاندان|گھریلو|ازدواجی)',
+        re.UNICODE),
+     0.35, "family_urdu_script"),
+    (re.compile(
+        r'\b(wife|husband|biwi|shohar|shauhar|child|bachha|bacha|'
+        r'parent|parents|in-laws|sas|susral|sasural|rishta|talaq\s*e\s*ahsan)\b',
         re.IGNORECASE),
      0.15, "family_general"),
 ]

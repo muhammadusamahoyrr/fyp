@@ -11,7 +11,6 @@ httpx==0.28.1
 motor==3.6.0
 pymongo==4.9.2
 chromadb==1.5.9
-sentence-transformers==3.3.1
 pdfplumber==0.11.4
 rank-bm25==0.2.2
 
@@ -31,17 +30,18 @@ jinja2==3.1.4
 
 # Document generation
 docxtpl==0.18.0
+reportlab==4.2.5
+
+# NLU intent pipeline (ONNX-based embeddings — no torch dependency)
+fastembed==0.4.2
 
 # AI / LangChain
 langchain
 langchain-core
 langchain-community
-langchain-classic
-langchain-google-genai
 langchain-groq
-langchain-ollama
+langchain-openai
 langchain-chroma
-langchain-huggingface
 langgraph
 nltk
 

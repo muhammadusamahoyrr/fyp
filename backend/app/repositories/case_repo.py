@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pymongo import DESCENDING
 
@@ -34,7 +34,7 @@ class CaseRepository(BaseRepository):
             {"_id": case_id},
             {
                 "$push": {"milestones": milestone},
-                "$set": {"updated_at": datetime.utcnow()},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
             },
         )
 
@@ -43,18 +43,18 @@ class CaseRepository(BaseRepository):
             {"_id": case_id},
             {
                 "$push": {"hearing_dates": hearing},
-                "$set": {"updated_at": datetime.utcnow()},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
             },
         )
 
     async def set_embedding(self, case_id: str, vector: list[float]) -> bool:
         return await self.update_one(
             {"_id": case_id},
-            {"$set": {"case_embedding": vector, "updated_at": datetime.utcnow()}},
+            {"$set": {"case_embedding": vector, "updated_at": datetime.now(timezone.utc)}},
         )
 
     async def set_matched_lawyers(self, case_id: str, matches: list[dict]) -> bool:
         return await self.update_one(
             {"_id": case_id},
-            {"$set": {"matched_lawyers": matches, "updated_at": datetime.utcnow()}},
+            {"$set": {"matched_lawyers": matches, "updated_at": datetime.now(timezone.utc)}},
         )

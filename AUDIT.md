@@ -1,513 +1,663 @@
-# Attorney.AI — Sequence Diagrams (4)
-> All endpoints, field names, validation rules, response shapes, and logic are sourced directly from the backend source code.
+# Attorney.AI — Code Audit Report
+
+**Date:** May 9, 2026
+**Auditor:** Syed Ahmad Ali Naqvi
+**Scope:** Full backend codebase — AI pipeline, services, repositories, models, security, WebSockets, API routes
 
 ---
 
-## SD-1 — Legal Query Intake & AI Case Structuring (M2 + M3)
+## Summary
 
-**Modules:** M2 (Legal Intake) + M3 (AI Legal Guidance)
+33 distinct issues identified across the AI pipeline, services layer, security, and data layer. The systemic themes are:
 
-**Key source files:**
-- `backend/app/services/intake_service.py`
-- `backend/app/api/v1/routes/intake.py`
-- `backend/app/services/case_service.py`
-- `backend/app/websockets/chat_socket.py`
-- `frontend/src/components/client/ModIntake.jsx`
-- `frontend/src/components/client/ModChatbot.jsx`
-- `frontend/src/components/shared/CaseContext.jsx`
+1. **Silent exception swallowing** — bare `except: pass` or `except: return default` with no logging throughout the codebase
+2. **State fields defined but never wired** — `messages`, `specialization_embedding`, `matched_lawyers` in API responses, `gatekeeper_node`
+3. **No ownership validation on WebSockets** — session hijacking is trivial
+4. **Non-atomic MongoDB operations** — ratings, signatures, concurrent writes
+5. **Fail-open instead of fail-closed** — hallucination check, relevance grading, and clarification all default to "success" on failure
 
-```mermaid
-sequenceDiagram
-    participant U  as Client (Browser)
-    participant FE as ModIntake.jsx
-    participant CTX as CaseContext.jsx
-    participant API as FastAPI /api/v1
-    participant IS  as intake_service.py
-    participant CS  as case_service.py
-    participant DB  as MongoDB
-    participant WS  as WebSocket /ws/chat/{session_id}
-    participant CH  as chat_socket.py
-    participant CR  as chat_repo (MongoDB)
+---
 
-    rect rgb(235, 245, 255)
-        Note over U,DB: ── PHASE 1 : M2  Legal Intake (5 Steps) ──
+## Severity Breakdown
 
-        U->>FE: Opens /intake
-        FE->>API: POST /intake/start
-        Note over API: require_client guard (JWT)
-        API->>IS: start_intake(client_id)
-        IS->>DB: Insert Intake {current_step:1, completed:false,<br/>step1-5: null, ai_structured_case.summary:"pending"}
-        DB-->>IS: intake saved
-        IS-->>API: {session_token, message:"Intake session started"}
-        API-->>FE: {session_token}
-        Note over FE: Token stored for all PATCH calls
+| Severity | Count |
+|----------|-------|
+| CRITICAL | 7 |
+| HIGH | 11 |
+| MEDIUM | 15 |
 
-        Note over U,FE: Step 1 — Role + Province
-        U->>FE: Select role (Plaintiff | Defendant) + select province
-        FE->>API: PATCH /intake/{token}/step/1  body:{data:{province}}
-        API->>IS: save_step(token, 1, data, client_id)
-        IS->>IS: _validate_step(1) — required:[province]
-        IS->>DB: Update Intake.step1 = {role, province}
-        DB-->>IS: OK
-        IS-->>API: {session_token, current_step:1, completed:false, case_id:null}
-        API-->>FE: Step 1 saved
+---
 
-        Note over U,FE: Step 2 — Case Type + Urgency
-        U->>FE: Choose case_type (CIVIL/CRIMINAL/CONSTITUTIONAL/FAMILY) + urgency
-        FE->>API: PATCH /intake/{token}/step/2  body:{data:{case_type, urgency}}
-        API->>IS: save_step(token, 2, data, client_id)
-        IS->>IS: _validate_step(2) — required:[case_type, urgency]
-        IS->>DB: Update Intake.step2
-        IS-->>API: {current_step:2, completed:false}
-        API-->>FE: Step 2 saved
+## CRITICAL — Will cause wrong behavior or data loss
 
-        Note over U,FE: Step 3 — Incident Description (AI Follow-up Questions)
-        U->>FE: Describe incident (text or voice) — answer AI follow-up questions
-        FE->>API: PATCH /intake/{token}/step/3  body:{data:{incident_description, incident_date, incident_location}}
-        API->>IS: save_step(token, 3, data, client_id)
-        IS->>IS: _validate_step(3) — required:[incident_description]
-        IS->>DB: Update Intake.step3
-        IS-->>API: {current_step:3, completed:false}
-        API-->>FE: Step 3 saved
+### 1. Conversation history is never read by any node
 
-        Note over U,FE: Step 4 — Evidence Info (optional fields)
-        U->>FE: Fill evidence details (optional: has_evidence, opposing_party)
-        FE->>API: PATCH /intake/{token}/step/4  body:{data:{has_evidence, evidence_description, opposing_party}}
-        API->>IS: save_step(token, 4, data, client_id)
-        IS->>IS: _validate_step(4) — required:[] (no required fields)
-        IS->>DB: Update Intake.step4
-        IS-->>API: {current_step:4, completed:false}
-        API-->>FE: Step 4 saved
+**Files:** `backend/app/ai/graph/state.py:46`, all files in `backend/app/ai/nodes/`
+**Category:** Architecture
 
-        Note over U,FE: Step 5 — Desired Outcome + Categorization
-        U->>FE: State desired outcome + select case category
-        FE->>API: PATCH /intake/{token}/step/5  body:{data:{desired_outcome, additional_notes}}
-        API->>IS: save_step(token, 5, data, client_id)
-        IS->>IS: _validate_step(5) — required:[desired_outcome]
-        IS->>DB: Update Intake.step5
-        IS-->>API: {current_step:5, completed:false}
-        API-->>FE: Step 5 saved — all steps complete
+The `AgentState` defines a `messages` field with `Annotated[list[BaseMessage], operator.add]` for append-only history. `chat_socket.py` adds a `HumanMessage` for each turn, and `MemorySaver` is wired as the checkpointer in `supervisor.py:89`.
 
-        Note over U,FE: Submit — Convert Intake to Case
-        U->>FE: Click "Submit Case"
-        FE->>API: POST /intake/{token}/convert
-        API->>IS: convert_to_case(token, client_id)
-        IS->>DB: Fetch intake by token
-        DB-->>IS: Full intake document
-        IS->>IS: Validate: all step1-5 present<br/>(else AppValidationError "Steps not completed:[n]")
-        IS->>CS: create_case(client_id, {case_type:step2.case_type, province:step1.province,<br/>title:step3.incident_description[:80], description:step3.incident_description, intake_id})
-        CS->>DB: Insert Case {case_number:"ATT-{year}-{hex}", status:"open",<br/>lawyer_id:null, milestones:[], hearing_dates:[], case_embedding:null}
-        DB-->>CS: case_id
-        CS-->>IS: Case document
-        Note over IS: TODO: trigger ai_structured_case async processing
-        IS->>DB: Mark Intake {completed:true, case_id}
-        IS-->>API: {session_token, completed:true, case_id}
-        API-->>FE: {case_id}
-        FE->>CTX: completeIntake({role, caseType, caseSubtype, description, evidenceDocs})
-        Note over CTX: intakeDone=true, caseRef set
-        FE-->>U: Redirect to /chat
-    end
+However, **not a single node reads `state["messages"]`**. Every node only reads `state["query"]` (the current turn's input). Grep for `messages` across all node files returns zero hits.
 
-    rect rgb(235, 255, 240)
-        Note over U,CR: ── PHASE 2 : M3  AI Legal Guidance (Chat) ──
+**Impact:**
+- The chatbot has zero conversation context. Each message is treated in complete isolation.
+- Multi-turn refinement, follow-ups, and context carryover are impossible.
+- The HITL clarification flow is broken: if fact_gap_node asks "did you file an FIR?" and the user replies "no", the next graph invocation sees `query="no"` with no prior context. Triage classifies "no" as off-topic.
+- The `MemorySaver` checkpointer is dead code.
 
-        U->>FE: Opens /chat (case context loaded from CaseContext)
-        Note over FE: ModChatbot mounts — session_id generated
-        FE->>WS: WebSocket connect: ws://…/ws/chat/{session_id}?token=JWT
-        WS->>CH: Handshake — decode_token(token)
-        alt Token invalid
-            CH-->>FE: close(code=4001)
-        else Token valid
-            CH->>CR: find_by_session(session_id)
-            alt Session does not exist
-                CR-->>CH: null
-                CH->>CR: Insert ChatSession {session_id, client_id, case_id:null,<br/>messages:[], langgraph_checkpoint:null}
-            end
-            CH-->>FE: Connection accepted
-            FE-->>U: Chat ready — greeting shown (time-based: Morning/Afternoon/Evening)
+**Fix:** At minimum, `triage_node`, `fact_gap_node`, and `generation_node` must read `state["messages"]` and include prior turns in their LLM context.
 
-            U->>FE: Type query (EN or UR) + click Send
-            Note over FE: typing=true; msg added to msgs[] {role:"user", text, time}
-            FE->>WS: send({content, case_id, case_type, province})
+---
 
-            WS->>CH: receive_json(data)
-            CH->>CR: append_message(session_id, {role:"user", content,<br/>citations:[], confidence:null, created_at})
-            CH->>CR: update_session_meta(session_id, {case_id, case_type, province})
+### 2. `intake_hallucination_node` returns `is_grounded=True` on exceptions
 
-            Note over CH: TODO: invoke LangGraph supervisor + stream tokens
-            Note over CH: Currently returns stub response
+**File:** `backend/app/ai/nodes/intake_hallucination_node.py`
+**Category:** Exception handling
 
-            CH->>WS: send_json({type:"final", content:"AI legal assistant is not yet connected.<br/>Your query has been recorded.", citations:[], confidence:0.0})
-            WS-->>FE: Final response message
-            Note over FE: typing=false; msg added {role:"ai", text, refs:citations}
-            FE-->>U: AI response displayed
+When the grounding-check LLM call fails, the `except` block returns:
+```python
+except Exception:
+    return {"is_grounded": True}
+```
 
-            CH->>CR: append_message(session_id, {role:"assistant", content,<br/>citations:[], confidence:0.0, created_at})
-        end
-    end
+This is the exact opposite of fail-safe. Exceptions in validation are treated as successful validation.
+
+**Impact:** Unverified legal recommendations (applicable laws, recommended actions, risk levels) pass through to users without any grounding check when the LLM is unavailable or errors out.
+
+**Fix:** Return `{"is_grounded": False}` on exception. Add logging.
+
+---
+
+### 3. WebSocket session has no ownership check
+
+**File:** `backend/app/websockets/chat_socket.py:98`
+**Category:** Authorization
+
+On reconnect, the existing session is loaded from MongoDB but **never validated** against the authenticated `user_id`:
+```python
+session = await chat_repo.find_by_session(session_id)
+if not session:
+    await chat_repo.insert({...})  # New session created with correct client_id
+    session = {}
+# BUG: No check that session["client_id"] == user_id for existing sessions
+```
+
+**Impact:** Any authenticated user who guesses or intercepts a `session_id` can:
+- Read another user's chat history (via the session's cached state)
+- Inject messages into their session
+- Receive AI responses intended for another user
+
+**Fix:**
+```python
+session = await chat_repo.find_by_session(session_id)
+if session and session.get("client_id") != user_id:
+    await websocket.close(code=4003)
+    return
 ```
 
 ---
 
-## SD-2 — Lawyer Discovery & Appointment Booking (M4)
+### 4. Lawyer matching KYC bypass in final fallback
 
-**Module:** M4 (Lawyer Discovery)
+**File:** `backend/app/services/lawyer_service.py`
+**Category:** Security / Compliance
 
-**Key source files:**
-- `backend/app/services/lawyer_service.py`
-- `backend/app/api/v1/routes/lawyers.py`
-- `backend/app/services/case_service.py`
-- `backend/app/services/notification_service.py`
-- `frontend/src/components/shared/CaseContext.jsx`
+The last-resort fallback in `match_lawyers_for_case()` queries:
+```python
+all_lawyers = await user_repo.find_many(
+    {"role": "lawyer", "is_active": True},  # NO KYC CHECK
+    limit=top_n * 4,
+)
+```
 
-**Note on matching algorithm (current implementation):**
-`match_score = (rating / 5.0) × 0.5  +  (0.2 if availability else 0)  +  0.3`
-The `0.3` is a static placeholder — `TODO: replace with cosine_similarity(case_embedding, lawyer_embedding) × 0.5` once AI phase is integrated.
+This removes the `kyc_verified: True` filter entirely. Unverified lawyers (potentially fake profiles) can be matched to real clients seeking legal help.
 
-**Note on appointment booking:** No dedicated `/appointments` endpoint exists. Appointment confirmation is handled via `CaseContext.confirmAppointment()` in frontend state. Case assignment is persisted via `PATCH /cases/{case_id}`.
+The `"(unverified)"` string appended to `match_reason` is cosmetic — the frontend may not parse or display it.
 
-```mermaid
-sequenceDiagram
-    participant U   as Client (Browser)
-    participant FE  as ModLawyers.jsx
-    participant CTX as CaseContext.jsx
-    participant API as FastAPI /api/v1
-    participant LS  as lawyer_service.py
-    participant CaS as case_service.py
-    participant NS  as notification_service.py
-    participant DB  as MongoDB
-    participant L   as Lawyer (Browser)
+**Impact:** Bypass of the KYC verification gate. Clients could be matched with unverified or fraudulent lawyer profiles.
 
-    rect rgb(255, 248, 235)
-        Note over U,DB: ── PHASE 1 : Discover Lawyers ──
+**Fix:** Always enforce `kyc_verified: True`, or return an empty result set with a clear message rather than silently degrading.
 
-        U->>FE: Opens /lawyers  (case_id in CaseContext)
-        FE->>API: GET /lawyers/match/{case_id}
-        Note over API: require_client guard (JWT)
-        API->>LS: match_lawyers_for_case(case_id)
-        LS->>DB: case_repo.find_by_id(case_id)
-        DB-->>LS: {case_type, province, …}
+---
 
-        LS->>DB: user_repo.find_lawyers(province, case_type,<br/>min_rating=0.0, page=1, page_size=20)
-        Note over DB: Filters: role=lawyer, kyc_verified=true,<br/>province match, case_type match
-        DB-->>LS: Up to 20 lawyer profiles
+### 5. Lawyer rating update is non-atomic (race condition)
 
-        LS->>LS: Score each lawyer:<br/>rating_score = (rating / 5.0) × 0.5<br/>avail_score  = 0.2 if availability else 0.0<br/>match_score  = rating_score + avail_score + 0.3
-        Note over LS: Sorted descending by match_score — top 5 returned
-        LS->>LS: scored.sort(reverse=True) → return scored[:5]
+**File:** `backend/app/services/lawyer_service.py`
+**Category:** Data integrity
 
-        LS-->>API: [{lawyer_id, name, match_score,<br/>lawyer_profile:{specialization, rating, availability}, …}]
-        API-->>FE: Top 5 matched lawyers
-        FE-->>U: Lawyer cards rendered (sorted by match score)
+Rating recalculation is done in Python application code, not atomically in MongoDB:
+```python
+total = lp.get("total_reviews", 0)
+current_avg = lp.get("rating", 0.0)
+new_avg = round((current_avg * total + stars) / (total + 1), 2)
+await user_repo.update_rating(lawyer_id, new_avg, total + 1)
+```
 
-        opt Client wants to manually filter
-            U->>FE: Apply filters (province, case_type, min_rating, availability)
-            FE->>API: GET /lawyers?province=&case_type=&min_rating=&availability=&page=1
-            API->>LS: search_lawyers(province, case_type, min_rating, availability, page, page_size)
-            LS->>DB: user_repo.find_lawyers(…filters…)
-            DB-->>LS: Paginated lawyer list
-            LS-->>API: Paginated result (passwords/CNIC stripped by _sanitize)
-            API-->>FE: Filtered results
-            FE-->>U: Updated lawyer list
-        end
-    end
+**Impact:** Two concurrent reviews cause a lost-update:
+1. T1 reads: rating=4.0, total=10
+2. T2 reads: rating=4.0, total=10
+3. T1 writes: new_avg=3.98, total=11
+4. T2 writes: new_avg=4.09, total=11 (overwrites T1 — first review is lost)
 
-    rect rgb(235, 255, 248)
-        Note over U,L: ── PHASE 2 : Select Lawyer & Book Appointment ──
-
-        U->>FE: Click lawyer card to view profile
-        FE->>CTX: selectLawyer(lawyer)
-        Note over CTX: selectedLawyer = lawyer (full object stored)
-
-        U->>FE: Click "Book Appointment"
-        FE-->>U: Show appointment modal (date, time, details fields)
-
-        U->>FE: Fill {date, time, details} + click "Confirm"
-        FE->>CTX: confirmAppointment({date, time, details})
-        CTX->>CTX: milestoneId = "appt-{Date.now()}"
-        CTX->>CTX: Create milestone {id:milestoneId, status:"active",<br/>event:"Consultation — {lawyer.name}", date, time,<br/>desc:details, tag:"appointment"}
-        CTX->>CTX: Update state {appointment:{date, time, details, status:"confirmed"},<br/>appointmentMilestones:[…, milestone]}
-        Note over CTX: Module 7 (Tracking) reads appointmentMilestones<br/>from context — timeline updates immediately
-
-        FE->>API: PATCH /cases/{case_id}  body:{lawyer_id, status:"in_progress"}
-        Note over API: get_current_user guard (any role)
-        API->>CaS: update_case(case_id, {lawyer_id, status:"in_progress"}, requester_id, role)
-        CaS->>DB: case_repo.find_by_id(case_id)
-        DB-->>CaS: Case document
-        CaS->>CaS: _assert_access — client_id match check
-        CaS->>DB: case_repo.update_one({$set:{lawyer_id, status:"in_progress", updated_at}})
-        DB-->>CaS: Updated case
-        CaS-->>API: Updated Case document
-        API-->>FE: {case_id, status:"in_progress", lawyer_id}
-        FE-->>U: Appointment confirmed — "Consultation booked"
-
-        API->>NS: create_notification(lawyer_id, LAWYER_ASSIGNED,<br/>"New case assigned", "Client booked a consultation")
-        NS->>DB: Insert Notification {user_id:lawyer_id, type:"lawyer_assigned",<br/>read:false, read_at:null}
-        NS->>NS: _ws_manager.send_to_user(lawyer_id,<br/>{type:"notification", title:"New case assigned", body:"…"})
-        NS-->>L: WebSocket push — "New case assigned"
-    end
+**Fix:** Use MongoDB's aggregation pipeline update:
+```python
+await user_repo.col.update_one(
+    {"_id": lawyer_id},
+    [{"$set": {
+        "lawyer_profile.rating": {
+            "$divide": [
+                {"$add": [
+                    {"$multiply": ["$lawyer_profile.rating", "$lawyer_profile.total_reviews"]},
+                    stars
+                ]},
+                {"$add": ["$lawyer_profile.total_reviews", 1]}
+            ]
+        },
+        "lawyer_profile.total_reviews": {"$add": ["$lawyer_profile.total_reviews", 1]}
+    }}]
+)
 ```
 
 ---
 
-## SD-3 — Digital Agreement & E-Signing Workflow (M5)
+### 6. Agreement signature field name mismatch
 
-**Module:** M5 (Digital Agreements & E-Signing)
+**Files:** `backend/app/services/agreement_service.py`, `backend/app/repositories/agreement_repo.py`
+**Category:** Logic bug
 
-**Key source files:**
-- `backend/app/services/agreement_service.py`
-- `backend/app/api/v1/routes/agreements.py`
-- `backend/app/services/notification_service.py`
-- `backend/app/core/constants.py`  (AgreementStatus, SignatureMethod)
+`agreement_service.py` builds the signature dict as:
+```python
+{"method": method, "data": signature_data}
+```
 
-**ETO 2002 classifications (from `ETO_CLASSIFICATION` dict in service):**
-- `CANVAS` → `"Advanced Electronic Signature (ETO 2002 S.2(d)(i))"`
-- `TYPED` → `"Basic Electronic Signature (ETO 2002)"`
-- `IMAGE_UPLOAD` → `"Basic Electronic Signature (ETO 2002)"`
+But `agreement_repo.update_party_signature()` reads:
+```python
+"parties.$.signature_method": signature["method"],
+"parties.$.signature_data": signature["data"],
+```
 
-**Guards enforced by `submit_signature()`:**
-1. User must be listed in `agreement.parties`
-2. `agreement.status` must **not** be `EXECUTED`
-3. That specific party must not have already signed
+The dict key is `"data"` but the MongoDB update targets a field called `"signature_data"`. This mismatch means signatures may silently fail to persist or write to the wrong field.
 
-```mermaid
-sequenceDiagram
-    participant C   as Client (Browser)
-    participant L   as Lawyer (Browser)
-    participant FE  as ModAgreements.jsx
-    participant API as FastAPI /api/v1
-    participant AS  as agreement_service.py
-    participant NS  as notification_service.py
-    participant DB  as MongoDB
+**Fix:** Align the dict keys or the MongoDB field names.
 
-    rect rgb(245, 235, 255)
-        Note over C,DB: ── PHASE 1 : Create Agreement ──
+---
 
-        C->>FE: Opens /agreements — clicks "New Agreement"
-        FE-->>C: Agreement editor (TipTap / Quill rich-text)
-        C->>FE: Fill title, draft body_html (terms), add parties
+### 7. LLM clarification failure silently returns `done: True`
 
-        FE->>API: POST /agreements<br/>body:{title, body_html, party_ids:[{user_id, full_name}, …]}
-        Note over API: get_current_user guard (any authenticated user)
-        API->>AS: create_agreement(title, body_html, parties, creator_id)
-        AS->>DB: Insert Agreement {<br/>  status: "pending",<br/>  parties:[{user_id, full_name, signed:false,<br/>            signed_at:null, signature_method:null, signature_data:null}],<br/>  eto_classification: null,<br/>  audit_log:[{action:"created", actor_id:creator_id, timestamp}],<br/>  created_by:creator_id<br/>}
-        DB-->>AS: agreement_id
-        AS-->>API: Full agreement document
-        API-->>FE: {agreement_id, status:"pending", parties:[…]}
-        FE-->>C: Agreement created — status PENDING
-        Note over FE: Both parties see agreement via GET /agreements/{id}
-    end
+**File:** `backend/app/services/intake_service.py:167-169`
+**Category:** Exception handling / Reliability
 
-    rect rgb(235, 255, 255)
-        Note over C,DB: ── PHASE 2 : Client Signs ──
+If the LLM call in `get_clarification()` throws (API timeout, rate limit, model error):
+```python
+try:
+    llm = get_llm()
+    response = llm.invoke([...])
+    text = response.content.strip()
+except Exception:
+    await intake_repo.save_clarification_qa(token, qa_list)
+    return {"question": None, "done": True, "round": answered_rounds}
+```
 
-        C->>FE: Opens agreement — reviews terms
-        FE->>API: GET /agreements/{agreement_id}
-        API->>AS: get_agreement(agreement_id, requester_id)
-        AS->>DB: find_by_id(agreement_id)
-        DB-->>AS: Agreement document
-        AS->>AS: Check requester in party_ids OR is creator
-        AS-->>API: Agreement document
-        API-->>FE: Agreement + parties sign status
-        FE-->>C: Show agreement body + signature panel
+The exception is swallowed with no logging, and the function returns `done: True`, forcing the intake to proceed as if clarification succeeded.
 
-        C->>FE: Choose signature method
-        alt Canvas Draw Pad
-            C->>FE: Draws signature on canvas
-            Note over FE: method = "canvas"
-        else Typed Name
-            C->>FE: Types full legal name
-            Note over FE: method = "typed"
-        else Image Upload (PNG / JPG)
-            C->>FE: Uploads signature image
-            Note over FE: method = "image_upload"
-        end
+**Impact:** Users are pushed into case conversion without gathering critical facts. No indication that the AI service failed.
 
-        FE->>API: POST /agreements/{agreement_id}/sign<br/>body:{method, signature_data}
-        Note over API: IP captured — request.client.host
-        API->>AS: submit_signature(agreement_id, client_id, method, signature_data, ip)
+**Fix:** Return `{"question": None, "done": False, "error": "AI service temporarily unavailable"}` and log the exception.
 
-        AS->>DB: find_by_id(agreement_id)
-        DB-->>AS: Agreement
-        AS->>AS: Guard 1 — client_id in party_ids? (else ForbiddenError)
-        AS->>AS: Guard 2 — status != "executed"? (else AppValidationError)
-        AS->>AS: Guard 3 — client not already signed? (else AppValidationError)
+---
 
-        AS->>AS: eto = ETO_CLASSIFICATION[method]
-        AS->>DB: update_party_signature(agreement_id, client_id, {method, data})
-        AS->>DB: append_audit_log({action:"signed", actor_id:client_id,<br/>timestamp, ip_address, note:eto})
-        AS->>DB: update_one($set:{eto_classification:eto})
+## HIGH — Significant quality or security degradation
 
-        AS->>DB: Re-fetch agreement → check all parties signed?
-        DB-->>AS: Updated agreement (lawyer.signed still false)
-        AS->>AS: all_signed = false — NOT yet fully executed
-        AS-->>API: Updated agreement document
-        API-->>FE: {status:"pending", parties:[{client:signed:true}, {lawyer:signed:false}]}
-        FE-->>C: "Waiting for co-signer"
+### 8. BM25 has no province filter
 
-        API->>NS: create_notification(lawyer_id, AGREEMENT_SIGNED,<br/>"Agreement awaiting your signature", title)
-        NS->>DB: Insert Notification {read:false}
-        NS-->>L: WebSocket push: {type:"notification", title:"Agreement awaiting your signature"}
-    end
+**File:** `backend/app/ai/pipelines/retriever.py:59-83`
+**Category:** Retrieval quality
 
-    rect rgb(255, 245, 235)
-        Note over L,DB: ── PHASE 3 : Lawyer Signs → Auto-Execute ──
+`build_retriever()` applies a `where_filter` with province to the ChromaDB semantic retriever, but BM25 receives **no province filter**:
+```python
+bm25 = _bm25(collection_name)  # All 1,735+ chunks, no province filter
 
-        L->>FE: Opens agreement from notification
-        FE->>API: GET /agreements/{agreement_id}
-        API-->>FE: Agreement (client already signed)
-        FE-->>L: Show terms + client signature confirmed
+return EnsembleRetriever(
+    retrievers=[bm25, semantic],
+    weights=[0.6, 0.4],  # BM25 has 60% weight
+)
+```
 
-        L->>FE: Choose signature method + sign
-        FE->>API: POST /agreements/{agreement_id}/sign<br/>body:{method, signature_data}
-        API->>AS: submit_signature(agreement_id, lawyer_id, method, signature_data, ip)
+BM25 has 60% weight in the ensemble, so wrong-province statutes dominate the merged results.
 
-        AS->>DB: find_by_id + run all 3 guards
-        DB-->>AS: Agreement passes guards
-        AS->>AS: eto = ETO_CLASSIFICATION[method]
-        AS->>DB: update_party_signature(agreement_id, lawyer_id, {method, data})
-        AS->>DB: append_audit_log({action:"signed", actor_id:lawyer_id, …, note:eto})
-        AS->>DB: update_one($set:{eto_classification:eto})
+**Impact:** A Punjab criminal case query receives Sindh-specific or Balochistan-specific law sections. Jurisdiction-specific legal advice is corrupted.
 
-        AS->>DB: Re-fetch agreement
-        DB-->>AS: Both parties now signed:true
-        AS->>AS: all_signed = all(p["signed"] for p in parties) → True
-        AS->>DB: agreement_repo.set_status(agreement_id, "executed")
-        Note over DB: Agreement status → EXECUTED<br/>Legally binding under ETO 2002
+**Fix:** Post-filter BM25 results to only keep `doc.metadata.get("province") in (province, "federal")` before passing to EnsembleRetriever.
 
-        AS-->>API: Fully executed agreement
-        API-->>FE: {status:"executed", parties:[all signed]}
-        FE-->>L: "Agreement fully executed" + download option
+---
 
-        API->>NS: create_notification(client_id, AGREEMENT_SIGNED,<br/>"Agreement fully executed", title)
-        NS-->>C: WebSocket push: {type:"notification", title:"Agreement fully executed"}
-    end
+### 9. Retrieval grader fallback inflates scores
+
+**File:** `backend/app/ai/nodes/retrieval_grader_node.py:56-59`
+**Category:** Exception handling
+
+When the LLM grading call fails:
+```python
+except Exception:
+    graded = to_grade       # Keep ALL chunks (ungraded)
+    score  = round(min(len(to_grade) / 10.0, 1.0), 3)  # 8 chunks = 0.8 score
+```
+
+The fallback scores based on chunk count, not quality. 8 irrelevant chunks produce a 0.8 score, which passes the 0.75 relevance threshold and proceeds to answer generation.
+
+**Impact:** When the grading LLM fails, garbage retrieval results are passed to the generation node with an artificially high relevance score.
+
+**Fix:** Fallback score should be `0.0` (fail closed), not a count-based proxy.
+
+---
+
+### 10. Generation confidence defaults to 0.7 on parse failure
+
+**File:** `backend/app/ai/nodes/generation_node.py:107-115`
+**Category:** LLM output handling
+
+The prompt instructs the LLM to output confidence JSON on the last line. If parsing fails:
+```python
+confidence = 0.7  # Hardcoded fallback
+
+try:
+    last       = json.loads(lines[-1])
+    confidence = float(last.get("confidence", 0.7))
+except (json.JSONDecodeError, IndexError, ValueError):
+    pass  # Falls through with 0.7
+```
+
+**Impact:** Any response where the LLM omits or malforms the JSON confidence line gets 0.7 — artificially high for a legal AI where the system couldn't even determine its own confidence.
+
+**Fix:** Default to `0.3` or lower. Log parse failures.
+
+---
+
+### 11. `decode_token` returns `{}` instead of `None` on failure
+
+**File:** `backend/app/core/security.py`
+**Category:** Authentication
+
+```python
+def decode_token(token: str) -> dict[str, Any]:
+    try:
+        return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError:
+        return {}  # Truthy in Python!
+```
+
+`{}` is truthy in Python. Code like `if payload:` passes for invalid tokens. Current callers happen to check `payload.get("sub")`, but this is a latent auth bypass waiting for any future code that checks truthiness.
+
+**Fix:** Return `None` on failure, or raise an exception.
+
+---
+
+### 12. Fire-and-forget tasks with no error tracking
+
+**File:** `backend/app/services/intake_service.py:148-149, 162, 171`
+**Category:** Reliability
+
+```python
+asyncio.create_task(_embed_case(case_id, description))
+asyncio.create_task(_auto_match_lawyers(case_id))
+```
+
+Both background tasks have bare `except: pass` inside. If embedding or lawyer matching fails:
+- Semantic lawyer matching silently falls back to the degraded path
+- No admin notification, no retry mechanism, no logging
+- The main flow completes successfully with no indication of failure
+
+**Fix:** Add `task.add_done_callback()` for error logging. Or use a task queue with retry.
+
+---
+
+### 13. Dead WebSocket connections never cleaned up
+
+**File:** `backend/app/websockets/manager.py`
+**Category:** Resource leak
+
+`send_to_user()` catches send exceptions with bare `except: pass` but never removes the dead connection from `_connections`:
+```python
+async def send_to_user(self, user_id: str, message: dict) -> None:
+    for ws in self._connections.get(user_id, []):
+        try:
+            await ws.send_json(message)
+        except Exception:
+            pass  # Dead socket stays in the list
+```
+
+**Impact:** Dead sockets accumulate. All future sends to that user silently fail on every dead socket before (maybe) reaching a live one.
+
+**Fix:** Remove dead connections on send failure:
+```python
+except Exception:
+    self.disconnect(user_id, ws)
 ```
 
 ---
 
-## SD-4 — Document Automation & AI Drafting (M6)
+### 14. `gatekeeper_node.py` is dead code
 
-**Module:** M6 (Document Automation & Drafting)
+**File:** `backend/app/ai/nodes/gatekeeper_node.py`
+**Category:** Code quality
 
-**Key source files:**
-- `backend/app/services/document_service.py`
-- `backend/app/api/v1/routes/documents.py`
-- `backend/app/services/notification_service.py`
+The file defines a `gatekeeper_node` function that duplicates `triage_node`'s off-topic detection. It is importable but **never added to either graph** in `supervisor.py`.
 
-**Template files location:** `knowledge_base/templates/{template_type}.docx`
-**Generated files location:** `backend/app/uploads/docs/{doc_id}.pdf`
+**Fix:** Delete the file.
 
-**Available templates (from `TEMPLATE_TITLES` dict):**
-| `template_type` value | Title |
-|---|---|
-| `plaint_civil` | Civil Plaint |
-| `written_statement` | Written Statement |
-| `legal_notice` | Legal Notice |
-| `nda` | Non-Disclosure Agreement |
-| `rental_agreement` | Rental Agreement |
+---
 
-**Important — `fields` parameter:** Client currently provides the `fields` dict manually in the request body. The line `# TODO: AI — replace fields dict with LLM extraction from case data` is present in `document_service.py` — LLM auto-extraction is a planned AI-phase feature.
+### 15. `fact_delta` semantic mismatch
 
-**Error handling (two distinct paths):**
-- `AppValidationError` (e.g. template file missing) → `mark_failed()` + **re-raises** → 422 response to client
-- Any other `Exception` (e.g. LibreOffice crash) → `mark_failed()` + **logged**, does **not** re-raise → returns doc with `status:"failed"`
+**Files:** `backend/app/ai/nodes/fact_gap_node.py:66`, `backend/app/ai/graph/edges.py`
+**Category:** State logic
 
-```mermaid
-sequenceDiagram
-    participant U   as Client (Browser)
-    participant FE  as ModDocuments.jsx
-    participant API as FastAPI /api/v1
-    participant DS  as document_service.py
-    participant TPL as docxtpl (thread pool)
-    participant LO  as LibreOffice --headless (thread pool)
-    participant FS  as File System (uploads/docs/)
-    participant NS  as notification_service.py
-    participant DB  as MongoDB
-
-    U->>FE: Opens /documents
-    FE-->>U: Template picker (Civil Plaint / Legal Notice / NDA / …)
-
-    U->>FE: Select template type
-    U->>FE: Fill document fields (plaintiff, defendant, facts, relief_sought, …)
-    Note over FE: fields dict built from form inputs<br/>(TODO: replaced by LLM extraction in AI phase)
-
-    U->>FE: Click "Generate Document"
-    FE->>API: POST /documents/generate<br/>body:{case_id, template_type, fields:{…}}
-    Note over API: get_current_user guard (JWT)
-
-    API->>DS: generate_document(case_id, client_id, template_type, fields)
-    DS->>DB: case_repo.find_by_id(case_id)
-    DB-->>DS: Case document (or NotFoundError)
-
-    DS->>DS: template_enum = DocumentTemplate(template_type)
-    DS->>DB: doc_repo.insert({_id:doc_id, case_id, client_id,<br/>template_type, title:TEMPLATE_TITLES[template],<br/>fields, file_path:null, status:"pending", created_at})
-    DB-->>DS: doc_id confirmed
-    Note over FE: status = "pending" — generation starts
-
-    DS->>DS: Call _fill_template(doc_id, template_enum, fields)
-
-    DS->>FS: Check template_path exists:<br/>knowledge_base/templates/{template_type}.docx
-    alt Template file missing
-        FS-->>DS: File not found
-        DS->>DS: raise AppValidationError
-        DS->>DB: doc_repo.mark_failed(doc_id)
-        DB-->>DS: status="failed"
-        DS-->>API: AppValidationError (re-raised)
-        API-->>FE: 422 Unprocessable Entity
-        FE-->>U: "Template not available — please try another"
-    else Template exists
-        FS-->>DS: template_path valid
-
-        DS->>FS: UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-
-        DS->>TPL: asyncio.to_thread(_render)<br/>DocxTemplate(template_path).render(fields).save(doc_id.docx)
-        Note over TPL: CPU-bound — runs in thread pool to avoid blocking event loop
-        alt docxtpl rendering fails
-            TPL-->>DS: Exception
-            DS->>DB: doc_repo.mark_failed(doc_id)
-            DS-->>API: doc {status:"failed"} — does NOT re-raise
-            API-->>FE: {doc_id, status:"failed"}
-            FE-->>U: "Generation failed — please retry"
-        else Rendering succeeds
-            TPL-->>DS: doc_id.docx saved to uploads/docs/
-
-            DS->>LO: asyncio.to_thread(subprocess.run,<br/>["libreoffice","--headless","--convert-to","pdf",<br/>"--outdir", UPLOADS_DIR, doc_id.docx], check=True)
-            Note over LO: Slow blocking call — thread pool prevents FastAPI freeze
-            alt LibreOffice fails (subprocess non-zero exit)
-                LO-->>DS: CalledProcessError
-                DS->>DS: logger.error("Document generation failed …")
-                DS->>DB: doc_repo.mark_failed(doc_id)
-                DS-->>API: doc {status:"failed"}
-                API-->>FE: {doc_id, status:"failed"}
-                FE-->>U: "PDF conversion failed — please retry"
-            else Conversion succeeds
-                LO-->>DS: doc_id.pdf written to uploads/docs/
-                DS->>FS: output_docx.unlink(missing_ok=True)
-                Note over FS: Intermediate .docx deleted — only PDF kept
-
-                DS->>DB: doc_repo.update_file_path(doc_id, "uploads/docs/doc_id.pdf")
-                DS->>DS: doc["status"] = "generated"
-                DS-->>API: {doc_id, title, template_type,<br/>file_path:"uploads/docs/doc_id.pdf", status:"generated"}
-                API-->>FE: {doc_id, status:"generated"}
-                FE-->>U: "Document ready — Download PDF" button enabled
-
-                API->>NS: create_notification(client_id, DOCUMENT_READY,<br/>"Document ready", title)
-                NS->>DB: Insert Notification {read:false}
-                NS-->>U: WebSocket push: {type:"notification", title:"Document ready"}
-            end
-        end
-    end
-
-    Note over U,DB: ── Download ──
-    U->>FE: Click "Download PDF"
-    FE->>API: GET /documents/{doc_id}/download
-    API->>DS: get_document(doc_id, requester_id)
-    DS->>DB: doc_repo.find_by_id(doc_id)
-    DB-->>DS: Document record
-    DS->>DS: Verify doc.client_id == requester_id (else NotFoundError)
-    DS-->>API: Document with file_path
-    API->>API: Check Path(file_path).exists() on disk<br/>(else NotFoundError "Document file")
-    API-->>FE: FileResponse(path, media_type="application/pdf",<br/>filename="{title}.pdf")
-    FE-->>U: PDF download starts in browser
+The state comment says `fact_delta` is "new facts discovered since the last fact_gap check" (a delta), but the code sets it to `len(known_facts)` (an absolute count) or `0`:
+```python
+return {
+    "fact_delta": len(known_facts),  # Not a delta — it's a total count
+    ...
+}
 ```
+
+Edge routing logic in `edges.py` checks `fact_delta == 0` to decide on retries, assuming it's a delta. The mismatch can cause incorrect convergence decisions.
+
+**Fix:** Either rename the field to `fact_count` and update edge logic, or compute an actual delta.
+
+---
+
+### 16. CNIC encryption key can't be rotated
+
+**File:** `backend/app/core/security.py`
+**Category:** Encryption / Secrets management
+
+```python
+def _get_fernet() -> Fernet:
+    global _fernet
+    if _fernet is None:
+        _fernet = Fernet(settings.encryption_key.encode())
+    return _fernet
+```
+
+The Fernet key is cached globally with no versioning. If the key is rotated in environment variables, all previously encrypted CNIC values become permanently unrecoverable.
+
+**Fix:** Implement key versioning — store a key ID alongside encrypted values, support decryption with old keys during migration.
+
+---
+
+### 17. Password reset token relies only on MongoDB TTL
+
+**File:** `backend/app/db/indexes.py`, `backend/app/services/auth_service.py`
+**Category:** Security
+
+Password reset tokens have a 1-hour TTL index in MongoDB, but the application code does `find_one` without checking the token's creation timestamp. It trusts that MongoDB's background TTL thread has already deleted expired tokens.
+
+**Impact:** MongoDB's TTL thread runs every 60 seconds by default. Under load, cleanup can be delayed further. During that window, expired tokens remain valid.
+
+**Fix:** Add an application-level expiry check:
+```python
+if token_doc["created_at"] + timedelta(hours=1) < datetime.utcnow():
+    raise AppValidationError("Reset token expired")
+```
+
+---
+
+### 18. Query expansion is unvalidated
+
+**File:** `backend/app/ai/nodes/retrieval_node.py:43-56`
+**Category:** Retrieval quality
+
+`_expand_query()` appends an LLM-rewritten query without validating the output:
+```python
+try:
+    rewritten = result.content.strip()
+    return f"{query} {rewritten}"
+except Exception:
+    return query
+```
+
+If the LLM hallucinates statute names that don't exist in the corpus (e.g., "PPC Section 99"), BM25 wastes capacity searching for non-existent terms, diluting the original query's signal.
+
+**Fix:** Only append the rewrite if it contains at least one recognized statute keyword (`PPC`, `CrPC`, `MFLO`, etc.), otherwise use the original.
+
+---
+
+## MEDIUM — Incorrect behavior in edge cases
+
+### 19. Content truncation too aggressive
+
+**Files:** `backend/app/ai/nodes/retrieval_grader_node.py:34` (300 chars), `backend/app/ai/nodes/generation_node.py:75` (400 chars)
+**Category:** Retrieval / generation quality
+
+Pakistani legal sections (PPC, CrPC) are dense. A single section like PPC 302 with punishment scales, exceptions, and conditions easily runs 600+ words. Truncating at 300 chars for grading means the grader often sees an incomplete section and marks it irrelevant.
+
+**Fix:** Grade with 500+ chars; generate with 600-800 chars.
+
+---
+
+### 20. Default case_type is `"criminal"` instead of something neutral
+
+**File:** `backend/app/websockets/chat_socket.py:40`
+**Category:** Configuration bias
+
+```python
+case_type = data.get("case_type") or session.get("case_type") or "criminal"
+```
+
+Ambiguous queries default to criminal law, biasing retrieval toward PPC when the user's issue might be civil, family, or constitutional.
+
+**Fix:** Default to `"civil"` (the broadest category) or use `"unknown"` and let triage decide.
+
+---
+
+### 21. Intake steps not validated for sequential order
+
+**File:** `backend/app/services/intake_service.py`
+**Category:** Logic bug
+
+`save_step()` validates required fields per step but does not enforce that steps are completed sequentially. A user can POST step 5 before step 1 and the system accepts it.
+
+**Fix:** Validate `step == current_step + 1` or `step <= current_step + 1`.
+
+---
+
+### 22. `case_embedding` never generated for API-created cases
+
+**File:** `backend/app/services/case_service.py`
+**Category:** Missing feature
+
+```python
+"case_embedding": None,  # TODO: AI -- embed case description at creation
+```
+
+Cases created directly via the API (not through intake) never get an embedding. Semantic lawyer matching falls back to the degraded non-semantic path for these cases.
+
+---
+
+### 23. `specialization_embedding` on LawyerProfile is never populated
+
+**File:** `backend/app/models/user.py:19`
+**Category:** Dead code
+
+`specialization_embedding: list[float] | None = None` is defined in the model but no service ever writes to it. Orphaned field.
+
+---
+
+### 24. `matched_lawyers` on CaseDocument stored but not exposed via API
+
+**Files:** `backend/app/services/intake_service.py`, `backend/app/schemas/case.py`
+**Category:** Dead code
+
+`matched_lawyers` is computed and cached on the case document during intake conversion, but `CaseResponse` does not include the field. The frontend can never access it.
+
+---
+
+### 25. Agreement concurrent signing race condition
+
+**File:** `backend/app/services/agreement_service.py`
+**Category:** Data integrity
+
+Two parties signing simultaneously can both pass the "already signed?" check, then both call `update_party_signature()`. The second write overwrites the first.
+
+**Fix:** Use MongoDB's `$cond` or findAndModify with a filter that includes `parties.$.signed: false`.
+
+---
+
+### 26. Missing `updated_at` on document/notification/chat inserts
+
+**Files:** `backend/app/services/document_service.py`, `backend/app/services/notification_service.py`, `backend/app/repositories/chat_repo.py`
+**Category:** Data integrity
+
+Multiple services create MongoDB documents without setting `updated_at`, despite the model defining the field. Queries sorting or filtering by `updated_at` will miss these documents.
+
+---
+
+### 27. Follow-up questions are vague (two sub-issues)
+
+**Files:** `backend/app/ai/nodes/fact_gap_node.py`, `backend/app/services/intake_service.py`
+**Category:** AI quality
+
+**27a. `fact_gap_node` bypasses after just 1 attempt:**
+```python
+if complexity == "simple" or len(known_facts) >= 2 or attempts >= 1:
+    return {"needs_clarification": False}
+```
+After one single question, the chat graph never asks again — even if the user's reply was "I don't know."
+
+**27b. Prompts don't instruct the LLM to analyze the user's description:**
+Both `_SYSTEM_TEMPLATE` and `_CLARIFY_SYSTEM` tell the LLM to pick from a template list but never say "read the description, identify what the user already told you, then ask about the most critical fact that's MISSING." No few-shot examples are provided. The result is generic template echoes like "Have you filed an FIR?" instead of description-grounded questions.
+
+---
+
+### 28. 8-word heuristic bypasses legally thin queries
+
+**File:** `backend/app/ai/nodes/fact_gap_node.py:71-78`
+**Category:** Logic bug
+
+```python
+has_description = len((state.get("query") or "").split()) >= 8
+
+if (has_province or has_case_type) and has_description:
+    return {"needs_clarification": False}
+```
+
+"My neighbor hit me last week in Lahore" is 9 words with province known — bypasses clarification entirely. No FIR status, no injury details, no relationship info gathered.
+
+---
+
+### 29. Case status never transitions
+
+**File:** `backend/app/services/case_service.py`
+**Category:** Missing business logic
+
+No service function validates or drives case status transitions. Cases created as `OPEN` stay `OPEN` forever. There is no state machine, no allowed-transitions map, no status lifecycle.
+
+---
+
+### 30. Intake step validation accepts empty strings
+
+**File:** `backend/app/services/intake_service.py`
+**Category:** Input validation
+
+```python
+missing = [f for f in required if not data.get(f)]
+```
+
+`not ""` is `True`, so this catches empty strings. But `not data.get(f)` also catches `0` and `False`. More importantly, whitespace-only strings like `"   "` pass validation.
+
+**Fix:**
+```python
+missing = [f for f in required if not str(data.get(f, "")).strip()]
+```
+
+---
+
+### 31. Error responses leak internal details
+
+**File:** `backend/app/api/v1/routes/voice.py`
+**Category:** Security
+
+```python
+raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
+```
+
+The raw exception message from `faster-whisper` is returned to the client. This could leak file paths, library versions, or stack trace fragments.
+
+**Fix:** Log the exception server-side, return a generic message to the client.
+
+---
+
+### 32. Temp file leak in document generation
+
+**File:** `backend/app/services/document_service.py`
+**Category:** Resource leak
+
+If `subprocess.run` (LibreOffice conversion) throws an exception, `output_docx.unlink()` is never reached. Temp files accumulate on disk.
+
+**Fix:** Wrap in `try/finally`:
+```python
+try:
+    await asyncio.to_thread(subprocess.run, [...])
+finally:
+    output_docx.unlink(missing_ok=True)
+```
+
+---
+
+### 33. Admin endpoint defined twice
+
+**File:** `backend/app/api/v1/routes/admin.py`
+**Category:** Code quality
+
+`POST /lawyers/embed-all` is defined twice with the same function name. FastAPI silently registers only the second definition. The first function becomes unreachable dead code.
+
+---
+
+## RAG-Specific Issues (Detailed)
+
+These overlap with issues above but provide additional RAG-focused detail.
+
+### R1. BM25 corpus is frozen at startup
+
+**File:** `backend/app/ai/pipelines/retriever.py:48-56`
+
+`_bm25()` is `@lru_cache(maxsize=6)`. The BM25 index is built once on first call and cached for the process lifetime. If new chunks are added to ChromaDB, BM25 won't reflect them until the server is restarted.
+
+### R2. `clarification_node.py` asks redundant meta-questions
+
+**File:** `backend/app/ai/nodes/clarification_node.py`
+
+This node is triggered when `relevance_score < 0.75` (poor retrieval). Its prompt asks about province, case_type, and civil-vs-criminal distinction — but triage_node already sets these fields. When they're already known, this node asks redundant questions, wasting a clarification round.
+
+### R3. No constitutional collection exists
+
+The `CASE_TYPE_TO_COLLECTION` map in `retriever.py` maps `"constitutional"` to `"constitutional_collection"`, but the knowledge base pipeline only ingests criminal, civil, and family law PDFs. Constitutional queries will hit an empty or non-existent collection.
+
+---
+
+## Follow-Up Question Issues (Detailed)
+
+### F1. No few-shot examples in clarification prompts
+
+Neither `_CLARIFY_SYSTEM` (intake) nor `_SYSTEM_TEMPLATE` (chat) includes a single example of a good, specific question vs a bad, generic one. For a task where specificity is the main goal, this is the highest-leverage fix available — pure prompt engineering, zero code changes.
+
+**Bad (current behavior):** "Have you filed an FIR (First Information Report)?"
+**Good (desired behavior):** "You mentioned your landlord beat you — did you sustain visible injuries, and if so, did you get a medical examination? A medical report is key evidence for charges under PPC Section 325."
+
+### F2. Intake clarification loop has no cap on unanswered questions
+
+**File:** `backend/app/services/intake_service.py`
+
+`_MAX_CLARIFY_ROUNDS = 4` counts only ANSWERED rounds. A user could spam the endpoint with blank answers, accumulating unlimited unanswered questions in `qa_list`. Each LLM call generates a new question that is appended but never answered.
+
+---
+
+## Recommended Fix Priority
+
+| Priority | Issues | Effort | Impact |
+|----------|--------|--------|--------|
+| P0 — Fix immediately | #3 (WebSocket auth), #2 (hallucination fail-open), #4 (KYC bypass) | Low | Security |
+| P1 — Fix this sprint | #1 (messages), #7 (clarification fail), #5 (rating race), #8 (BM25 province) | Medium | Core functionality |
+| P2 — Fix next sprint | #6 (signature mismatch), #9 (grader fallback), #10 (confidence default), #11 (decode_token) | Low-Medium | Correctness |
+| P3 — Backlog | #12-18 (error tracking, dead code, key rotation, TTL) | Medium | Reliability |
+| P4 — Nice to have | #19-33 (truncation, defaults, validation, dead fields) | Low | Polish |

@@ -6,15 +6,15 @@ from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
 
 SYSTEM_PROMPT = """\
-You are a Pakistani legal analyst. Based on the case description and the retrieved law sections, produce a structured case analysis.
+You are a Pakistani legal analyst. Based on the case description and any retrieved law sections, produce a structured case analysis.
 
 Return JSON with exactly these keys:
-- summary: clear one-paragraph summary of the legal situation
-- applicable_laws: list of strings, each citing a specific section (e.g. "PPC Section 302 — Punishment for murder")
-- recommended_actions: list of strings, practical steps the client should take
+- summary: clear one-paragraph summary of the legal situation and the client's legal position
+- applicable_laws: list of strings citing relevant Pakistani statutes (e.g. "PPC Section 302 — Punishment for murder"). If retrieved sections are provided, prefer those. If none are provided, cite well-known applicable Pakistani laws from your knowledge.
+- recommended_actions: list of 3-5 practical steps the client should take immediately
 - risk_level: one of "low", "medium", "high"
 
-Use only laws present in the retrieved sections. Do not invent citations."""
+Always produce a complete, useful analysis even when no retrieved sections are available."""
 
 
 class IntakeOutput(BaseModel):

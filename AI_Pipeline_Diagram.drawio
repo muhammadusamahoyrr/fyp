@@ -1,0 +1,150 @@
+<mxfile host="Electron" modified="2026-05-13T21:05:00Z" agent="5.0" version="21.6.8" type="device">
+  <diagram id="ultimate_combined_diag" name="Ultimate Combined AI Architecture">
+    <mxGraphModel dx="2000" dy="2000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="3500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- ========================================== -->
+        <!-- CORE FLOW NODES (CENTRAL COLUMN) -->
+        <!-- ========================================== -->
+        
+        <!-- Start -->
+        <mxCell id="n0" value="USER INPUT&lt;br&gt;(Text/Voice)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="40" width="160" height="70" as="geometry" />
+        </mxCell>
+        
+        <!-- WebSocket -->
+        <mxCell id="n1" value="chat_socket.py&lt;br&gt;(WS Connection)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="160" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="n0" target="n1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Security Info -->
+        <mxCell id="c1" value="SECURITY LAYER:&lt;br&gt;- JWT Authentication&lt;br&gt;- Rate Limiting&lt;br&gt;- AES-256 PII Encryption&lt;br&gt;- Prompt Injection Guard" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#f8cecc;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="140" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ec1" edge="1" parent="1" source="n1" target="c1" style="dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Intent Classifier -->
+        <mxCell id="n2" value="Intent Classification&lt;br&gt;(3-Layer NLU)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="380" y="280" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="n1" target="n2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- NLU Info -->
+        <mxCell id="c2" value="INTENT DETAILS:&lt;br&gt;- Fast Path (Shortcuts)&lt;br&gt;- Slow Path (Full Graph)&lt;br&gt;- Roman Urdu Normalization&lt;br&gt;- 0ms Regex / 10ms Embeddings" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="275" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ec2" edge="1" parent="1" source="n2" target="c2" style="dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- State / Memory -->
+        <mxCell id="n3" value="State Manager&lt;br&gt;(MemorySaver)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="420" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="n2" target="n3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Memory Info -->
+        <mxCell id="c3" value="MEMORY LAYER:&lt;br&gt;- Conversation Persistence&lt;br&gt;- Retry Tracking&lt;br&gt;- Interrupt Resume Logic&lt;br&gt;- WAL (Write Ahead Logging)" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#e1d5e7;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="405" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ec3" edge="1" parent="1" source="n3" target="c3" style="dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- LangGraph Start -->
+        <mxCell id="graph_sep" value="CORE LANGGRAPH PIPELINE" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="380" y="520" width="200" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Classifier Node -->
+        <mxCell id="gn1" value="classifier_node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+          <mxGeometry x="400" y="580" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="eg1" edge="1" parent="1" source="n3" target="gn1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Triage Node -->
+        <mxCell id="gn2" value="triage_node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+          <mxGeometry x="400" y="660" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="eg2" edge="1" parent="1" source="gn1" target="gn2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Fact Gap Node -->
+        <mxCell id="gn3" value="fact_gap_node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+          <mxGeometry x="400" y="740" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="eg3" edge="1" parent="1" source="gn2" target="gn3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Fact Info -->
+        <mxCell id="cg3" value="LEGAL INTELLIGENCE:&lt;br&gt;- Domain Fact Templates&lt;br&gt;- Minimum Information Floor&lt;br&gt;- Jurisdiction Enforcement" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#e1d5e7;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="720" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ecg3" edge="1" parent="1" source="gn3" target="cg3" style="dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Retrieval Node -->
+        <mxCell id="gn4" value="retrieval_node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="400" y="860" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="eg4" edge="1" parent="1" source="gn3" target="gn4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Retrieval Info -->
+        <mxCell id="cg4" value="KNOWLEDGE ENGINE:&lt;br&gt;- ChromaDB Legal Storage&lt;br&gt;- Hybrid Search (BM25 + Vector)&lt;br&gt;- RRF (Rank Fusion)&lt;br&gt;- Semantic Caching" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#dae8fc;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="840" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ecg4" edge="1" parent="1" source="gn4" target="cg4" style="dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Grader Node -->
+        <mxCell id="gn5" value="grader_node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="400" y="940" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="eg5" edge="1" parent="1" source="gn4" target="gn5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Decision Engine -->
+        <mxCell id="gn6" value="decision_engine.py" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#fff2cc;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="380" y="1040" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="eg6" edge="1" parent="1" source="gn5" target="gn6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Calibration Info -->
+        <mxCell id="cg6" value="AI CALIBRATION LAYER:&lt;br&gt;- Utility-Based Decisioning&lt;br&gt;- Platt Scaling Probability&lt;br&gt;- Drift Detection (PSI Monitoring)&lt;br&gt;- Adaptive Threshold Manager" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="1025" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ecg6" edge="1" parent="1" source="gn6" target="cg6" style="dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Generation Node -->
+        <mxCell id="gn7" value="generation_node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;" vertex="1" parent="1">
+          <mxGeometry x="400" y="1160" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="eg7" edge="1" parent="1" source="gn6" target="gn7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Hallucination Node -->
+        <mxCell id="gn8" value="hallucination_node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;" vertex="1" parent="1">
+          <mxGeometry x="400" y="1240" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="eg8" edge="1" parent="1" source="gn7" target="gn8"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Production Info -->
+        <mxCell id="cg8" value="PRODUCTION RESILIENCE:&lt;br&gt;- Circuit Breaker (LLM Health)&lt;br&gt;- Latency &amp; Token Monitoring&lt;br&gt;- Atomic Operations Recovery&lt;br&gt;- Model Version Control" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#d5e8d4;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="1220" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ecg8" edge="1" parent="1" source="gn8" target="cg8" style="dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Final Results -->
+        <mxCell id="out1" value="FINAL ANSWER&lt;br&gt;+ Citations" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="250" y="1400" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="out2" value="LAWYER ESCALATION&lt;br&gt;(Multi-Factor)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffe6cc;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="550" y="1400" width="160" height="70" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="eo1" edge="1" parent="1" source="gn8" target="out1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eo2" edge="1" parent="1" source="gn8" target="out2" style="strokeColor=#FF0000;strokeWidth=2;"><mxGeometry relative="1" as="geometry" /></mxCell>
+        
+        <!-- Match Info -->
+        <mxCell id="cout" value="MATCHING ENGINE:&lt;br&gt;- Semantic (50%)&lt;br&gt;- Domain (20%)&lt;br&gt;- Rating (15%)&lt;br&gt;- Availability (10%)&lt;br&gt;- Experience (5%)" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#ffe6cc;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="750" y="1390" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ecout" edge="1" parent="1" source="out2" target="cout" style="dashed=1;"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db.collections import get_agreements_col
 from app.repositories.base import BaseRepository
@@ -19,7 +19,7 @@ class AgreementRepository(BaseRepository):
             {"_id": agreement_id},
             {
                 "$push": {"audit_log": entry},
-                "$set": {"updated_at": datetime.utcnow()},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
             },
         )
 
@@ -31,10 +31,10 @@ class AgreementRepository(BaseRepository):
             {
                 "$set": {
                     "parties.$.signed": True,
-                    "parties.$.signed_at": datetime.utcnow(),
+                    "parties.$.signed_at": datetime.now(timezone.utc),
                     "parties.$.signature_method": signature["method"],
                     "parties.$.signature_data": signature["data"],
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 }
             },
         )
@@ -42,5 +42,5 @@ class AgreementRepository(BaseRepository):
     async def set_status(self, agreement_id: str, status: str) -> bool:
         return await self.update_one(
             {"_id": agreement_id},
-            {"$set": {"status": status, "updated_at": datetime.utcnow()}},
+            {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
         )

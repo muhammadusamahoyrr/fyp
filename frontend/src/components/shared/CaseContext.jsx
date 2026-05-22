@@ -1,5 +1,7 @@
 'use client';
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
+import { useAuth } from "@/context/AuthContext.jsx";
+import { getNotifications, markNotificationRead, markAllNotificationsRead, listCases, listAppointments } from "@/lib/api.js";
 
 /* ═══════════════════════════════════════════════════════════════
    GLOBAL CASE CONTEXT  —  Fix #1
@@ -19,95 +21,189 @@ export const useCase = () => {
 
 /* ─── Initial shape ─────────────────────────────────────────── */
 const INITIAL = {
-    // ── Intake (Module 2) ───────────────────────────────────────
-    intakeDone: false,          // true once Step 5 is submitted
-    caseId: null,               // MongoDB _id returned by /intake/{token}/convert
+    intakeDone: false,
+    caseId: null,
     caseRef: "AIQ-2026-0042",
-    role: "",             // "Plaintiff" | "Defendant"
-    caseType: "",             // e.g. "civil" | "criminal" | "family" | "constitutional"
-    caseSubtype: "",             // e.g. "Wrongful Termination"
-    province: "",               // e.g. "punjab" | "sindh" | "kpk" | "balochistan" | "federal"
+    role: "",
+    caseType: "",
+    caseSubtype: "",
+    province: "",
     description: "",
-    evidenceDocs: [],             // [{name, size, type}]
+    evidenceDocs: [],
 
-    // ── Lawyer (Module 4) ───────────────────────────────────────
-    selectedLawyer: null,         // full lawyer object from ModLawyers
-    appointment: null,            // {date, time, details, status}
+    selectedLawyer: null,
+    appointment: null,
 
-    // ── Tracking (Module 7) ─────────────────────────────────────
-    // Milestones added by appointment booking land here so Module 7
-    // can consume them without its own hard-coded array.
-    appointmentMilestones: [],    // [{id, event, date, time, desc, tag, status, milestoneId}]
-
-    // ── Notifications (Module 7.3) ──────────────────────────────
-    notifications: [
-        { id: "n1", type: "hearing", urgency: "critical", title: "Court Hearing", date: "Feb 25", time: "9:00 AM", desc: "Pre-trial conference — attend in person", done: false },
-        { id: "n2", type: "deadline", urgency: "overdue", title: "Pre-Trial Brief", date: "Feb 20", time: "Due", desc: "Response to opposition motion — 1 day overdue", done: false },
-        { id: "n3", type: "deadline", urgency: "urgent", title: "Witness List Sign-off", date: "Feb 23", time: "EOD", desc: "Confirm final witness list with your lawyer", done: false },
-        { id: "n4", type: "reminder", urgency: "normal", title: "Review Exhibit C", date: "Feb 23", time: "9:00 AM", desc: "Review pages 8–14 before the hearing", done: false },
-        { id: "n5", type: "document", urgency: "info", title: "Document Updated", date: "Feb 18", time: "11:00 AM", desc: "Pre-Trial Brief revised — v3 now available", done: true },
-        { id: "n6", type: "response", urgency: "info", title: "Lawyer Response", date: "Feb 19", time: "2:30 PM", desc: "Atty. Ahmad Raza replied about Exhibit C", done: true },
-    ],
+    appointmentMilestones: [],
+    notifications: [],
+    cases: [],
+    appointments: [],
 };
+
+const normalizeNotificationType = (type) => {
+    if (!type) return "info";
+    if (type.startsWith("appointment_")) return "appointment";
+    if (type === "appointment") return "appointment";
+    if (type === "hearing_scheduled") return "hearing";
+    if (type === "document_ready") return "document";
+    if (type === "case_update") return "status";
+    if (type === "lawyer_assigned") return "status";
+    return type;
+};
+
+const formatNotificationTimestamp = (value) => {
+    if (!value) return { date: "", time: "" };
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return { date: "", time: "" };
+
+    return {
+        date: new Intl.DateTimeFormat("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+        }).format(parsed),
+        time: new Intl.DateTimeFormat("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+        }).format(parsed),
+    };
+};
+
+const mapNotification = (notif) => ({
+    id: notif._id || notif.id,
+    type: normalizeNotificationType(notif.type),
+    rawType: notif.type || "",
+    urgency: notif.urgency || "info",
+    title: notif.title || "Notification",
+    ...formatNotificationTimestamp(notif.created_at || notif.date),
+    desc: notif.body || notif.description || "",
+    done: Boolean(notif.read),
+    payload: notif.payload || {},
+});
 
 /* ─── Provider ──────────────────────────────────────────────── */
 export const CaseProvider = ({ children }) => {
+    const { user } = useAuth();
     const [caseData, setCaseData] = useState(INITIAL);
 
-    /* Generic field updater — merges partial updates */
     const updateCase = (patch) =>
         setCaseData(prev => ({ ...prev, ...patch }));
 
-    /* ── Intake helpers ─────────────────────────────────────── */
     const completeIntake = ({ role, caseType, caseSubtype, province, caseId, description, evidenceDocs }) => {
         updateCase({ intakeDone: true, role, caseType, caseSubtype, province, caseId, description, evidenceDocs });
     };
 
-    /* ── Lawyer / appointment helpers ──────────────────────── */
     const selectLawyer = (lawyer) => updateCase({ selectedLawyer: lawyer });
 
-    /**
-     * confirmAppointment — called by ModLawyers when user confirms booking.
-     * Writes appointment data AND creates a milestone entry so Module 7
-     * timeline displays it immediately (Fix #5).
-     */
     const confirmAppointment = ({ date, time, details }) => {
         const milestoneId = `appt-${Date.now()}`;
-        const milestone = {
-            id: milestoneId,
-            status: "active",
-            event: `Consultation — ${caseData.selectedLawyer?.name ?? "Lawyer"}`,
-            date,
-            time,
-            desc: details || "Initial consultation appointment confirmed.",
-            tag: "appointment",
-            milestoneId,
-        };
-        updateCase({
-            appointment: { date, time, details, status: "confirmed" },
-            appointmentMilestones: [...caseData.appointmentMilestones, milestone],
+        setCaseData(prev => {
+            const milestone = {
+                id: milestoneId,
+                status: "active",
+                event: `Consultation — ${prev.selectedLawyer?.name ?? "Lawyer"}`,
+                date,
+                time,
+                desc: details || "Initial consultation appointment confirmed.",
+                tag: "appointment",
+                milestoneId,
+            };
+            return {
+                ...prev,
+                appointment: { date, time, details, status: "confirmed" },
+                appointmentMilestones: [...prev.appointmentMilestones, milestone],
+            };
         });
     };
 
-    /* ── Notification helpers ───────────────────────────────── */
-    const markNotificationDone = (id) =>
+    const markNotificationDone = async (id) => {
         updateCase({
             notifications: caseData.notifications.map(n =>
                 n.id === id ? { ...n, done: true } : n
             ),
         });
 
-    const markAllNotificationsDone = () =>
+        const { error } = await markNotificationRead(id);
+        if (error) console.error("❌ Failed to mark notification read:", error);
+    };
+
+    const markAllNotificationsDone = async () => {
         updateCase({
             notifications: caseData.notifications.map(n => ({ ...n, done: true })),
         });
 
+        const { error } = await markAllNotificationsRead();
+        if (error) console.error("❌ Failed to mark all notifications read:", error);
+    };
+
     const addNotification = (notif) =>
-        updateCase({
-            notifications: [{ id: `n-${Date.now()}`, done: false, ...notif }, ...caseData.notifications],
-        });
+        setCaseData(prev => ({
+            ...prev,
+            notifications: [{ id: `n-${Date.now()}`, done: false, ...notif }, ...prev.notifications],
+        }));
 
     const unreadCount = caseData.notifications.filter(n => !n.done).length;
+
+    useEffect(() => {
+        let cancelled = false;
+        let ws;
+
+        const fetchAll = async () => {
+            const [notifRes, casesRes, apptsRes] = await Promise.all([
+                getNotifications(),
+                listCases({ page_size: 50 }),
+                listAppointments({ page_size: 50 }),
+            ]);
+            if (cancelled) return;
+
+            const patch = {};
+            if (notifRes.data)  patch.notifications = notifRes.data.map(mapNotification);
+            if (casesRes.data)  patch.cases         = casesRes.data.items || casesRes.data || [];
+            if (apptsRes.data)  patch.appointments  = apptsRes.data.items || apptsRes.data || [];
+            if (Object.keys(patch).length) updateCase(patch);
+        };
+
+        const connectLiveNotifications = () => {
+            const token = typeof window !== "undefined" ? localStorage.getItem("aai-token") : "";
+            if (!user?._id || !token) return;
+
+            const wsBase = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1")
+                .replace(/\/api\/v1$/, "")
+                .replace(/^http/, "ws");
+            const wsUrl = `${wsBase}/ws/notifications/${user._id}?token=${encodeURIComponent(token)}`;
+
+            ws = new WebSocket(wsUrl);
+            ws.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    if (message?.type === "notification" && message.notification) {
+                        const incoming = mapNotification(message.notification);
+                        setCaseData(prev => ({
+                            ...prev,
+                            notifications: [incoming, ...prev.notifications.filter(n => n.id !== incoming.id)],
+                        }));
+                    }
+                } catch (error) {
+                    console.warn("⚠️ Failed to parse notification websocket message:", error);
+                }
+            };
+            ws.onerror = () => {
+                console.warn("⚠️ Notification websocket connection failed");
+            };
+        };
+
+        fetchAll();
+        connectLiveNotifications();
+        return () => {
+            cancelled = true;
+            try { ws?.close(); } catch {}
+        };
+    }, [user?._id]);
+
+    const refreshAppointments = async () => {
+        const { data } = await listAppointments({ page_size: 50 });
+        if (data) updateCase({ appointments: data.items || data || [] });
+    };
 
     return (
         <CaseCtx.Provider value={{
@@ -119,6 +215,7 @@ export const CaseProvider = ({ children }) => {
             markNotificationDone,
             markAllNotificationsDone,
             addNotification,
+            refreshAppointments,
             unreadCount,
         }}>
             {children}

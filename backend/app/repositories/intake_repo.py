@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db.collections import get_intakes_col
 from app.repositories.base import BaseRepository
@@ -17,7 +17,7 @@ class IntakeRepository(BaseRepository):
             {
                 "$set": {
                     f"step{step}": data,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 },
                 # $max only advances current_step — never goes backwards
                 "$max": {"current_step": step + 1},
@@ -27,13 +27,22 @@ class IntakeRepository(BaseRepository):
     async def save_ai_structured_case(self, token: str, ai_data: dict) -> bool:
         return await self.update_one(
             {"session_token": token},
-            {"$set": {"ai_structured_case": ai_data, "updated_at": datetime.utcnow()}},
+            {"$set": {"ai_structured_case": ai_data, "updated_at": datetime.now(timezone.utc)}},
         )
 
     async def save_clarification_qa(self, token: str, qa_list: list) -> bool:
         return await self.update_one(
             {"session_token": token},
-            {"$set": {"clarification_qa": qa_list, "updated_at": datetime.utcnow()}},
+            {"$set": {"clarification_qa": qa_list, "updated_at": datetime.now(timezone.utc)}},
+        )
+
+    async def add_evidence_file(self, token: str, file_meta: dict) -> bool:
+        return await self.update_one(
+            {"session_token": token},
+            {
+                "$push": {"evidence_files": file_meta},
+                "$set":  {"updated_at": datetime.now(timezone.utc)},
+            },
         )
 
     async def mark_completed(self, token: str, case_id: str) -> bool:
@@ -43,7 +52,7 @@ class IntakeRepository(BaseRepository):
                 "$set": {
                     "completed": True,
                     "case_id": case_id,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 }
             },
         )

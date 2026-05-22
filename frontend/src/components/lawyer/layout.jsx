@@ -122,6 +122,7 @@ const NAV_SECTIONS = [
         items: [
             { id: "ai-legal", label: "AI Assistant", icon: "ai" },
             { id: "drafts", label: "Draft Generator", icon: "wand" },
+            { id: "courtroom", label: "Courtroom", icon: "courtroom" },
         ],
     },
     {
@@ -234,7 +235,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
             borderRight: `1px solid ${t.border}`,
             display: "flex", flexDirection: "column",
             transition: "width .25s ease, min-width .25s ease",
-            overflow: "hidden", zIndex: 10, flexShrink: 0,
+            overflowX: "hidden", zIndex: 10, flexShrink: 0,
             position: "sticky", top: 0,
         }}>
 
@@ -308,7 +309,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
             )}
 
             {/* ── Nav ── */}
-            <div style={{ flex: 1, padding: "6px 6px 0" }}>
+            <div style={{ flex: 1, padding: "6px 6px 0", overflowY: "auto", overflowX: "hidden" }}>
                 {NAV_SECTIONS.map(section => (
                     <div key={section.id}>
                         <SectionLabel label={section.label} collapsed={collapsed} t={t} />
@@ -400,6 +401,7 @@ function Topbar({ page, collapsed, setCollapsed, toggleTheme, children }) {
         appointments: "Appointments", clients: "Clients", "ai-legal": "AI Assistant",
         "doc-automation": "Document Automation", upload: "Upload Documents",
         communications: "Messages", profile: "Lawyer Profile", settings: "Settings",
+        courtroom: "Courtroom Simulation",
     };
 
     const isComm = page === "communications";

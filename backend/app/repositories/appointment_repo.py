@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from pymongo import ASCENDING, DESCENDING
 
@@ -93,7 +93,7 @@ class AppointmentRepository(BaseRepository):
         status: AppointmentStatus,
         extra: dict | None = None,
     ) -> bool:
-        update = {"$set": {"status": status.value, "updated_at": datetime.utcnow()}}
+        update = {"$set": {"status": status.value, "updated_at": datetime.now(timezone.utc)}}
         if extra:
             update["$set"].update(extra)
         return await self.update_one({"_id": appt_id}, update)

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.constants import NotificationType
 from app.core.exceptions import NotFoundError
@@ -39,7 +39,7 @@ async def process_kyc(lawyer_id: str, approved: bool, reason: str | None) -> Non
                 "$set": {
                     "lawyer_profile.kyc_verified": True,
                     "lawyer_profile.kyc_rejection_reason": None,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 }
             },
         )
@@ -56,7 +56,7 @@ async def process_kyc(lawyer_id: str, approved: bool, reason: str | None) -> Non
             {
                 "$set": {
                     "lawyer_profile.kyc_rejection_reason": reason or "Not specified",
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 }
             },
         )

@@ -5,6 +5,7 @@ import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "@/components/shared/CaseContext.jsx";
 import { getToken } from "@/lib/api.js";
+import { useAuth } from "@/context/AuthContext.jsx";
 import Ic from "./Ic.jsx";
 import { Badge, Tooltip } from "@/components/shared/shared.jsx";
 
@@ -18,23 +19,30 @@ const ModChatbot = () => {
     const toast  = useToast();
     const router = useRouter();
     const { caseType } = useCase();
+    const { user }     = useAuth();
 
     /* ── UI state ─────────────────────────────────────────────────────── */
-    const [msgs,     setMsgs]     = useState([]);
-    const [inp,      setInp]      = useState("");
-    const [typing,   setTyping]   = useState(false);
-    const [lang,     setLang]     = useState("EN");
-    const [sideOpen, setSideOpen] = useState(true);
-    const [history,  setHistory]  = useState([
+    const [msgs,      setMsgs]      = useState([]);
+    const [inp,       setInp]       = useState("");
+    const [typing,    setTyping]    = useState(false);
+    const [lang,      setLang]      = useState("EN");
+    const [sideOpen,  setSideOpen]  = useState(true);
+    const [webSearch, setWebSearch] = useState(false);
+    const [listening, setListening] = useState(false);
+    const [history,   setHistory]   = useState([
         { group: "This Week",  items: [] },
         { group: "Last Week",  items: ["Contract dispute analysis", "NDA review help"] },
     ]);
 
     /* ── WebSocket state ──────────────────────────────────────────────── */
-    const wsRef       = useRef(null);
-    const sessionIdRef = useRef(null);
-    const bottomRef   = useRef(null);
-    const [wsStatus, setWsStatus] = useState("disconnected"); // connecting | connected | disconnected
+    const wsRef          = useRef(null);
+    const sessionIdRef   = useRef(null);
+    const bottomRef      = useRef(null);
+    const retryRef       = useRef(null);
+    const stableRef      = useRef(null); // timer to reset retry count after stable connection
+    const retryCount     = useRef(0);
+    const listeningRef   = useRef(false); // mirror of `listening` state for WS closures
+    const [wsStatus, setWsStatus] = useState("disconnected");
 
     /* Generate a stable session ID per component mount */
     if (!sessionIdRef.current) {
@@ -56,9 +64,26 @@ const ModChatbot = () => {
         setWsStatus("connecting");
         const ws = new WebSocket(url);
 
-        ws.onopen  = () => setWsStatus("connected");
-        ws.onclose = () => setWsStatus("disconnected");
-        ws.onerror = () => setWsStatus("disconnected");
+        ws.onopen  = () => {
+            setWsStatus("connected");
+            // Reset retry count only after the connection has been stable for 10 s
+            // (not immediately on open — that caused an infinite retry loop)
+            clearTimeout(stableRef.current);
+            stableRef.current = setTimeout(() => { retryCount.current = 0; }, 10000);
+        };
+        ws.onclose = () => {
+            clearTimeout(stableRef.current);
+            setWsStatus("disconnected");
+            // Don't retry while mic is active — Chrome drops WS when SpeechRecognition
+            // grabs the audio device; reconnect happens in rec.onend instead
+            if (listeningRef.current) return;
+            if (retryCount.current < 5) {
+                const delay = Math.min(1000 * 2 ** retryCount.current, 30000);
+                retryCount.current += 1;
+                retryRef.current = setTimeout(connect, delay);
+            }
+        };
+        ws.onerror = () => { ws.close(); };
 
         ws.onmessage = (event) => {
             let msg;
@@ -115,7 +140,13 @@ const ModChatbot = () => {
     /* Connect on mount, close on unmount */
     useEffect(() => {
         connect();
-        return () => { wsRef.current?.close(); };
+        return () => {
+            clearTimeout(retryRef.current);
+            clearTimeout(stableRef.current);
+            retryCount.current = 99;
+            listeningRef.current = false;
+            wsRef.current?.close();
+        };
     }, [connect]);
 
     /* Auto-scroll to latest message */
@@ -125,6 +156,8 @@ const ModChatbot = () => {
 
     /* ── New chat ─────────────────────────────────────────────────────── */
     const newChat = () => {
+        clearTimeout(retryRef.current);
+        retryCount.current = 0;
         wsRef.current?.close();
         sessionIdRef.current =
             typeof crypto !== "undefined" && crypto.randomUUID
@@ -163,12 +196,46 @@ const ModChatbot = () => {
         const caseId = typeof window !== "undefined" ? localStorage.getItem("aai-case-id") : null;
 
         wsRef.current.send(JSON.stringify({
-            content:   txt,
-            case_id:   caseId  || null,
-            case_type: caseType || null,
-            province:  null,          // backend reads from case document
-            language:  lang === "UR" ? "ur" : "en",
+            content:    txt,
+            case_id:    caseId  || null,
+            case_type:  caseType || null,
+            province:   null,
+            language:   lang === "UR" ? "ur" : "en",
+            web_search: webSearch,
         }));
+    };
+
+    /* ── Voice input ─────────────────────────────────────────────────── */
+    const startVoice = () => {
+        const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+        if (!SR) { toast.show("Voice input not supported in this browser.", "warn", 3000); return; }
+        if (listening) return;
+
+        const rec = new SR();
+        rec.lang = lang === "UR" ? "ur-PK" : "en-US";
+        rec.continuous = false;
+        rec.interimResults = false;
+
+        rec.onstart  = () => { setListening(true);  listeningRef.current = true; };
+        rec.onend    = () => {
+            setListening(false);
+            listeningRef.current = false;
+            // Reconnect WS if it dropped while mic was active
+            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                retryCount.current = 0;
+                connect();
+            }
+        };
+        rec.onerror  = () => {
+            setListening(false);
+            listeningRef.current = false;
+            toast.show("Voice recognition failed — please try again.", "error", 2500);
+        };
+        rec.onresult = (e) => {
+            const transcript = e.results[0][0].transcript;
+            setInp(prev => prev ? `${prev} ${transcript}` : transcript);
+        };
+        rec.start();
     };
 
     const hasMessages = msgs.length > 0;
@@ -348,19 +415,27 @@ const ModChatbot = () => {
                     padding: hasMessages ? "68px 28px 16px" : "0 28px",
                 }}>
                     {!hasMessages ? (
-                        <div style={{ textAlign: "center", maxWidth: 700, width: "100%", padding: "0 20px" }}>
-                            <div style={{
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                gap: 14, marginBottom: 16,
-                            }}>
-                                <span style={{ fontSize: 44 }}>{greetingEmoji}</span>
+                        <div style={{ textAlign: "center", maxWidth: 600, width: "100%", padding: "0 20px" }}>
+                            {/* Robot mascot */}
+                            <div style={{ marginBottom: 24, display: "flex", justifyContent: "center" }}>
+                                <div style={{
+                                    width: 160, height: 160, borderRadius: "50%",
+                                    background: `radial-gradient(circle at 50% 60%, ${t.primary}25, ${t.primary}08 70%)`,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    boxShadow: `0 0 50px ${t.primary}20`,
+                                }}>
+                                    <img src="/chatbot.gif" alt="AI Assistant" style={{ width: 130, height: 130, objectFit: "contain" }} />
+                                </div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 10 }}>
+                                <span style={{ fontSize: 26 }}>{greetingEmoji}</span>
                                 <h2 style={{
-                                    fontFamily: "'Playfair Display',serif", fontSize: 26, fontWeight: 700,
+                                    fontFamily: "'Playfair Display',serif", fontSize: 24, fontWeight: 700,
                                     color: t.text, margin: 0, letterSpacing: "-0.4px",
-                                }}>{greetingText}, Muhammad!</h2>
+                                }}>{greetingText}, {user?.full_name?.split(" ")[0] || "there"}!</h2>
                             </div>
                             <p style={{
-                                fontFamily: "'Playfair Display',serif", fontSize: 32, fontWeight: 700,
+                                fontFamily: "'Playfair Display',serif", fontSize: 28, fontWeight: 700,
                                 color: t.text, marginBottom: 44, lineHeight: 1.35, letterSpacing: "-0.6px",
                             }}>{greetingSub}</p>
                             {wsStatus === "disconnected" && (
@@ -379,12 +454,17 @@ const ModChatbot = () => {
                                 }}>
                                     {m.role === "ai" && (
                                         <div style={{
-                                            width: 34, height: 34, borderRadius: 10,
+                                            width: 36, height: 36, borderRadius: 10,
                                             background: m.isError ? "#fee2e2" : t.primaryGlow,
+                                            border: `1px solid ${m.isError ? "#fca5a5" : t.primary + "30"}`,
                                             flexShrink: 0,
                                             display: "flex", alignItems: "center", justifyContent: "center",
+                                            overflow: "hidden",
                                         }}>
-                                            <Ic n="scale" s={16} c={m.isError ? "#ef4444" : t.primary} />
+                                            {m.isError
+                                                ? <Ic n="scale" s={16} c="#ef4444" />
+                                                : <img src="/chatbot.gif" alt="AI" style={{ width: 30, height: 30, objectFit: "contain" }} />
+                                            }
                                         </div>
                                     )}
                                     <div style={{ maxWidth: "75%" }}>
@@ -519,20 +599,18 @@ const ModChatbot = () => {
                             value={inp}
                             onChange={e => setInp(e.target.value)}
                             onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
-                            placeholder={wsStatus === "connected" ? "Ask Attorney AI..." : wsStatus === "connecting" ? "Connecting..." : "Offline — check your connection"}
-                            disabled={wsStatus !== "connected"}
+                            placeholder={wsStatus === "connected" ? "Ask Attorney AI..." : wsStatus === "connecting" ? "Connecting..." : "Offline — reconnecting..."}
                             style={{
                                 width: "100%", background: "transparent", border: "none", outline: "none",
                                 color: t.text, fontSize: 15, fontFamily: "'Inter',sans-serif",
                                 padding: "4px 0 12px", lineHeight: 1.6,
-                                opacity: wsStatus !== "connected" ? 0.5 : 1,
                             }}
                         />
 
                         {/* Bottom toolbar */}
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                            {/* Search button */}
-                            <button style={{
+                            {/* Toggle sidebar */}
+                            <button onClick={() => setSideOpen(o => !o)} style={{
                                 display: "flex", alignItems: "center", gap: 7,
                                 background: t.inputBg, border: `1px solid ${t.border}`,
                                 borderRadius: 50, padding: "7px 16px",
@@ -542,30 +620,54 @@ const ModChatbot = () => {
                                 onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}
                                 onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}
                             >
-                                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><ellipse cx="12" cy="12" rx="4" ry="10" />
-                                </svg>
-                                Search
+                                <Ic n="clock" s={14} c="currentColor" />
+                                History
                             </button>
 
                             {/* Right controls */}
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                {/* Clock */}
-                                <Tooltip text="Recent chats">
-                                    <button style={iconBtn()}
-                                        onMouseEnter={e => { e.currentTarget.style.background = t.inputBg; e.currentTarget.style.color = t.primary; }}
-                                        onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = t.textMuted; }}
-                                    >
-                                        <Ic n="clock" s={17} c="currentColor" />
-                                    </button>
-                                </Tooltip>
+                                {/* Web search toggle */}
+                                <button
+                                    onClick={() => setWebSearch(s => !s)}
+                                    title={webSearch ? "Web search ON — click to disable" : "Enable web search"}
+                                    style={{
+                                        display: "flex", alignItems: "center", gap: 6,
+                                        background: webSearch ? `${t.primary}18` : t.inputBg,
+                                        border: `1px solid ${webSearch ? t.primary : t.border}`,
+                                        borderRadius: 50, padding: "7px 14px",
+                                        fontSize: 12, color: webSearch ? t.primary : t.textMuted,
+                                        cursor: "pointer", fontFamily: "'Inter',sans-serif",
+                                        transition: "all 0.15s", fontWeight: webSearch ? 700 : 400,
+                                    }}
+                                    onMouseEnter={e => { if (!webSearch) { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}}
+                                    onMouseLeave={e => { if (!webSearch) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}}
+                                >
+                                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                                    </svg>
+                                    Web
+                                </button>
 
-                                {/* Pro badge */}
-                                <span style={{
-                                    fontSize: 11, fontWeight: 700, color: t.textMuted,
-                                    background: t.inputBg, border: `1px solid ${t.border}`,
-                                    borderRadius: 6, padding: "3px 9px",
-                                }}>Pro</span>
+                                {/* Mic button */}
+                                <button
+                                    onClick={startVoice}
+                                    title={listening ? "Listening…" : "Voice input"}
+                                    style={{
+                                        width: 36, height: 36, borderRadius: 10,
+                                        background: listening ? `${t.primary}22` : t.inputBg,
+                                        border: `1.5px solid ${listening ? t.primary : t.border}`,
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        cursor: "pointer", transition: "all 0.2s",
+                                        animation: listening ? "pulse 1s ease infinite" : "none",
+                                    }}
+                                >
+                                    <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke={listening ? t.primary : t.textMuted} strokeWidth="2">
+                                        <rect x="9" y="2" width="6" height="11" rx="3"/>
+                                        <path d="M5 10a7 7 0 0 0 14 0"/>
+                                        <line x1="12" y1="19" x2="12" y2="23"/>
+                                        <line x1="8" y1="23" x2="16" y2="23"/>
+                                    </svg>
+                                </button>
 
                                 {/* EN/UR switcher */}
                                 <div style={{
@@ -582,16 +684,6 @@ const ModChatbot = () => {
                                         }}>{l}</button>
                                     ))}
                                 </div>
-
-                                {/* Mic */}
-                                <Tooltip text="Voice input (beta)">
-                                    <button style={iconBtn()}
-                                        onMouseEnter={e => { e.currentTarget.style.background = t.inputBg; e.currentTarget.style.color = t.primary; }}
-                                        onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = t.textMuted; }}
-                                    >
-                                        <Ic n="mic" s={17} c="currentColor" />
-                                    </button>
-                                </Tooltip>
 
                                 {/* Send */}
                                 <button

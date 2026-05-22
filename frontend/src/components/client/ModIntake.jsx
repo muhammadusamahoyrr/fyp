@@ -6,7 +6,7 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "./CaseContext.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge, Tooltip } from "@/components/shared/shared.jsx";
-import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio } from "@/lib/api.js";
+import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence } from "@/lib/api.js";
 
 // Encode Float32 PCM as 16-bit mono WAV (no ffmpeg on backend)
 function _pcmToWav(samples, sampleRate) {
@@ -39,6 +39,35 @@ const CASE_TYPES = [
     { value: "family",         label: "Family Law" },
     { value: "constitutional", label: "Constitutional Law" },
 ];
+
+// Mirrors backend classifier_node._score_query — runs in browser so case type
+// is selected before the backend even receives the description.
+const quickClassify = (text) => {
+    if (!text || text.trim().length < 4) return "";
+    const t = text;
+    const scores = { family: 0, criminal: 0, civil: 0, constitutional: 0 };
+
+    // Family — English, Romanized Urdu, Urdu script
+    if (/\b(divorce|talaq|talaaq|khula|khulaah|nikah|nikaah|marriage|shadi|shaadi|custody|hizanat|maintenance|nafaqa|dowry|jahez|dower|mehr|mehar|inheritance|wirsa|wirasat|MFLO|guardian|iddat|iddah)\b/i.test(t)) scores.family += 0.35;
+    if (/(خلع|طلاق|نکاح|شادی|حضانت|نفقہ|مہر|وراثت|خاندان|گھریلو)/.test(t)) scores.family += 0.35;
+    if (/\b(wife|husband|biwi|shohar|shauhar|child|bachha|in-laws|susral|sasural)\b/i.test(t)) scores.family += 0.15;
+
+    // Criminal — English, Romanized Urdu, Urdu script
+    if (/\b(FIR|murder|qatl|qatal|theft|chori|steal|rob|assault|dacoity|robbery|rape|zina|kidnap|bail|arrest|police|challan|accused|CrPC|PPC|PECA|cybercrime)\b/i.test(t)) scores.criminal += 0.30;
+    if (/(قتل|چوری|ڈکیتی|بیل|گرفتاری|مقدمہ|پولیس|ملزم)/.test(t)) scores.criminal += 0.30;
+    if (/\b(crime|criminal|jail|prison|sentence|prosecution|qaid)\b/i.test(t)) scores.criminal += 0.20;
+
+    // Civil
+    if (/\b(property|tenant|landlord|rent|kiraya|contract|agreement|debt|loan|mortgage|qarz|possession|eviction|damages|injunction|CPC|decree)\b/i.test(t)) scores.civil += 0.30;
+    if (/\b(dispute|compensation|nuqsan)\b/i.test(t)) scores.civil += 0.15;
+
+    // Constitutional
+    if (/\b(fundamental\s*rights?|article\s*\d+|constitution|Supreme\s*Court|High\s*Court|writ|habeas|mandamus|government|parliament)\b/i.test(t)) scores.constitutional += 0.35;
+    if (/\b(rights?|haqooq|azaadi|freedom|liberty|equality|discrimination)\b/i.test(t)) scores.constitutional += 0.15;
+
+    const best = Object.entries(scores).reduce((a, b) => b[1] > a[1] ? b : a);
+    return best[1] >= 0.15 ? best[0] : "";
+};
 
 const URGENCY_LEVELS = [
     { value: "low",    label: "Low — No immediate deadline" },
@@ -73,7 +102,7 @@ const ModIntake = () => {
     // ── Core intake fields ─────────────────────────────────────────
     const [role, setRole] = useState("");
     const [province, setProvince] = useState("");
-    const [caseTypeInput, setCaseTypeInput] = useState("civil");
+    const [caseTypeInput, setCaseTypeInput] = useState("");
     const [urgency, setUrgency] = useState("medium");
     const [description, setDescription] = useState("");
 
@@ -102,6 +131,8 @@ const ModIntake = () => {
     // ── Evidence + desired outcome (collected in step 2, saved on convert) ──
     const [hasEvidence, setHasEvidence]       = useState(false);
     const [evidenceDesc, setEvidenceDesc]     = useState("");
+    const [evidenceFiles, setEvidenceFiles]   = useState([]); // [{file_id,filename,size,content_type,uploading,error}]
+    const fileInputRef                        = useRef(null);
     const [desiredOutcome, setDesiredOutcome] = useState("");
 
     // ── UI helpers ─────────────────────────────────────────────────
@@ -109,6 +140,127 @@ const ModIntake = () => {
     const steps = ["Select Role", "Case Input", "AI Questions", "Case Summary", "Categorization"];
     const completedSteps = Math.max(0, step - 1);
     const progress = (completedSteps / steps.length) * 100;
+
+    // ── Export helpers ─────────────────────────────────────────────
+    const _buildPrintHTML = () => {
+        const caseTypeLabel = CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput;
+        const provinceLabel = PROVINCES.find(p => p.value === province)?.label || province;
+        const date = new Date().toLocaleDateString("en-PK", { year: "numeric", month: "long", day: "numeric" });
+
+        const laws = aiStructured?.applicable_laws?.length
+            ? aiStructured.applicable_laws.map((l, i) => `<li>${i + 1}. ${l}</li>`).join("")
+            : "<li>Not available</li>";
+        const actions = aiStructured?.recommended_actions?.length
+            ? aiStructured.recommended_actions.map((a, i) => `<li>${i + 1}. ${a}</li>`).join("")
+            : "<li>Not available</li>";
+
+        return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+<title>Case Summary — Attorney.AI</title>
+<style>
+  body{font-family:'Segoe UI',sans-serif;color:#1a1a1a;margin:0;padding:40px;background:#fff;font-size:13px}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#00c2a8;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid #e5e5e5}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:16px;border-bottom:2px solid #00c2a8;margin-bottom:24px}
+  .brand{font-size:18px;font-weight:800;color:#00c2a8}
+  .meta{font-size:11px;color:#666;text-align:right;line-height:1.8}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px}
+  .field{background:#f8f8f8;border-radius:6px;padding:10px 14px}
+  .field-label{font-size:10px;text-transform:uppercase;letter-spacing:0.8px;color:#888;margin-bottom:4px}
+  .field-value{font-size:13px;font-weight:600;color:#1a1a1a}
+  .summary{background:#f8f8f8;border-radius:8px;padding:14px 18px;line-height:1.7;color:#333}
+  ul{margin:0;padding-left:18px;line-height:2}
+  .risk{display:inline-block;padding:4px 12px;border-radius:20px;font-weight:700;font-size:12px;text-transform:uppercase}
+  .risk-low{background:#d1fae5;color:#065f46} .risk-medium{background:#fef3c7;color:#92400e}
+  .risk-high{background:#fee2e2;color:#991b1b} .risk-urgent{background:#fee2e2;color:#991b1b}
+  .disclaimer{margin-top:32px;padding:12px 16px;background:#fff8e1;border-left:3px solid #f59e0b;font-size:11px;color:#78350f;line-height:1.6;border-radius:0 6px 6px 0}
+  @media print{body{padding:20px}button{display:none}}
+</style></head><body>
+<div class="header">
+  <div><div class="brand">Attorney.AI</div><h1>Legal Case Summary</h1></div>
+  <div class="meta">
+    <div>Case ID: ${caseId ? `…${caseId.slice(-8)}` : "Pending"}</div>
+    <div>Date: ${date}</div>
+    <div>Status: Ready</div>
+  </div>
+</div>
+
+<h2>Case Details</h2>
+<div class="grid">
+  <div class="field"><div class="field-label">Case Type</div><div class="field-value">${caseTypeLabel}</div></div>
+  <div class="field"><div class="field-label">Province</div><div class="field-value">${provinceLabel}</div></div>
+  <div class="field"><div class="field-label">Your Role</div><div class="field-value">${role || "Not specified"}</div></div>
+  <div class="field"><div class="field-label">Urgency</div><div class="field-value">${urgency}</div></div>
+</div>
+
+<h2>Case Summary</h2>
+<div class="summary">${aiStructured?.summary || description || "Not available"}</div>
+
+<h2>Applicable Laws</h2>
+<ul>${laws}</ul>
+
+<h2>Recommended Actions</h2>
+<ul>${actions}</ul>
+
+${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${aiStructured.risk_level}">${aiStructured.risk_level} risk</span>` : ""}
+
+<div class="disclaimer">
+  <strong>Disclaimer:</strong> This case summary is generated by an AI system for general informational purposes only and does not constitute legal advice. Please consult a qualified Pakistani lawyer before taking any legal action.
+</div>
+</body></html>`;
+    };
+
+    const _buildTextSummary = () => {
+        const caseTypeLabel = CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput;
+        const provinceLabel = PROVINCES.find(p => p.value === province)?.label || province;
+        const date = new Date().toLocaleDateString("en-PK", { year: "numeric", month: "long", day: "numeric" });
+        const laws = aiStructured?.applicable_laws?.join("\n  • ") || "Not available";
+        const actions = aiStructured?.recommended_actions?.join("\n  • ") || "Not available";
+        return [
+            `ATTORNEY.AI — LEGAL CASE SUMMARY`,
+            `Generated: ${date}`,
+            `Case ID: ${caseId || "Pending"}`,
+            ``,
+            `CASE DETAILS`,
+            `Type: ${caseTypeLabel}`,
+            `Province: ${provinceLabel}`,
+            `Role: ${role || "Not specified"}`,
+            `Urgency: ${urgency}`,
+            ``,
+            `SUMMARY`,
+            aiStructured?.summary || description || "Not available",
+            ``,
+            `APPLICABLE LAWS`,
+            `  • ${laws}`,
+            ``,
+            `RECOMMENDED ACTIONS`,
+            `  • ${actions}`,
+            aiStructured?.risk_level ? `\nRISK LEVEL: ${aiStructured.risk_level.toUpperCase()}` : "",
+            ``,
+            `DISCLAIMER: This summary is AI-generated for informational purposes only and does not constitute legal advice. Consult a qualified Pakistani lawyer before taking any action.`,
+        ].join("\n");
+    };
+
+    const handleDownloadPDF = () => {
+        const win = window.open("", "_blank");
+        if (!win) { toast.show("Please allow pop-ups to download the PDF", "warn", 3000); return; }
+        win.document.write(_buildPrintHTML());
+        win.document.close();
+        win.onload = () => { win.focus(); win.print(); };
+    };
+
+    const handlePrint = () => {
+        const win = window.open("", "_blank");
+        if (!win) { toast.show("Please allow pop-ups to print", "warn", 3000); return; }
+        win.document.write(_buildPrintHTML());
+        win.document.close();
+        win.onload = () => { win.focus(); win.print(); };
+    };
+
+    const handleEmail = () => {
+        const subject = encodeURIComponent(`Legal Case Summary — Attorney.AI${caseId ? ` (${caseId.slice(-8)})` : ""}`);
+        const body = encodeURIComponent(_buildTextSummary());
+        window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    };
 
     const canGoToStep = (target) => {
         if (target <= step) return true;
@@ -187,8 +339,12 @@ const ModIntake = () => {
             toast.show("Please describe your legal issue before continuing.", "warn", 2500);
             return;
         }
+        // Ensure case type is set — fall back to quick JS classify then "civil"
+        const effectiveCaseType = caseTypeInput || quickClassify(desc) || "civil";
+        if (!caseTypeInput && effectiveCaseType) setCaseTypeInput(effectiveCaseType);
+
         if (intakeToken) {
-            const r2 = await intakeSaveStep(intakeToken, 2, { case_type: caseTypeInput, urgency });
+            const r2 = await intakeSaveStep(intakeToken, 2, { case_type: effectiveCaseType, urgency });
             const r3 = await intakeSaveStep(intakeToken, 3, {
                 incident_description: desc,
                 incident_date: null,
@@ -298,6 +454,16 @@ const ModIntake = () => {
             localStorage.setItem("aai-case-id", converted.case_id);
             localStorage.removeItem("aai-intake-token");
             setIntakeToken(null);
+
+            // If AI corrected the case type, update UI and notify user
+            if (converted.type_was_corrected && converted.ai_case_type) {
+                const label = { civil: "Civil", criminal: "Criminal", family: "Family", constitutional: "Constitutional" };
+                setCaseTypeInput(converted.ai_case_type);
+                toast.show(
+                    `Case type updated: ${label[converted.user_case_type] || converted.user_case_type} → ${label[converted.ai_case_type] || converted.ai_case_type}`,
+                    "info", 5000
+                );
+            }
 
             // Fetch the AI-structured case data
             const { data: intake } = await intakeGet(savedToken);
@@ -428,6 +594,8 @@ const ModIntake = () => {
     const handleSubmitVoice = () => {
         if (!voiceTranscript.trim()) { toast.show("No transcript to submit.", "warn", 2000); return; }
         setDescription(voiceTranscript);
+        const detected = quickClassify(voiceTranscript);
+        if (detected) setCaseTypeInput(detected);
         setVoiceStatus("idle");
         setInputType("text");
         toast.show("Voice transcript added to your case.", "success", 2000);
@@ -451,45 +619,58 @@ const ModIntake = () => {
 
     return (
         <div>
-            {/* Progress bar */}
-            <div style={{ marginBottom: 24 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <h3 style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Case Intake Progress</h3>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: t.primary }}>{Math.round(progress)}%</span>
-                </div>
-                <div style={{ height: 6, background: t.inputBg, borderRadius: 4, overflow: "hidden" }}>
-                    <div style={{ width: `${progress}%`, height: "100%", background: t.grad1, borderRadius: 4, transition: "width 0.5s cubic-bezier(0.4, 0, 0.2, 1)" }} />
-                </div>
-            </div>
-
-            {/* Step tabs */}
-            <div style={{ display: "flex", marginBottom: 28, background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16, overflow: "hidden", boxShadow: t.shadowCard }}>
+            {/* Compact horizontal stepper */}
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 28, padding: "12px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, gap: 0 }}>
                 {steps.map((s, i) => {
                     const targetStep = i + 1;
                     const act = step === targetStep;
                     const done = step > targetStep;
                     const locked = !canGoToStep(targetStep) && !done && !act;
+                    const isLast = i === steps.length - 1;
+                    
                     return (
-                        <div key={s} onClick={() => tryGoToStep(targetStep)}
-                            style={{
-                                flex: 1, padding: "14px 10px", textAlign: "center",
-                                cursor: locked ? "not-allowed" : "pointer",
-                                background: act ? t.primaryGlow : "transparent",
-                                borderBottom: act ? `2.5px solid ${t.primary}` : done ? `2.5px solid ${t.success}` : "2.5px solid transparent",
-                                transition: "all 0.2s",
-                                opacity: locked ? 0.45 : 1,
-                            }}>
-                            <div style={{
-                                width: 26, height: 26, borderRadius: "50%",
-                                background: done ? t.success : act ? t.primary : t.inputBg,
-                                color: (done || act) ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted,
-                                fontSize: 11, fontWeight: 800, margin: "0 auto 6px",
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                            }}>
-                                {done ? <Ic n="check" s={12} c={t.mode === "dark" ? "#1A2E35" : "#fff"} /> : locked ? "🔒" : targetStep}
+                        <Fragment key={s}>
+                            <div 
+                                onClick={() => tryGoToStep(targetStep)}
+                                style={{
+                                    display: "flex", alignItems: "center", gap: 10,
+                                    cursor: locked ? "not-allowed" : "pointer",
+                                    opacity: locked ? 0.4 : 1,
+                                    transition: "all 0.2s",
+                                }}
+                            >
+                                {/* Step indicator */}
+                                <div style={{
+                                    width: 28, height: 28, borderRadius: "50%",
+                                    background: done ? t.success : act ? t.primary : t.inputBg,
+                                    color: (done || act) ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted,
+                                    fontSize: 12, fontWeight: 800,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    boxShadow: act ? `0 0 0 3px ${t.primary}30, 0 4px 12px ${t.primary}25` : "none",
+                                    transition: "all 0.2s",
+                                }}>
+                                    {done ? <Ic n="check" s={13} c={t.mode === "dark" ? "#1A2E35" : "#fff"} /> : targetStep}
+                                </div>
+                                
+                                {/* Step label */}
+                                <div style={{ 
+                                    fontSize: 13, fontWeight: act ? 700 : 600, 
+                                    color: act ? t.primary : done ? t.success : t.text,
+                                }}>
+                                    {s}
+                                </div>
                             </div>
-                            <div style={{ fontSize: 12, fontWeight: act ? 700 : 500, color: act ? t.primary : done ? t.success : t.textMuted }}>{s}</div>
-                        </div>
+                            
+                            {/* Connector line */}
+                            {!isLast && (
+                                <div style={{
+                                    flex: 1, height: 2,
+                                    background: done && step > targetStep + 1 ? t.success : t.border,
+                                    margin: "0 8px",
+                                    transition: "background 0.3s",
+                                }} />
+                            )}
+                        </Fragment>
                     );
                 })}
             </div>
@@ -542,35 +723,28 @@ const ModIntake = () => {
                 <Fragment>
                     <div className="aFadeUp" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
                         {/* Top nav bar */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16 }}>
-                            <BtnOutline onClick={() => setStep(1)} style={{ fontSize: 13, padding: "10px 20px", border: "none" }}>← Back</BtnOutline>
+                        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
+                            <BtnOutline onClick={() => setStep(1)} style={{ fontSize: 13, padding: "8px 16px", border: "none" }}>← Back</BtnOutline>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 20, border: `1.5px solid ${t.warn}40`, background: `${t.warn}15`, color: t.warn, fontSize: 12, fontWeight: 700 }}>
                                 📁 Case AIQ-2026-0042
                             </div>
                             <div style={{ flex: 1 }}></div>
-                            <BtnOutline onClick={() => toast.show("Draft saved!", "success")} style={{ fontSize: 13, padding: "10px 20px" }}>💾 Save Draft</BtnOutline>
-                            <BtnPrimary onClick={handleStep2Continue} style={{ fontSize: 13, padding: "10px 24px" }}>Continue →</BtnPrimary>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: t.textMuted, whiteSpace: "nowrap" }}>Urgency</span>
+                                <select
+                                    value={urgency}
+                                    onChange={e => setUrgency(e.target.value)}
+                                    style={{ fontSize: 13, fontWeight: 600, padding: "7px 12px", borderRadius: 8, border: `1.5px solid ${urgency === "urgent" ? "#ef4444" : urgency === "high" ? "#f97316" : urgency === "medium" ? t.warn : "#22c55e"}`, background: t.inputBg, color: urgency === "urgent" ? "#ef4444" : urgency === "high" ? "#f97316" : urgency === "medium" ? t.warn : "#22c55e", cursor: "pointer", outline: "none" }}
+                                >
+                                    <option value="low">🟢 Low</option>
+                                    <option value="medium">🟡 Medium</option>
+                                    <option value="high">🟠 High</option>
+                                    <option value="urgent">🔴 Urgent</option>
+                                </select>
+                            </div>
+                            <BtnPrimary onClick={handleStep2Continue} style={{ fontSize: 13, padding: "8px 18px" }}>Continue →</BtnPrimary>
                         </div>
 
-                        {/* Case Type + Urgency row */}
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, padding: "18px 20px", background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16 }}>
-                            <div>
-                                <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 8 }}>
-                                    Case Type *
-                                </label>
-                                <select value={caseTypeInput} onChange={e => setCaseTypeInput(e.target.value)} style={selectStyle}>
-                                    {CASE_TYPES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                                </select>
-                            </div>
-                            <div>
-                                <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 8 }}>
-                                    Urgency *
-                                </label>
-                                <select value={urgency} onChange={e => setUrgency(e.target.value)} style={selectStyle}>
-                                    {URGENCY_LEVELS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
-                                </select>
-                            </div>
-                        </div>
 
                         <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 24 }}>
                             {/* LEFT PANEL: Input Tab */}
@@ -643,7 +817,11 @@ const ModIntake = () => {
                                         <textarea
                                             placeholder="Please describe the events leading up to your dispute in detail..."
                                             value={description}
-                                            onChange={e => setDescription(e.target.value)}
+                                            onChange={e => {
+                                                setDescription(e.target.value);
+                                                const detected = quickClassify(e.target.value);
+                                                if (detected) setCaseTypeInput(detected);
+                                            }}
                                             style={{ width: "100%", height: "100%", minHeight: 180, background: "transparent", border: "none", outline: "none", color: t.text, fontSize: 14, resize: "none", fontFamily: "inherit" }} />
                                     </Card>
                                 )}
@@ -671,12 +849,75 @@ const ModIntake = () => {
                                     ))}
                                 </div>
                                 {hasEvidence && (
-                                    <textarea
-                                        placeholder="Describe your evidence: medical records, photos, contracts, witness names…"
-                                        value={evidenceDesc}
-                                        onChange={e => setEvidenceDesc(e.target.value)}
-                                        style={{ width: "100%", minHeight: 90, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, padding: "10px 12px", color: t.text, fontSize: 13, resize: "vertical", outline: "none", fontFamily: "inherit", marginBottom: 16 }}
-                                    />
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+                                        {/* Hidden file input */}
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            multiple
+                                            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.webp"
+                                            style={{ display: "none" }}
+                                            onChange={async e => {
+                                                const files = Array.from(e.target.files || []);
+                                                e.target.value = "";
+                                                if (!intakeToken) { toast.show("Start intake first to upload files", "error"); return; }
+                                                for (const f of files) {
+                                                    const tempId = `temp-${Date.now()}-${Math.random()}`;
+                                                    setEvidenceFiles(prev => [...prev, { file_id: tempId, filename: f.name, size: f.size, content_type: f.type, uploading: true, error: null }]);
+                                                    const { data, error } = await uploadIntakeEvidence(intakeToken, f);
+                                                    setEvidenceFiles(prev => prev.map(ef =>
+                                                        ef.file_id === tempId
+                                                            ? error
+                                                                ? { ...ef, uploading: false, error: error?.detail || "Upload failed" }
+                                                                : { ...data, uploading: false, error: null }
+                                                            : ef
+                                                    ));
+                                                }
+                                            }}
+                                        />
+                                        {/* Drop zone / upload button */}
+                                        <div
+                                            onClick={() => fileInputRef.current?.click()}
+                                            style={{ border: `1.5px dashed ${t.primary}60`, borderRadius: 10, padding: "14px 12px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", background: `${t.primary}08`, transition: "background 0.15s" }}
+                                            onMouseEnter={e => e.currentTarget.style.background = `${t.primary}14`}
+                                            onMouseLeave={e => e.currentTarget.style.background = `${t.primary}08`}
+                                        >
+                                            <Ic n="file" s={15} c={t.primary} />
+                                            <span style={{ fontSize: 12, fontWeight: 700, color: t.primary }}>Upload Files</span>
+                                            <span style={{ fontSize: 11, color: t.textMuted }}>PDF, Word, JPG, PNG · max 10 MB each</span>
+                                        </div>
+                                        {/* Uploaded file list */}
+                                        {evidenceFiles.length > 0 && (
+                                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                                {evidenceFiles.map(ef => {
+                                                    const icon = ef.content_type?.startsWith("image/") ? "🖼️" : ef.content_type === "application/pdf" ? "📄" : "📝";
+                                                    const kb   = ef.size ? `${(ef.size / 1024).toFixed(0)} KB` : "";
+                                                    return (
+                                                        <div key={ef.file_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 8, background: ef.error ? "#fef2f2" : t.inputBg, border: `1px solid ${ef.error ? "#fca5a5" : t.border}` }}>
+                                                            <span style={{ fontSize: 15 }}>{icon}</span>
+                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                <div style={{ fontSize: 12, fontWeight: 600, color: ef.error ? "#ef4444" : t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                                    {ef.filename}
+                                                                </div>
+                                                                <div style={{ fontSize: 10, color: t.textMuted }}>{ef.error || (ef.uploading ? "Uploading…" : kb)}</div>
+                                                            </div>
+                                                            {ef.uploading && <div style={{ width: 12, height: 12, border: `2px solid ${t.primary}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
+                                                            {!ef.uploading && (
+                                                                <button onClick={() => setEvidenceFiles(prev => prev.filter(x => x.file_id !== ef.file_id))} style={{ background: "none", border: "none", cursor: "pointer", color: t.textMuted, fontSize: 14, lineHeight: 1, padding: 2 }}>✕</button>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                        {/* Optional notes */}
+                                        <textarea
+                                            placeholder="Optional: add notes about witnesses, context, or additional evidence…"
+                                            value={evidenceDesc}
+                                            onChange={e => setEvidenceDesc(e.target.value)}
+                                            style={{ width: "100%", minHeight: 64, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, padding: "8px 12px", color: t.text, fontSize: 12, resize: "vertical", outline: "none", fontFamily: "inherit" }}
+                                        />
+                                    </div>
                                 )}
 
                                 {/* Desired outcome */}
@@ -703,15 +944,15 @@ const ModIntake = () => {
             {/* ── STEP 3: AI Follow-up Questions (dynamic) ────────────── */}
             {step === 3 && (
                 <div className="aFadeUp" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16 }}>
-                        <BtnOutline onClick={() => setStep(2)} style={{ fontSize: 13, padding: "10px 20px" }}>← Back</BtnOutline>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
+                        <BtnOutline onClick={() => setStep(2)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
                         <div style={{ flex: 1 }} />
                         {/* "Next Question" for rounds 1-3; "Complete & Continue" on round 4 or when done */}
                         {(clarifyRound >= 1 && clarifyRound <= 3) && !clarifyDone ? (
                             <BtnPrimary
                                 disabled={clarifyLoading || !getCurrentAnswer().trim()}
                                 onClick={handleClarifyNext}
-                                style={{ fontSize: 13, padding: "10px 22px" }}
+                                style={{ fontSize: 13, padding: "8px 18px" }}
                             >
                                 {clarifyLoading ? "Thinking…" : "Next Question →"}
                             </BtnPrimary>
@@ -719,14 +960,14 @@ const ModIntake = () => {
                             <BtnPrimary
                                 disabled={converting || clarifyLoading || (clarifyRound === 4 && !clarifyA4.trim())}
                                 onClick={handleConvertAndSummarise}
-                                style={{ fontSize: 13, padding: "10px 22px", opacity: converting ? 0.7 : 1 }}
+                                style={{ fontSize: 13, padding: "8px 18px", opacity: converting ? 0.7 : 1 }}
                             >
                                 {converting ? "Analysing case…" : clarifyLoading ? "Thinking…" : "Complete & Continue →"}
                             </BtnPrimary>
                         )}
                     </div>
                     <div>
-                        <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI <em>Follow-up Questions</em></div>
+                        <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI Follow-up Questions</div>
                         <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>Our AI has analysed your case and identified the most important missing facts.</div>
                     </div>
 
@@ -901,10 +1142,10 @@ const ModIntake = () => {
             {/* ── STEP 4: AI Case Summary ──────────────────────────────── */}
             {step === 4 && (
                 <div className="aFadeUp" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16 }}>
-                        <BtnOutline onClick={() => setStep(3)} style={{ fontSize: 13, padding: "10px 20px" }}>← Back</BtnOutline>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
+                        <BtnOutline onClick={() => setStep(3)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
                         <div style={{ flex: 1 }} />
-                        <BtnPrimary onClick={() => { toast.show("✅ Case saved!", "success"); setStep(5); }} style={{ fontSize: 13, padding: "10px 22px" }}>Confirm & Save Case →</BtnPrimary>
+                        <BtnPrimary onClick={() => { toast.show("✅ Case saved!", "success"); setStep(5); }} style={{ fontSize: 13, padding: "8px 18px" }}>Confirm & Save Case →</BtnPrimary>
                     </div>
                     <div>
                         <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI-Generated <em>Case Summary</em></div>
@@ -1067,13 +1308,13 @@ const ModIntake = () => {
             {/* ── STEP 5: Categorization + Final Submit ────────────────── */}
             {step === 5 && (
                 <div className="aFadeUp" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16 }}>
-                        <BtnOutline onClick={() => setStep(4)} style={{ fontSize: 13, padding: "10px 20px" }}>← Back</BtnOutline>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
+                        <BtnOutline onClick={() => setStep(4)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
                         <div style={{ flex: 1 }} />
                         <BtnPrimary
                             disabled={intakeSubmitting}
                             onClick={() => { if (!intakeSubmitting) { toast.show("🎉 Case fully structured!"); handleSubmit(); } }}
-                            style={{ fontSize: 13, padding: "10px 22px", opacity: intakeSubmitting ? 0.7 : 1 }}>
+                            style={{ fontSize: 13, padding: "8px 18px", opacity: intakeSubmitting ? 0.7 : 1 }}>
                             {intakeSubmitting ? "Submitting…" : "🎉 Complete Case Intake →"}
                         </BtnPrimary>
                     </div>
@@ -1087,18 +1328,19 @@ const ModIntake = () => {
                             <div style={{ padding: "16px 20px", borderRadius: 16, background: `linear-gradient(135deg, ${t.primary}15, ${t.primary}05)`, border: `1px solid ${t.primary}30`, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
                                 <div style={{ fontSize: 18 }}>🤖</div>
                                 <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.6 }}>
-                                    AI identified your case as <strong style={{ color: t.primary }}>{CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput}</strong>. Confirm or select a different category.
+                                    {caseTypeInput
+                                        ? <>AI classified your case as <strong style={{ color: t.primary }}>{CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput}</strong>. Confirm or change below.</>
+                                        : <>Select the category that best describes your legal issue.</>
+                                    }
                                 </div>
                             </div>
 
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}>
                                 {[
                                     { id: "civil",          i: "⚖️",  n: "Civil Law",          d: "Property disputes, contracts, personal injury" },
                                     { id: "criminal",       i: "🚔",  n: "Criminal Law",        d: "FIR filing, bail applications, criminal defense" },
                                     { id: "family",         i: "👨‍👩‍👧",  n: "Family Law",          d: "Divorce, custody, inheritance, guardianship" },
                                     { id: "constitutional", i: "📜",  n: "Constitutional Law",  d: "Fundamental rights, writ petitions" },
-                                    { id: "property",       i: "🏠",  n: "Property Law",        d: "Land disputes, ownership, title deed" },
-                                    { id: "corporate",      i: "🏢",  n: "Corporate Law",       d: "Business disputes, NDA breaches, partnerships" },
                                 ].map(c => {
                                     const sel = c.id === caseTypeInput;
                                     return (
@@ -1151,9 +1393,9 @@ const ModIntake = () => {
                                     <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Export Case</div>
                                 </div>
                                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                    <BtnOutline onClick={() => toast.show("Generating PDF...")} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>📄 Download Case PDF</BtnOutline>
-                                    <BtnOutline onClick={() => toast.show("Opening email client...")} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>✉️ Email Summary</BtnOutline>
-                                    <BtnOutline onClick={() => toast.show("Printing...")} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>🖨️ Print</BtnOutline>
+                                    <BtnOutline onClick={handleDownloadPDF} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>📄 Download Case PDF</BtnOutline>
+                                    <BtnOutline onClick={handleEmail} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>✉️ Email Summary</BtnOutline>
+                                    <BtnOutline onClick={handlePrint} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>🖨️ Print</BtnOutline>
                                 </div>
                             </Card>
                         </div>

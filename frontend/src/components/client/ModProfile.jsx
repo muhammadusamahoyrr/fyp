@@ -1,9 +1,10 @@
 'use client';
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { updateMe } from "@/lib/api.js";
+import { updateMe, changePassword } from "@/lib/api.js";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, ConfirmDialog, Tooltip, Badge } from "@/components/shared/shared.jsx";
 
@@ -229,6 +230,14 @@ const HeroBgIcons = ({ color }) => (
     </svg>
 );
 
+const PROVINCE_OPTIONS = [
+    { value: "punjab",      label: "Punjab",          sub: "Lahore · Rawalpindi · Faisalabad",   flag: "🌾" },
+    { value: "sindh",       label: "Sindh",           sub: "Karachi · Hyderabad · Sukkur",       flag: "🌊" },
+    { value: "kpk",         label: "KPK",             sub: "Peshawar · Abbottabad · Mardan",     flag: "⛰️" },
+    { value: "balochistan", label: "Balochistan",     sub: "Quetta · Gwadar · Turbat",           flag: "🏜️" },
+    { value: "federal",     label: "Federal (ICT)",   sub: "Islamabad Capital Territory",        flag: "🏛️" },
+];
+
 /* ══════════════════════════════════════════════════════════════
    MODULE: PROFILE
 ══════════════════════════════════════════════════════════════ */
@@ -245,7 +254,29 @@ const ModProfile = () => {
     const [avatarHover, setAvatarHover] = useState(false);
     const [photoSrc, setPhotoSrc] = useState(null);
     const [saving, setSaving] = useState(false);
-    const [editData, setEditData] = useState({ full_name: "", email: "", phone: "", address: "" });
+    const [editData, setEditData] = useState({ full_name: "", phone: "", province: "" });
+    const [pwdData, setPwdData] = useState({ current: "", next: "", confirm: "" });
+    const [provinceOpen, setProvinceOpen] = useState(false);
+    const [provinceRect, setProvinceRect] = useState(null);
+    const [dropUp, setDropUp] = useState(false);
+    const provinceButtonRef = useRef(null);
+    const provinceDropRef = useRef(null);
+
+    useEffect(() => {
+        if (!provinceOpen) return;
+        const handler = (e) => {
+            if (
+                !provinceButtonRef.current?.contains(e.target) &&
+                !provinceDropRef.current?.contains(e.target)
+            ) setProvinceOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        document.addEventListener("touchstart", handler);
+        return () => {
+            document.removeEventListener("mousedown", handler);
+            document.removeEventListener("touchstart", handler);
+        };
+    }, [provinceOpen]);
     const fileInputRef = useRef(null);
 
     const displayName = user?.full_name || "Muhammad Usama";
@@ -267,27 +298,42 @@ const ModProfile = () => {
     const startEdit = () => {
         setEditData({
             full_name: displayName,
-            email: displayEmail,
-            phone: displayPhone,
-            address: displayAddress,
+            phone: user?.phone || "",
+            province: user?.province || "",
         });
         setEdit(true);
     };
 
     const handleSave = async () => {
         setSaving(true);
-        const { error } = await updateMe({ full_name: editData.full_name, phone: editData.phone });
+        const payload = { full_name: editData.full_name, phone: editData.phone };
+        if (editData.province) payload.province = editData.province;
+        const { error } = await updateMe(payload);
         if (error) {
             toast.show(error.detail || "Failed to save profile. Please try again.", "error");
         } else {
-            updateUser({ full_name: editData.full_name, phone: editData.phone });
+            updateUser(payload);
             toast.show("Profile updated successfully!", "success");
             setEdit(false);
         }
         setSaving(false);
     };
 
-    const handlePasswordUpdate = () => { setPwdMode(false); toast.show("Password changed successfully!", "success"); };
+    const handlePasswordUpdate = async () => {
+        if (!pwdData.current) { toast.show("Please enter your current password.", "warn", 2500); return; }
+        if (pwdData.next.length < 8) { toast.show("New password must be at least 8 characters.", "warn", 2500); return; }
+        if (pwdData.next !== pwdData.confirm) { toast.show("Passwords don't match.", "warn", 2500); return; }
+        setSaving(true);
+        const { error } = await changePassword(pwdData.current, pwdData.next);
+        if (error) {
+            toast.show(error.detail || "Failed to change password. Please try again.", "error");
+        } else {
+            toast.show("Password changed successfully!", "success");
+            setPwdMode(false);
+            setPwdData({ current: "", next: "", confirm: "" });
+        }
+        setSaving(false);
+    };
     const handleDeleteConfirm = () => {
         setDelConfirm(false);
         toast.show("Account deletion in progress...", "warn");
@@ -488,7 +534,13 @@ const ModProfile = () => {
                             <div>
                                 <SectionLabel>Contact Information</SectionLabel>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                                    <EditField label="Email" value={editData.email} icon="mail" type="email" />
+                                    <div>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7, fontSize: 10, color: tk.textMuted, fontWeight: 700, letterSpacing: "0.6px", textTransform: "uppercase" }}>
+                                            <Ic n="mail" s={11} c={tk.textMuted} />
+                                            Email (cannot be changed)
+                                        </div>
+                                        <ThemedInput value={displayEmail} disabled type="email" style={{ opacity: 0.55, cursor: "not-allowed" }} />
+                                    </div>
                                     <EditField
                                         label="Phone"
                                         value={editData.phone}
@@ -507,7 +559,124 @@ const ModProfile = () => {
                                         onChange={e => setEditData(d => ({ ...d, full_name: e.target.value }))}
                                         icon="user"
                                     />
-                                    <EditField label="Address" value={editData.address} icon="map" />
+                                    <div style={{ position: "relative" }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7, fontSize: 10, color: tk.textMuted, fontWeight: 700, letterSpacing: "0.6px", textTransform: "uppercase" }}>
+                                            <Ic n="map" s={11} c={tk.textMuted} />
+                                            Province
+                                        </div>
+
+                                        {/* Trigger button */}
+                                        <button
+                                            ref={provinceButtonRef}
+                                            type="button"
+                                            onClick={() => {
+                                                if (provinceButtonRef.current) {
+                                                    const r = provinceButtonRef.current.getBoundingClientRect();
+                                                    const dropdownHeight = 280;
+                                                    const dropdownWidth = Math.max(r.width, 280);
+                                                    const spaceBelow = window.innerHeight - r.bottom;
+                                                    const spaceRight = window.innerWidth - r.right;
+                                                    const shouldDropUp = spaceBelow < dropdownHeight + 20;
+                                                    const shouldAlignRight = spaceRight < dropdownWidth + 20;
+                                                    
+                                                    setDropUp(shouldDropUp);
+                                                    setProvinceRect({
+                                                        top: shouldDropUp ? r.top - dropdownHeight - 6 : r.bottom + 6,
+                                                        left: shouldAlignRight ? r.right - dropdownWidth : r.left,
+                                                        width: dropdownWidth,
+                                                    });
+                                                }
+                                                setProvinceOpen(v => !v);
+                                            }}
+                                            style={{
+                                                width: "100%", padding: "10px 14px", borderRadius: 8,
+                                                border: `1.5px solid ${provinceOpen ? tk.primary : tk.cardBorder}`,
+                                                background: tk.inputBg, color: editData.province ? tk.text : tk.textMuted,
+                                                fontSize: 13, outline: "none", cursor: "pointer", fontFamily: "inherit",
+                                                display: "flex", alignItems: "center", gap: 8,
+                                                transition: "border-color 0.15s, box-shadow 0.15s",
+                                                boxShadow: provinceOpen ? `0 0 0 3px ${tk.primary}20` : "none",
+                                            }}
+                                        >
+                                            {editData.province ? (
+                                                <>
+                                                    <span style={{ fontSize: 16, lineHeight: 1 }}>
+                                                        {PROVINCE_OPTIONS.find(p => p.value === editData.province)?.flag}
+                                                    </span>
+                                                    <span style={{ flex: 1, fontWeight: 600, textAlign: "left" }}>
+                                                        {PROVINCE_OPTIONS.find(p => p.value === editData.province)?.label}
+                                                    </span>
+                                                </>
+                                            ) : (
+                                                <span style={{ flex: 1, textAlign: "left" }}>— Select province —</span>
+                                            )}
+                                            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                                                style={{ flexShrink: 0, transition: "transform 0.2s", transform: provinceOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
+                                                <polyline points="6 9 12 15 18 9" />
+                                            </svg>
+                                        </button>
+
+                                        {/* Portal — renders into document.body, bypasses all overflow:hidden and CSS transforms */}
+                                        {provinceOpen && provinceRect && createPortal(
+                                            <>
+                                                <style>{`
+                                                    @keyframes fadeInDown {
+                                                        from { opacity: 0; transform: translateY(-4px); }
+                                                        to { opacity: 1; transform: translateY(0); }
+                                                    }
+                                                    @keyframes fadeInUp {
+                                                        from { opacity: 0; transform: translateY(4px); }
+                                                        to { opacity: 1; transform: translateY(0); }
+                                                    }
+                                                `}</style>
+                                                <div
+                                                    ref={provinceDropRef}
+                                                    style={{
+                                                        position: "fixed",
+                                                        top: provinceRect.top,
+                                                        left: provinceRect.left,
+                                                        width: provinceRect.width,
+                                                        maxHeight: 320,
+                                                        zIndex: 9999,
+                                                        background: tk.card, border: `1.5px solid ${tk.primary}40`, borderRadius: 12,
+                                                        boxShadow: `0 12px 40px rgba(0,0,0,0.22)`, overflow: "hidden",
+                                                        overflowY: "auto",
+                                                        animation: dropUp ? "fadeInUp 0.15s ease-out" : "fadeInDown 0.15s ease-out",
+                                                    }}>
+                                                    {PROVINCE_OPTIONS.map((p, i) => {
+                                                        const selected = editData.province === p.value;
+                                                        return (
+                                                            <div
+                                                                key={p.value}
+                                                                onClick={() => { setEditData(d => ({ ...d, province: p.value })); setProvinceOpen(false); }}
+                                                                style={{
+                                                                    display: "flex", alignItems: "center", gap: 12,
+                                                                    padding: "11px 14px", cursor: "pointer",
+                                                                    borderBottom: i < PROVINCE_OPTIONS.length - 1 ? `1px solid ${tk.divider}` : "none",
+                                                                    background: selected ? `${tk.primary}14` : "transparent",
+                                                                    transition: "background 0.12s",
+                                                                }}
+                                                                onMouseEnter={e => { if (!selected) e.currentTarget.style.background = tk.hoverBg; }}
+                                                                onMouseLeave={e => { if (!selected) e.currentTarget.style.background = selected ? `${tk.primary}14` : "transparent"; }}
+                                                            >
+                                                                <span style={{ fontSize: 20, lineHeight: 1, flexShrink: 0 }}>{p.flag}</span>
+                                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                                    <div style={{ fontSize: 13, fontWeight: 700, color: selected ? tk.primary : tk.text }}>{p.label}</div>
+                                                                    <div style={{ fontSize: 11, color: tk.textMuted, marginTop: 1 }}>{p.sub}</div>
+                                                                </div>
+                                                                {selected && (
+                                                                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={tk.primary} strokeWidth="2.5">
+                                                                        <polyline points="20 6 9 17 4 12" />
+                                                                    </svg>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </>,
+                                            document.body
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -519,17 +688,17 @@ const ModProfile = () => {
                             <div>
                                 <SectionLabel>Change Password</SectionLabel>
                                 <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 420, marginBottom: 16 }}>
-                                    <EditField label="Current Password" value="" icon="lock" type="password" />
-                                    <EditField label="New Password" value="" icon="lock" type="password" />
-                                    <EditField label="Confirm New Password" value="" icon="lock" type="password" />
+                                    <EditField label="Current Password" value={pwdData.current} onChange={e => setPwdData(d => ({ ...d, current: e.target.value }))} icon="lock" type="password" />
+                                    <EditField label="New Password" value={pwdData.next} onChange={e => setPwdData(d => ({ ...d, next: e.target.value }))} icon="lock" type="password" />
+                                    <EditField label="Confirm New Password" value={pwdData.confirm} onChange={e => setPwdData(d => ({ ...d, confirm: e.target.value }))} icon="lock" type="password" />
                                 </div>
                                 <div style={{ display: "flex", gap: 10 }}>
-                                    <BtnPrimary onClick={handlePasswordUpdate} style={{ fontSize: 13, padding: "12px 22px" }}>
+                                    <BtnPrimary onClick={handlePasswordUpdate} disabled={saving} style={{ fontSize: 13, padding: "12px 22px", opacity: saving ? 0.7 : 1 }}>
                                         <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                                            <Ic n="check" s={13} c={t.mode === "dark" ? "#1A2E35" : "#fff"} /> Update Password
+                                            <Ic n="check" s={13} c={t.mode === "dark" ? "#1A2E35" : "#fff"} /> {saving ? "Updating…" : "Update Password"}
                                         </span>
                                     </BtnPrimary>
-                                    <BtnOutline onClick={() => setPwdMode(false)} style={{ fontSize: 13, padding: "12px 22px" }}>Cancel</BtnOutline>
+                                    <BtnOutline onClick={() => { setPwdMode(false); setPwdData({ current: "", next: "", confirm: "" }); }} disabled={saving} style={{ fontSize: 13, padding: "12px 22px" }}>Cancel</BtnOutline>
                                 </div>
                             </div>
                         ) : (

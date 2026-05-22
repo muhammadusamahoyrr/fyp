@@ -114,11 +114,21 @@ def retrieval_node(state: AgentState) -> dict:
     if attempts > 1 and known_facts:
         base_query = f"{base_query} {' '.join(known_facts)}"
 
-    expanded  = _expand_query(base_query)
-    retriever = build_retriever(state["case_type"], state["province"])
+    expanded = _expand_query(base_query)
+    try:
+        retriever = build_retriever(state["case_type"], state["province"])
+    except Exception:
+        return {
+            "retrieved_chunks": [],
+            "reranked_chunks":  [],
+            "retrieval_attempts": attempts,
+        }
 
     # ── Hop 1: primary query ──────────────────────────────────────────────────
-    docs_hop1: list[Document] = retriever.invoke(expanded)
+    try:
+        docs_hop1: list[Document] = retriever.invoke(expanded)
+    except Exception:
+        docs_hop1 = []
 
     # ── Hop 2: follow statute cross-references found in hop-1 results ─────────
     all_hops: list[list[Document]] = [docs_hop1]

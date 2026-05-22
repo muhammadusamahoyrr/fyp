@@ -77,6 +77,15 @@ def _format_chunks(chunks: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
+_SYSTEM_DEEPEN = """\
+You are an expert Pakistani legal assistant. The user wants more detail on the previous answer.
+
+Using the retrieved law sections and the conversation history below, elaborate on the specific aspect the user is asking about.
+Keep the same IRAC structure but go deeper — add more legal analysis, cite additional sections, and explain implications.
+
+On the very last line, output ONLY this JSON: {"confidence": 0.85}"""
+
+
 def generation_node(state: AgentState) -> dict:
     attempts  = state.get("generation_attempts", 0) + 1
     prev_conf = state.get("confidence", 0.0)
@@ -84,7 +93,13 @@ def generation_node(state: AgentState) -> dict:
     llm     = get_llm()
     context = _format_chunks(state.get("reranked_chunks", []))
     lang    = state.get("language", "en")
-    system  = _SYSTEM_UR if lang in ("ur", "roman_urdu") else _SYSTEM_EN
+    intent  = state.get("followup_intent")
+
+    # Pick system prompt based on intent
+    if intent == "deepen":
+        system = _SYSTEM_DEEPEN
+    else:
+        system = _SYSTEM_UR if lang in ("ur", "roman_urdu") else _SYSTEM_EN
 
     # Use normalized query for generation so Urdu queries are standard script
     question = state.get("normalized_query") or state["query"]
@@ -94,7 +109,7 @@ def generation_node(state: AgentState) -> dict:
         chunks_to_use = state.get("reranked_chunks", [])[:4]
         context = _format_chunks(chunks_to_use)
 
-    history = format_history(state, max_turns=3)
+    history = format_history(state, max_turns=4)
     history_section = f"\nConversation context:\n{history}\n" if history else ""
 
     response = llm.invoke([

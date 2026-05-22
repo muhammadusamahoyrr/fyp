@@ -65,7 +65,7 @@ function MeshBg() {
 /* ─── Main page ───────────────────────────────────────────────── */
 export default function LoginPage() {
   const router = useRouter();
-  const { login, isAuthenticated, role: authRole } = useAuth();
+  const { login, user, loading: authLoading } = useAuth();
   const D = DARK;
   const L = LIGHT;
 
@@ -76,12 +76,11 @@ export default function LoginPage() {
   const [loading,  setLoading]  = useState(false);
   const [apiError, setApiError] = useState('');
 
-  // Redirect already-authenticated users
   useEffect(() => {
-    if (isAuthenticated) {
-      router.replace(authRole === 'lawyer' ? '/lawyer' : authRole === 'admin' ? '/admin' : '/dashboard');
+    if (!authLoading && user) {
+      router.replace(user.role === 'lawyer' ? '/lawyer' : user.role === 'admin' ? '/admin' : '/dashboard');
     }
-  }, [isAuthenticated, authRole]);
+  }, [authLoading, user]);
 
   async function handleSignIn() {
     if (!email || !password) { setApiError('Please enter your email and password.'); return; }
@@ -339,7 +338,7 @@ export default function LoginPage() {
             </div>
 
             {/* Sign In CTA */}
-            <button className="si-btn" onClick={handleSignIn} disabled={loading} style={{
+            <button className="si-btn" onClick={handleSignIn} disabled={loading || authLoading} style={{
               width: '100%', padding: '10px 0',
               background: `linear-gradient(135deg, ${L.primary} 0%, ${L.primaryDim} 100%)`,
               border: 'none', borderRadius: L.r.md,
@@ -347,9 +346,9 @@ export default function LoginPage() {
               letterSpacing: '0.03em',
               boxShadow: `0 4px 18px ${L.primaryGlow}`,
               marginBottom: 12,
-              opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: (loading || authLoading) ? 0.7 : 1, cursor: (loading || authLoading) ? 'not-allowed' : 'pointer',
             }}>
-              {loading ? 'Signing In…' : 'Sign In'}
+              {authLoading ? 'Checking session…' : loading ? 'Signing In…' : 'Sign In'}
             </button>
 
             {/* Register */}
