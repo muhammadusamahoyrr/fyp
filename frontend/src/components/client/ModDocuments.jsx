@@ -5,6 +5,8 @@ import { useT, useHeaderActions } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
+import { useCase } from "./CaseContext.jsx";
+import { extractDocumentFields, generateDocument, downloadDocument, submitDocumentForReview, listDocuments, searchLawyers } from "@/lib/api.js";
 
 const STitle = ({ icon, sub, children }) => {
     const t = useT();
@@ -26,18 +28,18 @@ const Lbl = ({ children }) => {
    MODULE: DOCUMENT AUTOMATION — 5-Step Wizard
 ══════════════════════════════════════════════════════ */
 const DRAFTS_DATA = [
-    { name: "Special Power of Attorney", cat: "Civil", views: 120, dl: 113, free: true },
-    { name: "Order I, Rule 10 — Intervenor App.", cat: "Civil", views: 39, dl: 44, free: false },
-    { name: "Joint Venture Agreement", cat: "Corporate", views: 16, dl: 27, free: true },
-    { name: "Condonation Application", cat: "Civil", views: 21, dl: 70, free: true },
-    { name: "Certified Copy Application", cat: "Civil", views: 28, dl: 49, free: false },
-    { name: "Articles of Association — SMC", cat: "Corporate", views: 9, dl: 15, free: true },
-    { name: "Employment Termination Letter", cat: "Employment", views: 55, dl: 88, free: true },
-    { name: "Non-Disclosure Agreement", cat: "Corporate", views: 102, dl: 95, free: false },
-    { name: "Bail Application", cat: "Criminal", views: 44, dl: 38, free: true },
-    { name: "Suit for Recovery of Money", cat: "Civil", views: 67, dl: 52, free: true },
-    { name: "Property Transfer Deed", cat: "Property", views: 33, dl: 28, free: false },
-    { name: "Labour Court Complaint", cat: "Employment", views: 29, dl: 41, free: true },
+    { name: "Special Power of Attorney", cat: "Civil" },
+    { name: "Order I, Rule 10 — Intervenor App.", cat: "Civil" },
+    { name: "Joint Venture Agreement", cat: "Corporate" },
+    { name: "Condonation Application", cat: "Civil" },
+    { name: "Certified Copy Application", cat: "Civil" },
+    { name: "Articles of Association — SMC", cat: "Corporate" },
+    { name: "Employment Termination Letter", cat: "Employment" },
+    { name: "Non-Disclosure Agreement", cat: "Corporate" },
+    { name: "Bail Application", cat: "Criminal" },
+    { name: "Suit for Recovery of Money", cat: "Civil" },
+    { name: "Property Transfer Deed", cat: "Property" },
+    { name: "Labour Court Complaint", cat: "Employment" },
 ];
 
 const DOC_TYPES_DATA = [
@@ -51,6 +53,15 @@ const DOC_TYPES_DATA = [
 
 const GEN_STEPS_LABELS = ["Extracting case data…", "Applying AI recommendations…", "Populating template…", "Formatting document…", "Generating draft…"];
 
+const DOC_TYPE_MAP = {
+    "Plaint": "plaint_civil",
+    "Written Statement": "written_statement",
+    "Legal Notice": "legal_notice",
+    "Contract": "nda",
+    "Settlement Draft": "rental_agreement",
+    "Stay Application": null,
+};
+
 const EVIDENCE_FILES = [
     { name: "Employment_Contract.pdf", size: "2.4 MB", date: "Feb 10", status: "Processed" },
     { name: "Termination_Letter.pdf", size: "512 KB", date: "Feb 12", status: "Processed" },
@@ -62,10 +73,13 @@ const EVIDENCE_FILES = [
 const ModDocuments = () => {
     const t = useT();
     const toast = useToast();
+    const { cases } = useCase();
 
     /* ── State ── */
     const [step, setStep] = useState(0);                       // 0–4
     const [selectedDraft, setSelectedDraft] = useState(null);
+    const [selectedCaseId, setSelectedCaseId] = useState("");
+    const [docId, setDocId] = useState(null);
     const [selectedCat, setSelectedCat] = useState("All");
     const [searchQ, setSearchQ] = useState("");
     const [selectedType, setSelectedType] = useState(null);   // chosen doc type
@@ -81,12 +95,18 @@ const ModDocuments = () => {
     const [editMode, setEditMode] = useState(false);
     const [docContent, setDocContent] = useState(null);       // null until generated
     const [userApproved, setUserApproved] = useState(false);
-    // Step 4 — lawyer submission
-    const [selLawyer, setSelLawyer] = useState(null);
+    // Step 4 — lawyer submission (real pipeline: submit → lawyer reviews → notified)
+    const [selLawyer, setSelLawyer] = useState(null);         // _id of the chosen lawyer
+    const [revLawyers, setRevLawyers] = useState([]);         // verified lawyers from the API
+    const [caseLawyerId, setCaseLawyerId] = useState(null);   // assigned lawyer of the linked case, if any
+    const [genCaseId, setGenCaseId] = useState(null);         // case the document was generated for
     const [reviewNote, setReviewNote] = useState("");
     const [urgency, setUrgency] = useState("Normal");
     const [reviewSent, setReviewSent] = useState(false);
-    const [lawyerAction, setLawyerAction] = useState(null);   // null | "editing" | "approved"
+    const [submitting, setSubmitting] = useState(false);
+    const [reviewStatus, setReviewStatus] = useState(null);   // submitted | approved | returned | rejected
+    const [lawyerNote, setLawyerNote] = useState("");         // lawyer's note from the review
+    const [revLawyerName, setRevLawyerName] = useState("");   // display name of the reviewing lawyer
     // Step 5 — final
     const [exported, setExported] = useState(false);
 
@@ -100,14 +120,76 @@ const ModDocuments = () => {
     ];
     const categories = ["All", "Civil", "Criminal", "Corporate", "Employment", "Property"];
     const catIcons = { All: "📋", Civil: "⚖️", Criminal: "🔒", Corporate: "🏢", Employment: "💼", Property: "🏠" };
-    const statusColors = { Draft: "gray", "Under Review": "warn", Approved: "success", Final: "info" };
-    const docStatus = genDone ? (reviewSent ? (lawyerAction === "approved" ? "Final" : "Under Review") : userApproved ? "Approved" : "Draft") : "Draft";
-    const lawyers = [
-        { name: "Ahmad Raza Khan", spec: "Employment Law", rating: 4.9, avail: true, avatar: "AR", fee: "PKR 5,000", cases: 148, eta: "~2 hrs" },
-        { name: "Sara Malik", spec: "Civil Litigation", rating: 4.8, avail: true, avatar: "SM", fee: "PKR 4,500", cases: 97, eta: "~3 hrs" },
-        { name: "Bilal Chaudhry", spec: "Corporate Law", rating: 4.7, avail: false, avatar: "BC", fee: "PKR 6,000", cases: 203, eta: "Unavailable" },
-    ];
+    const statusColors = { Draft: "gray", "Under Review": "warn", Approved: "success", Returned: "warn", Rejected: "danger", Final: "info" };
+    const docStatus = genDone
+        ? (reviewSent
+            ? (reviewStatus === "approved" ? "Final" : reviewStatus === "returned" ? "Returned" : reviewStatus === "rejected" ? "Rejected" : "Under Review")
+            : userApproved ? "Approved" : "Draft")
+        : "Draft";
     const GEN_STEPS = ["Extracting case data…", "Applying AI recommendations…", "Populating template…", "Formatting document…", "Finalising draft…"];
+
+    // Real verified lawyers for the review step
+    useEffect(() => {
+        if (step !== 3 || revLawyers.length) return;
+        searchLawyers({ page_size: 50 }).then(({ data }) => {
+            const items = Array.isArray(data) ? data : (data?.items || []);
+            setRevLawyers(items.map(l => ({
+                _id: l._id,
+                name: l.full_name || "Lawyer",
+                spec: ((l.lawyer_profile?.specializations || [])[0] || "General Practice").replace(/_/g, " "),
+                rating: l.lawyer_profile?.rating || 0,
+                avail: !!l.lawyer_profile?.availability,
+                avatar: (l.full_name || "L").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
+            })));
+        }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [step]);
+
+    // If the linked case already has a lawyer, the document goes to them
+    useEffect(() => {
+        const c = cases.find(x => (x._id || x.id) === genCaseId);
+        setCaseLawyerId(c?.lawyer_id || null);
+        if (c?.lawyer_id) setSelLawyer(c.lawyer_id);
+    }, [genCaseId, cases]);
+
+    // Poll the real review status while waiting for the lawyer
+    useEffect(() => {
+        if (!reviewSent || !docId || !genCaseId) return;
+        if (reviewStatus && reviewStatus !== "submitted") return; // terminal state reached
+        const refresh = async () => {
+            const { data } = await listDocuments(genCaseId);
+            const d = (Array.isArray(data) ? data : []).find(x => x._id === docId);
+            if (d?.review_status) {
+                setReviewStatus(d.review_status);
+                setLawyerNote(d.lawyer_note || "");
+            }
+        };
+        refresh();
+        const iv = setInterval(refresh, 12000);
+        return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [reviewSent, docId, genCaseId, reviewStatus]);
+
+    const submitToLawyer = async () => {
+        if (!docId) { toast.show("⚠️ Generate the document first (Step 2)", "warn"); return; }
+        if (!selLawyer) { toast.show("⚠️ Select a lawyer first", "warn"); return; }
+        setSubmitting(true);
+        const { data, error } = await submitDocumentForReview(docId, {
+            lawyer_id: selLawyer,
+            note: reviewNote.trim() || null,
+            urgency: urgency.toLowerCase(),
+        });
+        setSubmitting(false);
+        if (error) {
+            toast.show("❌ " + (error.message || "Submission failed"), "danger", 4000);
+            return;
+        }
+        setReviewStatus("submitted");
+        setLawyerNote("");
+        setRevLawyerName(data?.lawyer_name || revLawyers.find(l => l._id === selLawyer)?.name || "your lawyer");
+        setReviewSent(true);
+        toast.show(`📤 Submitted — ${data?.lawyer_name || "the lawyer"} has been notified`, "success", 3500);
+    };
 
     const filteredDrafts = DRAFTS_DATA.filter(d =>
         (selectedCat === "All" || d.cat === selectedCat) &&
@@ -128,12 +210,15 @@ const ModDocuments = () => {
         if (step === 0 && selectedDraft === null) {
             toast.show("⚠️ Select a template first", "warn"); return;
         }
+        // The final step is only reachable once the lawyer has actually approved
+        if (step === 3 && reviewStatus !== "approved") {
+            toast.show("⚠️ The final version unlocks after your lawyer approves the document", "warn", 3500); return;
+        }
         if (step < STEPS.length - 1) setStep(s => s + 1);
     };
     const prevStep = () => { if (step > 0) setStep(s => s - 1); };
 
     const pickDraft = i => {
-        if (!DRAFTS_DATA[i].free) { toast.show("🔒 Upgrade to Pro", "warn"); return; }
         setSelectedDraft(i);
         if (selectedType) setDocTitle(DRAFTS_DATA[i].name + " — " + selectedType);
     };
@@ -142,17 +227,45 @@ const ModDocuments = () => {
         if (selectedDraft !== null) setDocTitle(DRAFTS_DATA[selectedDraft].name + " — " + key);
     };
 
-    const handleGenerate = () => {
-        setGenerating(true); setGenPct(0); setGenDone(false);
-        let pct = 0, si = 0;
-        const iv = setInterval(() => {
-            pct += 20; si++;
-            setGenPct(pct);
-            if (pct >= 100) {
-                clearInterval(iv);
-                setTimeout(() => { setGenerating(false); setGenDone(true); toast.show("✅ Draft generated!", "success"); }, 400);
+    const handleGenerate = async () => {
+        const templateKey = DOC_TYPE_MAP[selectedType];
+        if (selectedType && templateKey === null) {
+            toast.show("⚠️ This document type is not yet supported by the AI", "warn"); return;
+        }
+        const caseId = selectedCaseId || (cases[0]?._id || cases[0]?.id);
+        if (!caseId) {
+            toast.show("⚠️ No case found — complete your legal intake first", "warn"); return;
+        }
+        const backendType = templateKey || "plaint_civil";
+        setGenerating(true); setGenPct(10); setGenDone(false); setDocId(null);
+        setGenCaseId(caseId);
+        // A regenerated document restarts the review pipeline
+        setReviewSent(false); setReviewStatus(null); setLawyerNote(""); setUserApproved(false);
+        try {
+            // Phase 1 — AI field extraction
+            const extractRes = await extractDocumentFields(caseId, backendType);
+            setGenPct(45);
+            if (extractRes.error) {
+                toast.show("❌ " + (extractRes.error?.detail || "Field extraction failed"), "danger");
+                setGenerating(false); return;
             }
-        }, 400);
+            // Phase 2 — PDF generation
+            const fields = extractRes.data?.fields || {};
+            const genRes = await generateDocument(caseId, backendType, fields);
+            setGenPct(90);
+            if (genRes.error) {
+                toast.show("❌ " + (genRes.error?.detail || "PDF generation failed"), "danger");
+                setGenerating(false); return;
+            }
+            const newDocId = genRes.data?._id || genRes.data?.doc_id;
+            setDocId(newDocId);
+            if (genRes.data?.title) setDocTitle(genRes.data.title);
+            setGenPct(100);
+            setTimeout(() => { setGenerating(false); setGenDone(true); toast.show("✅ Draft generated!", "success"); }, 300);
+        } catch {
+            toast.show("❌ Generation failed — check backend connection", "danger");
+            setGenerating(false);
+        }
     };
 
     /* ── Header actions ── */
@@ -160,16 +273,12 @@ const ModDocuments = () => {
     useEffect(() => {
         setHeaderActions(
             <>
-                {step === 0 && (
-                    <BtnPrimary onClick={() => toast.show("⚡ Upgrade to unlock all templates!", "success")} style={{ fontSize: 11, padding: "7px 18px", background: "linear-gradient(135deg,#0fa,#0d9)" }}>⚡ Upgrade to Pro</BtnPrimary>
-                )}
                 {step > 0 && <BtnOutline onClick={prevStep} style={{ fontSize: 11, padding: "7px 14px" }}>← Back</BtnOutline>}
-                {step > 0 && <BtnOutline onClick={() => toast.show("💾 Draft saved!", "success")} style={{ fontSize: 11, padding: "7px 14px" }}>💾 Save Draft</BtnOutline>}
                 {step > 0 && step < 4 && <BtnPrimary onClick={nextStep} style={{ fontSize: 11, padding: "7px 18px" }}>Continue →</BtnPrimary>}
             </>
         );
         return () => setHeaderActions(null);
-    });
+    }, [step, setHeaderActions]);
 
     /* ── Stepper ── */
     const Stepper = () => (
@@ -204,9 +313,9 @@ const ModDocuments = () => {
         { label: "User Review", active: step === 2 && !userApproved, done: step > 2 || userApproved },
         { label: "User Edit / Modify", active: step === 2 && editMode, done: step > 2 },
         { label: "Submit to Lawyer", active: step === 3 && !reviewSent, done: reviewSent },
-        { label: "Lawyer Review", active: reviewSent && lawyerAction === null, done: lawyerAction !== null },
-        { label: "Lawyer Edit / Approve", active: lawyerAction === "editing", done: lawyerAction === "approved" },
-        { label: "Final Version", active: lawyerAction === "approved" && !exported, done: exported },
+        { label: "Lawyer Review", active: reviewSent && reviewStatus === "submitted", done: reviewSent && reviewStatus !== "submitted" && reviewStatus !== null },
+        { label: "Lawyer Decision", active: false, done: ["approved", "returned", "rejected"].includes(reviewStatus) },
+        { label: "Final Version", active: reviewStatus === "approved" && !exported, done: exported },
         { label: "Export", active: exported, done: exported },
     ];
 
@@ -222,8 +331,8 @@ const ModDocuments = () => {
                 {step === 0 && (
                     <div>
                         {/* Stats bar */}
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 14 }}>
-                            {[["Total Templates", "30", "📄", t.primary], ["Recent", "5", "🕐", t.warn], ["Categories", "6", "📁", t.success], ["Free", "6", "⬇️", t.info]].map(([label, val, ico, col]) => (
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 14 }}>
+                            {[["Templates", String(DRAFTS_DATA.length), "📄", t.primary], ["Categories", String(new Set(DRAFTS_DATA.map(d => d.cat)).size), "📁", t.success]].map(([label, val, ico, col]) => (
                                 <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderRadius: 14, background: t.card, border: `1px solid ${t.border}` }}>
                                     <div>
                                         <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 4 }}>{label}</div>
@@ -251,9 +360,9 @@ const ModDocuments = () => {
                                 const gi = DRAFTS_DATA.indexOf(d);
                                 const sel = selectedDraft === gi;
                                 return (
-                                    <div key={gi} onClick={() => d.free && pickDraft(gi)} style={{ background: sel ? t.primaryGlow : t.card, border: `2px solid ${sel ? t.primary : t.border}`, borderRadius: 18, padding: 18, cursor: d.free ? "pointer" : "not-allowed", transition: "all 0.2s", position: "relative", display: "flex", flexDirection: "column", minHeight: 200, opacity: !d.free ? 0.6 : 1, boxShadow: sel ? `0 0 0 1px ${t.primary}, ${t.shadowCard}` : t.shadowCard }}
-                                        onMouseEnter={e => { if (d.free && !sel) { e.currentTarget.style.borderColor = t.primary + "60"; e.currentTarget.style.background = t.primaryGlow + "50"; } }}
-                                        onMouseLeave={e => { if (d.free && !sel) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.card; } }}
+                                    <div key={gi} onClick={() => pickDraft(gi)} style={{ background: sel ? t.primaryGlow : t.card, border: `2px solid ${sel ? t.primary : t.border}`, borderRadius: 18, padding: 18, cursor: "pointer", transition: "all 0.2s", position: "relative", display: "flex", flexDirection: "column", minHeight: 200, boxShadow: sel ? `0 0 0 1px ${t.primary}, ${t.shadowCard}` : t.shadowCard }}
+                                        onMouseEnter={e => { if (!sel) { e.currentTarget.style.borderColor = t.primary + "60"; e.currentTarget.style.background = t.primaryGlow + "50"; } }}
+                                        onMouseLeave={e => { if (!sel) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.card; } }}
                                     >
                                         {/* Selected badge */}
                                         {sel && <div style={{ position: "absolute", top: 12, left: 12, width: 22, height: 22, borderRadius: "50%", background: t.primary, color: t.mode === "dark" ? "#1A2E35" : "#fff", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 2px 8px ${t.primaryGlow}` }}>✓</div>}
@@ -265,15 +374,10 @@ const ModDocuments = () => {
                                         <Badge type={catBadgeColor(d.cat)} style={{ marginBottom: 7, alignSelf: "flex-start", fontSize: 10 }}>{d.cat}</Badge>
                                         {/* Name */}
                                         <div style={{ fontSize: 13, fontWeight: 700, color: sel ? t.primary : t.text, lineHeight: 1.35, marginBottom: 6, flex: 1 }}>{d.name}</div>
-                                        {/* Stats */}
-                                        <div style={{ display: "flex", gap: 12, fontSize: 11, color: t.textMuted, marginBottom: 10 }}><span>👁 {d.views}</span><span>⬇️ {d.dl}</span></div>
-                                        {/* Action buttons */}
+                                        {/* Action */}
                                         <div style={{ display: "flex", gap: 7 }}>
-                                            <button onClick={e => { e.stopPropagation(); toast.show("🔍 Template preview", "info"); }} style={{ flex: 1, padding: "7px", borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.card, color: t.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif" }}>🔍 Preview</button>
-                                            <button onClick={e => { e.stopPropagation(); d.free ? (sel ? nextStep() : pickDraft(gi)) : toast.show("🔒 Upgrade to access", "warn"); }} style={{ flex: 1, padding: "7px", borderRadius: 10, border: `1.5px solid ${sel ? t.primary : t.border}`, background: sel ? t.primary : t.card, color: sel ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted, fontSize: 11, fontWeight: 600, cursor: d.free || sel ? "pointer" : "not-allowed", fontFamily: "'Inter',sans-serif", transition: "all 0.2s" }}>{sel ? "✓ Use Template" : d.free ? "Select" : "🔒 Pro"}</button>
+                                            <button onClick={e => { e.stopPropagation(); sel ? nextStep() : pickDraft(gi); }} style={{ flex: 1, padding: "7px", borderRadius: 10, border: `1.5px solid ${sel ? t.primary : t.border}`, background: sel ? t.primary : t.card, color: sel ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif", transition: "all 0.2s" }}>{sel ? "✓ Use Template" : "Select"}</button>
                                         </div>
-                                        {/* Pro lock overlay */}
-                                        {!d.free && <div style={{ position: "absolute", inset: 0, borderRadius: 17, background: `${t.card}cc`, backdropFilter: "blur(2px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}><span style={{ fontSize: 20 }}>🔒</span><span style={{ fontSize: 11, color: t.textMuted, fontWeight: 600 }}>Pro Only</span></div>}
                                     </div>
                                 );
                             }) : <div style={{ gridColumn: "span 3", textAlign: "center", padding: 48, color: t.textMuted, fontSize: 13 }}>No templates found.</div>}
@@ -308,6 +412,15 @@ const ModDocuments = () => {
                             <STitle icon="sparkle" sub="Configure your document before AI drafting">Generation Settings</STitle>
                             <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
                                 <div><Lbl>Document Title</Lbl><ThemedInput value={docTitle} onChange={e => setDocTitle(e.target.value)} placeholder={`${selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "Employment Dispute"} — ${selectedType || "Plaint"}`} /></div>
+                                {cases.length > 0 && (
+                                    <div>
+                                        <Lbl>Linked Case</Lbl>
+                                        <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5, fontFamily: "'Inter',sans-serif" }}>
+                                            <option value="">Select a case…</option>
+                                            {cases.map(c => <option key={c._id || c.id} value={c._id || c.id}>{c.title || c.case_type || (c._id || c.id)}</option>)}
+                                        </select>
+                                    </div>
+                                )}
                                 <div><Lbl>Case Reference No.</Lbl><ThemedInput value={caseRef} onChange={e => setCaseRef(e.target.value)} placeholder="e.g. CASE-2026-00142" /></div>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                                     <div><Lbl>Jurisdiction</Lbl>
@@ -417,7 +530,7 @@ const ModDocuments = () => {
 
                             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                                 <BtnOutline onClick={() => toast.show("📄 PDF generated!", "success")} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>📄 PDF</BtnOutline>
-                                <BtnOutline onClick={() => toast.show("📥 Downloading…", "info")} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>📥 Download</BtnOutline>
+                                <BtnOutline onClick={() => { if (docId) { downloadDocument(docId, docTitle || "document"); } else { toast.show("⚠️ Generate the document first", "warn"); } }} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>📥 Download</BtnOutline>
                                 <BtnOutline onClick={() => toast.show("✉️ Email sent!", "success")} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>✉️ Email</BtnOutline>
                                 <BtnOutline onClick={() => toast.show("🖨️ Printing…", "info")} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>🖨️ Print</BtnOutline>
                             </div>
@@ -481,27 +594,36 @@ const ModDocuments = () => {
                             </div>
 
                             <Card>
-                                <STitle icon="scale" sub="Select a lawyer to review your document">Choose Lawyer</STitle>
+                                <STitle icon="scale" sub={caseLawyerId ? "Your case lawyer will review this document" : "Select a verified lawyer to review your document"}>Choose Lawyer</STitle>
                                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                                    {lawyers.map((l, i) => (
-                                        <div key={i} onClick={() => l.avail && setSelLawyer(i)} style={{ display: "flex", alignItems: "center", gap: 13, padding: "13px 15px", borderRadius: 13, border: `2px solid ${selLawyer === i ? t.primary : t.border}`, background: selLawyer === i ? t.primaryGlow : t.inputBg, cursor: l.avail ? "pointer" : "not-allowed", transition: "all 0.2s", opacity: l.avail ? 1 : 0.45, position: "relative" }}>
-                                            <div style={{ width: 44, height: 44, borderRadius: "50%", background: selLawyer === i ? t.primary : `${t.primary}18`, border: `2px solid ${selLawyer === i ? t.primary : t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: selLawyer === i ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.primary, flexShrink: 0, transition: "all 0.2s" }}>{l.avatar}</div>
+                                    {caseLawyerId && (
+                                        <div style={{ fontSize: 11.5, color: t.textMuted, padding: "8px 12px", borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}30`, lineHeight: 1.55 }}>
+                                            This case already has an engaged lawyer — documents for it are reviewed by them.
+                                        </div>
+                                    )}
+                                    {(caseLawyerId ? revLawyers.filter(l => l._id === caseLawyerId) : revLawyers).map(l => (
+                                        <div key={l._id} onClick={() => setSelLawyer(l._id)} style={{ display: "flex", alignItems: "center", gap: 13, padding: "13px 15px", borderRadius: 13, border: `2px solid ${selLawyer === l._id ? t.primary : t.border}`, background: selLawyer === l._id ? t.primaryGlow : t.inputBg, cursor: "pointer", transition: "all 0.2s", position: "relative" }}>
+                                            <div style={{ width: 44, height: 44, borderRadius: "50%", background: selLawyer === l._id ? t.primary : `${t.primary}18`, border: `2px solid ${selLawyer === l._id ? t.primary : t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: selLawyer === l._id ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.primary, flexShrink: 0, transition: "all 0.2s" }}>{l.avatar}</div>
                                             <div style={{ flex: 1, minWidth: 0 }}>
                                                 <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>{l.name}</div>
-                                                <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 4 }}>{l.spec}</div>
+                                                <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 4, textTransform: "capitalize" }}>{l.spec}</div>
                                                 <div style={{ display: "flex", gap: 10, fontSize: 11 }}>
-                                                    <span style={{ color: t.warn }}>⭐ {l.rating}</span>
-                                                    <span style={{ color: t.textMuted }}>💼 {l.cases} cases</span>
-                                                    <span style={{ color: t.success, fontWeight: 600 }}>{l.fee}/review</span>
+                                                    {l.rating > 0 && <span style={{ color: t.warn }}>⭐ {l.rating}</span>}
+                                                    <span style={{ color: l.avail ? t.success : t.textMuted }}>{l.avail ? "● Available" : "○ Busy"}</span>
                                                 </div>
                                             </div>
-                                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 }}>
-                                                <Badge type={l.avail ? "success" : "gray"}>{l.avail ? "● Available" : "○ Busy"}</Badge>
-                                                <div style={{ fontSize: 10, color: t.textFaint }}>{l.eta}</div>
-                                            </div>
-                                            {selLawyer === i && <div style={{ position: "absolute", top: 8, right: 8, width: 20, height: 20, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff" }}>✓</div>}
+                                            {selLawyer === l._id && <div style={{ position: "absolute", top: 8, right: 8, width: 20, height: 20, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff" }}>✓</div>}
                                         </div>
                                     ))}
+                                    {caseLawyerId && !revLawyers.some(l => l._id === caseLawyerId) && (
+                                        <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "13px 15px", borderRadius: 13, border: `2px solid ${t.primary}`, background: t.primaryGlow }}>
+                                            <div style={{ width: 44, height: 44, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff", flexShrink: 0 }}>⚖️</div>
+                                            <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Your engaged case lawyer</div>
+                                        </div>
+                                    )}
+                                    {!caseLawyerId && !revLawyers.length && (
+                                        <div style={{ fontSize: 12, color: t.textMuted, textAlign: "center", padding: "18px 0" }}>Loading verified lawyers…</div>
+                                    )}
                                 </div>
                             </Card>
 
@@ -515,64 +637,46 @@ const ModDocuments = () => {
                         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
                             {/* Selected lawyer preview */}
-                            <Card style={{ minHeight: 90, display: "flex", alignItems: selLawyer === null ? "center" : "flex-start" }}>
-                                {selLawyer === null ? (
+                            <Card style={{ minHeight: 90, display: "flex", alignItems: !selLawyer ? "center" : "flex-start" }}>
+                                {!selLawyer ? (
                                     <div style={{ textAlign: "center", color: t.textMuted, fontSize: 12, width: "100%" }}><div style={{ fontSize: 24, marginBottom: 5 }}>👤</div>Select a lawyer</div>
-                                ) : (
-                                    <div style={{ width: "100%" }}>
-                                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 8 }}>Assigned Lawyer</div>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", borderRadius: 11, background: t.primaryGlow, border: `1px solid ${t.primary}40` }}>
-                                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff", flexShrink: 0 }}>{lawyers[selLawyer].avatar}</div>
-                                            <div>
-                                                <div style={{ fontSize: 12, fontWeight: 700, color: t.text }}>{lawyers[selLawyer].name}</div>
-                                                <div style={{ fontSize: 10, color: t.primary }}>{lawyers[selLawyer].spec}</div>
+                                ) : (() => {
+                                    const l = revLawyers.find(x => x._id === selLawyer);
+                                    return (
+                                        <div style={{ width: "100%" }}>
+                                            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 8 }}>Reviewing Lawyer</div>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", borderRadius: 11, background: t.primaryGlow, border: `1px solid ${t.primary}40` }}>
+                                                <div style={{ width: 34, height: 34, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff", flexShrink: 0 }}>{l?.avatar || "⚖️"}</div>
+                                                <div>
+                                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.text }}>{l?.name || "Your case lawyer"}</div>
+                                                    <div style={{ fontSize: 10, color: t.primary, textTransform: "capitalize" }}>{l?.spec || (caseLawyerId ? "Engaged on this case" : "")}</div>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                )}
+                                    );
+                                })()}
                             </Card>
 
-                            {/* Urgency */}
+                            {/* Urgency — tells the lawyer how quickly you need this back */}
                             <Card>
-                                <STitle icon="clock" sub="Response time">Urgency</STitle>
-                                {[["Normal", "2–4 hours", "Standard", t.success], ["Priority", "1–2 hours", "+25%", t.warn], ["Urgent", "< 1 hour", "+60%", t.danger]].map(([lvl, eta, fee, col]) => (
+                                <STitle icon="clock" sub="How urgent is this review?">Urgency</STitle>
+                                {[["Normal", "No rush", t.success], ["Priority", "Needed soon", t.warn], ["Urgent", "Time-critical", t.danger]].map(([lvl, desc, col]) => (
                                     <div key={lvl} onClick={() => setUrgency(lvl)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${urgency === lvl ? col : t.border}`, background: urgency === lvl ? `${col}10` : t.inputBg, cursor: "pointer", marginBottom: 7, transition: "all 0.2s" }}>
                                         <div style={{ width: 13, height: 13, borderRadius: "50%", border: `2px solid ${urgency === lvl ? col : t.border}`, background: urgency === lvl ? col : "transparent", flexShrink: 0 }} />
                                         <div style={{ flex: 1 }}>
                                             <div style={{ fontSize: 12, fontWeight: urgency === lvl ? 700 : 500, color: urgency === lvl ? col : t.text }}>{lvl}</div>
-                                            <div style={{ fontSize: 10, color: t.textFaint }}>{eta}</div>
+                                            <div style={{ fontSize: 10, color: t.textFaint }}>{desc}</div>
                                         </div>
-                                        <span style={{ fontSize: 10, fontWeight: 600, color: urgency === lvl ? col : t.textMuted }}>{fee}</span>
                                     </div>
                                 ))}
                             </Card>
 
-                            {/* Fee */}
-                            {selLawyer !== null && (
-                                <div style={{ padding: "12px 14px", borderRadius: 12, background: t.inputBg, border: `1px solid ${t.border}` }}>
-                                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 8 }}>Fee Summary</div>
-                                    {[["Base fee", lawyers[selLawyer].fee], ["Urgency", urgency === "Priority" ? "+25%" : urgency === "Urgent" ? "+60%" : "—"]].map(([k, v]) => (
-                                        <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${t.border}`, fontSize: 11.5 }}>
-                                            <span style={{ color: t.textMuted }}>{k}</span><span style={{ fontWeight: 600, color: t.text }}>{v}</span>
-                                        </div>
-                                    ))}
-                                    <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0 0", fontSize: 13, fontWeight: 800 }}>
-                                        <span style={{ color: t.text }}>Total</span>
-                                        <span style={{ color: t.primary }}>{urgency === "Priority" ? "PKR 5,625" : urgency === "Urgent" ? "PKR 8,000" : lawyers[selLawyer].fee}</span>
-                                    </div>
-                                </div>
-                            )}
-
-                            <BtnPrimary onClick={() => {
-                                if (selLawyer === null) { toast.show("⚠️ Select a lawyer first", "warn"); return; }
-                                setReviewSent(true);
-                                toast.show(`📤 Sent to ${lawyers[selLawyer].name}`, "success");
-                            }} style={{ width: "100%", fontSize: 13, padding: "14px", borderRadius: 12, justifyContent: "center", boxShadow: `0 6px 20px ${t.primaryGlow}`, opacity: selLawyer === null ? 0.5 : 1 }}>
-                                📤 Submit to Lawyer
+                            <BtnPrimary onClick={submitToLawyer} disabled={submitting} style={{ width: "100%", fontSize: 13, padding: "14px", borderRadius: 12, justifyContent: "center", boxShadow: `0 6px 20px ${t.primaryGlow}`, opacity: !selLawyer || submitting ? 0.6 : 1 }}>
+                                {submitting ? "⏳ Submitting…" : "📤 Submit to Lawyer"}
                             </BtnPrimary>
-                            <BtnOutline onClick={() => toast.show("💾 Saved as draft", "success")} style={{ width: "100%", fontSize: 12, padding: "10px", borderRadius: 10 }}>
-                                💾 Save as Draft
-                            </BtnOutline>
+                            <div style={{ fontSize: 11, color: t.textMuted, lineHeight: 1.6, textAlign: "center" }}>
+                                The lawyer is notified immediately and you'll get a notification when they respond.
+                            </div>
                         </div>
                     </div>
                 )}
@@ -587,8 +691,8 @@ const ModDocuments = () => {
                                 <div style={{ width: 60, height: 60, borderRadius: "50%", background: t.primaryGlow, border: `2px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, margin: "0 auto 12px" }}>📬</div>
                                 <div style={{ fontSize: 16, fontWeight: 800, color: t.text, fontFamily: "'Playfair Display',serif", marginBottom: 5 }}>Submitted for Legal Review</div>
                                 <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 6, padding: "7px 14px", borderRadius: 50, background: t.primaryGlow, border: `1px solid ${t.primary}40` }}>
-                                    <div style={{ width: 24, height: 24, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff" }}>{lawyers[selLawyer].avatar}</div>
-                                    <span style={{ fontSize: 13, fontWeight: 700, color: t.primary }}>{lawyers[selLawyer].name}</span>
+                                    <div style={{ width: 24, height: 24, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff" }}>⚖️</div>
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: t.primary }}>{revLawyerName}</span>
                                 </div>
                             </div>
 
@@ -596,11 +700,15 @@ const ModDocuments = () => {
                             <div style={{ position: "relative" }}>
                                 <div style={{ position: "absolute", left: 13, top: 26, bottom: 26, width: 2, background: `linear-gradient(${t.primary}, ${t.border})`, borderRadius: 2 }} />
                                 {[
-                                    { ico: "✅", label: "Document submitted", sub: "Just now", done: true, active: false },
-                                    { ico: "🔔", label: "Lawyer notified", sub: "Just now", done: true, active: false },
-                                    { ico: "🔍", label: "Lawyer review", sub: urgency === "Urgent" ? "< 1 hr" : urgency === "Priority" ? "1–2 hrs" : "2–4 hrs", done: false, active: lawyerAction === null },
-                                    { ico: "✏️", label: "Lawyer edit / modify", sub: "If changes needed", done: lawyerAction === "approved", active: lawyerAction === "editing" },
-                                    { ico: "✅", label: "Lawyer approved", sub: "Final sign-off", done: lawyerAction === "approved", active: false },
+                                    { ico: "✅", label: "Document submitted", sub: "Done", done: true, active: false },
+                                    { ico: "🔔", label: "Lawyer notified", sub: "Done", done: true, active: false },
+                                    { ico: "🔍", label: "Lawyer review", sub: reviewStatus === "submitted" ? "In progress — updates automatically" : "Complete", done: reviewStatus !== "submitted", active: reviewStatus === "submitted" },
+                                    {
+                                        ico: reviewStatus === "approved" ? "✅" : reviewStatus === "returned" ? "↩️" : reviewStatus === "rejected" ? "❌" : "⚖️",
+                                        label: reviewStatus === "approved" ? "Approved by lawyer" : reviewStatus === "returned" ? "Returned with changes" : reviewStatus === "rejected" ? "Rejected by lawyer" : "Lawyer decision",
+                                        sub: reviewStatus === "submitted" ? "Pending" : "Recorded",
+                                        done: ["approved", "returned", "rejected"].includes(reviewStatus), active: false,
+                                    },
                                 ].map((item, i) => (
                                     <div key={i} style={{ display: "flex", gap: 13, marginBottom: 14, alignItems: "flex-start", position: "relative" }}>
                                         <div style={{ width: 28, height: 28, borderRadius: "50%", background: item.done ? t.primary : item.active ? t.primaryGlow : t.inputBg, border: `2px solid ${item.done ? t.primary : item.active ? t.primary : t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0, zIndex: 1, boxShadow: item.active ? `0 0 0 4px ${t.primaryGlow}` : "none" }}>{item.ico}</div>
@@ -613,22 +721,29 @@ const ModDocuments = () => {
                                 ))}
                             </div>
 
-                            {/* Simulate lawyer actions */}
-                            {lawyerAction === null && (
-                                <div style={{ marginTop: 4, padding: "12px 14px", borderRadius: 12, background: `${t.warn}10`, border: `1px solid ${t.warn}30` }}>
-                                    <div style={{ fontSize: 11, fontWeight: 700, color: t.warn, marginBottom: 8 }}>Simulate Lawyer Response</div>
-                                    <div style={{ display: "flex", gap: 8 }}>
-                                        <BtnOutline onClick={() => { setLawyerAction("editing"); toast.show("✏️ Lawyer is editing…", "info"); }} style={{ flex: 1, fontSize: 11, padding: "8px", borderRadius: 9, borderColor: t.warn, color: t.warn }}>✏️ Lawyer Edits</BtnOutline>
-                                        <BtnPrimary onClick={() => { setLawyerAction("approved"); toast.show("✅ Lawyer approved!", "success"); }} style={{ flex: 1, fontSize: 11, padding: "8px", borderRadius: 9, justifyContent: "center" }}>✅ Lawyer Approves</BtnPrimary>
-                                    </div>
+                            {/* Real status-driven actions */}
+                            {reviewStatus === "submitted" && (
+                                <div style={{ marginTop: 4, padding: "12px 14px", borderRadius: 12, background: t.primaryGlow, border: `1px solid ${t.primary}30`, fontSize: 11.5, color: t.textMuted, lineHeight: 1.6 }}>
+                                    ⏳ Waiting for {revLawyerName} to review. This page checks automatically —
+                                    you'll also get a notification the moment they respond.
                                 </div>
                             )}
-                            {lawyerAction === "editing" && (
-                                <BtnPrimary onClick={() => { setLawyerAction("approved"); toast.show("✅ Lawyer approved after edits!", "success"); }} style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 11, justifyContent: "center", marginTop: 4 }}>
-                                    ✅ Lawyer Approves After Edit
-                                </BtnPrimary>
+                            {(reviewStatus === "returned" || reviewStatus === "rejected") && (
+                                <div style={{ marginTop: 4 }}>
+                                    <div style={{ padding: "12px 14px", borderRadius: 12, background: reviewStatus === "returned" ? `${t.warn}10` : `${t.danger}10`, border: `1px solid ${reviewStatus === "returned" ? t.warn : t.danger}30`, marginBottom: 8 }}>
+                                        <div style={{ fontSize: 11, fontWeight: 700, color: reviewStatus === "returned" ? t.warn : t.danger, marginBottom: 4 }}>
+                                            {reviewStatus === "returned" ? "↩️ Lawyer requested changes" : "❌ Lawyer rejected this document"}
+                                        </div>
+                                        <div style={{ fontSize: 12, color: t.text, lineHeight: 1.6 }}>{lawyerNote || "No note provided."}</div>
+                                    </div>
+                                    {reviewStatus === "returned" && (
+                                        <BtnPrimary onClick={() => { setReviewSent(false); setReviewStatus(null); goTo(1); }} style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 11, justifyContent: "center" }}>
+                                            ✏️ Revise & Regenerate →
+                                        </BtnPrimary>
+                                    )}
+                                </div>
                             )}
-                            {lawyerAction === "approved" && (
+                            {reviewStatus === "approved" && (
                                 <BtnPrimary onClick={() => goTo(4)} style={{ width: "100%", fontSize: 13, padding: "13px", borderRadius: 12, justifyContent: "center", marginTop: 4, boxShadow: `0 4px 18px ${t.primaryGlow}` }}>
                                     🏛 View Final Version →
                                 </BtnPrimary>
@@ -643,7 +758,7 @@ const ModDocuments = () => {
                                     <div style={{ fontSize: 12, fontWeight: 700, color: t.text, marginBottom: 1 }}>{docTitle || "Employment Dispute"}</div>
                                     <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType} · {caseRef || "No ref"}</div>
                                 </div>
-                                {[["Lawyer", lawyers[selLawyer].name], ["Urgency", urgency], ["Type", selectedType], ["Status", null]].map(([k, v]) => (
+                                {[["Lawyer", revLawyerName], ["Urgency", urgency], ["Type", selectedType], ["Status", null]].map(([k, v]) => (
                                     <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>{k}</span>
                                         {k === "Status" ? <Badge type={statusColors[docStatus]}>{docStatus}</Badge>
@@ -672,7 +787,7 @@ const ModDocuments = () => {
                                 <div style={{ width: 30, height: 30, borderRadius: "50%", background: `${t.success}20`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>🔔</div>
                                 <div>
                                     <div style={{ fontSize: 12, fontWeight: 700, color: t.text, marginBottom: 2 }}>You'll be notified</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>Alert when {lawyers[selLawyer].name} completes review.</div>
+                                    <div style={{ fontSize: 11, color: t.textMuted }}>Alert when {revLawyerName} completes review.</div>
                                 </div>
                             </div>
                         </div>
@@ -709,7 +824,7 @@ const ModDocuments = () => {
                                 <p style={{ marginBottom: 6 }}><strong>PRAYER:</strong></p>
                                 <p style={{ marginBottom: 20 }}>The plaintiff respectfully prays that this Honourable Court may be pleased to award PKR 500,000 as compensation together with costs of the suit.</p>
                                 <div style={{ borderTop: `1px solid ${t.border}`, paddingTop: 14, display: "flex", justifyContent: "space-between", fontSize: 11, color: t.textMuted }}>
-                                    <span>🏛 Approved by {selLawyer !== null ? lawyers[selLawyer].name : "Lawyer"}</span>
+                                    <span>🏛 Approved by {revLawyerName || "Lawyer"}</span>
                                     <span>📅 {new Date().toLocaleDateString("en-GB")}</span>
                                 </div>
                             </div>
@@ -718,7 +833,7 @@ const ModDocuments = () => {
                             <div style={{ marginTop: 14 }}>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
                                     {[["📄", "Generate PDF"], ["📥", "Download"], ["✉️", "Email"], ["🖨️", "Print"]].map(([ico, lbl]) => (
-                                        <div key={lbl} onClick={() => { setExported(true); toast.show(`${ico} ${lbl}…`, "success"); }} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "12px 8px", borderRadius: 12, border: `1.5px solid ${t.border}`, background: t.inputBg, cursor: "pointer", transition: "all 0.2s" }}
+                                        <div key={lbl} onClick={() => { setExported(true); if (lbl === "Download" && docId) { downloadDocument(docId, docTitle || "document"); } else { toast.show(`${ico} ${lbl}…`, "success"); } }} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "12px 8px", borderRadius: 12, border: `1.5px solid ${t.border}`, background: t.inputBg, cursor: "pointer", transition: "all 0.2s" }}
                                             onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.background = t.primaryGlow; }}
                                             onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.inputBg; }}>
                                             <span style={{ fontSize: 20 }}>{ico}</span>
@@ -736,14 +851,14 @@ const ModDocuments = () => {
                             <div style={{ textAlign: "center", padding: "20px 16px", borderRadius: 16, background: `linear-gradient(135deg,${t.primaryGlow},${t.card})`, border: `1px solid ${t.primary}30` }}>
                                 <div style={{ fontSize: 42, marginBottom: 10 }}>🎉</div>
                                 <div style={{ fontSize: 14, fontWeight: 800, color: t.text, fontFamily: "'Playfair Display',serif", marginBottom: 5 }}>Document Complete</div>
-                                <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 12 }}>Reviewed and approved by {selLawyer !== null ? lawyers[selLawyer].name : "your lawyer"}</div>
+                                <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 12 }}>Reviewed and approved by {revLawyerName || "your lawyer"}</div>
                                 <Badge type="info" style={{ fontSize: 12, padding: "5px 14px" }}>● Final Version</Badge>
                             </div>
 
                             {/* Document summary */}
                             <Card>
                                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 10 }}>Document Summary</div>
-                                {[["Type", selectedType || "—"], ["Template", selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "—"], ["Case Ref", caseRef || "—"], ["Reviewer", selLawyer !== null ? lawyers[selLawyer].name : "—"], ["Status", null], ["Compliance", null]].map(([k, v]) => (
+                                {[["Type", selectedType || "—"], ["Template", selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Compliance", null]].map(([k, v]) => (
                                     <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>{k}</span>
                                         {k === "Status" ? <Badge type="info">Final</Badge> : k === "Compliance" ? <Badge type="success">✓ Verified</Badge> : <span style={{ fontWeight: 600, color: t.text, textAlign: "right", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>}

@@ -1,17 +1,48 @@
+import logging
+
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
+from app.core.constants import AppointmentStatus, EngagementStatus
 from app.db.collections import (
     get_agreements_col,
     get_appointments_col,
     get_cases_col,
     get_chat_sessions_col,
+    get_checkpoint_writes_col,
+    get_checkpoints_col,
     get_documents_col,
+    get_engagements_col,
     get_intakes_col,
+    get_lawyer_reviews_col,
     get_notifications_col,
     get_password_reset_col,
+    get_payment_events_col,
+    get_payments_col,
+    get_poas_col,
     get_refresh_blocklist_col,
+    get_subscriptions_col,
     get_users_col,
+    get_ws_tickets_col,
 )
+
+logger = logging.getLogger(__name__)
+
+
+async def _try_unique_partial(col, keys, name: str, status_value: str | None = None) -> None:
+    """Create a unique index. When `status_value` is given it's a partial-unique
+    index scoped to that `status`; when omitted it's a plain unique index. If
+    legacy duplicates already exist, log and skip rather than crash startup — the
+    operator can dedupe and restart to enforce it."""
+    kwargs: dict = {"unique": True, "name": name}
+    if status_value is not None:
+        kwargs["partialFilterExpression"] = {"status": status_value}
+    try:
+        await col.create_indexes([IndexModel(keys, **kwargs)])
+    except Exception:
+        logger.warning(
+            "Could not create unique index %s (existing duplicates?). "
+            "Dedupe the collection and restart to enforce it.", name,
+        )
 
 
 async def create_all_indexes() -> None:
@@ -23,7 +54,38 @@ async def create_all_indexes() -> None:
     await _notifications_indexes()
     await _chat_sessions_indexes()
     await _appointments_indexes()
+    await _engagements_indexes()
+    await _lawyer_reviews_indexes()
     await _auth_indexes()
+    await _payments_indexes()
+    await _poa_indexes()
+    await _checkpoint_indexes()
+
+
+async def _checkpoint_indexes() -> None:
+    """LangGraph conversation checkpoints.
+
+    The unique keys are what make the upserts in MongoDBSaver safe under
+    concurrency: without them two workers racing on the same turn could insert
+    duplicate checkpoints, and "latest checkpoint" would become ambiguous.
+    """
+    await get_checkpoints_col().create_indexes([
+        IndexModel(
+            [("thread_id", ASCENDING), ("checkpoint_ns", ASCENDING),
+             ("checkpoint_id", ASCENDING)],
+            unique=True,
+        ),
+        # Serves aget_tuple's "latest for this thread" descending sort.
+        IndexModel([("thread_id", ASCENDING), ("checkpoint_ns", ASCENDING),
+                    ("checkpoint_id", DESCENDING)]),
+    ])
+    await get_checkpoint_writes_col().create_indexes([
+        IndexModel(
+            [("thread_id", ASCENDING), ("checkpoint_ns", ASCENDING),
+             ("checkpoint_id", ASCENDING), ("task_id", ASCENDING), ("idx", ASCENDING)],
+            unique=True,
+        ),
+    ])
 
 
 async def _users_indexes() -> None:
@@ -110,6 +172,73 @@ async def _appointments_indexes() -> None:
         IndexModel([("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)]),
         IndexModel([("created_at", DESCENDING)]),
     ])
+    # Atomic guard: at most one PENDING appointment per lawyer + exact start time.
+    # Closes the concurrent-booking race (two requests both passing has_conflict).
+    await _try_unique_partial(
+        col, [("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)],
+        "uniq_pending_slot", AppointmentStatus.PENDING.value,
+    )
+
+
+async def _engagements_indexes() -> None:
+    col = get_engagements_col()
+    await col.create_indexes([
+        IndexModel([("case_id", ASCENDING)]),
+        IndexModel([("client_id", ASCENDING)]),
+        IndexModel([("lawyer_id", ASCENDING)]),
+        IndexModel([("status", ASCENDING)]),
+        IndexModel([("created_at", DESCENDING)]),
+    ])
+    # Atomic guard: at most one open (REQUESTED) engagement per case.
+    # Closes the duplicate-pending-request race.
+    await _try_unique_partial(
+        col, [("case_id", ASCENDING)],
+        "uniq_pending_engagement", EngagementStatus.REQUESTED.value,
+    )
+
+
+async def _lawyer_reviews_indexes() -> None:
+    col = get_lawyer_reviews_col()
+    await col.create_indexes([
+        IndexModel([("lawyer_id", ASCENDING)]),
+        IndexModel([("client_id", ASCENDING)]),
+        IndexModel([("created_at", DESCENDING)]),
+    ])
+    # One review per (client, lawyer). Plain unique index (no status field), using
+    # the same log-and-skip safety as the partial guards above.
+    await _try_unique_partial(
+        col, [("client_id", ASCENDING), ("lawyer_id", ASCENDING)],
+        "uniq_client_lawyer_review",
+    )
+
+
+async def _payments_indexes() -> None:
+    await get_payments_col().create_indexes([
+        IndexModel([("payer_id", ASCENDING)]),
+        IndexModel([("payee_id", ASCENDING), ("status", ASCENDING)]),
+        IndexModel([("case_id", ASCENDING)], sparse=True),
+        IndexModel([("kind", ASCENDING)]),
+        IndexModel([("status", ASCENDING)]),
+        IndexModel([("created_at", DESCENDING)]),
+    ])
+    await get_subscriptions_col().create_indexes([
+        IndexModel([("lawyer_id", ASCENDING)], unique=True),
+        IndexModel([("status", ASCENDING)]),
+    ])
+    # Webhook idempotency — a provider event settles a payment at most once.
+    await get_payment_events_col().create_indexes([
+        IndexModel([("event_id", ASCENDING)], unique=True),
+        IndexModel([("created_at", ASCENDING)], expireAfterSeconds=90 * 24 * 3600),
+    ])
+
+
+async def _poa_indexes() -> None:
+    await get_poas_col().create_indexes([
+        IndexModel([("principal_id", ASCENDING)]),
+        IndexModel([("status", ASCENDING)]),
+        IndexModel([("expiry_date", ASCENDING)], sparse=True),
+        IndexModel([("created_at", DESCENDING)]),
+    ])
 
 
 async def _auth_indexes() -> None:
@@ -123,4 +252,10 @@ async def _auth_indexes() -> None:
         IndexModel([("token", ASCENDING)], unique=True),
         IndexModel([("email", ASCENDING)]),
         IndexModel([("created_at", ASCENDING)], expireAfterSeconds=3600),
+    ])
+    # WebSocket auth tickets — multi-worker-safe one-time-use store.
+    # TTL at `expires_at` (expireAfterSeconds=0) sweeps abandoned tickets;
+    # consume also checks expiry explicitly so it's precise, not sweep-dependent.
+    await get_ws_tickets_col().create_indexes([
+        IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
     ])

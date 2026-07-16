@@ -1,0 +1,107 @@
+- generic [active] [ref=f34e1]:
+  - button "Open Next.js Dev Tools" [ref=f34e9] [cursor=pointer]
+  - alert [ref=f34e13]
+  - generic [ref=f34e14]:
+    - generic [ref=f34e15]:
+      - generic [ref=f34e16]:
+        - img "AttorneyAI" [ref=f34e17]
+        - generic [ref=f34e18]:
+          - generic [ref=f34e19]: AttorneyAI
+          - generic [ref=f34e20]: Legal Practice Suite
+        - button [ref=f34e21] [cursor=pointer]
+      - generic [ref=f34e24]:
+        - generic [ref=f34e25]:
+          - button "Dashboard" [ref=f34e26] [cursor=pointer]
+          - button "Cases" [ref=f34e31] [cursor=pointer]
+          - button "Clients" [ref=f34e36] [cursor=pointer]
+        - generic [ref=f34e44]:
+          - button "Documents" [ref=f34e45] [cursor=pointer]
+          - button "Agreements" [ref=f34e51] [cursor=pointer]
+          - button "Overseas Disputes" [ref=f34e57] [cursor=pointer]
+          - button "Cause List" [ref=f34e66] [cursor=pointer]
+          - button "Payments" [ref=f34e74] [cursor=pointer]
+          - button "Appointments" [ref=f34e80] [cursor=pointer]
+        - generic [ref=f34e86]:
+          - button "AI Assistant" [ref=f34e87] [cursor=pointer]
+          - button "Case Law" [ref=f34e93] [cursor=pointer]
+          - button "Draft Generator" [ref=f34e98] [cursor=pointer]
+        - button "Settings" [ref=f34e105] [cursor=pointer]
+      - generic [ref=f34e112] [cursor=pointer]:
+        - generic [ref=f34e113]: AR
+        - generic [ref=f34e114]:
+          - generic [ref=f34e115]: Ahmad Raza Khan
+          - generic [ref=f34e116]: Advocate
+        - button "7" [ref=f34e117]
+        - button "Switch to Light Mode" [ref=f34e122]
+    - main [ref=f34e127]:
+      - generic [ref=f34e128]:
+        - generic [ref=f34e129]:
+          - button "← Back to inbox" [ref=f34e269] [cursor=pointer]
+          - generic [ref=f34e270]: Held for your review
+        - generic [ref=f34e132]:
+          - generic [ref=f34e271]: Property dispute — case brief
+          - generic [ref=f34e272]: From Bilal Overseas · sent Jul 15, 2026
+        - generic [ref=f34e273]:
+          - generic [ref=f34e274]: "Held for your review because:"
+          - list [ref=f34e275]:
+            - listitem [ref=f34e276]: The special court for Islamabad Capital Territory / federal is not confirmed operational — a lawyer should confirm the forum (the federal framework may still apply).
+        - generic [ref=f34e277]:
+          - generic [ref=f34e278]:
+            - generic [ref=f34e279]: Overseas-Pakistani eligibility
+            - generic [ref=f34e280]:
+              - generic [ref=f34e281]: Qualifies
+              - generic [ref=f34e282]: "Yes"
+          - generic [ref=f34e283]:
+            - generic [ref=f34e284]: Grievance classification
+            - generic [ref=f34e285]:
+              - generic [ref=f34e286]:
+                - generic [ref=f34e287]: Type
+                - generic [ref=f34e288]: Someone has taken or holds possession of the property without right (dispossession / land-grab / forcible occupation).
+              - generic [ref=f34e289]:
+                - generic [ref=f34e290]: Confidence
+                - generic [ref=f34e291]: established
+              - generic [ref=f34e292]:
+                - generic [ref=f34e293]: Needs triage
+                - generic [ref=f34e294]: No — clear
+            - generic [ref=f34e295]:
+              - generic [ref=f34e296]: Reasoning
+              - generic [ref=f34e297]: Someone has taken possession of the property without right
+          - generic [ref=f34e298]:
+            - generic [ref=f34e299]: The facts (as entered)
+            - generic [ref=f34e300]:
+              - generic [ref=f34e301]: Property
+              - generic [ref=f34e302]: House 12, Street 4, F-8/3, Islamabad
+            - generic [ref=f34e303]:
+              - generic [ref=f34e304]:
+                - generic [ref=f34e305]: Opposing party
+                - generic [ref=f34e306]: Kamran Sheikh
+              - generic [ref=f34e307]:
+                - generic [ref=f34e308]: Khasra / registry
+                - generic [ref=f34e309]: —
+            - generic [ref=f34e310]:
+              - generic [ref=f34e311]: Timeline
+              - generic [ref=f34e312]: He broke in around March 2026 and refuses to leave.
+            - generic [ref=f34e313]:
+              - generic [ref=f34e314]: Documents held
+              - generic [ref=f34e315]: title_deed_fard, cnic_nicop
+            - generic [ref=f34e316]:
+              - generic [ref=f34e317]: Relief sought
+              - generic [ref=f34e318]: restore_possession
+          - generic [ref=f34e319]:
+            - generic [ref=f34e320]: Jurisdiction (Special Court, 2024 Act)
+            - generic [ref=f34e321]:
+              - generic [ref=f34e322]:
+                - generic [ref=f34e323]: Province
+                - generic [ref=f34e324]: Islamabad Capital Territory / federal
+              - generic [ref=f34e325]:
+                - generic [ref=f34e326]: Court status
+                - generic [ref=f34e327]: unknown
+              - generic [ref=f34e328]:
+                - generic [ref=f34e329]: Appeal window
+                - generic [ref=f34e330]: confirm with court
+              - generic [ref=f34e331]:
+                - generic [ref=f34e332]: Disposal
+                - generic [ref=f34e333]: —
+          - generic [ref=f34e334]:
+            - generic [ref=f34e335]: Draft petition
+            - generic [ref=f34e336]: No petition drafted — this dispute was held for your review before drafting.

@@ -26,3 +26,13 @@ class DocumentRepository(BaseRepository):
             {"_id": doc_id},
             {"$set": {"status": "failed"}},
         )
+
+    async def set_review_fields(self, doc_id: str, fields: dict) -> bool:
+        return await self.update_one({"_id": doc_id}, {"$set": fields})
+
+    async def find_review_queue(self, lawyer_id: str) -> list[dict]:
+        """All documents ever submitted to this lawyer, newest first."""
+        return await self.find_many(
+            {"submitted_to": lawyer_id, "review_status": {"$ne": None}},
+            sort=[("submitted_at", -1)],
+        )

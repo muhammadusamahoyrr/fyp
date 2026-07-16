@@ -1,6 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.core.security import decode_token
+from app.core.ws_ticket import consume_ticket
 from app.repositories.notification_repo import NotificationRepository
 from app.websockets.manager import notification_manager
 
@@ -8,10 +8,12 @@ router = APIRouter(tags=["websockets"])
 notification_repo = NotificationRepository()
 
 
-@router.websocket("/ws/notifications/{user_id}")
-async def notification_endpoint(websocket: WebSocket, user_id: str, token: str = ""):
-    payload = decode_token(token)
-    if not payload or payload.get("type") != "access" or payload.get("sub") != user_id:
+@router.websocket("/ws/notifications")
+async def notification_endpoint(websocket: WebSocket, ticket: str = ""):
+    # One-time ticket from POST /auth/ws-ticket — the JWT itself never
+    # appears in the URL, so it can't leak into server/proxy logs.
+    user_id = await consume_ticket(ticket)
+    if not user_id:
         await websocket.close(code=4001)
         return
 

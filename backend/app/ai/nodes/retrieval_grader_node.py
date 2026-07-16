@@ -1,3 +1,5 @@
+import asyncio
+
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_fast_llm
 
@@ -16,7 +18,7 @@ Example for 5 chunks: [1,0,1,1,0]
 No explanation. No other text."""
 
 
-def retrieval_grader_node(state: AgentState) -> dict:
+async def retrieval_grader_node(state: AgentState) -> dict:
     chunks     = state.get("retrieved_chunks", [])
     prev_score = state.get("relevance_score", 0.0)
 
@@ -38,15 +40,15 @@ def retrieval_grader_node(state: AgentState) -> dict:
     )
 
     try:
+        import json
         llm      = get_fast_llm()
-        response = llm.invoke([
+        response = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _SYSTEM},
             {"role": "user",   "content": (
                 f"User query: {state['query']}\n\n"
                 f"Chunks to grade:\n{context}"
             )},
         ])
-        import json
         grades = json.loads(response.content.strip())
 
         graded  = [c for c, g in zip(to_grade, grades) if g == 1]
@@ -54,8 +56,9 @@ def retrieval_grader_node(state: AgentState) -> dict:
         score   = round(n_kept / max(len(to_grade), 1), 3)
 
     except Exception:
-        # Fail-closed: if grading LLM fails, assume low relevance
-        graded = to_grade
+        # Fail-closed: empty graded list forces a retrieval retry (score=0.0 < threshold)
+        # rather than forwarding ungraded chunks to generation_node
+        graded = []
         score  = 0.0
 
     return {

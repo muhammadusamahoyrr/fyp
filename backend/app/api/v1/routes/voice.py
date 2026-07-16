@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 
 from app.core.rate_limit import limiter
 from app.dependencies import get_current_user
@@ -9,7 +10,14 @@ router = APIRouter(prefix="/voice", tags=["voice"])
 MAX_BYTES = 10 * 1024 * 1024  # 10 MB — matches frontend WAV limit for 2-min recording
 
 
-@router.post("/transcribe")
+class TranscriptionResult(BaseModel):
+    transcript: str
+    language: str
+    language_name: str
+    language_probability: float
+
+
+@router.post("/transcribe", response_model=TranscriptionResult)
 @limiter.limit("10/minute")
 async def transcribe_audio(
     request: Request,

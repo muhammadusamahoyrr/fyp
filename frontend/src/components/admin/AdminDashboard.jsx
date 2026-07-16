@@ -1,20 +1,34 @@
 'use client';
+import { useState, useEffect } from "react";
 import { StatCard, IconBox, Ic } from "./components.jsx";
 import { BarChart, DonutChart } from "./charts.jsx";
 import { IC } from "./icons.js";
+import { adminGetAnalytics } from "@/lib/api.js";
 
 export const Dashboard = ({ T, nav }) => {
   const dk = T.mode === "dark";
+  const [analytics, setAnalytics] = useState(null);
+
+  useEffect(() => {
+    adminGetAnalytics().then(({ data }) => { if (data) setAnalytics(data); });
+  }, []);
+
   const sparkUsers   = [62, 65, 68, 66, 72, 74, 78, 82];
   const sparkCases   = [45, 52, 48, 60, 57, 65, 70, 68];
   const sparkDocs    = [340, 380, 360, 420, 400, 450, 480, 490];
   const sparkLawyers = [82, 84, 85, 86, 87, 88, 89, 89];
 
+  const totalUsers   = analytics ? analytics.total_users.toLocaleString() : "…";
+  const totalCases   = analytics ? analytics.total_cases.toLocaleString() : "…";
+  const totalDocs    = analytics ? analytics.total_documents.toLocaleString() : "…";
+  const lawyerCount  = analytics ? (analytics.users_by_role?.lawyer ?? 0).toLocaleString() : "…";
+  const pendingKYC   = analytics?.pending_kyc ?? 0;
+
   const stats = [
-    { label: "Active Users", value: "1,284", sub: "+12% from last month", sparkData: sparkUsers, sparkColor: dk ? "#40F0DC" : T.primary, icon: <IconBox icon={IC.users} variant="Primary" T={T} size={42} />, onClick: () => nav("users") },
-    { label: "Total Cases", value: "164", sub: "+8 this week", sparkData: sparkCases, sparkColor: T.warn, icon: <IconBox icon={IC.briefcase} variant="Warn" T={T} size={42} />, onClick: () => nav("cases") },
-    { label: "Documents", value: "3,847", sub: "+23 today", sparkData: sparkDocs, sparkColor: T.info, icon: <IconBox icon={IC.file} variant="Info" T={T} size={42} />, onClick: () => nav("analytics") },
-    { label: "Active Lawyers", value: "89", sub: "3 pending verification", subColor: T.warn, sparkData: sparkLawyers, sparkColor: T.success, icon: <IconBox icon={IC.balance} variant="Success" T={T} size={42} />, onClick: () => nav("kyc") },
+    { label: "Total Users",    value: totalUsers,  sub: `${analytics?.users_by_role?.client ?? 0} clients · ${analytics?.users_by_role?.lawyer ?? 0} lawyers`, sparkData: sparkUsers, sparkColor: dk ? "#40F0DC" : T.primary, icon: <IconBox icon={IC.users} variant="Primary" T={T} size={42} />, onClick: () => nav("users") },
+    { label: "Total Cases",    value: totalCases,  sub: `${analytics?.cases_by_status?.open ?? 0} open · ${analytics?.cases_by_status?.in_progress ?? 0} in progress`, sparkData: sparkCases, sparkColor: T.warn, icon: <IconBox icon={IC.briefcase} variant="Warn" T={T} size={42} />, onClick: () => nav("cases") },
+    { label: "Documents",      value: totalDocs,   sub: `${analytics?.total_agreements ?? 0} agreements`, sparkData: sparkDocs, sparkColor: T.info, icon: <IconBox icon={IC.file} variant="Info" T={T} size={42} />, onClick: () => nav("users") },
+    { label: "Active Lawyers", value: lawyerCount, sub: pendingKYC > 0 ? `${pendingKYC} pending verification` : "All verified", subColor: pendingKYC > 0 ? T.warn : T.success, sparkData: sparkLawyers, sparkColor: T.success, icon: <IconBox icon={IC.balance} variant="Success" T={T} size={42} />, onClick: () => nav("kyc") },
   ];
   const barCols  = dk ? ["#40F0DC","#5AB3FF"] : ["#2C8C99","#6B8FD4"];
   const barData  = [[45,28],[52,40],[40,32],[60,47],[57,50],[65,52],[72,60],[68,53],[75,62],[60,58]];
@@ -41,9 +55,9 @@ export const Dashboard = ({ T, nav }) => {
           <Ic d={IC.bell} size={13} color={T.warn} /> Needs attention:
         </span>
         {[
-          { label: "2 KYC pending",   color: T.warn,      m: "kyc"   },
-          { label: "1 overdue case",  color: T.danger,    m: "cases" },
-          { label: "1 inactive user", color: T.textMuted, m: "users" },
+          ...(pendingKYC > 0 ? [{ label: `${pendingKYC} KYC pending`, color: T.warn, m: "kyc" }] : []),
+          { label: "Review cases",    color: T.danger,    m: "cases" },
+          { label: "Manage users",    color: T.textMuted, m: "users" },
         ].map(a => (
           <button key={a.label} onClick={() => nav(a.m)}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 14px", borderRadius: 20, background: `${a.color}14`, border: `1px solid ${a.color}35`, color: a.color, fontSize: 12.5, fontWeight: 600, cursor: "pointer", transition: "all 0.15s" }}
@@ -100,10 +114,10 @@ export const Dashboard = ({ T, nav }) => {
           <div style={{ fontWeight: 600, fontSize: 14, color: T.text, marginBottom: 14 }}>Quick Actions</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             {[
-              { l: "User Management", ic: IC.users,     m: "users" },
-              { l: "KYC Verification", ic: IC.verify,   m: "kyc" },
-              { l: "Case Tracking",   ic: IC.briefcase, m: "cases" },
-              { l: "System Config",   ic: IC.settings,  m: "config" },
+              { l: "User Management",  ic: IC.users,     m: "users"   },
+              { l: "KYC Verification", ic: IC.verify,    m: "kyc"     },
+              { l: "Case Tracking",    ic: IC.briefcase, m: "cases"   },
+              { l: "Lawyer Monitor",   ic: IC.balance,   m: "lawyers" },
             ].map(q => (
               <button key={q.l} onClick={() => nav(q.m)}
                 style={{ background: T.mode === "dark" ? T.surface : T.bg, border: `1px solid ${T.border}`, borderRadius: 12, padding: "16px 12px", cursor: "pointer", textAlign: "center", transition: "all 0.18s" }}

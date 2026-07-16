@@ -1,0 +1,139 @@
+- generic [ref=f35e1]:
+  - button "Open Next.js Dev Tools" [ref=f35e9] [cursor=pointer]
+  - alert [ref=f35e13]
+  - generic [ref=f35e14]:
+    - generic [ref=f35e15]:
+      - generic [ref=f35e16]:
+        - img "AttorneyAI" [ref=f35e17]
+        - generic [ref=f35e18]:
+          - generic [ref=f35e19]: AttorneyAI
+          - generic [ref=f35e20]: Legal Practice Suite
+        - button [ref=f35e21] [cursor=pointer]
+      - generic [ref=f35e24]:
+        - generic [ref=f35e25]:
+          - button "Dashboard" [ref=f35e26] [cursor=pointer]
+          - button "Cases" [ref=f35e32] [cursor=pointer]
+          - button "Clients" [ref=f35e37] [cursor=pointer]
+        - generic [ref=f35e45]:
+          - button "Documents" [ref=f35e46] [cursor=pointer]
+          - button "Agreements" [ref=f35e52] [cursor=pointer]
+          - button "Overseas Disputes" [ref=f35e58] [cursor=pointer]
+          - button "Cause List" [ref=f35e66] [cursor=pointer]
+          - button "Payments" [ref=f35e74] [cursor=pointer]
+          - button "Appointments" [ref=f35e80] [cursor=pointer]
+        - generic [ref=f35e86]:
+          - button "AI Assistant" [ref=f35e87] [cursor=pointer]
+          - button "Case Law" [ref=f35e93] [cursor=pointer]
+          - button "Draft Generator" [ref=f35e98] [cursor=pointer]
+        - button "Settings" [ref=f35e105] [cursor=pointer]
+      - generic [ref=f35e112] [cursor=pointer]:
+        - generic [ref=f35e113]: AR
+        - generic [ref=f35e114]:
+          - generic [ref=f35e115]: Ahmad Raza Khan
+          - generic [ref=f35e116]: Advocate
+        - button "7" [active] [ref=f35e117]
+        - button "Switch to Light Mode" [ref=f35e122]
+      - generic [ref=f35e246]:
+        - generic [ref=f35e247]:
+          - generic [ref=f35e248]: Notifications
+          - button "Clear all" [ref=f35e249] [cursor=pointer]
+        - generic [ref=f35e250]:
+          - generic [ref=f35e258] [cursor=pointer]:
+            - generic [ref=f35e259]: New property-dispute case brief
+            - generic [ref=f35e260]: Browser Test Client sent you a property-dispute case brief (ready to draft a petition). Open it to see the full case in one place.
+            - generic [ref=f35e261]:
+              - text: 5h ago
+              - generic [ref=f35e262]: · Open →
+          - generic [ref=f35e269] [cursor=pointer]:
+            - generic [ref=f35e270]: Document submitted for review
+            - generic [ref=f35e271]: "Browser Test Client submitted \"Special Court Petition (draft)\" for your review. Note: Auto-shared with the case brief from the Overseas Property Dispute desk."
+            - generic [ref=f35e272]: 5h ago
+          - generic [ref=f35e281] [cursor=pointer]:
+            - generic [ref=f35e282]: New property-dispute case brief
+            - generic [ref=f35e283]: Bilal Overseas sent you a property-dispute case brief (ready to draft a petition). Open it to see the full case in one place.
+            - generic [ref=f35e284]:
+              - text: 6h ago
+              - generic [ref=f35e285]: · Open →
+          - generic [ref=f35e292] [cursor=pointer]:
+            - generic [ref=f35e293]: Document submitted for review
+            - generic [ref=f35e294]: "Bilal Overseas submitted \"Special Court Petition (draft)\" for your review. Note: Auto-shared with the case brief from the Overseas Property Dispute desk."
+            - generic [ref=f35e295]: 6h ago
+          - generic [ref=f35e304] [cursor=pointer]:
+            - generic [ref=f35e305]: New property-dispute case brief
+            - generic [ref=f35e306]: Bilal Overseas sent you a property-dispute case brief (held for your review before any petition is drafted). Open it to see the full case in one place.
+            - generic [ref=f35e307]:
+              - text: 6h ago
+              - generic [ref=f35e308]: · Open →
+          - generic [ref=f35e317] [cursor=pointer]:
+            - generic [ref=f35e318]: New property-dispute case brief
+            - generic [ref=f35e319]: Bilal Overseas sent you a property-dispute case brief (held for your review before any petition is drafted). Open it to see the full case in one place.
+            - generic [ref=f35e320]:
+              - text: 6h ago
+              - generic [ref=f35e321]: · Open →
+          - generic [ref=f35e328] [cursor=pointer]:
+            - generic [ref=f35e329]: Fee payment received
+            - generic [ref=f35e330]: "Browser Test Client paid PKR 50,000 for \"Property dispute (test)\". Net to you: PKR 47,500 (after PKR 2,500 platform fee)."
+            - generic [ref=f35e331]: 20h ago
+    - main [ref=f35e127]:
+      - generic [ref=f35e130]:
+        - generic [ref=f35e131]:
+          - generic [ref=f35e132]: Good morning, Ahmad ☀️
+          - generic [ref=f35e133]: Here's what's happening across your practice today.
+        - generic [ref=f35e134]:
+          - generic [ref=f35e137] [cursor=pointer]:
+            - generic [ref=f35e138]: Active Cases
+            - generic [ref=f35e139]: —
+            - generic [ref=f35e140]: Assigned to you
+          - generic [ref=f35e148] [cursor=pointer]:
+            - generic [ref=f35e149]: Pending Docs
+            - generic [ref=f35e150]: —
+            - generic [ref=f35e151]: See documents
+          - generic [ref=f35e160] [cursor=pointer]:
+            - generic [ref=f35e161]: Total Clients
+            - generic [ref=f35e162]: —
+            - generic [ref=f35e163]: Across all cases
+          - generic [ref=f35e174] [cursor=pointer]:
+            - generic [ref=f35e175]: Appointments
+            - generic [ref=f35e176]: "0"
+            - generic [ref=f35e177]: Pending + Confirmed
+        - generic [ref=f35e186]:
+          - generic [ref=f35e187]:
+            - generic [ref=f35e188]:
+              - generic [ref=f35e189]: Recent Cases
+              - button "View all" [ref=f35e190] [cursor=pointer]
+            - table [ref=f35e193]:
+              - rowgroup [ref=f35e194]:
+                - row [ref=f35e195]:
+                  - columnheader "Case ID" [ref=f35e196]
+                  - columnheader "Title" [ref=f35e197]
+                  - columnheader "Type" [ref=f35e198]
+                  - columnheader "Status" [ref=f35e199]
+                  - columnheader "Date" [ref=f35e200]
+                  - columnheader [ref=f35e201]
+              - rowgroup [ref=f35e202]:
+                - row [ref=f35e203]:
+                  - cell "No cases assigned yet" [ref=f35e204]
+          - generic [ref=f35e205]:
+            - generic [ref=f35e206]: Today's Schedule
+            - generic [ref=f35e211] [cursor=pointer]:
+              - generic [ref=f35e212]: 10:00 AM
+              - generic [ref=f35e213]: Court Hearing
+            - generic [ref=f35e218] [cursor=pointer]:
+              - generic [ref=f35e219]: 12:30 PM
+              - generic [ref=f35e220]: Client Meeting
+            - generic [ref=f35e225] [cursor=pointer]:
+              - generic [ref=f35e226]: 2:00 PM
+              - generic [ref=f35e227]: Document Review
+            - generic [ref=f35e231] [cursor=pointer]:
+              - generic [ref=f35e232]: 4:30 PM
+              - generic [ref=f35e233]: New Client Consultation
+            - generic [ref=f35e235]:
+              - generic [ref=f35e236] [cursor=pointer]:
+                - generic [ref=f35e237]: "3"
+                - generic [ref=f35e238]: Hearings
+              - generic [ref=f35e239] [cursor=pointer]:
+                - generic [ref=f35e240]: "5"
+                - generic [ref=f35e241]: Tasks
+              - generic [ref=f35e242] [cursor=pointer]:
+                - generic [ref=f35e243]: "2"
+                - generic [ref=f35e244]: Pending

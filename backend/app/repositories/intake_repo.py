@@ -11,6 +11,18 @@ class IntakeRepository(BaseRepository):
     async def find_by_token(self, token: str) -> dict | None:
         return await self.find_one({"session_token": token})
 
+    async def find_evidence_by_client(self, client_id: str, limit: int = 20) -> list[dict]:
+        """Intake sessions belonging to `client_id` that carry evidence files.
+
+        client_id is part of the QUERY, not a post-filter, so this cannot return
+        another user's uploads even if called with a bad id.
+        """
+        cursor = self.col.find(
+            {"client_id": client_id, "evidence_files.0": {"$exists": True}},
+            {"session_token": 1, "evidence_files": 1, "created_at": 1},
+        ).sort("created_at", -1).limit(limit)
+        return [doc async for doc in cursor]
+
     async def update_step(self, token: str, step: int, data: dict) -> bool:
         return await self.update_one(
             {"session_token": token},

@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overseas Desk — Attorney.AI</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%A1%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg:#F5F2EA; --bg2:#EFEBE0; --surface:#FFFFFF; --surface2:#FBF9F2;
+    --ink:#1B231E; --muted:#586158; --faint:#8A9188;
+    --brand:#12503A; --emerald:#1E7A57; --gold:#9A6E22; --gold-soft:#C79A45;
+    --border:#E3DCCC; --border-strong:#D3C9B2;
+    --tick:#1E7A57; --amber:#B27A16; --blue:#2C6E8F;
+    --shadow:0 1px 2px rgba(27,35,30,.04), 0 8px 30px rgba(27,35,30,.06);
+    --radius:14px;
+    --serif:Georgia,'Iowan Old Style','Times New Roman',serif;
+    --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --mono:ui-monospace,'SF Mono','Cascadia Mono',Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0C1310; --bg2:#0E1613; --surface:#131C17; --surface2:#16211B;
+      --ink:#E8EFE8; --muted:#9CA89F; --faint:#6E7A72;
+      --brand:#3FA985; --emerald:#4FBE96; --gold:#D6AE5E; --gold-soft:#B98F3E;
+      --border:#233029; --border-strong:#2E3D34;
+      --tick:#4FBE96; --amber:#D6AE5E; --blue:#6FB4D2;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.32);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:#F5F2EA; --bg2:#EFEBE0; --surface:#FFFFFF; --surface2:#FBF9F2;
+    --ink:#1B231E; --muted:#586158; --faint:#8A9188;
+    --brand:#12503A; --emerald:#1E7A57; --gold:#9A6E22; --gold-soft:#C79A45;
+    --border:#E3DCCC; --border-strong:#D3C9B2;
+    --tick:#1E7A57; --amber:#B27A16; --blue:#2C6E8F;
+    --shadow:0 1px 2px rgba(27,35,30,.04), 0 8px 30px rgba(27,35,30,.06);
+  }
+  :root[data-theme="dark"] {
+    --bg:#0C1310; --bg2:#0E1613; --surface:#131C17; --surface2:#16211B;
+    --ink:#E8EFE8; --muted:#9CA89F; --faint:#6E7A72;
+    --brand:#3FA985; --emerald:#4FBE96; --gold:#D6AE5E; --gold-soft:#B98F3E;
+    --border:#233029; --border-strong:#2E3D34;
+    --tick:#4FBE96; --amber:#D6AE5E; --blue:#6FB4D2;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.32);
+  }
+
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); line-height:1.65; font-size:16px;
+    -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(ellipse at 12% -5%, color-mix(in srgb, var(--emerald) 10%, transparent) 0%, transparent 45%),
+      radial-gradient(ellipse at 100% 0%, color-mix(in srgb, var(--gold-soft) 8%, transparent) 0%, transparent 40%);
+    background-attachment:fixed;
+  }
+  .wrap { max-width:920px; margin:0 auto; padding:0 24px; }
+  ::selection { background:color-mix(in srgb, var(--emerald) 30%, transparent); }
+
+  /* ---- Hero ---- */
+  header.hero { padding:74px 0 40px; }
+  .brandline {
+    display:inline-flex; align-items:center; gap:9px; font-family:var(--mono);
+    font-size:11.5px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--brand); font-weight:600; margin-bottom:22px;
+    padding:6px 12px; border:1px solid var(--border-strong); border-radius:100px;
+    background:var(--surface);
+  }
+  .brandline .seal { width:15px; height:15px; border-radius:50%; background:
+    radial-gradient(circle at 35% 30%, var(--gold-soft), var(--gold)); flex-shrink:0;
+    box-shadow:0 0 0 2px color-mix(in srgb, var(--gold) 22%, transparent); }
+  h1 {
+    font-family:var(--serif); font-weight:700; font-size:clamp(40px,7vw,68px);
+    line-height:1.03; letter-spacing:-.015em; margin:0 0 18px; text-wrap:balance;
+    color:var(--ink);
+  }
+  h1 .accent { color:var(--brand); font-style:italic; }
+  .lede { font-size:clamp(17px,2.4vw,20px); color:var(--muted); max-width:60ch; margin:0 0 30px; }
+  .lede strong { color:var(--ink); font-weight:600; }
+
+  .metarow { display:flex; flex-wrap:wrap; gap:10px; }
+  .chip {
+    font-family:var(--mono); font-size:12px; color:var(--muted);
+    padding:7px 13px; border-radius:9px; background:var(--surface);
+    border:1px solid var(--border); display:inline-flex; gap:7px; align-items:center;
+  }
+  .chip b { color:var(--brand); font-weight:600; }
+
+  .rule { height:1px; background:linear-gradient(90deg, var(--border-strong), transparent); border:0; margin:44px 0; }
+
+  /* ---- Module section ---- */
+  .module { padding:26px 0 8px; }
+  .mod-head { display:flex; align-items:baseline; gap:16px; margin-bottom:8px; }
+  .mod-num {
+    font-family:var(--mono); font-size:13px; font-weight:600; color:var(--gold);
+    border:1px solid var(--border-strong); border-radius:8px; padding:4px 9px;
+    background:var(--surface); flex-shrink:0; letter-spacing:.05em;
+  }
+  .mod-head h2 {
+    font-family:var(--serif); font-size:clamp(26px,4vw,34px); font-weight:700;
+    letter-spacing:-.01em; margin:0; color:var(--ink); text-wrap:balance;
+  }
+  .mod-sub { color:var(--muted); font-size:15.5px; margin:2px 0 24px; max-width:66ch; }
+  .mod-sub .term { color:var(--ink); font-weight:600; }
+
+  /* feature rows */
+  .feat { display:grid; gap:12px; }
+  .frow {
+    display:grid; grid-template-columns:22px 200px 1fr; gap:16px; align-items:start;
+    padding:15px 18px; background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); box-shadow:var(--shadow);
+    transition:border-color .18s ease, transform .18s ease;
+  }
+  .frow:hover { border-color:var(--emerald); transform:translateY(-1px); }
+  .frow .tick { color:var(--tick); font-size:15px; line-height:1.5; }
+  .frow .fname { font-weight:600; color:var(--ink); font-size:15px; }
+  .frow .fdesc { color:var(--muted); font-size:14.5px; }
+  .frow .fdesc b { color:var(--ink); font-weight:600; }
+
+  /* ---- Property Dispute flagship ---- */
+  .flagship {
+    border:1px solid var(--border-strong); border-radius:20px; overflow:hidden;
+    box-shadow:var(--shadow); background:var(--surface); margin-top:6px;
+  }
+  .flag-band {
+    padding:22px 26px; background:
+      linear-gradient(120deg, color-mix(in srgb, var(--brand) 12%, var(--surface)), var(--surface));
+    border-bottom:1px solid var(--border);
+  }
+  .flag-band .tagpill {
+    font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+    color:#fff; background:var(--brand); padding:4px 10px; border-radius:6px; font-weight:600;
+  }
+  .flag-body { padding:10px 26px 26px; }
+
+  .steps { position:relative; margin:8px 0 6px; }
+  .step { display:grid; grid-template-columns:40px 1fr; gap:18px; padding:18px 0; }
+  .step:not(:last-child) { border-bottom:1px dashed var(--border); }
+  .step-n {
+    width:38px; height:38px; border-radius:50%; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--serif); font-weight:700; font-size:17px; color:#fff;
+    background:linear-gradient(150deg, var(--emerald), var(--brand));
+    box-shadow:0 3px 10px color-mix(in srgb, var(--brand) 30%, transparent);
+  }
+  .step h4 { margin:5px 0 5px; font-size:16.5px; color:var(--ink); font-family:var(--serif); font-weight:700; }
+  .step p { margin:0; color:var(--muted); font-size:14.5px; }
+  .step p b { color:var(--ink); font-weight:600; }
+
+  .outcomes { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:20px; }
+  .oc { padding:16px 18px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface2); }
+  .oc.ready { border-left:4px solid var(--emerald); }
+  .oc.held { border-left:4px solid var(--amber); }
+  .oc .oc-t { font-weight:700; font-size:14.5px; margin-bottom:5px; display:flex; align-items:center; gap:7px; }
+  .oc.ready .oc-t { color:var(--emerald); }
+  .oc.held .oc-t { color:var(--amber); }
+  .oc p { margin:0; color:var(--muted); font-size:13.8px; }
+
+  .handoff {
+    margin-top:18px; padding:18px 20px; border-radius:var(--radius);
+    border:1px dashed var(--blue); background:color-mix(in srgb, var(--blue) 7%, var(--surface));
+  }
+  .handoff .h-t { font-weight:700; color:var(--blue); font-size:14.5px; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+  .handoff ul { margin:0; padding-left:20px; color:var(--muted); font-size:14px; }
+  .handoff li { margin:4px 0; }
+  .handoff li b { color:var(--ink); font-weight:600; }
+  .handoff .note { margin-top:10px; font-family:var(--mono); font-size:11.5px; color:var(--faint); }
+
+  /* ---- callout for attestation nuance ---- */
+  .callout {
+    margin:18px 0 4px; padding:16px 18px; border-radius:var(--radius);
+    background:color-mix(in srgb, var(--gold-soft) 9%, var(--surface));
+    border:1px solid color-mix(in srgb, var(--gold) 30%, var(--border));
+  }
+  .callout .co-t { font-weight:600; color:var(--gold); font-size:13px; font-family:var(--mono);
+    letter-spacing:.05em; text-transform:uppercase; margin-bottom:8px; }
+  .callout ul { margin:0; padding-left:18px; }
+  .callout li { color:var(--muted); font-size:14.3px; margin:5px 0; }
+  .callout li b { color:var(--ink); font-weight:600; }
+
+  /* ---- principles ---- */
+  .principles { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-top:8px; }
+  .prin {
+    padding:18px 20px; border-radius:var(--radius); background:var(--surface);
+    border:1px solid var(--border); box-shadow:var(--shadow);
+  }
+  .prin .p-i { font-size:20px; margin-bottom:8px; display:block; }
+  .prin h4 { margin:0 0 5px; font-size:15.5px; color:var(--ink); font-family:var(--serif); font-weight:700; }
+  .prin p { margin:0; color:var(--muted); font-size:14px; }
+
+  section > h3.eyebrow {
+    font-family:var(--mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--gold); margin:0 0 6px; font-weight:600;
+  }
+  section > h2.big {
+    font-family:var(--serif); font-size:clamp(24px,3.5vw,30px); font-weight:700;
+    margin:0 0 22px; color:var(--ink); letter-spacing:-.01em;
+  }
+
+  footer {
+    margin-top:56px; padding:30px 0 60px; border-top:1px solid var(--border);
+    color:var(--faint); font-size:13.5px;
+  }
+  footer .sig { font-family:var(--serif); color:var(--brand); font-weight:700; font-size:16px; }
+  footer p { margin:8px 0 0; max-width:70ch; }
+
+  @media (max-width:640px) {
+    .frow { grid-template-columns:20px 1fr; }
+    .frow .fname { grid-column:2; }
+    .frow .fdesc { grid-column:2; }
+    .outcomes, .principles { grid-template-columns:1fr; }
+    header.hero { padding:48px 0 30px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="brandline"><span class="seal"></span>Attorney.AI · Feature Overview</span>
+    <h1>Overseas <span class="accent">Desk</span></h1>
+    <p class="lede">The POA lifecycle-safety and property-enforcement layer for the Pakistani
+      diaspora. Draft the <strong>right</strong> Power of Attorney, get it attested correctly,
+      and — when property is grabbed or a POA is misused — reach the fast-track court created
+      by the <strong>Protection of Overseas Pakistanis' Property Act 2024</strong>.</p>
+    <div class="metarow">
+      <span class="chip"><b>4</b> modules</span>
+      <span class="chip"><b>Act 2024</b> Special Courts</span>
+      <span class="chip"><b>Fail-safe</b> by design</span>
+      <span class="chip">AI suggests · <b>code enforces</b></span>
+    </div>
+  </header>
+
+  <hr class="rule">
+
+  <!-- MODULE 1 -->
+  <section class="module">
+    <div class="mod-head"><span class="mod-num">01</span><h2>My Powers of Attorney</h2></div>
+    <p class="mod-sub">A full POA lifecycle manager built around one fact: <span class="term">a court
+      reads the written authority, not what was intended</span> — so choosing the wrong <em>type</em>
+      of POA is the single biggest cause of misuse and fraud.</p>
+    <div class="feat">
+      <div class="frow"><span class="tick">◆</span><span class="fname">Plain-English POA advisor</span><span class="fdesc">Type an intent ("let my brother sell my flat"); an LLM maps it to a POA type + powers, then a <b>pure rule engine</b> enforces the non-negotiable safety rules — disposing of property forces a Special (registered) POA, a rule that lives in code, not the prompt.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Fraud-risk score</span><span class="fdesc">Deterministic scoring flags fraud-prone shapes: a General POA carrying disposal powers, no expiry, vague scope, an over-broad grant.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">POA generation</span><span class="fdesc">Special / General POA as a PDF with a <b>non-removable DRAFT-FOR-LEGAL-REVIEW banner</b>.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Disposal-power guard</span><span class="fdesc">Sell / transfer / gift / mortgage powers are <b>barred from a General POA</b> at the data layer.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Registry &amp; revocation</span><span class="fdesc">Tracks every POA, warns before expiry, and generates a <b>Deed of Revocation</b> in one click.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Attestation lifecycle</span><span class="fdesc">Execution workflow: drafted → notarised → mission attested → MOFA attested → registered.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Tamper-evidence</span><span class="fdesc">Each PDF's <b>SHA-256 hash</b> is stored so later tampering can be detected.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Point-of-use verify link + QR</span><span class="fdesc">A public, no-login link (the token <em>is</em> the capability). A buyer's lawyer or sub-registrar scans the QR and sees the POA's <b>live status, exact authorised scope, and tamper-hash</b> — stopping a revoked or forged POA from being honoured.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Attested-document verify</span><span class="fdesc">Upload the returned attested POA; the system reports the attestation markers found and whether they match the POA on record — "did they attest the <b>right</b> thing?"</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">OPPPA status</span><span class="fdesc">Track whether the property is registered with the Overseas Pakistanis' Property Protection Authority.</span></div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- MODULE 2 -->
+  <section class="module">
+    <div class="mod-head"><span class="mod-num">02</span><h2>Attestation Navigator</h2></div>
+    <p class="mod-sub">Objection-aware routing between the <span class="term">apostille</span> and the
+      <span class="term">legacy consular chain</span>. Pakistan joined the Hague Apostille Convention
+      (in force 9 March 2023, Apostille Act 2024): a single apostille can replace the old
+      Notary → Mission → MOFA legalisation chain.</p>
+    <div class="callout">
+      <div class="co-t">But it is not "apostille everywhere"</div>
+      <ul>
+        <li><b>Bilateral objections can't be inferred from membership.</b> Several states objected under Art. 12, so the Convention doesn't operate between them and Pakistan — the legacy chain is still correct.</li>
+        <li><b>India is a separate case</b> (political non-recognition, not an Art. 12 objection) with the same practical result.</li>
+        <li><b>Unknown countries fail safe</b> to the longer legacy chain, never the shorter apostille path.</li>
+      </ul>
+    </div>
+    <p class="mod-sub" style="margin-top:16px;">Pick the country where the POA is executed; get the correct route.</p>
+  </section>
+
+  <hr class="rule">
+
+  <!-- MODULE 3 -->
+  <section class="module">
+    <div class="mod-head"><span class="mod-num">03</span><h2>Special Courts</h2></div>
+    <p class="mod-sub">A <span class="term">jurisdiction engine</span> for the remedy most overseas
+      Pakistanis don't know exists. The 2024 Act created special courts — with e-filing, video-link
+      hearings supervised by Pakistan missions, and statutory deadlines — and provinces are enacting
+      their own versions on a rolling basis.</p>
+    <div class="feat">
+      <div class="frow"><span class="tick">◆</span><span class="fname">Per-province resolution</span><span class="fdesc">Federal/ICT is operational; some provinces are <b>enacted-but-pending</b>; others have nothing yet.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Real timelines</span><span class="fdesc">Disposal window measured from the <b>grant of leave to defend</b> (not from filing), plus the appeal window where known.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Fail-safe routing</span><span class="fdesc">A court not confirmed operational is <b>never</b> told to "e-file here today" — it routes to the federal framework and a lawyer, flagged for verification.</span></div>
+      <div class="frow"><span class="tick">◆</span><span class="fname">Dated &amp; sourced</span><span class="fdesc">Every figure carries an <code style="font-family:var(--mono);font-size:12.5px">effective_as_of</code> date, a confidence tier (established / single-source / unconfirmed), and a source citation.</span></div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- MODULE 4 - flagship -->
+  <section class="module">
+    <div class="mod-head"><span class="mod-num">04</span><h2>Property Dispute</h2></div>
+    <p class="mod-sub">The fast-track enforcement flow: from "my property was grabbed" to either a
+      drafted petition or a lawyer's desk — <span class="term">never a guess</span>.</p>
+
+    <div class="flagship">
+      <div class="flag-band"><span class="tagpill">Guided 4-step pipeline</span></div>
+      <div class="flag-body">
+        <div class="steps">
+          <div class="step">
+            <div class="step-n">1</div>
+            <div><h4>Eligibility</h4><p>A deterministic (no-LLM) check of overseas-Pakistani status: a valid ID (passport / CNIC / NICOP / POC / OPF) plus <b>182+ days abroad</b> in a tax year.</p></div>
+          </div>
+          <div class="step">
+            <div class="step-n">2</div>
+            <div><h4>Classify the grievance</h4><p>A grounded LLM sorts the complaint into one of six categories with a <b>confidence gate</b>. This is the one place AI heads toward a real filing, so an <b>unconfirmed or ambiguous</b> result never proceeds — it holds for a lawyer. The hold is enforced in pure code, not the prompt.</p></div>
+          </div>
+          <div class="step">
+            <div class="step-n">3</div>
+            <div><h4>Guided intake</h4><p>Fixed fields only — property, province, opposing party, timeline, documents held, relief sought. No open-ended conversational intake.</p></div>
+          </div>
+          <div class="step">
+            <div class="step-n">4</div>
+            <div><h4>Outcome</h4><p>The pipeline ends in exactly one of two states:</p>
+              <div class="outcomes">
+                <div class="oc ready"><div class="oc-t">✓ Ready to draft</div><p>Generates a Special-Court petition PDF. Assembly is deterministic (heading, parties, jurisdiction, relief, leave-to-defend timing, the confirmed <b>15-day appeal window</b>); the LLM writes only the facts &amp; cause of action, grounded strictly in the intake — "[to be provided]" rather than an invention. Missing a field refuses the draft. Nothing is auto-filed.</p></div>
+                <div class="oc held"><div class="oc-t">⏸ Held for triage</div><p>The client gets a plain-language notification explaining <b>why</b> it's held, with a route into the verified-lawyer directory.</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="handoff">
+          <div class="h-t">⇢ Case-brief handoff to a lawyer <span style="font-weight:400;color:var(--faint);font-family:var(--mono);font-size:11px;">read / handoff only</span></div>
+          <ul>
+            <li><b>Send to lawyer</b> — from either state, packages the whole case (eligibility, classification + confidence, entered facts, jurisdiction, and the draft petition if present) to one verified lawyer. Idempotent — can't be re-sent.</li>
+            <li><b>Lawyer inbox</b> — a page listing every case brief sent to that lawyer, with state and "petition ready" badges.</li>
+            <li><b>Case brief view</b> — the lawyer opens the whole case in one place and <b>downloads the draft petition</b> where present.</li>
+            <li><b>Deep-link notification</b> — the "new case brief" alert opens the inbox directly.</li>
+          </ul>
+          <div class="note">No fee negotiation · no engagement letter · no payment — that is the separate hiring flow.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- PRINCIPLES -->
+  <section>
+    <h3 class="eyebrow">The through-line</h3>
+    <h2 class="big">Design principles in every feature</h2>
+    <div class="principles">
+      <div class="prin"><span class="p-i">🛡️</span><h4>Fail-safe / fail-closed</h4><p>Uncertainty routes to a human, never a confident guess.</p></div>
+      <div class="prin"><span class="p-i">⚙️</span><h4>AI suggests, code enforces</h4><p>Every safety-critical rule — disposal → Special POA, the triage hold, grounding — lives in deterministic code, not a prompt.</p></div>
+      <div class="prin"><span class="p-i">🗓️</span><h4>Dated &amp; sourced</h4><p>Fast-moving legal facts carry an effective date, a confidence tier, a citation, and a standing "verify with a lawyer" duty.</p></div>
+      <div class="prin"><span class="p-i">📎</span><h4>Grounded generation</h4><p>Drafts use only the facts provided; a gap becomes "[to be provided]", never an invention.</p></div>
+      <div class="prin" style="grid-column:1/-1;"><span class="p-i">📄</span><h4>Nothing filed or paid automatically</h4><p>Every generated document is a DRAFT for a qualified lawyer to review, complete and file.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="sig">Attorney.AI — Overseas Desk</div>
+    <p>This tool provides guidance and drafts, not legal advice. Confirm the current legal
+      position with a qualified Pakistani lawyer before acting on any output.</p>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,45 @@
+- generic [active] [ref=f33e1]:
+  - generic [ref=f33e2]:
+    - generic [ref=f33e56]:
+      - generic [ref=f33e57]:
+        - img "AttorneyAI" [ref=f33e58]
+        - generic [ref=f33e59]:
+          - generic [ref=f33e60]: AttorneyAI
+          - generic [ref=f33e61]: Legal Intelligence Platform
+      - heading "The Ultimate AI Co-Counsel" [level=1] [ref=f33e62]: The UltimateAI Co-Counsel
+      - paragraph [ref=f33e63]: AI-powered legal guidance grounded in Pakistani law — PPC, CrPC, Family Code & the Constitution.
+      - generic [ref=f33e64]:
+        - generic [ref=f33e65]: INSTANT
+        - generic [ref=f33e66]: "|"
+        - generic [ref=f33e67]: ACCURATE
+        - generic [ref=f33e68]: "|"
+        - generic [ref=f33e69]: SECURE
+      - generic [ref=f33e70]:
+        - generic [ref=f33e71]: ⚡
+        - generic [ref=f33e72]: Powered by 400k case laws and statutes.
+    - generic [ref=f33e74]:
+      - heading "Welcome Back!" [level=2] [ref=f33e80]
+      - paragraph [ref=f33e81]: Please sign in to your account.
+      - generic [ref=f33e82]:
+        - button "Google" [ref=f33e83] [cursor=pointer]
+        - button "Facebook" [ref=f33e90] [cursor=pointer]
+      - generic [ref=f33e94]: or continue with
+      - generic [ref=f33e98]:
+        - generic [ref=f33e99]: Email
+        - textbox "attorneyai@gmail.com" [ref=f33e101]: ahmad.raza@attorney.ai
+      - generic [ref=f33e102]:
+        - generic [ref=f33e103]: Password
+        - generic [ref=f33e104]:
+          - textbox "••••••••••••" [ref=f33e105]: Lawyer@1234
+          - button [ref=f33e106] [cursor=pointer]
+      - generic [ref=f33e110]:
+        - generic [ref=f33e111] [cursor=pointer]:
+          - checkbox "Remember me for 90 days" [checked] [ref=f33e112]
+          - generic [ref=f33e113]: Remember me for 90 days
+        - button "Forgot Password?" [ref=f33e114] [cursor=pointer]
+      - button "Sign In" [ref=f33e119] [cursor=pointer]
+      - paragraph [ref=f33e116]:
+        - text: Don't have an account?
+        - button "Sign Up" [ref=f33e117] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f33e125] [cursor=pointer]
+  - alert [ref=f33e118]

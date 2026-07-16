@@ -1,6 +1,6 @@
 'use client';
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { getToken, setToken, clearToken, authLogout } from '@/lib/api';
+import { getToken, setToken, clearToken, authLogout, bootstrapAuth, broadcastLogout } from '@/lib/api';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -16,21 +16,23 @@ export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Hydrate auth state from stored token on mount
+  // Hydrate auth state on mount (audit #5): the access token is in-memory only,
+  // so on a cold load we adopt a sibling tab's token or silently re-mint one from
+  // the HttpOnly refresh cookie (bootstrapAuth), then load the profile.
   useEffect(() => {
     (async () => {
-      const token = getToken();
-      if (!token) { setLoading(false); return; }
       try {
+        const ok = await bootstrapAuth();
+        if (!ok) { setLoading(false); return; }
         const res = await fetch(`${BASE}/users/me`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${getToken()}` },
           credentials: 'include',
         });
         if (res.ok) setUser(await res.json());
         else clearToken();
       } catch {
-        // Network error — keep the token for retry but do NOT set user from stale localStorage.
-        // isAuthenticated stays false until a real /users/me succeeds.
+        // Network error — stay unauthenticated (isAuthenticated false) until a
+        // real /users/me succeeds; the in-memory token is left for retry.
       }
       setLoading(false);
     })();
@@ -55,6 +57,7 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try { await authLogout(); } catch {}
     clearToken();
+    broadcastLogout();   // sibling tabs clear their in-memory token + redirect
     try { localStorage.removeItem('aai-role'); } catch {}
     setUser(null);
   }, []);

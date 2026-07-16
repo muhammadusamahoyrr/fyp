@@ -26,7 +26,27 @@
       "Bash(grep -r \"bookAppointment\\\\|listAppointments\\\\|getAppointment\\\\|confirmAppointment\\\\|cancelAppointment\\\\|completeAppointment\\\\|markNoShow\\\\|getLawyerAvailability\" frontend/src/app/lawyer --include=\"*.jsx\" --include=\"*.js\" -l)",
       "Bash(grep -r \"appointment\" frontend/src/app/lawyer --include=\"*.jsx\" -l)",
       "WebFetch(domain:threepipe.org)",
-      "Bash(venv/Scripts/python.exe -c ' *)"
+      "Bash(venv/Scripts/python.exe -c ' *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(..\\\\backend\\\\venv\\\\Scripts\\\\uvicorn.exe app.main:app --reload --host 0.0.0.0 --port 8000)",
+      "WebFetch(domain:saazghar.vercel.app)",
+      "Bash(grep -v -E '\\\\.\\(png|jpg|jpeg|glb|ico|svg|woff|ttf\\)$')",
+      "Bash(grep -E '\\\\.\\(jsx|js|py\\)$')",
+      "Bash(grep -E 'frontend/src.*\\\\.\\(jsx|js\\)$')",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__click",
+      "mcp__chrome-devtools__take_snapshot",
+      "WebSearch",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(cd \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\backend\"; $env:PYTHONIOENCODING=\"utf-8\"; $env:FRONTEND_URL=\"http://localhost:3001\"; Start-Process -FilePath \"venv\\\\Scripts\\\\python.exe\" -ArgumentList \"-m\",\"uvicorn\",\"app.main:app\",\"--port\",\"8000\" -WorkingDirectory \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\backend\" -WindowStyle Hidden -RedirectStandardOutput \"C:\\\\Users\\\\THELAP~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-The-Laptop-Hut-Desktop-attorney-ai\\\\eabee946-2440-4bb8-b683-509ef1924c30\\\\scratchpad\\\\uvicorn2.out\" -RedirectStandardError \"C:\\\\Users\\\\THELAP~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-The-Laptop-Hut-Desktop-attorney-ai\\\\eabee946-2440-4bb8-b683-509ef1924c30\\\\scratchpad\\\\uvicorn2.err\"; Write-Output \"backend restarting with FRONTEND_URL=3001\")",
+      "mcp__chrome-devtools__evaluate_script",
+      "mcp__playwright__browser_wait_for",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_network_requests",
+      "Bash(timeout 500 ./venv/Scripts/python.exe /tmp/stress.py)",
+      "mcp__playwright__browser_navigate"
     ]
   }
 }

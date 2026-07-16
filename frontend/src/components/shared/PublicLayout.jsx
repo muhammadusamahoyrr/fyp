@@ -68,7 +68,7 @@ export function PublicHeader({ activePage = '' }) {
   const activeNavLink = 'relative text-base font-semibold text-[#025E56] border-b-2 border-[#025E56] pb-0.5';
 
   return (
-    <header className="fixed mx-4 mt-2 lg:mt-6 lg:mx-20 rounded-full shadow-lg shadow-[#004743]/20 inset-x-0 top-0 z-50 bg-white/90 backdrop-blur-sm">
+    <header className="fixed mx-4 mt-2 lg:mt-6 lg:mx-20 rounded-full shadow-lg shadow-[#004743]/20 inset-x-0 top-0 z-50 bg-white/75 backdrop-blur-xl saturate-150 transition-all duration-300">
       <nav className="flex items-center justify-between p-2 lg:px-4">
         {/* Logo */}
         <div className="hidden lg:flex lg:flex-1">

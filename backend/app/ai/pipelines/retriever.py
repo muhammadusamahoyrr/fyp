@@ -87,6 +87,7 @@ class _FilteredBM25Retriever(BaseRetriever):
 
 
 def build_retriever(case_type: str, province: str):
+    province = province.lower()  # normalize so "Punjab" == "punjab" == metadata value
     collection_name = CASE_TYPE_TO_COLLECTION.get(case_type, "civil_collection")
 
     bm25_raw = _bm25(collection_name)

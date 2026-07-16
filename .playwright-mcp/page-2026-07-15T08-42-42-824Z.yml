@@ -1,0 +1,62 @@
+- generic [active] [ref=f44e1]:
+  - button "Open Next.js Dev Tools" [ref=f44e9] [cursor=pointer]
+  - alert [ref=f44e13]
+  - generic [ref=f44e14]:
+    - generic [ref=f44e15]:
+      - generic [ref=f44e16]:
+        - img "Attorney.AI" [ref=f44e17]
+        - generic [ref=f44e18]: Attorney.AI
+        - button [ref=f44e20] [cursor=pointer]
+      - navigation [ref=f44e22]:
+        - button "Overview" [ref=f44e23] [cursor=pointer]
+        - button "Profile" [ref=f44e27] [cursor=pointer]
+        - button "Legal Intake" [ref=f44e31] [cursor=pointer]
+        - button "AI Chat" [ref=f44e35] [cursor=pointer]
+        - button "Legal Tools" [ref=f44e40] [cursor=pointer]
+        - button [ref=f44e43] [cursor=pointer]
+        - button "Lawyers" [ref=f44e49] [cursor=pointer]
+        - button "Agreements" [ref=f44e53] [cursor=pointer]
+        - button "Documents" [ref=f44e56] [cursor=pointer]
+        - button "Tracking 3" [ref=f44e60] [cursor=pointer]:
+          - text: Tracking
+          - generic [ref=f44e64]: "3"
+      - generic [ref=f44e66]:
+        - generic [ref=f44e67]:
+          - generic [ref=f44e68]: BT
+          - generic [ref=f44e69]:
+            - generic [ref=f44e70]: Browser Test Client
+            - generic [ref=f44e71]: Client
+          - button "اردو" [ref=f44e72] [cursor=pointer]
+        - generic [ref=f44e73]:
+          - button [ref=f44e74] [cursor=pointer]
+          - button "Sign Out" [ref=f44e82] [cursor=pointer]
+    - generic [ref=f44e85]:
+      - generic [ref=f44e86]:
+        - generic [ref=f44e88]:
+          - heading "Overseas Desk" [level=1] [ref=f44e89]
+          - paragraph [ref=f44e90]: Wednesday, July 15, 2026
+        - button "3" [ref=f44e92] [cursor=pointer]
+      - generic [ref=f44e97]:
+        - generic [ref=f44e98]:
+          - generic [ref=f44e99]: Overseas Desk
+          - generic [ref=f44e100]: Manage your Pakistani property & affairs from abroad — the right POA, verified, and protected.
+        - generic [ref=f44e101]:
+          - button "My Powers of Attorney" [ref=f44e102] [cursor=pointer]
+          - button "Attestation Navigator" [ref=f44e106] [cursor=pointer]
+          - button "Special Courts" [ref=f44e109] [cursor=pointer]
+          - button "Property Dispute" [ref=f44e112] [cursor=pointer]
+        - generic [ref=f44e121]:
+          - generic [ref=f44e122]: Property grabbed, POA misused, or a fraudulent transfer? The Protection of Overseas Pakistanis' Property Act 2024 gives a fast-track court remedy. Answer a few questions — if it's clear-cut we prepare a draft petition; if it's not, we route you to a lawyer rather than guess.
+          - generic [ref=f44e136]:
+            - generic [ref=f44e137]: 1. Eligibility
+            - generic [ref=f44e138]: 2. Your situation
+            - generic [ref=f44e139]: 3. Details
+            - generic [ref=f44e140]: 4. Result
+          - generic [ref=f44e141]:
+            - generic [ref=f44e151]: Ready to draft ✓
+            - generic [ref=f44e152]: Your dispute qualifies for the Islamabad Capital Territory / federal special court. We can prepare a DRAFT petition for a lawyer to review and file.
+            - button "Draft petition (PDF)" [ref=f44e153] [cursor=pointer]
+            - generic [ref=f44e154]:
+              - generic [ref=f44e155]: ✓ Sent to Ahmad Raza Khan
+              - text: — they can now open your full case brief and the draft petition. They'll be in touch through the platform.
+          - button "Start another dispute" [ref=f44e157] [cursor=pointer]

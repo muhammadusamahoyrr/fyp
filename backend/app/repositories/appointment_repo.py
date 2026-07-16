@@ -17,6 +17,15 @@ class AppointmentRepository(BaseRepository):
     async def find_by_id(self, appt_id: str) -> dict | None:
         return await self.find_one({"_id": appt_id})
 
+    async def exists_completed(self, client_id: str, lawyer_id: str) -> bool:
+        """True if this client has a completed appointment with this lawyer —
+        proof of actual work done (used to gate reviews)."""
+        return bool(await self.find_one({
+            "client_id": client_id,
+            "lawyer_id": lawyer_id,
+            "status": AppointmentStatus.COMPLETED.value,
+        }))
+
     async def find_for_client(
         self,
         client_id: str,

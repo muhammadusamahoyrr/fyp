@@ -1,3 +1,7 @@
+import asyncio
+
+from langgraph.types import interrupt
+
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_fast_llm
 from app.ai.nodes._history import format_history
@@ -14,12 +18,12 @@ Reference what the user said to show you understood their situation.
 Ask in the same language the user used. No explanations — just the question."""
 
 
-def clarification_node(state: AgentState) -> dict:
+async def clarification_node(state: AgentState) -> dict:
     llm = get_fast_llm()
     history = format_history(state, max_turns=3)
     history_section = f"\nConversation history:\n{history}\n" if history else ""
 
-    response = llm.invoke([
+    response = await asyncio.to_thread(llm.invoke, [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": (
             f"User query: {state['query']}\n"
@@ -28,7 +32,9 @@ def clarification_node(state: AgentState) -> dict:
             f"{history_section}"
         )},
     ])
+    question = response.content.strip()
+    interrupt(question)  # pause graph — chat_socket resumes with user's answer
     return {
-        "clarification_question": response.content.strip(),
+        "clarification_question": question,
         "needs_clarification":    True,
     }

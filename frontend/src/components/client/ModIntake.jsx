@@ -7,6 +7,7 @@ import { useCase } from "./CaseContext.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge, Tooltip } from "@/components/shared/shared.jsx";
 import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence } from "@/lib/api.js";
+import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 
 // Encode Float32 PCM as 16-bit mono WAV (no ffmpeg on backend)
 function _pcmToWav(samples, sampleRate) {
@@ -96,6 +97,8 @@ const ModIntake = () => {
     const t      = useT();
     const toast  = useToast();
     const router = useRouter();
+    const { T }  = useLang();
+    const isMobile = useIsMobile();
     const { completeIntake, addNotification } = useCase();
     const [step, setStep] = useState(1);
 
@@ -137,7 +140,13 @@ const ModIntake = () => {
 
     // ── UI helpers ─────────────────────────────────────────────────
     const [autosave, setAutosave] = useState(false);
-    const steps = ["Select Role", "Case Input", "AI Questions", "Case Summary", "Categorization"];
+    const steps = [
+        T("Select Role", "کردار منتخب کریں"),
+        T("Case Input", "کیس کی تفصیل"),
+        T("AI Questions", "اے آئی سوالات"),
+        T("Case Summary", "کیس کا خلاصہ"),
+        T("Categorization", "درجہ بندی"),
+    ];
     const completedSteps = Math.max(0, step - 1);
     const progress = (completedSteps / steps.length) * 100;
 
@@ -578,7 +587,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
         const { data, error } = await transcribeAudio(sendBlob);
         if (error) {
             setVoiceStatus("error");
-            toast.show(error.detail || "Transcription failed. Try again.", "error", 3000);
+            toast.show(error.message || "Transcription failed. Try again.", "error", 3000);
             return;
         }
         setVoiceTranscript(data.transcript || "");
@@ -652,13 +661,16 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                     {done ? <Ic n="check" s={13} c={t.mode === "dark" ? "#1A2E35" : "#fff"} /> : targetStep}
                                 </div>
                                 
-                                {/* Step label */}
-                                <div style={{ 
-                                    fontSize: 13, fontWeight: act ? 700 : 600, 
-                                    color: act ? t.primary : done ? t.success : t.text,
-                                }}>
-                                    {s}
-                                </div>
+                                {/* Step label — circles only on mobile */}
+                                {(!isMobile || act) && (
+                                    <div style={{
+                                        fontSize: 13, fontWeight: act ? 700 : 600,
+                                        color: act ? t.primary : done ? t.success : t.text,
+                                        whiteSpace: "nowrap",
+                                    }}>
+                                        {s}
+                                    </div>
+                                )}
                             </div>
                             
                             {/* Connector line */}
@@ -678,22 +690,22 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
             {/* ── STEP 1: Role + Province ─────────────────────────────── */}
             {step === 1 && (
                 <Card className="aFadeUp">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                        <STitle icon="user" sub="Your role and province determine how we structure your case">Select Your Role & Province</STitle>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
+                        <STitle icon="user" sub={T("Your role and province determine how we structure your case", "آپ کا کردار اور صوبہ طے کرتا ہے کہ ہم آپ کا کیس کیسے ترتیب دیں گے")}>{T("Select Your Role & Province", "اپنا کردار اور صوبہ منتخب کریں")}</STitle>
                         <BtnPrimary
                             disabled={!role || !province}
                             onClick={handleStep1Continue}
                             style={{ fontSize: 14, padding: "12px 32px" }}
-                        >Continue →</BtnPrimary>
+                        >{T("Continue →", "جاری رکھیں ←")}</BtnPrimary>
                     </div>
 
                     {/* Role cards */}
-                    <div style={{ display: "flex", gap: 16, marginBottom: 24, marginTop: 8 }}>
+                    <div style={{ display: "flex", gap: 16, marginBottom: 24, marginTop: 8, flexDirection: isMobile ? "column" : "row" }}>
                         {["Plaintiff", "Defendant"].map(r => (
                             <div key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: 28, borderRadius: 18, border: `2.5px solid ${role === r ? t.primary : t.border}`, background: role === r ? t.primaryGlow : "transparent", cursor: "pointer", textAlign: "center", transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)", transform: role === r ? "scale(1.05)" : "scale(1)", boxShadow: role === r ? `0 12px 32px ${t.primary}25` : "none" }}>
                                 <div style={{ fontSize: 48, marginBottom: 14 }}>{r === "Plaintiff" ? "⚖️" : "🛡️"}</div>
-                                <div style={{ fontWeight: 800, color: t.text, fontSize: 18, fontFamily: "'Playfair Display',serif", marginBottom: 4 }}>{r}</div>
-                                <div style={{ fontSize: 13, color: t.textMuted, marginTop: 6 }}>{r === "Plaintiff" ? "Filing a legal claim" : "Responding to a claim"}</div>
+                                <div style={{ fontWeight: 800, color: t.text, fontSize: 18, fontFamily: "'Playfair Display',serif", marginBottom: 4 }}>{r === "Plaintiff" ? T("Plaintiff", "مدعی") : T("Defendant", "مدعا علیہ")}</div>
+                                <div style={{ fontSize: 13, color: t.textMuted, marginTop: 6 }}>{r === "Plaintiff" ? T("Filing a legal claim", "قانونی دعویٰ دائر کرنا") : T("Responding to a claim", "دعوے کا جواب دینا")}</div>
                             </div>
                         ))}
                     </div>
@@ -730,30 +742,30 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                             </div>
                             <div style={{ flex: 1 }}></div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <span style={{ fontSize: 12, fontWeight: 600, color: t.textMuted, whiteSpace: "nowrap" }}>Urgency</span>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: t.textMuted, whiteSpace: "nowrap" }}>{T("Urgency", "فوری نوعیت")}</span>
                                 <select
                                     value={urgency}
                                     onChange={e => setUrgency(e.target.value)}
                                     style={{ fontSize: 13, fontWeight: 600, padding: "7px 12px", borderRadius: 8, border: `1.5px solid ${urgency === "urgent" ? "#ef4444" : urgency === "high" ? "#f97316" : urgency === "medium" ? t.warn : "#22c55e"}`, background: t.inputBg, color: urgency === "urgent" ? "#ef4444" : urgency === "high" ? "#f97316" : urgency === "medium" ? t.warn : "#22c55e", cursor: "pointer", outline: "none" }}
                                 >
-                                    <option value="low">🟢 Low</option>
-                                    <option value="medium">🟡 Medium</option>
-                                    <option value="high">🟠 High</option>
-                                    <option value="urgent">🔴 Urgent</option>
+                                    <option value="low">🟢 {T("Low", "کم")}</option>
+                                    <option value="medium">🟡 {T("Medium", "درمیانی")}</option>
+                                    <option value="high">🟠 {T("High", "زیادہ")}</option>
+                                    <option value="urgent">🔴 {T("Urgent", "فوری")}</option>
                                 </select>
                             </div>
-                            <BtnPrimary onClick={handleStep2Continue} style={{ fontSize: 13, padding: "8px 18px" }}>Continue →</BtnPrimary>
+                            <BtnPrimary onClick={handleStep2Continue} style={{ fontSize: 13, padding: "8px 18px" }}>{T("Continue →", "جاری رکھیں ←")}</BtnPrimary>
                         </div>
 
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 24 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.2fr 0.8fr", gap: 24 }}>
                             {/* LEFT PANEL: Input Tab */}
                             <div>
                                 <div style={{ display: "inline-flex", background: t.inputBg, borderRadius: 50, padding: 4, marginBottom: 16, border: `1px solid ${t.border}` }}>
                                     {["text", "voice"].map(type => (
                                         <button key={type} onClick={() => setInputType(type)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 20px", borderRadius: 40, border: "none", background: inputType === type ? t.primary : "transparent", color: inputType === type ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s" }}>
                                             <Ic n={type === "text" ? "pen" : "mic"} s={14} c={inputType === type ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted} />
-                                            {type === "text" ? "Text Input" : "Voice Input"}
+                                            {type === "text" ? T("Text Input", "تحریری ان پٹ") : T("Voice Input", "آواز سے ان پٹ")}
                                         </button>
                                     ))}
                                 </div>
@@ -815,7 +827,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                 ) : (
                                     <Card style={{ padding: "40px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 260 }}>
                                         <textarea
-                                            placeholder="Please describe the events leading up to your dispute in detail..."
+                                            placeholder={T("Please describe the events leading up to your dispute in detail...", "براہ کرم اپنے تنازعے کے واقعات کی تفصیل لکھیں...")}
                                             value={description}
                                             onChange={e => {
                                                 setDescription(e.target.value);
@@ -833,8 +845,8 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
                                     <div style={{ width: 36, height: 36, borderRadius: 10, background: t.inputBg, display: "flex", alignItems: "center", justifyContent: "center" }}><Ic n="file" s={16} c={t.textMuted} /></div>
                                     <div>
-                                        <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>Do you have evidence?</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>Documents, photos, or witnesses</div>
+                                        <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{T("Do you have evidence?", "کیا آپ کے پاس ثبوت ہیں؟")}</div>
+                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>{T("Documents, photos, or witnesses", "دستاویزات، تصاویر یا گواہ")}</div>
                                     </div>
                                 </div>
                                 <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
@@ -883,7 +895,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                             onMouseLeave={e => e.currentTarget.style.background = `${t.primary}08`}
                                         >
                                             <Ic n="file" s={15} c={t.primary} />
-                                            <span style={{ fontSize: 12, fontWeight: 700, color: t.primary }}>Upload Files</span>
+                                            <span style={{ fontSize: 12, fontWeight: 700, color: t.primary }}>{T("Upload Files", "فائلیں اپ لوڈ کریں")}</span>
                                             <span style={{ fontSize: 11, color: t.textMuted }}>PDF, Word, JPG, PNG · max 10 MB each</span>
                                         </div>
                                         {/* Uploaded file list */}
@@ -971,7 +983,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                         <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>Our AI has analysed your case and identified the most important missing facts.</div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 14 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 14 }}>
                         <div>
                             <div style={{ padding: "16px 20px", borderRadius: 16, background: `linear-gradient(135deg, ${t.primary}15, ${t.primary}05)`, border: `1px solid ${t.primary}30`, marginBottom: 16, display: "flex", alignItems: "flex-start", gap: 12 }}>
                                 <div style={{ width: 36, height: 36, borderRadius: "50%", background: t.primaryGlow, border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🤖</div>
@@ -1083,7 +1095,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
                                     <div style={{ width: 34, height: 34, borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📊</div>
                                     <div>
-                                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Question Progress</div>
+                                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{T("Question Progress", "سوالات کی پیش رفت")}</div>
                                         <div style={{ fontSize: 11, color: t.textMuted }}>AI-generated follow-up</div>
                                     </div>
                                 </div>
@@ -1115,8 +1127,8 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
                                     <div style={{ width: 34, height: 34, borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📋</div>
                                     <div>
-                                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Case Preview</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted }}>Building from answers</div>
+                                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{T("Case Preview", "کیس کا جائزہ")}</div>
+                                        <div style={{ fontSize: 11, color: t.textMuted }}>{T("Building from answers", "جوابات سے تیار ہو رہا ہے")}</div>
                                     </div>
                                 </div>
                                 <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
@@ -1145,14 +1157,14 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                     <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
                         <BtnOutline onClick={() => setStep(3)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
                         <div style={{ flex: 1 }} />
-                        <BtnPrimary onClick={() => { toast.show("✅ Case saved!", "success"); setStep(5); }} style={{ fontSize: 13, padding: "8px 18px" }}>Confirm & Save Case →</BtnPrimary>
+                        <BtnPrimary onClick={() => { toast.show("✅ Case saved!", "success"); setStep(5); }} style={{ fontSize: 13, padding: "8px 18px" }}>{T("Confirm & Save Case →", "تصدیق کریں اور کیس محفوظ کریں ←")}</BtnPrimary>
                     </div>
                     <div>
                         <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI-Generated <em>Case Summary</em></div>
                         <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>Review and confirm your structured case before saving</div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 14 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 14 }}>
                         {/* Main panel */}
                         <Card style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                             <div style={{ padding: "16px 20px", borderBottom: `1px solid ${t.border}`, background: t.inputBg, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1323,7 +1335,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                         <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>Confirm your case category before final submission</div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 14 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 14 }}>
                         <div>
                             <div style={{ padding: "16px 20px", borderRadius: 16, background: `linear-gradient(135deg, ${t.primary}15, ${t.primary}05)`, border: `1px solid ${t.primary}30`, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
                                 <div style={{ fontSize: 18 }}>🤖</div>
@@ -1335,7 +1347,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                 </div>
                             </div>
 
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 12, marginBottom: 20 }}>
                                 {[
                                     { id: "civil",          i: "⚖️",  n: "Civil Law",          d: "Property disputes, contracts, personal injury" },
                                     { id: "criminal",       i: "🚔",  n: "Criminal Law",        d: "FIR filing, bail applications, criminal defense" },
@@ -1358,8 +1370,8 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                             <Card style={{ padding: 20, border: `1px solid ${t.primary}50`, background: t.primaryGlow, textAlign: "center" }}>
                                 <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-                                <div style={{ fontFamily: "'Fraunces',serif", fontSize: 18, fontWeight: 600, color: t.primary, marginBottom: 6 }}>Case Intake Complete</div>
-                                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>Your case is structured and ready for review</div>
+                                <div style={{ fontFamily: "'Fraunces',serif", fontSize: 18, fontWeight: 600, color: t.primary, marginBottom: 6 }}>{T("Case Intake Complete", "کیس کی درخواست مکمل")}</div>
+                                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>{T("Your case is structured and ready for review", "آپ کا کیس ترتیب پا چکا ہے اور جائزے کے لیے تیار ہے")}</div>
                                 <div style={{ textAlign: "left" }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>Case ID</span>
@@ -1384,13 +1396,13 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                         router.push(dest);
                                     }}
                                     style={{ width: "100%", marginTop: 20, padding: 14, fontSize: 14 }}
-                                >Find a Lawyer →</BtnPrimary>
+                                >{T("Find a Lawyer →", "وکیل تلاش کریں ←")}</BtnPrimary>
                             </Card>
 
                             <Card style={{ padding: 20 }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
                                     <div style={{ width: 34, height: 34, borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📄</div>
-                                    <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Export Case</div>
+                                    <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{T("Export Case", "کیس ایکسپورٹ کریں")}</div>
                                 </div>
                                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                                     <BtnOutline onClick={handleDownloadPDF} style={{ padding: "10px", fontSize: 12, justifyContent: "center" }}>📄 Download Case PDF</BtnOutline>

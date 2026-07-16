@@ -37,6 +37,14 @@ def decrypt_cnic(token: str) -> str:
     return _get_fernet().decrypt(token.encode()).decode()
 
 
+def mask_cnic(cnic: str) -> str:
+    """Display-safe CNIC: all but the last 4 digits masked. '' if too short."""
+    digits = "".join(ch for ch in (cnic or "") if ch.isdigit())
+    if len(digits) < 4:
+        return ""
+    return "*" * (len(digits) - 4) + digits[-4:]
+
+
 # --- JWT ---
 
 def _create_token(data: dict[str, Any], expires_delta: timedelta) -> str:

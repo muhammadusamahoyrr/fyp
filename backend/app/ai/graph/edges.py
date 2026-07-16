@@ -27,6 +27,17 @@ _CLASSIFIER_CONFIDENCE_THRESHOLD = 0.85
 
 # ── Routing functions ─────────────────────────────────────────────────────────
 
+def route_after_gatekeeper(state: AgentState) -> str:
+    """
+    Entry-node router. The gatekeeper blocks prompt-injection / jailbreak attempts
+    by setting convergence_status="off_topic" + a canned refusal answer (mirroring
+    the off-topic exit). A clean query proceeds to the normal classifier pass.
+    """
+    if state.get("convergence_status") == "off_topic":
+        return "finalizer_node"
+    return "classifier_node"
+
+
 def route_after_classifier(state: AgentState) -> str:
     """
     Always route to triage_node first.
@@ -86,11 +97,39 @@ def route_after_fact_gap(state: AgentState) -> str:
     return "retrieval_node"
 
 
+def route_after_cache(state: AgentState) -> str:
+    """Cache hit → straight to finalizer (skip retrieval + generation).
+    Miss → tool_node, which decides whether a deterministic engine (bail, court
+    fee, inheritance, case law) can compute part of the answer before retrieval
+    runs. tool_node is a no-op for the majority of queries that need no tool."""
+    return "finalizer_node" if state.get("cache_hit") else "tool_node"
+
+
+def _has_engine_answer(state: AgentState) -> bool:
+    """Did a deterministic engine already answer this question successfully?"""
+    for call in state.get("tool_results", []) or []:
+        result = call.get("result")
+        if isinstance(result, dict):
+            if not result.get("error"):
+                return True
+        elif isinstance(result, list):
+            if any(isinstance(r, dict) and not r.get("error") for r in result):
+                return True
+    return False
+
+
 def route_after_grader(state: AgentState) -> str:
     score    = state.get("relevance_score", 0.0)
     prev     = state.get("prev_relevance_score", 0.0)
     attempts = state.get("retrieval_attempts", 1)
     delta    = score - prev
+
+    # A deterministic engine (bail / court fee / inheritance) already produced the
+    # answer. Retrieval here only supplies *supplementary* statute context, so a
+    # low relevance score is not worth a retry: another pass cannot improve an
+    # answer that is already exact, and it was costing seconds per query.
+    if _has_engine_answer(state):
+        return "generation_node"
 
     # No new facts added since last retrieval → re-running won't help
     if state.get("fact_delta", 1) == 0 and attempts > 1:

@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
-import { useNotif } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
-import { casesData } from "./data.js";
+import { listCases, aiResearch, rateAnswer } from "@/lib/api.js";
+import { useAuth } from "@/context/AuthContext.jsx";
 
 // ============================================================
 // AI LEGAL PAGE — Full chatbot UI with case context injection
@@ -13,19 +13,47 @@ import { casesData } from "./data.js";
 function AILegalPage() {
     const { t } = useTheme();
     const { activeCase } = useCase();
-    const { addNotif } = useNotif();
-    const activeCaseObj = casesData.find(c => c.id === activeCase);
+    const { user } = useAuth();
+    const firstName = user?.full_name?.split(" ")[0] || "Counselor";
+    const [apiCases, setApiCases] = useState([]);
     const [msgs, setMsgs] = useState([]);
+
+    useEffect(() => {
+        listCases({ page_size: 50 }).then(({ data }) => {
+            if (!data?.items) return;
+            setApiCases(data.items.map(c => ({
+                id: c.case_number || c._id,
+                _id: c._id,
+                title: c.title || "Untitled Case",
+                type: c.case_type || "general",
+                client: c.client_name || "Client",
+                court: c.province || "Court",
+                nextHearing: c.hearing_dates?.find(h => !h.outcome)?.date?.split("T")[0] || "TBD",
+            })));
+        });
+    }, []);
+
+    const activeCaseObj = apiCases.find(c => c.id === activeCase) || null;
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(false);
     const [sideOpen, setSideOpen] = useState(true);
     const [lang, setLang] = useState("EN");
     const [history, setHistory] = useState([
-        { group: "This Week", items: ["What is wrongful termination?", "Employment law basics", "CPC Section 9 explanation"] },
-        { group: "Last Week", items: ["Contract dispute analysis", "NDA review help", "Bail application under CrPC"] },
+        { group: "This Week", items: [] },
     ]);
+    const sessionIdRef = useRef(`${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
     const bottomRef = useRef(null);
     useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
+
+    // Inject cursor-blink keyframe once
+    useEffect(() => {
+        const id = "ai-blink-kf";
+        if (document.getElementById(id)) return;
+        const s = document.createElement("style");
+        s.id = id;
+        s.textContent = `@keyframes aiBlink{0%,100%{opacity:1}50%{opacity:0}}`;
+        document.head.appendChild(s);
+    }, []);
 
     // Auto-inject active case context when case changes
     useEffect(() => {
@@ -33,12 +61,9 @@ function AILegalPage() {
             const ctx = `I'm working on case ${activeCaseObj.id}: "${activeCaseObj.title}" — ${activeCaseObj.type} case for client ${activeCaseObj.client} at ${activeCaseObj.court}. Next hearing: ${activeCaseObj.nextHearing}. What should I prepare?`;
             setQuery(ctx);
             setMsgs([]); // reset conversation when case changes
+            sessionIdRef.current = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; // fresh graph thread
         }
     }, [activeCase]); // runs whenever active case changes, not just mount
-
-    const systemPrompt = activeCaseObj
-        ? `You are an expert Indian legal assistant for a lawyer. You are currently helping with case ${activeCaseObj.id}: "${activeCaseObj.title}" — a ${activeCaseObj.type} case for client ${activeCaseObj.client} at ${activeCaseObj.court}. Next hearing: ${activeCaseObj.nextHearing}. Provide concise, accurate answers about Indian law, court procedures, case precedents, and legal sections. Reference specific acts and sections where relevant.`
-        : `You are an expert Indian legal assistant for a lawyer. Provide concise, accurate answers about Indian law, court procedures, case precedents, and legal sections. Reference specific acts and sections where relevant.`;
 
     const h = new Date().getHours();
     const greetEmoji = h < 12 ? "🌅" : h < 17 ? "⛅" : "🌙";
@@ -47,25 +72,53 @@ function AILegalPage() {
 
     const send = async () => {
         if (!query.trim() || loading) return;
-        const q = query.trim(); setQuery("");
+        const q = query.trim();
+        setQuery("");
         const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         setMsgs(p => [...p, { role: "user", content: q, time: now }]);
         setHistory(prev => { const u = [...prev]; if (u[0] && !u[0].items.includes(q)) u[0] = { ...u[0], items: [q, ...u[0].items] }; return u; });
         setLoading(true);
+
+        const aiTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const msgHistory = msgs.filter(m => m.role !== "system").map(m => ({ role: m.role, content: m.content }));
+
+        // Insert placeholder immediately (filled when the pipeline answers)
+        setMsgs(p => [...p, { role: "assistant", content: "", time: aiTime, streaming: true }]);
+
+        const fill = (patch) => setMsgs(p => {
+            const next = [...p];
+            const last = next[next.length - 1];
+            if (last?.streaming) next[next.length - 1] = { ...last, streaming: false, ...patch };
+            return next;
+        });
+
         try {
-            const r = await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    model: "claude-sonnet-4-20250514", max_tokens: 1000,
-                    system: systemPrompt,
-                    messages: msgs.filter(m => m.role !== "system").concat([{ role: "user", content: q }]).map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }))
-                })
+            const { data, error } = await aiResearch(q, sessionIdRef.current, {
+                language: lang === "UR" ? "ur" : "en",
+                history: msgHistory,
             });
-            const d = await r.json();
-            const aiTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-            setMsgs(p => [...p, { role: "assistant", content: d.content?.[0]?.text || "Error occurred.", time: aiTime }]);
-        } catch { setMsgs(p => [...p, { role: "assistant", content: "Connection error. Please try again.", time: "" }]); }
-        finally { setLoading(false); }
+            if (error || !data) throw new Error(error?.detail || "request failed");
+
+            if (data.type === "clarification") {
+                fill({ content: data.question, clarification: true });
+            } else {
+                const citations = (data.citations || [])
+                    .map(c => ({
+                        label: [c.statute, c.section ? `§${c.section}` : ""].filter(Boolean).join(" "),
+                        url: c.url || (c.type === "judgment" ? c.source : ""),
+                        judgment: c.type === "judgment",
+                    }))
+                    .filter(c => c.label);
+                fill({
+                    content: data.answer || "No response received.",
+                    citations,
+                    confidence: data.confidence,
+                });
+            }
+        } catch {
+            fill({ content: "AI service unavailable. Please try again." });
+        }
+        setLoading(false);
     };
 
     const hasMessages = msgs.length > 0;
@@ -200,7 +253,7 @@ function AILegalPage() {
                         <div style={{ textAlign: "center", maxWidth: 640, width: "100%", padding: "0 16px" }}>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 16 }}>
                                 <span style={{ fontSize: 42 }}>{greetEmoji}</span>
-                                <h2 className="serif" style={{ fontSize: 26, fontWeight: 700, color: t.text, margin: 0 }}>{greetWord}, John!</h2>
+                                <h2 className="serif" style={{ fontSize: 26, fontWeight: 700, color: t.text, margin: 0 }}>{greetWord}, {firstName}!</h2>
                             </div>
                             {/* Active case context pill */}
                             {activeCaseObj && (
@@ -216,15 +269,15 @@ function AILegalPage() {
                             {/* Quick prompt chips — case-aware when active */}
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
                                 {(activeCaseObj ? [
-                                    `What sections apply to ${activeCaseObj.type} cases in India?`,
+                                    `What sections apply to ${activeCaseObj.type} cases in Pakistan?`,
                                     `Key arguments for ${activeCaseObj.title}`,
                                     `Documents needed for next hearing at ${activeCaseObj.court}`,
                                     `Recent precedents for ${activeCaseObj.type} law`
                                 ] : [
                                     "Relevant sections for property dispute",
-                                    "IPC sections for cheque bounce",
-                                    "Bail conditions under CrPC",
-                                    "Contempt of court procedure"
+                                    "PPC sections for cheque bounce",
+                                    "Bail conditions under CrPC 1898",
+                                    "Contempt of court procedure in Pakistan"
                                 ]).map((p, i) => (
                                     <button key={i} onClick={() => setQuery(p)} style={{
                                         padding: "9px 16px", borderRadius: 50,
@@ -255,15 +308,59 @@ function AILegalPage() {
                                             borderRadius: m.role === "user" ? "18px 18px 6px 18px" : "18px 18px 18px 6px",
                                             padding: "12px 16px", fontSize: 13.5, lineHeight: 1.8,
                                             color: m.role === "user" ? (t.mode === "dark" ? "#111B1F" : "#fff") : t.text,
-                                            whiteSpace: "pre-wrap"
+                                            whiteSpace: "pre-wrap", minHeight: m.streaming && !m.content ? 20 : undefined,
                                         }}>
-                                            {m.content}
+                                            {m.content || (m.streaming ? "" : "No response received.")}
+                                            {m.streaming && <span style={{ display: "inline-block", width: 2, height: "1em", background: t.primary, marginLeft: 2, verticalAlign: "text-bottom", animation: "aiBlink 1s step-end infinite" }} />}
+                                            {m.role === "assistant" && !m.streaming && m.citations?.length > 0 && (
+                                                <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.border}`, display: "flex", flexWrap: "wrap", gap: 5 }}>
+                                                    {m.citations.map((c, ci) => {
+                                                        const label = typeof c === "string" ? c : c.label;
+                                                        const url = typeof c === "string" ? "" : c.url;
+                                                        const icon = (typeof c === "object" && c.judgment) ? "⚖️" : "📖";
+                                                        const chipStyle = { fontSize: 11, padding: "3px 9px", borderRadius: 7, background: t.cardHi, border: `1px solid ${t.border}`, color: url ? t.primary : t.textMuted, textDecoration: "none", fontWeight: url ? 700 : 400 };
+                                                        return url
+                                                            ? <a key={ci} href={url} target="_blank" rel="noopener noreferrer" style={chipStyle}>{icon} {label} ↗</a>
+                                                            : <span key={ci} style={chipStyle}>{icon} {label}</span>;
+                                                    })}
+                                                </div>
+                                            )}
                                         </div>
-                                        {m.time && <div style={{ fontSize: 10, color: t.textFaint, marginTop: 4, textAlign: m.role === "user" ? "right" : "left" }}>{m.time}</div>}
+                                        {m.time && (
+                                            <div style={{ fontSize: 10, color: t.textFaint, marginTop: 4, textAlign: m.role === "user" ? "right" : "left", display: "flex", alignItems: "center", gap: 8, justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                                                {m.time}
+                                                {m.confidence != null && (
+                                                    <span style={{ color: m.confidence >= 0.65 ? t.textFaint : "#f59e0b" }}>
+                                                        {Math.round(m.confidence * 100)}% confidence
+                                                    </span>
+                                                )}
+                                                {m.role === "assistant" && !m.streaming && !m.clarification && m.content && (
+                                                    m.rated ? <span>feedback recorded ✓</span> : (
+                                                        <span style={{ display: "inline-flex", gap: 3 }}>
+                                                            {["up", "down"].map(r => (
+                                                                <button key={r}
+                                                                    onClick={() => {
+                                                                        setMsgs(prev => prev.map((x, xi) => xi === i ? { ...x, rated: r } : x));
+                                                                        rateAnswer({
+                                                                            session_id: sessionIdRef.current,
+                                                                            rating: r,
+                                                                            answer_preview: (m.content || "").slice(0, 300),
+                                                                            question_preview: (msgs[i - 1]?.content || "").slice(0, 300),
+                                                                            source: "research",
+                                                                        }).catch(() => {});
+                                                                    }}
+                                                                    style={{ border: `1px solid ${t.border}`, background: "transparent", borderRadius: 6, cursor: "pointer", fontSize: 10, padding: "1px 6px" }}
+                                                                >{r === "up" ? "👍" : "👎"}</button>
+                                                            ))}
+                                                        </span>
+                                                    )
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             ))}
-                            {loading && (
+                            {loading && !msgs.some(m => m.streaming) && (
                                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                                     <div style={{ width: 34, height: 34, borderRadius: 10, background: t.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                                         <Icon d={I.ai} size={16} style={{ color: t.primary }} />

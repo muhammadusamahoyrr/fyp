@@ -1,0 +1,73 @@
+- generic [ref=f29e1]:
+  - button "Open Next.js Dev Tools" [ref=f29e9] [cursor=pointer]
+  - alert [ref=f29e13]
+  - generic [ref=f29e14]:
+    - generic [ref=f29e15]:
+      - generic [ref=f29e16]:
+        - img "Attorney.AI" [ref=f29e17]
+        - generic [ref=f29e18]: Attorney.AI
+        - button [ref=f29e20] [cursor=pointer]
+      - navigation [ref=f29e22]:
+        - button "Overview" [ref=f29e23] [cursor=pointer]
+        - button "Profile" [ref=f29e27] [cursor=pointer]
+        - button "Legal Intake" [ref=f29e31] [cursor=pointer]
+        - button "AI Chat" [ref=f29e35] [cursor=pointer]
+        - button "Legal Tools" [ref=f29e40] [cursor=pointer]
+        - button [ref=f29e43] [cursor=pointer]
+        - button "Lawyers" [ref=f29e49] [cursor=pointer]
+        - button "Agreements" [ref=f29e53] [cursor=pointer]
+        - button "Documents" [ref=f29e56] [cursor=pointer]
+        - button "Tracking 2" [ref=f29e60] [cursor=pointer]:
+          - text: Tracking
+          - generic [ref=f29e64]: "2"
+      - generic [ref=f29e66]:
+        - generic [ref=f29e67]:
+          - generic [ref=f29e68]: BT
+          - generic [ref=f29e69]:
+            - generic [ref=f29e70]: Browser Test Client
+            - generic [ref=f29e71]: Client
+          - button "اردو" [ref=f29e72] [cursor=pointer]
+        - generic [ref=f29e73]:
+          - button [ref=f29e74] [cursor=pointer]
+          - button "Sign Out" [ref=f29e82] [cursor=pointer]
+    - generic [ref=f29e85]:
+      - generic [ref=f29e86]:
+        - generic [ref=f29e88]:
+          - heading "Overseas Desk" [level=1] [ref=f29e89]
+          - paragraph [ref=f29e90]: Wednesday, July 15, 2026
+        - button "2" [ref=f29e92] [cursor=pointer]
+      - generic [ref=f29e97]:
+        - generic [ref=f29e98]:
+          - generic [ref=f29e99]: Overseas Desk
+          - generic [ref=f29e100]: Manage your Pakistani property & affairs from abroad — the right POA, verified, and protected.
+        - generic [ref=f29e101]:
+          - button "My Powers of Attorney" [ref=f29e102] [cursor=pointer]
+          - button "Attestation Navigator" [ref=f29e106] [cursor=pointer]
+          - button "Special Courts" [ref=f29e109] [cursor=pointer]
+          - button "Property Dispute" [ref=f29e112] [cursor=pointer]
+        - generic [ref=f29e121]:
+          - generic [ref=f29e122]: Property grabbed, POA misused, or a fraudulent transfer? The Protection of Overseas Pakistanis' Property Act 2024 gives a fast-track court remedy. Answer a few questions — if it's clear-cut we prepare a draft petition; if it's not, we route you to a lawyer rather than guess.
+          - generic [ref=f29e183]:
+            - generic [ref=f29e184]: YOUR DISPUTES
+            - generic [ref=f29e185]:
+              - generic [ref=f29e186]: House 12, Street 4, F-8/3, Islamabad
+              - generic [ref=f29e187]: ready
+          - generic [ref=f29e123]:
+            - generic [ref=f29e124]: 1. Eligibility
+            - generic [ref=f29e125]: 2. Your situation
+            - generic [ref=f29e126]: 3. Details
+            - generic [ref=f29e127]: 4. Result
+          - generic [ref=f29e128]:
+            - generic [ref=f29e188]: Your Pakistani identity document
+            - combobox [ref=f29e189]:
+              - option "NICOP" [selected]
+              - option "CNIC"
+              - option "Passport"
+              - option "POC"
+              - option "OPF card"
+            - generic [ref=f29e190]: Days spent abroad in this tax year
+            - spinbutton "e.g. 300" [ref=f29e192]: "280"
+            - generic [ref=f29e193]:
+              - button "Check eligibility" [active] [ref=f29e194] [cursor=pointer]
+              - generic [ref=f29e197]: ✓ You qualify as an overseas Pakistani
+            - button "Continue" [ref=f29e196] [cursor=pointer]

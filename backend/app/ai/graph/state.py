@@ -10,6 +10,10 @@ class AgentState(TypedDict):
     normalized_query: str
     session_id: str
     case_id: str | None
+    # Authenticated caller. Document tools are BOUND to this id — it is never a
+    # tool argument, so the model cannot reach another user's uploads.
+    user_id: str
+    user_role: str
     case_type: str
     case_type_confidence: float
     complexity: str
@@ -34,13 +38,24 @@ class AgentState(TypedDict):
     clarification_depth:    int
 
     # ── Retrieval ─────────────────────────────────────────────────────────────
+    web_search_enabled: bool
     retrieved_chunks: list[dict]
     reranked_chunks:  list[dict]
+    # Case-law (LHC judgment) hits — kept out of the statute grading loop so they
+    # don't skew relevance_score, but folded into generation + grounding context.
+    case_law_chunks:  list[dict]
     relevance_score:  float
     signal_variance:  float
     bm25_confidence:  float
     cache_hit:        bool
     cache_confidence: float
+
+    # ── Tool calls (deterministic engines) ────────────────────────────────────
+    # Held out of retrieved_chunks on purpose: engine output is ground truth, so
+    # it must not be scored by the relevance grader nor overwritten by a
+    # retrieval retry. Each entry: {"tool": str, "args": dict, "result": Any}.
+    tool_results:     list[dict]
+    tool_calls_made:  list[str]
 
     # ── Arbitration / generation ──────────────────────────────────────────────
     arbitration_output:     str

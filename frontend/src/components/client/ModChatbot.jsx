@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "@/components/shared/CaseContext.jsx";
-import { getToken } from "@/lib/api.js";
+import { getToken, rateAnswer } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import Ic from "./Ic.jsx";
 import { Badge, Tooltip } from "@/components/shared/shared.jsx";
@@ -53,13 +53,31 @@ const ModChatbot = () => {
     }
 
     /* ── WebSocket connect ────────────────────────────────────────────── */
-    const connect = useCallback(() => {
+    const connect = useCallback(async () => {
         const token = getToken();
         if (!token) return;                              // not logged in
         if (wsRef.current?.readyState === WebSocket.OPEN) return;  // already open
 
         const sid = sessionIdRef.current;
-        const url = `${WS_BASE}/ws/chat/${sid}?token=${encodeURIComponent(token)}`;
+
+        // Exchange access token for a one-time 60-second WS ticket.
+        // Never put the JWT itself in the URL — it ends up in server logs.
+        const apiBase = WS_BASE.replace(/^ws/, 'http');
+        let ticket;
+        try {
+            const resp = await fetch(`${apiBase}/api/v1/auth/ws-ticket`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            ticket = data.ticket;
+        } catch {
+            return;
+        }
+        if (!ticket) return;
+
+        const url = `${WS_BASE}/ws/chat/${sid}?ticket=${encodeURIComponent(ticket)}`;
 
         setWsStatus("connecting");
         const ws = new WebSocket(url);
@@ -484,8 +502,61 @@ const ModChatbot = () => {
                                             {m.text}
                                         </div>
                                         {m.refs?.length > 0 && (
-                                            <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                                {m.refs.map((r, ri) => <Badge key={ri} type="info">{r}</Badge>)}
+                                            <div style={{ marginTop: 8 }}>
+                                                <button
+                                                    onClick={() => setMsgs(prev => prev.map((x, xi) => xi === i ? { ...x, refsOpen: !x.refsOpen } : x))}
+                                                    style={{
+                                                        display: "inline-flex", alignItems: "center", gap: 6,
+                                                        padding: "5px 12px", borderRadius: 8, fontSize: 11.5, fontWeight: 700,
+                                                        border: `1px solid ${t.border}`, background: m.refsOpen ? t.primaryGlow : "transparent",
+                                                        color: t.primary, cursor: "pointer", fontFamily: "inherit",
+                                                    }}>
+                                                    📖 Sources ({m.refs.length}) {m.refsOpen ? "▴" : "▾"}
+                                                </button>
+                                                {m.refsOpen && (
+                                                    <div style={{
+                                                        marginTop: 6, padding: "10px 12px", borderRadius: 10,
+                                                        background: t.surface, border: `1px solid ${t.border}`,
+                                                    }}>
+                                                        <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                                                            Cited provisions — verify before relying on them
+                                                        </div>
+                                                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                                            {m.refs.map((r, ri) => <Badge key={ri} type="info">{r}</Badge>)}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                        {/* Rating — every substantive AI answer */}
+                                        {m.role === "ai" && !m.isError && !m.isClarification && m.text && (
+                                            <div style={{ marginTop: 6, display: "flex", gap: 4, alignItems: "center" }}>
+                                                {m.rated ? (
+                                                    <span style={{ fontSize: 11, color: t.textMuted }}>
+                                                        {m.rated === "up" ? "Thanks for the feedback 👍" : "Thanks — we'll use this to improve 👎"}
+                                                    </span>
+                                                ) : (
+                                                    ["up", "down"].map(r => (
+                                                        <button key={r}
+                                                            onClick={() => {
+                                                                setMsgs(prev => prev.map((x, xi) => xi === i ? { ...x, rated: r } : x));
+                                                                rateAnswer({
+                                                                    session_id: sessionIdRef.current || "unknown",
+                                                                    rating: r,
+                                                                    answer_preview: (m.text || "").slice(0, 300),
+                                                                    question_preview: (msgs[i - 1]?.text || "").slice(0, 300),
+                                                                    source: "chat",
+                                                                }).catch(() => {});
+                                                            }}
+                                                            style={{
+                                                                width: 26, height: 26, borderRadius: 7, cursor: "pointer",
+                                                                border: `1px solid ${t.border}`, background: "transparent",
+                                                                fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center",
+                                                            }}
+                                                            title={r === "up" ? "Helpful" : "Not helpful"}
+                                                        >{r === "up" ? "👍" : "👎"}</button>
+                                                    ))
+                                                )}
                                             </div>
                                         )}
                                         {/* Lawyer connect card — shown on HITL or max_attempts */}

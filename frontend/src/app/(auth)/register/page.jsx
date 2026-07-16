@@ -130,7 +130,7 @@ export default function RegisterPage() {
     });
     if (regError) {
       setLoading(false);
-      setApiError(regError.detail || regError.message || 'Registration failed. Please try again.');
+      setApiError(regError.message || 'Registration failed. Please try again.');
       return;
     }
     // Auto-login after successful registration

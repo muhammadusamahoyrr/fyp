@@ -1,0 +1,72 @@
+- generic [active] [ref=f31e1]:
+  - button "Open Next.js Dev Tools" [ref=f31e9] [cursor=pointer]
+  - alert [ref=f31e13]
+  - generic [ref=f31e130]:
+    - generic [ref=f31e131]:
+      - generic [ref=f31e132]:
+        - img "Attorney.AI" [ref=f31e133]
+        - generic [ref=f31e134]: Attorney.AI
+        - button [ref=f31e136] [cursor=pointer]
+      - navigation [ref=f31e138]:
+        - button [ref=f31e139] [cursor=pointer]
+        - button "Profile" [ref=f31e145] [cursor=pointer]
+        - button "Legal Intake" [ref=f31e149] [cursor=pointer]
+        - button "AI Chat" [ref=f31e153] [cursor=pointer]
+        - button "Legal Tools" [ref=f31e158] [cursor=pointer]
+        - button "Overseas Desk" [ref=f31e161] [cursor=pointer]
+        - button "Lawyers" [ref=f31e165] [cursor=pointer]
+        - button "Agreements" [ref=f31e169] [cursor=pointer]
+        - button "Documents" [ref=f31e172] [cursor=pointer]
+        - button "Tracking" [ref=f31e176] [cursor=pointer]
+      - generic [ref=f31e180]:
+        - generic [ref=f31e181]:
+          - generic [ref=f31e182]: BT
+          - generic [ref=f31e183]:
+            - generic [ref=f31e184]: Browser Test Client
+            - generic [ref=f31e185]: Client
+          - button "اردو" [ref=f31e186] [cursor=pointer]
+        - generic [ref=f31e187]:
+          - button [ref=f31e188] [cursor=pointer]
+          - button "Sign Out" [ref=f31e196] [cursor=pointer]
+    - generic [ref=f31e199]:
+      - generic [ref=f31e200]:
+        - generic [ref=f31e202]:
+          - heading "Overview" [level=1] [ref=f31e203]
+          - paragraph [ref=f31e204]: Wednesday, July 15, 2026
+        - button [ref=f31e206] [cursor=pointer]
+      - generic [ref=f31e210]:
+        - generic [ref=f31e211]:
+          - generic [ref=f31e212]:
+            - generic [ref=f31e213]: —
+            - generic [ref=f31e219]: Active Cases
+            - generic [ref=f31e220]: No cases yet
+          - generic [ref=f31e223]:
+            - generic [ref=f31e224]: —
+            - generic [ref=f31e230]: Pending Docs
+            - generic [ref=f31e231]: Upload via case
+          - generic [ref=f31e234]:
+            - generic [ref=f31e235]: —
+            - generic [ref=f31e241]: Appointments
+            - generic [ref=f31e242]: None scheduled
+          - generic [ref=f31e245]:
+            - generic [ref=f31e246]: —
+            - generic [ref=f31e251]: Agreements
+            - generic [ref=f31e252]: Via lawyer portal
+        - generic [ref=f31e255]:
+          - generic [ref=f31e256]:
+            - generic [ref=f31e257]:
+              - generic [ref=f31e261]: Recent Cases
+              - generic [ref=f31e262]: Your latest active cases
+            - generic [ref=f31e263]: No cases yet — complete intake to create your first case.
+          - generic [ref=f31e264]:
+            - generic [ref=f31e265]:
+              - generic [ref=f31e266]:
+                - generic [ref=f31e270]: Upcoming
+                - generic [ref=f31e271]: Events & deadlines
+              - generic [ref=f31e272]: No upcoming appointments.
+            - generic [ref=f31e273]:
+              - generic [ref=f31e274]: AI Insight
+              - paragraph [ref=f31e278]:
+                - text: Employment Dispute has a
+                - strong [ref=f31e279]: 78% win probability
+                - text: based on evidence & precedents.

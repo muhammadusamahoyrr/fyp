@@ -1,8 +1,9 @@
 'use client';
 import { useState, useEffect, useRef } from "react";
 import { DARK, LIGHT, useT } from "./theme.js";
+import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useCase } from "./CaseContext.jsx";
-import { listCases, getCaseTimeline, listAppointments } from "@/lib/api.js";
+import { listCases, getCaseTimeline, listAppointments, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt } from "@/lib/api.js";
 
 // ─── DATA ─────────────────────────────────────────────────────────────────────
 const CASES = [
@@ -248,17 +249,19 @@ const priorityOrder = { critical: 0, overdue: 1, urgent: 2, upcoming: 3, normal:
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 const TRACKING_PAGES = [
-    { key: "overview",       label: "Overview",       ico: "overview",       badge: null },
-    { key: "appointments",   label: "Appointments",   ico: "appointments",   badge: null },
-    { key: "timeline",       label: "Case Timeline",  ico: "timeline",       badge: null },
-    { key: "documents",      label: "Documents",      ico: "documents",      badge: 6,  bv: "primary" },
-    { key: "notifications",  label: "Notifications",  ico: "notifications",  badge: 4,  bv: "danger" },
-    { key: "communication",  label: "Communication",  ico: "communication",  badge: 2,  bv: "info" },
-    { key: "reminders",      label: "Reminders",      ico: "reminders",      badge: 1,  bv: "warn" },
+    { key: "overview",       label: "Overview",       ur: "جائزہ",          ico: "overview",       badge: null },
+    { key: "appointments",   label: "Appointments",   ur: "ملاقاتیں",       ico: "appointments",   badge: null },
+    { key: "timeline",       label: "Case Timeline",  ur: "کیس ٹائم لائن",  ico: "timeline",       badge: null },
+    { key: "documents",      label: "Documents",      ur: "دستاویزات",      ico: "documents",      badge: null },
+    { key: "payments",       label: "Payments",       ur: "ادائیگیاں",       ico: "documents",      badge: null },
+    { key: "notifications",  label: "Notifications",  ur: "اطلاعات",        ico: "notifications",  badge: null },
+    { key: "communication",  label: "Communication",  ur: "رابطہ",          ico: "communication",  badge: null },
+    { key: "reminders",      label: "Reminders",      ur: "یاد دہانیاں",     ico: "reminders",      badge: null },
 ];
 
 const Sidebar = ({ page, onNavigate, collapsed, onToggle }) => {
     const t = useT();
+    const { T } = useLang();
     return (
         <div style={{
             width: collapsed ? 56 : 200, flexShrink: 0, background: t.surface, borderRight: `1px solid ${t.border}`,
@@ -321,7 +324,7 @@ const Sidebar = ({ page, onNavigate, collapsed, onToggle }) => {
                             </div>
                             {!collapsed && (
                                 <>
-                                    <span style={{ fontSize: 13, fontWeight: active ? 700 : 500, whiteSpace: "nowrap", flex: 1, color: "inherit" }}>{l.label}</span>
+                                    <span style={{ fontSize: 13, fontWeight: active ? 700 : 500, whiteSpace: "nowrap", flex: 1, color: "inherit" }}>{T(l.label, l.ur)}</span>
                                     {l.badge != null && (
                                         <span style={{
                                             minWidth: 18, padding: "2px 6px", borderRadius: 999, fontSize: 10, fontWeight: 700, textAlign: "center",
@@ -344,6 +347,7 @@ const Sidebar = ({ page, onNavigate, collapsed, onToggle }) => {
 
 // ─── TOP HEADER ───────────────────────────────────────────────────────────────
 const TopHeader = ({ t, onBack, activeCaseId, cases, onCaseSwitch, unreadCount }) => {
+    const { T } = useLang();
     const [caseOpen, setCaseOpen] = useState(false);
     const activeCase = cases.find(c => c.id === activeCaseId) || cases[0];
     return (
@@ -389,7 +393,7 @@ const TopHeader = ({ t, onBack, activeCaseId, cases, onCaseSwitch, unreadCount }
                         <div style={{
                             padding: "8px 14px", fontSize: 10, fontWeight: 700, color: t.textMuted,
                             letterSpacing: "0.1em", textTransform: "uppercase", borderBottom: `1px solid ${t.border}`
-                        }}>Switch Case</div>
+                        }}>{T("Switch Case", "کیس تبدیل کریں")}</div>
                         {cases.map(cs => (
                             <div key={cs.id} onClick={() => { onCaseSwitch(cs.id); setCaseOpen(false); }}
                                 style={{
@@ -403,7 +407,7 @@ const TopHeader = ({ t, onBack, activeCaseId, cases, onCaseSwitch, unreadCount }
                                     <div style={{ fontSize: 12, fontWeight: 700, color: cs.id === activeCaseId ? t.primary : t.text }}>{cs.id} — {cs.title}</div>
                                     <div style={{ fontSize: 10, color: t.textMuted }}>{cs.type} · {cs.court}</div>
                                 </div>
-                                {cs.id === activeCaseId && <span style={{ fontSize: 10, color: t.primary, fontWeight: 700 }}>Active</span>}
+                                {cs.id === activeCaseId && <span style={{ fontSize: 10, color: t.primary, fontWeight: 700 }}>{T("Active", "فعال")}</span>}
                             </div>
                         ))}
                     </div>
@@ -441,8 +445,122 @@ const TopHeader = ({ t, onBack, activeCaseId, cases, onCaseSwitch, unreadCount }
 };
 
 // ─── PAGE: OVERVIEW ───────────────────────────────────────────────────────────
-function PageOverview({ setPage, activeCase, feed }) {
+const _fmtHearingDate = (d) => d ? new Date(d).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" }) : "—";
+
+// WhatsApp-shareable peshi card: the family group chat is where hearing news
+// actually travels — build the update as plain text and hand it to wa.me.
+const _fmtShareDate = (d, urdu) => d
+    ? new Date(d).toLocaleDateString(urdu ? "ur-PK" : "en-PK", { day: "numeric", month: "long", year: "numeric" })
+    : "";
+
+function _buildPeshiMessage(h, { caseTitle, court, nextUp, urdu }) {
+    const meaning = urdu ? (h.outcome_meaning_ur || h.outcome_meaning || "") : (h.outcome_meaning || "");
+    const lines = urdu
+        ? [
+            "⚖️ پیشی کی تازہ کاری",
+            "",
+            caseTitle ? `مقدمہ: ${caseTitle}` : null,
+            court ? `عدالت: ${court}` : null,
+            `تاریخِ پیشی: ${_fmtShareDate(h.date, true)}`,
+            h.outcome_label || h.outcome ? `نتیجہ: ${h.outcome_label || h.outcome}` : null,
+            "",
+            meaning || null,
+            h.outcome_note ? `\n💬 وکیل کا نوٹ: ${h.outcome_note}` : null,
+            nextUp ? `\n📅 اگلی پیشی: ${_fmtShareDate(nextUp.date, true)}${nextUp.time ? ` · ${nextUp.time}` : ""}` : null,
+            "",
+            "— Attorney.AI کے ذریعے بھیجا گیا",
+        ]
+        : [
+            "⚖️ Hearing Update (Peshi)",
+            "",
+            caseTitle ? `Case: ${caseTitle}` : null,
+            court ? `Court: ${court}` : null,
+            `Hearing date: ${_fmtShareDate(h.date, false)}`,
+            h.outcome_label || h.outcome ? `Outcome: ${h.outcome_label || h.outcome}` : null,
+            "",
+            meaning || null,
+            h.outcome_note ? `\n💬 Lawyer's note: ${h.outcome_note}` : null,
+            nextUp ? `\n📅 Next hearing: ${_fmtShareDate(nextUp.date, false)}${nextUp.time ? ` · ${nextUp.time}` : ""}` : null,
+            "",
+            "— Sent via Attorney.AI",
+        ];
+    return lines.filter(l => l !== null).join("\n");
+}
+
+function _shareOnWhatsApp(text) {
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+}
+
+// Peshi tracker — what the lawyer recorded, in the client's language
+function HearingUpdates({ hearings, caseTitle, court }) {
     const t = useT();
+    const [showUrdu, setShowUrdu] = useState(false);
+    const recorded = (hearings || []).filter(h => h.outcome).sort((a, b) => new Date(b.date) - new Date(a.date));
+    const nextUp = (hearings || []).filter(h => !h.outcome).sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+
+    if (!hearings?.length) return null;
+
+    return (
+        <Card t={t} style={{ marginBottom: 16 }}>
+            <SH icon="🏛" title="Hearing Updates" desc="What happened at each court date — explained simply" t={t}
+                badge={
+                    <button onClick={(e) => { e.stopPropagation(); setShowUrdu(u => !u); }} style={{
+                        padding: "4px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                        border: `1px solid ${t.border}`, background: showUrdu ? t.primaryGlow2 : "transparent", color: showUrdu ? t.primary : t.textMuted,
+                    }}>{showUrdu ? "اردو ✓" : "اردو"}</button>
+                } />
+            <div style={{ padding: 16 }}>
+                {nextUp && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10, background: t.primaryGlow2, border: `1px solid ${t.primary}40`, marginBottom: 12 }}>
+                        <span style={{ fontSize: 16 }}>📅</span>
+                        <div>
+                            <div style={{ fontSize: 12.5, fontWeight: 700, color: t.primary }}>Next hearing: {_fmtHearingDate(nextUp.date)}{nextUp.time ? ` · ${nextUp.time}` : ""}</div>
+                            <div style={{ fontSize: 11, color: t.textMuted }}>{[nextUp.purpose, nextUp.court].filter(Boolean).join(" — ")}</div>
+                        </div>
+                    </div>
+                )}
+                {recorded.length === 0 ? (
+                    <div style={{ fontSize: 12, color: t.textMuted, padding: "6px 2px" }}>No hearing outcomes recorded yet — updates from your lawyer will appear here after each court date.</div>
+                ) : recorded.slice(0, 4).map((h, i) => (
+                    <div key={h._id || i} style={{ padding: "10px 2px", borderTop: i > 0 ? `1px solid ${t.border}` : "none" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: t.text }}>{_fmtHearingDate(h.date)}</span>
+                            <Badge variant={h.outcome === "decided" ? "success" : h.outcome === "adjourned" || h.outcome === "judge_on_leave" ? "warn" : "info"} t={t} sm>
+                                {h.outcome_label || h.outcome}
+                            </Badge>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); _shareOnWhatsApp(_buildPeshiMessage(h, { caseTitle, court, nextUp, urdu: showUrdu })); }}
+                                title={showUrdu ? "واٹس ایپ پر شیئر کریں" : "Share update on WhatsApp"}
+                                style={{
+                                    marginLeft: "auto", display: "flex", alignItems: "center", gap: 5,
+                                    padding: "3px 10px", borderRadius: 8, cursor: "pointer",
+                                    border: "1px solid #25D36650", background: "#25D36615",
+                                    color: "#25D366", fontSize: 10.5, fontWeight: 700,
+                                    fontFamily: "inherit", transition: "all .15s", flexShrink: 0,
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.background = "#25D36630"; e.currentTarget.style.borderColor = "#25D366"; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = "#25D36615"; e.currentTarget.style.borderColor = "#25D36650"; }}
+                            >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                {showUrdu ? "شیئر" : "Share"}
+                            </button>
+                        </div>
+                        <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.6, direction: showUrdu ? "rtl" : "ltr", textAlign: showUrdu ? "right" : "left" }}>
+                            {showUrdu ? (h.outcome_meaning_ur || h.outcome_meaning || "") : (h.outcome_meaning || "")}
+                        </div>
+                        {h.outcome_note && (
+                            <div style={{ fontSize: 11.5, color: t.textMuted, marginTop: 3 }}>💬 Lawyer's note: {h.outcome_note}</div>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </Card>
+    );
+}
+
+function PageOverview({ setPage, activeCase, feed, hearings }) {
+    const t = useT();
+    const { T } = useLang();
     const uc = urgencyConfig(t);
     const critical = feed.filter(f => !f.done && (f.urgency === "critical" || f.urgency === "overdue"));
     const upcoming = feed.filter(f => !f.done && (f.urgency === "urgent" || f.urgency === "upcoming")).slice(0, 2);
@@ -471,7 +589,7 @@ function PageOverview({ setPage, activeCase, feed }) {
                                 </div>
                             </div>
                             <div style={{ fontSize: 12, color: t.textDim }}>
-                                Next: <span style={{ color: t.primary, fontWeight: 700 }}>Court Hearing</span> on <strong>Feb 25</strong> at 9:00 AM
+                                Next hearing: <span style={{ color: t.primary, fontWeight: 700 }}>{activeCase.nextHearing}</span>
                             </div>
                         </div>
                         <Ring pct={activeCase.pct} t={t} />
@@ -497,6 +615,9 @@ function PageOverview({ setPage, activeCase, feed }) {
                     ))}
                 </div>
             </Card>
+
+            {/* Peshi tracker — hearing updates in plain language */}
+            <HearingUpdates hearings={hearings} caseTitle={activeCase?.title} court={activeCase?.court} />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
                 {/* Action Required — unified feed preview */}
@@ -527,7 +648,7 @@ function PageOverview({ setPage, activeCase, feed }) {
                         )}
                         {upcoming.length > 0 && (
                             <>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, letterSpacing: "0.1em", marginBottom: 8, marginTop: 4 }}>UPCOMING</div>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, letterSpacing: "0.1em", marginBottom: 8, marginTop: 4 }}>{T("UPCOMING", "آئندہ")}</div>
                                 {upcoming.map(f => {
                                     const u = uc[f.urgency];
                                     return (
@@ -816,15 +937,45 @@ function PageTimeline({ milestones: propMilestones }) {
     );
 }
 
+const DOC_TYPE_LABELS = {
+    plaint_civil: "Plaint", written_statement: "Written Statement",
+    legal_notice: "Legal Notice", stay_application: "Stay Application",
+    settlement_draft: "Settlement Draft", nda: "NDA / Contract",
+};
+
+function _mapApiDoc(d) {
+    return {
+        id: d._id || d.id,
+        name: d.title || DOC_TYPE_LABELS[d.template_type] || (d.template_type || "Document"),
+        type: "PDF",
+        date: d.created_at ? new Date(d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",
+        category: DOC_TYPE_LABELS[d.template_type] || "Document",
+        size: "—",
+        version: 1,
+        seenByLawyer: false,
+        _raw: d,
+    };
+}
+
 // ─── PAGE: DOCUMENTS ──────────────────────────────────────────────────────────
-function PageDocuments() {
+function PageDocuments({ activeCaseId }) {
     const t = useT();
     const [filter, setFilter] = useState("All");
     const [search, setSearch] = useState("");
     const [sort, setSort] = useState("date");
     const [expandedId, setExpandedId] = useState(null);
-    const cats = ["All", "PDF", "DOCX", "Evidence", "Court Order", "Legal Brief", "Discovery"];
-    const filtered = DOCUMENTS_INIT.filter(d =>
+    const [apiDocs, setApiDocs] = useState(null); // null = loading
+
+    useEffect(() => {
+        if (!activeCaseId || activeCaseId.startsWith("C-")) { setApiDocs([]); return; }
+        apiListDocuments(activeCaseId).then(({ data, error }) => {
+            setApiDocs(!error && Array.isArray(data) ? data.map(_mapApiDoc) : []);
+        });
+    }, [activeCaseId]);
+
+    const docSource = apiDocs !== null ? apiDocs : DOCUMENTS_INIT;
+    const cats = ["All", "PDF", "Plaint", "Written Statement", "Legal Notice", "NDA / Contract", "Document"];
+    const filtered = docSource.filter(d =>
         (filter === "All" || d.type === filter || d.category === filter) &&
         (!search || d.name.toLowerCase().includes(search.toLowerCase()))
     );
@@ -838,7 +989,7 @@ function PageDocuments() {
         <div>
             <Card t={t}>
                 <SH icon="📁" title="Uploaded Documents" desc="View, open & download case documents"
-                    badge={<Badge variant="primary" t={t}>{DOCUMENTS_INIT.length} Files</Badge>} t={t} />
+                    badge={<Badge variant="primary" t={t}>{apiDocs === null ? "…" : filtered.length} Files</Badge>} t={t} />
                 <div style={{ padding: "14px 20px", borderBottom: `1px solid ${t.border}` }}>
                     <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
                         <div style={{ flex: 1, position: "relative" }}>
@@ -930,6 +1081,88 @@ function PageDocuments() {
 
 // ─── PAGE: NOTIFICATIONS ──────────────────────────────────────────────────────
 // Fix #4: reads from CaseContext feed; mutations go through context helpers.
+function PagePayments({ t }) {
+    const { T } = useLang();
+    const [items, setItems] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [payingId, setPayingId] = useState(null);
+
+    const load = async () => {
+        const { data } = await listPayments();
+        if (Array.isArray(data)) setItems(data);
+        setLoading(false);
+    };
+    useEffect(() => { load(); }, []);
+
+    const pay = async (p) => {
+        setPayingId(p.id);
+        const { data, error } = await startCheckout(p.id);
+        if (error) { setPayingId(null); return; }
+        if (data?.dry_run) {
+            await mockPay(p.id);          // dev/test: settle immediately
+        } else if (data?.checkout_url) {
+            window.open(data.checkout_url, "_blank", "noopener");
+        }
+        await load();
+        setPayingId(null);
+    };
+
+    const badge = (status) => {
+        const map = {
+            paid: t.badgeSuccess, pending: t.badgeWarn, created: t.badgeInfo,
+            expired: t.badgeGray, failed: t.badgeDanger, cancelled: t.badgeGray,
+        };
+        const b = map[status] || t.badgeInfo;
+        const label = { paid: T("Paid", "ادا شدہ"), pending: T("Processing", "زیرِ عمل"),
+            created: T("Due", "واجب"), expired: T("Expired", "میعاد ختم"),
+            failed: T("Failed", "ناکام"), cancelled: T("Cancelled", "منسوخ") }[status] || status;
+        return <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: b.bg, color: b.color, border: `1px solid ${b.border}` }}>{label}</span>;
+    };
+
+    return (
+        <div style={{ maxWidth: 720 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: t.text, marginBottom: 4 }}>{T("Payments", "ادائیگیاں")}</div>
+            <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 18 }}>
+                {T("Fees requested by your lawyer. Pay securely from here.", "آپ کے وکیل کی طرف سے مانگی گئی فیس۔ یہاں سے محفوظ ادائیگی کریں۔")}
+            </div>
+
+            {loading && <div style={{ fontSize: 13, color: t.textMuted }}>{T("Loading…", "لوڈ ہو رہا ہے…")}</div>}
+            {!loading && items.length === 0 && (
+                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 14, padding: 28, textAlign: "center", fontSize: 13.5, color: t.textMuted }}>
+                    {T("No fee requests yet.", "ابھی تک کوئی فیس کی درخواست نہیں۔")}
+                </div>
+            )}
+
+            {items.map(p => (
+                <div key={p.id} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 14, padding: 16, marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: t.text }}>PKR {Number(p.amount).toLocaleString()}</div>
+                        <div style={{ fontSize: 12, color: t.textMuted, marginTop: 3 }}>
+                            {p.purpose === "peshi_fee" ? T("Appearance (peshi) fee", "پیشی فیس") : T("Professional fee", "پروفیشنل فیس")}
+                            {p.payee_snapshot?.name ? ` · ${p.payee_snapshot.name}` : ""}
+                        </div>
+                        {p.case_snapshot?.title && <div style={{ fontSize: 11.5, color: t.textFaint, marginTop: 2 }}>{p.case_snapshot.title}</div>}
+                        {p.note && <div style={{ fontSize: 11.5, color: t.textFaint, marginTop: 2, fontStyle: "italic" }}>“{p.note}”</div>}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                        {badge(p.status)}
+                        {(p.status === "created" || p.status === "pending") && (
+                            <button onClick={() => pay(p)} disabled={payingId === p.id} style={{ padding: "0 20px", height: 40, borderRadius: 10, border: "none", background: t.primary, color: t.mode === "dark" ? "#0F2A30" : "#fff", fontSize: 13.5, fontWeight: 800, cursor: payingId === p.id ? "default" : "pointer", fontFamily: "inherit" }}>
+                                {payingId === p.id ? T("Processing…", "زیرِ عمل…") : `${T("Pay", "ادا کریں")} PKR ${Number(p.amount).toLocaleString()}`}
+                            </button>
+                        )}
+                        {p.status === "paid" && (
+                            <button onClick={() => downloadReceipt(p.id, `receipt-${p.id}.pdf`)} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${t.border}`, background: "transparent", color: t.primary, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                {T("Receipt", "رسید")} ↓
+                            </button>
+                        )}
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 function PageNotifications({ feed, onMarkDone, onMarkAllDone }) {
     const t = useT();
     const [tab, setTab] = useState("all");
@@ -1040,35 +1273,71 @@ function PageNotifications({ feed, onMarkDone, onMarkAllDone }) {
 }
 
 // ─── PAGE: COMMUNICATION ──────────────────────────────────────────────────────
-function PageCommunication() {
+function PageCommunication({ caseId, milestones: propMilestones }) {
     const t = useT();
-    const [msgs, setMsgs] = useState(MESSAGES_INIT);
+    const [msgs, setMsgs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [sending, setSending] = useState(false);
     const [input, setInput] = useState("");
     const [tab, setTab] = useState("messages");
     const [selMilestone, setSelMilestone] = useState("");
-    const [selDoc, setSelDoc] = useState("");
     const [noteInput, setNoteInput] = useState("");
     const [tagL, setTagL] = useState(false);
     const [noteMilestone, setNoteMilestone] = useState("");
-    const [notes, setNotes] = useState([
-        { id: 1, milestone: "Court Hearing", note: "Review Exhibit C pages 8–14 carefully.", tagged: true, date: "Feb 20" },
-    ]);
+    const [notes, setNotes] = useState([]);
     const endRef = useRef(null);
     useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-    const canSend = input.trim() && selMilestone;
-    const send = () => {
-        if (!canSend) return;
-        const milestoneName = MILESTONES.find(m => m.milestoneId === selMilestone)?.event || "";
-        setMsgs(p => [...p, {
-            id: Date.now(), from: "client", text: input, date: "Just now", status: "pending",
-            milestoneId: selMilestone, milestoneName, seenByLawyer: false
-        }]);
-        setInput(""); setSelMilestone(""); setSelDoc("");
+    const milestoneList = propMilestones || MILESTONES;
+
+    useEffect(() => {
+        if (!caseId || caseId.startsWith("C-")) { setLoading(false); return; }
+        apiListMessages(caseId).then(({ data, error }) => {
+            if (!error && data) {
+                setMsgs(data.map(m => ({
+                    id: m._id,
+                    from: m.sender_role === "lawyer" ? "lawyer" : "client",
+                    text: m.text,
+                    date: m.created_at ? new Date(m.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—",
+                    seenByLawyer: m.sender_role === "lawyer",
+                    milestoneId: m.milestone_id || selMilestone,
+                    milestoneName: m.milestone_name || "",
+                })));
+            }
+            setLoading(false);
+        });
+    }, [caseId]);
+
+    const canSend = input.trim();
+    const send = async () => {
+        if (!canSend || sending) return;
+        setSending(true);
+        const realCaseId = caseId;
+        const { data, error } = (!realCaseId || realCaseId.startsWith("C-"))
+            ? { data: null, error: "no real case" }
+            : await apiSendMessage(realCaseId, input);
+        if (!error && data) {
+            setMsgs(p => [...p, {
+                id: data._id,
+                from: "client",
+                text: data.text,
+                date: "Just now",
+                seenByLawyer: false,
+                milestoneId: selMilestone,
+                milestoneName: milestoneList.find(m => m.milestoneId === selMilestone)?.event || "",
+            }]);
+        } else if (error && error !== "no real case") {
+            // Optimistic local add if API unavailable
+            setMsgs(p => [...p, { id: Date.now(), from: "client", text: input, date: "Just now", status: "pending", seenByLawyer: false }]);
+        } else {
+            setMsgs(p => [...p, { id: Date.now(), from: "client", text: input, date: "Just now", status: "pending", seenByLawyer: false }]);
+        }
+        setInput(""); setSelMilestone("");
+        setSending(false);
     };
     const saveNote = () => {
         if (!noteInput.trim() || !noteMilestone) return;
-        setNotes(p => [...p, { id: Date.now(), milestone: MILESTONES.find(m => m.milestoneId === noteMilestone)?.event || noteMilestone, note: noteInput, tagged: tagL, date: "Just now" }]);
+        setNotes(p => [...p, { id: Date.now(), milestone: milestoneList.find(m => m.milestoneId === noteMilestone)?.event || noteMilestone, note: noteInput, tagged: tagL, date: "Just now" }]);
         setNoteInput(""); setTagL(false); setNoteMilestone("");
     };
 
@@ -1134,7 +1403,7 @@ function PageCommunication() {
                                             padding: "8px 12px", color: selMilestone ? t.text : t.textFaint, fontSize: 12, outline: "none", boxSizing: "border-box"
                                         }}>
                                         <option value="">— Milestone (required) —</option>
-                                        {MILESTONES.map(m => <option key={m.id} value={m.milestoneId}>{m.event}</option>)}
+                                        {milestoneList.map(m => <option key={m.id} value={m.milestoneId}>{m.event}</option>)}
                                     </select>
                                     <select value={selDoc} onChange={e => setSelDoc(e.target.value)}
                                         style={{
@@ -1184,7 +1453,7 @@ function PageCommunication() {
                                         padding: "9px 12px", color: t.text, fontSize: 13, outline: "none", boxSizing: "border-box"
                                     }}>
                                     <option value="">— Select —</option>
-                                    {MILESTONES.map(m => <option key={m.id} value={m.milestoneId}>{m.event}</option>)}
+                                    {milestoneList.map(m => <option key={m.id} value={m.milestoneId}>{m.event}</option>)}
                                 </select>
                             </div>
                             <div style={{ marginBottom: 10 }}>
@@ -1405,6 +1674,7 @@ function PageReminders({ feed, setFeed }) {
 
 // ─── PAGE: APPOINTMENTS ───────────────────────────────────────────────────────
 function PageAppointments({ appointments, loading, t }) {
+    const { T } = useLang();
     const statusStyle = {
         pending:   { bg: `${t.warn}18`,    color: t.warn,    label: "⏳ Pending Confirmation" },
         confirmed: { bg: `${t.primary}18`, color: t.primary, label: "✅ Confirmed" },
@@ -1423,14 +1693,14 @@ function PageAppointments({ appointments, loading, t }) {
     if (!appointments.length) return (
         <div style={{ textAlign: "center", padding: "60px 24px" }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📅</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 8 }}>No appointments yet</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 8 }}>{T("No appointments yet", "ابھی کوئی ملاقات نہیں")}</div>
             <div style={{ fontSize: 13, color: t.textMuted }}>Book a consultation with a lawyer to get started.</div>
         </div>
     );
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: t.text, marginBottom: 4 }}>Your Appointments</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: t.text, marginBottom: 4 }}>{T("Your Appointments", "آپ کی ملاقاتیں")}</div>
             {appointments.map(appt => {
                 const s    = statusStyle[appt.status] || statusStyle.pending;
                 const date = new Date(appt.scheduled_at);
@@ -1496,12 +1766,16 @@ function PageAppointments({ appointments, loading, t }) {
 //         appear on the timeline immediately.
 export default function Module7({ isDark }) {
     const t = isDark ? DARK : LIGHT;
+    const isMobile = useIsMobile();
     const { notifications, markNotificationDone, markAllNotificationsDone, appointmentMilestones } = useCase();
     const [page, setPage] = useState("overview");
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    // Icon-only inner nav on phones
+    useEffect(() => { if (isMobile) setSidebarCollapsed(true); }, [isMobile]);
     const [activeCaseId, setActiveCaseId] = useState("C-001");
     const [apiCases, setApiCases] = useState([]);
     const [apiMilestones, setApiMilestones] = useState([]);
+    const [apiHearings, setApiHearings] = useState([]);
     const [apiAppointments, setApiAppointments] = useState([]);
     const [apptLoading, setApptLoading] = useState(false);
 
@@ -1535,15 +1809,27 @@ export default function Module7({ isDark }) {
             } else {
                 setApiMilestones([]);
             }
+            setApiHearings(data?.hearing_dates || []);
         });
     }, [activeCaseId]);
 
     const displayCases      = apiCases.length ? apiCases : CASES;
     const displayMilestones = apiMilestones.length ? apiMilestones : MILESTONES;
 
-    // Merge static feed with CaseContext notifications so both sources appear
-    const feed = notifications;
-    const setFeed = () => { }; // mutations go through CaseContext helpers
+    // Local reminders created inside PageReminders (notifications come from CaseContext)
+    const [localReminders, setLocalReminders] = useState([]);
+    const feed = [...notifications, ...localReminders];
+    const setFeed = (updater) => {
+        const notifIds = new Set(notifications.map(n => n.id));
+        const fullFeed = [...notifications, ...localReminders];
+        const updated = typeof updater === 'function' ? updater(fullFeed) : updater;
+        // Route notification done-toggles through CaseContext
+        updated
+            .filter(x => notifIds.has(x.id) && x.done && !notifications.find(n => n.id === x.id)?.done)
+            .forEach(n => markNotificationDone(n.id));
+        // Persist only local (non-notification) entries in local state
+        setLocalReminders(updated.filter(x => !notifIds.has(x.id)));
+    };
 
     // Merge milestones with any appointment milestones from Module 4
     const allMilestones = [...displayMilestones, ...appointmentMilestones];
@@ -1552,14 +1838,15 @@ export default function Module7({ isDark }) {
     const unreadCount = feed.filter(f => !f.done).length;
 
     const pages = {
-        overview:      (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} />,
+        overview:      (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} hearings={apiHearings} />,
         appointments:  (props) => <PageAppointments  {...props} appointments={apiAppointments} loading={apptLoading} />,
         timeline:      (props) => <PageTimeline      {...props} milestones={allMilestones} />,
-        documents:     (props) => <PageDocuments     {...props} />,
+        documents:     (props) => <PageDocuments     {...props} activeCaseId={activeCaseId} />,
+        payments:      (props) => <PagePayments      {...props} />,
         notifications: (props) => <PageNotifications {...props} feed={feed}
             onMarkDone={markNotificationDone}
             onMarkAllDone={markAllNotificationsDone} />,
-        communication: (props) => <PageCommunication {...props} />,
+        communication: (props) => <PageCommunication {...props} caseId={activeCaseId} milestones={allMilestones} />,
         reminders:     (props) => <PageReminders     {...props} feed={feed} setFeed={setFeed} />,
     };
     const PageComp = pages[page] || pages.overview;
@@ -1572,14 +1859,17 @@ export default function Module7({ isDark }) {
         ::-webkit-scrollbar-thumb{background:${t.accent};border-radius:2px;}
         input[type=date],input[type=time]{color-scheme:${t.mode};}
         textarea::placeholder,input::placeholder{color:${t.textFaint};}
+        @media (max-width:768px){
+          .tracking-root [style*="grid-template-columns"]{grid-template-columns:1fr !important;}
+        }
         select option{background:${t.card};}
       `}</style>
-            <div style={{ display: "flex", position: "absolute", inset: 0, background: t.bg, fontFamily: "'Inter',sans-serif", color: t.text, overflow: "hidden" }}>
+            <div className="tracking-root" style={{ display: "flex", position: "absolute", inset: 0, background: t.bg, fontFamily: "'Inter',sans-serif", color: t.text, overflow: "hidden" }}>
                 <Sidebar page={page} onNavigate={setPage} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(p => !p)} t={t} />
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
                     <TopHeader t={t} onBack={() => setPage("overview")}
                         activeCaseId={activeCaseId} cases={displayCases} onCaseSwitch={setActiveCaseId} unreadCount={unreadCount} />
-                    <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+                    <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? 12 : 24 }}>
                         <PageComp setPage={setPage} t={t} />
                     </div>
                 </div>

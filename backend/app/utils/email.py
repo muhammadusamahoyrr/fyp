@@ -1,14 +1,23 @@
+import logging
+
 import aiosmtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 
-async def _send(to: str, subject: str, html: str) -> None:
+
+async def _send(to: str, subject: str, html: str) -> bool:
+    """Send an email. Returns False (and logs a warning) when SMTP is not
+    configured; raises on a real delivery failure so callers can decide
+    whether the operation must fail loudly."""
     if not settings.smtp_user:
-        # Email not configured — skip silently in development
-        return
+        logger.warning(
+            "SMTP not configured — email %r to %s was NOT sent", subject, to
+        )
+        return False
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -16,17 +25,22 @@ async def _send(to: str, subject: str, html: str) -> None:
     msg["To"] = to
     msg.attach(MIMEText(html, "html"))
 
-    await aiosmtplib.send(
-        msg,
-        hostname=settings.smtp_host,
-        port=settings.smtp_port,
-        username=settings.smtp_user,
-        password=settings.smtp_password,
-        start_tls=True,
-    )
+    try:
+        await aiosmtplib.send(
+            msg,
+            hostname=settings.smtp_host,
+            port=settings.smtp_port,
+            username=settings.smtp_user,
+            password=settings.smtp_password,
+            start_tls=True,
+        )
+    except Exception:
+        logger.exception("Email delivery FAILED: %r to %s", subject, to)
+        raise
+    return True
 
 
-async def send_password_reset_email(email: str, token: str) -> None:
+async def send_password_reset_email(email: str, token: str) -> bool:
     reset_url = f"{settings.frontend_url}/reset-password?token={token}"
     html = f"""
     <h2>Password Reset — Attorney.AI</h2>
@@ -34,12 +48,12 @@ async def send_password_reset_email(email: str, token: str) -> None:
     <a href="{reset_url}">{reset_url}</a>
     <p>If you did not request this, ignore this email.</p>
     """
-    await _send(email, "Reset your Attorney.AI password", html)
+    return await _send(email, "Reset your Attorney.AI password", html)
 
 
 async def send_kyc_result_email(
     email: str, approved: bool, reason: str | None = None
-) -> None:
+) -> bool:
     if approved:
         html = """
         <h2>KYC Approved — Attorney.AI</h2>
@@ -55,4 +69,4 @@ async def send_kyc_result_email(
         """
         subject = "Attorney.AI verification update"
 
-    await _send(email, subject, html)
+    return await _send(email, subject, html)

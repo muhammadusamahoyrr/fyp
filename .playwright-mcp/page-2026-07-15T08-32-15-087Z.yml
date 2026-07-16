@@ -1,0 +1,44 @@
+- generic [active] [ref=f37e1]:
+  - generic [ref=f37e2]:
+    - generic [ref=f37e56]:
+      - generic [ref=f37e57]:
+        - img "AttorneyAI" [ref=f37e58]
+        - generic [ref=f37e59]:
+          - generic [ref=f37e60]: AttorneyAI
+          - generic [ref=f37e61]: Legal Intelligence Platform
+      - heading "The Ultimate AI Co-Counsel" [level=1] [ref=f37e62]: The UltimateAI Co-Counsel
+      - paragraph [ref=f37e63]: AI-powered legal guidance grounded in Pakistani law — PPC, CrPC, Family Code & the Constitution.
+      - generic [ref=f37e64]:
+        - generic [ref=f37e65]: INSTANT
+        - generic [ref=f37e66]: "|"
+        - generic [ref=f37e67]: ACCURATE
+        - generic [ref=f37e68]: "|"
+        - generic [ref=f37e69]: SECURE
+      - generic [ref=f37e70]:
+        - generic [ref=f37e71]: ⚡
+        - generic [ref=f37e72]: Powered by 400k case laws and statutes.
+    - generic [ref=f37e74]:
+      - heading "Welcome Back!" [level=2] [ref=f37e80]
+      - paragraph [ref=f37e81]: Please sign in to your account.
+      - generic [ref=f37e82]:
+        - button "Google" [ref=f37e83] [cursor=pointer]
+        - button "Facebook" [ref=f37e90] [cursor=pointer]
+      - generic [ref=f37e94]: or continue with
+      - generic [ref=f37e98]:
+        - generic [ref=f37e99]: Email
+        - textbox "attorneyai@gmail.com" [ref=f37e101]: browsertest@example.com
+      - generic [ref=f37e102]:
+        - generic [ref=f37e103]: Password
+        - generic [ref=f37e104]:
+          - textbox "••••••••••••" [ref=f37e105]: Client@1234
+          - button [ref=f37e106] [cursor=pointer]
+      - generic [ref=f37e110]:
+        - generic [ref=f37e111] [cursor=pointer]:
+          - checkbox "Remember me for 90 days" [checked] [ref=f37e112]
+          - generic [ref=f37e113]: Remember me for 90 days
+        - button "Forgot Password?" [ref=f37e114] [cursor=pointer]
+      - button "Checking session…" [disabled] [ref=f37e115]
+      - paragraph [ref=f37e116]:
+        - text: Don't have an account?
+        - button "Sign Up" [ref=f37e117] [cursor=pointer]
+  - alert [ref=f37e118]

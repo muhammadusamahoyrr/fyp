@@ -83,7 +83,8 @@ export const StatCard = ({ label, value, sub, subColor, iconEl, T, sparkData, sp
         boxShadow: hov && onClick ? T.shadowHover : T.shadowCard,
         display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12,
         cursor: onClick ? "pointer" : "default",
-        transition: "border-color 0.18s, box-shadow 0.18s",
+        transform: hov && onClick ? "translateY(-3px)" : "none",
+        transition: "border-color 0.18s, box-shadow 0.18s, transform 0.22s cubic-bezier(0.4,0,0.2,1)",
       }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ color: T.textMuted, fontSize: 12.5, fontWeight: 500, marginBottom: 5 }}>{label}</div>
@@ -101,7 +102,7 @@ export const StatCard = ({ label, value, sub, subColor, iconEl, T, sparkData, sp
 };
 
 // ─── Btn ──────────────────────────────────────────────────────────────────────
-export const Btn = ({ children, onClick, variant = "primary", size = "md", T, icon, style: ex }) => {
+export const Btn = ({ children, onClick, variant = "primary", size = "md", T, icon, style: ex, disabled }) => {
   const [h, setH] = useState(false);
   const pad = size === "sm" ? "6px 13px" : "8px 18px";
   const fs = size === "sm" ? 12 : 13;
@@ -114,9 +115,10 @@ export const Btn = ({ children, onClick, variant = "primary", size = "md", T, ic
   };
   const v = vars[variant] || vars.ghost;
   return (
-    <button onClick={onClick} onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
-      style={{ padding: pad, background: v.bg, color: v.color, border: v.border || "none", borderRadius: 9, cursor: "pointer", fontWeight: 600, fontSize: fs, display: "inline-flex", alignItems: "center", gap: 6, transition: "all 0.15s", whiteSpace: "nowrap", ...ex }}>
-      {icon && <Ic d={icon} size={13} color={v.color} />}
+    <button onClick={disabled ? undefined : onClick} disabled={disabled}
+      onMouseEnter={() => !disabled && setH(true)} onMouseLeave={() => setH(false)}
+      style={{ padding: pad, background: disabled ? (T.mode === "dark" ? "rgba(255,255,255,0.07)" : "rgba(26,46,53,0.07)") : v.bg, color: disabled ? T.textFaint : v.color, border: v.border || "none", borderRadius: 9, cursor: disabled ? "not-allowed" : "pointer", fontWeight: 600, fontSize: fs, display: "inline-flex", alignItems: "center", gap: 6, transition: "all 0.15s", whiteSpace: "nowrap", opacity: disabled ? 0.6 : 1, ...ex }}>
+      {icon && <Ic d={icon} size={13} color={disabled ? T.textFaint : v.color} />}
       {children}
     </button>
   );
