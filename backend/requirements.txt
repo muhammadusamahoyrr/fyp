@@ -40,7 +40,7 @@ fastembed==0.4.2
 
 # AI / LangChain (pinned for reproducible installs)
 langchain==0.3.30
-langchain-core==0.3.86
+langchain-core==1.4.9
 langchain-community==0.3.27
 langchain-groq==0.3.8
 langchain-openai==0.3.35
