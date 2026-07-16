@@ -225,4 +225,8 @@ Actively developed. Core platform, the LangGraph legal pipeline, deterministic l
 **Muhammad Usama** — Computer Science, COMSATS University Islamabad.
 Built as a final-year project.
 
+## License
+
+Released under the [MIT License](LICENSE).
+
 > ⚠️ **Disclaimer:** Attorney.AI provides legal *information*, not legal *advice*, and does not create an attorney–client relationship. Always consult a licensed advocate for any actual legal matter.
