@@ -3,7 +3,13 @@ from datetime import datetime, timedelta, timezone
 
 from pymongo.errors import DuplicateKeyError
 
-from app.core.exceptions import AuthError, ConflictError, NotFoundError, AppValidationError
+from app.core.exceptions import (
+    AppValidationError,
+    AuthError,
+    ConflictError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -15,14 +21,18 @@ from app.db.collections import get_password_reset_col, get_refresh_blocklist_col
 from app.repositories.user_repo import UserRepository
 from app.schemas.auth import RegisterRequest
 from app.utils.email import send_password_reset_email
-from app.utils.validators import validate_password_strength
+from app.utils.validators import PASSWORD_POLICY, validate_password_strength
 
 user_repo = UserRepository()
 
 
 async def register(data: RegisterRequest) -> dict:
+    # Public registration is client/lawyer only — admins are provisioned by an existing admin
+    if data.role.value not in ("client", "lawyer"):
+        raise AppValidationError("Invalid role")
+
     if not validate_password_strength(data.password):
-        raise AppValidationError("Password must be at least 8 characters with a number")
+        raise AppValidationError(PASSWORD_POLICY)
 
     existing = await user_repo.find_by_email(data.email)
     if existing:
@@ -82,7 +92,7 @@ async def login(email: str, password: str) -> dict:
     }
 
 
-async def refresh(refresh_token: str) -> str:
+async def refresh(refresh_token: str) -> dict:
     payload = decode_token(refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise AuthError("Invalid refresh token")
@@ -95,7 +105,14 @@ async def refresh(refresh_token: str) -> str:
     if not user or not user.get("is_active"):
         raise AuthError("User not found")
 
-    return create_access_token(user["_id"], user["role"])
+    # Rotate: blocklist old token, issue fresh pair
+    await get_refresh_blocklist_col().insert_one(
+        {"token": refresh_token, "created_at": datetime.now(timezone.utc)}
+    )
+    return {
+        "access_token":  create_access_token(user["_id"], user["role"]),
+        "refresh_token": create_refresh_token(user["_id"]),
+    }
 
 
 async def logout(refresh_token: str) -> None:
@@ -124,12 +141,18 @@ async def forgot_password(email: str) -> None:
             "created_at": datetime.now(timezone.utc),
         }
     )
-    await send_password_reset_email(email, reset_token)
+    try:
+        await send_password_reset_email(email, reset_token)
+    except Exception:
+        # Delivery failed for a real account — tell the user instead of letting
+        # them wait for an email that will never arrive. (Doesn't leak account
+        # existence: the failure is on our SMTP side, not tied to the address.)
+        raise ServiceUnavailableError("Could not send the reset email — please try again later")
 
 
 async def reset_password(token: str, new_password: str) -> None:
     if not validate_password_strength(new_password):
-        raise AppValidationError("Password must be at least 8 characters with a number")
+        raise AppValidationError(PASSWORD_POLICY)
 
     record = await get_password_reset_col().find_one({"token": token})
     if not record:

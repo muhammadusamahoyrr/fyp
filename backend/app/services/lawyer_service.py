@@ -1,10 +1,25 @@
-from app.core.exceptions import AppValidationError, NotFoundError
+import secrets
+from datetime import datetime, timezone
+
+from pymongo.errors import DuplicateKeyError
+
+from app.core.exceptions import (
+    AppValidationError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+)
+from app.db.collections import get_lawyer_reviews_col
+from app.repositories.appointment_repo import AppointmentRepository
 from app.repositories.case_repo import CaseRepository
+from app.repositories.engagement_repo import EngagementRepository
 from app.repositories.user_repo import UserRepository
 from app.utils.geocoding import province_coords
 
 user_repo = UserRepository()
 case_repo = CaseRepository()
+engagement_repo = EngagementRepository()
+appointment_repo = AppointmentRepository()
 
 
 def _sanitize(user: dict) -> dict:
@@ -213,5 +228,29 @@ async def submit_review(
     lawyer = await user_repo.find_by_id(lawyer_id)
     if not lawyer or lawyer.get("role") != "lawyer":
         raise NotFoundError("Lawyer")
+
+    # Relationship guard: only a client who has actually worked with this lawyer
+    # may review — an accepted engagement OR a completed appointment. Blocks
+    # rating spam from users with no real relationship.
+    has_engagement  = await engagement_repo.exists_accepted(client_id, lawyer_id)
+    has_appointment = await appointment_repo.exists_completed(client_id, lawyer_id)
+    if not (has_engagement or has_appointment):
+        raise ForbiddenError("You can only review a lawyer you have worked with")
+
+    # One review per (client, lawyer), enforced by a unique index. Insert the
+    # review record FIRST so a duplicate is rejected before the aggregate is
+    # touched — a blocked duplicate can never inflate the rating.
+    review = {
+        "_id":        secrets.token_urlsafe(16),
+        "client_id":  client_id,
+        "lawyer_id":  lawyer_id,
+        "stars":      stars,
+        "comment":    (comment or "")[:1000],
+        "created_at": datetime.now(timezone.utc),
+    }
+    try:
+        await get_lawyer_reviews_col().insert_one(review)
+    except DuplicateKeyError:
+        raise ConflictError("You have already reviewed this lawyer")
 
     await user_repo.update_rating_atomic(lawyer_id, stars)

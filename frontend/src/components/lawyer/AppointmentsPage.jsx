@@ -5,7 +5,6 @@ import { useNotif } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { Card, Btn, Input, Sel } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
-import { APSB } from "./data.js";
 import {
     listAppointments,
     confirmAppointment as apiConfirm,
@@ -18,20 +17,16 @@ import {
 // ============================================================
 
 const CAL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const CAL_DATES = [27, 28, 29, 30, 31, 1, 2];
 const CAL_HOURS = ["9:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
-const calAppts = [
-    { day: 4, hour: "9:00", client: "Rajesh Singh", purpose: "Case Review", type: "gavel" },
-    { day: 1, hour: "10:00", client: "Rajesh Singh", purpose: "Case Review", type: "gavel" },
-    { day: 2, hour: "10:00", client: "Priya Sharma", purpose: "Property Dispute", type: "video" },
-    { day: 4, hour: "10:00", client: "Amit Patel", purpose: "Employment St...", type: "video" },
-    { day: 0, hour: "11:00", client: "Priya Sharma", purpose: "Property Dispute", type: "gavel" },
-    { day: 1, hour: "11:00", client: "Rajesh Singh", purpose: "Case Review", type: "gavel" },
-    { day: 0, hour: "12:00", client: "Amit Patel", purpose: "Case Review", type: "gavel" },
-    { day: 1, hour: "12:00", client: "Amit Patel", purpose: "Employment Strategy", type: "video" },
-    { day: 4, hour: "12:00", client: "Neha Verma", purpose: "Property Dispute", type: "gavel" },
-    { day: 0, hour: "13:00", client: "Vikram Kumar", purpose: "Employment Strategy", type: "video" },
-];
+
+// Current week (Mon–Sun) as Date objects — calendar shows real appointments in this window
+const _weekDates = (() => {
+    const now = new Date();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+    return CAL_DAYS.map((_, i) => { const d = new Date(monday); d.setDate(monday.getDate() + i); return d; });
+})();
+const _isToday = (d) => d.toDateString() === new Date().toDateString();
 
 // ── Status badge styles — high contrast, clearly visible ─────
 const STATUS_STYLES = {
@@ -205,7 +200,7 @@ function ScheduleModal({ apt, onClose, onConfirm, t }) {
                     <>
                         <Field label="Client Name">
                             <input value={form.client} onChange={e => f("client")(e.target.value)}
-                                placeholder="e.g. Rajesh Singh" style={inp}
+                                placeholder="e.g. Ahmed Raza Khan" style={inp}
                                 onFocus={e => e.target.style.borderColor = t.primary}
                                 onBlur={e => e.target.style.borderColor = t.border} />
                         </Field>
@@ -296,8 +291,18 @@ function AppointmentsPage() {
             a.purpose.toLowerCase().includes(search.toLowerCase()))
     );
 
+    const nextApt = appointments
+        .filter(a => a.at && a.at > new Date() && (a.status === "Upcoming" || a.status === "Pending"))
+        .sort((x, y) => x.at - y.at)[0];
+    const bookedToday = new Set(
+        appointments
+            .filter(a => a.at && _isToday(a.at) && a.status !== "Cancelled")
+            .map(a => `${String(a.at.getHours()).padStart(2, "0")}:${String(a.at.getMinutes()).padStart(2, "0")}`)
+    );
+
     const mapApiAppt = (a) => ({
         id: a.id,
+        at: a.scheduled_at ? new Date(a.scheduled_at) : null,
         client: a.client_name || "Client",
         initials: (a.client_name || "??").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
         purpose: a.notes || "Consultation",
@@ -326,7 +331,7 @@ function AppointmentsPage() {
         const { error } = result;
         if (error) {
             console.error("❌ Confirmation failed:", error);
-            const errMsg = error.detail || "Could not confirm appointment";
+            const errMsg = error.message || "Could not confirm appointment";
             toast.show(errMsg, "danger", 4000);
             addNotif({ type: "appointment", title: "Failed to Confirm", body: errMsg, time: "Just now" });
             return;
@@ -342,7 +347,7 @@ function AppointmentsPage() {
         const apt = appointments.find(a => a.id === id);
         const { error } = await apiCancel(id);
         if (error) {
-            const errMsg = error.detail || "Could not cancel appointment";
+            const errMsg = error.message || "Could not cancel appointment";
             toast.show(errMsg, "danger", 4000);
             addNotif({ type: "appointment", title: "Failed to Cancel", body: errMsg, time: "Just now" });
             return;
@@ -356,7 +361,7 @@ function AppointmentsPage() {
         const apt = appointments.find(a => a.id === id);
         const { error } = await apiComplete(id);
         if (error) {
-            const errMsg = error.detail || "Could not mark as complete";
+            const errMsg = error.message || "Could not mark as complete";
             toast.show(errMsg, "danger", 4000);
             addNotif({ type: "appointment", title: "Failed", body: errMsg, time: "Just now" });
             return;
@@ -386,7 +391,7 @@ function AppointmentsPage() {
     };
 
     const statCounts = {
-        today: appointments.filter(a => a.status === "Upcoming" && a.date === "Mar 11, 2026").length || 4,
+        today: appointments.filter(a => a.at && _isToday(a.at) && a.status !== "Cancelled").length,
         upcoming: appointments.filter(a => a.status === "Upcoming").length,
         pending: appointments.filter(a => a.status === "Pending").length,
         completed: appointments.filter(a => a.status === "Completed").length,
@@ -699,7 +704,7 @@ function AppointmentsPage() {
                                     </div>
                                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 14 }}>
                                         {["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30"].map(slot => {
-                                            const booked = ["10:00", "12:30"].includes(slot);
+                                            const booked = bookedToday.has(slot);
                                             return (
                                                 <button key={slot} disabled={booked} style={{
                                                     padding: "6px 4px", borderRadius: 7, fontSize: 11, fontWeight: 500,
@@ -714,8 +719,8 @@ function AppointmentsPage() {
                                     </div>
                                     <div style={{ borderRadius: 10, background: t.primaryGlow2, border: `1px solid ${t.primary}30`, padding: 14, textAlign: "center" }}>
                                         <div style={{ fontSize: 11, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 4 }}>Next Meeting</div>
-                                        <div style={{ fontSize: 20, fontWeight: 700, color: t.text, fontFamily: "Georgia,serif" }}>Rajesh Singh</div>
-                                        <div style={{ fontSize: 16, fontWeight: 700, color: t.primary, marginTop: 3 }}>10:00 AM</div>
+                                        <div style={{ fontSize: 20, fontWeight: 700, color: t.text, fontFamily: "Georgia,serif" }}>{nextApt ? nextApt.client : "No upcoming meeting"}</div>
+                                        <div style={{ fontSize: 16, fontWeight: 700, color: t.primary, marginTop: 3 }}>{nextApt ? `${nextApt.date} · ${nextApt.time}` : "—"}</div>
                                     </div>
                                 </Card>
 
@@ -751,7 +756,7 @@ function AppointmentsPage() {
                                                 {CAL_DAYS.map((d, i) => (
                                                     <th key={d} style={{ padding: "10px 6px", borderBottom: `1px solid ${t.border}`, borderRight: `1px solid ${t.border}`, background: t.surface, textAlign: "center", minWidth: 95 }}>
                                                         <div style={{ fontSize: 10, color: t.textFaint, fontWeight: 600, textTransform: "uppercase" }}>{d} Day</div>
-                                                        <div style={{ fontSize: 18, fontWeight: 700, color: i === 4 ? t.primary : t.text, marginTop: 1 }}>{CAL_DATES[i]}</div>
+                                                        <div style={{ fontSize: 18, fontWeight: 700, color: _isToday(_weekDates[i]) ? t.primary : t.text, marginTop: 1 }}>{_weekDates[i].getDate()}</div>
                                                     </th>
                                                 ))}
                                             </tr>
@@ -761,13 +766,17 @@ function AppointmentsPage() {
                                                 <tr key={hr}>
                                                     <td style={{ padding: "6px 8px", fontSize: 11, color: t.textFaint, borderRight: `1px solid ${t.border}`, borderBottom: `1px solid ${t.border}`, fontWeight: 500, textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{hr}</td>
                                                     {CAL_DAYS.map((_, di) => {
-                                                        const evs = calAppts.filter(e => e.day === di && e.hour === hr);
+                                                        const evs = appointments.filter(a =>
+                                                            a.at && a.status !== "Cancelled" &&
+                                                            a.at.toDateString() === _weekDates[di].toDateString() &&
+                                                            a.at.getHours() === parseInt(hr)
+                                                        );
                                                         return (
                                                             <td key={di} style={{ padding: 3, borderRight: `1px solid ${t.border}`, borderBottom: `1px solid ${t.border}`, verticalAlign: "top", height: 50 }}>
                                                                 {evs.map((ev, ei) => (
                                                                     <div key={ei} style={{
-                                                                        background: ev.type === "video" ? `${t.info}22` : `${t.primary}18`,
-                                                                        border: `1px solid ${ev.type === "video" ? t.info : t.primary}40`,
+                                                                        background: ev.type === "Video Call" ? `${t.info}22` : `${t.primary}18`,
+                                                                        border: `1px solid ${ev.type === "Video Call" ? t.info : t.primary}40`,
                                                                         borderRadius: 6, padding: "4px 6px", marginBottom: 2, cursor: "pointer",
                                                                     }}>
                                                                         <div style={{ fontSize: 11, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.client}</div>

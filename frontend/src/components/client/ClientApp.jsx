@@ -1,10 +1,12 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext.jsx';
 import Dashboard from './Dashboard';
 
 export default function ClientApp({ initialTab = 'overview' }) {
   const router = useRouter();
+  const { logout } = useAuth();
   const [isDark, setIsDark] = useState(true);
 
   useEffect(() => {
@@ -25,8 +27,9 @@ export default function ClientApp({ initialTab = 'overview' }) {
       initialTab={initialTab}
       isDark={isDark}
       toggleTheme={toggleTheme}
-      go={(target) => {
-        if (target === 'landing') router.push('/');
+      go={async (target) => {
+        if (target === 'signout') { await logout(); router.push('/'); }
+        else if (target === 'landing') router.push('/');
         else if (target === 'login') router.push('/login');
       }}
     />

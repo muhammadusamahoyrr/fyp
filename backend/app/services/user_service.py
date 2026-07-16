@@ -14,6 +14,12 @@ def _sanitize(user: dict) -> dict:
     user = dict(user)  # shallow copy — don't mutate the original from Motor
     user.pop("password_hash", None)
     user.pop("cnic_encrypted", None)
+    # Drop the internal 384-dim matching embedding — big and not for clients.
+    lp = user.get("lawyer_profile")
+    if isinstance(lp, dict) and "specialization_embedding" in lp:
+        lp = dict(lp)
+        lp.pop("specialization_embedding", None)
+        user["lawyer_profile"] = lp
     return user
 
 

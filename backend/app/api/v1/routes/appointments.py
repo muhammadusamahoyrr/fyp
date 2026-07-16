@@ -3,17 +3,19 @@ from fastapi import APIRouter, Depends, Query
 from app.core.constants import AppointmentStatus
 from app.dependencies import get_current_user, require_client, require_lawyer
 from app.schemas.appointment import (
+    AppointmentOut,
+    AvailabilityResponse,
     BookAppointmentRequest,
     CancelAppointmentRequest,
     CompleteAppointmentRequest,
 )
-from app.schemas.common import StatusResponse
+from app.schemas.common import PaginatedResponse, StatusResponse
 from app.services import appointment_service
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=AppointmentOut)
 async def book_appointment(
     body: BookAppointmentRequest,
     current_user: dict = Depends(require_client),
@@ -30,7 +32,7 @@ async def book_appointment(
     )
 
 
-@router.get("")
+@router.get("", response_model=PaginatedResponse[AppointmentOut])
 async def list_appointments(
     status: AppointmentStatus | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -50,7 +52,7 @@ async def list_appointments(
     )
 
 
-@router.get("/availability/{lawyer_id}")
+@router.get("/availability/{lawyer_id}", response_model=AvailabilityResponse)
 async def get_lawyer_availability(
     lawyer_id: str,
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
@@ -60,7 +62,7 @@ async def get_lawyer_availability(
     return await appointment_service.get_availability(lawyer_id, date)
 
 
-@router.get("/{appointment_id}")
+@router.get("/{appointment_id}", response_model=AppointmentOut)
 async def get_appointment(
     appointment_id: str,
     current_user: dict = Depends(get_current_user),

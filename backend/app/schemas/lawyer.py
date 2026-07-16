@@ -1,15 +1,6 @@
 from pydantic import BaseModel
 
-from app.core.constants import CaseType, Province
-
-
-class LawyerSearchParams(BaseModel):
-    province: Province | None = None
-    case_type: CaseType | None = None
-    min_rating: float = 0.0
-    availability: bool | None = None
-    page: int = 1
-    page_size: int = 10
+from app.schemas.user import UserProfileResponse
 
 
 class LawyerReview(BaseModel):
@@ -17,24 +8,13 @@ class LawyerReview(BaseModel):
     comment: str | None = None
 
 
-class LawyerListItem(BaseModel):
-    id: str
-    full_name: str
-    province: str | None
-    specializations: list[CaseType]
-    rating: float
-    total_reviews: int
-    availability: bool
-    bio: str | None
-    kyc_verified: bool
+class LawyerMatch(UserProfileResponse):
+    """A matched lawyer for /lawyers/match/{case_id}.
 
-
-class MatchedLawyer(BaseModel):
-    id: str
-    full_name: str
-    province: str | None
-    specializations: list[CaseType]
-    rating: float
-    availability: bool
-    match_score: float
+    Reuses the whitelisted UserProfileResponse (which strips password_hash,
+    cnic_encrypted AND the specialization_embedding vector, and passes
+    lawyer_profile through as a dict) so a client-facing search can never leak
+    internal fields — then adds the two scoring fields the matcher attaches.
+    """
+    match_score: float | None = None
     match_reason: str | None = None

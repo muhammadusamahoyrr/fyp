@@ -1,0 +1,619 @@
+"""Phase 5a — property-dispute intake for the Special Courts (2024 Act).
+
+Builds ON special_court.py (reuses its jurisdiction resolver; does not replace it).
+This is the "route it right" half of the enforcement flow: establish eligibility,
+classify the grievance with a confidence gate, collect the fixed petition facts,
+resolve the forum — and end in exactly one of two states:
+
+    ready_for_drafting      — eligible, confidently classified, forum operational
+    held_for_lawyer_triage  — anything uncertain, so a human decides before drafting
+
+NO petition text is produced here (that is 5b). The single most important rule is
+the confidence gate on the grievance classifier: this is the one place AI output
+heads toward a real court filing, so an unconfirmed OR ambiguous classification
+NEVER proceeds to drafting — it holds for a lawyer. The hold decision is enforced
+in pure code (needs_triage / _decide_state), never left to the prompt.
+"""
+from __future__ import annotations
+
+import logging
+import secrets
+from datetime import datetime, timezone
+
+from pydantic import BaseModel, Field, field_validator
+
+from app.services import special_court
+
+logger = logging.getLogger(__name__)
+
+
+# ── Eligibility (deterministic — no LLM) ─────────────────────────────────────
+
+# The Act defines an "overseas Pakistani" as a holder of one of these IDs living,
+# working or studying abroad for 182+ days in a tax year.
+ELIGIBLE_ID_TYPES = {"passport", "cnic", "nicop", "poc", "opf"}
+MIN_DAYS_ABROAD = 182
+
+
+def check_eligibility(id_type: str, days_abroad) -> dict:
+    """Deterministic overseas-Pakistani eligibility check. No LLM."""
+    id_norm = (id_type or "").strip().lower()
+    id_ok = id_norm in ELIGIBLE_ID_TYPES
+    try:
+        days = int(days_abroad)
+    except (TypeError, ValueError):
+        days = -1
+    days_ok = days >= MIN_DAYS_ABROAD
+
+    reasons: list[str] = []
+    if not id_ok:
+        reasons.append("A valid Pakistani passport, CNIC, NICOP, POC or OPF card is required "
+                       "to qualify as an overseas Pakistani under the Act.")
+    if not days_ok:
+        reasons.append(f"Overseas-Pakistani status requires living/working/studying abroad for "
+                       f"at least {MIN_DAYS_ABROAD} days in a tax year.")
+    return {"eligible": id_ok and days_ok, "id_ok": id_ok, "days_ok": days_ok, "reasons": reasons}
+
+
+# ── Grievance classifier (grounded LLM + confidence gate) ────────────────────
+
+# The six categories, with the definition the model classifies against. The
+# cause-of-action hint is for 5b; 5a only needs the category + confidence.
+GRIEVANCE_CATEGORIES: dict[str, str] = {
+    "illegal_occupation":     "Someone has taken or holds possession of the property without right "
+                              "(dispossession / land-grab / forcible occupation).",
+    "poa_misuse":             "An attorney acted beyond, or contrary to, the authority granted in a "
+                              "Power of Attorney (e.g. sold when only allowed to manage).",
+    "fraudulent_transfer":    "The property was sold, transferred or mutated by forgery, impersonation, "
+                              "a forged POA or a fake document.",
+    "inheritance_dispute":    "A dispute over inherited shares, or a co-heir dealing with the property "
+                              "without the others' consent.",
+    "encroachment":           "A neighbour or third party has encroached on part of the property "
+                              "(boundary, wall or construction).",
+    "sale_agreement_dispute": "A dispute arising from an agreement to sell or purchase the property "
+                              "(non-performance, disputed terms, double sale).",
+}
+
+# Reused from special_court.py's vocabulary, on purpose.
+CONFIDENCE_TIERS = ("established", "single_source", "unconfirmed")
+
+
+class GrievanceClassification(BaseModel):
+    category: str = Field(description="one of: " + ", ".join(GRIEVANCE_CATEGORIES))
+    confidence: str = Field(description="established | single_source | unconfirmed")
+    reasoning: str = Field(default="", description="one sentence, why this category")
+    alternatives: list[str] = Field(
+        default_factory=list,
+        description="other categories that plausibly also fit — empty if the fit is clean",
+    )
+
+
+_SYSTEM = f"""\
+You classify an overseas Pakistani's property grievance into exactly ONE category,
+for routing to the correct court petition. You do NOT draft anything.
+
+Categories (use the code, left of the colon):
+{chr(10).join(f"- {k}: {v}" for k, v in GRIEVANCE_CATEGORIES.items())}
+
+Return:
+- category: the single best-fit category code from the list above.
+- confidence:
+    established   — the facts name SPECIFIC, distinguishing details that pin exactly
+                    one category (e.g. they say the POA only allowed rent collection but
+                    the attorney sold — clearly poa_misuse). Use this sparingly.
+    single_source — one category is the best fit, but the facts are thin.
+    unconfirmed   — genuinely unclear, spans categories, or too little information.
+- reasoning: one sentence.
+- alternatives: list the other category codes that GENUINELY fit these specific facts —
+  not every category, only the ones that plausibly apply. Judge by the facts given.
+
+The wrong cause of action in a court filing is a serious harm, so when the facts
+describe a wrong but do NOT pin down the mechanism, list the real possibilities:
+  AMBIGUOUS  "sold my plot using some papers" — the papers could be a forged/misused
+             POA (poa_misuse) or a fake deed (fraudulent_transfer). List both.
+  AMBIGUOUS  "took my land" — could be illegal_occupation or encroachment. List both.
+  INHERITANCE OVERLAP — when the facts involve a DECEASED owner, an inheritance, or a
+             CO-HEIR dealing with the property, inheritance_dispute is a genuine
+             alternative and MUST be listed. A relative who occupies or withholds an
+             inherited house is doing BOTH a possession wrong AND an inheritance wrong.
+             Pick the category that fits the specific act as primary, but list
+             inheritance_dispute in alternatives. Do NOT force inheritance_dispute as
+             the primary — it is the alternative here, not the default.
+             e.g. "after my father died, my uncle took over the family house and won't
+             let us in" -> primary illegal_occupation, alternatives ['inheritance_dispute'].
+But do not invent alternatives that the facts exclude:
+  CLEAR      "gave a POA only to collect rent, but he used it to sell" — the facts pin
+             this to poa_misuse (a real POA, exceeded). alternatives: [] (empty).
+  illegal_occupation means someone with NO claim has taken possession of the WHOLE
+  property. It is DISTINCT from encroachment (a boundary/partial intrusion — a wall
+  or construction across the line) and from inheritance_dispute (a co-heir WITHHOLDING
+  shares of an inherited property). Do NOT list illegal_occupation as a reflexive
+  alternative to a clear boundary encroachment or a clear co-heir/inheritance matter —
+  e.g. "my neighbour built a wall three feet inside my plot" is encroachment ONLY;
+  "my brother holds the inherited house and won't give my share" is inheritance ONLY.
+When the facts genuinely don't distinguish, or there is too little information, use
+confidence unconfirmed. Do not force a confident answer."""
+
+
+def needs_triage(classification: dict) -> bool:
+    """PURE hold-rule. An unconfirmed OR ambiguous classification must NOT proceed to
+    drafting — it holds for a lawyer. Ambiguity = the model named any alternative
+    category, or the confidence is unconfirmed, or the category is not one of the six.
+    Only a clean, confident single fit (established/single_source, no alternatives)
+    proceeds."""
+    category = classification.get("category")
+    confidence = classification.get("confidence")
+    alternatives = classification.get("alternatives") or []
+    if category not in GRIEVANCE_CATEGORIES:
+        return True
+    if confidence not in ("established", "single_source"):
+        return True
+    if alternatives:
+        return True
+    return False
+
+
+async def classify_grievance(text: str) -> dict:
+    """Grounded classification of a free-text grievance, with the confidence gate
+    applied deterministically afterward."""
+    import asyncio
+
+    from app.ai.llm import get_structured_llm
+
+    text = (text or "").strip()
+    if not text:
+        return {"error": "Describe what has happened to the property."}
+
+    try:
+        llm = get_structured_llm(GrievanceClassification, fast=True)
+        result: GrievanceClassification = await asyncio.to_thread(llm.invoke, [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": text},
+        ])
+        raw = result.model_dump()
+    except Exception as exc:
+        logger.warning("classify_grievance failed: %s", exc)
+        # Fail safe: a failed classification holds for a lawyer, never guesses.
+        return {
+            "category": None, "confidence": "unconfirmed", "reasoning": "",
+            "alternatives": [], "needs_triage": True,
+            "note": "Automated classification was unavailable — routed to lawyer triage.",
+        }
+
+    # Normalise + apply the hold-rule in code (not the prompt).
+    raw["category"] = (raw.get("category") or "").strip().lower()
+    raw["confidence"] = (raw.get("confidence") or "unconfirmed").strip().lower()
+    raw["alternatives"] = [a.strip().lower() for a in (raw.get("alternatives") or [])
+                           if a.strip().lower() in GRIEVANCE_CATEGORIES and a.strip().lower() != raw["category"]]
+    raw["needs_triage"] = needs_triage(raw)
+    raw["category_label"] = GRIEVANCE_CATEGORIES.get(raw["category"], "")
+    return raw
+
+
+# ── Guided intake (fixed fields only — no free-form) ─────────────────────────
+
+DOCUMENT_OPTIONS = {
+    "title_deed_fard", "power_of_attorney", "cnic_nicop",
+    "sale_agreement", "fir", "tax_receipts", "none",
+}
+RELIEF_OPTIONS = {
+    "restore_possession", "cancel_transfer_or_poa", "declare_ownership", "injunction", "other",
+}
+
+
+class DisputeIntake(BaseModel):
+    """The fixed petition facts. Values are user-entered, but the FIELDS are fixed —
+    no open-ended conversational intake."""
+    property_description: str = Field(min_length=1)
+    province: str = Field(min_length=1)
+    khasra_number: str = ""
+    opposing_party: str = Field(min_length=1)
+    opposing_party_relation: str = ""
+    timeline: str = Field(min_length=1, description="when it started / key dates")
+    documents_held: list[str] = Field(default_factory=list)
+    relief_wanted: str = Field(min_length=1)
+
+    @field_validator("documents_held")
+    @classmethod
+    def _valid_documents(cls, v):
+        bad = [d for d in v if d not in DOCUMENT_OPTIONS]
+        if bad:
+            raise ValueError(f"Unknown document(s): {bad}. Allowed: {sorted(DOCUMENT_OPTIONS)}")
+        return v
+
+    @field_validator("relief_wanted")
+    @classmethod
+    def _valid_relief(cls, v):
+        if v not in RELIEF_OPTIONS:
+            raise ValueError(f"relief_wanted must be one of {sorted(RELIEF_OPTIONS)}")
+        return v
+
+
+# ── State decision (pure) + record creation ─────────────────────────────────
+
+STATE_READY = "ready_for_drafting"
+STATE_HELD = "held_for_lawyer_triage"
+
+# Plain-language names for the notification (the codes never reach the user).
+SHORT_LABELS = {
+    "illegal_occupation":     "illegal occupation of your property",
+    "poa_misuse":             "misuse of a power of attorney",
+    "fraudulent_transfer":    "a fraudulent sale or transfer",
+    "inheritance_dispute":    "an inheritance dispute",
+    "encroachment":           "an encroachment on your land",
+    "sale_agreement_dispute": "a dispute over a sale agreement",
+}
+
+
+def _join_or(items: list[str]) -> str:
+    items = [i for i in items if i]
+    if len(items) <= 1:
+        return items[0] if items else ""
+    return ", ".join(items[:-1]) + " or " + items[-1]
+
+
+def _triage_message(rec: dict) -> tuple[str, str]:
+    """Plain-language 'why it's held' + a clear next step. No jargon — the user never
+    sees 'unconfirmed confidence'; they see what it means for them."""
+    g = rec.get("grievance") or {}
+    why: list[str] = []
+
+    if g.get("needs_triage"):
+        primary, alts = g.get("category"), (g.get("alternatives") or [])
+        if primary in SHORT_LABELS and alts:
+            names = [SHORT_LABELS[primary]] + [SHORT_LABELS.get(a, a) for a in alts]
+            why.append("From what you described, this could be " + _join_or(names) +
+                       ". Which one it is decides the legal claim and who the case is filed "
+                       "against — too important to guess, so a lawyer should confirm it first.")
+        else:
+            why.append("Your description didn't give enough detail to identify the type of "
+                       "dispute with confidence, so a lawyer should review it before we go further.")
+
+    if not (rec.get("eligibility") or {}).get("eligible"):
+        why.append("We also couldn't confirm your overseas-Pakistani status from the details "
+                   "entered — a lawyer can help establish it.")
+
+    j = rec.get("jurisdiction") or {}
+    if j.get("court_status") != special_court.OPERATIONAL:
+        why.append(f"The dedicated special court for {j.get('province')} is not confirmed running "
+                   "yet, so a lawyer should confirm the correct court (the federal court may apply).")
+
+    title = "Your property dispute needs a lawyer's review"
+    body = ("We've set your property dispute aside for a lawyer to check before anything is "
+            "drafted. " + " ".join(why) +
+            " Open the Lawyers section to connect with a verified Pakistani lawyer and take it forward.")
+    return title, body
+
+
+async def _notify_triage(client_id: str, dispute_id: str, rec: dict) -> None:
+    """Send the held-for-triage notification via the SAME channel the cause-list
+    watcher and engagements use — no new channel."""
+    from app.core.constants import NotificationType
+    from app.services import notification_service
+
+    title, body = _triage_message(rec)
+    await notification_service.create_notification(
+        client_id, NotificationType.DISPUTE_TRIAGE, title, body,
+        payload={"dispute_id": dispute_id, "cta": "find_lawyer", "route": "/lawyers"},
+    )
+
+
+def _decide_state(eligibility: dict, grievance: dict, jurisdiction: dict) -> dict:
+    """PURE. Ready to draft ONLY when eligibility is met, the grievance is confidently
+    classified, and the forum is confirmed operational. Anything uncertain holds for a
+    lawyer — the fail-safe posture used everywhere in this feature."""
+    reasons: list[str] = []
+    if not eligibility.get("eligible"):
+        reasons.append("Overseas-Pakistani eligibility is not established — a lawyer should confirm it.")
+    if grievance.get("needs_triage"):
+        reasons.append("The grievance could not be confidently classified — a lawyer should decide the "
+                       "correct cause of action before any petition is drafted.")
+    if jurisdiction.get("court_status") != special_court.OPERATIONAL:
+        reasons.append(f"The special court for {jurisdiction.get('province')} is not confirmed operational — "
+                       "a lawyer should confirm the forum (the federal framework may still apply).")
+    return {"state": STATE_HELD if reasons else STATE_READY, "hold_reasons": reasons}
+
+
+def _public(doc: dict) -> dict:
+    out = {k: v for k, v in doc.items() if k != "_id"}
+    out["id"] = doc["_id"]
+    return out
+
+
+async def create_dispute(client_id: str, id_type: str, days_abroad, grievance_text: str,
+                         intake: dict) -> dict:
+    """Run the full 5a pipeline and persist a property_disputes record with its
+    lifecycle state. Reuses special_court.resolve for the forum."""
+    from app.db.collections import get_disputes_col
+
+    eligibility = check_eligibility(id_type, days_abroad)
+    grievance = await classify_grievance(grievance_text)
+    parsed = DisputeIntake(**intake)                       # validates fixed fields
+    jurisdiction = special_court.resolve(parsed.province)  # reuse — do not replace
+    decision = _decide_state(eligibility, grievance, jurisdiction)
+
+    now = datetime.now(timezone.utc)
+    rec = {
+        "_id":          secrets.token_urlsafe(16),
+        "client_id":    client_id,
+        "eligibility":  eligibility,
+        "grievance":    grievance,
+        "intake":       parsed.model_dump(),
+        "jurisdiction": {
+            "province": jurisdiction.get("province"),
+            "court_status": jurisdiction.get("court_status"),
+            "act": jurisdiction.get("act"),
+            "disposal_days": jurisdiction.get("disposal_days"),
+            "disposal_note": "The disposal clock runs from the grant of leave to defend, not from filing.",
+            "appeal_days": jurisdiction.get("appeal_days"),
+            "appeal_disposal_days": jurisdiction.get("appeal_disposal_days"),
+            "can_efile_now": jurisdiction.get("can_efile_now"),
+            "confidence": jurisdiction.get("confidence"),
+            "verify": jurisdiction.get("verify"),
+        },
+        "state":        decision["state"],
+        "hold_reasons": decision["hold_reasons"],
+        # 5c handoff bookkeeping. triage_notified_at is set ONLY on a successful send;
+        # triage_notify_error records a failure. So a held record with BOTH still null
+        # means the notification never fired — a bug we can detect, not one that hides
+        # silently (the same class of gap as the POAOut/QR silent-drop).
+        "triage_notified_at": None,
+        "triage_notify_error": None,
+        "created_at":   now,
+        "updated_at":   now,
+    }
+    await get_disputes_col().insert_one(rec)
+
+    # Close the dead end: a held dispute notifies the user with a plain-language
+    # reason + a route into the lawyer marketplace. ready_for_drafting needs nothing.
+    if rec["state"] == STATE_HELD:
+        try:
+            await _notify_triage(client_id, rec["_id"], rec)
+            sent_at = datetime.now(timezone.utc)
+            await get_disputes_col().update_one(
+                {"_id": rec["_id"]}, {"$set": {"triage_notified_at": sent_at}})
+            rec["triage_notified_at"] = sent_at
+        except Exception as exc:  # loud, not silent — mirrors the loud-email pattern
+            logger.exception("dispute triage notification FAILED for %s", rec["_id"])
+            err = str(exc)[:300]
+            await get_disputes_col().update_one(
+                {"_id": rec["_id"]}, {"$set": {"triage_notify_error": err}})
+            rec["triage_notify_error"] = err
+
+    return _public(rec)
+
+
+async def list_disputes(client_id: str) -> list[dict]:
+    from app.db.collections import get_disputes_col
+    cur = get_disputes_col().find({"client_id": client_id}).sort("created_at", -1)
+    return [_public(d) async for d in cur]
+
+
+async def get_dispute(dispute_id: str, client_id: str) -> dict:
+    from app.core.exceptions import ForbiddenError, NotFoundError
+    from app.db.collections import get_disputes_col
+    doc = await get_disputes_col().find_one({"_id": dispute_id})
+    if not doc:
+        raise NotFoundError("Dispute")
+    if doc.get("client_id") != client_id:
+        raise ForbiddenError("This dispute is not yours")
+    return _public(doc)
+
+
+# ── Case-brief handoff to a lawyer (minimal — no matching, no payments) ───────
+#
+# WHY this lives on the dispute record and does NOT go through the Case-based
+# `engagement` model: an engagement is structurally a Case engagement — it requires
+# a case_id, transitions case status, negotiates a fee, and emits a signed engagement
+# letter. That is the full marketplace/hiring flow, explicitly out of scope here. A
+# property_dispute is its own entity, not a Case. So the handoff is the smallest thing
+# that satisfies the goal — "a lawyer can see the whole case in one place instead of
+# nothing": stamp the chosen lawyer on the dispute, grant them read access to the
+# petition PDF through the EXISTING document review pipeline (submit_for_review sets
+# submitted_to, which the download route already honours and which surfaces the doc in
+# the lawyer's existing review queue), and notify them. No new collection, no new
+# access-control surface. When real hiring/payments land, this promotes cleanly to a
+# full engagement.
+
+
+def _lawyer_card(lawyer: dict) -> dict:
+    """Minimal, non-sensitive lawyer identity for the brief/assignment."""
+    lp = lawyer.get("lawyer_profile") or {}
+    return {
+        "id":              lawyer["_id"],
+        "name":            lawyer.get("full_name", ""),
+        "province":        lawyer.get("province", ""),
+        "specializations": lp.get("specializations") or [],
+        "rating":          lp.get("rating", 0.0),
+        "kyc_verified":    bool(lp.get("kyc_verified")),
+    }
+
+
+async def _pick_verified_lawyer():
+    """Pick ONE verified, active lawyer from the existing marketplace data. No smart
+    matching yet — the highest-rated verified lawyer (find_lawyers sorts by rating).
+    Returns the lawyer doc, or None if the marketplace has no verified lawyer."""
+    from app.repositories.user_repo import UserRepository
+    result = await UserRepository().find_lawyers(page=1, page_size=1)
+    items = getattr(result, "items", None) or []
+    return items[0] if items else None
+
+
+async def send_to_lawyer(dispute_id: str, client_id: str) -> dict:
+    """Hand a dispute (in EITHER state) to one verified lawyer for review. Idempotent:
+    if already sent, returns the existing assignment rather than picking again."""
+    from datetime import datetime, timezone
+
+    from app.core.constants import NotificationType
+    from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
+    from app.db.collections import get_disputes_col
+    from app.services import notification_service
+
+    col = get_disputes_col()
+    dispute = await col.find_one({"_id": dispute_id})
+    if not dispute:
+        raise NotFoundError("Dispute")
+    if dispute.get("client_id") != client_id:
+        raise ForbiddenError("This dispute is not yours")
+
+    # Idempotent: never double-assign or silently re-pick a different lawyer.
+    if dispute.get("assigned_lawyer_id"):
+        return {
+            "dispute_id":  dispute_id,
+            "already_sent": True,
+            "assigned_lawyer": dispute.get("assigned_lawyer"),
+            "sent_to_lawyer_at": dispute.get("sent_to_lawyer_at"),
+            "petition_shared": bool(dispute.get("petition_shared")),
+        }
+
+    lawyer = await _pick_verified_lawyer()
+    if not lawyer:
+        raise AppValidationError(
+            "No verified lawyer is available on the platform yet to receive this case. "
+            "Please try again once a verified lawyer is listed.")
+
+    lawyer_card = _lawyer_card(lawyer)
+
+    # Grant the lawyer access to the petition PDF (if one was drafted) through the
+    # EXISTING review pipeline — this both authorises the download and drops the
+    # petition into the lawyer's normal review queue. Best-effort: a dispute with no
+    # petition (e.g. held) still hands off; a petition already submitted elsewhere
+    # does not block the handoff.
+    petition_shared = False
+    petition_doc_id = dispute.get("petition_document_id")
+    if petition_doc_id:
+        try:
+            from app.services import document_service
+            await document_service.submit_for_review(
+                petition_doc_id, client_id, lawyer["_id"],
+                note="Auto-shared with the case brief from the Overseas Property Dispute desk.",
+                urgency="normal",
+            )
+            petition_shared = True
+        except Exception as exc:  # loud, not silent — same posture as triage notify
+            logger.warning("could not share petition %s with lawyer %s: %s",
+                           petition_doc_id, lawyer["_id"], exc)
+
+    now = datetime.now(timezone.utc)
+    await col.update_one(
+        {"_id": dispute_id},
+        {"$set": {
+            "assigned_lawyer_id": lawyer["_id"],
+            "assigned_lawyer":    lawyer_card,
+            "sent_to_lawyer_at":  now,
+            "petition_shared":    petition_shared,
+            "updated_at":         now,
+        }},
+    )
+
+    # Notify the lawyer — reuse the existing notification channel, new type only.
+    client = None
+    try:
+        from app.repositories.user_repo import UserRepository
+        client = await UserRepository().find_by_id(client_id)
+    except Exception:
+        pass
+    client_name = (client or {}).get("full_name", "An overseas Pakistani client")
+    state_label = ("ready to draft a petition" if dispute.get("state") == STATE_READY
+                   else "held for your review before any petition is drafted")
+    try:
+        await notification_service.create_notification(
+            lawyer["_id"], NotificationType.DISPUTE_ASSIGNED,
+            "New property-dispute case brief",
+            f"{client_name} sent you a property-dispute case brief ({state_label}). "
+            "Open it to see the full case in one place.",
+            payload={"dispute_id": dispute_id, "route": "/lawyer/disputes"},
+        )
+    except Exception:
+        logger.exception("dispute-assigned notification FAILED for %s", dispute_id)
+
+    return {
+        "dispute_id":        dispute_id,
+        "already_sent":      False,
+        "assigned_lawyer":   lawyer_card,
+        "sent_to_lawyer_at": now,
+        "petition_shared":   petition_shared,
+    }
+
+
+def _case_brief(doc: dict, client: dict | None) -> dict:
+    """Package a dispute into a single case brief. Plain dict, NO response_model — the
+    same no-silent-drop choice as every dispute endpoint (a Pydantic allowlist would
+    quietly drop any nested field it doesn't declare, the POAOut/QR bug class)."""
+    grievance = doc.get("grievance") or {}
+    petition = None
+    if doc.get("petition_document_id"):
+        petition = {
+            "document_id":  doc["petition_document_id"],
+            "download_url": f"/api/v1/documents/{doc['petition_document_id']}/download",
+            "drafted_at":   doc.get("petition_drafted_at"),
+            "shared_with_lawyer": bool(doc.get("petition_shared")),
+        }
+    assignment = None
+    if doc.get("assigned_lawyer_id"):
+        assignment = {
+            "lawyer":  doc.get("assigned_lawyer"),
+            "sent_at": doc.get("sent_to_lawyer_at"),
+        }
+    return {
+        "dispute_id":  doc["_id"],
+        "state":       doc.get("state"),
+        "hold_reasons": doc.get("hold_reasons") or [],
+        "client": {
+            "id":   doc.get("client_id"),
+            "name": (client or {}).get("full_name", ""),
+        },
+        "eligibility": doc.get("eligibility") or {},
+        "grievance": {
+            "category":       grievance.get("category"),
+            "category_label": grievance.get("category_label"),
+            "confidence":     grievance.get("confidence"),
+            "alternatives":   grievance.get("alternatives") or [],
+            "reasoning":      grievance.get("reasoning", ""),
+            "needs_triage":   grievance.get("needs_triage"),
+        },
+        "intake":       doc.get("intake") or {},
+        "jurisdiction": doc.get("jurisdiction") or {},
+        "petition":     petition,
+        "assignment":   assignment,
+        "created_at":   doc.get("created_at"),
+        "updated_at":   doc.get("updated_at"),
+    }
+
+
+async def get_case_brief(dispute_id: str, viewer_id: str, viewer_role: str) -> dict:
+    """The single case-brief view. Accessible to the owning CLIENT or the ASSIGNED
+    LAWYER (and admin). Everyone else is refused — the assignment is the capability."""
+    from app.core.exceptions import ForbiddenError, NotFoundError
+    from app.db.collections import get_disputes_col
+    from app.repositories.user_repo import UserRepository
+
+    doc = await get_disputes_col().find_one({"_id": dispute_id})
+    if not doc:
+        raise NotFoundError("Dispute")
+
+    is_owner = doc.get("client_id") == viewer_id
+    is_assigned_lawyer = viewer_role == "lawyer" and doc.get("assigned_lawyer_id") == viewer_id
+    if not (is_owner or is_assigned_lawyer or viewer_role == "admin"):
+        raise ForbiddenError("You do not have access to this case brief")
+
+    client = await UserRepository().find_by_id(doc.get("client_id"))
+    return _case_brief(doc, client)
+
+
+async def list_disputes_for_lawyer(lawyer_id: str) -> list[dict]:
+    """Disputes handed to this lawyer — their inbox of case briefs (summaries)."""
+    from app.db.collections import get_disputes_col
+    cur = get_disputes_col().find({"assigned_lawyer_id": lawyer_id}).sort("sent_to_lawyer_at", -1)
+    out: list[dict] = []
+    async for d in cur:
+        g = d.get("grievance") or {}
+        out.append({
+            "dispute_id":   d["_id"],
+            "state":        d.get("state"),
+            "category_label": g.get("category_label"),
+            "province":     (d.get("jurisdiction") or {}).get("province"),
+            "has_petition": bool(d.get("petition_document_id")),
+            "sent_at":      d.get("sent_to_lawyer_at"),
+        })
+    return out

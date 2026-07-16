@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, Request
 
 from app.dependencies import get_current_user
-from app.schemas.agreement import AgreementCreate, SignatureSubmit
+from app.schemas.agreement import AgreementCreate, AgreementOut, SignatureSubmit
 from app.services import agreement_service
 
 router = APIRouter(prefix="/agreements", tags=["agreements"])
 
 
-@router.post("", response_model=dict)
+@router.post("", response_model=AgreementOut)
 async def create_agreement(
     body: AgreementCreate,
     current_user: dict = Depends(get_current_user),
@@ -20,7 +20,13 @@ async def create_agreement(
     )
 
 
-@router.get("/{agreement_id}", response_model=dict)
+@router.get("", response_model=list[AgreementOut])
+async def list_agreements(current_user: dict = Depends(get_current_user)):
+    """All agreements the current user is a party to or created."""
+    return await agreement_service.list_agreements(current_user["_id"])
+
+
+@router.get("/{agreement_id}", response_model=AgreementOut)
 async def get_agreement(
     agreement_id: str,
     current_user: dict = Depends(get_current_user),
@@ -28,7 +34,7 @@ async def get_agreement(
     return await agreement_service.get_agreement(agreement_id, current_user["_id"])
 
 
-@router.post("/{agreement_id}/sign", response_model=dict)
+@router.post("/{agreement_id}/sign", response_model=AgreementOut)
 async def sign_agreement(
     agreement_id: str,
     body: SignatureSubmit,

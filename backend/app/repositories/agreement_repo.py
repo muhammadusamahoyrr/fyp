@@ -14,6 +14,13 @@ class AgreementRepository(BaseRepository):
     async def find_by_party(self, user_id: str) -> list[dict]:
         return await self.find_many({"parties.user_id": user_id})
 
+    async def find_for_user(self, user_id: str) -> list[dict]:
+        """Agreements the user is a party to or created, newest first."""
+        return await self.find_many(
+            {"$or": [{"parties.user_id": user_id}, {"created_by": user_id}]},
+            sort=[("created_at", -1)],
+        )
+
     async def append_audit_log(self, agreement_id: str, entry: dict) -> bool:
         return await self.update_one(
             {"_id": agreement_id},

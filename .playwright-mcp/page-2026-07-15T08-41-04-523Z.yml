@@ -1,0 +1,53 @@
+- generic [ref=f44e1]:
+  - button "Open Next.js Dev Tools" [ref=f44e9] [cursor=pointer]
+  - alert [ref=f44e13]
+  - generic [ref=f44e14]:
+    - generic [ref=f44e15]:
+      - generic [ref=f44e16]:
+        - img "Attorney.AI" [ref=f44e17]
+        - generic [ref=f44e18]: Attorney.AI
+        - button [ref=f44e20] [cursor=pointer]
+      - navigation [ref=f44e22]:
+        - button "Overview" [ref=f44e23] [cursor=pointer]
+        - button "Profile" [ref=f44e27] [cursor=pointer]
+        - button "Legal Intake" [ref=f44e31] [cursor=pointer]
+        - button "AI Chat" [ref=f44e35] [cursor=pointer]
+        - button "Legal Tools" [ref=f44e40] [cursor=pointer]
+        - button [active] [ref=f44e43] [cursor=pointer]
+        - button "Lawyers" [ref=f44e49] [cursor=pointer]
+        - button "Agreements" [ref=f44e53] [cursor=pointer]
+        - button "Documents" [ref=f44e56] [cursor=pointer]
+        - button "Tracking 3" [ref=f44e60] [cursor=pointer]:
+          - text: Tracking
+          - generic [ref=f44e64]: "3"
+      - generic [ref=f44e66]:
+        - generic [ref=f44e67]:
+          - generic [ref=f44e68]: BT
+          - generic [ref=f44e69]:
+            - generic [ref=f44e70]: Browser Test Client
+            - generic [ref=f44e71]: Client
+          - button "اردو" [ref=f44e72] [cursor=pointer]
+        - generic [ref=f44e73]:
+          - button [ref=f44e74] [cursor=pointer]
+          - button "Sign Out" [ref=f44e82] [cursor=pointer]
+    - generic [ref=f44e85]:
+      - generic [ref=f44e86]:
+        - generic [ref=f44e88]:
+          - heading "Overseas Desk" [level=1] [ref=f44e89]
+          - paragraph [ref=f44e90]: Wednesday, July 15, 2026
+        - button "3" [ref=f44e92] [cursor=pointer]
+      - generic [ref=f44e97]:
+        - generic [ref=f44e98]:
+          - generic [ref=f44e99]: Overseas Desk
+          - generic [ref=f44e100]: Manage your Pakistani property & affairs from abroad — the right POA, verified, and protected.
+        - generic [ref=f44e101]:
+          - button "My Powers of Attorney" [ref=f44e102] [cursor=pointer]
+          - button "Attestation Navigator" [ref=f44e106] [cursor=pointer]
+          - button "Special Courts" [ref=f44e109] [cursor=pointer]
+          - button "Property Dispute" [ref=f44e112] [cursor=pointer]
+        - generic [ref=f44e115]:
+          - generic [ref=f44e116]: Draft for legal review. Generated POAs are unexecuted drafts — not valid until signed, notarised, attested and, for property, registered. Have a qualified Pakistani lawyer review before use.
+          - generic [ref=f44e117]:
+            - generic [ref=f44e118]: Your Powers of Attorney
+            - button "+ New POA" [ref=f44e119] [cursor=pointer]
+          - generic [ref=f44e120]: No Powers of Attorney yet. Click New POA to draft one.

@@ -1,0 +1,105 @@
+- generic [active] [ref=f34e1]:
+  - button "Open Next.js Dev Tools" [ref=f34e9] [cursor=pointer]
+  - alert [ref=f34e13]
+  - generic [ref=f34e14]:
+    - generic [ref=f34e15]:
+      - generic [ref=f34e16]:
+        - img "AttorneyAI" [ref=f34e17]
+        - generic [ref=f34e18]:
+          - generic [ref=f34e19]: AttorneyAI
+          - generic [ref=f34e20]: Legal Practice Suite
+        - button [ref=f34e21] [cursor=pointer]
+      - generic [ref=f34e24]:
+        - generic [ref=f34e25]:
+          - button "Dashboard" [ref=f34e26] [cursor=pointer]
+          - button "Cases" [ref=f34e31] [cursor=pointer]
+          - button "Clients" [ref=f34e36] [cursor=pointer]
+        - generic [ref=f34e44]:
+          - button "Documents" [ref=f34e45] [cursor=pointer]
+          - button "Agreements" [ref=f34e51] [cursor=pointer]
+          - button "Overseas Disputes" [ref=f34e57] [cursor=pointer]
+          - button "Cause List" [ref=f34e66] [cursor=pointer]
+          - button "Payments" [ref=f34e74] [cursor=pointer]
+          - button "Appointments" [ref=f34e80] [cursor=pointer]
+        - generic [ref=f34e86]:
+          - button "AI Assistant" [ref=f34e87] [cursor=pointer]
+          - button "Case Law" [ref=f34e93] [cursor=pointer]
+          - button "Draft Generator" [ref=f34e98] [cursor=pointer]
+        - button "Settings" [ref=f34e105] [cursor=pointer]
+      - generic [ref=f34e112] [cursor=pointer]:
+        - generic [ref=f34e113]: AR
+        - generic [ref=f34e114]:
+          - generic [ref=f34e115]: Ahmad Raza Khan
+          - generic [ref=f34e116]: Advocate
+        - button "7" [ref=f34e117]
+        - button "Switch to Light Mode" [ref=f34e122]
+    - main [ref=f34e127]:
+      - generic [ref=f34e128]:
+        - generic [ref=f34e129]:
+          - button "← Back to inbox" [ref=f34e167] [cursor=pointer]
+          - generic [ref=f34e168]: Ready to draft
+        - generic [ref=f34e132]:
+          - generic [ref=f34e169]: Property dispute — case brief
+          - generic [ref=f34e170]: From Bilal Overseas · sent Jul 15, 2026
+        - generic [ref=f34e171]:
+          - generic [ref=f34e172]:
+            - generic [ref=f34e173]: Overseas-Pakistani eligibility
+            - generic [ref=f34e174]:
+              - generic [ref=f34e175]: Qualifies
+              - generic [ref=f34e176]: "Yes"
+          - generic [ref=f34e177]:
+            - generic [ref=f34e178]: Grievance classification
+            - generic [ref=f34e179]:
+              - generic [ref=f34e180]:
+                - generic [ref=f34e181]: Type
+                - generic [ref=f34e182]: Someone has taken or holds possession of the property without right (dispossession / land-grab / forcible occupation).
+              - generic [ref=f34e183]:
+                - generic [ref=f34e184]: Confidence
+                - generic [ref=f34e185]: established
+              - generic [ref=f34e186]:
+                - generic [ref=f34e187]: Needs triage
+                - generic [ref=f34e188]: No — clear
+            - generic [ref=f34e189]:
+              - generic [ref=f34e190]: Reasoning
+              - generic [ref=f34e191]: Someone has taken possession of the property without right
+          - generic [ref=f34e192]:
+            - generic [ref=f34e193]: The facts (as entered)
+            - generic [ref=f34e194]:
+              - generic [ref=f34e195]: Property
+              - generic [ref=f34e196]: House 12, Street 4, F-8/3, Islamabad
+            - generic [ref=f34e197]:
+              - generic [ref=f34e198]:
+                - generic [ref=f34e199]: Opposing party
+                - generic [ref=f34e200]: Kamran Sheikh
+              - generic [ref=f34e201]:
+                - generic [ref=f34e202]: Khasra / registry
+                - generic [ref=f34e203]: —
+            - generic [ref=f34e204]:
+              - generic [ref=f34e205]: Timeline
+              - generic [ref=f34e206]: He broke in around March 2026 and refuses to leave.
+            - generic [ref=f34e207]:
+              - generic [ref=f34e208]: Documents held
+              - generic [ref=f34e209]: title_deed_fard, cnic_nicop
+            - generic [ref=f34e210]:
+              - generic [ref=f34e211]: Relief sought
+              - generic [ref=f34e212]: restore_possession
+          - generic [ref=f34e213]:
+            - generic [ref=f34e214]: Jurisdiction (Special Court, 2024 Act)
+            - generic [ref=f34e215]:
+              - generic [ref=f34e216]:
+                - generic [ref=f34e217]: Province
+                - generic [ref=f34e218]: Islamabad Capital Territory / federal
+              - generic [ref=f34e219]:
+                - generic [ref=f34e220]: Court status
+                - generic [ref=f34e221]: operational
+              - generic [ref=f34e222]:
+                - generic [ref=f34e223]: Appeal window
+                - generic [ref=f34e224]: 15 days
+              - generic [ref=f34e225]:
+                - generic [ref=f34e226]: Disposal
+                - generic [ref=f34e227]: 90 days (from leave to defend)
+          - generic [ref=f34e228]:
+            - generic [ref=f34e229]: Draft petition
+            - generic [ref=f34e230]:
+              - button "⤓ Download draft petition (PDF)" [ref=f34e231] [cursor=pointer]
+              - generic [ref=f34e232]: Drafted Jul 15, 2026 — a DRAFT for you to review, complete and file.

@@ -1,7 +1,7 @@
 'use client';
 import { createContext, useContext, useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { getNotifications, markNotificationRead, markAllNotificationsRead, listCases, listAppointments } from "@/lib/api.js";
+import { getNotifications, markNotificationRead, markAllNotificationsRead, listCases, listAppointments, openNotificationSocket } from "@/lib/api.js";
 
 /* ═══════════════════════════════════════════════════════════════
    GLOBAL CASE CONTEXT  —  Fix #1
@@ -163,33 +163,20 @@ export const CaseProvider = ({ children }) => {
             if (Object.keys(patch).length) updateCase(patch);
         };
 
-        const connectLiveNotifications = () => {
-            const token = typeof window !== "undefined" ? localStorage.getItem("aai-token") : "";
-            if (!user?._id || !token) return;
-
-            const wsBase = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1")
-                .replace(/\/api\/v1$/, "")
-                .replace(/^http/, "ws");
-            const wsUrl = `${wsBase}/ws/notifications/${user._id}?token=${encodeURIComponent(token)}`;
-
-            ws = new WebSocket(wsUrl);
-            ws.onmessage = (event) => {
-                try {
-                    const message = JSON.parse(event.data);
-                    if (message?.type === "notification" && message.notification) {
-                        const incoming = mapNotification(message.notification);
-                        setCaseData(prev => ({
-                            ...prev,
-                            notifications: [incoming, ...prev.notifications.filter(n => n.id !== incoming.id)],
-                        }));
-                    }
-                } catch (error) {
-                    console.warn("⚠️ Failed to parse notification websocket message:", error);
+        const connectLiveNotifications = async () => {
+            if (!user?._id) return;
+            const sock = await openNotificationSocket((message) => {
+                if (message?.type === "notification" && message.notification) {
+                    const incoming = mapNotification(message.notification);
+                    setCaseData(prev => ({
+                        ...prev,
+                        notifications: [incoming, ...prev.notifications.filter(n => n.id !== incoming.id)],
+                    }));
                 }
-            };
-            ws.onerror = () => {
-                console.warn("⚠️ Notification websocket connection failed");
-            };
+            });
+            if (cancelled) { try { sock?.close(); } catch {} return; }
+            ws = sock;
+            if (ws) ws.onerror = () => console.warn("⚠️ Notification websocket connection failed");
         };
 
         fetchAll();

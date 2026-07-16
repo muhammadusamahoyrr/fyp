@@ -5,10 +5,12 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.core.config import settings
 from app.core.exceptions import AppValidationError, NotFoundError
 from app.repositories.intake_repo import IntakeRepository
 from app.repositories.case_repo import CaseRepository
 from app.services.case_service import create_case
+from app.utils.file_handler import detect_mime, ext_for_mime
 
 intake_repo = IntakeRepository()
 case_repo   = CaseRepository()
@@ -182,7 +184,7 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
 
     try:
         llm      = get_llm()
-        response = llm.invoke([
+        response = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _CLARIFY_SYSTEM},
             {"role": "user",   "content": user_msg},
         ])
@@ -234,7 +236,7 @@ async def _ai_classify_case_type(description: str, user_selected: str) -> tuple[
         try:
             from app.ai.llm import get_fast_llm
             llm = get_fast_llm()
-            response = llm.invoke([
+            response = await asyncio.to_thread(llm.invoke, [
                 {"role": "system", "content": _TYPE_CLASSIFY_SYSTEM},
                 {"role": "user",   "content": description[:1200]},
             ])
@@ -298,9 +300,7 @@ async def convert_to_case(
     }
     case = await create_case(client_id, case_data)
     case_id = case["_id"]
-
-    # P1 — generate 768-dim case embedding (non-blocking)
-    asyncio.create_task(_embed_case(case_id, description))
+    # Embedding is scheduled inside create_case
 
     # Use frontend-provided urgency if given; fall back to what the user stored in step 2
     effective_urgency = urgency or step2.get("urgency", "medium")
@@ -340,20 +340,6 @@ async def convert_to_case(
         "user_case_type":     user_case_type,
         "type_was_corrected": type_corrected,
     }
-
-
-async def _embed_case(case_id: str, description: str) -> None:
-    """P1 — embed case description and store in MongoDB."""
-    try:
-        from app.ai.pipelines.retriever import _embeddings
-        emb_model = _embeddings()
-        # "query: " prefix for multilingual-e5 query-side embedding
-        vector = await asyncio.to_thread(
-            emb_model.embed_query, f"query: {description[:512]}"
-        )
-        await case_repo.set_embedding(case_id, vector)
-    except Exception:
-        pass  # non-critical — matching falls back to MongoDB scoring
 
 
 async def _auto_match_lawyers(case_id: str) -> None:
@@ -397,19 +383,36 @@ async def _run_intake_ai(
         "case_id":                case_id,
         "case_type":              case_type,
         "case_type_confidence":   0.0,
-        "classifier_case_type":   case_type,
-        "classifier_confidence":  1.0,
-        "routing_mode":           "single",
-        "followup_intent":        None,
         "complexity":             "simple",
         "urgency":                urgency,
         "province":               province,
+        "province_inferred":      False,
         "language":               language,
+        "classifier_case_type":   case_type,
+        "classifier_confidence":  1.0,
+        "classifier_scores":      {},
+        "precomputed_collection_names": [],
+        "routing_mode":           "single",
+        "followup_intent":        None,
         "needs_clarification":    False,
         "clarification_question": "",
+        "clarification_depth":    0,
+        "interrupt_active":       False,
+        "interrupt_question_type": "",
+        "interrupt_question_text": "",
+        "interrupt_step":         0,
+        "interrupt_expires_at":   "",
+        "web_search_enabled":     False,
         "retrieved_chunks":       [],
         "reranked_chunks":        [],
         "relevance_score":        1.0,
+        "signal_variance":        0.0,
+        "bm25_confidence":        0.0,
+        "cache_hit":              False,
+        "cache_confidence":       0.0,
+        "arbitration_output":     "answer",
+        "arbitration_source":     "none",
+        "arbitration_confidence": 0.0,
         "answer":                 "",
         "citations":              [],
         "confidence":             0.0,
@@ -437,7 +440,7 @@ async def _run_intake_ai(
         }
 
 
-_EVIDENCE_DIR = Path("uploads/evidence")
+_EVIDENCE_DIR = Path(settings.upload_root) / "evidence"
 _ALLOWED_MIME = {
     "image/jpeg", "image/png", "image/gif", "image/webp",
     "application/pdf",
@@ -454,18 +457,21 @@ async def upload_evidence(token: str, client_id: str, file) -> dict:
     if not intake or intake.get("client_id") != client_id:
         raise NotFoundError("Intake session")
 
-    if file.content_type not in _ALLOWED_MIME:
-        raise AppValidationError(f"File type not allowed. Accepted: PDF, Word, JPEG, PNG, GIF, WebP")
-
     content = await file.read()
     if len(content) > _MAX_EVIDENCE_SIZE:
         raise AppValidationError("File too large — maximum size is 10 MB")
+
+    # Validate by actual file contents, not the client-supplied Content-Type header
+    detected_mime = detect_mime(content[:16])
+    if detected_mime not in _ALLOWED_MIME:
+        raise AppValidationError("File type not allowed. Accepted: PDF, Word, JPEG, PNG, GIF, WebP")
 
     save_dir = _EVIDENCE_DIR / token
     save_dir.mkdir(parents=True, exist_ok=True)
 
     file_id = uuid.uuid4().hex
-    suffix  = Path(file.filename or "file").suffix or ""
+    # Extension from the DETECTED type — never from the client filename.
+    suffix  = ext_for_mime(detected_mime)
     save_path = save_dir / f"{file_id}{suffix}"
 
     async with aiofiles.open(save_path, "wb") as f:

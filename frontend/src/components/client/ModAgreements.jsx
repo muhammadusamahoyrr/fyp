@@ -1,10 +1,12 @@
 'use client';
 // Paste your ModAgreements.jsx code here
-import React, { useState, Fragment, useRef, useCallback } from "react";
+import React, { useState, Fragment, useRef, useCallback, useEffect } from "react";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
+import { useAuth } from "@/context/AuthContext.jsx";
+import { createAgreement, signAgreement, listAgreements, searchLawyers } from "@/lib/api.js";
 
 /* ══════════════════════════════════════════════════════
    MODULE: AGREEMENTS — 5-Step Wizard
@@ -30,13 +32,6 @@ const AGMT_CLAUSES_INIT = [
     { title: "Termination", text: "Either party may terminate this agreement with 30 days written notice.", required: false },
 ];
 
-const AGMT_LIST_DATA = [
-    { name: "Service Agreement — XYZ Corp.", sub: "Created Mar 5, 2026 · 2 parties · PKR 500,000", status: "Pending", type: "warn", ref: "AGR-2026-0042", parties: "M. Usama · XYZ Corp.", value: "PKR 500,000", signed: "1 of 2" },
-    { name: "NDA — Tech Startup Ltd.", sub: "Signed Feb 28, 2026 · 2 parties · Confidentiality", status: "Signed", type: "success", ref: "AGR-2026-0038", parties: "M. Usama · Tech Startup", value: "N/A", signed: "2 of 2" },
-    { name: "Employment Contract — ABC Industries", sub: "Rejected Feb 20, 2026 · Reason: Terms dispute", status: "Rejected", type: "danger", ref: "AGR-2026-0031", parties: "M. Usama · ABC Ind.", value: "PKR 1,200,000", signed: "0 of 2" },
-    { name: "Partnership Agreement — Delta Ventures", sub: "Signed Jan 15, 2026 · 3 parties · Joint venture", status: "Signed", type: "success", ref: "AGR-2026-0019", parties: "3 parties", value: "PKR 2,500,000", signed: "3 of 3" },
-    { name: "Lease Agreement — Property LHR-22", sub: "Pending Feb 10, 2026 · Awaiting owner signature", status: "Pending", type: "warn", ref: "AGR-2026-0028", parties: "M. Usama · Landlord", value: "PKR 85,000/mo", signed: "1 of 2" },
-];
 
 // ─────────────────────────────────────────────
 //  ModAgreements — redesigned to match new UI screens
@@ -131,13 +126,42 @@ const TEMPLATES = [
     },
 ];
 
-const AGREEMENTS_LIST = [
-    { name: "Employment Contract - Sarah Chen", type: "Employment", parties: 2, status: "Signed", date: "2026-03-07", ref: "AGR-2026-001" },
-    { name: "NDA - TechCorp Partnership", type: "NDA", parties: 3, status: "Pending", date: "2026-03-06", ref: "AGR-2026-002" },
-    { name: "Lease Agreement - 42 Oak St", type: "Lease", parties: 2, status: "Pending", date: "2026-03-05", ref: "AGR-2026-003" },
-    { name: "Service Agreement - DesignPro", type: "Service", parties: 2, status: "Rejected", date: "2026-03-04", ref: "AGR-2026-004" },
-    { name: "Freelancer Contract - John Davis", type: "Employment", parties: 2, status: "Draft", date: "2026-03-03", ref: "AGR-2026-005" },
-];
+// ── REAL AGREEMENT HELPERS ───────────────────
+const AG_STATUS_LABEL = { pending: "Pending", executed: "Signed", cancelled: "Rejected", draft: "Draft" };
+
+const mapAgreement = (a, myId) => {
+    const parties = a.parties || [];
+    const me = parties.find(p => p.user_id === myId);
+    return {
+        id: a.id || a._id,
+        name: a.title || "Agreement",
+        body: a.body_html || "",
+        status: AG_STATUS_LABEL[a.status] || "Pending",
+        rawStatus: a.status,
+        parties,
+        signedCount: parties.filter(p => p.signed).length,
+        totalParties: parties.length,
+        needsMySig: a.status === "pending" && !!me && !me.signed,
+        date: a.created_at ? new Date(a.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
+        counterparts: parties.filter(p => p.user_id !== myId).map(p => p.full_name).join(" · "),
+        eto: a.eto_classification,
+        isEngagementLetter: !!a.engagement_id,
+    };
+};
+
+// Fetch + map the user's real agreements; returns [items, loading, reload]
+const useMyAgreements = (userId) => {
+    const [items, setItems] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const reload = useCallback(() => {
+        listAgreements().then(({ data }) => {
+            if (Array.isArray(data)) setItems(data.map(a => mapAgreement(a, userId)));
+            setLoading(false);
+        }).catch(() => setLoading(false));
+    }, [userId]);
+    useEffect(() => { reload(); }, [reload]);
+    return [items, loading, reload];
+};
 
 // ── STEP PROGRESS BAR ────────────────────────
 const StepBar = ({ steps, current }) => {
@@ -185,11 +209,14 @@ const StepBar = ({ steps, current }) => {
 // ── PAGE: DASHBOARD ──────────────────────────
 const PageDashboard = ({ onNavigate }) => {
     const t = useTheme();
+    const { user } = useAuth();
+    const [agmts, loading] = useMyAgreements(user?._id);
+    const awaitingMe = agmts.filter(a => a.needsMySig).length;
     const stats = [
-        { label: "Total Agreements", val: 24, sub: "+3 this week", icon: "📄", color: t.primary },
-        { label: "Pending Signatures", val: 5, sub: null, icon: "⏰", color: t.warn },
-        { label: "Signed", val: 16, sub: "+2 today", icon: "✅", color: t.success },
-        { label: "Rejected", val: 3, sub: null, icon: "⚠️", color: t.danger },
+        { label: "Total Agreements", val: agmts.length, sub: null, icon: "📄", color: t.primary },
+        { label: "Awaiting My Signature", val: awaitingMe, sub: awaitingMe ? "Action needed" : null, icon: "✍️", color: t.warn },
+        { label: "Pending Others", val: agmts.filter(a => a.status === "Pending" && !a.needsMySig).length, sub: null, icon: "⏰", color: t.info },
+        { label: "Executed", val: agmts.filter(a => a.status === "Signed").length, sub: null, icon: "✅", color: t.success },
     ];
     return (
         <div>
@@ -251,10 +278,16 @@ const PageDashboard = ({ onNavigate }) => {
                     <span style={{ fontSize: 15, fontWeight: 700, color: t.text }}>Recent Agreements</span>
                     <span onClick={() => onNavigate("all")} style={{ fontSize: 12, color: t.primary, cursor: "pointer", fontWeight: 600 }}>View All</span>
                 </div>
-                {AGREEMENTS_LIST.slice(0, 4).map((a, i) => (
-                    <div key={i} style={{
+                {loading ? (
+                    <div style={{ padding: "28px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>Loading…</div>
+                ) : agmts.length === 0 ? (
+                    <div style={{ padding: "28px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>
+                        No agreements yet — create one, or hire a lawyer to receive an engagement letter here.
+                    </div>
+                ) : agmts.slice(0, 4).map((a, i) => (
+                    <div key={a.id} onClick={() => onNavigate("all")} style={{
                         display: "flex", alignItems: "center", gap: 12, padding: "14px 20px",
-                        borderBottom: i < 3 ? `1px solid ${t.border}` : "none",
+                        borderBottom: i < Math.min(agmts.length, 4) - 1 ? `1px solid ${t.border}` : "none",
                         transition: "background 0.15s", cursor: "pointer",
                     }}
                         onMouseEnter={e => e.currentTarget.style.background = t.cardHi}
@@ -263,10 +296,12 @@ const PageDashboard = ({ onNavigate }) => {
                         <div style={{
                             width: 36, height: 36, borderRadius: 10, background: t.primaryGlow,
                             display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0
-                        }}>📄</div>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{a.name}</div>
-                            <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>{a.type} · {a.parties} parties</div>
+                        }}>{a.isEngagementLetter ? "⚖️" : "📄"}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
+                            <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>
+                                {a.signedCount} of {a.totalParties} signed{a.needsMySig ? " · your signature needed" : ""}
+                            </div>
                         </div>
                         <div style={{ fontSize: 11, color: t.textMuted, marginRight: 10 }}>{a.date}</div>
                         <StatusBadge status={a.status} />
@@ -359,23 +394,45 @@ const TOOLBAR_ACTIONS = [
     { label: "Tx", title: "Clear format" }, { label: "↩", title: "Undo" }, { label: "↪", title: "Redo" },
 ];
 
+const SIG_METHOD_MAP = { draw: "canvas", type: "typed", upload: "image_upload" };
+
 const PageCreate = ({ template, onNavigate, onDone }) => {
     const t = useTheme();
+    const toast = useToast();
+    const { user } = useAuth();
     const [step, setStep] = useState(0);
     const [title, setTitle] = useState(template?.name || "New Agreement");
     const [body, setBody] = useState(template?.body || "");
-    const [signers, setSigners] = useState([{ name: "", role: "", email: "", method: "email" }]);
-    const [signerIdx, setSignerIdx] = useState(0);
+    // Real counterparty — a registered user who will counter-sign from their dashboard
+    const [counterparty, setCounterparty] = useState(null);
+    const [cpList, setCpList] = useState([]);
+    const [cpLoading, setCpLoading] = useState(true);
+    const [cpSearch, setCpSearch] = useState("");
     const [fullName, setFullName] = useState("");
     const [hasSig, setHasSig] = useState(false);
     const [sigMode, setSigMode] = useState("draw");
     const [typedSig, setTypedSig] = useState("");
     const [uploadedSig, setUploadedSig] = useState(null);
+    const [submitting, setSubmitting] = useState(false);
     const canvasRef = useRef(null);
     const drawing = useRef(false);
     const lastPos = useRef({ x: 0, y: 0 });
 
-    const STEPS = ["Edit Agreement", "Add Signers", "Your Signature", "Review & Send"];
+    const STEPS = ["Edit Agreement", "Choose Counterparty", "Your Signature", "Review & Send"];
+
+    // Verified lawyers are the counterparties available on the platform
+    useEffect(() => {
+        searchLawyers({ page_size: 50 }).then(({ data }) => {
+            const items = Array.isArray(data) ? data : (data?.items || []);
+            setCpList(items.map(l => ({
+                _id: l._id,
+                name: l.full_name || "Lawyer",
+                spec: ((l.lawyer_profile?.specializations || [])[0] || "General Practice").replace(/_/g, " "),
+                avatar: (l.full_name || "L").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
+            })));
+            setCpLoading(false);
+        }).catch(() => setCpLoading(false));
+    }, []);
 
     // Canvas drawing
     const startDraw = useCallback(e => {
@@ -412,12 +469,9 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
         setUploadedSig(null);
     };
 
-    const addSigner = () => setSigners([...signers, { name: "", role: "", email: "", method: "email" }]);
-    const removeSigner = i => setSigners(signers.filter((_, idx) => idx !== i));
-    const updateSigner = (i, field, val) => setSigners(signers.map((s, idx) => idx === i ? { ...s, [field]: val } : s));
-
     const nav = (n) => {
         if (n > step && step === 0 && !title.trim()) return;
+        if (n > 1 && step === 1 && !counterparty) { toast.show("⚠️ Select a counterparty first", "warn"); return; }
         setStep(Math.max(0, Math.min(3, n)));
     };
 
@@ -489,88 +543,55 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                 </div>
             )}
 
-            {/* ── STEP 1: Add Signers ── */}
+            {/* ── STEP 1: Choose Counterparty ── */}
             {step === 1 && (
                 <div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                        <div>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>Signers</div>
-                            <div style={{ fontSize: 12, color: t.textMuted }}>Add people who need to sign this agreement</div>
+                    <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>Counterparty</div>
+                        <div style={{ fontSize: 12, color: t.textMuted }}>
+                            Choose who signs this agreement with you. They'll be notified and counter-sign from their own dashboard.
                         </div>
-                        <Btn primary onClick={addSigner} style={{ fontSize: 12, padding: "9px 16px" }}>👤+ Add Signer</Btn>
                     </div>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                        {signers.map((sg, i) => (
-                            <Card key={i} style={{ padding: 0, overflow: "hidden" }}>
-                                {/* Card header */}
-                                <div style={{
-                                    display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
-                                    borderBottom: `1px solid ${t.border}`, background: t.surface
-                                }}>
-                                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                                        <span style={{ fontSize: 9, color: t.textMuted }}>▲</span>
-                                        <span style={{ fontSize: 9, color: t.textMuted }}>▼</span>
-                                    </div>
-                                    <div style={{
-                                        width: 28, height: 28, borderRadius: "50%", background: t.primaryGlow,
-                                        border: `1.5px solid ${t.primary}`, display: "flex", alignItems: "center", justifyContent: "center",
-                                        fontSize: 12, fontWeight: 700, color: t.primary
-                                    }}>{i + 1}</div>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{sg.name || "New Signer"}</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted }}>{sg.email || "No email set"}</div>
-                                    </div>
-                                    <span style={{
-                                        fontSize: 10, fontWeight: 700, color: t.info, background: "rgba(90,179,255,0.12)",
-                                        border: "1px solid rgba(90,179,255,0.25)", borderRadius: 6, padding: "3px 8px", letterSpacing: "0.5px"
-                                    }}>
-                                        EMAIL
-                                    </span>
-                                    {signers.length > 1 && (
-                                        <button onClick={() => removeSigner(i)} style={{
-                                            width: 28, height: 28, borderRadius: 8, border: `1px solid ${t.danger}40`,
-                                            background: "transparent", color: t.danger, cursor: "pointer", fontSize: 14,
-                                            display: "flex", alignItems: "center", justifyContent: "center",
-                                        }}>🗑</button>
-                                    )}
+                    {counterparty && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 12, background: t.primaryGlow, border: `1.5px solid ${t.primary}`, marginBottom: 14 }}>
+                            <div style={{ width: 36, height: 36, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff" }}>{counterparty.avatar}</div>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{counterparty.name}</div>
+                                <div style={{ fontSize: 11, color: t.primary, textTransform: "capitalize" }}>{counterparty.spec} · will counter-sign</div>
+                            </div>
+                            <button onClick={() => setCounterparty(null)} style={{ background: "none", border: `1px solid ${t.border}`, borderRadius: 8, padding: "5px 12px", color: t.textMuted, fontSize: 11, cursor: "pointer" }}>Change</button>
+                        </div>
+                    )}
+
+                    <div style={{ position: "relative", marginBottom: 12 }}>
+                        <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 13, color: t.textMuted }}>🔍</span>
+                        <Input placeholder="Search verified lawyers…" value={cpSearch} onChange={e => setCpSearch(e.target.value)} style={{ paddingLeft: 38 }} />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 380, overflowY: "auto" }}>
+                        {cpLoading ? (
+                            <div style={{ padding: "28px 0", textAlign: "center", color: t.textMuted, fontSize: 13 }}>Loading verified lawyers…</div>
+                        ) : cpList.filter(l => l.name.toLowerCase().includes(cpSearch.toLowerCase())).map(l => (
+                            <div key={l._id} onClick={() => setCounterparty(l)} style={{
+                                display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 12,
+                                border: `1.5px solid ${counterparty?._id === l._id ? t.primary : t.border}`,
+                                background: counterparty?._id === l._id ? t.primaryGlow : t.card,
+                                cursor: "pointer", transition: "all 0.15s",
+                            }}>
+                                <div style={{ width: 34, height: 34, borderRadius: "50%", background: `${t.primary}18`, border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: t.primary }}>{l.avatar}</div>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{l.name}</div>
+                                    <div style={{ fontSize: 11, color: t.textMuted, textTransform: "capitalize" }}>{l.spec}</div>
                                 </div>
-                                {/* Fields */}
-                                <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                                        <div>
-                                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 5 }}>Full Name</div>
-                                            <Input placeholder="John Doe" value={sg.name} onChange={e => updateSigner(i, "name", e.target.value)} />
-                                        </div>
-                                        <div>
-                                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 5 }}>Role / Title</div>
-                                            <Input placeholder="CEO, Contractor, etc." value={sg.role} onChange={e => updateSigner(i, "role", e.target.value)} />
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 5 }}>Invitation Method</div>
-                                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                                            {[["email", "✉️ Send via Email"], ["link", "🔗 Generate Link"]].map(([val, label]) => (
-                                                <button key={val} onClick={() => updateSigner(i, "method", val)} style={{
-                                                    padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 500, cursor: "pointer",
-                                                    fontFamily: "'Inter',sans-serif", transition: "all 0.15s",
-                                                    border: `1.5px solid ${sg.method === val ? t.primary : t.border}`,
-                                                    background: sg.method === val ? t.primaryGlow : t.inputBg,
-                                                    color: sg.method === val ? t.primary : t.textMuted,
-                                                }}>{label}</button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    {sg.method === "email" && (
-                                        <div>
-                                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 5 }}>Email Address</div>
-                                            <Input placeholder="signer@example.com" type="email" value={sg.email}
-                                                onChange={e => updateSigner(i, "email", e.target.value)} />
-                                        </div>
-                                    )}
-                                </div>
-                            </Card>
+                                {counterparty?._id === l._id && <span style={{ color: t.primary, fontWeight: 800, fontSize: 14 }}>✓</span>}
+                            </div>
                         ))}
+                        {!cpLoading && !cpList.length && (
+                            <div style={{ padding: "28px 0", textAlign: "center", color: t.textMuted, fontSize: 13 }}>
+                                No verified lawyers available yet — counterparties must be registered users.
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -600,9 +621,9 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                                     Sign as creator
                                 </div>
                                 <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.6 }}>
-                                    Your signature is applied first, then forwarded to{" "}
-                                    <span style={{ color: t.primary, fontWeight: 700 }}>{signers.length}</span>{" "}
-                                    other signer{signers.length !== 1 ? "s" : ""}.
+                                    Your signature is applied first, then{" "}
+                                    <span style={{ color: t.primary, fontWeight: 700 }}>{counterparty?.name || "the counterparty"}</span>{" "}
+                                    is asked to counter-sign.
                                 </div>
                             </div>
                         </div>
@@ -913,7 +934,7 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                                         display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12,
                                         color: "#1A2E35", fontWeight: 700, flexShrink: 0
                                     }}>✓</div>
-                                    {signers.length > 0 && <div style={{ width: 2, flex: 1, background: t.border, marginTop: 4 }} />}
+                                    <div style={{ width: 2, flex: 1, background: t.border, marginTop: 4 }} />
                                 </div>
                                 <div style={{ flex: 1 }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -940,30 +961,25 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                                     )}
                                 </div>
                             </div>
-                            {signers.map((sg, i) => (
-                                <div key={i} style={{ display: "flex", gap: 16, paddingBottom: i < signers.length - 1 ? 16 : 0 }}>
-                                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                                        <div style={{
-                                            width: 28, height: 28, borderRadius: "50%", background: t.warn + "30",
-                                            border: `2px solid ${t.warn}`, display: "flex", alignItems: "center", justifyContent: "center",
-                                            fontSize: 12, color: t.warn, flexShrink: 0
-                                        }}>⏰</div>
-                                        {i < signers.length - 1 && <div style={{ width: 2, flex: 1, background: t.border, marginTop: 4 }} />}
+                            <div style={{ display: "flex", gap: 16 }}>
+                                <div style={{
+                                    width: 28, height: 28, borderRadius: "50%", background: t.warn + "30",
+                                    border: `2px solid ${t.warn}`, display: "flex", alignItems: "center", justifyContent: "center",
+                                    fontSize: 12, color: t.warn, flexShrink: 0
+                                }}>⏰</div>
+                                <div style={{ flex: 1, paddingTop: 4 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                                        <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{counterparty?.name || "Counterparty"}</span>
+                                        <span style={{
+                                            fontSize: 10, fontWeight: 700, color: t.info, background: "rgba(90,179,255,0.12)",
+                                            border: "1px solid rgba(90,179,255,0.25)", borderRadius: 5, padding: "2px 7px"
+                                        }}>IN-APP</span>
                                     </div>
-                                    <div style={{ flex: 1, paddingTop: 4 }}>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                                            <span style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{sg.name || `Signer ${i + 1}`}</span>
-                                            <span style={{
-                                                fontSize: 10, fontWeight: 700, color: t.info, background: "rgba(90,179,255,0.12)",
-                                                border: "1px solid rgba(90,179,255,0.25)", borderRadius: 5, padding: "2px 7px"
-                                            }}>VIA EMAIL</span>
-                                        </div>
-                                        <div style={{ fontSize: 11, color: t.textMuted }}>
-                                            {sg.email || "No email set"} · Will be notified immediately
-                                        </div>
+                                    <div style={{ fontSize: 11, color: t.textMuted }}>
+                                        Notified immediately · counter-signs from their Agreements page
                                     </div>
                                 </div>
-                            ))}
+                            </div>
                         </div>
                     </Card>
 
@@ -994,8 +1010,43 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                 <span style={{ fontSize: 12, color: t.textMuted }}>Step {step + 1} of {STEPS.length}</span>
                 {step < 3
                     ? <Btn primary onClick={() => nav(step + 1)} style={{ padding: "11px 24px" }}>Next →</Btn>
-                    : <Btn primary onClick={() => { alert("Agreement sent!"); onDone(); }} style={{ padding: "11px 24px" }}>
-                        ✈️ Sign & Send
+                    : <Btn primary disabled={submitting} onClick={async () => {
+                        if (!user?._id) { toast.show("⚠️ Please log in first", "warn"); return; }
+                        if (!counterparty?._id) { toast.show("⚠️ Select a counterparty (Step 2) — an agreement needs two parties", "warn"); return; }
+                        const sigData = sigMode === "draw"
+                            ? (canvasRef.current?.toDataURL() || "")
+                            : sigMode === "type" ? typedSig
+                            : (uploadedSig || "");
+                        if (!sigData) { toast.show("⚠️ Please add your signature first", "warn"); return; }
+                        setSubmitting(true);
+                        try {
+                            const createRes = await createAgreement(
+                                title,
+                                body,
+                                [
+                                    { user_id: user._id, full_name: fullName || user.full_name || "User" },
+                                    { user_id: counterparty._id, full_name: counterparty.name },
+                                ]
+                            );
+                            if (createRes.error) {
+                                toast.show("❌ " + (createRes.error?.detail || "Failed to create agreement"), "danger");
+                                setSubmitting(false); return;
+                            }
+                            const agreementId = createRes.data?._id;
+                            const signRes = await signAgreement(agreementId, SIG_METHOD_MAP[sigMode], sigData);
+                            if (signRes.error) {
+                                toast.show("❌ " + (signRes.error?.detail || "Failed to sign"), "danger");
+                                setSubmitting(false); return;
+                            }
+                            toast.show(`✅ Signed & sent — awaiting ${counterparty.name}'s signature`, "success", 4000);
+                            onDone();
+                        } catch {
+                            toast.show("❌ Network error — check backend", "danger");
+                        } finally {
+                            setSubmitting(false);
+                        }
+                    }} style={{ padding: "11px 24px" }}>
+                        {submitting ? "⏳ Sending…" : "✈️ Sign & Send"}
                     </Btn>
                 }
             </div>
@@ -1006,13 +1057,31 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
 // ── PAGE: ALL AGREEMENTS ─────────────────────
 const PageAllAgreements = ({ onNavigate }) => {
     const t = useTheme();
+    const toast = useToast();
+    const { user } = useAuth();
+    const [agmts, loading, reload] = useMyAgreements(user?._id);
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState("All");
+    const [viewing, setViewing] = useState(null);       // mapped agreement being viewed
+    const [signName, setSignName] = useState("");
+    const [signBusy, setSignBusy] = useState(false);
     const filters = ["All", "Signed", "Pending", "Rejected", "Draft"];
-    const filtered = AGREEMENTS_LIST.filter(a =>
+    const filtered = agmts.filter(a =>
         (filter === "All" || a.status === filter) &&
         a.name.toLowerCase().includes(search.toLowerCase())
     );
+
+    const doSign = async () => {
+        if (!signName.trim()) { toast.show("⚠️ Type your full name to sign", "warn"); return; }
+        setSignBusy(true);
+        const { data, error } = await signAgreement(viewing.id, "typed", signName.trim());
+        setSignBusy(false);
+        if (error) { toast.show("❌ " + (error.message || "Failed to sign"), "danger"); return; }
+        toast.show(data?.status === "executed" ? "🎉 Agreement fully executed!" : "✅ Signed — awaiting the other party", "success", 4000);
+        setViewing(null);
+        setSignName("");
+        reload();
+    };
     return (
         <div>
             <div style={{ marginBottom: 24 }}>
@@ -1047,7 +1116,7 @@ const PageAllAgreements = ({ onNavigate }) => {
                     display: "grid", gridTemplateColumns: "2fr 1fr 80px 120px 100px",
                     padding: "10px 20px", borderBottom: `1px solid ${t.border}`, background: t.surface
                 }}>
-                    {["AGREEMENT", "TYPE", "PARTIES", "STATUS", "ACTIONS"].map(h => (
+                    {["AGREEMENT", "WITH", "SIGNED", "STATUS", "ACTIONS"].map(h => (
                         <div key={h} style={{
                             fontSize: 10, fontWeight: 700, color: t.textMuted,
                             letterSpacing: "0.7px", textTransform: "uppercase"
@@ -1055,7 +1124,7 @@ const PageAllAgreements = ({ onNavigate }) => {
                     ))}
                 </div>
                 {filtered.map((a, i) => (
-                    <div key={i} style={{
+                    <div key={a.id} onClick={() => { setViewing(a); setSignName(user?.full_name || ""); }} style={{
                         display: "grid", gridTemplateColumns: "2fr 1fr 80px 120px 100px",
                         alignItems: "center", padding: "16px 20px",
                         borderBottom: i < filtered.length - 1 ? `1px solid ${t.border}` : "none",
@@ -1064,41 +1133,105 @@ const PageAllAgreements = ({ onNavigate }) => {
                         onMouseEnter={e => e.currentTarget.style.background = t.cardHi}
                         onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                     >
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                             <div style={{
                                 width: 36, height: 36, borderRadius: 10, background: t.primaryGlow,
                                 display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0
-                            }}>📄</div>
-                            <div>
-                                <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{a.name}</div>
-                                <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>{a.date}</div>
+                            }}>{a.isEngagementLetter ? "⚖️" : "📄"}</div>
+                            <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
+                                <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>
+                                    {a.date}{a.needsMySig && <span style={{ color: t.warn, fontWeight: 700 }}> · your signature needed</span>}
+                                </div>
                             </div>
                         </div>
-                        <div style={{ fontSize: 12, color: t.textMuted }}>{a.type}</div>
-                        <div style={{ fontSize: 13, color: t.textMuted, paddingLeft: 10 }}>{a.parties}</div>
+                        <div style={{ fontSize: 12, color: t.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.counterparts || "—"}</div>
+                        <div style={{ fontSize: 13, color: t.textMuted, paddingLeft: 10 }}>{a.signedCount}/{a.totalParties}</div>
                         <StatusBadge status={a.status} />
                         <div style={{ display: "flex", gap: 6 }}>
-                            <button onClick={e => { e.stopPropagation(); alert("View"); }} style={{
-                                width: 30, height: 30, borderRadius: 8, border: `1px solid ${t.border}`,
-                                background: t.inputBg, color: t.textMuted, cursor: "pointer", fontSize: 13,
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                            }}>👁</button>
-                            {a.status === "Signed" && (
-                                <button onClick={e => { e.stopPropagation(); alert("Download"); }} style={{
+                            {a.needsMySig ? (
+                                <Btn primary style={{ fontSize: 11, padding: "7px 14px" }}
+                                    onClick={e => { e.stopPropagation(); setViewing(a); setSignName(user?.full_name || ""); }}>
+                                    ✍️ Sign
+                                </Btn>
+                            ) : (
+                                <button onClick={e => { e.stopPropagation(); setViewing(a); }} style={{
                                     width: 30, height: 30, borderRadius: 8, border: `1px solid ${t.border}`,
                                     background: t.inputBg, color: t.textMuted, cursor: "pointer", fontSize: 13,
                                     display: "flex", alignItems: "center", justifyContent: "center",
-                                }}>📥</button>
+                                }}>👁</button>
                             )}
                         </div>
                     </div>
                 ))}
-                {filtered.length === 0 && (
+                {loading ? (
+                    <div style={{ padding: "40px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>Loading agreements…</div>
+                ) : filtered.length === 0 && (
                     <div style={{ padding: "40px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>
                         No agreements found.
                     </div>
                 )}
             </Card>
+
+            {/* View / Sign modal */}
+            {viewing && (
+                <div onClick={() => setViewing(null)} style={{
+                    position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)",
+                    backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+                }}>
+                    <div onClick={e => e.stopPropagation()} style={{
+                        background: t.card, borderRadius: 20, border: `1.5px solid ${t.border}`,
+                        width: "100%", maxWidth: 640, maxHeight: "88vh", display: "flex", flexDirection: "column",
+                        boxShadow: "0 24px 64px rgba(0,0,0,0.4)", overflow: "hidden",
+                    }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "18px 22px", borderBottom: `1px solid ${t.border}` }}>
+                            <span style={{ fontSize: 20 }}>{viewing.isEngagementLetter ? "⚖️" : "📄"}</span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 15, fontWeight: 800, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{viewing.name}</div>
+                                <div style={{ fontSize: 11, color: t.textMuted }}>{viewing.eto || "Awaiting first signature"}</div>
+                            </div>
+                            <StatusBadge status={viewing.status} />
+                            <button onClick={() => setViewing(null)} style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, width: 30, height: 30, cursor: "pointer", color: t.textMuted, fontSize: 15 }}>✕</button>
+                        </div>
+
+                        <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px" }}>
+                            {/* Parties */}
+                            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+                                {viewing.parties.map(p => (
+                                    <div key={p.user_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 10, background: p.signed ? `${t.success}12` : t.inputBg, border: `1px solid ${p.signed ? t.success + "40" : t.border}` }}>
+                                        <span style={{ fontSize: 12 }}>{p.signed ? "✅" : "⏰"}</span>
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: t.text }}>{p.full_name}</span>
+                                        <span style={{ fontSize: 10, color: p.signed ? t.success : t.textMuted }}>
+                                            {p.signed ? `signed ${p.signed_at ? new Date(p.signed_at).toLocaleDateString() : ""}` : "pending"}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                            {/* Body */}
+                            <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "18px 20px", fontSize: 13, lineHeight: 1.85, color: t.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
+                                {viewing.body || "No content."}
+                            </div>
+                        </div>
+
+                        {viewing.needsMySig && (
+                            <div style={{ padding: "14px 22px", borderTop: `1px solid ${t.border}`, background: t.surface }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 8 }}>
+                                    Sign — type your full legal name
+                                </div>
+                                <div style={{ display: "flex", gap: 10 }}>
+                                    <Input placeholder="Your full name" value={signName} onChange={e => setSignName(e.target.value)} style={{ flex: 1 }} />
+                                    <Btn primary disabled={signBusy} onClick={doSign} style={{ padding: "11px 22px", flexShrink: 0 }}>
+                                        {signBusy ? "Signing…" : "✍️ Sign Agreement"}
+                                    </Btn>
+                                </div>
+                                <div style={{ fontSize: 10.5, color: t.textMuted, marginTop: 8, lineHeight: 1.5 }}>
+                                    Your typed signature is recorded with a timestamp and classified under the Electronic Transactions Ordinance 2002.
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

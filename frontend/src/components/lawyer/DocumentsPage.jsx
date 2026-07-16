@@ -1,10 +1,12 @@
 'use client';
 // Lawyer Documents Page — paste your code here
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Btn, Input } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
+import { listReviewQueue, reviewDocument, downloadDocument } from "@/lib/api.js";
+import { useAuth } from "@/context/AuthContext.jsx";
 
 function StatusBadge({ status }) {
     const s = STATUS_STYLES[status] || STATUS_STYLES.Draft;
@@ -84,16 +86,14 @@ function EditMenu({ doc, onClose, anchorRef }) {
 // ─── THEME ────────────────────────────────────────────────────
 
 
-// ─── SEED DATA ────────────────────────────────────────────────
-const PENDING_DOCS = [
-    { id: "ADOC-001", client: "Rajesh Singh", caseId: "CS-2024-089", caseCategory: "Civil", title: "Plaint — Singh vs. Municipal Corp.", type: "Plaint", status: "Pending Review", urgency: "Priority", fee: "PKR 5,000", submitted: "Mar 9, 2026", note: "Please verify property boundaries and cite CPC Order VII Rule 1." },
-    { id: "ADOC-002", client: "Priya Sharma", caseId: "CS-2024-887", caseCategory: "Property", title: "Written Statement — Sharma Property", type: "Written Statement", status: "Pending Review", urgency: "Normal", fee: "PKR 4,500", submitted: "Mar 8, 2026", note: "" },
-    { id: "ADOC-007", client: "Neha Verma", caseId: "CS-2024-091", caseCategory: "Criminal", title: "Bail Application — Verma", type: "Bail Application", status: "Pending Review", urgency: "Urgent", fee: "PKR 6,000", submitted: "Mar 10, 2026", note: "Urgent — hearing on Mar 12. Please prioritise." },
-    { id: "ADOC-003", client: "Amit Patel", caseId: "CS-2024-085", caseCategory: "Labor", title: "Affidavit — Patel Employment", type: "Affidavit", status: "Under Review", urgency: "Normal", fee: "PKR 3,500", submitted: "Mar 7, 2026", note: "" },
-    { id: "ADOC-004", client: "Vikram Kumar", caseId: "CS-2024-082", caseCategory: "Commercial", title: "Contract Agreement — Kumar", type: "Agreement", status: "Approved", urgency: "Normal", fee: "PKR 5,500", submitted: "Feb 28, 2026", note: "" },
-    { id: "ADOC-006", client: "Rajesh Singh", caseId: "CS-2024-089", caseCategory: "Civil", title: "Vakalatnama — Singh Case", type: "Vakalatnama", status: "Final", urgency: "Normal", fee: "PKR 2,000", submitted: "Feb 20, 2026", note: "" },
-];
+// ─── MAPPING HELPERS ──────────────────────────────────────────
+const _TMPL_MAP = {
+    plaint_civil: "Plaint", written_statement: "Written Statement",
+    legal_notice: "Legal Notice", nda: "NDA", rental_agreement: "Rental Agreement",
+};
+const _CASE_TYPE_MAP = { civil: "Civil", criminal: "Criminal", family: "Family", constitutional: "Constitutional" };
 
+// Placeholder body shown when a document has no inline content (real docs are PDFs)
 const DOC_CONTENT = `IN THE COURT OF THE CIVIL JUDGE, LAHORE
 
 Employment Dispute — Plaint No. ____/2026
@@ -116,16 +116,17 @@ The plaintiff respectfully prays that this Honourable Court may be pleased to aw
 const STEPS = [
     { id: "inbox", label: "Document Inbox", icon: "📥" },
     { id: "review", label: "Review & Validate", icon: "✏️" },
-    { id: "decision", label: "Approve / Edit", icon: "⚖️" },
-    { id: "notify", label: "Notify Client", icon: "📨" },
+    { id: "decision", label: "Decision & Notify", icon: "⚖️" },
     { id: "final", label: "Final & Export", icon: "📤" },
 ];
-const STEP_IDX = { inbox: 0, review: 1, decision: 2, notify: 3, final: 4 };
+const STEP_IDX = { inbox: 0, review: 1, decision: 2, final: 3 };
 
 const STATUS_COLOR = {
     "Pending Review": { dot: "#FFC857", badge: "rgba(255,200,87,0.15)", text: "#FFC857", border: "rgba(255,200,87,0.3)" },
     "Under Review": { dot: "#5AB3FF", badge: "rgba(90,179,255,0.15)", text: "#5AB3FF", border: "rgba(90,179,255,0.3)" },
     "Approved": { dot: "#4DD4A3", badge: "rgba(77,212,163,0.15)", text: "#4DD4A3", border: "rgba(77,212,163,0.3)" },
+    "Returned": { dot: "#FFC857", badge: "rgba(255,200,87,0.15)", text: "#FFC857", border: "rgba(255,200,87,0.3)" },
+    "Rejected": { dot: "#FF6B7A", badge: "rgba(255,107,122,0.15)", text: "#FF6B7A", border: "rgba(255,107,122,0.3)" },
     "Final": { dot: "#40F0DC", badge: "rgba(64,240,220,0.15)", text: "#40F0DC", border: "rgba(64,240,220,0.3)" },
 };
 const URGENCY_COLOR = { Normal: "#9A9A94", Priority: "#FFC857", Urgent: "#FF6B7A" };
@@ -280,6 +281,8 @@ const STATUS_COLOR_V2 = {
     "Pending Review": { dot: "#e8b84b", text: "#e8b84b", badge: "rgba(232,184,75,0.14)", border: "rgba(232,184,75,0.45)" },
     "Under Review": { dot: "#5aafd4", text: "#5aafd4", badge: "rgba(90,175,212,0.14)", border: "rgba(90,175,212,0.45)" },
     "Approved": { dot: "#3ec99a", text: "#3ec99a", badge: "rgba(62,201,154,0.14)", border: "rgba(62,201,154,0.45)" },
+    "Returned": { dot: "#e8b84b", text: "#e8b84b", badge: "rgba(232,184,75,0.14)", border: "rgba(232,184,75,0.45)" },
+    "Rejected": { dot: "#e8526a", text: "#e8526a", badge: "rgba(232,82,106,0.14)", border: "rgba(232,82,106,0.45)" },
     "Final": { dot: "#38d8c4", text: "#38d8c4", badge: "rgba(56,216,196,0.14)", border: "rgba(56,216,196,0.45)" },
 };
 
@@ -293,21 +296,23 @@ const ACTION_CFG = {
     "Pending Review": { label: "Review Now", icon: "👁", bg: "#b8890e", glow: "rgba(184,137,14,0.45)" },
     "Under Review": { label: "Review", icon: "📋", bg: "#2660a8", glow: "rgba(38,96,168,0.45)" },
     "Approved": { label: "Open", icon: "📁", bg: "#1e9868", glow: "rgba(30,152,104,0.45)" },
+    "Returned": { label: "Open", icon: "📁", bg: "#b8890e", glow: "rgba(184,137,14,0.45)" },
+    "Rejected": { label: "Open", icon: "📁", bg: "#a83a4e", glow: "rgba(168,58,78,0.45)" },
     "Final": { label: "Open", icon: "📁", bg: "#189888", glow: "rgba(24,152,136,0.45)" },
 };
 
-function ScreenInbox({ t, onOpen }) {
+function ScreenInbox({ t, onOpen, docs, loading }) {
     const [statusF, setStatusF] = useState("All");
     const [search, setSearch] = useState("");
 
-    const statusTabs = ["All", "Pending Review", "Under Review", "Approved", "Final"];
+    const statusTabs = ["All", "Pending Review", "Approved", "Returned", "Rejected"];
     const counts = Object.fromEntries(
         statusTabs.map(s => [s, s === "All"
-            ? PENDING_DOCS.length
-            : PENDING_DOCS.filter(d => d.status === s).length])
+            ? docs.length
+            : docs.filter(d => d.status === s).length])
     );
 
-    const filtered = PENDING_DOCS.filter(d =>
+    const filtered = docs.filter(d =>
         (statusF === "All" || d.status === statusF) &&
         (d.title.toLowerCase().includes(search.toLowerCase()) ||
             d.client.toLowerCase().includes(search.toLowerCase()) ||
@@ -323,22 +328,22 @@ function ScreenInbox({ t, onOpen }) {
             border: "rgba(160,200,228,0.32)"
         },
         {
-            label: "Under Review", value: counts["Under Review"], icon: "🔍",
-            numColor: "#58b8d8",
-            bg: "linear-gradient(135deg, rgba(90,145,170,0.20) 0%, rgba(70,125,155,0.12) 100%)",
-            border: "rgba(95,150,178,0.30)"
-        },
-        {
             label: "Approved", value: counts["Approved"], icon: "✅",
             numColor: "#2ec890",
             bg: "linear-gradient(135deg, rgba(55,175,125,0.22) 0%, rgba(40,155,108,0.13) 100%)",
             border: "rgba(55,180,128,0.32)"
         },
         {
-            label: "Finalized", value: counts["Final"], icon: "📤",
-            numColor: "#20d0c0",
-            bg: "linear-gradient(135deg, rgba(32,205,190,0.22) 0%, rgba(24,188,172,0.12) 100%)",
-            border: "rgba(32,208,192,0.32)"
+            label: "Returned", value: counts["Returned"], icon: "↩️",
+            numColor: "#e8b84b",
+            bg: "linear-gradient(135deg, rgba(232,184,75,0.16) 0%, rgba(200,155,60,0.10) 100%)",
+            border: "rgba(232,184,75,0.30)"
+        },
+        {
+            label: "Rejected", value: counts["Rejected"], icon: "❌",
+            numColor: "#e8526a",
+            bg: "linear-gradient(135deg, rgba(232,82,106,0.16) 0%, rgba(200,60,85,0.10) 100%)",
+            border: "rgba(232,82,106,0.30)"
         },
     ];
 
@@ -576,12 +581,15 @@ function ScreenInbox({ t, onOpen }) {
                     );
                 })}
 
-                {/* Empty */}
-                {!filtered.length && (
+                {/* Empty / Loading */}
+                {loading ? (
+                    <div style={{ padding: "52px", textAlign: "center", fontSize: 13, color: t.textMuted }}>Loading documents…</div>
+                ) : !filtered.length && (
                     <div style={{ padding: "52px", textAlign: "center" }}>
                         <div style={{ fontSize: 34, marginBottom: 12 }}>📂</div>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: t.textMuted }}>No documents found</div>
-                        <div style={{ fontSize: 12, color: t.textFaint, marginTop: 5 }}>Try adjusting your search or filter</div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: t.textMuted }}>
+                            {docs.length === 0 ? "No documents yet — client submissions for review will appear here." : "No documents match your search."}
+                        </div>
                     </div>
                 )}
             </div>
@@ -596,7 +604,7 @@ function ScreenInbox({ t, onOpen }) {
 // ═══════════════════════════════════════════════════════════════
 function ScreenReview({ doc, t, onBack, onContinue }) {
     const [mode, setMode] = useState("view");
-    const [content, setContent] = useState(DOC_CONTENT);
+    const [content, setContent] = useState(doc?.content || DOC_CONTENT);
     const [checks] = useState([
         { label: "Legal Compliance", status: "verified" },
         { label: "Case Details", status: "verified" },
@@ -671,13 +679,11 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
 
                 {/* Export bar */}
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                    {["📄 PDF", "⬇ Download", "✉️ Email", "🖨 Print"].map(lbl => (
-                        <button key={lbl} style={{
-                            flex: 1, padding: "9px 0", borderRadius: 9,
-                            border: `1px solid ${t.border}`, background: t.card, color: t.textMuted,
-                            fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 500
-                        }}>{lbl}</button>
-                    ))}
+                    <button onClick={() => downloadDocument(doc.id, `${doc.title || "document"}.pdf`)} style={{
+                        flex: 1, padding: "9px 0", borderRadius: 9,
+                        border: `1px solid ${t.primary}50`, background: t.card, color: t.primary,
+                        fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
+                    }}>⬇ Download PDF</button>
                 </div>
             </div>
 
@@ -762,8 +768,15 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                         }} />
                 </div>
 
-                {/* Continue to decision */}
-                <Btn full onClick={onContinue}>⚖️ Proceed to Decision →</Btn>
+                {/* Continue to decision — only documents awaiting review can be decided */}
+                {doc.status === "Pending Review" ? (
+                    <Btn full onClick={onContinue}>⚖️ Proceed to Decision →</Btn>
+                ) : (
+                    <div style={{ padding: "10px 14px", borderRadius: 10, background: t.card, border: `1px solid ${t.border}`, fontSize: 12, color: t.textMuted, textAlign: "center" }}>
+                        Decision recorded: <span style={{ fontWeight: 700, color: t.text }}>{doc.status}</span>
+                        {doc.lawyerNote ? <div style={{ marginTop: 6, fontStyle: "italic" }}>“{doc.lawyerNote}”</div> : null}
+                    </div>
+                )}
                 <Btn full variant="secondary" onClick={onBack}>← Back to Inbox</Btn>
             </div>
         </div>
@@ -775,12 +788,11 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
 // Lawyer makes final decision — mirrors client "Submit to Lawyer"
 // but reversed: lawyer is the one deciding
 // ═══════════════════════════════════════════════════════════════
-function ScreenDecision({ doc, t, onBack, onApprove, onReject }) {
+function ScreenDecision({ doc, t, onBack, onDecide, busy }) {
     const [decision, setDecision] = useState(null); // null | "approve" | "edit" | "reject"
     const [editNotes, setEditNotes] = useState("");
     const [rejectReason, setRejectReason] = useState("");
     const [returnNote, setReturnNote] = useState("");
-    const [fee, setFee] = useState(doc.fee);
 
     return (
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 320px", gap: 0, overflow: "hidden" }}>
@@ -804,7 +816,7 @@ function ScreenDecision({ doc, t, onBack, onApprove, onReject }) {
                         fontSize: 11, padding: "3px 10px", borderRadius: 20,
                         background: "rgba(90,179,255,0.15)", color: "#5AB3FF", border: "1px solid rgba(90,179,255,0.3)",
                         fontWeight: 700
-                    }}>Under Review</span>
+                    }}>{doc.status}</span>
                 </div>
 
                 <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 4 }}>⚖️ Your Decision</div>
@@ -836,22 +848,14 @@ function ScreenDecision({ doc, t, onBack, onApprove, onReject }) {
                 {decision === "approve" && (
                     <div style={{ background: t.card, border: `1px solid rgba(77,212,163,0.3)`, borderRadius: 12, padding: "20px" }}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#4DD4A3", marginBottom: 16 }}>✅ Approval Details</div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-                            <div>
-                                <div style={{ fontSize: 10, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Fee Charged</div>
-                                <Input value={fee} onChange={e => setFee(e.target.value)} placeholder="PKR 5,000" />
-                            </div>
-                            <div>
-                                <div style={{ fontSize: 10, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Approval Date</div>
-                                <Input value="Mar 10, 2026" placeholder="Date" />
-                            </div>
-                        </div>
                         <div style={{ marginBottom: 16 }}>
-                            <div style={{ fontSize: 10, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Approval Note to Client</div>
+                            <div style={{ fontSize: 10, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Approval Note to Client (optional)</div>
                             <Input type="textarea" rows={3} value={editNotes} onChange={e => setEditNotes(e.target.value)}
                                 placeholder="e.g. Document approved. Please file within 7 working days..." />
                         </div>
-                        <Btn full variant="success" onClick={onApprove}>✅ Confirm Approval & Notify Client</Btn>
+                        <Btn full variant="success" disabled={busy} onClick={() => onDecide("approve", editNotes.trim() || null)}>
+                            {busy ? "Sending…" : "✅ Confirm Approval & Notify Client"}
+                        </Btn>
                     </div>
                 )}
 
@@ -863,7 +867,9 @@ function ScreenDecision({ doc, t, onBack, onApprove, onReject }) {
                             <Input type="textarea" rows={4} value={returnNote} onChange={e => setReturnNote(e.target.value)}
                                 placeholder="e.g. Please update para 2 with correct termination date, add CNIC number in plaintiff details..." />
                         </div>
-                        <Btn full variant="warn" onClick={() => onReject("edit")}>↩ Return to Client with Notes</Btn>
+                        <Btn full variant="warn" disabled={busy} onClick={() => onDecide("return", returnNote.trim() || null)}>
+                            {busy ? "Sending…" : "↩ Return to Client with Notes"}
+                        </Btn>
                     </div>
                 )}
 
@@ -875,7 +881,9 @@ function ScreenDecision({ doc, t, onBack, onApprove, onReject }) {
                             <Input type="textarea" rows={4} value={rejectReason} onChange={e => setRejectReason(e.target.value)}
                                 placeholder="e.g. Document contains factual inaccuracies and cannot proceed in current state..." />
                         </div>
-                        <Btn full variant="danger" onClick={() => onReject("reject")}>❌ Confirm Rejection</Btn>
+                        <Btn full variant="danger" disabled={busy || !rejectReason.trim()} onClick={() => onDecide("reject", rejectReason.trim())}>
+                            {busy ? "Sending…" : "❌ Confirm Rejection"}
+                        </Btn>
                     </div>
                 )}
             </div>
@@ -894,29 +902,17 @@ function ScreenDecision({ doc, t, onBack, onApprove, onReject }) {
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <UrgencyBadge urgency={doc.urgency} />
-                        <StatusPill status="Under Review" t={t} />
+                        <StatusPill status={doc.status} t={t} />
                     </div>
                 </div>
 
-                {/* Fee selector */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px" }}>
-                    <div style={{
-                        fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase",
-                        letterSpacing: "0.07em", marginBottom: 12
-                    }}>💰 Review Fee</div>
-                    {["PKR 2,000", "PKR 3,500", "PKR 5,000", "PKR 6,000"].map(f => (
-                        <div key={f} onClick={() => setFee(f)}
-                            style={{
-                                display: "flex", justifyContent: "space-between", alignItems: "center",
-                                padding: "10px 12px", borderRadius: 8, marginBottom: 6, cursor: "pointer",
-                                border: `1px solid ${fee === f ? t.primary : t.border}`,
-                                background: fee === f ? t.primaryGlow : "transparent", transition: "all .14s"
-                            }}>
-                            <span style={{ fontSize: 12, color: fee === f ? t.primary : t.textDim }}>{f}</span>
-                            {fee === f && <span style={{ fontSize: 10, color: t.primary }}>✓</span>}
-                        </div>
-                    ))}
-                </div>
+                {/* Client note */}
+                {doc.note && (
+                    <div style={{ background: `rgba(255,200,87,0.08)`, border: `1px solid rgba(255,200,87,0.3)`, borderRadius: 12, padding: "12px 14px" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#FFC857", marginBottom: 4 }}>📝 Client Note</div>
+                        <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.6 }}>{doc.note}</div>
+                    </div>
+                )}
 
                 {/* Response timeline */}
                 <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px" }}>
@@ -925,9 +921,9 @@ function ScreenDecision({ doc, t, onBack, onApprove, onReject }) {
                         letterSpacing: "0.07em", marginBottom: 12
                     }}>⏱ Response SLA</div>
                     {[
-                        { l: "Normal", t2: "2–4 hours", extra: "", sel: doc.urgency === "Normal" },
-                        { l: "Priority", t2: "~2 hours", extra: "+25%", sel: doc.urgency === "Priority" },
-                        { l: "Urgent", t2: "< 1 hour", extra: "+60%", sel: doc.urgency === "Urgent" },
+                        { l: "Normal", t2: "No rush", extra: "", sel: doc.urgency === "Normal" },
+                        { l: "Priority", t2: "Needed soon", extra: "", sel: doc.urgency === "Priority" },
+                        { l: "Urgent", t2: "Time-critical", extra: "", sel: doc.urgency === "Urgent" },
                     ].map(s => (
                         <div key={s.l} style={{
                             display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -957,194 +953,12 @@ function ScreenDecision({ doc, t, onBack, onApprove, onReject }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SCREEN 4 — NOTIFY CLIENT
-// Lawyer-approved doc — send notification to client
-// Mirrors client "Submit to Lawyer" reversed perspective
-// ═══════════════════════════════════════════════════════════════
-function ScreenNotify({ doc, t, onBack, onContinue }) {
-    const [notifType, setNotifType] = useState(doc.rejectionAction === "edit" ? "changes" : doc.rejectionAction === "reject" ? "rejected" : "approved");
-    const [channel, setChannel] = useState("both");
-
-    // Set default message based on notification type
-    const getDefaultMessage = () => {
-        if (doc.rejectionAction === "edit") {
-            return "Your document requires some revisions. Please review the lawyer's notes and make the requested changes before resubmitting.";
-        } else if (doc.rejectionAction === "reject") {
-            return "Unfortunately, your document cannot proceed in its current form. Please review the rejection reason and contact your lawyer for guidance.";
-        }
-        return "Your document has been reviewed and approved by your lawyer. Please proceed to download the final version and file within 7 working days.";
-    };
-
-    const [msg, setMsg] = useState(getDefaultMessage());
-
-    return (
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
-
-            {/* Left */}
-            <div style={{ padding: "22px 26px", overflowY: "auto", borderRight: `1px solid ${t.border}` }}>
-
-                {/* Doc status banner */}
-                <div style={{
-                    display: "flex", alignItems: "center", gap: 10, padding: "12px 16px",
-                    background: doc.rejectionAction === "edit" ? "rgba(255,200,87,0.1)" :
-                        doc.rejectionAction === "reject" ? "rgba(255,107,122,0.1)" :
-                            "rgba(77,212,163,0.1)",
-                    border: doc.rejectionAction === "edit" ? "1px solid rgba(255,200,87,0.3)" :
-                        doc.rejectionAction === "reject" ? "1px solid rgba(255,107,122,0.3)" :
-                            "1px solid rgba(77,212,163,0.3)",
-                    borderRadius: 12, marginBottom: 20
-                }}>
-                    <span style={{ fontSize: 20 }}>
-                        {doc.rejectionAction === "edit" ? "✏️" : doc.rejectionAction === "reject" ? "❌" : "✅"}
-                    </span>
-                    <div>
-                        <div style={{
-                            fontSize: 13, fontWeight: 700,
-                            color: doc.rejectionAction === "edit" ? "#FFC857" :
-                                doc.rejectionAction === "reject" ? "#FF6B7A" :
-                                    "#4DD4A3"
-                        }}>
-                            {doc.rejectionAction === "edit" ? "Document Needs Changes" :
-                                doc.rejectionAction === "reject" ? "Document Rejected" :
-                                    "Document Approved — Ready to Notify"}
-                        </div>
-                        <div style={{ fontSize: 11, color: t.textMuted }}>{doc.title} · {doc.client}</div>
-                    </div>
-                    <span style={{
-                        marginLeft: "auto", fontSize: 11, padding: "3px 10px", borderRadius: 20,
-                        background: doc.rejectionAction === "edit" ? "rgba(255,200,87,0.15)" :
-                            doc.rejectionAction === "reject" ? "rgba(255,107,122,0.15)" :
-                                "rgba(77,212,163,0.15)",
-                        color: doc.rejectionAction === "edit" ? "#FFC857" :
-                            doc.rejectionAction === "reject" ? "#FF6B7A" :
-                                "#4DD4A3",
-                        border: doc.rejectionAction === "edit" ? "1px solid rgba(255,200,87,0.3)" :
-                            doc.rejectionAction === "reject" ? "1px solid rgba(255,107,122,0.3)" :
-                                "1px solid rgba(77,212,163,0.3)",
-                        fontWeight: 700
-                    }}>
-                        {doc.rejectionAction === "edit" ? "📝 Needs Edit" :
-                            doc.rejectionAction === "reject" ? "❌ Rejected" :
-                                "✓ Lawyer Approved"}
-                    </span>
-                </div>
-
-                {/* Notification type */}
-                <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 12 }}>📨 Notification Type</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 22 }}>
-                    {[
-                        { id: "approved", icon: "✅", label: "Approved", color: "#4DD4A3" },
-                        { id: "changes", icon: "✏️", label: "Needs Edit", color: "#FFC857" },
-                        { id: "rejected", icon: "❌", label: "Rejected", color: "#FF6B7A" },
-                    ].map(n => (
-                        <div key={n.id} onClick={() => setNotifType(n.id)}
-                            style={{
-                                padding: "12px", borderRadius: 11, cursor: "pointer", textAlign: "center",
-                                border: `2px solid ${notifType === n.id ? n.color : t.border}`,
-                                background: notifType === n.id ? `${n.color}12` : t.card, transition: "all .15s"
-                            }}>
-                            <div style={{ fontSize: 22, marginBottom: 5 }}>{n.icon}</div>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: notifType === n.id ? n.color : t.text }}>{n.label}</div>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Message */}
-                <div style={{ marginBottom: 18 }}>
-                    <div style={{
-                        fontSize: 10, fontWeight: 700, color: t.textFaint, textTransform: "uppercase",
-                        letterSpacing: "0.07em", marginBottom: 7
-                    }}>Message to Client</div>
-                    <Input type="textarea" rows={5} value={msg} onChange={e => setMsg(e.target.value)}
-                        placeholder="Write your message to the client..." />
-                </div>
-
-                {/* Channel */}
-                <div style={{ fontSize: 12, fontWeight: 700, color: t.text, marginBottom: 10 }}>Notification Channel</div>
-                <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
-                    {[
-                        { id: "email", label: "📧 Email only" },
-                        { id: "sms", label: "📱 SMS only" },
-                        { id: "both", label: "📧📱 Both" },
-                    ].map(c => (
-                        <button key={c.id} onClick={() => setChannel(c.id)}
-                            style={{
-                                flex: 1, padding: "9px", borderRadius: 9, cursor: "pointer",
-                                border: `1.5px solid ${channel === c.id ? t.primary : t.border}`,
-                                background: channel === c.id ? t.primaryGlow : t.card,
-                                color: channel === c.id ? t.primary : t.textMuted, fontSize: 12, fontFamily: "inherit",
-                                transition: "all .14s"
-                            }}>
-                            {c.label}
-                        </button>
-                    ))}
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <Btn full variant="secondary" onClick={onBack}>← Back</Btn>
-                    <Btn full onClick={onContinue}>📨 Send Notification →</Btn>
-                </div>
-            </div>
-
-            {/* Right — preview */}
-            <div style={{ padding: "22px 18px", overflowY: "auto" }}>
-                <div style={{
-                    fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase",
-                    letterSpacing: "0.07em", marginBottom: 14
-                }}>Notification Preview</div>
-
-                {/* Mock message preview */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px", marginBottom: 14 }}>
-                    <div style={{
-                        display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 10,
-                        borderBottom: `1px solid ${t.border}`
-                    }}>
-                        <Avatar name={doc.client} size={30} t={t} />
-                        <div>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: t.text }}>To: {doc.client}</div>
-                            <div style={{ fontSize: 10, color: t.textFaint }}>Re: {doc.title}</div>
-                        </div>
-                    </div>
-                    <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.7 }}>{msg}</div>
-                    <div style={{
-                        marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.border}`,
-                        fontSize: 10, color: t.textFaint
-                    }}>
-                        — John Doe, Advocate · AttorneyAI
-                    </div>
-                </div>
-
-                {/* What client will see */}
-                <div style={{
-                    background: "rgba(64,240,220,0.06)", border: `1px solid ${t.primary}25`,
-                    borderRadius: 12, padding: "12px 14px"
-                }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: t.primary, marginBottom: 8 }}>📱 Client App Update</div>
-                    {[
-                        ["Document Status", "Approved"],
-                        ["Step", "Final & Export"],
-                        ["Reviewed by", "John Doe, Advocate"],
-                        ["Date", "Mar 10, 2026"],
-                    ].map(([k, v]) => (
-                        <div key={k} style={{
-                            display: "flex", justifyContent: "space-between",
-                            padding: "4px 0", borderBottom: `1px solid ${t.border}20`
-                        }}>
-                            <span style={{ fontSize: 11, color: t.textFaint }}>{k}</span>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: t.primary }}>{v}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// ═══════════════════════════════════════════════════════════════
 // SCREEN 5 — FINAL & EXPORT
 // Mirrors client Screen 4 exactly — final document view
 // ═══════════════════════════════════════════════════════════════
 function ScreenFinal({ doc, t, onBack }) {
+    const { user } = useAuth();
+    const lawyerName = user?.full_name || "Advocate";
     return (
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
 
@@ -1179,7 +993,7 @@ function ScreenFinal({ doc, t, onBack }) {
                     padding: "28px 36px", lineHeight: 1.85, color: t.text, fontSize: 13,
                     fontFamily: "Georgia,serif", marginBottom: 16
                 }}>
-                    {DOC_CONTENT.split("\n").map((line, i) => (
+                    {(doc?.content || DOC_CONTENT).split("\n").map((line, i) => (
                         <div key={i} style={{
                             fontWeight: line.match(/^[A-Z\s]{4,}:?$/) ? 700 : 400,
                             textAlign: line.includes("COURT") || line.includes("Dispute") || line.includes("PRAYER") || line.includes("PLAINT") ? "center" : "left",
@@ -1191,7 +1005,7 @@ function ScreenFinal({ doc, t, onBack }) {
                         marginTop: 20, paddingTop: 12, borderTop: `1px solid ${t.border}`,
                         display: "flex", justifyContent: "space-between", alignItems: "center"
                     }}>
-                        <span style={{ fontSize: 11, color: t.textFaint }}>🖊 Approved by Lawyer · John Doe</span>
+                        <span style={{ fontSize: 11, color: t.textFaint }}>🖊 Approved by Lawyer · {lawyerName}</span>
                         <span style={{ fontSize: 11, color: t.textFaint }}>📅 Mar 10, 2026</span>
                     </div>
                 </div>
@@ -1241,7 +1055,7 @@ function ScreenFinal({ doc, t, onBack }) {
                         ["Template", doc.title.split(" — ")[0]],
                         ["Case Ref", doc.caseId],
                         ["Client", doc.client],
-                        ["Reviewer", "John Doe, Advocate"],
+                        ["Reviewer", `${lawyerName}, Advocate`],
                         ["Status", "Final"],
                         ["Compliance", "✓ Verified"],
                     ].map(([k, v]) => (
@@ -1293,15 +1107,64 @@ function ScreenFinal({ doc, t, onBack }) {
 // ═══════════════════════════════════════════════════════════════
 // ROOT APP
 // ═══════════════════════════════════════════════════════════════
+// review_status (backend) → display status
+const _REVIEW_STATUS_LABEL = {
+    submitted: "Pending Review",
+    approved: "Approved",
+    returned: "Returned",
+    rejected: "Rejected",
+};
+const _URGENCY_LABEL = { normal: "Normal", priority: "Priority", urgent: "Urgent" };
+
+function _mapQueueDoc(d) {
+    return {
+        id: d.id,
+        client: d.client_name || "Client",
+        caseId: (d.case_number || d.case_id || "—").slice(-8).toUpperCase(),
+        caseCategory: _CASE_TYPE_MAP[d.case_type] || "General",
+        title: d.title || "Legal Document",
+        type: _TMPL_MAP[d.template_type] || d.template_type || "Document",
+        status: _REVIEW_STATUS_LABEL[d.review_status] || "Pending Review",
+        urgency: _URGENCY_LABEL[d.urgency] || "Normal",
+        submitted: d.submitted_at ? new Date(d.submitted_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
+        note: d.review_note || "",
+        lawyerNote: d.lawyer_note || "",
+    };
+}
+
 function DocWorkflowApp() {
     const { t } = useTheme();
-    const [screen, setScreen] = useState("inbox");   // inbox | review | decision | notify | final
+    const [screen, setScreen] = useState("inbox");
     const [activeDoc, setActiveDoc] = useState(null);
+    const [docs, setDocs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [busy, setBusy] = useState(false);
+    const [toast, setToast] = useState(null);
+    const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
 
-    const openDoc = (doc) => { setActiveDoc(doc); setScreen("review"); };
+    const load = async () => {
+        setLoading(true);
+        const { data } = await listReviewQueue();
+        setDocs((Array.isArray(data) ? data : []).map(_mapQueueDoc));
+        setLoading(false);
+    };
+    useEffect(() => { load().catch(() => setLoading(false)); }, []);
+
+    const openDoc = (doc) => { setActiveDoc(doc); setScreen(doc.status === "Approved" ? "final" : "review"); };
     const reset = () => { setScreen("inbox"); setActiveDoc(null); };
 
-    const screenTitles = { inbox: "Documents", review: "Documents", decision: "Documents", notify: "Documents", final: "Documents" };
+    // The real decision: persists the status and notifies the client server-side
+    const handleDecide = async (action, note) => {
+        setBusy(true);
+        const { data, error } = await reviewDocument(activeDoc.id, { action, note });
+        setBusy(false);
+        if (error) { showToast("❌ " + (error.message || "Failed to record decision")); return; }
+        const newLabel = _REVIEW_STATUS_LABEL[data?.review_status] ||
+            (action === "approve" ? "Approved" : action === "return" ? "Returned" : "Rejected");
+        setDocs(prev => prev.map(d => d.id === activeDoc.id ? { ...d, status: newLabel, lawyerNote: note || "" } : d));
+        showToast(`✅ ${newLabel} — the client has been notified`);
+        reset();
+    };
 
     return (
         <div style={{
@@ -1311,50 +1174,29 @@ function DocWorkflowApp() {
 
             <Stepper step={screen} t={t} />
 
-            {screen === "inbox" && <ScreenInbox t={t} onOpen={openDoc} />}
+            {screen === "inbox" && <ScreenInbox t={t} onOpen={openDoc} docs={docs} loading={loading} />}
             {screen === "review" && activeDoc && (
                 <ScreenReview doc={activeDoc} t={t}
                     onBack={() => setScreen("inbox")}
                     onContinue={() => setScreen("decision")} />
             )}
             {screen === "decision" && activeDoc && (
-                <ScreenDecision doc={activeDoc} t={t}
+                <ScreenDecision doc={activeDoc} t={t} busy={busy}
                     onBack={() => setScreen("review")}
-                    onApprove={() => setScreen("notify")}
-                    onReject={(action) => {
-                        // Store the rejection action type for the notify screen
-                        setActiveDoc(prev => ({ ...prev, rejectionAction: action }));
-                        setScreen("notify");
-                    }} />
-            )}
-            {screen === "notify" && activeDoc && (
-                <ScreenNotify doc={activeDoc} t={t}
-                    onBack={() => setScreen("decision")}
-                    onContinue={() => setScreen("final")} />
+                    onDecide={handleDecide} />
             )}
             {screen === "final" && activeDoc && (
                 <ScreenFinal doc={activeDoc} t={t} onBack={reset} />
             )}
+
+            {toast && (
+                <div style={{
+                    position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 9999,
+                    background: t.card, border: `1px solid ${t.border}`, borderRadius: 10,
+                    padding: "10px 20px", fontSize: 13, color: t.text, boxShadow: "0 8px 32px rgba(0,0,0,0.3)"
+                }}>{toast}</div>
+            )}
         </div>
     );
 }
-// ============================================================
-// APPOINTMENTS PAGE — exactly matching screenshots 1 & 2
-// ============================================================
-
-const CAL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const CAL_DATES = [27, 28, 29, 30, 31, 1, 2];
-const CAL_HOURS = ["9:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
-const calAppts = [
-    { day: 4, hour: "9:00", client: "Rajesh Singh", purpose: "Case Review", type: "gavel" },
-    { day: 1, hour: "10:00", client: "Rajesh Singh", purpose: "Case Review", type: "gavel" },
-    { day: 2, hour: "10:00", client: "Priya Sharma", purpose: "Property Dispute", type: "video" },
-    { day: 4, hour: "10:00", client: "Amit Patel", purpose: "Employment St...", type: "video" },
-    { day: 0, hour: "11:00", client: "Priya Sharma", purpose: "Property Dispute", type: "gavel" },
-    { day: 1, hour: "11:00", client: "Rajesh Singh", purpose: "Case Review", type: "gavel" },
-    { day: 0, hour: "12:00", client: "Amit Patel", purpose: "Case Review", type: "gavel" },
-    { day: 1, hour: "12:00", client: "Amit Patel", purpose: "Employment Strategy", type: "video" },
-    { day: 4, hour: "12:00", client: "Neha Verma", purpose: "Property Dispute", type: "gavel" },
-    { day: 0, hour: "13:00", client: "Vikram Kumar", purpose: "Employment Strategy", type: "video" },
-];
 export { DocWorkflowApp };

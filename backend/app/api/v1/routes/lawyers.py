@@ -1,15 +1,16 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 
 from app.core.constants import CaseType, Province
 from app.dependencies import get_current_user, require_client, require_admin
-from app.schemas.lawyer import LawyerReview
-from app.schemas.common import StatusResponse
+from app.schemas.lawyer import LawyerMatch, LawyerReview
+from app.schemas.common import PaginatedResponse, StatusResponse
+from app.schemas.user import UserProfileResponse
 from app.services import lawyer_service
 
 router = APIRouter(prefix="/lawyers", tags=["lawyers"])
 
 
-@router.get("")
+@router.get("", response_model=PaginatedResponse[UserProfileResponse])
 async def search_lawyers(
     province: Province | None = Query(None),
     case_type: CaseType | None = Query(None),
@@ -29,7 +30,7 @@ async def search_lawyers(
     )
 
 
-@router.get("/match/{case_id}", response_model=list)
+@router.get("/match/{case_id}", response_model=list[LawyerMatch])
 async def match_lawyers(
     case_id: str,
     current_user: dict = Depends(require_client),
@@ -45,7 +46,7 @@ async def match_lawyers(
     return await lawyer_service.match_lawyers_for_case(case_id)
 
 
-@router.post("/{lawyer_id}/review", response_model=StatusResponse)
+@router.post("/{lawyer_id}/review", response_model=StatusResponse, status_code=status.HTTP_201_CREATED)
 async def submit_review(
     lawyer_id: str,
     body: LawyerReview,

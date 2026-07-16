@@ -4,10 +4,11 @@ import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
 
 from app.core.security import decode_token
+from app.db.collections import get_users_col
 from app.repositories.chat_repo import ChatRepository
 
 logger = logging.getLogger(__name__)
@@ -68,14 +69,41 @@ async def _fetch_matched_lawyers(session: dict, n: int = 3) -> list[dict]:
         return []
 
 
-def _build_state(query: str, session_id: str, session: dict, data: dict) -> dict:
+def _build_state(
+    query: str,
+    session_id: str,
+    session: dict,
+    data: dict,
+    history: list[dict] | None = None,
+    user_id: str = "",
+    user_role: str = "client",
+) -> dict:
+    """Build the graph state for one turn.
+
+    `user_id` is passed in explicitly by the caller from the authenticated
+    ticket/token — NOT read out of `data` (raw client payload, untrusted) and not
+    out of `session` (which is {} on a brand-new conversation, so the document
+    tools would silently disappear on a user's first message).
+    """
     province = data.get("province") or session.get("province") or "unknown"
     language = data.get("language") or "en"
+
+    # Seed LangGraph message list from MongoDB history so nodes have conversation context
+    lc_messages = []
+    for m in (history or []):
+        if m["role"] == "user":
+            lc_messages.append(HumanMessage(content=m.get("content", "")))
+        elif m["role"] == "assistant" and m.get("content"):
+            lc_messages.append(AIMessage(content=m["content"]))
+    lc_messages.append(HumanMessage(content=query))
+
     return {
         "query":                  query,
         "normalized_query":       "",
         "session_id":             session_id,
         "case_id":                data.get("case_id") or session.get("case_id"),
+        "user_id":                user_id,
+        "user_role":              user_role,
         "case_type":              "unknown",
         "case_type_confidence":   0.0,
         "complexity":             "simple",
@@ -97,6 +125,7 @@ def _build_state(query: str, session_id: str, session: dict, data: dict) -> dict
         "interrupt_question_text": "",
         "interrupt_step":          0,
         "interrupt_expires_at":    "",
+        "web_search_enabled": bool(data.get("web_search", False)),
         "retrieved_chunks":  [],
         "reranked_chunks":   [],
         "relevance_score":   0.0,
@@ -119,7 +148,7 @@ def _build_state(query: str, session_id: str, session: dict, data: dict) -> dict
         "generation_attempts":    0,
         "clarification_attempts": session.get("clarification_attempts", 0),
         "convergence_status":     "pending",
-        "messages": [HumanMessage(content=query)],
+        "messages": lc_messages,
     }
 
 
@@ -154,13 +183,19 @@ def _extract_interrupt_question(snapshot) -> str | None:
 # ── WebSocket endpoint ────────────────────────────────────────────────────────
 
 @router.websocket("/ws/chat/{session_id}")
-async def chat_endpoint(websocket: WebSocket, session_id: str, token: str = ""):
-    payload = decode_token(token)
-    if not payload or payload.get("type") != "access":
+async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = ""):
+    from app.core.ws_ticket import consume_ticket
+    user_id = await consume_ticket(ticket)
+    if not user_id:
         await websocket.close(code=4001)
         return
 
-    user_id = payload["sub"]
+    # Verify user is active at connection time
+    user = await get_users_col().find_one({"_id": user_id, "is_active": True})
+    if not user:
+        await websocket.close(code=4003)
+        return
+
     await websocket.accept()
 
     session = await chat_repo.find_by_session(session_id)
@@ -183,9 +218,11 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, token: str = ""):
 
     from app.ai.graph.supervisor import chat_graph
     from app.ai.intent import classify as intent_classify
+    from app.ai.tracing import TraceHandler
 
     graph_config = {"configurable": {"thread_id": session_id}}
     last_ai_content: str | None = _extract_last_ai(session)
+    msg_count = 0
 
     try:
         while True:
@@ -193,6 +230,13 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, token: str = ""):
             query = (data.get("content") or "").strip()
             if not query:
                 continue
+
+            # Re-check is_active every 50 messages to catch deactivated accounts
+            msg_count += 1
+            if msg_count % 50 == 0:
+                active = await get_users_col().find_one({"_id": user_id, "is_active": True})
+                if not active:
+                    break
 
             # Persist user message
             await chat_repo.append_message(session_id, {
@@ -209,12 +253,18 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, token: str = ""):
             await websocket.send_json({"type": "thinking"})
 
             try:
+                # One trace per user turn: records every node, LLM call (including
+                # provider failover) and tool call with timings. Read-only state
+                # snapshots keep the plain config — nothing to trace there.
+                tracer      = TraceHandler(session_id=session_id)
+                turn_config = {**graph_config, "callbacks": [tracer]}
+
                 # ── Interrupt resume (HITL clarification) ─────────────────────
                 pre_snap         = await chat_graph.aget_state(config=graph_config)
                 pending_question = _extract_interrupt_question(pre_snap)
 
                 if pending_question is not None:
-                    await chat_graph.ainvoke(Command(resume=query), config=graph_config)
+                    await chat_graph.ainvoke(Command(resume=query), config=turn_config)
                     ws_response = None   # handled below via post_snap
                     shortcut    = False
 
@@ -267,10 +317,21 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, token: str = ""):
                     else:
                         # new_query / format_detail / clarify / unknown → full graph
                         shortcut = False
-                        state = _build_state(query, session_id, session, data)
+                        state = _build_state(
+                            query, session_id, session, data,
+                            history=_session_history(session),
+                            user_id=user_id,
+                            user_role=user.get("role", "client"),
+                        )
                         if intent.intent == "format_detail":
                             state["followup_intent"] = "deepen"
-                        await chat_graph.ainvoke(state, config=graph_config)
+                        await chat_graph.ainvoke(state, config=turn_config)
+
+                # A graph turn actually ran — emit the trace rollup. This single
+                # line answers "which tools ran, which provider served it, how
+                # many tokens, where did the time go, what failed over".
+                if not shortcut or pending_question is not None:
+                    logger.info("chat trace %s", tracer.summary())
 
                 # ── Read graph state (when shortcut didn't fire) ───────────────
                 if not shortcut or pending_question is not None:
@@ -332,4 +393,8 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, token: str = ""):
                 last_ai_content = db_content
 
     except WebSocketDisconnect:
-        pass
+        # Normal client-side close. Conversation state is already persisted to
+        # chat_repo per message (LangGraph checkpoints keyed by session_id) and
+        # this endpoint holds no in-memory connection registry, so there is
+        # nothing to unwind — just record it for observability.
+        logger.info("Chat WebSocket disconnected: session_id=%s user_id=%s", session_id, user_id)

@@ -13,6 +13,10 @@ async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
 ) -> dict:
+    # Short-circuit if already resolved for this request (multiple deps can call this)
+    if hasattr(request.state, "_current_user"):
+        return request.state._current_user
+
     token = credentials.credentials if credentials else None
 
     if not token:
@@ -30,6 +34,7 @@ async def get_current_user(
     if not user:
         raise AuthError("User not found or deactivated")
 
+    request.state._current_user = user
     return user
 
 

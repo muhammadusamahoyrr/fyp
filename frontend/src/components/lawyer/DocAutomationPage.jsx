@@ -4,7 +4,17 @@ import { useState, useRef, useEffect } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
-import { casesData } from "./data.js";
+import { listCases, aiDraftStream, saveDocDraft, listDocDrafts, deleteDocDraft, aiPleadingUrduStream, pleadingUrduPdf, downloadDocument } from "@/lib/api.js";
+
+// Infer the statute collection to ground drafting in, from the template.
+function templateCaseType(name = "") {
+    const n = name.toLowerCase();
+    if (/bail|criminal|fir|crpc|ppc|remand|acquittal|f\.?i\.?r/.test(n)) return "criminal";
+    if (/marriage|divorce|khula|custody|nikah|dower|maintenance|guardian|family/.test(n)) return "family";
+    if (/writ|constitution|fundamental right|article 199|mandamus|habeas/.test(n)) return "constitutional";
+    return "civil";
+}
+import { useAuth } from "@/context/AuthContext.jsx";
 
 // ============================================================
 // DATA
@@ -33,12 +43,12 @@ function buildContent(tmpl, caseObj) {
     const caseRef = caseObj?.id || "CS-2024-089";
     const clientRef = caseObj?.client || "[Client Name]";
     const court = caseObj?.court || "[Court Name]";
-    const today = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+    const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
     const map = {
         1: `IN THE FAMILY COURT AT [LOCATION]\n\nSuit No. ______/2026\n\n${clientRef.toUpperCase()}, W/O [Husband's Name],\nResident of [Full Address], CNIC No. [__________],\n\n...Petitioner\n\nVERSUS\n\n[Respondent's Name], S/O [Father's Name],\nResident of [Full Address],\n\n...Respondent\n\n\nPETITION FOR DISSOLUTION OF MARRIAGE (DIVORCE)\nUNDER THE MUSLIM FAMILY LAWS ORDINANCE, 1961\n\nRespectfully Sheweth:\n\n1. That the petitioner and the respondent were duly married on [Date] at [Place] in accordance with Muslim personal law.\n\n2. That the respondent has treated the petitioner with cruelty and has failed to maintain the petitioner without reasonable cause.\n\n3. That the petitioner is entitled to seek dissolution of marriage under Section 2(ix) of the Dissolution of Muslim Marriages Act, 1939.\n\nPRAYER:\nIt is therefore respectfully prayed that this Honourable Court may be pleased to:\n(a) Grant decree of dissolution of marriage;\n(b) Award maintenance to the petitioner;\n(c) Award costs of the proceedings.\n\nDate: ${today}\n\n_________________________\nPetitioner / Advocate`,
         2: `IN THE COURT OF THE CIVIL JUDGE, LAHORE\n\nCase No. ${caseRef} of 2026\n\n${clientRef.toUpperCase()}\n...Plaintiff\n\nVERSUS\n\n[Defendant Name]\n...Defendant\n\n\nPLAINT UNDER ORDER VII RULE 1, C.P.C.\n\nMost Respectfully Sheweth:\n\n1. That the plaintiff is a resident of [Address] and is entitled to file the present suit.\n\n2. That the defendant is indebted to the plaintiff in the sum of PKR [Amount] on account of [cause of action].\n\n3. That the cause of action arose on [Date] when the defendant failed to honour the obligation despite written demand dated [Date].\n\n4. That this Court has territorial and pecuniary jurisdiction to try the present suit.\n\nPRAYER:\nThe plaintiff humbly prays that this Honourable Court may be pleased to:\n(a) Decree the suit for PKR [Amount];\n(b) Award markup at the rate of [Rate]% per annum;\n(c) Award costs of the suit.\n\nVerified: The contents of the above plaint are true to the best of my knowledge.\n\nDate: ${today}\t\t\t_______________________\n\t\t\t\t\tPlaintiff / Advocate`,
-        default: `IN THE COURT OF THE HONOURABLE JUDGE\n\nCase Reference: ${caseRef}\n\n${tmpl.name.toUpperCase()}\n\nIN THE MATTER OF: ${clientRef}\n\nBefore: ${court}\n\nDate: ${today}\n\n${"─".repeat(60)}\n\n1. INTRODUCTION\n\nThis ${tmpl.name} is filed on behalf of ${clientRef} in connection with the above-referenced matter.\n\n2. FACTS\n\nThe relevant facts are as follows:\n\n   a) [State first material fact]\n   b) [State second material fact]\n   c) [State third material fact]\n\n3. GROUNDS\n\n   i.  [Ground one — legal basis]\n   ii. [Ground two — factual basis]\n\n4. PRAYER\n\nIn light of the above, it is respectfully prayed that this Honourable Court may be pleased to grant the relief sought herein, along with costs.\n\n${"─".repeat(60)}\n\nDate: ${today}\t\t\t_______________________\n\t\t\t\t\tJohn Doe, Advocate\n\t\t\t\t\tEnrollment: MH/2015/4582`,
+        default: `IN THE COURT OF THE HONOURABLE JUDGE\n\nCase Reference: ${caseRef}\n\n${tmpl.name.toUpperCase()}\n\nIN THE MATTER OF: ${clientRef}\n\nBefore: ${court}\n\nDate: ${today}\n\n${"─".repeat(60)}\n\n1. INTRODUCTION\n\nThis ${tmpl.name} is filed on behalf of ${clientRef} in connection with the above-referenced matter.\n\n2. FACTS\n\nThe relevant facts are as follows:\n\n   a) [State first material fact]\n   b) [State second material fact]\n   c) [State third material fact]\n\n3. GROUNDS\n\n   i.  [Ground one — legal basis]\n   ii. [Ground two — factual basis]\n\n4. PRAYER\n\nIn light of the above, it is respectfully prayed that this Honourable Court may be pleased to grant the relief sought herein, along with costs.\n\n${"─".repeat(60)}\n\nDate: ${today}\t\t\t_______________________\n\t\t\t\t\t[Advocate Name]\n\t\t\t\t\tBar Council Enrollment No.: [__________]`,
     };
 
     return map[tmpl.id] || map.default;
@@ -85,31 +95,10 @@ function ToolSep() {
 }
 
 // ============================================================
-// STATUS BADGE
-// ============================================================
-function StatusBadge({ status, t }) {
-    const cfg = {
-        Draft: { bg: t.cardHi, color: t.textMuted, border: t.border },
-        "Under Review": { bg: `${t.warn}15`, color: t.warn, border: `${t.warn}40` },
-        Approved: { bg: `${t.success}15`, color: t.success, border: `${t.success}40` },
-        Final: { bg: t.primaryGlow2, color: t.primary, border: `${t.primary}40` },
-    };
-    const c = cfg[status] || cfg.Draft;
-    return (
-        <span style={{
-            fontSize: 10, padding: "3px 9px", borderRadius: 6,
-            background: c.bg, color: c.color,
-            fontWeight: 700, border: `1px solid ${c.border}`,
-            letterSpacing: "0.05em", textTransform: "uppercase", whiteSpace: "nowrap",
-            flexShrink: 0,
-        }}>{status}</span>
-    );
-}
-
-// ============================================================
 // STAGE 1 — TEMPLATE GALLERY
 // ============================================================
-function StageGallery({ onSelect, t }) {
+function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
+    const [showDrafts, setShowDrafts] = useState(false);
     const [search, setSearch] = useState("");
     const [cat, setCat] = useState("All");
     const [bookmarked, setBookmarked] = useState(new Set([1, 6, 12]));
@@ -132,7 +121,7 @@ function StageGallery({ onSelect, t }) {
                     <div style={{ width: 32, height: 32, borderRadius: 9, background: t.primaryGlow, border: `1.5px solid ${t.primary}30`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>⚖️</div>
                     <div className="serif" style={{ fontSize: 26, fontWeight: 700, color: t.text, letterSpacing: "0.02em" }}>Drafter</div>
                 </div>
-                <div style={{ fontSize: 13, color: t.textMuted, marginTop: 2 }}>AI-powered legal document generation for Indian &amp; Pakistani law</div>
+                <div style={{ fontSize: 13, color: t.textMuted, marginTop: 2 }}>AI-powered legal document generation for Pakistani law</div>
             </div>
 
             {/* Search */}
@@ -158,7 +147,7 @@ function StageGallery({ onSelect, t }) {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
                 {[
                     { label: "New Document", sub: "Start with a blank legal document.", icon: I.plus, color: t.primary, onClick: () => onSelect({ id: 0, name: "Blank Document", cat: "General", desc: "", icon: "📄" }) },
-                    { label: "Personal Templates", sub: "Create from your saved templates.", icon: I.bookmark, color: t.warn, onClick: () => { } },
+                    { label: "My Drafts", sub: `${drafts.length} saved draft${drafts.length === 1 ? "" : "s"} — continue where you left off.`, icon: I.save, color: t.warn, onClick: () => setShowDrafts(v => !v) },
                 ].map(h => (
                     <button key={h.label} onClick={h.onClick}
                         style={{ padding: "20px 20px", borderRadius: 14, textAlign: "left", border: `1.5px solid ${t.border}`, background: t.card, cursor: "pointer", transition: "all .18s" }}
@@ -172,6 +161,41 @@ function StageGallery({ onSelect, t }) {
                     </button>
                 ))}
             </div>
+
+            {/* Saved drafts */}
+            {showDrafts && (
+                <div style={{ marginBottom: 24 }} className="fade-in">
+                    <div style={{ fontSize: 10, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>My Drafts</div>
+                    {drafts.length === 0 && (
+                        <div style={{ padding: "18px 16px", borderRadius: 12, border: `1.5px dashed ${t.border}`, color: t.textMuted, fontSize: 12.5 }}>
+                            No saved drafts yet — open a template and hit "Save Draft".
+                        </div>
+                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {drafts.map(d => (
+                            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${t.border}`, background: t.card }}>
+                                <div style={{ width: 34, height: 34, borderRadius: 9, background: t.cardHi, border: `1px solid ${t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{d.template_icon || "📄"}</div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.title}</div>
+                                    <div style={{ fontSize: 11, color: t.textMuted }}>
+                                        Last saved {d.updated_at ? new Date(d.updated_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                                    </div>
+                                </div>
+                                <button onClick={() => onOpenDraft(d)}
+                                    style={{ padding: "6px 14px", borderRadius: 8, border: `1.5px solid ${t.primary}40`, background: t.primaryGlow2, color: t.primary, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
+                                    Open
+                                </button>
+                                <button onClick={() => onDeleteDraft(d.id)}
+                                    style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${t.border}`, background: "transparent", color: t.textMuted, cursor: "pointer", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}
+                                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.danger || "#e5484d"; e.currentTarget.style.color = t.danger || "#e5484d"; }}
+                                    onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}>
+                                    Delete
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {search === "" && cat === "All" && (
                 <div style={{ fontSize: 10, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Popular Templates</div>
@@ -210,30 +234,73 @@ function StageGallery({ onSelect, t }) {
 // ============================================================
 // STAGE 2 — EDITOR
 // ============================================================
-function StageEditor({ tmpl, caseObj, onBack, t }) {
-    const rawContent = buildContent(tmpl, caseObj);
+function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
+    // A saved draft stores editor HTML; a fresh template is plain text
+    const initialHtml = draft ? draft.content : buildContent(tmpl, caseObj).replace(/\n/g, "<br>");
     const [aiMessages, setAiMessages] = useState([]);
     const [aiInput, setAiInput] = useState("");
     const [aiLoading, setAiLoading] = useState(false);
-    const [status, setStatus] = useState("Draft");
+    const [draftId, setDraftId] = useState(draft?.id || null);
+    const [saving, setSaving] = useState(false);
+    const [saveErr, setSaveErr] = useState("");
     const [saved, setSaved] = useState(false);
     const [fontSize, setFontSize] = useState("13");
     const [font, setFont] = useState("Default Font");
     const [wordCount, setWordCount] = useState(0);
+    // Court-Urdu pleading generator
+    const [urduOpen, setUrduOpen] = useState(false);
+    const [urduText, setUrduText] = useState("");
+    const [urduBusy, setUrduBusy] = useState(false);
+    const [urduPdfBusy, setUrduPdfBusy] = useState(false);
+    const [urduMeta, setUrduMeta] = useState({ court_ur: "", title_ur: "" });
     const editorRef = useRef(null);
     const aiEndRef = useRef(null);
     const aiInputRef = useRef(null);
 
     const h = new Date().getHours();
     const greeting = h < 12 ? "Good Morning" : h < 17 ? "Good Afternoon" : "Good Evening";
-    const userName = "Muhammad";
+    const { user } = useAuth();
+    const userName = user?.full_name?.split(" ")[0] || "Counselor";
     const greetIcon = h < 12 ? "🌅" : h < 17 ? "☀️" : "🌙";
 
     useEffect(() => { aiEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [aiMessages, aiLoading]);
-    useEffect(() => { setWordCount(rawContent.trim().split(/\s+/).filter(Boolean).length); }, []);
+    useEffect(() => { setWordCount((editorRef.current?.innerText || "").trim().split(/\s+/).filter(Boolean).length); }, []);
 
     const exec = (cmd, val = null) => { editorRef.current?.focus(); document.execCommand(cmd, false, val); };
     const queryState = (cmd) => document.queryCommandState(cmd);
+
+    const handleSave = async () => {
+        if (saving) return;
+        setSaving(true); setSaveErr("");
+        const { data, error } = await saveDocDraft({
+            draft_id: draftId,
+            title: draft?.title || tmpl.name,
+            content: editorRef.current?.innerHTML || "",
+            template_name: tmpl.name,
+            template_icon: tmpl.icon,
+            case_id: caseObj?._id || null,
+        });
+        setSaving(false);
+        if (error) { setSaveErr(error.message || "Save failed"); setTimeout(() => setSaveErr(""), 4000); return; }
+        setDraftId(data.id);
+        setSaved(true); setTimeout(() => setSaved(false), 2500);
+    };
+
+    const handleExport = () => {
+        // Word-compatible download: HTML body wrapped in a Word-namespaced
+        // document, saved as .doc — opens with formatting in MS Word.
+        const body = editorRef.current?.innerHTML || "";
+        const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${tmpl.name}</title></head><body style="font-family:Georgia,'Times New Roman',serif;line-height:1.9;">${body}</body></html>`;
+        const blob = new Blob(["﻿", html], { type: "application/msword" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${(draft?.title || tmpl.name).replace(/[^\w\s-]/g, "").trim() || "document"}.doc`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    };
 
     const sendToAI = async () => {
         const q = aiInput.trim();
@@ -242,21 +309,21 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
         setAiMessages(prev => [...prev, { role: "user", text: q }]);
         setAiLoading(true);
         try {
-            const res = await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    model: "claude-sonnet-4-20250514",
-                    max_tokens: 1000,
-                    system: `You are an expert legal document assistant for Indian and Pakistani law. Document type: ${tmpl.name}. When asked to modify or redraft, respond with the COMPLETE updated document text only — no explanation, no markdown fences. If asked a question, answer concisely.`,
-                    messages: [
-                        ...aiMessages.map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.text })),
-                        { role: "user", content: `Current document:\n\n${editorRef.current?.innerText || rawContent}\n\n---\nInstruction: ${q}` },
-                    ],
-                }),
-            });
-            const data = await res.json();
-            const reply = data.content?.[0]?.text || "Sorry, I couldn't process that.";
+            const history = aiMessages.map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }));
+            let reply = "";
+            // RAG-grounded: the backend retrieves real Pakistani law for this template
+            // and instructs the model to cite only genuine sections/precedents.
+            await aiDraftStream(
+                {
+                    instruction: q,
+                    document: editorRef.current?.innerText || "",
+                    template: tmpl.name,
+                    case_type: templateCaseType(tmpl.name),
+                    history,
+                },
+                (token) => { reply += token; },
+            );
+            if (!reply) reply = "Sorry, I couldn't process that.";
             const looksLikeDoc = reply.length > 300 && (reply.includes("\n\n") || reply.includes("PRAYER") || reply.includes("Respectfully") || reply.includes("IN THE COURT") || reply.includes("PETITION") || reply.includes("AGREEMENT"));
             if (looksLikeDoc && editorRef.current) {
                 editorRef.current.innerText = reply;
@@ -268,6 +335,30 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
         } finally {
             setAiLoading(false);
         }
+    };
+
+    const translateToUrdu = async () => {
+        const src = (editorRef.current?.innerText || "").trim();
+        if (!src) return;
+        setUrduOpen(true); setUrduBusy(true); setUrduText("");
+        try {
+            let out = "";
+            await aiPleadingUrduStream({ document: src, template: tmpl.name }, (tok) => { out += tok; setUrduText(out); });
+            if (!out) setUrduText("(No translation returned — please try again.)");
+        } catch (e) {
+            setUrduText("Translation failed: " + (e?.message || "error"));
+        } finally { setUrduBusy(false); }
+    };
+
+    const downloadUrduPdf = async () => {
+        if (!urduText.trim() || urduPdfBusy) return;
+        setUrduPdfBusy(true);
+        const { data, error } = await pleadingUrduPdf({
+            urdu_text: urduText, title_ur: urduMeta.title_ur, court_ur: urduMeta.court_ur, english_label: tmpl.name,
+        });
+        setUrduPdfBusy(false);
+        if (error || !data?.doc_id) return;
+        await downloadDocument(data.doc_id, ((draft?.title || tmpl.name) + "-urdu").replace(/[^\w\s-]/g, "").trim() || "pleading-urdu");
     };
 
     const FONT_OPTIONS = ["Default Font", "Georgia", "Times New Roman", "Courier New", "Arial"];
@@ -354,17 +445,13 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
                                     {tmpl.cat}
                                 </span>
                                 <span style={{ color: t.border }}>•</span>
-                                <span>{new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                                <span>{new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
                                 <span style={{ color: t.border }}>•</span>
                                 <span style={{ color: t.success, fontWeight: 600 }}>{wordCount} words</span>
                             </div>
                         </div>
                     </div>
 
-                    {/* Enhanced status badge */}
-                    <div style={{ marginLeft: 4 }}>
-                        <StatusBadge status={status} t={t} />
-                    </div>
                 </div>
 
                 {/* RIGHT — Enhanced action buttons */}
@@ -380,79 +467,19 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
                             whiteSpace: "nowrap", fontWeight: 600,
                             boxShadow: `0 2px 8px ${t.success}25`,
                         }}>
-                            <Icon d={I.checkCircle} size={12} /> Document Saved
+                            <Icon d={I.checkCircle} size={12} /> Draft Saved
                         </span>
                     )}
-
-                    {/* Enhanced status workflow buttons */}
-                    {status === "Draft" && (
-                        <button onClick={() => setStatus("Under Review")}
-                            style={{
-                                padding: "7px 14px", borderRadius: 10,
-                                border: `1.5px solid ${t.warn}40`,
-                                background: `linear-gradient(135deg, ${t.warn}20, ${t.warn}10)`,
-                                color: t.warn, cursor: "pointer",
-                                fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
-                                whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5,
-                                transition: "all .15s",
-                                boxShadow: `0 2px 6px ${t.warn}20`,
-                            }}
-                            onMouseEnter={e => {
-                                e.currentTarget.style.background = `linear-gradient(135deg, ${t.warn}30, ${t.warn}15)`;
-                                e.currentTarget.style.transform = "translateY(-1px)";
-                            }}
-                            onMouseLeave={e => {
-                                e.currentTarget.style.background = `linear-gradient(135deg, ${t.warn}20, ${t.warn}10)`;
-                                e.currentTarget.style.transform = "translateY(0)";
-                            }}>
-                            <Icon d={I.send} size={12} /> Send for Review
-                        </button>
-                    )}
-                    {status === "Under Review" && (
-                        <button onClick={() => setStatus("Approved")}
-                            style={{
-                                padding: "7px 14px", borderRadius: 10,
-                                border: `1.5px solid ${t.success}40`,
-                                background: `linear-gradient(135deg, ${t.success}20, ${t.success}10)`,
-                                color: t.success, cursor: "pointer",
-                                fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
-                                whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5,
-                                transition: "all .15s",
-                                boxShadow: `0 2px 6px ${t.success}20`,
-                            }}
-                            onMouseEnter={e => {
-                                e.currentTarget.style.background = `linear-gradient(135deg, ${t.success}30, ${t.success}15)`;
-                                e.currentTarget.style.transform = "translateY(-1px)";
-                            }}
-                            onMouseLeave={e => {
-                                e.currentTarget.style.background = `linear-gradient(135deg, ${t.success}20, ${t.success}10)`;
-                                e.currentTarget.style.transform = "translateY(0)";
-                            }}>
-                            <Icon d={I.check} size={12} /> Approve Document
-                        </button>
-                    )}
-                    {status === "Approved" && (
-                        <button onClick={() => setStatus("Final")}
-                            style={{
-                                padding: "7px 14px", borderRadius: 10,
-                                border: `1.5px solid ${t.primary}40`,
-                                background: `linear-gradient(135deg, ${t.primary}25, ${t.primary}15)`,
-                                color: t.primary, cursor: "pointer",
-                                fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
-                                whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5,
-                                transition: "all .15s",
-                                boxShadow: `0 2px 6px ${t.primary}25`,
-                            }}
-                            onMouseEnter={e => {
-                                e.currentTarget.style.background = `linear-gradient(135deg, ${t.primary}35, ${t.primary}20)`;
-                                e.currentTarget.style.transform = "translateY(-1px)";
-                            }}
-                            onMouseLeave={e => {
-                                e.currentTarget.style.background = `linear-gradient(135deg, ${t.primary}25, ${t.primary}15)`;
-                                e.currentTarget.style.transform = "translateY(0)";
-                            }}>
-                            <Icon d={I.star} size={12} /> Mark as Final
-                        </button>
+                    {saveErr && (
+                        <span style={{
+                            fontSize: 11, color: t.danger || "#e5484d",
+                            padding: "6px 12px", borderRadius: 10,
+                            background: `${t.danger || "#e5484d"}15`,
+                            border: `1.5px solid ${t.danger || "#e5484d"}40`,
+                            whiteSpace: "nowrap", fontWeight: 600,
+                        }}>
+                            {saveErr}
+                        </span>
                     )}
 
                     {/* Enhanced divider */}
@@ -462,9 +489,10 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
                         flexShrink: 0, margin: "0 4px"
                     }} />
 
-                    {/* Enhanced Save button */}
+                    {/* Save button — persists the draft to the backend */}
                     <button
-                        onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2500); }}
+                        onClick={handleSave}
+                        disabled={saving}
                         style={{
                             padding: "7px 14px", borderRadius: 10,
                             border: `1.5px solid ${t.border}`,
@@ -487,10 +515,10 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
                             e.currentTarget.style.color = t.text;
                             e.currentTarget.style.transform = "translateY(0)";
                         }}>
-                        <Icon d={I.save} size={13} /> Save Draft
+                        <Icon d={I.save} size={13} /> {saving ? "Saving…" : "Save Draft"}
                     </button>
 
-                    <button style={{
+                    <button onClick={handleExport} style={{
                         padding: "5px 13px", borderRadius: 8,
                         border: `1px solid ${t.primary}50`, background: t.primaryGlow2,
                         color: t.primary, cursor: "pointer",
@@ -498,7 +526,18 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
                         display: "flex", alignItems: "center", gap: 4,
                         whiteSpace: "nowrap",
                     }}>
-                        <Icon d={I.download} size={12} /> Export .docx
+                        <Icon d={I.download} size={12} /> Export Word
+                    </button>
+
+                    <button onClick={translateToUrdu} title="Translate this draft into court Urdu" style={{
+                        padding: "5px 13px", borderRadius: 8,
+                        border: `1px solid #16a34a55`, background: "#16a34a12",
+                        color: "#16a34a", cursor: "pointer",
+                        fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
+                        display: "flex", alignItems: "center", gap: 5,
+                        whiteSpace: "nowrap",
+                    }}>
+                        <span style={{ fontSize: 13 }}>اردو</span> Court Urdu
                     </button>
                 </div>
             </div>
@@ -679,7 +718,7 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
                             fontSize: 13.5, lineHeight: 1.95,
                             color: t.text, outline: "none", whiteSpace: "pre-wrap", letterSpacing: "0.01em",
                         }}
-                        dangerouslySetInnerHTML={{ __html: rawContent.replace(/\n/g, "<br>") }}
+                        dangerouslySetInnerHTML={{ __html: initialHtml }}
                     />
                     <div style={{ textAlign: "center", marginTop: 10, fontSize: 10, color: t.textFaint, letterSpacing: "0.05em" }}>— Page 1 —</div>
                 </div>
@@ -787,6 +826,47 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
                     </div>
                 </div>
             </div>
+
+            {urduOpen && (
+                <div onClick={() => setUrduOpen(false)} style={{
+                    position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 60,
+                    display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+                }}>
+                    <div onClick={e => e.stopPropagation()} style={{
+                        width: "min(760px, 96vw)", maxHeight: "92vh", display: "flex", flexDirection: "column",
+                        background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+                    }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: `1px solid ${t.border}` }}>
+                            <div>
+                                <div style={{ fontSize: 14, fontWeight: 800, color: t.text }}>Court Urdu — عدالتی اردو</div>
+                                <div style={{ fontSize: 11, color: t.textFaint, marginTop: 2 }}>{tmpl.name} · review the translation, then export as an RTL PDF</div>
+                            </div>
+                            <button onClick={() => setUrduOpen(false)} style={{ background: "none", border: "none", color: t.textMuted, fontSize: 20, cursor: "pointer", lineHeight: 1 }}>×</button>
+                        </div>
+
+                        <div style={{ padding: 16, overflowY: "auto" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                                <input value={urduMeta.court_ur} onChange={e => setUrduMeta(m => ({ ...m, court_ur: e.target.value }))} placeholder="عدالت (court header, optional)" dir="rtl"
+                                    style={{ padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${t.border}`, background: t.card, color: t.text, fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+                                <input value={urduMeta.title_ur} onChange={e => setUrduMeta(m => ({ ...m, title_ur: e.target.value }))} placeholder="عنوان (title, optional)" dir="rtl"
+                                    style={{ padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${t.border}`, background: t.card, color: t.text, fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+                            </div>
+                            <textarea value={urduText} onChange={e => setUrduText(e.target.value)} dir="rtl" readOnly={urduBusy}
+                                placeholder={urduBusy ? "ترجمہ ہو رہا ہے…" : ""}
+                                style={{ width: "100%", minHeight: 320, boxSizing: "border-box", padding: "12px 14px", borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.card, color: t.text, fontSize: 15, lineHeight: 2, fontFamily: "'Noto Naskh Arabic','Jameel Noori Nastaleeq',serif", resize: "vertical", outline: "none" }} />
+                            {urduBusy && <div style={{ fontSize: 11.5, color: t.primary, marginTop: 8 }}>Translating… ترجمہ ہو رہا ہے…</div>}
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderTop: `1px solid ${t.border}`, gap: 10 }}>
+                            <span style={{ fontSize: 10.5, color: t.textFaint }}>Machine-assisted — verify legal terms before filing</span>
+                            <div style={{ display: "flex", gap: 8 }}>
+                                <button onClick={translateToUrdu} disabled={urduBusy} style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${t.border}`, background: t.card, color: t.text, fontSize: 12, fontWeight: 700, cursor: urduBusy ? "default" : "pointer", fontFamily: "inherit" }}>↻ Retranslate</button>
+                                <button onClick={downloadUrduPdf} disabled={urduBusy || urduPdfBusy || !urduText.trim()} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: (urduBusy || urduPdfBusy || !urduText.trim()) ? t.border : "#16a34a", color: "#fff", fontSize: 12, fontWeight: 800, cursor: (urduBusy || urduPdfBusy || !urduText.trim()) ? "default" : "pointer", fontFamily: "inherit" }}>{urduPdfBusy ? "Generating…" : "⬇ Download Urdu PDF"}</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -794,12 +874,59 @@ function StageEditor({ tmpl, caseObj, onBack, t }) {
 // ============================================================
 // ROOT
 // ============================================================
+const _DA_MAP = { open: "Filed", active: "Under Hearing", closed: "Closed", dismissed: "Closed" };
+
 function DocAutomationPage() {
     const { t } = useTheme();
-    const { activeCaseObj } = useCase();
+    const { activeCase } = useCase();
     const [stage, setStage] = useState("gallery");
     const [selectedTemplate, setSelectedTemplate] = useState(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [apiCases, setApiCases] = useState([]);
+    const [selectedCaseId, setSelectedCaseId] = useState("");
+    const [drafts, setDrafts] = useState([]);
+    const [activeDraft, setActiveDraft] = useState(null);
+
+    useEffect(() => {
+        if (stage !== "gallery") return;
+        listDocDrafts().then(({ data }) => { if (Array.isArray(data)) setDrafts(data); });
+    }, [stage]);
+
+    const openDraft = (d) => {
+        setActiveDraft(d);
+        setSelectedTemplate({ id: -1, name: d.template_name || d.title, cat: "Draft", desc: "", icon: d.template_icon || "📄" });
+        setStage("editor");
+    };
+
+    const removeDraft = async (id) => {
+        const { error } = await deleteDocDraft(id);
+        if (!error) setDrafts(prev => prev.filter(x => x.id !== id));
+    };
+
+    useEffect(() => {
+        listCases({ page_size: 50 }).then(({ data }) => {
+            if (data?.items) {
+                const mapped = data.items.map(c => ({
+                    id: c.case_number || c._id,
+                    _id: c._id,
+                    title: c.title || "Untitled",
+                    client: c.client_name || "—",
+                    court: c.province || "—",
+                    type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
+                    status: _DA_MAP[c.status] || "Filed",
+                }));
+                setApiCases(mapped);
+                if (activeCase) {
+                    const match = mapped.find(c => c.id === activeCase || c._id === activeCase);
+                    if (match) setSelectedCaseId(match.id);
+                } else if (mapped.length) {
+                    setSelectedCaseId(mapped[0].id);
+                }
+            }
+        });
+    }, []);
+
+    const activeCaseObj = apiCases.find(c => c.id === selectedCaseId) || null;
 
     // Listen for sidebar collapse changes
     useEffect(() => {
@@ -826,11 +953,29 @@ function DocAutomationPage() {
 
     return (
         <div style={{ display: "flex", flexDirection: "column", position: "fixed", top: 0, left: sidebarCollapsed ? 56 : 240, right: 0, bottom: 0, background: t.bg, zIndex: 10, transition: "left .25s ease" }}>
+            {/* Case selector strip — always visible */}
+            {apiCases.length > 0 && (
+                <div style={{ flexShrink: 0, padding: "8px 24px", background: t.surface, borderBottom: `1px solid ${t.border}`, display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 12, color: t.textMuted, fontWeight: 600 }}>Case context:</span>
+                    <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)}
+                        style={{ height: 32, border: `1px solid ${t.border}`, borderRadius: 8, background: t.inputBg, color: t.text, fontSize: 12, padding: "0 12px", outline: "none", cursor: "pointer", minWidth: 260 }}>
+                        <option value="">— No case selected —</option>
+                        {apiCases.map(c => <option key={c.id} value={c.id} style={{ background: t.surface }}>{c.id} — {c.title}</option>)}
+                    </select>
+                    {activeCaseObj && <span style={{ fontSize: 11, color: t.primary, fontWeight: 600 }}>{activeCaseObj.type} · {activeCaseObj.status}</span>}
+                </div>
+            )}
             {stage === "gallery" && (
-                <StageGallery onSelect={tmpl => { setSelectedTemplate(tmpl); setStage("editor"); }} t={t} />
+                <StageGallery
+                    onSelect={tmpl => { setActiveDraft(null); setSelectedTemplate(tmpl); setStage("editor"); }}
+                    drafts={drafts}
+                    onOpenDraft={openDraft}
+                    onDeleteDraft={removeDraft}
+                    t={t}
+                />
             )}
             {stage === "editor" && selectedTemplate && (
-                <StageEditor tmpl={selectedTemplate} caseObj={activeCaseObj} onBack={() => setStage("gallery")} t={t} />
+                <StageEditor tmpl={selectedTemplate} caseObj={activeCaseObj} draft={activeDraft} onBack={() => setStage("gallery")} t={t} />
             )}
         </div>
     );

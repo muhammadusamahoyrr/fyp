@@ -1,14 +1,99 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
-// ─── Token helpers ────────────────────────────────────────────────────────────
-export function getToken() {
-  try { return localStorage.getItem('aai-token'); } catch { return null; }
+// ─── Token store (in-memory, audit #5) ────────────────────────────────────────
+// The access token lives ONLY in memory — never localStorage — so an XSS payload
+// can't read it out of persistent storage. The durable credential is the HttpOnly
+// refresh cookie; on a hard refresh we silently re-mint the access token via
+// /auth/refresh (see bootstrapAuth). Sibling tabs share the token over a
+// BroadcastChannel so each cold load doesn't independently rotate the cookie.
+let accessToken = null;
+
+export function getToken() { return accessToken; }
+export function setToken(t) { accessToken = t || null; if (t) _broadcastToken(t); }
+export function clearToken() { accessToken = null; }
+
+// ─── Cross-tab auth channel (BroadcastChannel) ────────────────────────────────
+let _bc = null;                 // BroadcastChannel | false (unsupported) | null (uninit)
+const _tokenWaiters = [];       // resolvers awaiting a sibling's token during boot
+
+function _getBC() {
+  if (_bc === null) {
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        _bc = new BroadcastChannel('aai-auth');
+        _bc.onmessage = (e) => {
+          const msg = e?.data || {};
+          if (msg.type === 'token' && msg.token) {
+            accessToken = msg.token;                 // adopt without re-broadcasting
+            while (_tokenWaiters.length) _tokenWaiters.shift()(msg.token);
+          } else if (msg.type === 'token-request') {
+            if (accessToken) { try { _bc.postMessage({ type: 'token', token: accessToken }); } catch {} }
+          } else if (msg.type === 'logout') {
+            accessToken = null;
+            if (typeof window !== 'undefined') { try { window.location.href = '/login'; } catch {} }
+          }
+        };
+      } catch { _bc = false; }
+    } else { _bc = false; }
+  }
+  return _bc || null;
 }
-export function setToken(t) {
-  try { localStorage.setItem('aai-token', t); } catch {}
+
+function _broadcastToken(t) { const bc = _getBC(); if (bc) { try { bc.postMessage({ type: 'token', token: t }); } catch {} } }
+export function broadcastLogout() { const bc = _getBC(); if (bc) { try { bc.postMessage({ type: 'logout' }); } catch {} } }
+
+// Ask sibling tabs for a token; resolve with one if it arrives within `ms`.
+function _requestSiblingToken(ms = 150) {
+  const bc = _getBC();
+  if (!bc) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    _tokenWaiters.push(finish);
+    try { bc.postMessage({ type: 'token-request' }); } catch { finish(null); }
+    setTimeout(() => finish(null), ms);
+  });
 }
-export function clearToken() {
-  try { localStorage.removeItem('aai-token'); } catch {}
+
+// Cross-tab-safe boot: adopt an in-memory/sibling token, else silently refresh.
+// Returns true if an access token is available afterward. Used by AuthContext.
+export async function bootstrapAuth() {
+  if (accessToken) return true;                       // already have one this tab
+  const sibling = await _requestSiblingToken();       // election: another tab holds one?
+  if (sibling) { accessToken = sibling; return true; }
+  if (await _tryRefresh()) return true;               // single-flight /auth/refresh
+  // Simultaneous cold-load rotation race: give a sibling's broadcast a beat, retry once.
+  const late = await _requestSiblingToken(250);
+  if (late) { accessToken = late; return true; }
+  return !!accessToken;
+}
+
+// Helper to format error details (including Pydantic arrays) into a safe, user-friendly error message string.
+function formatResponseError(body) {
+  let errorObj = typeof body === 'object' && body !== null ? body : { detail: body };
+  let message = 'An unexpected error occurred.';
+  if (errorObj.detail) {
+    if (Array.isArray(errorObj.detail)) {
+      message = errorObj.detail
+        .map(e => {
+          const field = e.loc ? e.loc[e.loc.length - 1] : '';
+          const msg = e.msg || 'invalid value';
+          const capitalizedField = field ? field.charAt(0).toUpperCase() + field.slice(1) : '';
+          return capitalizedField ? `${capitalizedField}: ${msg}` : msg;
+        })
+        .join('; ');
+    } else if (typeof errorObj.detail === 'string') {
+      message = errorObj.detail;
+    } else {
+      message = JSON.stringify(errorObj.detail);
+    }
+  } else if (errorObj.message) {
+    message = String(errorObj.message);
+  } else if (errorObj.error) {
+    message = String(errorObj.error);
+  }
+  errorObj.message = message;
+  return errorObj;
 }
 
 // ─── Core fetch wrapper ───────────────────────────────────────────────────────
@@ -27,7 +112,7 @@ async function apiFetch(path, options = {}) {
       credentials: 'include', // sends httpOnly refresh_token cookie
     });
   } catch {
-    return { data: null, error: { detail: 'Network error. Please check your connection.' }, status: 0 };
+    return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
   }
 
   // Auto-refresh on 401
@@ -38,34 +123,44 @@ async function apiFetch(path, options = {}) {
       try {
         res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include' });
       } catch {
-        return { data: null, error: { detail: 'Network error. Please check your connection.' }, status: 0 };
+        return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
       }
     } else {
       clearToken();
-      return { data: null, error: { detail: 'Session expired. Please sign in again.' }, status: 401 };
+      return { data: null, error: formatResponseError({ detail: 'Session expired. Please sign in again.' }), status: 401 };
     }
   }
 
   const body = await res.json().catch(() => ({}));
-  return { data: res.ok ? body : null, error: res.ok ? null : body, status: res.status };
+  return { data: res.ok ? body : null, error: res.ok ? null : formatResponseError(body), status: res.status };
 }
 
+// Single-flight: concurrent callers (parallel 401s + boot) collapse into ONE
+// /auth/refresh. Critical because the refresh token is single-use + rotating —
+// parallel refreshes would race, and all but the first would get "revoked".
+let _refreshPromise = null;
 async function _tryRefresh() {
-  try {
-    const res = await fetch(`${BASE}/auth/refresh`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (res.ok) {
-      const body = await res.json();
-      setToken(body.access_token);
-      return true;
+  if (_refreshPromise) return _refreshPromise;
+  _refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${BASE}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const body = await res.json();
+        setToken(body.access_token);   // sets in-memory + broadcasts to siblings
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      _refreshPromise = null;
     }
-    return false;
-  } catch {
-    return false;
-  }
+  })();
+  return _refreshPromise;
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -154,7 +249,7 @@ async function apiFetchMultipart(path, formData) {
   try {
     res = await fetch(`${BASE}${path}`, { method: 'POST', headers, credentials: 'include', body: formData });
   } catch {
-    return { data: null, error: { detail: 'Network error. Please check your connection.' }, status: 0 };
+    return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
   }
 
   if (res.status === 401 && token) {
@@ -164,16 +259,16 @@ async function apiFetchMultipart(path, formData) {
       try {
         res = await fetch(`${BASE}${path}`, { method: 'POST', headers, credentials: 'include', body: formData });
       } catch {
-        return { data: null, error: { detail: 'Network error. Please check your connection.' }, status: 0 };
+        return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
       }
     } else {
       clearToken();
-      return { data: null, error: { detail: 'Session expired. Please sign in again.' }, status: 401 };
+      return { data: null, error: formatResponseError({ detail: 'Session expired. Please sign in again.' }), status: 401 };
     }
   }
 
   const body = await res.json().catch(() => ({}));
-  return { data: res.ok ? body : null, error: res.ok ? null : body, status: res.status };
+  return { data: res.ok ? body : null, error: res.ok ? null : formatResponseError(body), status: res.status };
 }
 
 // ─── Voice / STT ─────────────────────────────────────────────────────────────
@@ -194,8 +289,81 @@ export async function getCase(caseId) {
   return apiFetch(`/cases/${caseId}`);
 }
 
+export async function createCase({ title, description, case_type, province }) {
+  return apiFetch('/cases', {
+    method: 'POST',
+    body: JSON.stringify({ title, description, case_type, province }),
+  });
+}
+
+export async function updateCase(caseId, updates) {
+  return apiFetch(`/cases/${caseId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+}
+
 export async function getCaseTimeline(caseId) {
   return apiFetch(`/cases/${caseId}/timeline`);
+}
+
+// Peshi tracker: record what happened at a hearing (lawyer only).
+// outcome: adjourned | arguments_heard | evidence_recorded | order_reserved | decided | judge_on_leave | other
+export async function recordHearingOutcome(caseId, hearingId, { outcome, note, next_date, next_time, next_purpose } = {}) {
+  return apiFetch(`/cases/${caseId}/hearings/${hearingId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ outcome, note, next_date, next_time, next_purpose }),
+  });
+}
+
+export async function addHearing(caseId, { date, court, judge, purpose, time, outcome }) {
+  return apiFetch(`/cases/${caseId}/hearings`, {
+    method: 'POST',
+    body: JSON.stringify({
+      date,
+      court,
+      judge: judge || null,
+      purpose: purpose || null,
+      time: time || null,
+      outcome: outcome || null,
+    }),
+  });
+}
+
+export async function addMilestone(caseId, { title, description, date }) {
+  return apiFetch(`/cases/${caseId}/milestones`, {
+    method: 'POST',
+    body: JSON.stringify({ title, description: description || null, date }),
+  });
+}
+
+export async function listMessages(caseId) {
+  return apiFetch(`/cases/${caseId}/messages`);
+}
+
+export async function sendMessage(caseId, text) {
+  return apiFetch(`/cases/${caseId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function listTasks(caseId) {
+  return apiFetch(`/cases/${caseId}/tasks`);
+}
+
+export async function addTask(caseId, { title, due, priority, description }) {
+  return apiFetch(`/cases/${caseId}/tasks`, {
+    method: 'POST',
+    body: JSON.stringify({ title, due: due || null, priority: priority || 'medium', description: description || null }),
+  });
+}
+
+export async function toggleTask(caseId, taskId, done) {
+  return apiFetch(`/cases/${caseId}/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ done }),
+  });
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -288,9 +456,9 @@ export async function listDocuments(case_id) {
 }
 
 export async function downloadDocument(doc_id, filename = 'document.pdf') {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('aai-token') : '';
-  const base  = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') + '/api/v1';
-  const res   = await fetch(`${base}/documents/${doc_id}/download`, {
+  const token = getToken();
+  // BASE already includes /api/v1 — do not append it again
+  const res   = await fetch(`${BASE}/documents/${doc_id}/download`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return { error: 'Download failed' };
@@ -300,6 +468,211 @@ export async function downloadDocument(doc_id, filename = 'document.pdf') {
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
   return { data: true };
+}
+
+// ─── Document review pipeline ────────────────────────────────────────────────
+// Client submits a generated document to a lawyer; lawyer approves/returns/rejects.
+
+export async function submitDocumentForReview(doc_id, { lawyer_id, note, urgency } = {}) {
+  return apiFetch(`/documents/${doc_id}/submit`, {
+    method: 'POST',
+    body: JSON.stringify({
+      lawyer_id: lawyer_id || null,
+      note: note || null,
+      urgency: urgency || 'normal',
+    }),
+  });
+}
+
+export async function reviewDocument(doc_id, { action, note } = {}) {
+  return apiFetch(`/documents/${doc_id}/review`, {
+    method: 'PATCH',
+    body: JSON.stringify({ action, note: note || null }),
+  });
+}
+
+export async function listReviewQueue() {
+  return apiFetch('/documents/review-queue');
+}
+
+// ─── Live notifications ──────────────────────────────────────────────────────
+// Exchanges the JWT for a one-time 60s WS ticket (the JWT itself never goes in
+// the URL) and opens the notification socket. Returns the WebSocket or null.
+export async function openNotificationSocket(onMessage) {
+  const token = getToken();
+  if (!token) return null;
+
+  let ticket;
+  try {
+    const resp = await fetch(`${BASE}/auth/ws-ticket`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) return null;
+    ticket = (await resp.json()).ticket;
+  } catch {
+    return null;
+  }
+  if (!ticket) return null;
+
+  const wsBase = BASE.replace(/\/api\/v1$/, '').replace(/^http/, 'ws');
+  const ws = new WebSocket(`${wsBase}/ws/notifications?ticket=${encodeURIComponent(ticket)}`);
+  ws.onmessage = (ev) => {
+    try { onMessage(JSON.parse(ev.data)); } catch {}
+  };
+  return ws;
+}
+
+// ─── Case-law citator ────────────────────────────────────────────────────────
+
+export async function citatorSearch(q, n = 8) {
+  return apiFetch(`/citator/search?q=${encodeURIComponent(q)}&n=${n}`);
+}
+
+export async function citatorCitedBy(cite) {
+  return apiFetch(`/citator/cited-by?cite=${encodeURIComponent(cite)}`);
+}
+
+export async function citatorStats() {
+  return apiFetch('/citator/stats');
+}
+
+export async function citatorJudgment(id) {
+  return apiFetch(`/citator/judgment/${id}`);
+}
+
+// ─── Payments (peshi/professional fees) ──────────────────────────────────────
+
+export async function createFeeRequest({ case_id, amount, purpose, note, hearing_id, engagement_id }) {
+  return apiFetch('/payments/fee-request', {
+    method: 'POST',
+    body: JSON.stringify({ case_id, amount, purpose, note, hearing_id, engagement_id }),
+  });
+}
+
+export async function listPayments() {
+  return apiFetch('/payments');
+}
+
+export async function paymentSummary() {
+  return apiFetch('/payments/summary');
+}
+
+export async function getPayment(id) {
+  return apiFetch(`/payments/${id}`);
+}
+
+export async function startCheckout(id) {
+  return apiFetch(`/payments/${id}/checkout`, { method: 'POST' });
+}
+
+export async function mockPay(id) {
+  return apiFetch(`/payments/${id}/mock-pay`, { method: 'POST' });
+}
+
+export async function downloadReceipt(id, filename = 'receipt.pdf') {
+  const token = getToken();
+  const res = await fetch(`${BASE}/payments/${id}/receipt`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return { error: 'Download failed' };
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+  return { data: true };
+}
+
+// ─── Billing / subscription ──────────────────────────────────────────────────
+
+export async function billingPlans() {
+  return apiFetch('/billing/plans');
+}
+
+export async function mySubscription() {
+  return apiFetch('/billing/subscription');
+}
+
+export async function subscribePlan(tier, cycle = 'monthly') {
+  return apiFetch('/billing/subscribe', {
+    method: 'POST',
+    body: JSON.stringify({ tier, cycle }),
+  });
+}
+
+export async function cancelSubscription() {
+  return apiFetch('/billing/cancel', { method: 'POST' });
+}
+
+// ─── WhatsApp linking ────────────────────────────────────────────────────────
+
+export async function whatsappLinkCode() {
+  return apiFetch('/whatsapp/link-code', { method: 'POST' });
+}
+
+export async function whatsappStatus() {
+  return apiFetch('/whatsapp/status');
+}
+
+export async function whatsappUnlink() {
+  return apiFetch('/whatsapp/link', { method: 'DELETE' });
+}
+
+// ─── Cause-list watcher (lawyer) ─────────────────────────────────────────────
+
+export async function createCauselistWatch({ case_no, title_hint, case_id } = {}) {
+  return apiFetch('/causelist/watches', {
+    method: 'POST',
+    body: JSON.stringify({ case_no, title_hint: title_hint || null, case_id: case_id || null }),
+  });
+}
+
+export async function listCauselistWatches() {
+  return apiFetch('/causelist/watches');
+}
+
+export async function deleteCauselistWatch(id) {
+  return apiFetch(`/causelist/watches/${id}`, { method: 'DELETE' });
+}
+
+export async function checkCauselist() {
+  return apiFetch('/causelist/check', { method: 'POST' });
+}
+
+export async function listCauselistEntries() {
+  return apiFetch('/causelist/entries');
+}
+
+export async function matchCauselistText(text) {
+  return apiFetch('/causelist/match-text', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
+// ─── Editor drafts (lawyer Drafter page) ─────────────────────────────────────
+
+export async function saveDocDraft({ draft_id, title, content, template_name, template_icon, case_id } = {}) {
+  return apiFetch('/documents/drafts', {
+    method: 'POST',
+    body: JSON.stringify({
+      draft_id: draft_id || null,
+      title,
+      content,
+      template_name: template_name || null,
+      template_icon: template_icon || null,
+      case_id: case_id || null,
+    }),
+  });
+}
+
+export async function listDocDrafts() {
+  return apiFetch('/documents/drafts');
+}
+
+export async function deleteDocDraft(id) {
+  return apiFetch(`/documents/drafts/${id}`, { method: 'DELETE' });
 }
 
 export async function cancelAppointment(id, reason) {
@@ -324,6 +697,44 @@ export async function getLawyerAvailability(lawyer_id, date) {
   return apiFetch(`/appointments/availability/${lawyer_id}?date=${date}`);
 }
 
+// ─── Engagements (hire a lawyer) ─────────────────────────────────────────────
+// Client requests → lawyer accepts/declines → case is linked. The only path
+// that assigns a lawyer to a case.
+
+export async function requestEngagement({ case_id, lawyer_id, message }) {
+  return apiFetch('/engagements', {
+    method: 'POST',
+    body: JSON.stringify({ case_id, lawyer_id, message: message || null }),
+  });
+}
+
+export async function listEngagements({ status } = {}) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+  return apiFetch(`/engagements${qs}`);
+}
+
+export async function acceptEngagement(engagement_id, { fee_amount, fee_type, scope_note } = {}) {
+  return apiFetch(`/engagements/${engagement_id}/accept`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      fee_amount: fee_amount ?? null,
+      fee_type: fee_type || null,
+      scope_note: scope_note || null,
+    }),
+  });
+}
+
+export async function declineEngagement(engagement_id, reason) {
+  return apiFetch(`/engagements/${engagement_id}/decline`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason: reason || null }),
+  });
+}
+
+export async function cancelEngagement(engagement_id) {
+  return apiFetch(`/engagements/${engagement_id}/cancel`, { method: 'PATCH' });
+}
+
 // ─── Notifications ────────────────────────────────────────────────────────────
 export async function getNotifications() {
   return apiFetch('/notifications');
@@ -335,4 +746,434 @@ export async function markNotificationRead(notification_id) {
 
 export async function markAllNotificationsRead() {
   return apiFetch('/notifications/read-all', { method: 'POST' });
+}
+
+// ─── Agreements ───────────────────────────────────────────────────────────────
+
+export async function createAgreement(title, body_html, party_ids) {
+  return apiFetch('/agreements', {
+    method: 'POST',
+    body: JSON.stringify({ title, body_html, party_ids }),
+  });
+}
+
+export async function signAgreement(agreement_id, method, signature_data) {
+  return apiFetch(`/agreements/${agreement_id}/sign`, {
+    method: 'POST',
+    body: JSON.stringify({ method, signature_data }),
+  });
+}
+
+export async function getAgreement(agreement_id) {
+  return apiFetch(`/agreements/${agreement_id}`);
+}
+
+// ─── Lawyer Profile ───────────────────────────────────────────────────────────
+export async function updateLawyerProfile(updates) {
+  return apiFetch('/users/me/lawyer-profile', {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function listAgreements() {
+  return apiFetch('/agreements');
+}
+
+// ─── AI ──────────────────────────────────────────────────────────────────────
+// opts: { templateId?: "chat" | "case_context", context?: object, history?: array }
+// `context` is a whitelisted set of case fields (case_title, case_type, court,
+// client_name, next_hearing) — the server ignores any free-text system prompt.
+export async function aiQuery(message, { templateId = "chat", context = {}, history = [] } = {}) {
+  return apiFetch('/ai/query', {
+    method: 'POST',
+    body: JSON.stringify({ message, template_id: templateId, context, history }),
+  });
+}
+
+// ─── Inheritance (Faraid) calculator ─────────────────────────────────────────
+export async function inheritanceCalculate(estate_value, heirs) {
+  return apiFetch('/inheritance/calculate', {
+    method: 'POST',
+    body: JSON.stringify({ estate_value, heirs }),
+  });
+}
+
+export async function inheritanceSettlementPdf({ estate_value, heirs, deceased_name, date_of_death, estate_description }) {
+  return apiFetch('/inheritance/settlement-pdf', {
+    method: 'POST',
+    body: JSON.stringify({ estate_value, heirs, deceased_name, date_of_death, estate_description }),
+  });
+}
+
+export async function inheritanceDemandLetter(payload) {
+  return apiFetch('/inheritance/demand-letter', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function wasiyyatCompute(payload) {
+  return apiFetch('/inheritance/wasiyyat', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function wasiyyatPdf(payload) {
+  return apiFetch('/inheritance/wasiyyat-pdf', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+// ─── Overseas Desk (Power of Attorney) ────────────────────────────────────────
+
+export async function overseasCreatePoa(payload) {
+  return apiFetch('/overseas/poa', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function overseasListPoas() {
+  return apiFetch('/overseas/poa');
+}
+
+export async function overseasGetPoa(id) {
+  return apiFetch(`/overseas/poa/${id}`);
+}
+
+export async function overseasRevokePoa(id) {
+  return apiFetch(`/overseas/poa/${id}/revoke`, { method: 'POST' });
+}
+
+export async function overseasSetExecution(id, execution_status) {
+  return apiFetch(`/overseas/poa/${id}/execution`, {
+    method: 'PATCH',
+    body: JSON.stringify({ execution_status }),
+  });
+}
+
+export async function overseasAcknowledge(id) {
+  return apiFetch(`/overseas/poa/${id}/acknowledge`, { method: 'POST' });
+}
+
+// Attestation Navigator (objection-aware apostille vs legacy consular chain)
+export async function overseasAttestationCountries() {
+  return apiFetch('/overseas/attestation/countries');
+}
+export async function overseasAttestationPath(country, forProperty = true) {
+  return apiFetch(`/overseas/attestation/path?country=${encodeURIComponent(country)}&for_property=${forProperty}`);
+}
+
+// Special-Court jurisdiction engine (Protection of Overseas Pakistanis' Property Act 2024)
+export async function overseasSpecialCourtProvinces() {
+  return apiFetch('/overseas/special-court/provinces');
+}
+export async function overseasSpecialCourtPath(province) {
+  return apiFetch(`/overseas/special-court/path?province=${encodeURIComponent(province)}`);
+}
+
+// Plain-English -> POA structure, and the deterministic risk scorer
+export async function overseasSuggestPoa(intent) {
+  return apiFetch('/overseas/poa/suggest', { method: 'POST', body: JSON.stringify({ intent }) });
+}
+export async function overseasPoaRisk(payload) {
+  return apiFetch('/overseas/poa/risk', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+// OPPPA registration guidance + per-POA status
+export async function overseasOpppaGuidance() {
+  return apiFetch('/overseas/opppa/guidance');
+}
+export async function overseasSetOpppa(id, status) {
+  return apiFetch(`/overseas/poa/${id}/opppa`, { method: 'PATCH', body: JSON.stringify({ status }) });
+}
+
+// Point-of-use verification (public) + attested-document check
+export async function overseasVerifyToken(token) {
+  return apiFetch(`/overseas/verify/${encodeURIComponent(token)}`);
+}
+// Public QR image URL for a verify link (served by the backend, no auth).
+export function overseasVerifyQrUrl(token) {
+  return `${BASE}/overseas/verify/${encodeURIComponent(token)}/qr.svg`;
+}
+
+// Property-dispute intake (Special Courts, 2024 Act) — Phase 5a/5b/5c
+export async function overseasDisputeEligibility(id_type, days_abroad) {
+  return apiFetch('/overseas/dispute/eligibility', { method: 'POST', body: JSON.stringify({ id_type, days_abroad }) });
+}
+export async function overseasDisputeClassify(text) {
+  return apiFetch('/overseas/dispute/classify', { method: 'POST', body: JSON.stringify({ text }) });
+}
+export async function overseasDisputeCreate(payload) {
+  return apiFetch('/overseas/dispute', { method: 'POST', body: JSON.stringify(payload) });
+}
+export async function overseasDisputeList() {
+  return apiFetch('/overseas/dispute');
+}
+export async function overseasDraftPetition(id) {
+  return apiFetch(`/overseas/dispute/${id}/petition`, { method: 'POST' });
+}
+// Case-brief handoff (read/handoff only — no fee, engagement or payment)
+export async function overseasSendDisputeToLawyer(id) {
+  return apiFetch(`/overseas/dispute/${id}/send-to-lawyer`, { method: 'POST' });
+}
+export async function overseasDisputeBrief(id) {
+  return apiFetch(`/overseas/dispute/${id}/brief`);
+}
+export async function overseasLawyerDisputes() {
+  return apiFetch('/overseas/lawyer/disputes');
+}
+export async function overseasVerifyAttested(id, file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  return apiFetchMultipart(`/overseas/poa/${id}/verify-attested`, fd);
+}
+
+// ─── Legal calculators ────────────────────────────────────────────────────────
+
+export async function courtFeeCalculate(payload) {
+  return apiFetch('/calculators/court-fee', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function labourDuesCalculate(payload) {
+  return apiFetch('/calculators/labour-dues', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function labourDemandPdf(payload) {
+  return apiFetch('/calculators/labour-demand-pdf', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+// ─── Bail checker ─────────────────────────────────────────────────────────────
+
+export async function bailSearch(q, limit = 12) {
+  const params = new URLSearchParams({ q: q || '', limit: String(limit) });
+  return apiFetch(`/bail/search?${params.toString()}`);
+}
+
+export async function bailCheck({ law = 'PPC', section, arrested = true }) {
+  return apiFetch('/bail/check', { method: 'POST', body: JSON.stringify({ law, section, arrested }) });
+}
+
+// Thumbs up/down on an AI answer (quality-feedback flywheel).
+export async function rateAnswer({ session_id, rating, answer_preview = '', question_preview = '', comment = null, source = 'chat' }) {
+  return apiFetch('/ai/rate', {
+    method: 'POST',
+    body: JSON.stringify({ session_id, rating, answer_preview, question_preview, comment, source }),
+  });
+}
+
+// One-description fast path: legal notice / FIR pack / FIA complaint without a case.
+export async function quickNotice(text, template_type = 'legal_notice', fields = null) {
+  return apiFetch('/documents/quick-notice', {
+    method: 'POST',
+    body: JSON.stringify({ text, template_type, fields }),
+  });
+}
+
+// RAG-grounded research (LangGraph pipeline) — returns { answer, citations, confidence } or a clarification question.
+export async function aiResearch(message, session_id, { language = 'en', province = null, history = [] } = {}) {
+  return apiFetch('/ai/research', {
+    method: 'POST',
+    body: JSON.stringify({ message, session_id, language, province, history }),
+  });
+}
+
+// Streaming version — calls onToken(chunk) for each token, resolves when done.
+// opts: { templateId?: "chat" | "case_context", context?: object, history?: array }
+export async function aiQueryStream(message, { templateId = "chat", context = {}, history = [] } = {}, onToken) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}/ai/query/stream`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify({ message, template_id: templateId, context, history }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail || `HTTP ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.content) onToken(parsed.content);
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+      }
+    }
+  }
+}
+
+// RAG-grounded drafting: retrieves real Pakistani law before the LLM drafts.
+export async function aiDraftStream({ instruction, document = '', template = '', case_type = 'civil', province = 'federal', history = [] }, onToken) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}/ai/draft/stream`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify({ instruction, document, template, case_type, province, history }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail || `HTTP ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.content) onToken(parsed.content);
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+      }
+    }
+  }
+}
+
+// ─── Court-Urdu pleading generator ────────────────────────────────────────────
+
+export async function aiPleadingUrduStream({ document = '', template = '' }, onToken) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}/ai/pleading-urdu/stream`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify({ document, template }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail || `HTTP ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.content) onToken(parsed.content);
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+      }
+    }
+  }
+}
+
+export async function pleadingUrduPdf({ urdu_text, title_ur = '', court_ur = '', english_label = '' }) {
+  return apiFetch('/ai/pleading-urdu/pdf', {
+    method: 'POST',
+    body: JSON.stringify({ urdu_text, title_ur, court_ur, english_label }),
+  });
+}
+
+// ─── Admin ────────────────────────────────────────────────────────────────────
+export async function adminGetAnalytics() {
+  return apiFetch('/admin/analytics/overview');
+}
+
+export async function adminListPendingKYC() {
+  return apiFetch('/admin/kyc/pending');
+}
+
+export async function adminProcessKYC(lawyerId, approved, rejectionReason = null) {
+  return apiFetch(`/admin/kyc/${lawyerId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ approved, rejection_reason: rejectionReason }),
+  });
+}
+
+export async function adminListUsers({ page = 1, pageSize = 20, role, search } = {}) {
+  const q = new URLSearchParams({ page, page_size: pageSize });
+  if (role && role !== 'all') q.set('role', role);
+  if (search) q.set('search', search);
+  return apiFetch(`/admin/users?${q}`);
+}
+
+export async function adminCreateUser({ full_name, email, role, password }) {
+  return apiFetch('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({ full_name, email, role, password }),
+  });
+}
+
+export async function adminUpdateUser(userId, data) {
+  return apiFetch(`/admin/users/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function adminResetPassword(userId, newPassword) {
+  return apiFetch(`/admin/users/${userId}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify({ new_password: newPassword }),
+  });
+}
+
+export async function adminDeleteUser(userId) {
+  return apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
+}
+
+export async function adminListCases({ page = 1, pageSize = 20, status, search } = {}) {
+  const q = new URLSearchParams({ page, page_size: pageSize });
+  if (status && status !== 'all') q.set('status', status);
+  if (search) q.set('search', search);
+  return apiFetch(`/admin/cases?${q}`);
+}
+
+export async function adminUpdateCaseStatus(caseId, status) {
+  return apiFetch(`/admin/cases/${caseId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function adminListLawyers() {
+  return apiFetch('/admin/lawyers/monitoring');
 }

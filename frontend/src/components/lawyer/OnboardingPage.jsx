@@ -1,7 +1,29 @@
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { DARK } from "./theme.js";
+import { getMe, updateMe, updateLawyerProfile } from "@/lib/api.js";
 
+// localStorage cache ONLY — never the source of truth. See isLawyerOnboarded.
 export const ONBOARDED_KEY = "lawyer_onboarded";
+
+/**
+ * Has this lawyer completed onboarding? Answered from the SERVER's copy of the
+ * profile, not from localStorage.
+ *
+ * This gate used to read localStorage alone, and the key was written only when
+ * the lawyer clicked one specific button on the final wizard screen. So a lawyer
+ * whose profile was fully saved server-side — but who cleared site data, switched
+ * browser or device, or simply navigated away before clicking that button — was
+ * pushed back into onboarding on every visit, forever, with every lawyer route
+ * (Drafter, Payments, Cause List, Case Law) redirecting there. The data was safe;
+ * the gate just never asked the server.
+ *
+ * Completeness = the two fields the platform actually needs to function: the bar
+ * number (identity/verification) and at least one specialization (client matching).
+ */
+export function isLawyerOnboarded(me) {
+  const profile = me?.lawyer_profile;
+  return Boolean(profile?.bar_number && profile?.specializations?.length);
+}
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const T = {
@@ -58,8 +80,9 @@ const STEPS = [
   { label: "Workspace Ready", sub: "Your profile is complete", icon: Ic.star },
 ];
 
-const SPECS_CORE = ["Corporate", "Criminal", "Family", "Civil Litigation", "Real Estate", "Immigration"];
-const SPECS_EXTRA = ["Environment Law", "Intellectual Property", "Arbitration"];
+// Labels map to the platform's case types — matching runs on these values
+const SPECS_CORE = ["Civil Litigation", "Criminal", "Family", "Constitutional"];
+const SPEC_VALUE = { "Civil Litigation": "civil", Criminal: "criminal", Family: "family", Constitutional: "constitutional" };
 const DAYS = ["M","T","W","T","F","S","S"];
 const DAY_FULL = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const CONTENT_PAD = 18;
@@ -253,19 +276,25 @@ const SpecIcons = {
   "Environment Law": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M17 8C8 10 5.9 16.17 3.82 19.15A2 2 0 005.49 22h13a2 2 0 001.92-2.56C19 16 19 8 17 8z"/><path d="M17 8C17 8 17 2 12 2c0 0 0 6-5 8"/></svg>,
   "Intellectual Property": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3M12 17h.01"/></svg>,
   Arbitration: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M15 12l-8.5 8.5a2.12 2.12 0 01-3-3L12 9M18 9l3-3M17 3l4 4M3 14l4 4"/></svg>,
+  Constitutional: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M12 3v18M5 6h14M7 6l-2 5a3 3 0 006 0L9 6M17 6l-2 5a3 3 0 006 0l-2-5"/></svg>,
 };
 
 // ─── Step 1: Professional Profile ─────────────────────────────────────────────
 function StepProfessional({ onNext }) {
-  const [name, setName] = useState("Adv. Ahmad Khan");
+  const [name, setName] = useState("");
   const [exp, setExp] = useState("");
-  const [license, setLicense] = useState("BKP/PNJ/2019");
+  const [license, setLicense] = useState("");
   const [council, setCouncil] = useState("Punjab Bar Council");
-  const [coreSpecs, setCoreSpecs] = useState(["Corporate"]);
-  const [extraSpecs, setExtraSpecs] = useState(["Intellectual Property"]);
+  const [coreSpecs, setCoreSpecs] = useState([]);
+
+  useEffect(() => {
+    getMe().then(({ data }) => {
+      if (data?.full_name) setName(prev => prev || data.full_name);
+      if (data?.lawyer_profile?.bar_number) setLicense(prev => prev || data.lawyer_profile.bar_number);
+    }).catch(() => {});
+  }, []);
 
   const togCore = (s) => setCoreSpecs(p => p.includes(s) ? p.filter(x => x !== s) : p.length < 3 ? [...p, s] : p);
-  const togExtra = (s) => setExtraSpecs(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s]);
 
   // Icon grid card for specializations
   const SpecCard = ({ label, selected, onClick, size = "core" }) => {
@@ -397,18 +426,14 @@ function StepProfessional({ onNext }) {
               </div>
             </div>
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ marginBottom: 6 }}>
                 <Label>Bar License No.</Label>
-                <span style={{ fontSize: 11, color: T.success, display: "flex", alignItems: "center", gap: 4, fontWeight: 600 }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill={T.success} stroke="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5l-4-4 1.41-1.41L10 13.67l6.59-6.59L18 8.5l-8 8z"/></svg>
-                  Verified
-                </span>
               </div>
               <div style={{ position: "relative" }}>
                 <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                 </span>
-                <input value={`VERIFIED (${license})`} readOnly style={{
+                <input value={license} onChange={e => setLicense(e.target.value)} placeholder="e.g. PBC/12345/2019" style={{
                   width:"100%", boxSizing:"border-box", background: T.inputBg,
                   border: `1.5px solid ${T.inputBorder}`, borderRadius: T.r.md,
                   color: T.text, fontSize: 13, padding: "10px 12px 10px 36px",
@@ -422,13 +447,8 @@ function StepProfessional({ onNext }) {
               borderRadius: T.r.sm, padding: "9px 12px",
             }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.primary} strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              <span style={{ fontSize: 11.5, color: T.primaryLight, fontWeight: 600 }}>DOCUMENT VERIFIED - PENDING BAR APPROVAL</span>
+              <span style={{ fontSize: 11.5, color: T.primaryLight, fontWeight: 600 }}>SUBMITTED FOR ADMIN VERIFICATION AFTER ONBOARDING</span>
             </div>
-            <button style={{
-              background: T.card, border: `1.5px solid ${T.border}`, borderRadius: T.r.md,
-              color: T.textMuted, fontSize: 13, fontWeight: 700, padding: "11px",
-              cursor: "pointer", letterSpacing: ".12em", textTransform: "uppercase",
-            }}>VERIFY</button>
           </div>
 
           {/* ── Primary Specializations ── */}
@@ -443,24 +463,15 @@ function StepProfessional({ onNext }) {
               <span style={{ fontSize: 17, fontWeight: 800, color: T.text }}>Primary Specializations</span>
             </div>
 
-            {/* Core — 2×3 grid */}
+            {/* Core — grid */}
             <div>
               <Label>Core Specializations (Select up to 3)</Label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginTop: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginTop: 8 }}>
                 {SPECS_CORE.map(s => (
                   <SpecCard key={s} label={s} selected={coreSpecs.includes(s)} onClick={() => togCore(s)} size="core" />
                 ))}
               </div>
-            </div>
-
-            {/* Additional — 1×3 */}
-            <div>
-              <Label>Additional Areas</Label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginTop: 8 }}>
-                {SPECS_EXTRA.map(s => (
-                  <SpecCard key={s} label={s} selected={extraSpecs.includes(s)} onClick={() => togExtra(s)} size="extra" />
-                ))}
-              </div>
+              <p style={{ fontSize: 11, color: T.textFaint, marginTop: 8 }}>Clients are matched to you by these practice areas.</p>
             </div>
           </div>
 
@@ -471,13 +482,20 @@ function StepProfessional({ onNext }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: `6px ${CONTENT_PAD}px 10px` }}>
         <span style={{ fontSize: 11, color: T.textFaint, fontWeight: 700 }}>1/4</span>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <button onClick={() => {}} style={{
+          {/* Step 1 is the first step — there is nothing to go back to. It was
+              wired to () => {} , i.e. a button that looked live and did nothing. */}
+          <button disabled title="This is the first step" style={{
             background: "transparent", border: `1px solid ${T.border}`, borderRadius: T.r.sm,
-            color: T.textMuted, fontSize: 11, padding: "5px 10px", cursor: "pointer",
-            display: "flex", alignItems: "center", gap: 4,
+            color: T.textFaint, fontSize: 11, padding: "5px 10px", cursor: "not-allowed",
+            opacity: 0.45, display: "flex", alignItems: "center", gap: 4,
           }}>{Ic.arrow("left", T.textFaint)} Back</button>
-          <button style={{ background: "transparent", border: "none", color: T.textMuted, fontSize: 11, cursor: "pointer" }}>Skip</button>
-          <GlowBtn onClick={onNext} style={{ padding: "7px 16px", fontSize: 12 }}>Continue {Ic.arrow("right")}</GlowBtn>
+          {/* No Skip on this step, deliberately. It collects the bar number and
+              specializations — the two fields onboarding is CONSIDERED COMPLETE by
+              (see isLawyerOnboarded). A "Skip" here would let a lawyer finish the
+              wizard with a profile the gate then rejects, dropping them straight
+              back into onboarding: a loop, just a different one. Step 2 (photo and
+              credential uploads) is genuinely optional and keeps its Skip. */}
+          <GlowBtn onClick={() => onNext({ name, exp, license, council, specs: coreSpecs.map(s => SPEC_VALUE[s]).filter(Boolean) })} style={{ padding: "7px 16px", fontSize: 12 }}>Continue {Ic.arrow("right")}</GlowBtn>
         </div>
       </div>
     </div>
@@ -488,8 +506,9 @@ function StepProfessional({ onNext }) {
 function StepCredentials({ onNext, onBack }) {
   const fileRef = useRef();
   const [photo, setPhoto] = useState(null);
-  const [eduReady] = useState(true);
-  const [profReady] = useState(true);
+  // No credential-upload endpoint yet — never show a fake "ready/uploaded" state
+  const [eduReady] = useState(false);
+  const [profReady] = useState(false);
 
   const handlePhoto = (e) => {
     const f = e.target.files?.[0];
@@ -688,7 +707,7 @@ function StepCredentials({ onNext, onBack }) {
             </div>
             {/* 3 cards */}
             <div style={{ display: "flex", gap: 12, flex: 1 }}>
-              <CredCard svgIcon={<CertIcon />} title="Bar Council Certificate" sub1="Official bar membership certificate" sub2="PDF, JPG or PNG · Max 5MB" fileName="certificate.pdf" />
+              <CredCard svgIcon={<CertIcon />} title="Bar Council Certificate" sub1="Official bar membership certificate" sub2="PDF, JPG or PNG · Max 5MB" />
               <CredCard svgIcon={<EduIcon />} title="Educational Credentials" sub1="LLB or equivalent law degree" sub2="PDF, JPG or PNG · Max 5MB" uploaded={eduReady} />
               <CredCard svgIcon={<AwardIcon />} title="Professional Certificates" sub1="Additional certifications or awards" sub2="PDF, JPG or PNG · Max 5MB" uploaded={profReady} />
             </div>
@@ -710,8 +729,13 @@ function StepCredentials({ onNext, onBack }) {
               strokeDasharray={`${(2/4)*113} 113`} strokeLinecap="round" transform="rotate(-90 22 22)"/>
             <text x="22" y="27" textAnchor="middle" fill={T.text} fontSize="10" fontWeight="700">2/4</text>
           </svg>
-          <button style={{ background: "transparent", border: "none", color: T.textMuted, fontSize: 12, cursor: "pointer" }}>Skip</button>
-          <GlowBtn onClick={onNext} style={{ padding: "8px 22px", fontSize: 13 }}>Continue {Ic.arrow("right")}</GlowBtn>
+          {/* Skip had no onClick — inert. This step is uploads only, so skipping
+              and continuing are the same thing: advance without adding data. */}
+          <button onClick={() => onNext()} style={{ background: "transparent", border: "none", color: T.textMuted, fontSize: 12, cursor: "pointer" }}>Skip</button>
+          {/* Was onClick={onNext} — which handed the React click EVENT to next(data),
+              and next() does Object.assign(formRef.current, data). That merged the
+              synthetic event's fields into the form payload. */}
+          <GlowBtn onClick={() => onNext()} style={{ padding: "8px 22px", fontSize: 13 }}>Continue {Ic.arrow("right")}</GlowBtn>
         </div>
       </div>
     </div>
@@ -719,7 +743,7 @@ function StepCredentials({ onNext, onBack }) {
 }
 
 // ─── Step 3: Office & Availability ────────────────────────────────────────────
-function StepOffice({ onNext, onBack }) {
+function StepOffice({ onNext, onBack, saving, error }) {
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("Lahore, 54000");
   const [phone, setPhone] = useState("");
@@ -936,8 +960,10 @@ function StepOffice({ onNext, onBack }) {
               strokeDasharray={`${(3/4)*88} 88`} strokeLinecap="round" transform="rotate(-90 18 18)"/>
             <text x="18" y="22" textAnchor="middle" fill={T.text} fontSize="9" fontWeight="700">3/4</text>
           </svg>
-          <button style={{ background: "transparent", border: "none", color: T.textMuted, fontSize: 12, cursor: "pointer" }}>Skip this step</button>
-          <GlowBtn onClick={onNext} style={{ padding: "9px 20px", fontSize: 13 }}>Continue {Ic.arrow("right")}</GlowBtn>
+          {error && <span style={{ fontSize: 12, color: "#e8526a", fontWeight: 600 }}>{error}</span>}
+          <GlowBtn onClick={() => !saving && onNext({ address, city, phone, minFee, bio: feeNote })} style={{ padding: "9px 20px", fontSize: 13, opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Submitting…" : "Submit for Verification"} {Ic.arrow("right")}
+          </GlowBtn>
         </div>
       </div>
     </div>
@@ -1036,9 +1062,42 @@ function StepSubmitted({ onBack, onComplete }) {
 export function OnboardingPage({ onComplete }) {
   const [step, setStep] = useState(0);
   const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const formRef = useRef({});
 
-  const next = () => {
-    if (step === 2) { setSubmitted(true); setStep(3); }
+  const submit = async () => {
+    setSaving(true);
+    setError(null);
+    const f = formRef.current;
+    const [r1, r2] = await Promise.all([
+      updateMe({
+        full_name: f.name || null,
+        phone: f.phone || null,
+      }),
+      updateLawyerProfile({
+        bar_number: f.license || null,
+        specializations: f.specs?.length ? f.specs : null,
+        experience_years: f.exp ? parseInt(f.exp) : null,
+        hourly_rate: f.minFee ? parseInt(f.minFee) : null,
+        address: [f.address, f.city].filter(Boolean).join(", ") || null,
+        bio: f.bio || null,
+        availability: true,
+      }),
+    ]);
+    setSaving(false);
+    const err = r1.error || r2.error;
+    if (err) {
+      setError(err?.detail || "Submission failed — check your connection and try again.");
+      return;
+    }
+    setSubmitted(true);
+    setStep(3);
+  };
+
+  const next = (data) => {
+    if (data) Object.assign(formRef.current, data);
+    if (step === 2) submit();
     else setStep(s => Math.min(s + 1, 3));
   };
   const back = () => {
@@ -1054,7 +1113,7 @@ export function OnboardingPage({ onComplete }) {
       <div style={{ flex: 1, overflow: "hidden", minWidth: 0, display: "flex", flexDirection: "column" }}>
         {step === 0 && <StepProfessional onNext={next} />}
         {step === 1 && <StepCredentials onNext={next} onBack={back} />}
-        {step === 2 && <StepOffice onNext={next} onBack={back} />}
+        {step === 2 && <StepOffice onNext={next} onBack={back} saving={saving} error={error} />}
         {step === 3 && <StepSubmitted onBack={back} onComplete={onComplete} />}
       </div>
     </div>

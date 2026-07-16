@@ -85,11 +85,11 @@ async def classify(
     context = cb.build_context(history)
 
     # ── 4. Embedding cache ────────────────────────────────────────────────────
-    embedding = cache.get(session_id, cleaned)
+    embedding = await cache.get(session_id, cleaned)
     if embedding is None and scorer._EMBED_AVAILABLE:
         embedding = await scorer.embed(cleaned)
         if embedding is not None:
-            cache.put(session_id, cleaned, embedding)
+            await cache.put(session_id, cleaned, embedding)
 
     # ── 5. Cosine scoring ─────────────────────────────────────────────────────
     scores = await scorer.score(cleaned, cached_embedding=embedding)

@@ -24,6 +24,9 @@ websockets==16.0
 # Rate limiting
 slowapi==0.1.9
 
+# Redis (async client — WS fan-out, scheduler locks, caching/rate-limiting)
+redis==5.2.1
+
 # Email
 aiosmtplib==3.0.1
 jinja2==3.1.4
@@ -35,19 +38,31 @@ reportlab==4.2.5
 # NLU intent pipeline (ONNX-based embeddings — no torch dependency)
 fastembed==0.4.2
 
-# AI / LangChain
-langchain
-langchain-core
-langchain-community
-langchain-groq
-langchain-openai
-langchain-chroma
-langgraph
-nltk
+# AI / LangChain (pinned for reproducible installs)
+langchain==0.3.30
+langchain-core==0.3.86
+langchain-community==0.3.27
+langchain-groq==0.3.8
+langchain-openai==0.3.35
+langchain-chroma==0.2.6
+langchain-huggingface==0.1.2
+langgraph==1.0.1
+nltk==3.9.4
+# Optional LLM providers — install only if you point LLM_PROVIDER at them
+# (llm.py imports them lazily and falls back if absent):
+#   langchain-google-genai   # Gemini
+#   langchain-ollama         # local Ollama
 
 # Voice / STT
 faster-whisper
 soundfile
 
+# Web search (no API key required)
+duckduckgo-search==7.3.0
+
 # Utilities
 python-dotenv==1.0.1
+arabic-reshaper==3.0.0
+python-bidi==0.6.6
+beautifulsoup4
+pypdf

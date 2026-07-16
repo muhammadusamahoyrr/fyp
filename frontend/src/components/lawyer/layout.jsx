@@ -5,7 +5,7 @@ import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
-import { casesData } from "./data.js";
+import { useAuth } from "@/context/AuthContext.jsx";
 const logo = "/logo.png";
 
 // ============================================================
@@ -14,23 +14,29 @@ const logo = "/logo.png";
 // ============================================================
 // NOTIFICATION PANEL
 // ============================================================
-function NotificationPanel({ onClose, notifs, clearNotif, clearAll }) {
+function NotificationPanel({ onClose, notifs, clearNotif, clearAll, anchorStyle }) {
     const { t } = useTheme();
-    const iconMap = { hearing: I.gavel, message: I.chat, document: I.fileText, appointment: I.calendar, upload: I.upload };
-    const colorMap = { hearing: t.info, message: t.primary, document: t.warn, appointment: t.success, upload: t.primary };
+    const iconMap = { hearing: I.gavel, message: I.chat, document: I.fileText, appointment: I.calendar, upload: I.upload, dispute_assigned: I.gavel };
+    const colorMap = { hearing: t.info, message: t.primary, document: t.warn, appointment: t.success, upload: t.primary, dispute_assigned: t.info };
+    // A notification with a `route` deep-links to its page; others just mark read.
+    const handleClick = (n) => {
+        clearNotif(n.id);
+        if (n.route) { onClose?.(); window.location.href = n.route; }
+    };
     return (
         <>
             <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 198 }} />
             <div style={{
                 position: "fixed", top: 58, right: 14, width: 340, background: t.surface, borderRadius: 14,
                 border: `1px solid ${t.border}`, zIndex: 199, boxShadow: "0 8px 40px rgba(0,0,0,0.35)",
-                overflow: "hidden", animation: "fadeIn .15s ease"
+                overflow: "hidden", animation: "fadeIn .15s ease",
+                ...anchorStyle,
             }}>
                 <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${t.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Notifications</div>
                     {notifs.length > 0 && <button onClick={clearAll} style={{ fontSize: 11, color: t.primary, background: "none", border: "none", cursor: "pointer" }}>Clear all</button>}
                 </div>
-                <div style={{ maxHeight: 400, overflowY: "auto" }}>
+                <div data-lenis-prevent style={{ maxHeight: 400, overflowY: "auto" }}>
                     {notifs.length === 0 ? (
                         <div style={{ padding: "32px 16px", textAlign: "center", color: t.textFaint, fontSize: 13 }}>
                             <Icon d={I.bell} size={24} style={{ marginBottom: 8, opacity: .3, display: "block", margin: "0 auto 10px" }} />
@@ -41,7 +47,7 @@ function NotificationPanel({ onClose, notifs, clearNotif, clearAll }) {
                             display: "flex", gap: 11, padding: "11px 16px", borderBottom: `1px solid ${t.border}`,
                             background: n.unread ? t.primaryGlow2 : "transparent", transition: "background .15s", cursor: "pointer"
                         }}
-                            onClick={() => clearNotif(n.id)}>
+                            onClick={() => handleClick(n)}>
                             <div style={{
                                 width: 34, height: 34, borderRadius: 10, flexShrink: 0,
                                 background: `${colorMap[n.type] || t.primary}18`,
@@ -52,7 +58,10 @@ function NotificationPanel({ onClose, notifs, clearNotif, clearAll }) {
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 13, fontWeight: n.unread ? 700 : 500, color: t.text, lineHeight: 1.4 }}>{n.title}</div>
                                 <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>{n.body}</div>
-                                <div style={{ fontSize: 10, color: t.textFaint, marginTop: 3 }}>{n.time}</div>
+                                <div style={{ fontSize: 10, color: t.textFaint, marginTop: 3, display: "flex", alignItems: "center", gap: 5 }}>
+                                    {n.time}
+                                    {n.route && <span style={{ color: t.primary, fontWeight: 600 }}>· Open →</span>}
+                                </div>
                             </div>
                             {n.unread && <div style={{ width: 7, height: 7, borderRadius: "50%", background: t.primary, flexShrink: 0, marginTop: 4 }} />}
                         </div>
@@ -69,8 +78,7 @@ function NotificationPanel({ onClose, notifs, clearNotif, clearAll }) {
 function ActiveCaseBanner({ caseId, onClear }) {
     const { t } = useTheme();
     const { setOpenCaseId, setPage } = useCase();
-    const c = casesData.find(x => x.id === caseId);
-    if (!c) return null;
+    if (!caseId) return null;
     const openWorkspace = () => { setOpenCaseId(caseId); setPage("cases"); };
     return (
         <div style={{
@@ -79,8 +87,7 @@ function ActiveCaseBanner({ caseId, onClear }) {
         }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: t.primary, flexShrink: 0 }} />
             <span style={{ fontSize: 11, color: t.primary, fontWeight: 600 }}>Active Case:</span>
-            <span className="mono" style={{ fontSize: 11, color: t.primary, fontWeight: 700 }}>{c.id}</span>
-            <span style={{ fontSize: 11, color: t.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{c.title}</span>
+            <span className="mono" style={{ fontSize: 11, color: t.primary, fontWeight: 700 }}>{caseId}</span>
             <button onClick={openWorkspace} style={{ fontSize: 11, color: t.primary, background: "none", border: `1px solid ${t.primary}50`, borderRadius: 6, padding: "3px 10px", cursor: "pointer", flexShrink: 0 }}>Open Workspace</button>
             <button onClick={onClear} style={{ background: "none", border: "none", color: t.textMuted, cursor: "pointer", display: "flex", flexShrink: 0 }}><Icon d={I.x} size={11} /></button>
         </div>
@@ -106,14 +113,11 @@ const NAV_SECTIONS = [
         label: "",
         items: [
             { id: "documents", label: "Documents", icon: "documents" },
+            { id: "agreements", label: "Agreements", icon: "documents" },
+            { id: "overseas-disputes", label: "Overseas Disputes", icon: "gavel" },
+            { id: "causelist", label: "Cause List", icon: "gavel" },
+            { id: "payments", label: "Payments", icon: "documents" },
             { id: "appointments", label: "Appointments", icon: "calendar" },
-        ],
-    },
-    {
-        id: "communication",
-        label: "",
-        items: [
-            { id: "communications", label: "Messages", icon: "chat", badge: 2 },
         ],
     },
     {
@@ -121,8 +125,8 @@ const NAV_SECTIONS = [
         label: "",
         items: [
             { id: "ai-legal", label: "AI Assistant", icon: "ai" },
+            { id: "caselaw", label: "Case Law", icon: "cases" },
             { id: "drafts", label: "Draft Generator", icon: "wand" },
-            { id: "courtroom", label: "Courtroom", icon: "courtroom" },
         ],
     },
     {
@@ -136,7 +140,7 @@ const NAV_SECTIONS = [
 
 const PAGE_REDIRECT = {
     tasks: "documents",
-    notifications: "communications",
+    notifications: "dashboard",
     research: "ai-legal",
     drafts: "doc-automation",
     reports: "settings",
@@ -146,7 +150,7 @@ function NavItem({ item, page, setPage, collapsed, t, unreadMsgs }) {
     const targetPage = PAGE_REDIRECT[item.id] || item.id;
     const active = page === item.id || (PAGE_REDIRECT[item.id] && page === PAGE_REDIRECT[item.id]);
     const [hov, setHov] = useState(false);
-    const badgeCount = item.id === "communications" ? unreadMsgs : 0;
+    const badgeCount = 0;
 
     return (
         <button
@@ -226,6 +230,37 @@ function SectionLabel({ label, collapsed, t }) {
 
 function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
     const { t, toggle } = useTheme();
+    const { user } = useAuth();
+    const { notifs, clearNotif, clearAll } = useNotif();
+    const [showNotifs, setShowNotifs] = useState(false);
+    const unreadCount = notifs.filter(n => n.unread).length;
+    const displayName = user?.full_name || "Advocate";
+    const initials = displayName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+
+    const bellBtn = (size) => (
+        <button
+            onClick={e => { e.stopPropagation(); setShowNotifs(v => !v); }}
+            title="Notifications"
+            style={{
+                width: size, height: size, borderRadius: 7, border: "none",
+                background: showNotifs ? t.primaryGlow2 : "transparent", color: t.textFaint,
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background .13s, color .13s", flexShrink: 0, position: "relative",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = t.primaryGlow2; e.currentTarget.style.color = t.text; }}
+            onMouseLeave={e => { e.currentTarget.style.background = showNotifs ? t.primaryGlow2 : "transparent"; e.currentTarget.style.color = t.textFaint; }}>
+            <Icon d={I.bell} size={15} />
+            {unreadCount > 0 && (
+                <span style={{
+                    position: "absolute", top: -2, right: -2,
+                    minWidth: 15, height: 15, borderRadius: 8, padding: "0 3px",
+                    background: t.danger, border: `2px solid ${t.surface}`,
+                    fontSize: 8.5, fontWeight: 700, color: "#fff", boxSizing: "content-box",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                }}>{unreadCount > 99 ? "99+" : unreadCount}</span>
+            )}
+        </button>
+    );
 
     return (
         <div data-sidebar style={{
@@ -309,7 +344,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
             )}
 
             {/* ── Nav ── */}
-            <div style={{ flex: 1, padding: "6px 6px 0", overflowY: "auto", overflowX: "hidden" }}>
+            <div data-lenis-prevent style={{ flex: 1, padding: "6px 6px 0", overflowY: "auto", overflowX: "hidden" }}>
                 {NAV_SECTIONS.map(section => (
                     <div key={section.id}>
                         <SectionLabel label={section.label} collapsed={collapsed} t={t} />
@@ -339,11 +374,12 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
                                 display: "flex", alignItems: "center", justifyContent: "center",
                                 fontSize: 12, fontWeight: 700,
                                 color: t.mode === "dark" ? "#111B1F" : "#fff", flexShrink: 0,
-                            }}>JD</div>
+                            }}>{initials}</div>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 14, fontWeight: 650, color: t.text, lineHeight: 1.3 }}>John Doe</div>
-                                <div style={{ fontSize: 12.5, color: t.textMuted }}>Senior Advocate</div>
+                                <div style={{ fontSize: 14, fontWeight: 650, color: t.text, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
+                                <div style={{ fontSize: 12.5, color: t.textMuted }}>Advocate</div>
                             </div>
+                            {bellBtn(28)}
                             <button
                                 onClick={e => { e.stopPropagation(); toggle(); }}
                                 title={t.mode === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
@@ -361,6 +397,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
                     </>
                 ) : (
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                        {bellBtn(32)}
                         <button
                             onClick={() => setPage("profile")}
                             style={{
@@ -369,7 +406,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
                                 alignItems: "center", justifyContent: "center",
                                 fontSize: 12, fontWeight: 700,
                                 color: t.mode === "dark" ? "#111B1F" : "#fff",
-                            }}>JD</button>
+                            }}>{initials}</button>
                         <button
                             onClick={toggle}
                             title={t.mode === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
@@ -386,6 +423,16 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
                     </div>
                 )}
             </div>
+
+            {showNotifs && (
+                <NotificationPanel
+                    onClose={() => setShowNotifs(false)}
+                    notifs={notifs}
+                    clearNotif={clearNotif}
+                    clearAll={clearAll}
+                    anchorStyle={{ top: "auto", right: "auto", bottom: 14, left: collapsed ? 64 : 248 }}
+                />
+            )}
         </div>
     );
 }
@@ -398,20 +445,20 @@ function Topbar({ page, collapsed, setCollapsed, toggleTheme, children }) {
     const unreadCount = notifs.filter(n => n.unread).length;
     const labels = {
         dashboard: "Dashboard", cases: "Cases", documents: "Documents",
-        appointments: "Appointments", clients: "Clients", "ai-legal": "AI Assistant",
-        "doc-automation": "Document Automation", upload: "Upload Documents",
-        communications: "Messages", profile: "Lawyer Profile", settings: "Settings",
-        courtroom: "Courtroom Simulation",
+        agreements: "Agreements", causelist: "Cause List", caselaw: "Case Law Research", payments: "Payments", appointments: "Appointments", clients: "Clients", "ai-legal": "AI Assistant",
+        "doc-automation": "Document Automation",
+        profile: "Lawyer Profile", settings: "Settings",
     };
 
-    const isComm = page === "communications";
-    const hideSearch = isComm || page === "documents";
+    const hideSearch = page === "documents";
 
     return (
         <div style={{
-            height: 56, background: t.navBg, borderBottom: `1px solid ${t.border}`,
+            height: 56, background: t.mode === "dark" ? "rgba(26,46,53,0.82)" : "rgba(255,255,255,0.82)",
+            backdropFilter: "blur(18px) saturate(180%)", WebkitBackdropFilter: "blur(18px) saturate(180%)",
+            borderBottom: `1px solid ${t.border}`,
             display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "0 20px", backdropFilter: "blur(12px)", flexShrink: 0, gap: 14,
+            padding: "0 20px", flexShrink: 0, gap: 14,
         }}>
             {/* Left — hamburger + page title */}
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>

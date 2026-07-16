@@ -89,7 +89,7 @@ export default function LoginPage() {
     const { data, error } = await authLogin(email, password);
     setLoading(false);
     if (error) {
-      setApiError(error.detail || error.message || 'Invalid email or password.');
+      setApiError(error.message || 'Invalid email or password.');
       return;
     }
     login(data); // sets user in AuthContext immediately

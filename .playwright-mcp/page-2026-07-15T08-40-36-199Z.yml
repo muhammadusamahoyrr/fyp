@@ -1,0 +1,45 @@
+- generic [active] [ref=f43e1]:
+  - button "Open Next.js Dev Tools" [ref=f43e9] [cursor=pointer]
+  - alert [ref=f43e13]
+  - generic [ref=f43e14]:
+    - generic [ref=f43e68]:
+      - generic [ref=f43e69]:
+        - img "AttorneyAI" [ref=f43e70]
+        - generic [ref=f43e71]:
+          - generic [ref=f43e72]: AttorneyAI
+          - generic [ref=f43e73]: Legal Intelligence Platform
+      - heading "The Ultimate AI Co-Counsel" [level=1] [ref=f43e74]: The UltimateAI Co-Counsel
+      - paragraph [ref=f43e75]: AI-powered legal guidance grounded in Pakistani law — PPC, CrPC, Family Code & the Constitution.
+      - generic [ref=f43e76]:
+        - generic [ref=f43e77]: INSTANT
+        - generic [ref=f43e78]: "|"
+        - generic [ref=f43e79]: ACCURATE
+        - generic [ref=f43e80]: "|"
+        - generic [ref=f43e81]: SECURE
+      - generic [ref=f43e82]:
+        - generic [ref=f43e83]: ⚡
+        - generic [ref=f43e84]: Powered by 400k case laws and statutes.
+    - generic [ref=f43e86]:
+      - heading "Welcome Back!" [level=2] [ref=f43e92]
+      - paragraph [ref=f43e93]: Please sign in to your account.
+      - generic [ref=f43e94]:
+        - button "Google" [ref=f43e95] [cursor=pointer]
+        - button "Facebook" [ref=f43e102] [cursor=pointer]
+      - generic [ref=f43e106]: or continue with
+      - generic [ref=f43e110]:
+        - generic [ref=f43e111]: Email
+        - textbox "attorneyai@gmail.com" [ref=f43e113]: browsertest@example.com
+      - generic [ref=f43e114]:
+        - generic [ref=f43e115]: Password
+        - generic [ref=f43e116]:
+          - textbox "••••••••••••" [ref=f43e117]: Client@1234
+          - button [ref=f43e118] [cursor=pointer]
+      - generic [ref=f43e122]:
+        - generic [ref=f43e123] [cursor=pointer]:
+          - checkbox "Remember me for 90 days" [checked] [ref=f43e124]
+          - generic [ref=f43e125]: Remember me for 90 days
+        - button "Forgot Password?" [ref=f43e126] [cursor=pointer]
+      - button "Sign In" [ref=f43e127] [cursor=pointer]
+      - paragraph [ref=f43e128]:
+        - text: Don't have an account?
+        - button "Sign Up" [ref=f43e129] [cursor=pointer]

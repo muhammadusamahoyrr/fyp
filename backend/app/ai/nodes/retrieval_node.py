@@ -1,11 +1,15 @@
+import asyncio
+import logging
 import re
 
 from langchain_core.documents import Document
 
 from app.ai.graph.state import AgentState
-from app.ai.llm import get_llm
+from app.ai.llm import get_fast_llm
 from app.ai.pipelines.retriever import build_retriever
 from app.ai.pipelines.reranker import RRF
+
+logger = logging.getLogger(__name__)
 
 _REWRITE_PROMPT = """\
 Rewrite the following user query into a concise legal search query using formal Pakistani legal terminology (PPC, CrPC, statute names, section topics).
@@ -31,7 +35,13 @@ _ALIASES = [
 # Matches inline statute citations in chunk text, e.g. "PPC 302", "CrPC 154", "MFLO 7"
 _STATUTE_RE = re.compile(r'\b(PPC|CrPC|MFLO)\s+\d+', re.IGNORECASE)
 
-_MAX_HOPS = 2
+_MAX_HOPS      = 2
+_WEB_MAX_RESULTS = 5
+
+# Case-law (LHC judgment) retrieval — semantic-only over the judgment corpus.
+# Conservative threshold: better to surface no precedent than an irrelevant one.
+_CASE_LAW_MIN_SCORE = 0.78
+_CASE_LAW_MAX       = 3
 
 
 def _normalise_aliases(query: str) -> str:
@@ -48,12 +58,15 @@ _LEGAL_KEYWORDS = re.compile(
 )
 
 
-def _expand_query(query: str) -> str:
+async def _expand_query(query: str) -> str:
     """Normalise statute aliases, then rewrite to legal terminology for better BM25 recall."""
     query = _normalise_aliases(query)
     try:
-        llm    = get_llm()
-        result = llm.invoke([
+        # Fast tier: this is a keyword rewrite for BM25 recall, not legal reasoning,
+        # and its output is keyword-guarded below anyway. Running it on the main
+        # model was costing several seconds inside every retrieval.
+        llm    = get_fast_llm()
+        result = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _REWRITE_PROMPT},
             {"role": "user",   "content": query},
         ])
@@ -89,6 +102,60 @@ def _extract_statute_refs(docs: list[Document]) -> str:
     return " ".join(sorted(refs)[:8])
 
 
+async def _web_search(query: str, case_type: str) -> list[dict]:
+    """DuckDuckGo search — no API key. Returns chunks in the same format as local retrieval."""
+    try:
+        from duckduckgo_search import DDGS
+        search_q = f"Pakistan law {case_type} {query}"
+        results  = await asyncio.to_thread(
+            lambda: list(DDGS().text(search_q, max_results=_WEB_MAX_RESULTS))
+        )
+        return [
+            {
+                "content":        f"{r.get('title', '')}\n{r.get('body', '')}",
+                "statute":        r.get("href", ""),
+                "section_number": "",
+                "source_file":    r.get("href", "web"),
+                "chunk_id":       f"web_{i}",
+                "province":       "federal",
+                "law_type":       "web",
+            }
+            for i, r in enumerate(results)
+            if r.get("body")
+        ]
+    except Exception:
+        return []
+
+
+async def _retrieve_case_law(query: str) -> list[dict]:
+    """Semantic search over the LHC judgment corpus. Returns chunk dicts marked
+    law_type='judgment'. Degrades to [] when the corpus is empty, embeddings are
+    unavailable, or nothing clears the relevance threshold."""
+    try:
+        from app.services import citator_service as cs
+        hits = await cs.search(query, n=_CASE_LAW_MAX * 2)
+    except Exception:
+        return []
+
+    chunks: list[dict] = []
+    for h in hits:
+        if h.get("score", 0.0) < _CASE_LAW_MIN_SCORE:
+            continue
+        jid = h.get("id", "")
+        chunks.append({
+            "content":      h.get("snippet") or h.get("tag_line") or "",
+            "law_type":     "judgment",
+            "judgment_id":  jid,
+            "citation":     f"LHC {jid}" if jid else "LHC judgment",
+            "title":        h.get("title") or h.get("case_no") or jid,
+            "pdf_url":      h.get("pdf_url", ""),
+            "score":        h.get("score", 0.0),
+        })
+        if len(chunks) >= _CASE_LAW_MAX:
+            break
+    return chunks
+
+
 def _docs_to_chunks(docs: list[Document]) -> list[dict]:
     return [
         {
@@ -104,7 +171,7 @@ def _docs_to_chunks(docs: list[Document]) -> list[dict]:
     ]
 
 
-def retrieval_node(state: AgentState) -> dict:
+async def retrieval_node(state: AgentState) -> dict:
     attempts    = state.get("retrieval_attempts", 0) + 1
     known_facts = state.get("known_facts", [])
 
@@ -114,13 +181,28 @@ def retrieval_node(state: AgentState) -> dict:
     if attempts > 1 and known_facts:
         base_query = f"{base_query} {' '.join(known_facts)}"
 
-    expanded = _expand_query(base_query)
+    expanded = await _expand_query(base_query)
+
+    # Case law runs on the raw (un-rewritten) query — judgment prose matches lay
+    # phrasing better than statute-terminology rewrites.
+    case_law = await _retrieve_case_law(base_query)
+
     try:
         retriever = build_retriever(state["case_type"], state["province"])
     except Exception:
+        # Previously swallowed in silence. A retriever that cannot be built (e.g.
+        # Chroma not connected) then returned zero chunks, and the user simply got
+        # an answer with no law in it — indistinguishable from "no law found".
+        # Failing quietly is the worst option here: log loudly, still fail open.
+        logger.exception(
+            "retrieval: could not build retriever (case_type=%s province=%s) — "
+            "answering with NO statute context",
+            state.get("case_type"), state.get("province"),
+        )
         return {
             "retrieved_chunks": [],
             "reranked_chunks":  [],
+            "case_law_chunks":  case_law,
             "retrieval_attempts": attempts,
         }
 
@@ -128,6 +210,7 @@ def retrieval_node(state: AgentState) -> dict:
     try:
         docs_hop1: list[Document] = retriever.invoke(expanded)
     except Exception:
+        logger.exception("retrieval: hop-1 query failed — continuing with no chunks")
         docs_hop1 = []
 
     # ── Hop 2: follow statute cross-references found in hop-1 results ─────────
@@ -150,9 +233,15 @@ def retrieval_node(state: AgentState) -> dict:
 
     chunks = _docs_to_chunks(merged)
 
+    # Augment with web results when user toggled web search on
+    if state.get("web_search_enabled"):
+        web_chunks = await _web_search(base_query, state.get("case_type", ""))
+        chunks = chunks + web_chunks
+
     return {
         "retrieved_chunks": chunks,
         # Passthrough fallback for intake_graph (grader overwrites this in chat_graph)
         "reranked_chunks":  chunks,
+        "case_law_chunks":  case_law,
         "retrieval_attempts": attempts,
     }

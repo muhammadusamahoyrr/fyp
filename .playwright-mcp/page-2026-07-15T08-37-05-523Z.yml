@@ -1,0 +1,106 @@
+- generic [ref=f40e1]:
+  - button "Open Next.js Dev Tools" [ref=f40e9] [cursor=pointer]
+  - alert [ref=f40e13]
+  - generic [ref=f40e14]:
+    - generic [ref=f40e15]:
+      - generic [ref=f40e16]:
+        - img "AttorneyAI" [ref=f40e17]
+        - generic [ref=f40e18]:
+          - generic [ref=f40e19]: AttorneyAI
+          - generic [ref=f40e20]: Legal Practice Suite
+        - button [ref=f40e21] [cursor=pointer]
+      - generic [ref=f40e24]:
+        - generic [ref=f40e25]:
+          - button "Dashboard" [ref=f40e26] [cursor=pointer]
+          - button "Cases" [ref=f40e31] [cursor=pointer]
+          - button "Clients" [ref=f40e36] [cursor=pointer]
+        - generic [ref=f40e44]:
+          - button "Documents" [ref=f40e45] [cursor=pointer]
+          - button "Agreements" [ref=f40e51] [cursor=pointer]
+          - button "Overseas Disputes" [ref=f40e57] [cursor=pointer]
+          - button "Cause List" [ref=f40e65] [cursor=pointer]
+          - button "Payments" [ref=f40e73] [cursor=pointer]
+          - button "Appointments" [ref=f40e79] [cursor=pointer]
+        - generic [ref=f40e85]:
+          - button "AI Assistant" [ref=f40e86] [cursor=pointer]
+          - button "Case Law" [ref=f40e92] [cursor=pointer]
+          - button "Draft Generator" [ref=f40e97] [cursor=pointer]
+        - button "Settings" [active] [ref=f40e104] [cursor=pointer]
+      - generic [ref=f40e112] [cursor=pointer]:
+        - generic [ref=f40e113]: AR
+        - generic [ref=f40e114]:
+          - generic [ref=f40e115]: Ahmad Raza Khan
+          - generic [ref=f40e116]: Advocate
+        - button "7" [ref=f40e117]
+        - button "Switch to Light Mode" [ref=f40e122]
+    - main [ref=f40e127]:
+      - generic [ref=f40e128]:
+        - generic [ref=f40e129]:
+          - generic [ref=f40e130]: Settings
+          - generic [ref=f40e131]: Manage account and preferences
+        - generic [ref=f40e132]:
+          - generic [ref=f40e133]:
+            - generic [ref=f40e134]: Change Password
+            - generic [ref=f40e138]:
+              - generic [ref=f40e139]:
+                - generic [ref=f40e140]: Current Password
+                - textbox "Enter current password" [ref=f40e142]
+              - generic [ref=f40e143]:
+                - generic [ref=f40e144]:
+                  - generic [ref=f40e145]: New Password
+                  - textbox "New password (min 8 chars)" [ref=f40e147]
+                - generic [ref=f40e148]:
+                  - generic [ref=f40e149]: Confirm
+                  - textbox "Confirm new password" [ref=f40e151]
+              - button "Update Password" [ref=f40e152] [cursor=pointer]
+          - generic [ref=f40e153]:
+            - generic [ref=f40e154]: Notifications
+            - generic [ref=f40e159] [cursor=pointer]:
+              - generic [ref=f40e160]: Email for new appointments
+              - checkbox "Email for new appointments" [checked] [ref=f40e161]
+            - generic [ref=f40e162] [cursor=pointer]:
+              - generic [ref=f40e163]: Case status change alerts
+              - checkbox "Case status change alerts" [checked] [ref=f40e164]
+            - generic [ref=f40e165] [cursor=pointer]:
+              - generic [ref=f40e166]: Document review reminders
+              - checkbox "Document review reminders" [checked] [ref=f40e167]
+            - generic [ref=f40e168] [cursor=pointer]:
+              - generic [ref=f40e169]: Client message notifications
+              - checkbox "Client message notifications" [checked] [ref=f40e170]
+            - generic [ref=f40e171] [cursor=pointer]:
+              - generic [ref=f40e172]: Hearing date reminders
+              - checkbox "Hearing date reminders" [checked] [ref=f40e173]
+          - generic [ref=f40e174]:
+            - generic [ref=f40e175]:
+              - generic [ref=f40e176]: ⭐
+              - generic [ref=f40e177]: Subscription
+              - generic [ref=f40e178]: free
+            - generic [ref=f40e179]: Upgrade to unlock unlimited cause-list watches, unlimited AI research + case-law, document generation and WhatsApp alerts.
+            - generic [ref=f40e180]:
+              - button "Monthly" [ref=f40e181] [cursor=pointer]
+              - button "Annual −25%" [ref=f40e182] [cursor=pointer]
+            - generic [ref=f40e183]:
+              - generic [ref=f40e184]:
+                - generic [ref=f40e185]: Professional
+                - generic [ref=f40e186]: ₨1,999/mo
+                - generic [ref=f40e187]: For practising lawyers.
+                - button "Choose Professional" [ref=f40e188] [cursor=pointer]
+              - generic [ref=f40e189]:
+                - generic [ref=f40e190]: Firm
+                - generic [ref=f40e191]: ₨7,999/mo
+                - generic [ref=f40e192]: For law firms & teams.
+                - button "Choose Firm" [ref=f40e193] [cursor=pointer]
+          - generic [ref=f40e194]:
+            - generic [ref=f40e195]:
+              - generic [ref=f40e196]: 💬
+              - generic [ref=f40e197]: WhatsApp Alerts
+            - generic [ref=f40e198]: Get hearing updates, cause-list alerts and case notifications on WhatsApp. Generate a code, then send LINK <code> to the Attorney.AI WhatsApp number from your phone.
+            - button "Generate Link Code" [ref=f40e199] [cursor=pointer]
+          - generic [ref=f40e200]:
+            - generic [ref=f40e201]: Sign Out
+            - generic [ref=f40e206]: Sign out of your account on this device. You will need to log back in to access your cases.
+            - button "Sign Out" [ref=f40e207] [cursor=pointer]
+          - generic [ref=f40e208]:
+            - generic [ref=f40e209]: Danger Zone
+            - generic [ref=f40e210]: Permanently delete your account. This cannot be undone.
+            - button "Delete Account" [ref=f40e211] [cursor=pointer]

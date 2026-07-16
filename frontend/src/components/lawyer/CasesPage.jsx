@@ -6,7 +6,8 @@ import { useCase } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { Card, Btn, Input, Sel, Label, Badge, Divider, Pills } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
-import { seedCases, seedHearings, seedDocs, seedTimeline, fmtDate, fmtTime, CSB, typeColor, typeIcon, DSB, APSB, PRIO, casesData, tasksData, qData } from "./data.js";
+import { fmtDate, fmtTime, CSB, typeColor, typeIcon, DSB, PRIO } from "./data.js";
+import { listCases, addHearing as apiAddHearing, recordHearingOutcome as apiRecordOutcome, aiQueryStream, listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask, toggleTask as apiToggleTask, listEngagements, acceptEngagement, declineEngagement } from "@/lib/api.js";
 import { avatarBg } from "./utils.js";
 
 function WorkspaceOverview({ c, docs, apts, msgs, tasks, hearings, setTab, setPage }) {
@@ -122,8 +123,8 @@ function WorkspaceOverview({ c, docs, apts, msgs, tasks, hearings, setTab, setPa
                         </div>
                     ))}
                     <div style={{ marginTop: 12 }}>
-                        <Btn variant="accent" size="sm" full onClick={() => setPage("communications")}>
-                            <Icon d={I.chat} size={12} /> Open in Communications
+                        <Btn variant="accent" size="sm" full onClick={() => setTab("messages")}>
+                            <Icon d={I.chat} size={12} /> Open Messages
                         </Btn>
                     </div>
                 </Card>
@@ -239,108 +240,90 @@ function WorkspaceHearings({ hearings, c }) {
 }
 
 // ── Messages Tab ─────────────────────────────────────────────
-function WorkspaceMessages({ msgs, c, setPage }) {
+function WorkspaceMessages({ caseId, c }) {
     const { t } = useTheme();
-    const [selectedMsg, setSelectedMsg] = useState(msgs[0] || null);
+    const [messages, setMessages] = useState([]);
     const [reply, setReply] = useState("");
-    const [localThreads, setLocalThreads] = useState(() => {
-        const init = {};
-        msgs.forEach(m => { init[m.id] = [...m.thread]; });
-        return init;
-    });
+    const [sending, setSending] = useState(false);
+    const [loading, setLoading] = useState(true);
     const msgEndRef = useRef(null);
-    useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [selectedMsg, localThreads]);
 
-    // Clear draft when switching conversation
-    useEffect(() => { setReply(""); }, [selectedMsg]);
+    useEffect(() => {
+        listMessages(caseId).then(({ data, error }) => {
+            if (!error && data) setMessages(data);
+            setLoading(false);
+        });
+    }, [caseId]);
 
-    const sendReply = () => {
-        if (!reply.trim() || !selectedMsg) return;
-        const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        setLocalThreads(prev => ({
-            ...prev,
-            [selectedMsg.id]: [...(prev[selectedMsg.id] || []), { who: "lawyer", text: reply.trim(), time: now }]
-        }));
+    useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+    const sendReply = async () => {
+        const text = reply.trim();
+        if (!text || sending) return;
+        setSending(true);
         setReply("");
+        const { data, error } = await apiSendMessage(caseId, text);
+        if (!error && data) {
+            setMessages(prev => [...prev, data]);
+        }
+        setSending(false);
     };
 
-    if (msgs.length === 0) return (
-        <Card style={{ padding: 48, textAlign: "center" }} className="fade-up">
-            <Icon d={I.chat} size={28} style={{ color: t.textFaint, opacity: .3, display: "block", margin: "0 auto 12px" }} />
-            <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 16 }}>No messages for this case yet.</div>
-            <Btn variant="primary" size="sm" onClick={() => setPage("communications")}>Open Communications</Btn>
-        </Card>
-    );
+    const clientInitials = (c.client || "C").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
 
     return (
-        <div style={{ display: "flex", gap: 16, height: "calc(100vh - 320px)", minHeight: 320 }} className="fade-up">
-            {/* Left list */}
-            <div style={{ width: 260, flexShrink: 0, background: t.surface, borderRadius: 12, border: `1px solid ${t.border}`, overflow: "hidden" }}>
-                {msgs.map(msg => {
-                    const sel = selectedMsg?.id === msg.id;
+        <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 320px)", minHeight: 320, background: t.surface, borderRadius: 12, border: `1px solid ${t.border}`, overflow: "hidden" }} className="fade-up">
+            {/* Header */}
+            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${t.border}`, display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0, background: avatarBg(clientInitials), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff" }}>{clientInitials}</div>
+                <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{c.client || "Client"}</div>
+                    <div style={{ fontSize: 11, color: t.textMuted }}>Re: {c.id} — {c.title}</div>
+                </div>
+            </div>
+            {/* Thread */}
+            <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 8, background: t.mode === "dark" ? "rgba(11,21,25,0.95)" : "rgba(234,240,234,0.95)" }}>
+                {loading && <div style={{ fontSize: 12, color: t.textFaint, textAlign: "center", marginTop: 20 }}>Loading messages…</div>}
+                {!loading && messages.length === 0 && (
+                    <div style={{ textAlign: "center", marginTop: 40 }}>
+                        <Icon d={I.chat} size={28} style={{ color: t.textFaint, opacity: .3, display: "block", margin: "0 auto 12px" }} />
+                        <div style={{ fontSize: 13, color: t.textMuted }}>No messages yet. Start the conversation.</div>
+                    </div>
+                )}
+                {messages.map((msg, i) => {
+                    const isL = msg.sender_role === "lawyer";
+                    const time = msg.created_at
+                        ? new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                        : "";
                     return (
-                        <div key={msg.id} onClick={() => setSelectedMsg(msg)}
-                            style={{
-                                display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", cursor: "pointer",
-                                borderBottom: `1px solid ${t.border}`, background: sel ? t.cardHi : t.surface,
-                                borderLeft: sel ? `3px solid ${t.primary}` : "3px solid transparent", transition: "background .1s"
-                            }}
-                            onMouseEnter={e => { if (!sel) e.currentTarget.style.background = t.cardHi; }}
-                            onMouseLeave={e => { if (!sel) e.currentTarget.style.background = t.surface; }}>
-                            <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: avatarBg(msg.initials), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff" }}>{msg.initials}</div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{msg.client}</div>
-                                <div style={{ fontSize: 11, color: t.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{msg.question}</div>
-                                <div style={{ fontSize: 10, color: t.textFaint, marginTop: 2 }}>{msg.time}</div>
+                        <div key={msg._id || i} style={{ display: "flex", justifyContent: isL ? "flex-end" : "flex-start" }}>
+                            <div style={{
+                                maxWidth: "60%", padding: "9px 13px",
+                                borderRadius: isL ? "10px 0 10px 10px" : "0 10px 10px 10px",
+                                background: isL ? t.primary : (t.mode === "dark" ? "rgba(26,44,52,0.95)" : t.surface),
+                                border: !isL ? `1px solid ${t.border}` : "none"
+                            }}>
+                                {!isL && <div style={{ fontSize: 10, fontWeight: 700, color: t.primary, marginBottom: 3 }}>{msg.sender_name}</div>}
+                                <div style={{ fontSize: 13, color: isL ? (t.mode === "dark" ? "#0D1E24" : "#fff") : t.text, lineHeight: 1.55 }}>{msg.text}</div>
+                                <div style={{ fontSize: 10, color: isL ? (t.mode === "dark" ? "rgba(13,30,36,0.55)" : "rgba(255,255,255,0.6)") : t.textFaint, marginTop: 3, textAlign: "right" }}>{time}</div>
                             </div>
-                            {msg.status === "Unanswered" && <div style={{ width: 7, height: 7, borderRadius: "50%", background: t.warn, flexShrink: 0 }} />}
                         </div>
                     );
                 })}
+                <div ref={msgEndRef} />
             </div>
-
-            {/* Right chat */}
-            {selectedMsg && (
-                <div style={{ flex: 1, background: t.surface, borderRadius: 12, border: `1px solid ${t.border}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                    <div style={{ padding: "12px 16px", borderBottom: `1px solid ${t.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0, background: avatarBg(selectedMsg.initials), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff" }}>{selectedMsg.initials}</div>
-                        <div>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{selectedMsg.client}</div>
-                            <div style={{ fontSize: 11, color: t.textMuted }}>Re: {c.id} — {c.title}</div>
-                        </div>
-                        <div style={{ flex: 1 }} />
-                        <Btn variant="secondary" size="sm" onClick={() => setPage("communications")}><Icon d={I.externalLink} size={11} /> Full View</Btn>
-                    </div>
-                    <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 8, background: t.mode === "dark" ? "rgba(11,21,25,0.95)" : "rgba(234,240,234,0.95)" }}>
-                        {(localThreads[selectedMsg.id] || []).map((msg, i) => {
-                            const isL = msg.who === "lawyer";
-                            return (
-                                <div key={`${selectedMsg.id}-${i}`} style={{ display: "flex", justifyContent: isL ? "flex-end" : "flex-start" }}>
-                                    <div style={{
-                                        maxWidth: "60%", padding: "9px 13px", borderRadius: isL ? "10px 0 10px 10px" : "0 10px 10px 10px",
-                                        background: isL ? t.primary : (t.mode === "dark" ? "rgba(26,44,52,0.95)" : t.surface),
-                                        border: !isL ? `1px solid ${t.border}` : "none"
-                                    }}>
-                                        <div style={{ fontSize: 13, color: isL ? (t.mode === "dark" ? "#0D1E24" : "#fff") : t.text, lineHeight: 1.55 }}>{msg.text}</div>
-                                        <div style={{ fontSize: 10, color: isL ? (t.mode === "dark" ? "rgba(13,30,36,0.55)" : "rgba(255,255,255,0.6)") : t.textFaint, marginTop: 3, textAlign: "right" }}>{msg.time}</div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                        <div ref={msgEndRef} />
-                    </div>
-                    <div style={{ padding: "10px 14px", borderTop: `1px solid ${t.border}`, display: "flex", gap: 8 }}>
-                        <input value={reply} onChange={e => setReply(e.target.value)}
-                            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); } }}
-                            placeholder="Type a reply..."
-                            style={{ flex: 1, height: 38, border: `1px solid ${t.border}`, borderRadius: 10, background: t.inputBg, color: t.text, fontSize: 13, padding: "0 14px", outline: "none" }} />
-                        <button onClick={sendReply}
-                            style={{ width: 38, height: 38, borderRadius: "50%", border: "none", background: reply.trim() ? t.primary : t.cardHi, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            <Icon d={I.send} size={14} style={{ color: reply.trim() ? (t.mode === "dark" ? "#0D1E24" : "#fff") : t.textMuted }} />
-                        </button>
-                    </div>
-                </div>
-            )}
+            {/* Input */}
+            <div style={{ padding: "10px 14px", borderTop: `1px solid ${t.border}`, display: "flex", gap: 8 }}>
+                <input value={reply} onChange={e => setReply(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); } }}
+                    placeholder="Type a message…"
+                    disabled={sending}
+                    style={{ flex: 1, height: 38, border: `1px solid ${t.border}`, borderRadius: 10, background: t.inputBg, color: t.text, fontSize: 13, padding: "0 14px", outline: "none" }} />
+                <button onClick={sendReply} disabled={sending || !reply.trim()}
+                    style={{ width: 38, height: 38, borderRadius: "50%", border: "none", background: reply.trim() ? t.primary : t.cardHi, cursor: reply.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Icon d={I.send} size={14} style={{ color: reply.trim() ? (t.mode === "dark" ? "#0D1E24" : "#fff") : t.textMuted }} />
+                </button>
+            </div>
         </div>
     );
 }
@@ -356,7 +339,15 @@ function WorkspaceAI({ c, addNotif }) {
     const bottomRef = useRef(null);
     useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-    const SYSTEM = `You are an expert Indian legal assistant. The lawyer is working on case "${c.id} — ${c.title}" (${c.type} case, ${c.court}). Client: ${c.client}. Next hearing: ${c.nextHearing}. Provide concise, case-relevant answers about Indian law. Reference specific acts and sections.`;
+    // Case context is sent as whitelisted structured data (not a free-text system
+    // prompt) — the server slots it into a vetted "case_context" template.
+    const caseContext = {
+        case_title: `${c.id} — ${c.title}`,
+        case_type: c.type,
+        court: c.court,
+        client_name: c.client,
+        next_hearing: c.nextHearing,
+    };
 
     const send = async (override) => {
         const q = (override || query).trim();
@@ -365,19 +356,19 @@ function WorkspaceAI({ c, addNotif }) {
         const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         if (!override) setMsgs(p => [...p, { role: "user", content: q, time: now }]);
         setLoading(true);
+        const history = msgs.map(m => ({ role: m.role, content: m.content }));
+        let accumulated = "";
+        const aiTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        // Optimistically add empty assistant message that we stream into
+        setMsgs(p => [...p, { role: "assistant", content: "", time: aiTime, _streaming: true }]);
         try {
-            const r = await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    model: "claude-sonnet-4-20250514", max_tokens: 1000, system: SYSTEM,
-                    messages: msgs.concat([{ role: "user", content: q }]).map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }))
-                })
+            await aiQueryStream(q, { templateId: "case_context", context: caseContext, history }, (chunk) => {
+                accumulated += chunk;
+                setMsgs(p => p.map((m, i) => i === p.length - 1 && m._streaming ? { ...m, content: accumulated } : m));
             });
-            if (!r.ok) throw new Error(`API error ${r.status}`);
-            const d = await r.json();
-            const aiTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-            setMsgs(p => [...p, { role: "assistant", content: d.content?.[0]?.text || "No response.", time: aiTime }]);
-        } catch (err) { setError(err.message || "Connection error"); }
+            // Mark streaming done
+            setMsgs(p => p.map((m, i) => i === p.length - 1 ? { ...m, _streaming: false } : m));
+        } catch (err) { setError(err.message || "Connection error"); setMsgs(p => p.filter(m => !m._streaming)); }
         finally { setLoading(false); }
     };
 
@@ -465,45 +456,103 @@ function WorkspaceAI({ c, addNotif }) {
 }
 
 // ── Tasks Tab ────────────────────────────────────────────────
-function WorkspaceTasks({ tasks, c }) {
+function WorkspaceTasks({ caseId, c }) {
     const { t } = useTheme();
-    const [localTasks, setLocalTasks] = useState(tasks);
-    const toggle = (id) => setLocalTasks(p => p.map(t => t.id === id ? { ...t, done: !t.done } : t));
-    const pending = localTasks.filter(t => !t.done);
-    const done = localTasks.filter(t => t.done);
+    const [tasks, setTasks] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [addModal, setAddModal] = useState(false);
+    const [form, setForm] = useState({ title: "", due: "", priority: "medium", description: "" });
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        listTasks(caseId).then(({ data, error }) => {
+            if (!error && data) setTasks(data);
+            setLoading(false);
+        });
+    }, [caseId]);
+
+    const toggle = async (task) => {
+        const newDone = !task.done;
+        setTasks(prev => prev.map(t => t._id === task._id ? { ...t, done: newDone } : t));
+        const { error } = await apiToggleTask(caseId, task._id, newDone);
+        if (error) setTasks(prev => prev.map(t => t._id === task._id ? { ...t, done: task.done } : t));
+    };
+
+    const handleAdd = async () => {
+        if (!form.title.trim()) return;
+        setSaving(true);
+        const { data, error } = await apiAddTask(caseId, { ...form, due: form.due || null });
+        if (!error && data) {
+            setTasks(prev => [...prev, data]);
+            setForm({ title: "", due: "", priority: "medium", description: "" });
+            setAddModal(false);
+        }
+        setSaving(false);
+    };
+
+    const pending = tasks.filter(t => !t.done);
+    const done = tasks.filter(t => t.done);
+    const f = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }} className="fade-up">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div className="serif" style={{ fontSize: 16, fontWeight: 600, color: t.text }}>Tasks — {pending.length} pending</div>
-                <Btn variant="accent" size="sm"><Icon d={I.plus} size={12} /> Add Task</Btn>
+                <Btn variant="accent" size="sm" onClick={() => setAddModal(true)}><Icon d={I.plus} size={12} /> Add Task</Btn>
             </div>
 
-            {localTasks.length === 0 ? (
+            {addModal && (
+                <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.55)" }} onClick={() => setAddModal(false)}>
+                    <div onClick={e => e.stopPropagation()} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, padding: 24, width: 440, maxWidth: "95vw" }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 16 }}>Add Task</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                            <div><Label>Title *</Label><Input value={form.title} onChange={f("title")} placeholder="e.g. File reply brief" /></div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                                <div><Label>Due Date</Label><Input type="date" value={form.due} onChange={f("due")} /></div>
+                                <div>
+                                    <Label>Priority</Label>
+                                    <select value={form.priority} onChange={f("priority")} style={{ width: "100%", height: 40, border: `1px solid ${t.border}`, borderRadius: 9, background: t.inputBg, color: t.text, fontSize: 14, padding: "0 12px", outline: "none" }}>
+                                        {["low", "medium", "high"].map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            <div><Label>Description</Label><Input type="textarea" value={form.description} onChange={f("description")} rows={2} placeholder="Optional details" /></div>
+                            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                                <Btn variant="secondary" size="sm" onClick={() => setAddModal(false)}>Cancel</Btn>
+                                <Btn variant="primary" size="sm" onClick={handleAdd} disabled={saving || !form.title.trim()}>{saving ? "Saving…" : "Add Task"}</Btn>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {loading && <div style={{ fontSize: 12, color: t.textFaint, textAlign: "center", padding: 24 }}>Loading tasks…</div>}
+
+            {!loading && tasks.length === 0 && (
                 <Card style={{ padding: 40, textAlign: "center" }}>
                     <div style={{ fontSize: 13, color: t.textMuted }}>No tasks for this case.</div>
                 </Card>
-            ) : (
+            )}
+
+            {!loading && tasks.length > 0 && (
                 <>
                     {pending.length > 0 && (
                         <div>
                             <div style={{ fontSize: 11, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Pending ({pending.length})</div>
                             {pending.map(task => (
-                                <div key={task.id} onClick={() => toggle(task.id)}
+                                <div key={task._id} onClick={() => toggle(task)}
                                     style={{
                                         display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderRadius: 10,
-                                        background: t.card, border: `1px solid ${t.border}`, marginBottom: 7, cursor: "pointer",
-                                        transition: "all .15s"
+                                        background: t.card, border: `1px solid ${t.border}`, marginBottom: 7, cursor: "pointer", transition: "all .15s"
                                     }}
                                     onMouseEnter={e => e.currentTarget.style.borderColor = t.primary}
                                     onMouseLeave={e => e.currentTarget.style.borderColor = t.border}>
-                                    <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${t[PRIO[task.priority]] || t.border}`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    </div>
+                                    <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${t[PRIO[task.priority]] || t.border}`, flexShrink: 0 }} />
                                     <div style={{ flex: 1 }}>
                                         <div style={{ fontSize: 13, fontWeight: 500, color: t.text }}>{task.title}</div>
-                                        <div style={{ fontSize: 11, color: t.textFaint, marginTop: 2 }}>Due {task.due}</div>
+                                        {task.due && <div style={{ fontSize: 11, color: t.textFaint, marginTop: 2 }}>Due {new Date(task.due).toLocaleDateString()}</div>}
                                     </div>
-                                    <Badge type={PRIO[task.priority]}>{task.priority}</Badge>
+                                    <Badge type={PRIO[task.priority] || "gray"}>{task.priority}</Badge>
                                 </div>
                             ))}
                         </div>
@@ -512,7 +561,7 @@ function WorkspaceTasks({ tasks, c }) {
                         <div>
                             <div style={{ fontSize: 11, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Completed ({done.length})</div>
                             {done.map(task => (
-                                <div key={task.id} onClick={() => toggle(task.id)}
+                                <div key={task._id} onClick={() => toggle(task)}
                                     style={{
                                         display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 10,
                                         background: t.card, border: `1px solid ${t.border}`, marginBottom: 6, cursor: "pointer", opacity: .6
@@ -522,7 +571,7 @@ function WorkspaceTasks({ tasks, c }) {
                                     </div>
                                     <div style={{ flex: 1 }}>
                                         <div style={{ fontSize: 13, color: t.textMuted, textDecoration: "line-through" }}>{task.title}</div>
-                                        <div style={{ fontSize: 11, color: t.textFaint, marginTop: 2 }}>Due {task.due}</div>
+                                        {task.due && <div style={{ fontSize: 11, color: t.textFaint, marginTop: 2 }}>Due {new Date(task.due).toLocaleDateString()}</div>}
                                     </div>
                                 </div>
                             ))}
@@ -618,6 +667,16 @@ function Toast({ msg }) {
 // ─────────────────────────────────────────────
 // HEARINGS TAB
 // ─────────────────────────────────────────────
+const OUTCOME_OPTIONS = [
+    ["adjourned", "Adjourned (new date given)"],
+    ["arguments_heard", "Arguments heard"],
+    ["evidence_recorded", "Evidence / witness recorded"],
+    ["order_reserved", "Order / judgment reserved"],
+    ["decided", "Decided / order announced"],
+    ["judge_on_leave", "Judge on leave / bench not available"],
+    ["other", "Other"],
+];
+
 function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline, setTimeline }) {
     const { t: T } = useTheme();
     const c = cases.find(x => x.id === caseId);
@@ -626,16 +685,35 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
     const emptyForm = { date: "", time: "10:00", court: c?.court || "", judge: c?.judge || "", purpose: "", outcome: "", status: "upcoming" };
     const [form, setForm] = useState(emptyForm);
     const [toast, setToast] = useState(null);
+    // Peshi tracker — structured outcome recording
+    const [outcomeModal, setOutcomeModal] = useState(null); // hearing object
+    const [oForm, setOForm] = useState({ outcome: "adjourned", note: "", next_date: "", next_time: "10:00" });
+    const [oBusy, setOBusy] = useState(false);
 
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
     const openAdd = () => { setForm(emptyForm); setModal("add"); };
     const openEdit = (h) => { setForm({ ...h }); setModal(h.id); };
 
-    const save = () => {
+    const save = async () => {
         if (!form.date || !form.purpose || !form.court) { showToast("⚠️ Date, court and purpose are required"); return; }
         const isEdit = modal !== "add";
         const updated = { ...form, id: isEdit ? modal : "H-" + Date.now(), status: form.outcome ? "past" : "upcoming" };
+
+        // Persist new hearings to backend; edits are local-only (no backend edit endpoint)
+        if (!isEdit) {
+            // Find the real _id of the case (case items have both id=case_number and _id=mongo_id)
+            const realCaseId = cases.find(x => x.id === caseId)?._id || caseId;
+            const { error } = await apiAddHearing(realCaseId, {
+                date: new Date(form.date).toISOString(),
+                court: form.court,
+                judge: form.judge || null,
+                purpose: form.purpose,
+                time: form.time || null,
+                outcome: form.outcome || null,
+            });
+            if (error) { showToast("❌ " + (error.message || "Failed to save hearing")); return; }
+        }
 
         setHearings(prev => {
             const list = prev[caseId] || [];
@@ -662,7 +740,43 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
         showToast("🗑 Hearing removed");
     };
 
-    const markOutcome = (h) => { setForm({ ...h }); setModal(h.id); };
+    const markOutcome = (h) => {
+        if (!h._id) { showToast("⚠️ This hearing predates outcome tracking — schedule hearings through the app to enable it"); return; }
+        setOForm({ outcome: "adjourned", note: "", next_date: "", next_time: "10:00" });
+        setOutcomeModal(h);
+    };
+
+    const saveOutcome = async () => {
+        const h = outcomeModal;
+        const realCaseId = cases.find(x => x.id === caseId)?._id || caseId;
+        setOBusy(true);
+        const { error } = await apiRecordOutcome(realCaseId, h._id, {
+            outcome: oForm.outcome,
+            note: oForm.note || null,
+            next_date: oForm.next_date ? new Date(oForm.next_date).toISOString() : null,
+            next_time: oForm.next_date ? oForm.next_time : null,
+        });
+        setOBusy(false);
+        if (error) { showToast("❌ " + (error.detail || error.message || "Failed to record outcome")); return; }
+
+        const label = OUTCOME_OPTIONS.find(([k]) => k === oForm.outcome)?.[1] || oForm.outcome;
+        setHearings(prev => {
+            let list = (prev[caseId] || []).map(x => x.id === h.id
+                ? { ...x, outcome: oForm.outcome, outcomeLabel: label, outcomeNote: oForm.note, status: "past" }
+                : x);
+            if (oForm.next_date) {
+                list = [...list, { id: "H-" + Date.now(), _id: null, date: oForm.next_date, time: oForm.next_time, court: h.court, judge: h.judge, purpose: "Next hearing", outcome: "", status: "upcoming" }];
+            }
+            return { ...prev, [caseId]: list };
+        });
+        if (oForm.next_date) {
+            setCases(prev => prev.map(x => x.id === caseId ? { ...x, nextHearing: oForm.next_date } : x));
+        }
+        const tlEntry = { id: "TL-" + Date.now(), date: h.date, type: "hearing", text: `Hearing outcome — ${label}${oForm.note ? ": " + oForm.note : ""}`, icon: "⚖️" };
+        setTimeline(prev => ({ ...prev, [caseId]: [tlEntry, ...(prev[caseId] || [])] }));
+        setOutcomeModal(null);
+        showToast("✅ Outcome recorded — client has been notified");
+    };
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -727,7 +841,7 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                                         </div>
                                         {h.outcome && (
                                             <div style={{ marginTop: 8, padding: "7px 12px", background: `${T.warn}14`, border: `1px solid ${T.warn}35`, borderRadius: 8, fontSize: 12, color: T.warn, display: "inline-block" }}>
-                                                📋 {h.outcome}
+                                                📋 {h.outcomeLabel || h.outcome}{h.outcomeNote ? ` — ${h.outcomeNote}` : ""}
                                             </div>
                                         )}
                                     </div>
@@ -755,7 +869,7 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                             <Input label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
                             <Input label="Time" type="time" value={form.time} onChange={v => setForm(p => ({ ...p, time: v }))} />
                         </div>
-                        <Input label="Court *" value={form.court} onChange={v => setForm(p => ({ ...p, court: v }))} placeholder="e.g. High Court Mumbai" />
+                        <Input label="Court *" value={form.court} onChange={v => setForm(p => ({ ...p, court: v }))} placeholder="e.g. Lahore High Court" />
                         <Input label="Judge / Presiding Officer" value={form.judge} onChange={v => setForm(p => ({ ...p, judge: v }))} placeholder="e.g. Hon. Justice Mehta" />
                         <Input label="Purpose / Agenda *" value={form.purpose} onChange={v => setForm(p => ({ ...p, purpose: v }))} placeholder="e.g. Evidence hearing — witness examination" />
                         <div style={{ borderTop: `1px dashed ${T.border}`, paddingTop: 14, marginTop: 2 }}>
@@ -764,6 +878,38 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 6 }}>
                             <Btn variant="secondary" onClick={() => setModal(null)}>Cancel</Btn>
                             <Btn onClick={save}>{modal === "add" ? "Schedule Hearing" : "Save Changes"}</Btn>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+            {/* Peshi tracker — record outcome modal */}
+            {outcomeModal && (
+                <Modal title="Record Hearing Outcome" subtitle={`${fmtDate(outcomeModal.date)} · ${outcomeModal.purpose || "Hearing"}`} onClose={() => setOutcomeModal(null)}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                        <div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>What happened? *</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+                                {OUTCOME_OPTIONS.map(([key, label]) => (
+                                    <button key={key} onClick={() => setOForm(p => ({ ...p, outcome: key }))} style={{
+                                        padding: "9px 10px", borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "left",
+                                        border: `1.5px solid ${oForm.outcome === key ? T.primary : T.border}`,
+                                        background: oForm.outcome === key ? T.primaryGlow2 : "transparent",
+                                        color: oForm.outcome === key ? T.primary : T.textMuted, fontFamily: "inherit",
+                                    }}>{label}</button>
+                                ))}
+                            </div>
+                        </div>
+                        <Textarea label="Note for the client (optional)" value={oForm.note} onChange={v => setOForm(p => ({ ...p, note: v }))} rows={2} placeholder="e.g. Opposing counsel sought time to file reply" />
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                            <Input label="Next hearing date (auto-schedules)" type="date" value={oForm.next_date} onChange={v => setOForm(p => ({ ...p, next_date: v }))} />
+                            <Input label="Time" type="time" value={oForm.next_time} onChange={v => setOForm(p => ({ ...p, next_time: v }))} />
+                        </div>
+                        <div style={{ fontSize: 11.5, color: T.textMuted }}>
+                            The client is notified instantly with a plain-language explanation of what this outcome means — in English and Urdu.
+                        </div>
+                        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                            <Btn variant="secondary" onClick={() => setOutcomeModal(null)}>Cancel</Btn>
+                            <Btn onClick={saveOutcome} disabled={oBusy}>{oBusy ? "Saving…" : "Record & Notify Client"}</Btn>
                         </div>
                     </div>
                 </Modal>
@@ -953,7 +1099,7 @@ function TimelineTab({ caseId, timeline, setTimeline, cases }) {
 
     // Group by month
     const grouped = entries.reduce((acc, e) => {
-        const key = new Date(e.date).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+        const key = new Date(e.date).toLocaleDateString("en-PK", { month: "long", year: "numeric" });
         if (!acc[key]) acc[key] = [];
         acc[key].push(e);
         return acc;
@@ -1217,17 +1363,142 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                 {tab === "timeline" && (
                     <TimelineTab caseId={caseId} timeline={timeline} setTimeline={setTimeline} cases={cases} />
                 )}
-                {tab === "messages" && <WorkspaceMessages msgs={qData.filter(q => q.case === caseId)} c={c} setPage={() => { }} />}
-                {tab === "tasks" && <WorkspaceTasks tasks={tasksData.filter(t => t.case === caseId)} c={c} />}
+                {tab === "messages" && <WorkspaceMessages caseId={cases.find(x => x.id === caseId)?._id || caseId} c={c} />}
+                {tab === "tasks" && <WorkspaceTasks caseId={cases.find(x => x.id === caseId)?._id || caseId} c={c} />}
             </div>
         </div>
     );
 }
 
 // ─────────────────────────────────────────────
+// ENGAGEMENT INBOX — incoming hire requests from clients
+// ─────────────────────────────────────────────
+const FEE_TYPE_OPTIONS = [
+    { value: "fixed", label: "Fixed fee (whole case)" },
+    { value: "hourly", label: "Per hour" },
+    { value: "per_hearing", label: "Per hearing (peshi)" },
+];
+
+function EngagementInbox({ requests, onChanged }) {
+    const { t: T } = useTheme();
+    const [accepting, setAccepting] = useState(null);   // request being accepted (opens terms modal)
+    const [feeAmount, setFeeAmount] = useState("");
+    const [feeType, setFeeType] = useState("fixed");
+    const [scopeNote, setScopeNote] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [toast, setToast] = useState(null);
+    const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+
+    if (!requests.length) return null;
+
+    const openAccept = (req) => {
+        setAccepting(req);
+        setFeeAmount("");
+        setFeeType("fixed");
+        setScopeNote("");
+    };
+
+    const submitAccept = async () => {
+        const amount = feeAmount === "" ? null : Number(feeAmount);
+        if (amount !== null && (!Number.isFinite(amount) || amount < 0)) {
+            showToast("⚠️ Fee must be a valid amount");
+            return;
+        }
+        setBusy(true);
+        const { error } = await acceptEngagement(accepting.id, {
+            fee_amount: amount,
+            fee_type: amount !== null ? feeType : null,
+            scope_note: scopeNote.trim() || null,
+        });
+        setBusy(false);
+        if (error) { showToast("❌ " + (error.message || "Failed to accept")); return; }
+        setAccepting(null);
+        showToast("✅ Case accepted — the client has been notified");
+        onChanged();
+    };
+
+    const handleDecline = async (req) => {
+        const reason = window.prompt("Optional: tell the client why you're declining (leave blank to skip)");
+        if (reason === null) return; // prompt cancelled
+        setBusy(true);
+        const { error } = await declineEngagement(req.id, reason.trim() || null);
+        setBusy(false);
+        if (error) { showToast("❌ " + (error.message || "Failed to decline")); return; }
+        showToast("Request declined — the client has been notified");
+        onChanged();
+    };
+
+    return (
+        <Card style={{ padding: 18, border: `1px solid ${T.primary}50`, background: T.primaryGlow2 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>
+                    📥 Client Requests
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: T.primary, background: `${T.primary}20`, borderRadius: 20, padding: "2px 10px" }}>
+                    {requests.length} pending
+                </span>
+                <span style={{ fontSize: 11, color: T.textMuted }}>Clients asking you to take their case — accept to add it to your workspace</span>
+            </div>
+
+            {requests.map(req => (
+                <div key={req.id} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{req.case_title || "Untitled case"}</span>
+                                <span style={{ fontSize: 11, color: T.primary, fontFamily: "monospace", fontWeight: 700 }}>{req.case_number}</span>
+                                {req.case_type && <Badge type="info">{req.case_type}</Badge>}
+                            </div>
+                            <div style={{ fontSize: 12, color: T.textMuted, marginTop: 3 }}>
+                                From <span style={{ color: T.text, fontWeight: 600 }}>{req.client_name || "Client"}</span>
+                            </div>
+                            {req.case_description && (
+                                <div style={{ fontSize: 12, color: T.textDim, marginTop: 6, lineHeight: 1.55 }}>{req.case_description}</div>
+                            )}
+                            {req.message && (
+                                <div style={{ fontSize: 12, color: T.text, marginTop: 8, padding: "8px 12px", borderLeft: `3px solid ${T.primary}`, background: T.primaryGlow2, borderRadius: "0 8px 8px 0", lineHeight: 1.55 }}>
+                                    “{req.message}”
+                                </div>
+                            )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
+                            <Btn variant="accent" size="sm" disabled={busy} onClick={() => openAccept(req)}>✓ Accept Case</Btn>
+                            <Btn variant="ghost" size="sm" disabled={busy} onClick={() => handleDecline(req)}>Decline</Btn>
+                        </div>
+                    </div>
+                </div>
+            ))}
+
+            {accepting && (
+                <Modal
+                    title="Accept This Case"
+                    subtitle={`${accepting.case_title} — set your terms; the client will see them in the acceptance notice`}
+                    onClose={() => setAccepting(null)}
+                    width={480}
+                >
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                            <FieldInput label="Fee (PKR, optional)" type="number" value={feeAmount} onChange={setFeeAmount} placeholder="e.g. 50000" />
+                            <Select label="Fee Type" value={feeType} onChange={setFeeType} options={FEE_TYPE_OPTIONS} />
+                        </div>
+                        <Textarea label="Scope Note (optional)" rows={3} value={scopeNote} onChange={setScopeNote}
+                            placeholder="What the engagement covers — e.g. representation through trial, drafting, hearings…" />
+                        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                            <Btn variant="ghost" onClick={() => setAccepting(null)}>Cancel</Btn>
+                            <Btn variant="accent" disabled={busy} onClick={submitAccept}>{busy ? "Accepting…" : "Accept & Notify Client"}</Btn>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+            <Toast msg={toast} />
+        </Card>
+    );
+}
+
+// ─────────────────────────────────────────────
 // CASES LIST
 // ─────────────────────────────────────────────
-function CasesList({ cases, onOpen }) {
+function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {} }) {
     const { t: T } = useTheme();
     const [search, setSearch] = useState("");
     const [statusF, setStatusF] = useState("All");
@@ -1255,6 +1526,8 @@ function CasesList({ cases, onOpen }) {
                     <div style={{ fontSize: 13, color: T.textMuted, marginTop: 3 }}>Track and manage all legal cases</div>
                 </div>
             </div>
+
+            <EngagementInbox requests={requests} onChanged={onRequestsChanged} />
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10 }}>
                 {stats.map(s => (
@@ -1328,16 +1601,82 @@ function CasesList({ cases, onOpen }) {
 // CASES PAGE — ties CasesList + CaseWorkspace
 // ─────────────────────────────────────────────
 
+const _CS = { open: "Filed", active: "Under Hearing", closed: "Closed", dismissed: "Closed" };
+function _mapApiCase(c) {
+    const hearings = (c.hearing_dates || []).map((h, idx) => ({
+        id: `DB-${idx}-${c._id}`,
+        _id: h._id || null,          // backend id — required for outcome recording
+        date: typeof h.date === "string" ? h.date.split("T")[0] : new Date(h.date).toISOString().split("T")[0],
+        time: h.time || "10:00",
+        court: h.court || "",
+        judge: h.judge || "",
+        purpose: h.purpose || h.notes || "",
+        outcome: h.outcome || "",
+        outcomeLabel: h.outcome_label || "",
+        outcomeNote: h.outcome_note || "",
+        status: h.outcome ? "past" : "upcoming",
+    }));
+    const nextUpcoming = hearings.find(h => h.status === "upcoming");
+    return {
+        id: c.case_number || c._id,
+        _id: c._id,
+        title: c.title || "Untitled Case",
+        client: c.client_name || "—",
+        court: c.province || "—",
+        type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
+        status: _CS[c.status] || "Filed",
+        nextHearing: nextUpcoming?.date || "",
+        urgent: c.urgency === "high",
+        value: "—",
+        judge: "—",
+        _apiHearings: hearings,
+    };
+}
+
 function CasesPage() {
     const { t: T } = useTheme();
     const { activeCase, setActiveCase, openCaseId, setOpenCaseId, docs, setDocs, setPage } = useCase();
-    const [cases, setCases] = useState(seedCases);
-    const [hearings, setHearings] = useState(seedHearings);
-    const [timeline, setTimeline] = useState(seedTimeline);
+    const [cases, setCases] = useState([]);
+    const [hearings, setHearings] = useState({});
+    const [timeline, setTimeline] = useState({});
+    const [loading, setLoading] = useState(true);
+    const [requests, setRequests] = useState([]);
+
+    const loadCases = () => {
+        listCases({ page_size: 50 }).then(({ data }) => {
+            if (data?.items) setCases(data.items.map(_mapApiCase));
+            setLoading(false);
+        }).catch(() => setLoading(false));
+    };
+    const loadRequests = () => {
+        listEngagements({ status: "requested" }).then(({ data }) => {
+            if (Array.isArray(data)) setRequests(data);
+        }).catch(() => {});
+    };
+
+    useEffect(() => {
+        loadCases();
+        loadRequests();
+    }, []);
+
+    // Accepting a request assigns the case — refresh both lists
+    const handleRequestsChanged = () => {
+        loadRequests();
+        loadCases();
+    };
 
     const handleOpenCase = (caseId) => {
         setOpenCaseId(caseId);
         setActiveCase(caseId);
+        // Seed hearings from DB data if not already loaded locally
+        setHearings(prev => {
+            if (prev[caseId]?.length) return prev;
+            const caseData = cases.find(c => c.id === caseId);
+            if (caseData?._apiHearings?.length) {
+                return { ...prev, [caseId]: caseData._apiHearings };
+            }
+            return prev;
+        });
     };
 
     const handleBack = () => {
@@ -1361,7 +1700,15 @@ function CasesPage() {
         );
     }
 
-    return <CasesList cases={cases} onOpen={handleOpenCase} />;
+    if (loading) {
+        return (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: T.textMuted, fontSize: 14 }}>
+                Loading cases…
+            </div>
+        );
+    }
+
+    return <CasesList cases={cases} onOpen={handleOpenCase} requests={requests} onRequestsChanged={handleRequestsChanged} />;
 }
 
 export { CasesPage };

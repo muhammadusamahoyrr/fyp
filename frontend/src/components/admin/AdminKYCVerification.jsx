@@ -1,28 +1,53 @@
 'use client';
-// Admin KYC Verification — paste your code here
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { StatCard, IconBox, Badge, DocTag, Avatar, Btn, Modal, EmptyState, Ic } from "./components.jsx";
 import { IC } from "./icons.js";
+import { adminListPendingKYC, adminProcessKYC } from "@/lib/api.js";
+
+function fmtDate(iso) {
+  if (!iso) return "Unknown";
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
 
 export const KYCVerification = ({ T }) => {
-  const [lawyers, setLawyers] = useState([
-    { id: 1, name: "Emily Rodriguez", email: "e.rodriguez@email.com", bar: "KA-5103", docs: ["Bar License","ID Proof","Address Proof"], status: "pending",  submitted: "Mar 12, 2024" },
-    { id: 2, name: "Thomas Lee",      email: "t.lee@email.com",       bar: "KA-7891", docs: ["Bar License","ID Proof"],                 status: "pending",  submitted: "Mar 13, 2024" },
-    { id: 3, name: "Sarah Johnson",   email: "sarah.j@email.com",     bar: "KA-4521", docs: ["Bar License","ID Proof","Address Proof"], status: "approved", submitted: "Feb 5, 2024"  },
-    { id: 4, name: "Robert Brown",    email: "r.brown@email.com",     bar: "KA-3892", docs: ["Bar License","ID Proof","Address Proof"], status: "approved", submitted: "Feb 8, 2024"  },
-    { id: 5, name: "Lisa Tan",        email: "l.tan@email.com",       bar: "KA-6234", docs: ["Bar License","ID Proof"],                 status: "rejected", submitted: "Feb 20, 2024" },
-  ]);
+  const [lawyers, setLawyers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [modal, setModal]             = useState(null);
   const [notif, setNotif]             = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch]           = useState("");
 
+  useEffect(() => {
+    adminListPendingKYC().then(({ data }) => {
+      if (data) {
+        const mapped = data.map(u => ({
+          id: u._id,
+          name: u.full_name,
+          email: u.email,
+          bar: u.lawyer_profile?.bar_number || "N/A",
+          docs: ["Bar License", "ID Proof"],
+          status: "pending",
+          submitted: fmtDate(u.created_at),
+        }));
+        setLawyers(mapped);
+      }
+      setLoading(false);
+    });
+  }, []);
+
   const pending  = lawyers.filter(l => l.status === "pending").length;
   const approved = lawyers.filter(l => l.status === "approved").length;
   const rejected = lawyers.filter(l => l.status === "rejected").length;
 
-  const setStatus = (id, st) => {
+  const setStatus = async (id, st) => {
     const lawyer = lawyers.find(l => l.id === id);
+    const { error } = await adminProcessKYC(id, st === "approved");
+    if (error) {
+      setNotif({ name: lawyer.name, email: lawyer.email, action: "error" });
+      setTimeout(() => setNotif(null), 4000);
+      return;
+    }
     setLawyers(p => p.map(l => l.id === id ? { ...l, status: st } : l));
     setNotif({ name: lawyer.name, email: lawyer.email, action: st });
     setTimeout(() => setNotif(null), 4000);
@@ -35,16 +60,22 @@ export const KYCVerification = ({ T }) => {
     return matchStatus && matchSearch;
   }), [lawyers, statusFilter, search]);
 
+  const [listRef] = useAutoAnimate({ duration: 220, easing: 'ease-out' });
   const sb = s => ({ pending: { label: "Pending", type: "warn" }, approved: { label: "Approved", type: "success" }, rejected: { label: "Rejected", type: "danger" } }[s]);
 
   return (
     <div style={{ position: "relative" }}>
       {notif && (
-        <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 999, background: notif.action === "approved" ? T.success : T.danger, color: "#fff", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 600, boxShadow: "0 6px 24px rgba(0,0,0,0.22)", maxWidth: 340, display: "flex", gap: 10, alignItems: "flex-start", animation: "slideUp 0.3s ease" }}>
+        <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 999, background: notif.action === "approved" ? T.success : notif.action === "error" ? T.warn : T.danger, color: "#fff", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 600, boxShadow: "0 6px 24px rgba(0,0,0,0.22)", maxWidth: 340, display: "flex", gap: 10, alignItems: "flex-start" }}>
           <Ic d={notif.action === "approved" ? IC.checkCircle : IC.xCircle} size={18} color="#fff" />
           <div>
-            <div style={{ fontWeight: 700 }}>Notification sent to {notif.name}</div>
-            <div style={{ fontSize: 12, opacity: 0.88, marginTop: 2 }}>Email to <strong>{notif.email}</strong>: KYC {notif.action}</div>
+            {notif.action === "error"
+              ? <div style={{ fontWeight: 700 }}>Failed to update {notif.name} — check connection</div>
+              : <>
+                  <div style={{ fontWeight: 700 }}>Notification sent to {notif.name}</div>
+                  <div style={{ fontSize: 12, opacity: 0.88, marginTop: 2 }}>Email to <strong>{notif.email}</strong>: KYC {notif.action}</div>
+                </>
+            }
           </div>
         </div>
       )}
@@ -95,10 +126,12 @@ export const KYCVerification = ({ T }) => {
         </div>
       )}
 
-      {filtered.length === 0
-        ? <EmptyState T={T} icon={IC.verify} title="No lawyers match" sub="Try a different filter or search term." actionLabel="Clear filters" onAction={() => { setStatusFilter("all"); setSearch(""); }} />
+      {loading
+        ? <div style={{ textAlign: "center", padding: 48, color: T.textMuted, fontSize: 14 }}>Loading pending KYC submissions…</div>
+        : filtered.length === 0
+        ? <EmptyState T={T} icon={IC.verify} title={lawyers.length === 0 ? "No pending KYC submissions" : "No lawyers match"} sub={lawyers.length === 0 ? "All submitted applications have been reviewed." : "Try a different filter or search term."} actionLabel="Clear filters" onAction={() => { setStatusFilter("all"); setSearch(""); }} />
         : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div ref={listRef} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {filtered.map(l => (
               <div key={l.id} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: "16px 20px", boxShadow: T.shadowCard, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
                 <Avatar name={l.name} size={42} />

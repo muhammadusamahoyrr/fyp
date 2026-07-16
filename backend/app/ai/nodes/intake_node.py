@@ -3,7 +3,7 @@ import json
 from pydantic import BaseModel
 
 from app.ai.graph.state import AgentState
-from app.ai.llm import get_llm
+from app.ai.llm import get_structured_llm
 
 SYSTEM_PROMPT = """\
 You are a Pakistani legal analyst. Based on the case description and any retrieved law sections, produce a structured case analysis.
@@ -25,7 +25,7 @@ class IntakeOutput(BaseModel):
 
 
 def intake_node(state: AgentState) -> dict:
-    llm = get_llm().with_structured_output(IntakeOutput)
+    llm = get_structured_llm(IntakeOutput)
 
     context = "\n".join(
         f"- {c['statute']} Section {c['section_number']}: {c['content'][:200]}"

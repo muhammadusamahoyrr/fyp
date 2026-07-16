@@ -41,6 +41,10 @@ coverage/
 .cache/
 *.tmp
 
+# Large binary files
+*.glb
+backend/uploads/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -75,3 +79,6 @@ backend/knowledge_base/
 backend/test_*.py
 backend/debug_*.py
 backend/verify_*.py
+
+# Nested tooling repo (not part of project)
+claude-skill-registry/

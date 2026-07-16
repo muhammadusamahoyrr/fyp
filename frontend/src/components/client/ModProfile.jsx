@@ -310,7 +310,7 @@ const ModProfile = () => {
         if (editData.province) payload.province = editData.province;
         const { error } = await updateMe(payload);
         if (error) {
-            toast.show(error.detail || "Failed to save profile. Please try again.", "error");
+            toast.show(error.message || "Failed to save profile. Please try again.", "error");
         } else {
             updateUser(payload);
             toast.show("Profile updated successfully!", "success");
@@ -326,7 +326,7 @@ const ModProfile = () => {
         setSaving(true);
         const { error } = await changePassword(pwdData.current, pwdData.next);
         if (error) {
-            toast.show(error.detail || "Failed to change password. Please try again.", "error");
+            toast.show(error.message || "Failed to change password. Please try again.", "error");
         } else {
             toast.show("Password changed successfully!", "success");
             setPwdMode(false);

@@ -5,15 +5,53 @@ import { useCase } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { Card, Badge, Divider } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
-import { casesData, CSB } from "./data.js";
-import { useState } from "react";
+import { CSB } from "./data.js";
+import { useState, useEffect } from "react";
+import { useAuth } from "@/context/AuthContext.jsx";
+import { listCases, listAppointments } from "@/lib/api.js";
+
+const _STAT_MAP = { open: "Filed", active: "Under Hearing", closed: "Closed", dismissed: "Closed" };
+function _mapCase(c) {
+    return {
+        id: c.case_number || c._id,
+        _id: c._id,
+        title: c.title || "Untitled Case",
+        client: c.client_name || "—",
+        court: c.province || "—",
+        type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
+        status: _STAT_MAP[c.status] || "Filed",
+        nextHearing: "",
+        urgent: c.urgency === "high",
+    };
+}
 
 function DashboardPage() {
     const { t } = useTheme();
     const { setActiveCase, setOpenCaseId, setPage } = useCase();
     const { addNotif } = useNotif();
-    const stats = [{ l: "Active Cases", v: "24", c: "#3EECD6", ic: "cases", ch: "+3 this month", pg: "cases" }, { l: "Pending Docs", v: "12", c: "#FFBE45", ic: "fileText", ch: "5 need review", pg: "documents" }, { l: "Total Clients", v: "67", c: "#42D4A0", ic: "clients", ch: "+8 this month", pg: "clients" }, { l: "Today's Hearings", v: "4", c: "#4AAFFF", ic: "gavel", ch: "Next in 2h", pg: "appointments" }];
-    const events = [{ time: "10:00 AM", title: "Court Hearing — Singh vs. Municipal", color: "#4AAFFF", page: "appointments" }, { time: "12:30 PM", title: "Client Meeting — Priya Sharma", color: "#3EECD6", page: "appointments" }, { time: "2:00 PM", title: "Document Review — Patel Case", color: "#42D4A0", page: "documents" }, { time: "4:30 PM", title: "New Client Consultation", color: "#FFBE45", page: "appointments" }];
+    const { user } = useAuth();
+    const [rawCases, setRawCases] = useState([]);
+    const [aptCount, setAptCount] = useState(0);
+
+    useEffect(() => {
+        listCases({ page_size: 50 }).then(({ data }) => { if (data?.items) setRawCases(data.items); });
+        listAppointments({ page_size: 50 }).then(({ data }) => {
+            if (data?.items) setAptCount(data.items.filter(a => a.status === "confirmed" || a.status === "pending").length);
+        });
+    }, []);
+
+    const displayCases = rawCases.slice(0, 4).map(_mapCase);
+    const greetName = user?.full_name?.split(" ")[0] || "Counselor";
+    const activeCnt = rawCases.filter(c => ["open", "active"].includes(c.status)).length;
+    const clientCnt = new Set(rawCases.map(c => c.client_id).filter(Boolean)).size;
+
+    const stats = [
+        { l: "Active Cases", v: rawCases.length ? String(activeCnt) : "—", c: "#3EECD6", ic: "cases", ch: "Assigned to you", pg: "cases" },
+        { l: "Pending Docs", v: "—", c: "#FFBE45", ic: "fileText", ch: "See documents", pg: "documents" },
+        { l: "Total Clients", v: rawCases.length ? String(clientCnt) : "—", c: "#42D4A0", ic: "clients", ch: "Across all cases", pg: "clients" },
+        { l: "Appointments", v: String(aptCount), c: "#4AAFFF", ic: "gavel", ch: "Pending + Confirmed", pg: "appointments" },
+    ];
+    const events = [{ time: "10:00 AM", title: "Court Hearing", color: "#4AAFFF", page: "appointments" }, { time: "12:30 PM", title: "Client Meeting", color: "#3EECD6", page: "appointments" }, { time: "2:00 PM", title: "Document Review", color: "#42D4A0", page: "documents" }, { time: "4:30 PM", title: "New Client Consultation", color: "#FFBE45", page: "appointments" }];
 
     const openCaseFromDashboard = (c) => {
         setActiveCase(c.id);
@@ -25,7 +63,7 @@ function DashboardPage() {
         <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
             <div style={{ flex: 1, overflowY: "auto", padding: 0 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-                    <div className="fade-up"><div className="serif" style={{ fontSize: 24, fontWeight: 700, color: t.text }}>Good morning, John ☀️</div><div style={{ fontSize: 13, color: t.textMuted, marginTop: 3 }}>Here's what's happening across your practice today.</div></div>
+                    <div className="fade-up"><div className="serif" style={{ fontSize: 24, fontWeight: 700, color: t.text }}>Good morning, {greetName} ☀️</div><div style={{ fontSize: 13, color: t.textMuted, marginTop: 3 }}>Here's what's happening across your practice today.</div></div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
                         {stats.map((s, i) => (
                             <Card key={s.l} className={`fade-up s${i + 1}`} style={{ padding: 16, cursor: "pointer" }} onClick={() => setPage(s.pg)}>
@@ -47,7 +85,8 @@ function DashboardPage() {
                             </div>
                             <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                 <thead><tr style={{ fontSize: 11, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.07em" }}>{["Case ID", "Title", "Type", "Status", "Date", ""].map(h => <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontWeight: 700, borderBottom: `1px solid ${t.border}` }}>{h}</th>)}</tr></thead>
-                                <tbody>{casesData.slice(0, 4).map(c => (
+                                <tbody>
+                                {displayCases.map(c => (
                                     <tr key={c.id} style={{ borderBottom: `1px solid ${t.border}`, cursor: "pointer" }} onClick={() => openCaseFromDashboard(c)}>
                                         <td style={{ padding: "12px 16px" }}><div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                                             {c.urgent && <Icon d={I.alert} size={13} style={{ color: t.danger }} />}
@@ -56,10 +95,14 @@ function DashboardPage() {
                                         <td style={{ padding: "12px 16px", fontSize: 13, color: t.text, fontWeight: 500 }}>{c.title}</td>
                                         <td style={{ padding: "12px 16px" }}><Badge type="gray">{c.type}</Badge></td>
                                         <td style={{ padding: "12px 16px" }}><Badge type={CSB[c.status]}>{c.status}</Badge></td>
-                                        <td style={{ padding: "12px 16px", fontSize: 12, color: t.textMuted }}>{c.nextHearing}</td>
+                                        <td style={{ padding: "12px 16px", fontSize: 12, color: t.textMuted }}>{c.nextHearing || "—"}</td>
                                         <td style={{ padding: "12px 16px" }}><button style={{ background: "none", border: "none", color: t.textFaint, cursor: "pointer" }}><Icon d={I.more} size={15} /></button></td>
                                     </tr>
-                                ))}</tbody>
+                                ))}
+                                {!displayCases.length && (
+                                    <tr><td colSpan={6} style={{ padding: "32px 16px", textAlign: "center", fontSize: 13, color: t.textMuted }}>No cases assigned yet</td></tr>
+                                )}
+                            </tbody>
                             </table>
                         </Card>
                         <Card className="fade-up s3" style={{ padding: 16 }}>

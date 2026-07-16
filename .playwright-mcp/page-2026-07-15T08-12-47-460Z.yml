@@ -1,0 +1,98 @@
+- generic [active] [ref=f33e1]:
+  - button "Open Next.js Dev Tools" [ref=f33e125] [cursor=pointer]
+  - alert [ref=f33e118]
+  - generic [ref=f33e129]:
+    - generic [ref=f33e130]:
+      - generic [ref=f33e131]:
+        - img "AttorneyAI" [ref=f33e132]
+        - generic [ref=f33e133]:
+          - generic [ref=f33e134]: AttorneyAI
+          - generic [ref=f33e135]: Legal Practice Suite
+        - button [ref=f33e136] [cursor=pointer]
+      - generic [ref=f33e139]:
+        - generic [ref=f33e140]:
+          - button "Dashboard" [ref=f33e141] [cursor=pointer]
+          - button "Cases" [ref=f33e147] [cursor=pointer]
+          - button "Clients" [ref=f33e152] [cursor=pointer]
+        - generic [ref=f33e160]:
+          - button "Documents" [ref=f33e161] [cursor=pointer]
+          - button "Agreements" [ref=f33e167] [cursor=pointer]
+          - button "Overseas Disputes" [ref=f33e173] [cursor=pointer]
+          - button "Cause List" [ref=f33e181] [cursor=pointer]
+          - button "Payments" [ref=f33e189] [cursor=pointer]
+          - button "Appointments" [ref=f33e195] [cursor=pointer]
+        - generic [ref=f33e201]:
+          - button "AI Assistant" [ref=f33e202] [cursor=pointer]
+          - button "Case Law" [ref=f33e208] [cursor=pointer]
+          - button "Draft Generator" [ref=f33e213] [cursor=pointer]
+        - button "Settings" [ref=f33e220] [cursor=pointer]
+      - generic [ref=f33e227] [cursor=pointer]:
+        - generic [ref=f33e228]: AR
+        - generic [ref=f33e229]:
+          - generic [ref=f33e230]: Ahmad Raza Khan
+          - generic [ref=f33e231]: Advocate
+        - button "7" [ref=f33e232]
+        - button "Switch to Light Mode" [ref=f33e237]
+    - main [ref=f33e242]:
+      - generic [ref=f33e245]:
+        - generic [ref=f33e246]:
+          - generic [ref=f33e247]: Good morning, Ahmad ☀️
+          - generic [ref=f33e248]: Here's what's happening across your practice today.
+        - generic [ref=f33e249]:
+          - generic [ref=f33e252] [cursor=pointer]:
+            - generic [ref=f33e253]: Active Cases
+            - generic [ref=f33e254]: —
+            - generic [ref=f33e255]: Assigned to you
+          - generic [ref=f33e263] [cursor=pointer]:
+            - generic [ref=f33e264]: Pending Docs
+            - generic [ref=f33e265]: —
+            - generic [ref=f33e266]: See documents
+          - generic [ref=f33e275] [cursor=pointer]:
+            - generic [ref=f33e276]: Total Clients
+            - generic [ref=f33e277]: —
+            - generic [ref=f33e278]: Across all cases
+          - generic [ref=f33e289] [cursor=pointer]:
+            - generic [ref=f33e290]: Appointments
+            - generic [ref=f33e291]: "0"
+            - generic [ref=f33e292]: Pending + Confirmed
+        - generic [ref=f33e301]:
+          - generic [ref=f33e302]:
+            - generic [ref=f33e303]:
+              - generic [ref=f33e304]: Recent Cases
+              - button "View all" [ref=f33e305] [cursor=pointer]
+            - table [ref=f33e308]:
+              - rowgroup [ref=f33e309]:
+                - row [ref=f33e310]:
+                  - columnheader "Case ID" [ref=f33e311]
+                  - columnheader "Title" [ref=f33e312]
+                  - columnheader "Type" [ref=f33e313]
+                  - columnheader "Status" [ref=f33e314]
+                  - columnheader "Date" [ref=f33e315]
+                  - columnheader [ref=f33e316]
+              - rowgroup [ref=f33e317]:
+                - row [ref=f33e318]:
+                  - cell "No cases assigned yet" [ref=f33e319]
+          - generic [ref=f33e320]:
+            - generic [ref=f33e321]: Today's Schedule
+            - generic [ref=f33e326] [cursor=pointer]:
+              - generic [ref=f33e327]: 10:00 AM
+              - generic [ref=f33e328]: Court Hearing
+            - generic [ref=f33e333] [cursor=pointer]:
+              - generic [ref=f33e334]: 12:30 PM
+              - generic [ref=f33e335]: Client Meeting
+            - generic [ref=f33e340] [cursor=pointer]:
+              - generic [ref=f33e341]: 2:00 PM
+              - generic [ref=f33e342]: Document Review
+            - generic [ref=f33e346] [cursor=pointer]:
+              - generic [ref=f33e347]: 4:30 PM
+              - generic [ref=f33e348]: New Client Consultation
+            - generic [ref=f33e350]:
+              - generic [ref=f33e351] [cursor=pointer]:
+                - generic [ref=f33e352]: "3"
+                - generic [ref=f33e353]: Hearings
+              - generic [ref=f33e354] [cursor=pointer]:
+                - generic [ref=f33e355]: "5"
+                - generic [ref=f33e356]: Tasks
+              - generic [ref=f33e357] [cursor=pointer]:
+                - generic [ref=f33e358]: "2"
+                - generic [ref=f33e359]: Pending

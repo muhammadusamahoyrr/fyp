@@ -1,0 +1,71 @@
+- generic [active] [ref=f34e1]:
+  - button "Open Next.js Dev Tools" [ref=f34e9] [cursor=pointer]
+  - alert [ref=f34e13]
+  - generic [ref=f34e14]:
+    - generic [ref=f34e15]:
+      - generic [ref=f34e16]:
+        - img "AttorneyAI" [ref=f34e17]
+        - generic [ref=f34e18]:
+          - generic [ref=f34e19]: AttorneyAI
+          - generic [ref=f34e20]: Legal Practice Suite
+        - button [ref=f34e21] [cursor=pointer]
+      - generic [ref=f34e24]:
+        - generic [ref=f34e25]:
+          - button "Dashboard" [ref=f34e26] [cursor=pointer]
+          - button "Cases" [ref=f34e31] [cursor=pointer]
+          - button "Clients" [ref=f34e36] [cursor=pointer]
+        - generic [ref=f34e44]:
+          - button "Documents" [ref=f34e45] [cursor=pointer]
+          - button "Agreements" [ref=f34e51] [cursor=pointer]
+          - button "Overseas Disputes" [ref=f34e57] [cursor=pointer]
+          - button "Cause List" [ref=f34e66] [cursor=pointer]
+          - button "Payments" [ref=f34e74] [cursor=pointer]
+          - button "Appointments" [ref=f34e80] [cursor=pointer]
+        - generic [ref=f34e86]:
+          - button "AI Assistant" [ref=f34e87] [cursor=pointer]
+          - button "Case Law" [ref=f34e93] [cursor=pointer]
+          - button "Draft Generator" [ref=f34e98] [cursor=pointer]
+        - button "Settings" [ref=f34e105] [cursor=pointer]
+      - generic [ref=f34e112] [cursor=pointer]:
+        - generic [ref=f34e113]: AR
+        - generic [ref=f34e114]:
+          - generic [ref=f34e115]: Ahmad Raza Khan
+          - generic [ref=f34e116]: Advocate
+        - button "7" [ref=f34e117]
+        - button "Switch to Light Mode" [ref=f34e122]
+    - main [ref=f34e127]:
+      - generic [ref=f34e128]:
+        - generic [ref=f34e129]:
+          - generic [ref=f34e130]: Overseas Property Disputes
+          - generic [ref=f34e131]: Case briefs sent to you by overseas Pakistanis — open one to see the whole case in one place.
+        - generic [ref=f34e132]:
+          - generic [ref=f34e134] [cursor=pointer]:
+            - generic [ref=f34e135]:
+              - generic [ref=f34e136]: Someone has taken or holds possession of the property without right (dispossession / land-grab / forcible occupation).
+              - generic [ref=f34e137]: Islamabad Capital Territory / federal · sent Jul 15, 2026
+            - generic [ref=f34e138]:
+              - generic [ref=f34e139]: Petition ready
+              - generic [ref=f34e140]: Ready to draft
+              - generic [ref=f34e141]: Open →
+          - generic [ref=f34e143] [cursor=pointer]:
+            - generic [ref=f34e144]:
+              - generic [ref=f34e145]: Someone has taken or holds possession of the property without right (dispossession / land-grab / forcible occupation).
+              - generic [ref=f34e146]: Islamabad Capital Territory / federal · sent Jul 15, 2026
+            - generic [ref=f34e147]:
+              - generic [ref=f34e148]: Petition ready
+              - generic [ref=f34e149]: Ready to draft
+              - generic [ref=f34e150]: Open →
+          - generic [ref=f34e152] [cursor=pointer]:
+            - generic [ref=f34e153]:
+              - generic [ref=f34e154]: Someone has taken or holds possession of the property without right (dispossession / land-grab / forcible occupation).
+              - generic [ref=f34e155]: Islamabad Capital Territory / federal · sent Jul 15, 2026
+            - generic [ref=f34e156]:
+              - generic [ref=f34e157]: Held for your review
+              - generic [ref=f34e158]: Open →
+          - generic [ref=f34e160] [cursor=pointer]:
+            - generic [ref=f34e161]:
+              - generic [ref=f34e162]: Someone has taken or holds possession of the property without right (dispossession / land-grab / forcible occupation).
+              - generic [ref=f34e163]: Islamabad Capital Territory / federal · sent Jul 15, 2026
+            - generic [ref=f34e164]:
+              - generic [ref=f34e165]: Held for your review
+              - generic [ref=f34e166]: Open →

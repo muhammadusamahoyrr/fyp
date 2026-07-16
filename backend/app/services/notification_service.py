@@ -46,6 +46,17 @@ async def create_notification(
                 "notification": jsonable_encoder(doc),
             },
         )
+
+    # Deliver to linked WhatsApp (fire-and-forget — must never block or fail
+    # the action that raised the notification)
+    try:
+        import asyncio
+        from app.services.whatsapp_service import is_configured, notify_user
+        if is_configured():
+            asyncio.create_task(notify_user(user_id, title, body))
+    except Exception:
+        pass
+
     return doc
 
 

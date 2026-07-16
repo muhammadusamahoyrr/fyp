@@ -8,22 +8,13 @@ import { useCase } from "./CaseContext.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
-import { searchLawyers, matchLawyers, submitReview, bookAppointment, getLawyerAvailability } from "@/lib/api.js";
+import { searchLawyers, matchLawyers, submitReview, bookAppointment, getLawyerAvailability, listCases, listEngagements, requestEngagement, cancelEngagement } from "@/lib/api.js";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), {
     ssr: false,
     loading: () => (
         <div style={{ height: 340, display: "flex", alignItems: "center", justifyContent: "center", color: "#6b7280", fontSize: 13 }}>
             Loading map…
-        </div>
-    ),
-});
-
-const CourthouseViewer = dynamic(() => import("./CourthouseViewer"), {
-    ssr: false,
-    loading: () => (
-        <div style={{ height: 300, background: "linear-gradient(135deg,#0d1117 0%,#161b2e 100%)", borderRadius: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ width: 32, height: 32, border: "3px solid #1D9E75", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
         </div>
     ),
 });
@@ -88,10 +79,50 @@ const ModLawyers = () => {
     const [reviewStars, setReviewStars]           = useState(5);
     const [reviewComment, setReviewComment]       = useState("");
     const [reviewSubmitting, setReviewSubmitting] = useState(false);
+    // Engagement (hire a lawyer) state
+    const [showHireModal, setShowHireModal] = useState(false);
+    const [hireLawyer, setHireLawyer]       = useState(null);
+    const [hireCaseId, setHireCaseId]       = useState("");
+    const [hireMessage, setHireMessage]     = useState("");
+    const [hireSubmitting, setHireSubmitting] = useState(false);
+    const [myCases, setMyCases]             = useState([]);
+    const [myEngagements, setMyEngagements] = useState([]);
 
-    // Prevent background scrolling when modal is open
+    const refreshEngagements = () => {
+        listEngagements().then(({ data }) => {
+            if (Array.isArray(data)) setMyEngagements(data);
+        }).catch(() => {});
+    };
+
     useEffect(() => {
-        if (showApptModal) {
+        listCases({ page_size: 50 }).then(({ data }) => {
+            if (data?.items) setMyCases(data.items);
+        }).catch(() => {});
+        refreshEngagements();
+    }, []);
+
+    // Cases you can still hire a lawyer for: no lawyer yet, not closed,
+    // and no request already pending on them.
+    const pendingByCase = useMemo(() => {
+        const m = {};
+        myEngagements.filter(e => e.status === "requested").forEach(e => { m[e.case_id] = e; });
+        return m;
+    }, [myEngagements]);
+    const hireableCases = useMemo(() =>
+        myCases.filter(c => !c.lawyer_id && !["closed", "dismissed"].includes(c.status) && !pendingByCase[c._id]),
+    [myCases, pendingByCase]);
+
+    // Engagement state for one lawyer: "requested" | "accepted" | null
+    const engagementWith = (lawyerId) => {
+        if (!lawyerId) return null;
+        if (myEngagements.some(e => e.lawyer_id === lawyerId && e.status === "requested")) return "requested";
+        if (myEngagements.some(e => e.lawyer_id === lawyerId && e.status === "accepted")) return "accepted";
+        return null;
+    };
+
+    // Prevent background scrolling when a modal is open
+    useEffect(() => {
+        if (showApptModal || showHireModal) {
             document.body.style.overflow = "hidden";
         } else {
             document.body.style.overflow = "";
@@ -99,7 +130,7 @@ const ModLawyers = () => {
         return () => {
             document.body.style.overflow = "";
         };
-    }, [showApptModal]);
+    }, [showApptModal, showHireModal]);
 
     // Map a backend user document to the shape the UI expects
     const mapApiLawyer = (raw, idx) => {
@@ -299,17 +330,7 @@ const ModLawyers = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [backendUp, searchParams]);
 
-    const MOCK_LAWYERS = [
-        { name: "Ahmad Raza Khan", spec: "Employment Law", city: "Lahore", exp: 12, fee: 8000, rating: 4.9, avail: true, reviews: 84, bar: "BAR-001", lat: 31.5204, lng: 74.3587, distance: 2.4, hours: "Mon–Fri: 9am–6pm", address: "12 Mall Road, Lahore", credentials: ["LLB – Punjab University", "LLM – Harvard Law", "10+ Supreme Court Cases"], reviewList: [{ user: "Kamran A.", rating: 5, date: "2026-01-10", text: "Excellent counsel, won my wrongful termination case." }, { user: "Sana M.", rating: 5, date: "2026-01-05", text: "Very professional and thorough." }, { user: "Usman T.", rating: 4, date: "2025-12-28", text: "Good communication throughout the process." }] },
-        { name: "Sara Minhas", spec: "Family Law", city: "Karachi", exp: 8, fee: 5500, rating: 4.7, avail: true, reviews: 61, bar: "BAR-002", lat: 24.8607, lng: 67.0011, distance: 5.1, hours: "Mon–Sat: 10am–5pm", address: "45 Clifton Block 4, Karachi", credentials: ["LLB – Karachi University", "Family Law Specialist Cert."], reviewList: [{ user: "Ayesha K.", rating: 5, date: "2026-01-15", text: "Handled my divorce case with sensitivity." }, { user: "Rehman B.", rating: 4, date: "2026-01-01", text: "Professional and responsive." }] },
-        { name: "Bilal Chaudhry", spec: "Property", city: "Islamabad", exp: 15, fee: 10000, rating: 4.8, avail: false, reviews: 102, bar: "BAR-003", lat: 33.6844, lng: 73.0479, distance: 1.8, hours: "Mon–Fri: 8am–5pm", address: "F-7 Markaz, Islamabad", credentials: ["LLB – LUMS", "LLM – Oxford", "Property Law Expert"], reviewList: [{ user: "Imran C.", rating: 5, date: "2026-01-12", text: "Resolved complex property dispute efficiently." }, { user: "Hina F.", rating: 5, date: "2025-12-20", text: "Very knowledgeable about land laws." }] },
-        { name: "Nadia Hussain", spec: "Criminal Defense", city: "Rawalpindi", exp: 10, fee: 7200, rating: 4.6, avail: true, reviews: 55, bar: "BAR-004", lat: 33.5651, lng: 73.0169, distance: 3.2, hours: "Mon–Sat: 9am–7pm", address: "Saddar, Rawalpindi", credentials: ["LLB – QAU", "Criminal Law Cert.", "High Court Advocate"], reviewList: [{ user: "Asad N.", rating: 5, date: "2026-01-08", text: "Got me acquitted! Brilliant defense strategy." }, { user: "Farrukh L.", rating: 4, date: "2025-12-15", text: "Very thorough in preparing the case." }] },
-        { name: "Tariq Mehmood", spec: "Contract", city: "Lahore", exp: 6, fee: 4800, rating: 4.5, avail: true, reviews: 39, bar: "BAR-005", lat: 31.5497, lng: 74.3436, distance: 4.7, hours: "Mon–Fri: 10am–6pm", address: "Gulberg III, Lahore", credentials: ["LLB – UCP", "Contract & Commercial Law Cert."], reviewList: [{ user: "Zainab R.", rating: 4, date: "2026-01-03", text: "Helped draft airtight business contracts." }] },
-        { name: "Zara Ali", spec: "Civil Rights", city: "Karachi", exp: 9, fee: 6300, rating: 4.8, avail: false, reviews: 77, bar: "BAR-006", lat: 24.8906, lng: 67.0022, distance: 6.3, hours: "Mon–Fri: 9am–5pm", address: "Defence Phase 2, Karachi", credentials: ["LLB – IBA", "Human Rights Law Fellow", "UN Advocacy Training"], reviewList: [{ user: "Mariam Q.", rating: 5, date: "2026-01-11", text: "Fought my civil rights case fearlessly." }, { user: "Shahid O.", rating: 5, date: "2025-12-30", text: "Exceptional dedication to justice." }] },
-    ];
-
-    // Use real API data when available, fall back to mock for demo
-    const lawyers = apiLawyers.length > 0 ? apiLawyers : MOCK_LAWYERS;
+    const lawyers = apiLawyers;
 
     // Accent color palette — one per lawyer slot, cycles if more lawyers added
     const accentPalette = [
@@ -374,7 +395,7 @@ const ModLawyers = () => {
         console.log("📡 Review submission response:", { error });
         if (error) {
             console.error("❌ Review submission error:", error);
-            toast.show(error.detail || "Failed to submit review. Please try again.", "error", 3000);
+            toast.show(error.message || "Failed to submit review. Please try again.", "error", 3000);
         } else {
             console.log("✅ Review submitted successfully");
             toast.show("⭐ Review submitted — thank you!", "success", 3000);
@@ -512,6 +533,125 @@ const ModLawyers = () => {
         }
     };
 
+    // ── HIRE (ENGAGEMENT) HELPERS ─────────────────────────────────
+    const openHire = (lawyer) => {
+        if (!lawyer?._id || lawyer._id.startsWith("api-")) {
+            toast.show("This lawyer is a sample profile — only verified lawyers can be hired.", "warn", 4000);
+            return;
+        }
+        if (!hireableCases.length) {
+            toast.show(
+                myCases.length
+                    ? "All your cases already have a lawyer or a pending request."
+                    : "Create a case first (via Intake) — then you can request a lawyer for it.",
+                "info", 4500
+            );
+            return;
+        }
+        setHireLawyer(lawyer);
+        const urlCase = getCaseId();
+        const preselect = hireableCases.find(c => c._id === urlCase) || hireableCases[0];
+        setHireCaseId(preselect?._id || "");
+        setHireMessage("");
+        setShowHireModal(true);
+    };
+
+    const submitHire = async () => {
+        if (!hireCaseId) {
+            toast.show("Select the case you want this lawyer to handle.", "warn", 3500);
+            return;
+        }
+        setHireSubmitting(true);
+        const { error } = await requestEngagement({
+            case_id: hireCaseId,
+            lawyer_id: hireLawyer._id,
+            message: hireMessage.trim() || null,
+        });
+        setHireSubmitting(false);
+        if (error) {
+            toast.show(error.message || "Could not send the request. Please try again.", "error", 4000);
+            return;
+        }
+        toast.show(`Request sent to ${hireLawyer.name}. You'll be notified when they respond.`, "success", 4000);
+        setShowHireModal(false);
+        refreshEngagements();
+    };
+
+    const withdrawRequest = async (engagementId) => {
+        const { error } = await cancelEngagement(engagementId);
+        if (error) {
+            toast.show(error.message || "Could not withdraw the request.", "error", 3500);
+        } else {
+            toast.show("Request withdrawn.", "success", 2500);
+            refreshEngagements();
+        }
+    };
+
+    // ── HIRE MODAL ────────────────────────────────────────────────
+    const HireModal = () => {
+        if (!hireLawyer || typeof document === "undefined") return null;
+        return createPortal(
+            <div style={{
+                position: "fixed", inset: 0, zIndex: 9999,
+                background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+                <div style={{
+                    background: t.card, borderRadius: 20, border: `1.5px solid ${t.border}`,
+                    padding: 28, width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto",
+                    boxShadow: "0 24px 64px rgba(0,0,0,0.4)",
+                }}>
+                    {/* Header */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+                        <div style={{ width: 46, height: 46, borderRadius: 14, background: t.primaryGlow, border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 800, color: t.primary, flexShrink: 0 }}>
+                            {hireLawyer.name.split(" ").map(w => w[0]).join("").slice(0, 2)}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 800, color: t.text, fontSize: 15 }}>Request to Hire {hireLawyer.name}</div>
+                            <div style={{ fontSize: 12, color: t.textMuted }}>{hireLawyer.spec} · {fmtFee(hireLawyer.fee)}/hr</div>
+                        </div>
+                        <button onClick={() => setShowHireModal(false)} style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, width: 30, height: 30, cursor: "pointer", color: t.textMuted, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                    </div>
+
+                    <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.6, marginBottom: 18, padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
+                        The lawyer will review your case and respond with their fee and scope.
+                        Nothing is assigned until they accept — you'll get a notification either way.
+                    </div>
+
+                    {/* Case picker */}
+                    <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Case *</label>
+                        <select value={hireCaseId} onChange={e => setHireCaseId(e.target.value)}
+                            style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${hireCaseId ? t.primary : t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", boxSizing: "border-box" }}>
+                            {hireableCases.map(c => (
+                                <option key={c._id} value={c._id}>
+                                    {c.title} ({c.case_number})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Message */}
+                    <div style={{ marginBottom: 22 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Message to the Lawyer (optional)</label>
+                        <textarea value={hireMessage} onChange={e => setHireMessage(e.target.value)}
+                            placeholder="Briefly describe what you need help with, your urgency, and anything the lawyer should know…"
+                            style={{ width: "100%", minHeight: 88, padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }} />
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: "flex", gap: 10 }}>
+                        <BtnOutline onClick={() => setShowHireModal(false)} style={{ flex: 1, fontSize: 13 }}>Cancel</BtnOutline>
+                        <BtnPrimary disabled={hireSubmitting} onClick={submitHire} style={{ flex: 2, fontSize: 13, padding: "12px", opacity: hireSubmitting ? 0.7 : 1 }}>
+                            {hireSubmitting ? "Sending…" : "Send Hire Request →"}
+                        </BtnPrimary>
+                    </div>
+                </div>
+            </div>,
+            document.body
+        );
+    };
+
     // ── APPOINTMENT MODAL ─────────────────────────────────────────
     const AppointmentModal = () => {
         if (!apptLawyer || typeof document === "undefined") return null;
@@ -616,6 +756,7 @@ const ModLawyers = () => {
         return (
             <div style={{ position: "relative" }}>
                 {showApptModal && <AppointmentModal />}
+                {showHireModal && <HireModal />}
                 <button onClick={() => setActiveView("list")} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: t.primary, cursor: "pointer", fontSize: 13, fontWeight: 600, marginBottom: 20, padding: 0 }}>
                     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={t.primary} strokeWidth="2"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
                     Back to Lawyers
@@ -652,13 +793,27 @@ const ModLawyers = () => {
                                 ))}
                             </div>
                             <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-                                <BtnOutline style={{ flex: 1, fontSize: 13 }}>Message</BtnOutline>
-                                <BtnPrimary
-                                    disabled={!l.avail || l._id?.startsWith("api-")}
+                                <BtnOutline
                                     onClick={() => l.avail && !l._id?.startsWith("api-") && openBooking(l)}
-                                    style={{ flex: 1, fontSize: 13 }}
-                                    title={l._id?.startsWith("api-") ? "Sample profile — not bookable" : ""}
-                                >Book Appointment</BtnPrimary>
+                                    style={{ flex: 1, fontSize: 13, opacity: (!l.avail || l._id?.startsWith("api-")) ? 0.5 : 1, cursor: (!l.avail || l._id?.startsWith("api-")) ? "not-allowed" : "pointer" }}
+                                >Book Appointment</BtnOutline>
+                                {(() => {
+                                    const engState = engagementWith(l._id);
+                                    if (engState === "accepted") return (
+                                        <BtnPrimary disabled style={{ flex: 1, fontSize: 13, opacity: 0.75 }}>✓ Engaged on Your Case</BtnPrimary>
+                                    );
+                                    if (engState === "requested") return (
+                                        <BtnPrimary disabled style={{ flex: 1, fontSize: 13, opacity: 0.75 }}>Request Pending…</BtnPrimary>
+                                    );
+                                    return (
+                                        <BtnPrimary
+                                            disabled={l._id?.startsWith("api-")}
+                                            onClick={() => openHire(l)}
+                                            style={{ flex: 1, fontSize: 13 }}
+                                            title={l._id?.startsWith("api-") ? "Sample profile — cannot be hired" : "Ask this lawyer to take your case"}
+                                        >Request to Hire</BtnPrimary>
+                                    );
+                                })()}
                             </div>
                         </Card>
                         <Card>
@@ -853,16 +1008,19 @@ const ModLawyers = () => {
     }
 
     // ── LIST VIEW (default) ───────────────────────────────────────
+    const visibleEngagements = myEngagements.filter(e => e.status === "requested" || e.status === "accepted");
+    const ENG_BADGE = {
+        requested: { label: "Pending", color: "#EF9F27" },
+        accepted:  { label: "Accepted", color: "#1D9E75" },
+    };
     return (
         <div style={{ position: "relative" }}>
             {showApptModal && <AppointmentModal />}
+            {showHireModal && <HireModal />}
 
-            {/* ── Courthouse 3D Banner ─────────────────────────── */}
+            {/* ── Directory Banner ─────────────────────────── */}
             <div style={{ position: "relative", marginBottom: 22, borderRadius: 20, overflow: "hidden", border: `1px solid ${t.border}`, boxShadow: t.shadowCard }}>
-                {/* 3D viewer */}
-                <div style={{ background: "linear-gradient(135deg,#0d1117 0%,#161b2e 100%)" }}>
-                    <CourthouseViewer height={300} />
-                </div>
+                <div style={{ height: 210, background: "linear-gradient(135deg,#0d1117 0%,#161b2e 100%)" }} />
 
                 {/* Left gradient overlay with text */}
                 <div style={{
@@ -898,16 +1056,6 @@ const ModLawyers = () => {
                     </div>
                 </div>
 
-                {/* Bottom-right hint */}
-                <div style={{
-                    position: "absolute", bottom: 12, right: 14,
-                    fontSize: 10, color: "rgba(255,255,255,0.3)",
-                    display: "flex", alignItems: "center", gap: 5,
-                    pointerEvents: "none",
-                }}>
-                    <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
-                    Drag to explore · Nolan County Courthouse
-                </div>
             </div>
 
             {/* Toolbar */}
@@ -1083,6 +1231,39 @@ const ModLawyers = () => {
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* My hire requests */}
+            {visibleEngagements.length > 0 && (
+                <div style={{ background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16, padding: "14px 18px", marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: t.text, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                        <Ic n="shield" s={14} c={t.primary} /> My Hire Requests
+                    </div>
+                    {visibleEngagements.map(e => {
+                        const badge = ENG_BADGE[e.status];
+                        return (
+                            <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: `1px solid ${t.border}` }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        {e.lawyer_name || "Lawyer"} · {e.case_title || e.case_number}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: t.textMuted }}>
+                                        {e.status === "accepted"
+                                            ? `Accepted${e.fee_amount ? ` — PKR ${Number(e.fee_amount).toLocaleString()}${e.fee_type === "hourly" ? "/hr" : e.fee_type === "per_hearing" ? "/hearing" : ""}` : ""}. Track progress on the Tracking page.`
+                                            : "Waiting for the lawyer to respond…"}
+                                    </div>
+                                </div>
+                                <span style={{ fontSize: 11, fontWeight: 700, color: badge.color, background: `${badge.color}18`, borderRadius: 20, padding: "3px 10px", flexShrink: 0 }}>{badge.label}</span>
+                                {e.status === "requested" && (
+                                    <button onClick={() => withdrawRequest(e.id)}
+                                        style={{ fontSize: 11, fontWeight: 600, color: t.textMuted, background: "none", border: `1px solid ${t.border}`, borderRadius: 8, padding: "4px 10px", cursor: "pointer", flexShrink: 0 }}>
+                                        Withdraw
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
             )}
 

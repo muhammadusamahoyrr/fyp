@@ -1,6 +1,8 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from pymongo.errors import DuplicateKeyError
+
 from app.core.constants import (
     AppointmentMode,
     AppointmentStatus,
@@ -85,7 +87,13 @@ async def book_appointment(
         "created_at":       now,
         "updated_at":       now,
     }
-    await appt_repo.insert(doc)
+    try:
+        await appt_repo.insert(doc)
+    except DuplicateKeyError:
+        # Lost the race: another booking claimed this exact lawyer + slot first.
+        raise AppValidationError(
+            "This time slot was just booked. Please choose a different time."
+        )
 
     # Notify both parties
     client = await user_repo.find_by_id(client_id)

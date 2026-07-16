@@ -43,6 +43,13 @@ class AIServiceError(HTTPException):
         )
 
 
+class ServiceUnavailableError(HTTPException):
+    def __init__(self, detail: str = "Service temporarily unavailable"):
+        super().__init__(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail
+        )
+
+
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,

@@ -1,3 +1,7 @@
+import asyncio
+
+from langgraph.types import interrupt
+
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
 from app.ai.nodes._history import format_history
@@ -62,7 +66,7 @@ BAD: "Is there a written contract?" (generic, ignores what user said)
 Ask in the same language the user used (English or Urdu). Do NOT add explanations or multiple questions."""
 
 
-def fact_gap_node(state: AgentState) -> dict:
+async def fact_gap_node(state: AgentState) -> dict:
     attempts    = state.get("clarification_attempts", 0)
     known_facts = state.get("known_facts", [])
     complexity  = state.get("complexity", "simple")
@@ -107,7 +111,7 @@ def fact_gap_node(state: AgentState) -> dict:
     history_section = f"\nConversation history:\n{history}\n" if history else ""
 
     llm      = get_llm()
-    response = llm.invoke([
+    response = await asyncio.to_thread(llm.invoke, [
         {"role": "system", "content": system},
         {"role": "user", "content": (
             f"Query: {state['query']}\n"
@@ -127,6 +131,7 @@ def fact_gap_node(state: AgentState) -> dict:
             "needs_clarification": False,
         }
 
+    interrupt(text)  # pause graph — chat_socket resumes with user's answer
     return {
         "clarification_question": text,
         "needs_clarification":    True,

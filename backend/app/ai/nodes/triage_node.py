@@ -6,13 +6,14 @@ Confirms or overrides the classifier's case_type with richer LLM reasoning.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
 from app.ai.graph.state import AgentState
-from app.ai.llm import get_fast_llm, get_llm
+from app.ai.llm import get_structured_llm
 from app.ai.nodes._history import format_history
 
 # ── Canned responses ──────────────────────────────────────────────────────────
@@ -41,12 +42,10 @@ def _is_gibberish(query: str) -> bool:
     return len(words) < _MIN_REAL_WORDS
 
 
-def _get_triage_llm():
-    """Use Gemini Flash when key is set, fall back to Groq 70B."""
+def _prefer_fast() -> bool:
+    """Use the fast tier (Gemini Flash) when its key is set, else the capable tier."""
     from app.core.config import settings
-    if settings.gemini_api_key:
-        return get_fast_llm()
-    return get_llm()
+    return bool(settings.gemini_api_key)
 
 
 # ── Follow-up intent detection (LLM structured output) ───────────────────────
@@ -92,11 +91,11 @@ def _last_ai_content(state: AgentState) -> str | None:
     return None
 
 
-def _detect_intent(query: str, last_ai: str) -> FollowupIntent:
+async def _detect_intent(query: str, last_ai: str) -> FollowupIntent:
     """LLM intent classification. Falls back to intent='new' on any error."""
     try:
-        llm = _get_triage_llm().with_structured_output(FollowupIntent)
-        return llm.invoke([
+        llm = get_structured_llm(FollowupIntent, fast=_prefer_fast())
+        return await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _INTENT_SYSTEM},
             {"role": "user",   "content": (
                 f"Previous AI response:\n{last_ai}\n\n"
@@ -173,7 +172,7 @@ class TriageOutput(BaseModel):
 
 # ── Node ──────────────────────────────────────────────────────────────────────
 
-def triage_node(state: AgentState) -> dict:
+async def triage_node(state: AgentState) -> dict:
     existing_type     = state.get("case_type")  or None
     existing_province = state.get("province")   or None
 
@@ -210,9 +209,11 @@ def triage_node(state: AgentState) -> dict:
         }
 
     # ── Follow-up intent detection (fallback when chat_socket had no history) ─
+    # Only run for short messages — long messages are almost certainly new legal questions.
+    # Avoids LLM cost + misrouting on multi-sentence queries that follow any prior AI reply.
     last_ai = _last_ai_content(state)
-    if last_ai:
-        intent_result = _detect_intent(query, last_ai)
+    if last_ai and len(query.split()) <= 20:
+        intent_result = await _detect_intent(query, last_ai)
         if intent_result.confidence >= 0.65 and intent_result.intent != "new":
             intent = intent_result.intent
             base = {
@@ -235,7 +236,7 @@ def triage_node(state: AgentState) -> dict:
             return base
 
     # ── Full LLM triage ───────────────────────────────────────────────────────
-    llm = _get_triage_llm().with_structured_output(TriageOutput)
+    llm = get_structured_llm(TriageOutput, fast=_prefer_fast())
 
     words      = query.split()
     safe_query = (
@@ -252,7 +253,7 @@ def triage_node(state: AgentState) -> dict:
             f"Current message: {safe_query}"
         )
 
-    result: TriageOutput = llm.invoke([
+    result: TriageOutput = await asyncio.to_thread(llm.invoke, [
         {"role": "system", "content": _SYSTEM},
         {"role": "user",   "content": user_content},
     ])
