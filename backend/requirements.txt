@@ -58,7 +58,7 @@ faster-whisper
 soundfile
 
 # Web search (no API key required)
-duckduckgo-search==7.3.0
+duckduckgo-search==8.1.1
 
 # Utilities
 python-dotenv==1.0.1
