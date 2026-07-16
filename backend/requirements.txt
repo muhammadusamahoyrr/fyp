@@ -61,7 +61,7 @@ soundfile
 duckduckgo-search==7.3.0
 
 # Utilities
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 arabic-reshaper==3.0.0
 python-bidi==0.6.6
 beautifulsoup4
