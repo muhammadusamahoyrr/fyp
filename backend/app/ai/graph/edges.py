@@ -118,28 +118,53 @@ def _has_engine_answer(state: AgentState) -> bool:
     return False
 
 
-def route_after_grader(state: AgentState) -> str:
+def _retry_is_worthwhile(state: AgentState) -> bool:
+    """
+    Is another retrieval pass justified? This is a graph-level *budget* question,
+    deliberately kept out of the Decision Engine: the engine judges evidence
+    quality, the graph decides whether it can afford to look again.
+    """
     score    = state.get("relevance_score", 0.0)
     prev     = state.get("prev_relevance_score", 0.0)
     attempts = state.get("retrieval_attempts", 1)
-    delta    = score - prev
-
-    # A deterministic engine (bail / court fee / inheritance) already produced the
-    # answer. Retrieval here only supplies *supplementary* statute context, so a
-    # low relevance score is not worth a retry: another pass cannot improve an
-    # answer that is already exact, and it was costing seconds per query.
-    if _has_engine_answer(state):
-        return "generation_node"
 
     # No new facts added since last retrieval → re-running won't help
     if state.get("fact_delta", 1) == 0 and attempts > 1:
+        return False
+
+    still_improving = (score - prev) > _CONVERGENCE_MIN_DELTA or attempts == 1
+    budget_left     = attempts < _MAX_RETRIEVAL_ATTEMPTS
+    return budget_left and still_improving
+
+
+def route_after_decision(state: AgentState) -> str:
+    """
+    Reads the Decision Engine's verdict — it does NOT recompute confidence.
+
+    arbitration_output is one of:
+      "answer"  → generate
+      "defer"   → retrieve again if the budget allows, else generate with what we have
+      "refuse"  → skip generation entirely; finalizer emits the refusal message
+
+    The engine's own clarification-depth cap means "defer" cannot recur forever:
+    after MAX_CLARIFICATION_DEPTH defers it switches to binary answer/refuse.
+    """
+    # A deterministic engine (bail / court fee / inheritance) already produced the
+    # answer. Retrieval here only supplies *supplementary* statute context, so a
+    # low relevance score is not worth a retry — and refusing a correct computed
+    # figure because the surrounding statute context scored poorly would be
+    # strictly worse than answering. This guard runs before the verdict is read.
+    if _has_engine_answer(state):
         return "generation_node"
 
-    still_improving = delta > _CONVERGENCE_MIN_DELTA or attempts == 1
-    budget_left     = attempts < _MAX_RETRIEVAL_ATTEMPTS
+    action = state.get("arbitration_output", "answer")
 
-    if score < _RELEVANCE_THRESHOLD and budget_left and still_improving:
-        return "retrieval_node"
+    if action == "refuse":
+        return "finalizer_node"
+
+    if action == "defer":
+        return "retrieval_node" if _retry_is_worthwhile(state) else "generation_node"
+
     return "generation_node"
 
 

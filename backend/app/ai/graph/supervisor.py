@@ -1,11 +1,12 @@
 from langgraph.graph import END, StateGraph
 
+from app.ai.decision_engine import run_decision_engine
 from app.ai.graph.checkpointer import MongoDBSaver
 from app.ai.graph.edges import (
     route_after_cache,
     route_after_classifier,
+    route_after_decision,
     route_after_gatekeeper,
-    route_after_grader,
     route_after_grader_intake,
     route_after_hallucination,
     route_after_triage,
@@ -42,8 +43,10 @@ def build_chat_graph():
                                                                                       inheritance / case-law engines)
                                                                                     └─ retrieval_node
                                                                                     └─ retrieval_grader_node
-                                                                                         ├─ poor+budget ► retrieval_node
-                                                                                         └─ ok ► generation_node
+                                                                                    └─ decision_node (arbitration authority)
+                                                                                         ├─ refuse ► finalizer_node → END
+                                                                                         ├─ defer+budget ► retrieval_node
+                                                                                         └─ answer ► generation_node
                                                                                                    └─ hallucination_node
                                                                                                         ├─ not grounded+budget ► generation_node
                                                                                                         └─ done ► finalizer_node → END
@@ -60,6 +63,10 @@ def build_chat_graph():
     builder.add_node("tool_node",             tool_node)  # deterministic legal engines
     builder.add_node("retrieval_node",        retrieval_node)
     builder.add_node("retrieval_grader_node", retrieval_grader_node)
+    # Single routing authority: turns retrieval evidence into answer/defer/refuse.
+    # Kept as its own node (not folded into the grader) because import_validator
+    # forbids worker nodes from importing the decision engine.
+    builder.add_node("decision_node",         run_decision_engine)
     builder.add_node("generation_node",       generation_node)
     builder.add_node("hallucination_node",    hallucination_node)
     builder.add_node("finalizer_node",        finalizer_node)
@@ -110,10 +117,17 @@ def build_chat_graph():
 
     builder.add_edge("retrieval_node", "retrieval_grader_node")
 
+    # The grader scores evidence; the decision node decides what to do about it.
+    builder.add_edge("retrieval_grader_node", "decision_node")
+
     builder.add_conditional_edges(
-        "retrieval_grader_node",
-        route_after_grader,
-        {"retrieval_node": "retrieval_node", "generation_node": "generation_node"},
+        "decision_node",
+        route_after_decision,
+        {
+            "retrieval_node":  "retrieval_node",
+            "generation_node": "generation_node",
+            "finalizer_node":  "finalizer_node",
+        },
     )
 
     builder.add_edge("generation_node", "hallucination_node")

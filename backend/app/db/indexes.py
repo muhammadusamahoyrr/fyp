@@ -5,6 +5,7 @@ from pymongo import ASCENDING, DESCENDING, IndexModel
 from app.core.constants import AppointmentStatus, EngagementStatus
 from app.db.collections import (
     get_agreements_col,
+    get_answer_provenance_col,
     get_appointments_col,
     get_cases_col,
     get_chat_sessions_col,
@@ -20,6 +21,7 @@ from app.db.collections import (
     get_payments_col,
     get_poas_col,
     get_refresh_blocklist_col,
+    get_retrieval_labels_col,
     get_subscriptions_col,
     get_users_col,
     get_ws_tickets_col,
@@ -60,6 +62,42 @@ async def create_all_indexes() -> None:
     await _payments_indexes()
     await _poa_indexes()
     await _checkpoint_indexes()
+    await _provenance_indexes()
+
+
+async def _provenance_indexes() -> None:
+    """Answer provenance — the audit trail.
+
+    request_id is unique so a retried write cannot produce two conflicting
+    records for the same answer. Both read paths are owner-scoped, so the
+    compound indexes lead with user_id to match how they are queried.
+
+    No TTL: these are accountability records for legal advice. Expiring them
+    automatically would quietly delete the evidence an audit needs.
+    """
+    await _try_unique_partial(
+        get_answer_provenance_col(),
+        [("request_id", ASCENDING)],
+        name="uniq_provenance_request_id",
+    )
+    await get_answer_provenance_col().create_indexes([
+        IndexModel([("user_id", ASCENDING), ("session_id", ASCENDING),
+                    ("created_at", DESCENDING)]),
+        IndexModel([("user_id", ASCENDING), ("request_id", ASCENDING)]),
+        IndexModel([("created_at", DESCENDING)]),
+    ])
+
+    # Human relevance judgements. Unique on request_id so re-labelling replaces
+    # a verdict instead of accumulating contradictory duplicates.
+    await _try_unique_partial(
+        get_retrieval_labels_col(),
+        [("request_id", ASCENDING)],
+        name="uniq_label_request_id",
+    )
+    await get_retrieval_labels_col().create_indexes([
+        IndexModel([("answer_verdict", ASCENDING)]),
+        IndexModel([("labeled_at", DESCENDING)]),
+    ])
 
 
 async def _checkpoint_indexes() -> None:

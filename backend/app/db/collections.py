@@ -117,3 +117,21 @@ def get_checkpoint_writes_col() -> AsyncIOMotorCollection:
 
 def get_disputes_col() -> AsyncIOMotorCollection:
     return get_database()["property_disputes"]
+
+
+# ── Audit trail ───────────────────────────────────────────────────────────────
+# One record per answered turn, linking the answer to the evidence, the
+# arbitration verdict and the models that produced it. Deliberately NO TTL:
+# these are accountability records for legal advice, so retention is a policy
+# decision rather than a cache-eviction one.
+
+def get_answer_provenance_col() -> AsyncIOMotorCollection:
+    return get_database()["answer_provenance"]
+
+
+# Human relevance judgements over provenance records. Kept SEPARATE from the
+# provenance collection on purpose: an audit record that gets edited is not an
+# audit record, so labels annotate it from outside rather than mutating it.
+
+def get_retrieval_labels_col() -> AsyncIOMotorCollection:
+    return get_database()["retrieval_labels"]

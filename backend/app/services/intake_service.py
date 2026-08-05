@@ -410,7 +410,9 @@ async def _run_intake_ai(
         "bm25_confidence":        0.0,
         "cache_hit":              False,
         "cache_confidence":       0.0,
-        "arbitration_output":     "answer",
+        # Intake runs build_intake_graph(), which has no decision_node — the
+        # verdict stays "pending" and is never read. Seeded for schema parity.
+        "arbitration_output":     "pending",
         "arbitration_source":     "none",
         "arbitration_confidence": 0.0,
         "answer":                 "",

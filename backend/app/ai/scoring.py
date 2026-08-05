@@ -12,10 +12,17 @@ Variance penalty applied when signals disagree above adaptive threshold.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from app.ai.calibration import calibrate_embedding, calibrate_llm
 from app.ai.threshold_manager import get_disagreement_max
+
+
+class RetrievalSignals(NamedTuple):
+    """The three numbers the Decision Engine arbitrates over."""
+    aggregate: float   # weighted three-signal confidence → relevance_score
+    variance:  float   # mean inter-signal disagreement  → signal_variance
+    lexical:   float   # mean keyword agreement          → bm25_confidence
 
 # ── Legal term set (alias-normalised; Urdu script included) ──────────────────
 _LEGAL_RE = re.compile(
@@ -45,17 +52,22 @@ def _keyword_score(query_text: str, chunk_text: str) -> float:
     return min(matched / len(query_terms), 1.0)
 
 
-def score_chunk(
+def score_chunk_with_variance(
     query_text:      str,
     chunk_text:      str,
     embedding_score: float,
     llm_grade:       float,
-) -> float:
+) -> tuple[float, float]:
     """
-    Weighted additive confidence score for one chunk → [0, 1].
+    Weighted additive confidence score for one chunk → ([0, 1], variance).
 
     Applies variance penalty when the three calibrated signals disagree
     beyond the adaptive disagreement threshold.
+
+    The raw variance is returned alongside the score because the Decision
+    Engine needs it: high inter-signal disagreement is what distinguishes
+    "defer for more information" from "answer" at the same confidence level.
+    Collapsing it into the score alone would throw that signal away.
     """
     kw  = _keyword_score(query_text, chunk_text)
     emb = calibrate_embedding(embedding_score)
@@ -70,7 +82,20 @@ def score_chunk(
     if var > get_disagreement_max():
         weighted = max(0.0, weighted - var)
 
-    return round(min(weighted, 1.0), 4)
+    return round(min(weighted, 1.0), 4), round(var, 4)
+
+
+def score_chunk(
+    query_text:      str,
+    chunk_text:      str,
+    embedding_score: float,
+    llm_grade:       float,
+) -> float:
+    """Weighted additive confidence score for one chunk → [0, 1]."""
+    score, _ = score_chunk_with_variance(
+        query_text, chunk_text, embedding_score, llm_grade
+    )
+    return score
 
 
 def score_retrieval_batch(
@@ -79,7 +104,7 @@ def score_retrieval_batch(
     embedding_scores: Optional[list[float]] = None,
     llm_grades:       Optional[list[int]]   = None,
     keep_threshold:   float                 = _DEFAULT_KEEP_THRESHOLD,
-) -> tuple[list[dict], float]:
+) -> tuple[list[dict], RetrievalSignals]:
     """
     Score all chunks and filter to those above keep_threshold.
 
@@ -87,14 +112,14 @@ def score_retrieval_batch(
     padded with neutral values (0.5 and 1) to avoid silent truncation.
 
     Returns:
-      (kept_chunks, aggregate_relevance_score)
+      (kept_chunks, RetrievalSignals)
 
-    aggregate_relevance_score = sum(chunk_scores) / max(total_chunks, 1)
+    aggregate = sum(chunk_scores) / max(total_chunks, 1)
     Guarantees at least _MIN_CHUNKS_RETURNED chunks are returned.
     """
     n = len(chunks)
     if n == 0:
-        return [], 0.0
+        return [], RetrievalSignals(aggregate=0.0, variance=0.0, lexical=0.0)
 
     # Pad / truncate to match chunk count — never silently drop
     emb_pad   = (embedding_scores or []) + [0.5] * n
@@ -103,14 +128,19 @@ def score_retrieval_batch(
     grade_list = grade_pad[:n]
 
     scored: list[tuple[float, dict]] = []
+    variances: list[float] = []
+    lexicals:  list[float] = []
     for chunk, emb, grade in zip(chunks, emb_list, grade_list):
-        s = score_chunk(
+        text = chunk.get("content", "")
+        s, var = score_chunk_with_variance(
             query_text=query_text,
-            chunk_text=chunk.get("content", ""),
+            chunk_text=text,
             embedding_score=float(emb),
             llm_grade=float(grade),
         )
         scored.append((s, chunk))
+        variances.append(var)
+        lexicals.append(_keyword_score(query_text, text))
 
     kept = [ch for s, ch in scored if s >= keep_threshold]
 
@@ -122,4 +152,13 @@ def score_retrieval_batch(
     total_score = sum(s for s, _ in scored)
     aggregate   = round(min(total_score / max(n, 1), 1.0), 4)
 
-    return kept, aggregate
+    signals = RetrievalSignals(
+        aggregate=aggregate,
+        # Mean disagreement across chunks — the Decision Engine defers when the
+        # three signals disagree, regardless of how high the mean score is.
+        variance=round(sum(variances) / max(len(variances), 1), 4),
+        # Lexical (keyword) agreement, used as the BM25-only fallback evidence
+        # when the LLM grader is unavailable or returns nothing.
+        lexical=round(sum(lexicals) / max(len(lexicals), 1), 4),
+    )
+    return kept, signals

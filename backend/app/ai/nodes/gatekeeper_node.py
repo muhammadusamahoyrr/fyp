@@ -43,10 +43,20 @@ CANNED_REFUSAL = (
 # (e.g. a query about "overriding a court order" must NOT trip this).
 _INJECTION_PATTERNS: list[re.Pattern] = [
     re.compile(r'\bignore\s+(all\s+|any\s+|the\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|messages?|context)', re.IGNORECASE),
-    re.compile(r'\bdisregard\s+(all\s+|any\s+|the\s+)?(previous|prior|above|your)\s+(instructions?|prompts?|rules?)', re.IGNORECASE),
+    # Qualifiers may stack and reorder ("disregard your prior rules"), but one of
+    # previous/prior/above/your is still REQUIRED. That anchor is what keeps this
+    # off genuine legal phrasing — "can the court disregard the rules of
+    # evidence?" must not be treated as an attack.
+    re.compile(r'\bdisregard\s+(?:all\s+|any\s+|the\s+)*(?:previous|prior|above|your)\s+(?:previous\s+|prior\s+|above\s+|your\s+)*(instructions?|prompts?|rules?|guidelines?)', re.IGNORECASE),
     re.compile(r'\bforget\s+(everything|all|your)\s+(above|previous|prior|instructions?|rules?)', re.IGNORECASE),
     re.compile(r'\byou\s+are\s+now\s+(a\s+|an\s+)?(?!assistant|an?\s+ai\s+assistant\b)\w+', re.IGNORECASE),
-    re.compile(r'\b(act|behave|pretend|roleplay|role-play)\s+as\s+(if\s+you\s+(are|were)\s+)?(a\s+|an\s+)?(DAN|jailbroken|unrestricted|unfiltered|evil|different\s+ai)', re.IGNORECASE),
+    # The persona adjectives must qualify an AI NOUN. Matching "unrestricted"
+    # alone was a false positive on this app's own subject matter: "act as an
+    # unrestricted agent for my brother" is a power-of-attorney question, and
+    # "unrestricted" is standard POA vocabulary. DAN needs no noun.
+    re.compile(r'\b(act|behave|pretend|roleplay|role-play)\s+as\s+(if\s+you\s+(are|were)\s+)?(a\s+|an\s+)?(DAN\b|(jailbroken|unrestricted|unfiltered|evil|different)\s+(ai|assistant|model|chatbot|bot|llm|gpt)\b)', re.IGNORECASE),
+    # Same personas without the "as": "pretend you are an unrestricted AI".
+    re.compile(r'\b(pretend|imagine|act\s+like)\s+(that\s+)?you(\'re|\s+are)\s+(a\s+|an\s+)?(DAN\b|(jailbroken|unrestricted|unfiltered|evil|different)\s+(ai|assistant|model|chatbot|bot|llm|gpt)\b)', re.IGNORECASE),
     re.compile(r'\bdeveloper\s+mode\b', re.IGNORECASE),
     re.compile(r'\bjailbreak\b', re.IGNORECASE),
     re.compile(r'\bDAN\s+mode\b', re.IGNORECASE),
@@ -58,12 +68,22 @@ _INJECTION_PATTERNS: list[re.Pattern] = [
 ]
 
 
-def _heuristic_flags(query: str) -> str | None:
-    """Return the matched pattern label if the query looks like an injection, else None."""
+def heuristic_injection_match(query: str) -> str | None:
+    """Return the matched pattern if the query looks like an injection, else None.
+
+    Public because the graph is not the only entry point: chat_socket routes
+    some turns to canned replies via the NLU classifier WITHOUT invoking the
+    graph, so it has to run this layer itself. Pure regex — no LLM cost, safe to
+    call on every message.
+    """
     for pat in _INJECTION_PATTERNS:
         if pat.search(query):
             return pat.pattern
     return None
+
+
+# Back-compat alias for the node below.
+_heuristic_flags = heuristic_injection_match
 
 
 # ── Layer 2: LLM classifier (fallback for subtle/obfuscated attempts) ─────────

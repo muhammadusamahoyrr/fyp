@@ -5,29 +5,17 @@ from langchain_core.messages import AIMessage
 from app.ai import cache
 from app.ai.graph.state import AgentState
 from app.ai.nodes.cache_node import is_personalised
+from app.utils.pii import scrub_pii as _scrub_pii
 
 _REFUSE = (
     "I was unable to provide a reliable answer based on the available Pakistani legal documents. "
     "Please consult a qualified Pakistani lawyer for accurate advice on your specific situation."
 )
 
-# ─── PII scrubbing patterns ────────────────────────────────────────────────────
-_CNIC_RE      = re.compile(r'\b\d{5}-\d{7}-\d\b')
-# Urdu/Extended Arabic-Indic digits (U+0660-U+0669, U+06F0-U+06F9)
-_CNIC_URDU_RE = re.compile(r'[٠-٩۰-۹]{5}-[٠-٩۰-۹]{7}-[٠-٩۰-۹]')
-_PHONE_RE     = re.compile(r'\b(\+92|0092|0)[\s\-]?\d{3}[\s\-]?\d{7}\b')
-
 # Prompt leakage artifacts from LLM output
 _LEAK_RE  = re.compile(
     r'(?im)^(System:|Human:|Assistant:|<\|im_start\||<\|im_end\||\[INST\]|<<SYS>>|Note to AI:|###\s*System).*$'
 )
-
-
-def _scrub_pii(text: str) -> str:
-    text = _CNIC_RE.sub('XXXXX-XXXXXXX-X', text)
-    text = _CNIC_URDU_RE.sub('XXXXX-XXXXXXX-X', text)
-    text = _PHONE_RE.sub('[PHONE REDACTED]', text)
-    return text
 
 
 def _remove_leakage(text: str) -> str:

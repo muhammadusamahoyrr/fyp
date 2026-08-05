@@ -33,6 +33,7 @@ from app.api.v1.routes import (
     notifications,
     overseas,
     payments,
+    provenance,
     users,
     voice,
     whatsapp,
@@ -169,12 +170,19 @@ _cors_origins = {
     _base.replace("localhost", "127.0.0.1"),
     _base.replace("127.0.0.1", "localhost"),
 }
+# Also include ports 3000-3005 explicitly in development
+if settings.app_env == "development":
+    for port in (3000, 3001, 3002, 3003, 3004, 3005):
+        _cors_origins.add(f"http://localhost:{port}")
+        _cors_origins.add(f"http://127.0.0.1:{port}")
+
 # Extra origins (apex + www, staging, etc.) from CORS_ORIGINS, comma-separated.
 for _extra in settings.cors_origins.split(","):
     _extra = _extra.strip().rstrip("/")
     if _extra:
         _cors_origins.add(_extra)
 _cors_origins = list(_cors_origins)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -217,6 +225,7 @@ app.include_router(billing.router, prefix=API_PREFIX)
 app.include_router(overseas.router, prefix=API_PREFIX)
 app.include_router(calculators.router, prefix=API_PREFIX)
 app.include_router(bail.router, prefix=API_PREFIX)
+app.include_router(provenance.router, prefix=API_PREFIX)
 
 app.include_router(chat_socket.router)
 app.include_router(notification_socket.router)

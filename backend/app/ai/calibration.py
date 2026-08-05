@@ -10,6 +10,12 @@ fitted ones without changing call sites.
 PSI drift detection:
   PSI >= 0.20  → distribution shift detected, recalibration required
   PSI <  0.10  → distribution stable
+
+The PSI baseline and window live in Redis when REDIS_URL is set, so drift is
+measured across the whole deployment rather than per worker. Held in-process
+each worker needed _PSI_WINDOW_SIZE samples of its OWN before it could say
+anything, and a restart discarded the baseline — which is precisely the moment
+drift detection matters. Falls back to in-process state when Redis is disabled.
 """
 from __future__ import annotations
 
@@ -17,6 +23,8 @@ import logging
 import math
 import threading
 from typing import Optional
+
+from app.core.redis_client import get_redis, redis_lock
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +45,17 @@ _bm25_iso_y: list[float] = []
 _calibration_fitted = False
 _lock = threading.Lock()
 
-# ── PSI state ─────────────────────────────────────────────────────────────────
+# ── PSI state (in-process fallback; Redis keys below when enabled) ────────────
 _psi_baseline: list[float] = []
 _psi_window:   list[float] = []
 _psi_lock = threading.Lock()
+
+_psi_pending:  list[str] = []      # awaiting a batched RPUSH
+_PSI_FLUSH_EVERY = 25              # samples buffered before one write
+
+_K_PSI_BASELINE = "aicalib:psi:baseline"
+_K_PSI_WINDOW   = "aicalib:psi:window"
+_K_PSI_LOCK     = "lock:aicalib:psi"
 
 
 # ── Calibration functions ─────────────────────────────────────────────────────
@@ -127,25 +142,104 @@ def _psi(baseline: list[float], current: list[float], n_bins: int = 10) -> float
     return sum((ci - bi) * math.log(ci / bi) for bi, ci in zip(b, c))
 
 
-def record_score_for_drift(score: float) -> None:
-    """Record a retrieval confidence score for PSI-based drift monitoring."""
+def _evaluate_psi(baseline: list[float], window: list[float]) -> tuple[float, bool]:
+    """Compare a full window against the baseline. Returns (psi, replace_baseline)."""
+    psi = _psi(baseline, window)
+    if psi >= _PSI_RECALIBRATE:
+        logger.warning(
+            "calibration: PSI=%.4f >= %.2f — distribution shift detected",
+            psi, _PSI_RECALIBRATE,
+        )
+        return psi, True
+    if psi < _PSI_STABLE:
+        logger.debug("calibration: PSI=%.4f — stable", psi)
+    else:
+        logger.info("calibration: PSI=%.4f — monitoring", psi)
+    return psi, False
+
+
+def _record_drift_local(score: float) -> None:
+    """In-process PSI accounting — used when Redis is disabled."""
     with _psi_lock:
-        _psi_window.append(max(0.0, min(1.0, score)))
-        if len(_psi_window) >= _PSI_WINDOW_SIZE:
-            if not _psi_baseline:
+        _psi_window.append(score)
+        if len(_psi_window) < _PSI_WINDOW_SIZE:
+            return
+        if not _psi_baseline:
+            _psi_baseline.extend(_psi_window)
+            logger.info("calibration: PSI baseline established (%d samples)", _PSI_WINDOW_SIZE)
+        else:
+            _, replace = _evaluate_psi(_psi_baseline, _psi_window)
+            if replace:
+                _psi_baseline.clear()
                 _psi_baseline.extend(_psi_window)
-                logger.info("calibration: PSI baseline established (%d samples)", _PSI_WINDOW_SIZE)
-            else:
-                psi = _psi(_psi_baseline, _psi_window)
-                if psi >= _PSI_RECALIBRATE:
-                    logger.warning(
-                        "calibration: PSI=%.4f >= %.2f — distribution shift detected",
-                        psi, _PSI_RECALIBRATE,
-                    )
-                    _psi_baseline.clear()
-                    _psi_baseline.extend(_psi_window)
-                elif psi < _PSI_STABLE:
-                    logger.debug("calibration: PSI=%.4f — stable", psi)
-                else:
-                    logger.info("calibration: PSI=%.4f — monitoring", psi)
-            _psi_window.clear()
+        _psi_window.clear()
+
+
+async def _record_drift_redis(client, score: float) -> None:
+    """
+    Shared PSI accounting.
+
+    Scores are buffered and pushed in batches of _PSI_FLUSH_EVERY rather than one
+    RPUSH per query — at one command per query this was the dominant Redis cost
+    in the whole pipeline, and the store is billed per command.
+    """
+    global _psi_pending
+    with _psi_lock:
+        _psi_pending.append(str(score))
+        if len(_psi_pending) < _PSI_FLUSH_EVERY:
+            return
+        batch, _psi_pending = _psi_pending, []
+
+    try:
+        length = await client.rpush(_K_PSI_WINDOW, *batch)
+    except Exception:
+        with _psi_lock:                      # keep the samples for the next attempt
+            _psi_pending = batch + _psi_pending
+        raise
+
+    if length < _PSI_WINDOW_SIZE:
+        return
+
+    # Window is full — exactly one worker should consume it.
+    async with redis_lock(_K_PSI_LOCK, ttl_seconds=20) as got:
+        if not got:
+            return
+        window_raw = await client.lrange(_K_PSI_WINDOW, 0, _PSI_WINDOW_SIZE - 1)
+        if len(window_raw) < _PSI_WINDOW_SIZE:
+            return   # another worker already consumed it
+        await client.ltrim(_K_PSI_WINDOW, _PSI_WINDOW_SIZE, -1)
+
+        window   = [float(x) for x in window_raw]
+        baseline = [float(x) for x in await client.lrange(_K_PSI_BASELINE, 0, -1)]
+
+        if not baseline:
+            await client.rpush(_K_PSI_BASELINE, *[str(v) for v in window])
+            logger.info("calibration: PSI baseline established (%d samples)", len(window))
+            return
+
+        _, replace = _evaluate_psi(baseline, window)
+        if replace:
+            pipe = client.pipeline()
+            pipe.delete(_K_PSI_BASELINE)
+            pipe.rpush(_K_PSI_BASELINE, *[str(v) for v in window])
+            await pipe.execute()
+
+
+async def record_score_for_drift(score: float) -> None:
+    """
+    Record a retrieval confidence score for PSI-based drift monitoring.
+
+    Never raises — drift monitoring is observability, not a query dependency.
+    """
+    score  = max(0.0, min(1.0, score))
+    client = get_redis()
+
+    if client is None:
+        _record_drift_local(score)
+        return
+
+    try:
+        await _record_drift_redis(client, score)
+    except Exception:
+        logger.exception("calibration: PSI update failed — falling back to local window")
+        _record_drift_local(score)
