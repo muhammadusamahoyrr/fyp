@@ -29,6 +29,28 @@ Example for 5 chunks: [1,0,1,1,0]
 No explanation. No other text."""
 
 
+def _reorder_by_topic(chunks: list[dict], query: str) -> list[dict]:
+    """Let statute-scope disambiguation have the last word on ordering.
+
+    Stable: chunks no rule mentions keep their graded order, and nothing is
+    dropped — a demoted statute stays retrievable and citable.
+    """
+    try:
+        from app.ai.pipelines.topic_rules import active_rules, statute_weight
+        if not active_rules(query):
+            return chunks
+        return [
+            c for _, c in sorted(
+                enumerate(chunks),
+                key=lambda pair: (-statute_weight(query, pair[1].get("statute", "")),
+                                  pair[0]),
+            )
+        ]
+    except Exception:
+        logger.exception("grader: topic reordering failed — keeping graded order")
+        return chunks
+
+
 def _routing_gap(state: AgentState) -> float:
     """
     Margin between the top two case-type scores from the fast classifier.
@@ -122,8 +144,16 @@ async def retrieval_grader_node(state: AgentState) -> dict:
 
     await _record_observation(state, signals.aggregate)
 
+    # Topic disambiguation is applied in retrieval_node so the right statute is
+    # among the chunks that get GRADED, but grading re-sorts by relevance and
+    # discards that order. Re-applying here makes it the final word: without
+    # this the Punjab Tenancy Act 1887 still led a rented-premises question,
+    # exactly the failure the rules exist to prevent.
+    ordered = _reorder_by_topic(graded + rest,
+                               state.get("normalized_query") or state.get("query", ""))
+
     return {
-        "reranked_chunks":      graded + rest,
+        "reranked_chunks":      ordered,
         "prev_relevance_score": prev_score,
         "relevance_score":      signals.aggregate,
         "signal_variance":      signals.variance,

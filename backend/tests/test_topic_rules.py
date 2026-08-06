@@ -114,3 +114,22 @@ def test_the_adjustment_is_modest_by_design():
     genuinely poor match over a good one."""
     assert 1.0 < BOOST <= 1.25
     assert 0.75 <= PENALTY < 1.0
+
+
+# ── the ordering must survive grading ────────────────────────────────────────
+
+def test_grader_reapplies_topic_ordering():
+    """Applying the rules only in retrieval_node was not enough: the grader
+    re-sorts by relevance and discarded that order, so the Punjab Tenancy Act
+    1887 still led a rented-premises question in production."""
+    from app.ai.nodes.retrieval_grader_node import _reorder_by_topic
+    graded = [_chunk(TENANCY, "45"), _chunk(RENTED, "12"), _chunk(UNRELATED)]
+    out = _reorder_by_topic(graded, "Can a tenant be evicted without notice in Punjab?")
+    assert out[0]["statute"] == RENTED
+    assert len(out) == 3
+
+
+def test_grader_reordering_is_a_noop_without_a_matching_rule():
+    from app.ai.nodes.retrieval_grader_node import _reorder_by_topic
+    graded = [_chunk(TENANCY), _chunk(RENTED)]
+    assert _reorder_by_topic(graded, "What is the punishment for theft?") == graded

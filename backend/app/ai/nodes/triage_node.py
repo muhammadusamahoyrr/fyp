@@ -75,6 +75,32 @@ def _prefer_fast() -> bool:
     return bool(settings.gemini_api_key)
 
 
+def _resolved_case_type(state: AgentState) -> str:
+    """Best available case type when the triage LLM returns "unknown".
+
+    classifier_node runs first and scores the query on keywords, but it only
+    promotes its finding into `case_type` above a HIGH confidence bar. Below
+    that it writes only `classifier_case_type`, and triage used to fall back to
+    `case_type` alone — so a correct classification was computed and then
+    thrown away.
+
+    Observed live: "What are the grounds for khula under Pakistani family law?"
+    scored classifier_case_type='family' at 0.35, the triage LLM answered
+    "unknown", and the turn was routed to clarification and never retrieved
+    anything. The word "khula" is in the classifier's family keywords; nothing
+    was missing except this handoff.
+    """
+    existing = str(state.get("case_type") or "").strip()
+    if existing and existing != "unknown":
+        return existing
+
+    hinted = str(state.get("classifier_case_type") or "").strip()
+    if hinted and hinted != "unknown" and (state.get("classifier_confidence") or 0) > 0:
+        return hinted
+
+    return "unknown"
+
+
 # ── Follow-up intent detection (LLM structured output) ───────────────────────
 
 _INTENT_SYSTEM = """\
@@ -213,7 +239,7 @@ async def triage_node(state: AgentState) -> dict:
             "is_grounded":        True,
             "confidence":         1.0,
             "language":           "en",
-            "case_type":          existing_type     or "unknown",
+            "case_type":          _resolved_case_type(state),
             "province":           existing_province or "unknown",
             "known_facts":        state.get("known_facts", []),
             "followup_intent":    None,
@@ -226,7 +252,7 @@ async def triage_node(state: AgentState) -> dict:
             "followup_intent":      pre_intent,
             "language":             state.get("language", "en"),
             "normalized_query":     query,
-            "case_type":            existing_type     or "unknown",
+            "case_type":            _resolved_case_type(state),
             "case_type_confidence": state.get("case_type_confidence", 0.0),
             "complexity":           state.get("complexity", "simple"),
             "urgency":              state.get("urgency", "low"),
@@ -247,7 +273,7 @@ async def triage_node(state: AgentState) -> dict:
                 "followup_intent":      intent,
                 "language":             state.get("language", "en"),
                 "normalized_query":     query,
-                "case_type":            existing_type     or "unknown",
+                "case_type":            _resolved_case_type(state),
                 "case_type_confidence": state.get("case_type_confidence", 0.0),
                 "complexity":           state.get("complexity", "simple"),
                 "urgency":              state.get("urgency", "low"),
@@ -292,7 +318,7 @@ async def triage_node(state: AgentState) -> dict:
             "is_grounded":        True,
             "confidence":         1.0,
             "language":           result.language,
-            "case_type":          existing_type     or "unknown",
+            "case_type":          _resolved_case_type(state),
             "province":           existing_province or "unknown",
             "known_facts":        state.get("known_facts", []),
             "followup_intent":    None,
@@ -301,7 +327,7 @@ async def triage_node(state: AgentState) -> dict:
     case_type = (
         result.case_type
         if result.case_type != "unknown"
-        else (existing_type or "unknown")
+        else _resolved_case_type(state)
     )
     province = (
         result.province

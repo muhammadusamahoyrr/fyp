@@ -59,8 +59,22 @@ else:
         )
 
 
+# First-stage retrieval depth.
+#
+# MEASURED, do not raise without re-measuring. Widening to 50 was tried together
+# with a cross-encoder reranker and BOTH were reverted:
+#   * k=50 alone made results WORSE — the khula query's target statute fell from
+#     rank 8 to rank 14, because more competitors enter the pool and the grader
+#     only scores the leading chunks.
+#   * the cross-encoder that was supposed to justify the extra depth scored the
+#     legally WRONG statute highest on this corpus (see reranker.py).
+# Depth and reranking are a pair: neither is useful here without the other
+# working, and the generic reranker does not work on this text.
+FIRST_STAGE_K = 10
+
+
 @lru_cache(maxsize=6)
-def _bm25(collection_name: str, k: int = 10) -> BM25Retriever:
+def _bm25(collection_name: str, k: int = FIRST_STAGE_K) -> BM25Retriever:
     col = get_chroma().get_collection(collection_name)
     result = col.get(include=["documents", "metadatas"])
     docs = [
@@ -110,7 +124,7 @@ def build_retriever(case_type: str, province: str):
         embedding_function=_embeddings(),
     )
     semantic = store.as_retriever(
-        search_kwargs={"k": 10, "filter": where_filter}
+        search_kwargs={"k": FIRST_STAGE_K, "filter": where_filter}
     )
 
     return EnsembleRetriever(
