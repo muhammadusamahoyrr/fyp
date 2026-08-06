@@ -12,6 +12,15 @@ _REFUSE = (
     "Please consult a qualified Pakistani lawyer for accurate advice on your specific situation."
 )
 
+# Distinct message for a retrieval FAULT. Telling a user no relevant law was
+# found, when in fact the search itself failed, is a false statement about the
+# law — and it discourages them from simply retrying.
+_REFUSE_ERROR = (
+    "I hit a technical problem searching the legal documents and could not "
+    "complete your request. Please try again in a moment. If it keeps happening, "
+    "please consult a qualified Pakistani lawyer for your specific situation."
+)
+
 # Prompt leakage artifacts from LLM output
 _LEAK_RE  = re.compile(
     r'(?im)^(System:|Human:|Assistant:|<\|im_start\||<\|im_end\||\[INST\]|<<SYS>>|Note to AI:|###\s*System).*$'
@@ -48,12 +57,17 @@ async def finalizer_node(state: AgentState) -> dict:
 
     # No answer was ever generated.
     if not state.get("answer"):
+        failed = (state.get("arbitration_source") == "error"
+                  or state.get("retrieval_error"))
+        msg = _REFUSE_ERROR if failed else _REFUSE
         return {
-            "answer":             _REFUSE,
+            "answer":             msg,
             "confidence":         0.0,
             "is_grounded":        False,
-            "convergence_status": "max_attempts",
-            "messages":           [AIMessage(content=_REFUSE)],
+            # "error" keeps a fault out of the abstention statistics; a genuine
+            # evidence-based refusal stays "max_attempts".
+            "convergence_status": "error" if failed else "max_attempts",
+            "messages":           [AIMessage(content=msg)],
         }
 
     is_grounded = state.get("is_grounded", False)

@@ -40,11 +40,19 @@ class FakeCollection:
                 if not any(self._match(doc, sub) for sub in cond):
                     return False
                 continue
-            value = doc.get(key)
+            # dotted path support, e.g. "arbitration.source"
+            if "." in key:
+                value = doc
+                for part in key.split("."):
+                    value = (value or {}).get(part) if isinstance(value, dict) else None
+            else:
+                value = doc.get(key)
             if isinstance(cond, dict):
                 if "$in" in cond and value not in cond["$in"]:
                     return False
                 if "$nin" in cond and value in cond["$nin"]:
+                    return False
+                if "$ne" in cond and value == cond["$ne"]:
                     return False
                 if "$exists" in cond and (key in doc) != cond["$exists"]:
                     return False
@@ -175,6 +183,31 @@ async def test_clarification_and_blocked_turns_are_not_offered_for_labelling(sto
 
     offered = await ls.unlabeled_records(limit=10)
     assert {r["request_id"] for r in offered} == {"r1"}
+
+
+@pytest.mark.asyncio
+async def test_retrieval_faults_are_not_offered_for_labelling(store):
+    """A refusal caused by a crashed retriever is not an abstention decision;
+    labelling it would put a system outage into the risk-coverage curve."""
+    prov, _ = store
+    prov.docs.extend([
+        _prov("r1"),
+        _prov("r2", arbitration={"output": "refuse", "source": "error",
+                                 "confidence": 0.0}),
+    ])
+    offered = await ls.unlabeled_records(limit=10)
+    assert {r["request_id"] for r in offered} == {"r1"}
+
+
+@pytest.mark.asyncio
+async def test_a_genuine_no_evidence_refusal_is_still_labelable(store):
+    """Only faults are excluded. An honest 'nothing relevant found' refusal is
+    exactly the case the abstention benchmark needs."""
+    prov, _ = store
+    prov.docs.append(_prov("r1", arbitration={"output": "refuse", "source": "none",
+                                              "confidence": 0.0}))
+    offered = await ls.unlabeled_records(limit=10)
+    assert [r["request_id"] for r in offered] == ["r1"]
 
 
 @pytest.mark.asyncio

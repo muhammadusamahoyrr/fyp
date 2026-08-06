@@ -132,7 +132,11 @@ _ANSWER_TURNS_ONLY = {
     "$or": [
         {"turn_type": "answer"},
         {"turn_type": {"$exists": False}},
-    ]
+    ],
+    # A refusal caused by a retrieval FAULT is not an abstention decision — the
+    # system never saw the evidence. Labelling it as a correct or wrong refusal
+    # would put a system outage into the risk-coverage curve.
+    "arbitration.source": {"$ne": "error"},
 }
 
 

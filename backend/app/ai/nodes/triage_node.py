@@ -7,6 +7,7 @@ Confirms or overrides the classifier's case_type with richer LLM reasoning.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 
 from langchain_core.messages import AIMessage
@@ -15,6 +16,8 @@ from pydantic import BaseModel, Field
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_structured_llm
 from app.ai.nodes._history import format_history
+
+logger = logging.getLogger(__name__)
 
 # ── Canned responses ──────────────────────────────────────────────────────────
 
@@ -40,6 +43,30 @@ _MIN_REAL_WORDS = 2
 def _is_gibberish(query: str) -> bool:
     words = re.findall(r'[a-zA-Z؀-ۿ]{3,}', query)
     return len(words) < _MIN_REAL_WORDS
+
+
+# Arabic/Urdu script block. Presence or absence of these characters is a FACT
+# about the string, so it beats the model's opinion about which script it is.
+_URDU_SCRIPT_RE = re.compile(r'[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]')
+
+
+def _reconcile_language(query: str, language: str) -> str:
+    """
+    Correct the LLM's language label against the script actually present.
+
+    Observed in production: "mera shohar mujhe kharch nahi deta, maintenance ka
+    kya tareeqa hai?" was labelled "ur". It contains no Urdu characters at all.
+    That mislabel matters twice — triage only transliterates when it believes the
+    input is Roman Urdu, and generation answers in the language it was told, so
+    a user typing Latin script got an Urdu-script reply.
+    """
+    has_script = bool(_URDU_SCRIPT_RE.search(query))
+
+    if has_script and language == "roman_urdu":
+        return "ur"          # it is genuinely Urdu script
+    if not has_script and language == "ur":
+        return "roman_urdu"  # cannot be Urdu script — no Urdu characters exist
+    return language
 
 
 def _prefer_fast() -> bool:
@@ -282,9 +309,23 @@ async def triage_node(state: AgentState) -> dict:
         else (existing_province or "unknown")
     )
 
+    language = _reconcile_language(query, result.language)
+    normalized = result.normalized_query or query
+
+    if language != result.language:
+        logger.info(
+            "triage: language corrected %s -> %s by script check | query=%r",
+            result.language, language, query[:120],
+        )
+        # The model believed this was already Urdu script, so it returned the
+        # text unchanged instead of transliterating. Fall back to the raw query
+        # rather than presenting un-transliterated text as if it were normalised.
+        if language == "roman_urdu" and not _URDU_SCRIPT_RE.search(normalized):
+            normalized = query
+
     return {
-        "language":             result.language,
-        "normalized_query":     result.normalized_query or query,
+        "language":             language,
+        "normalized_query":     normalized,
         "case_type":            case_type,
         "case_type_confidence": result.case_type_confidence,
         "complexity":           result.complexity,

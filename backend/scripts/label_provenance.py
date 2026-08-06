@@ -47,9 +47,16 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
+from app.ai.threshold_manager import WARMUP_QUERY_COUNT       # noqa: E402
 from app.db.chroma import connect_chroma, get_chroma          # noqa: E402
 from app.db.mongodb import close_db, connect_db               # noqa: E402
 from app.services import labeling_service as ls               # noqa: E402
+
+# Labels needed for a defensible evaluation set and for fitting calibration.
+# Platt scaling has two parameters and standard IR test collections run to a few
+# hundred topics, so a few hundred pairs is the realistic bar — not the 1000
+# that WARMUP_QUERY_COUNT refers to, which counts unlabeled queries.
+_TARGET_LABELS = 200
 
 _CASE_TYPE_TO_COLLECTION = {
     "civil":          "civil_collection",
@@ -219,10 +226,20 @@ async def cmd_stats() -> None:
         print(f"  metrics valid up to: k={lo}  "
               f"(ranks below that were never judged)")
 
-    target = 1000
-    if s["labeled"] < target:
-        print(f"\n  {target - s['labeled']} more to reach the {target} needed for "
-              f"threshold warmup and calibration fitting.")
+    # Two DIFFERENT targets, previously conflated into a single "1000 labels"
+    # figure that overstated the work by roughly 5x:
+    #   - labels are needed for the eval set and for fitting calibration
+    #   - threshold warmup counts QUERIES, not labels (record_query runs on
+    #     every RAG turn with is_labeled=False), so it is driven by traffic and
+    #     needs no human at all
+    print(f"\n  targets")
+    if s["labeled"] < _TARGET_LABELS:
+        print(f"    eval set + calibration : {s['labeled']}/{_TARGET_LABELS} labels "
+              f"({_TARGET_LABELS - s['labeled']} to go)")
+    else:
+        print(f"    eval set + calibration : {s['labeled']}/{_TARGET_LABELS} labels — met")
+    print(f"    threshold warmup       : needs {WARMUP_QUERY_COUNT} QUERIES, not labels "
+          f"- generate traffic, no labelling required")
     print()
 
 

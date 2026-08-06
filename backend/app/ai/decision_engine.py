@@ -148,12 +148,18 @@ def run_decision_engine(state: dict) -> dict:
     bm25_confidence     = state.get("bm25_confidence", 0.0)
     clarification_depth = state.get("clarification_depth", 0)
 
-    # Hard gate — zero chunks always refuse regardless of other signals
+    # Hard gate — zero chunks always refuse regardless of other signals.
+    # The SOURCE distinguishes why: "error" means retrieval crashed and we never
+    # saw the evidence, "none" means retrieval ran and found nothing. Only the
+    # latter is a genuine abstention; counting a system fault as one would
+    # corrupt any risk-coverage or refusal-rate measurement.
     if not chunks:
-        logger.info("decision_engine: 0 chunks → refuse")
+        failed = bool(state.get("retrieval_error"))
+        logger.info("decision_engine: 0 chunks → refuse (%s)",
+                    "retrieval error" if failed else "no evidence found")
         return {
             "arbitration_output":     "refuse",
-            "arbitration_source":     "none",
+            "arbitration_source":     "error" if failed else "none",
             "arbitration_confidence": 0.0,
         }
 

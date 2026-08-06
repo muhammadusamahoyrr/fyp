@@ -101,6 +101,24 @@ def test_zero_chunks_is_a_hard_refuse():
     assert out["arbitration_source"] == "none"
 
 
+def test_a_retrieval_fault_refuses_but_is_labelled_error_not_abstention():
+    """A crashed retriever and an empty result both give zero chunks, but only
+    one is a decision. Counting a system fault as an abstention would corrupt
+    refusal-rate and risk-coverage measurements."""
+    out = run_decision_engine({
+        "reranked_chunks": [], "relevance_score": 0.0, "retrieval_error": True,
+    })
+    assert out["arbitration_output"] == "refuse"
+    assert out["arbitration_source"] == "error"
+
+
+def test_absent_retrieval_error_flag_is_treated_as_no_evidence():
+    """Back-compat: records written before the flag existed must not all be
+    reclassified as faults."""
+    out = run_decision_engine({"reranked_chunks": [], "relevance_score": 0.0})
+    assert out["arbitration_source"] == "none"
+
+
 def test_node_writes_the_verdict_into_state():
     out = run_decision_engine({
         "reranked_chunks": [{"content": "PPC 302 ..."}],

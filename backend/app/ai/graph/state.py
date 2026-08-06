@@ -47,6 +47,9 @@ class AgentState(TypedDict):
     relevance_score:  float
     signal_variance:  float
     bm25_confidence:  float
+    # True when retrieval FAILED (exception), as opposed to running fine and
+    # finding nothing. Both yield zero chunks; only one is an abstention.
+    retrieval_error:  bool
     cache_hit:        bool
     cache_confidence: float
 
