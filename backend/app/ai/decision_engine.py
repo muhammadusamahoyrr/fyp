@@ -14,10 +14,22 @@ Utility function:  utility = calibrated_confidence / cost_weight
   (higher utility = preferred action given the confidence level)
 
 Failure tree (priority descending):
+  0. Unanswerable by nature — refuse regardless of evidence (answerability.py)
   1. LLM pipeline result (relevance_score from grader)
   2. Version-matched cache hit
   3. BM25-only result (confidence capped at 0.55)
   4. Refuse (no evidence available)
+
+Step 0 sits above the evidence branches deliberately. Some in-domain legal
+questions ask for a kind of fact statutes never state — a rate in force today, a
+court statistic, a personal record — and retrieval answers them with real,
+vocabulary-matching law. Confidence in that case is high and wrong, so no
+threshold below can catch it.
+
+arbitration_source distinguishes the abstentions for the audit trail:
+  "unanswerable" — the corpus could never answer this
+  "none"         — retrieval ran and found nothing
+  "error"        — retrieval failed, so the evidence was never seen
 
 Clarification depth cap: after MAX_CLARIFICATION_DEPTH consecutive defers,
 arbitration enters binary mode — answer if above absolute floor, else refuse.
@@ -27,6 +39,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from app.ai.pipelines.answerability import check as check_answerability
 from app.ai.threshold_manager import (
     get_generation_floor,
     get_refusal_ceiling,
@@ -147,6 +160,30 @@ def run_decision_engine(state: dict) -> dict:
     cache_confidence    = state.get("cache_confidence", 0.0)
     bm25_confidence     = state.get("bm25_confidence", 0.0)
     clarification_depth = state.get("clarification_depth", 0)
+
+    # Hard gate — some questions cannot be answered from statutes at all, no
+    # matter what retrieval returned. These are IN-DOMAIN legal questions, so
+    # neither the gatekeeper nor triage stops them, and retrieval happily
+    # supplies real law that shares their vocabulary: "the current stamp duty
+    # rate" pulls the Transfer of Property Act, and every signal then reads as
+    # moderate confidence in law that does not contain the answer.
+    #
+    # This is checked BEFORE the evidence branches because it is not a question
+    # of degree. The unanswerable and answerable confidence ranges overlap, so
+    # no threshold separates them; what separates them is the kind of fact being
+    # asked for. See answerability.py.
+    unanswerable = check_answerability(state.get("query") or "")
+    if unanswerable:
+        logger.info("decision_engine: refuse — corpus cannot answer (%s)",
+                    unanswerable.kind)
+        return {
+            "arbitration_output":     "refuse",
+            "arbitration_source":     "unanswerable",
+            "arbitration_confidence": 0.0,
+            "refusal_reason":         unanswerable.reason,
+            "refusal_redirect":       unanswerable.redirect,
+            "refusal_kind":           unanswerable.kind,
+        }
 
     # Hard gate — zero chunks always refuse regardless of other signals.
     # The SOURCE distinguishes why: "error" means retrieval crashed and we never

@@ -4,6 +4,7 @@ import logging
 from app.ai.calibration import record_score_for_drift
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_fast_llm
+from app.ai.pipelines.similarity import similarity_scores
 from app.ai.scoring import score_retrieval_batch
 from app.ai.threshold_manager import record_query
 
@@ -122,6 +123,16 @@ async def retrieval_grader_node(state: AgentState) -> dict:
         ])
         grades = [float(g) for g in json.loads(response.content.strip())]
 
+        # The grader runs on a small fast-tier model, and it does not reliably
+        # emit one digit per chunk. Observed on llama-3.1-8b: a runaway array of
+        # 130 zeros for 8 chunks. score_retrieval_batch pads and truncates, so
+        # that was silently accepted as "every chunk irrelevant" — a malformed
+        # response became a confident negative judgement. A wrong-length reply
+        # is not a grade; fall through to the neutral degradation below.
+        if len(grades) != len(to_grade):
+            raise ValueError(
+                f"grader returned {len(grades)} grades for {len(to_grade)} chunks")
+
     except Exception:
         # The grader LLM is the *third* signal, not the only one. Previously this
         # failed closed to score=0.0, which discarded the lexical and embedding
@@ -133,12 +144,22 @@ async def retrieval_grader_node(state: AgentState) -> dict:
         grades = [_NEUTRAL_GRADE] * len(to_grade)
 
     # Three-signal scoring (keyword 0.40 / embedding 0.35 / llm 0.25) with the
-    # inter-signal variance penalty. Embedding scores are not surfaced by the
-    # EnsembleRetriever, so score_retrieval_batch pads them to neutral — the
-    # keyword and LLM signals carry the decision until that is plumbed through.
+    # inter-signal variance penalty.
+    #
+    # The embedding signal is now real. EnsembleRetriever does not surface
+    # per-document scores, so score_retrieval_batch used to pad it to a constant
+    # 0.5 — meaning 35% of every confidence score was a fixed offset that could
+    # not distinguish an answerable question from an unanswerable one. The
+    # passage vectors already exist in Chroma from ingest, so recovering them is
+    # a lookup, not a re-encode.
+    scoring_query = state.get("normalized_query") or state["query"]
+    embedding_scores = await asyncio.to_thread(
+        similarity_scores, scoring_query, to_grade, state.get("case_type") or "civil")
+
     graded, signals = score_retrieval_batch(
-        query_text=state.get("normalized_query") or state["query"],
+        query_text=scoring_query,
         chunks=to_grade,
+        embedding_scores=embedding_scores,
         llm_grades=grades,
     )
 

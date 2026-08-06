@@ -59,6 +59,23 @@ async def finalizer_node(state: AgentState) -> dict:
     if not state.get("answer"):
         failed = (state.get("arbitration_source") == "error"
                   or state.get("retrieval_error"))
+
+        # A refusal the user can act on. "I couldn't find that" is indistinguish-
+        # able from a retrieval miss, so a user asking for the current stamp duty
+        # rate would simply rephrase and try again — the corpus will never hold
+        # the answer, and saying so is more useful than another empty search.
+        reason = state.get("refusal_reason")
+        if reason and not failed:
+            redirect = state.get("refusal_redirect")
+            msg = reason + (f" You'll want {redirect} for that." if redirect else "")
+            return {
+                "answer":             msg,
+                "confidence":         0.0,
+                "is_grounded":        False,
+                "convergence_status": "unanswerable",
+                "messages":           [AIMessage(content=msg)],
+            }
+
         msg = _REFUSE_ERROR if failed else _REFUSE
         return {
             "answer":             msg,

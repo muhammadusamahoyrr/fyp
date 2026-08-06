@@ -13,6 +13,7 @@ another. Follow-up turns (format/deepen/affirm) are skipped inside cache.get_res
 from app.ai import cache
 from app.ai.calibration import calibrate_cache
 from app.ai.graph.state import AgentState
+from app.ai.pipelines.answerability import check as check_answerability
 
 
 def is_personalised(state: AgentState) -> bool:
@@ -29,6 +30,18 @@ def is_personalised(state: AgentState) -> bool:
 
 async def cache_lookup_node(state: AgentState) -> dict:
     if is_personalised(state):
+        return {"cache_hit": False}
+
+    # A cache hit routes straight to finalizer_node, skipping the Decision
+    # Engine — so the answerability gate does not run on this path. That is how
+    # a pre-fix answer to "the current stamp duty rate in Gilgit-Baltistan"
+    # survived the fix and kept being served at 0.85 confidence.
+    #
+    # Declining the lookup sends the turn down the normal path, where the
+    # Decision Engine refuses it. Keeping the check here rather than adding a
+    # second refusal branch preserves the engine as the single routing
+    # authority. See pipelines/answerability.py.
+    if check_answerability(state.get("normalized_query") or state.get("query") or ""):
         return {"cache_hit": False}
 
     payload = await cache.get_result(

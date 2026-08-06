@@ -64,6 +64,14 @@ class AgentState(TypedDict):
     arbitration_output:     str
     arbitration_source:     str
     arbitration_confidence: float
+    # Set only when the corpus cannot answer the question by its nature (a live
+    # rate, a court statistic, a personal record) rather than for want of a good
+    # enough match. Lets the finalizer say WHY and point somewhere useful,
+    # instead of emitting the generic "I could not find this" that a user cannot
+    # distinguish from a retrieval miss. See pipelines/answerability.py.
+    refusal_kind:     str
+    refusal_reason:   str
+    refusal_redirect: str
     answer:      str
     citations:   list[dict]
     confidence:  float
