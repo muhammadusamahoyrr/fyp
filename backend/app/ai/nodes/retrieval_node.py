@@ -228,6 +228,40 @@ def _is_superseded_for(meta: dict, province: str) -> bool:
     return province.strip().lower() in {p.strip() for p in marker.split(",")}
 
 
+def _apply_topic_rules(chunks: list[dict], query: str) -> list[dict]:
+    """Reorder chunks so the statute whose SCOPE matches the query ranks first.
+
+    Applied here, before grading, because the grader only looks at the first
+    handful of chunks — a correct provision sitting sixth may never be scored at
+    all. Reordering is stable, so chunks the rules do not touch keep their
+    retrieval order.
+
+    Nothing is dropped: a demoted statute can still be retrieved and cited. This
+    breaks near-ties between laws of comparable relevance, it does not filter.
+    """
+    try:
+        from app.ai.pipelines.topic_rules import active_rules, statute_weight
+        fired = active_rules(query)
+        if not fired:
+            return chunks
+        # Rank descending by weight; enumerate keeps ties in original order.
+        ordered = sorted(
+            enumerate(chunks),
+            key=lambda pair: (-statute_weight(query, pair[1].get("statute", "")),
+                              pair[0]),
+        )
+        result = [c for _, c in ordered]
+        if result and result[0] is not chunks[0]:
+            logger.info(
+                "retrieval: topic rules %s reordered results — now leading with %r",
+                fired, result[0].get("statute", ""),
+            )
+        return result
+    except Exception:
+        logger.exception("retrieval: topic rule reordering failed — keeping original order")
+        return chunks
+
+
 def _docs_to_chunks(docs: list[Document], province: str = "") -> list[dict]:
     chunks = []
     dropped = 0
@@ -332,6 +366,7 @@ async def retrieval_node(state: AgentState) -> dict:
         merged = docs_hop1
 
     chunks = _docs_to_chunks(merged, state.get("province", ""))
+    chunks = _apply_topic_rules(chunks, base_query)
 
     # Augment with web results when user toggled web search on
     if state.get("web_search_enabled"):
