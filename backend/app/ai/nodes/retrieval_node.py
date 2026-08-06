@@ -127,13 +127,18 @@ async def _web_search(query: str, case_type: str) -> list[dict]:
         return []
 
 
-async def _retrieve_case_law(query: str) -> list[dict]:
-    """Semantic search over the LHC judgment corpus. Returns chunk dicts marked
+async def _retrieve_case_law(query: str, province: str | None = None) -> list[dict]:
+    """Semantic search over the judgment corpus. Returns chunk dicts marked
     law_type='judgment'. Degrades to [] when the corpus is empty, embeddings are
-    unavailable, or nothing clears the relevance threshold."""
+    unavailable, or nothing clears the relevance threshold.
+
+    `province` enables precedent-aware ranking: Supreme Court authority and the
+    querying province's own High Court outrank another province's High Court,
+    which is persuasive only. Nothing is excluded on that basis.
+    """
     try:
         from app.services import citator_service as cs
-        hits = await cs.search(query, n=_CASE_LAW_MAX * 2)
+        hits = await cs.search(query, n=_CASE_LAW_MAX * 2, province=province)
     except Exception:
         return []
 
@@ -150,25 +155,56 @@ async def _retrieve_case_law(query: str) -> list[dict]:
             "title":        h.get("title") or h.get("case_no") or jid,
             "pdf_url":      h.get("pdf_url", ""),
             "score":        h.get("score", 0.0),
+            # Whether this judgment binds the user's province or is merely
+            # persuasive — recorded so the answer, and the audit trail, can
+            # reflect the difference.
+            "authority":      h.get("authority", ""),
+            "court_province": h.get("court_province", ""),
         })
         if len(chunks) >= _CASE_LAW_MAX:
             break
     return chunks
 
 
-def _docs_to_chunks(docs: list[Document]) -> list[dict]:
-    return [
-        {
+def _is_superseded_for(meta: dict, province: str) -> bool:
+    """
+    Has this statute been superseded in the querying province?
+
+    Supersession is jurisdiction-scoped: the Police Act 1861 no longer governs
+    Punjab (Police Order 2002 replaced it) but remains in force elsewhere, so it
+    is stored as federal and must be dropped per-province rather than globally.
+    Presenting repealed law as current is worse than returning nothing — the
+    user acts on a rule that does not govern them.
+    """
+    marker = str(meta.get("superseded_in") or "").strip().lower()
+    if not marker or not province:
+        return False
+    return province.strip().lower() in {p.strip() for p in marker.split(",")}
+
+
+def _docs_to_chunks(docs: list[Document], province: str = "") -> list[dict]:
+    chunks = []
+    dropped = 0
+    for doc in docs:
+        meta = doc.metadata or {}
+        if _is_superseded_for(meta, province):
+            dropped += 1
+            continue
+        chunks.append({
             "content":        doc.page_content,
-            "statute":        doc.metadata.get("statute", ""),
-            "section_number": doc.metadata.get("section_number", ""),
-            "source_file":    doc.metadata.get("source_file", ""),
-            "chunk_id":       doc.metadata.get("chunk_id", ""),
-            "province":       doc.metadata.get("province", "federal"),
-            "law_type":       doc.metadata.get("law_type", ""),
-        }
-        for doc in docs
-    ]
+            "statute":        meta.get("statute", ""),
+            "section_number": meta.get("section_number", ""),
+            "source_file":    meta.get("source_file", ""),
+            "chunk_id":       meta.get("chunk_id", ""),
+            "province":       meta.get("province", "federal"),
+            "law_type":       meta.get("law_type", ""),
+        })
+    if dropped:
+        logger.info(
+            "retrieval: dropped %d chunk(s) superseded in province=%s",
+            dropped, province,
+        )
+    return chunks
 
 
 async def retrieval_node(state: AgentState) -> dict:
@@ -185,7 +221,7 @@ async def retrieval_node(state: AgentState) -> dict:
 
     # Case law runs on the raw (un-rewritten) query — judgment prose matches lay
     # phrasing better than statute-terminology rewrites.
-    case_law = await _retrieve_case_law(base_query)
+    case_law = await _retrieve_case_law(base_query, state.get("province"))
 
     try:
         retriever = build_retriever(state["case_type"], state["province"])
@@ -204,14 +240,23 @@ async def retrieval_node(state: AgentState) -> dict:
             "reranked_chunks":  [],
             "case_law_chunks":  case_law,
             "retrieval_attempts": attempts,
+            # A crashed retriever is NOT the same as "no relevant law exists",
+            # but both used to arrive at the Decision Engine as zero chunks and
+            # be refused identically. Recording the difference matters twice
+            # over: the user deserves "try again" rather than "no law found",
+            # and a refusal caused by a system fault must not be counted as an
+            # abstention decision when measuring selective prediction.
+            "retrieval_error": True,
         }
 
     # ── Hop 1: primary query ──────────────────────────────────────────────────
+    retrieval_error = False
     try:
         docs_hop1: list[Document] = retriever.invoke(expanded)
     except Exception:
         logger.exception("retrieval: hop-1 query failed — continuing with no chunks")
         docs_hop1 = []
+        retrieval_error = True
 
     # ── Hop 2: follow statute cross-references found in hop-1 results ─────────
     all_hops: list[list[Document]] = [docs_hop1]
@@ -231,7 +276,7 @@ async def retrieval_node(state: AgentState) -> dict:
     else:
         merged = docs_hop1
 
-    chunks = _docs_to_chunks(merged)
+    chunks = _docs_to_chunks(merged, state.get("province", ""))
 
     # Augment with web results when user toggled web search on
     if state.get("web_search_enabled"):
@@ -244,4 +289,5 @@ async def retrieval_node(state: AgentState) -> dict:
         "reranked_chunks":  chunks,
         "case_law_chunks":  case_law,
         "retrieval_attempts": attempts,
+        "retrieval_error":  retrieval_error,
     }

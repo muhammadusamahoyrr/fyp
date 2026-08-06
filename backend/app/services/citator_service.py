@@ -334,8 +334,37 @@ async def cited_by(citation: str, limit: int = 50) -> dict:
     return {"citation": norm, "cited_by": docs, "count": len(docs)}
 
 
-async def search(query: str, n: int = 8) -> list[dict]:
-    """Semantic search over judgment text; one result per judgment."""
+# ── precedent weighting ───────────────────────────────────────────────────────
+# Pakistani precedent is hierarchical: the Supreme Court binds every court in the
+# country, a High Court binds courts within its own province, and another
+# province's High Court is PERSUASIVE only.
+#
+# This is applied as a rank BOOST rather than a filter, deliberately. Excluding
+# other provinces would discard persuasive authority that is genuinely useful —
+# and with a corpus drawn largely from one High Court it would return nothing at
+# all for users elsewhere. Ordering reflects authority; availability does not.
+_AUTHORITY_BOOST_NATIONAL = 1.15   # Supreme Court — binds everywhere
+_AUTHORITY_BOOST_OWN      = 1.10   # High Court of the querying province
+_AUTHORITY_BOOST_OTHER    = 1.00   # another High Court — persuasive only
+
+
+def _precedent_weight(meta: dict, province: str | None) -> float:
+    authority = str((meta or {}).get("authority", ""))
+    if authority == "binding_national":
+        return _AUTHORITY_BOOST_NATIONAL
+    if authority == "binding_provincial" and province:
+        same = str((meta or {}).get("province", "")).lower() == province.lower()
+        return _AUTHORITY_BOOST_OWN if same else _AUTHORITY_BOOST_OTHER
+    return _AUTHORITY_BOOST_OTHER
+
+
+async def search(query: str, n: int = 8, province: str | None = None) -> list[dict]:
+    """Semantic search over judgment text; one result per judgment.
+
+    `province` enables precedent-aware ranking: binding authority outranks
+    persuasive authority at comparable semantic similarity. Omit it for a purely
+    semantic search.
+    """
     from app.ai.pipelines.retriever import _embeddings
     emb = _embeddings()
     qvec = emb.embed_query(query)
@@ -349,13 +378,21 @@ async def search(query: str, n: int = 8) -> list[dict]:
         dist = res["distances"][0][i]
         if jid in best and best[jid]["distance"] <= dist:
             continue
+        raw = round(max(0.0, 1 - dist), 4)
+        weight = _precedent_weight(meta, province)
         best[jid] = {
             "judgment_id": jid,
             "distance": dist,
-            "score": round(max(0.0, 1 - dist), 4),
+            # Capped at 1.0 so a boosted score stays comparable with the
+            # thresholds callers apply to semantic similarity.
+            "score": round(min(raw * weight, 1.0), 4),
+            "semantic_score": raw,
+            "authority": (meta or {}).get("authority", ""),
+            "court_province": (meta or {}).get("province", ""),
             "snippet": res["documents"][0][i][:400],
         }
-    ranked = sorted(best.values(), key=lambda x: x["distance"])[:n]
+    # Rank on the weighted score, not raw distance, or the boost does nothing.
+    ranked = sorted(best.values(), key=lambda x: -x["score"])[:n]
 
     out = []
     for hit in ranked:
@@ -364,6 +401,11 @@ async def search(query: str, n: int = 8) -> list[dict]:
             pub = _public(doc)
             pub["score"] = hit["score"]
             pub["snippet"] = hit["snippet"]
+            # Carried through so callers (and the audit trail) can see WHY a
+            # judgment ranked where it did, not just that it did.
+            pub["semantic_score"] = hit["semantic_score"]
+            pub["authority"] = hit["authority"]
+            pub["court_province"] = hit["court_province"]
             out.append(pub)
     return out
 
