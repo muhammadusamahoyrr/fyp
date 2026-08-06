@@ -188,9 +188,76 @@ def _slide(text: str) -> list[str]:
     return out
 
 
+# ── contents-region removal ──────────────────────────────────────────────────
+# 16 of 21 statutes open with an explicit CONTENTS marker. Removing that region
+# before chunking is strictly better than pruning stubs afterwards, and it
+# reaches a case dedup cannot: a contents entry whose body text was never
+# extracted has no sibling to be matched against, so it survives the prune and
+# masquerades as the section itself.
+#
+# Measured alternatives that did NOT work, so they are not reinstated:
+#   * dotted-leader density per page — fires on only 2 of 21 statutes, because
+#     Punjab contents lines carry no leader and no page number
+#   * right-aligned page numbers — body text shares the same right edge, the
+#     text block being narrow
+_CONTENTS_MARKER = re.compile(
+    r"^\s*(?:TABLE\s+OF\s+)?(?:CONTENTS|ARRANGEMENT\s+OF\s+SECTIONS|INDEX)\s*$",
+    re.IGNORECASE)
+# "12. Power to arrest without warrant." / "5. Definitions ... 3"
+_CONTENTS_ENTRY = re.compile(r"^\s*\d+[A-Z]?\s*[\.\-]\s*\S.{0,110}$")
+# Where the law actually begins. "Preamble" is deliberately NOT here: contents
+# pages frequently list "Preamble" as their first entry, and treating it as the
+# body terminated the scan immediately — that alone made the Qanun-e-Shahadat,
+# one of the two worst offenders, come back unchanged.
+_BODY_MARKER = re.compile(
+    r"\b(whereas|it\s+is\s+hereby\s+enacted|be\s+it\s+enacted|"
+    r"in\s+exercise\s+of\s+the\s+powers)\b", re.IGNORECASE)
+_BODY_LINE_CHARS = 150      # a line this long is prose, not a contents entry
+_MAX_CONTENTS_FRACTION = 0.30
+
+
+def _strip_contents(text: str) -> tuple[str, int]:
+    """Remove the contents region. Returns (text, lines_removed).
+
+    Conservative by design: without an explicit marker nothing is removed, and
+    the cut is capped at a fraction of the document so a misfire can never
+    swallow the statute.
+    """
+    lines = text.splitlines()
+    start = next((i for i, ln in enumerate(lines[:400])
+                  if _CONTENTS_MARKER.match(ln.strip())), None)
+    if start is None:
+        return text, 0
+
+    last_entry = start
+    for j in range(start + 1, len(lines)):
+        s = lines[j].strip()
+        if not s:
+            continue
+        if len(s) > _BODY_LINE_CHARS or _BODY_MARKER.search(s):
+            break                      # the law starts here
+        if _CONTENTS_ENTRY.match(s):
+            last_entry = j
+
+    cut = last_entry + 1
+    if cut - start < 3:                # too small to be a contents block
+        return text, 0
+    if cut > len(lines) * _MAX_CONTENTS_FRACTION:
+        # REFUSE rather than clamp. Clamping to the cap cuts at an arbitrary
+        # line in the middle of the region, which is worse than leaving it:
+        # part of the contents survives AND the boundary is meaningless.
+        return text, 0
+
+    return "\n".join(lines[:start] + lines[cut:]), cut - start
+
+
 def extract_text(path: Path) -> str:
     reader = PdfReader(str(path))
-    return "\n".join((p.extract_text() or "") for p in reader.pages)
+    raw = "\n".join((p.extract_text() or "") for p in reader.pages)
+    cleaned, removed = _strip_contents(raw)
+    if removed:
+        print(f"    (removed {removed} contents lines before chunking)")
+    return cleaned
 
 
 def make_chunks(text: str, statute: str, law_type: str, source_file: str,
@@ -224,7 +291,79 @@ def make_chunks(text: str, statute: str, law_type: str, source_file: str,
                 },
             })
             i += 1
-    return chunks
+    return _drop_toc_stubs(chunks)
+
+
+# A statute PDF opens with a CONTENTS page whose lines read
+# "12. Power to arrest .... 7". Section-aware splitting treats each as a section
+# start and emits a ~50-char chunk, duplicating a section whose real text is
+# indexed separately. Those stubs are almost entirely heading words, so they
+# match a query about that heading as densely as the provision does while
+# containing none of the rule — they compete with, and can outrank, the law.
+# Kept in sync with scripts/prune_toc_stubs.py.
+_STUB_MAX_CHARS = 120
+# Compare on the opening only. A contents line often carries trailing junk — a
+# page number, or the next chapter heading run together with it — so matching
+# the whole string fails even when the head is plainly the same.
+_STUB_HEAD_CHARS = 25
+_ALNUM = re.compile(r"[^a-z0-9]+")
+# The trailing page reference MUST go before alphanumeric folding, or it lands
+# inside the head and blocks the match. "16. Accomplice 7" -> "16accomplice7"
+# never prefixes "16accompliceanaccomplice...". Long headings hid this, because
+# the page number falls beyond _STUB_HEAD_CHARS.
+_TRAILING_PAGENO = re.compile(r"[\.\s]*\d{1,3}\s*$")
+
+
+def _normalise(text: str) -> str:
+    """Alphanumeric-only, lowercased, trailing page reference removed.
+
+    Statute PDFs are OCR'd, and the same heading appears differently in the
+    contents and the body: "communicat ions" vs "communications",
+    "facts-in-issue" vs "f acts in issue". Stripping everything but letters and
+    digits makes those identical, where exact text matching does not.
+    """
+    return _ALNUM.sub("", _TRAILING_PAGENO.sub("", (text or "")).lower())
+
+
+def _drop_toc_stubs(chunks: list[dict]) -> list[dict]:
+    """Drop contents-page stubs, identified by PREFIX rather than by length.
+
+    A contents line repeats the opening of the section it points at:
+
+        "16. Accomplice 7"                                   <- stub
+        "16. Accomplice; An accomplice shall be a competent"  <- the provision
+
+    Strip the trailing page number and the stub is a prefix of the real text.
+    That test is precise, where a length threshold is not: an earlier attempt
+    using "sibling must exceed 400 chars" misjudged this very section, because
+    the real provision is only 254 characters.
+
+    A short chunk with no longer sibling it prefixes is always kept — plenty of
+    provisions genuinely are one line, and dropping them would lose law.
+    """
+    by_section: dict[str, list[dict]] = {}
+    for c in chunks:
+        by_section.setdefault(c["meta"]["section_number"], []).append(c)
+
+    drop_ids = set()
+    for siblings in by_section.values():
+        if len(siblings) < 2:
+            continue
+        for c in siblings:
+            if len(c["content"]) >= _STUB_MAX_CHARS:
+                continue
+            head = _normalise(c["content"])[:_STUB_HEAD_CHARS]
+            # Too short a head would match almost anything.
+            if len(head) < 12:
+                continue
+            for other in siblings:
+                if other is c or len(other["content"]) <= len(c["content"]):
+                    continue
+                if _normalise(other["content"]).startswith(head):
+                    drop_ids.add(c["id"])
+                    break
+
+    return [c for c in chunks if c["id"] not in drop_ids]
 
 
 def existing_count(col, statute: str) -> int:

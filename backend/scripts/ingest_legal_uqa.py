@@ -66,7 +66,15 @@ _EXPECTED_COLUMNS = {
     "question_eng", "question_urdu", "answer_eng", "answer_urdu",
 }
 
-_ARTICLE_RE = re.compile(r'\bArticle\s+(\d+[A-Z]?)', re.IGNORECASE)
+# LEGAL-UQA context text opens with the article number itself — "25A. Equality
+# of citizens ..." — and only rarely writes the word "Article". Matching solely
+# on "Article N" therefore failed on almost every row, and the caller then fell
+# back to the dataset ROW INDEX, which was stored as if it were an article
+# number. That produced citations to articles that do not exist (the
+# Constitution has 280; indices ran past 290) and, worse, plausible-but-wrong
+# ones: row 27 carried the text of Article 25A.
+_ARTICLE_LEADING_RE = re.compile(r'^\s*(\d{1,3}[A-Z]?)\s*[\.\)\:]')
+_ARTICLE_NAMED_RE = re.compile(r'\bArticle\s+(\d{1,3}[A-Z]?)', re.IGNORECASE)
 
 
 def _validate_columns(ds) -> None:
@@ -86,12 +94,25 @@ def _validate_columns(ds) -> None:
 
 
 def _extract_article(text: str) -> str:
-    m = _ARTICLE_RE.search(text or "")
-    return m.group(1) if m else ""
+    """Article number from the text, or "" when it cannot be determined.
+
+    Returning "" is deliberate. The caller must NOT substitute a row index: an
+    empty section number is honest, while a wrong article number is a false
+    citation that reads as authoritative.
+    """
+    text = (text or "").strip()
+    m = _ARTICLE_LEADING_RE.match(text) or _ARTICLE_NAMED_RE.search(text)
+    if not m:
+        return ""
+    num = m.group(1)
+    # The Constitution of Pakistan runs to 280 articles; anything beyond that is
+    # a misparse, not an article.
+    digits = int(re.sub(r"[A-Z]", "", num) or 0)
+    return num if 1 <= digits <= 280 else ""
 
 
 def _build_context_chunk(ctx_eng: str, ctx_urdu: str, ctx_index: int) -> dict:
-    article  = _extract_article(ctx_eng) or str(ctx_index)
+    article  = _extract_article(ctx_eng)   # "" when unknown — never the row index
     chunk_id = f"legal_uqa_ctx_{ctx_index}"
     content  = ctx_eng.strip()
     if ctx_urdu and ctx_urdu.strip():
@@ -110,13 +131,18 @@ def _build_context_chunk(ctx_eng: str, ctx_urdu: str, ctx_index: int) -> dict:
 
 
 def _build_qa_chunk(q_eng: str, a_eng: str, q_urdu: str, a_urdu: str,
-                    ctx_index: int, row_index: int) -> dict:
+                    ctx_index: int, row_index: int,
+                    context_article: str = "") -> dict:
     chunk_id = f"legal_uqa_qa_{row_index}"
     content  = f"Q: {q_eng.strip()}\nA: {a_eng.strip()}"
     if q_urdu and a_urdu:
         content += f"\n\nسوال: {q_urdu.strip()}\nجواب: {a_urdu.strip()}"
     content = content[:_MAX_CHARS]
-    article = _extract_article(a_eng) or str(ctx_index)
+    # A QA pair is ABOUT the article it was generated from, but the answer is
+    # prose and rarely states the number. Inherit it from the context chunk,
+    # which is derivable — that is real information we hold, unlike the row
+    # index the previous version substituted.
+    article = _extract_article(a_eng) or context_article
     return {
         "chunk_id":       chunk_id,
         "content":        content,
@@ -165,9 +191,14 @@ def ingest() -> None:
             else:
                 skipped += 1
 
+        # The article this row's context belongs to, so the QA pair can inherit
+        # it rather than being left unlabelled.
+        context_article = _extract_article(ctx_eng)
+
         # QA chunk — one per row
         if q_eng and a_eng:
-            qa_chunks.append(_build_qa_chunk(q_eng, a_eng, q_urdu, a_urdu, ctx_idx, i))
+            qa_chunks.append(_build_qa_chunk(q_eng, a_eng, q_urdu, a_urdu,
+                                             ctx_idx, i, context_article))
 
     all_chunks = context_chunks + qa_chunks
     print(f"  {len(context_chunks)} unique context chunks")
