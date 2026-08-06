@@ -1,0 +1,539 @@
+%=============================================================================
+% FIT (Frontiers of Information Technology) — IEEE two-column conference format
+%
+% FIT requirements confirmed from https://fit.edu.pk/submission-guidelines.aspx
+%   - maximum 6 pages
+%   - two-column IEEE conference format
+%   - PDF, submitted via EasyChair
+%   - must not be under consideration elsewhere
+%
+% Build:  pdflatex main && bibtex main && pdflatex main && pdflatex main
+% Check the page count EVERY build. Six pages includes references.
+%=============================================================================
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{url}
+
+% Draft-only marker. DELETE this macro and every use of it before submitting.
+\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+\begin{document}
+
+\title{Grounded and Auditable: Tool-Augmented Retrieval-Generation
+with Selective Abstention for Legal Question Answering in
+Low-Resource, Code-Switched Jurisdictions}
+
+% IEEE author block. FIT is not double-blind (confirm on the CFP before
+% submitting); if it becomes anonymous, replace this block with \author{}.
+\author{\IEEEauthorblockN{Muhammad Usama}
+\IEEEauthorblockA{\textit{Department of Computer Science} \\
+\textit{COMSATS University Islamabad}\\
+Islamabad, Pakistan \\
+muhammadusamahoyrr@gmail.com}
+\and
+\IEEEauthorblockN{\TODO{supervisor name}}
+\IEEEauthorblockA{\textit{Department of Computer Science} \\
+\textit{COMSATS University Islamabad}\\
+Islamabad, Pakistan \\
+\TODO{email}}
+}
+
+\maketitle
+
+%-----------------------------------------------------------------------------
+\begin{abstract}
+Retrieval-augmented generation (RAG) is increasingly applied to legal question
+answering, but deployments are overwhelmingly English and target common-law or
+EU jurisdictions, and they are evaluated on answer quality alone. Two properties
+that matter more in legal practice are largely unmeasured: whether a system
+knows when \emph{not} to answer, and whether a given answer can later be
+audited. We present a legal question-answering architecture for Pakistani law
+that addresses both. The system combines hybrid lexical--dense retrieval over a
+bilingual statute corpus with a set of deterministic statutory engines, whose
+computed output is treated as first-class evidence by a grounding verifier;
+routes every query through a single arbitration layer that selects among
+answering, requesting clarification, and refusing under an explicit asymmetric
+cost model; and records a durable provenance document for every turn, linking
+the emitted answer to the evidence, the arbitration verdict, and the model that
+produced it. The system additionally normalises Roman-Urdu input to Urdu script
+before retrieval, and resolves cross-jurisdictional statute aliases that arise
+when users import Indian legal terminology. We describe the architecture, the
+construction of an abstention-aware evaluation set built by labelling recorded
+production traffic, and an evaluation protocol reporting selective-prediction
+behaviour alongside standard ranking metrics.
+\TODO{one or two sentences of headline results, once measured}
+\end{abstract}
+
+\begin{IEEEkeywords}
+legal informatics, retrieval-augmented generation, selective prediction,
+abstention, neuro-symbolic systems, low-resource NLP, code-switching, Urdu
+\end{IEEEkeywords}
+
+%-----------------------------------------------------------------------------
+\section{Introduction}
+Access to legal information is unevenly distributed. A litigant who cannot
+afford counsel is often unable to establish even the threshold facts of their
+own position: which statute governs, which forum has jurisdiction, what a
+filing will cost, or whether a limitation period has already expired.
+\TODO{Insert one cited statistic on the lawyer-to-population ratio or case
+backlog in Pakistan. Do not write a number you have not sourced.}
+
+Large language models with retrieval augmentation~\cite{lewis2020rag} appear
+well suited to closing part of that gap, and legal question answering is now an
+active application area~\cite{chalkidis2020legalbert,guha2023legalbench}.
+Existing systems, however, are built predominantly for English and for
+common-law or European jurisdictions. Transferring them to Pakistan is not a
+matter of swapping the corpus. Queries arrive in English, in Urdu script, and
+most commonly in Roman Urdu, the transliterated register used in everyday
+digital communication; the applicable law combines codified statute with
+Islamic personal law and varies by province; and users routinely import Indian
+statutory terminology, asking about the Indian Penal Code when the Pakistan
+Penal Code governs. Each of these is a retrieval problem before it is a
+generation problem.
+
+A second gap is less specific to jurisdiction and, we argue, more consequential.
+Legal question-answering systems are evaluated almost entirely on the quality of
+the answers they produce. Two properties that matter more in professional
+practice go largely unmeasured. The first is abstention: a confidently wrong
+answer about bail eligibility or a limitation period can cause material harm,
+so a system that declines to answer when its evidence is weak is more useful
+than one that always responds. The second is auditability: an answer that cannot
+be traced to the evidence and decisions that produced it cannot be contested,
+corrected, or defended, which is precisely what a regulated domain requires.
+Neither property is captured by answer-quality metrics, and neither is
+achievable as an afterthought.
+
+This paper describes a legal question-answering system for Pakistani law built
+around both. Our contributions are:
+
+\begin{itemize}
+\item \textbf{Verifier-aware symbolic evidence.} Deterministic statutory
+engines --- court fees, bail eligibility, limitation, inheritance shares under
+Islamic law --- are treated as first-class evidence by the grounding verifier,
+so that a correct computed answer is not mislabelled as ungrounded merely
+because no retrieved provision restates it (Section~\ref{sec:tools}).
+\item \textbf{An explicit abstention policy.} A single arbitration layer selects
+among answering, requesting clarification, and refusing, over heterogeneous
+evidence sources under an asymmetric cost model in which an unnecessary refusal
+is itself a cost (Section~\ref{sec:abstain}).
+\item \textbf{Code-switched retrieval} for a low-resource jurisdiction, with
+Roman-Urdu normalisation and cross-jurisdictional alias resolution
+(Section~\ref{sec:retrieval}).
+\item \textbf{Per-turn provenance} linking every emitted answer to its evidence,
+its arbitration verdict, and the model that served it, together with an
+evaluation protocol that constructs an abstention-aware test set by labelling
+recorded traffic (Sections~\ref{sec:prov} and \ref{sec:eval}).
+\end{itemize}
+
+\section{Related Work}
+\textbf{Legal NLP and retrieval-augmented generation.}
+Domain-adapted encoders such as LEGAL-BERT~\cite{chalkidis2020legalbert}
+established that legal text benefits from in-domain pretraining, and
+LegalBench~\cite{guha2023legalbench} provides a broad benchmark for legal
+reasoning in large language models. Retrieval augmentation~\cite{lewis2020rag}
+combined with dense passage retrieval~\cite{karpukhin2020dpr} is now the
+standard architecture for grounding generated answers in source documents.
+Self-RAG~\cite{asai2024selfrag} adds self-reflection over retrieval quality and
+answer support. This line of work overwhelmingly targets English and
+common-law or EU material, and evaluates the answers produced rather than the
+decision of whether to answer.
+
+\textbf{Selective prediction and calibration.}
+Selective classification formalises the option to abstain and the
+risk--coverage trade-off it induces~\cite{elyaniv2010selective,
+geifman2017selectivenet}. Modern neural networks are systematically
+miscalibrated~\cite{guo2017calibration}, motivating post-hoc mapping of scores
+into probability space by Platt scaling~\cite{platt1999} or isotonic
+regression~\cite{zadrozny2002isotonic}; conformal
+prediction~\cite{angelopoulos2021conformal} offers distribution-free coverage
+guarantees over the same problem. Language models retain some signal about
+their own reliability~\cite{kadavath2022know}, and hallucination remains a
+central failure mode of generation systems~\cite{ji2023hallucination}. These
+techniques are rarely applied to the routing decision inside a retrieval
+pipeline, which is where we place them.
+
+\textbf{Tool-augmented and neuro-symbolic generation.}
+Delegating exactly-computable subproblems to deterministic components is
+well established, but the interaction between tool output and answer
+verification is not. Where a grounding check tests whether claims appear in
+retrieved text, computed results are structurally invisible to it. We make the
+verifier aware of symbolic evidence rather than treating tools purely as a
+generation aid.
+
+\textbf{Low-resource retrieval and adversarial robustness.}
+Multilingual dense encoders~\cite{wang2024multilinguale5} make a single index
+viable across scripts, and hybrid lexical--dense retrieval with rank
+fusion~\cite{robertson2009bm25,cormack2009rrf} remains strong where exact
+terminology matters, as it does for statute references. Separately, prompt
+injection is a practical threat to any deployed instruction-following
+assistant~\cite{perez2022ignore,greshake2023injection}. We report a failure mode
+in this class that arises from pipeline structure rather than from classifier
+weakness.
+
+To our knowledge, no existing system combines abstention under an explicit cost
+model, symbolic evidence admitted by the grounding verifier, and code-switched
+retrieval for a low-resource jurisdiction, nor reports an evaluation that
+measures all three.
+
+%-----------------------------------------------------------------------------
+\section{Method}
+\label{sec:method}
+
+\subsection{Overview}
+The system is a directed graph of thirteen nodes executed per user turn. A
+turn enters an adversarial gatekeeper, is classified and triaged, may be
+suspended to ask the user for missing facts, is checked against a semantic
+cache, may invoke deterministic statutory engines, retrieves statute and
+case-law evidence, has that evidence scored, and only then reaches an
+arbitration node that decides whether to answer at all. Generation and a
+grounding check follow, and a finaliser sanitises the output. Conversation
+state, including the suspended state of a pending clarification, is
+checkpointed to a document store so that a turn survives process restarts and
+can be resumed by a different worker.
+
+Four properties distinguish the design from a standard RAG pipeline, and we
+describe each in turn: symbolic evidence admitted by the verifier
+(Section~\ref{sec:tools}), three-signal confidence with an explicit abstention
+policy (Sections~\ref{sec:scoring}--\ref{sec:abstain}), code-switched retrieval
+(Section~\ref{sec:retrieval}), and per-turn provenance
+(Section~\ref{sec:prov}).
+
+\subsection{Corpus and Retrieval}
+\label{sec:retrieval}
+The statute corpus is drawn from a public collection of 967 Pakistani legal
+documents~\cite{paklaws}, segmented by section and partitioned into four
+collections by legal domain (civil, criminal, family, constitutional). A
+bilingual English--Urdu constitutional question--answer set~\cite{legaluqa} is
+ingested into the constitutional collection as both raw article text and
+question--answer pairs.
+A separate corpus of reported Lahore High Court judgments supports case-law
+retrieval. Table~\ref{tab:corpus} reports the indexed chunk counts.
+
+\begin{table}[t]
+\caption{Indexed corpus, by collection}
+\label{tab:corpus}
+\centering
+\begin{tabular}{lr}
+\toprule
+\textbf{Collection} & \textbf{Chunks} \\
+\midrule
+Criminal        & 1{,}735 \\
+Constitutional  & 924 \\
+Civil           & 396 \\
+Family          & 226 \\
+\midrule
+Case law (LHC judgments) & 3{,}230 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Retrieval is hybrid. A BM25 index and a dense index over
+\texttt{multilingual-e5-base} embeddings are combined by weighted ensemble with
+weights $0.6$ and $0.4$ respectively, the lexical channel weighted higher
+because exact statute and section references carry disproportionate signal in
+this domain. Dense retrieval applies the asymmetric \texttt{query:}/
+\texttt{passage:} prefixes the model expects. Both channels are filtered so that
+a query for a given province retrieves only that province's provisions or
+federal ones.
+
+Two mechanisms address vocabulary mismatch specific to this setting. First, a
+rule-based alias layer rewrites common cross-jurisdictional references before
+retrieval; users frequently ask about the Indian Penal Code when they mean the
+Pakistan Penal Code, and equivalent confusions exist for procedural codes.
+Second, a query rewriter maps colloquial phrasing to formal statutory
+terminology, and its output is accepted only if it contains recognised legal
+vocabulary, guarding against a degenerate rewrite.
+
+Retrieval is two-hop. The first hop issues the expanded query. Statutory
+cross-references appearing in the first-hop results are then extracted and
+issued as a second query, so that a provision incorporating another by
+reference pulls in the referenced text. The two result lists are merged by
+reciprocal rank fusion. Case-law retrieval runs semantically over the judgment
+corpus on the \emph{unrewritten} query, since judgment prose matches lay
+phrasing more closely than statutory terminology, and admits at most three
+judgments above a conservative similarity threshold.
+
+\subsection{Code-Switched Input}
+Queries arrive in English, Urdu script, or Roman Urdu --- Urdu written in Latin
+characters, which is the dominant informal register. A triage stage classifies
+the input language and, for Roman Urdu, emits a transliteration into Urdu
+script. Retrieval runs on this normalised form, so a single multilingual dense
+index serves all three registers without a separate Roman-Urdu index. The
+lexical signal described in Section~\ref{sec:scoring} recognises legal terms in
+both scripts.
+
+\subsection{Deterministic Statutory Engines}
+\label{sec:tools}
+Several questions in this domain have exact answers that are computed, not
+retrieved: court-fee schedules, bail eligibility, statutory limitation periods,
+labour dues, and inheritance shares under Islamic law. The system exposes these
+as deterministic engines invoked before retrieval, and their results are held
+\emph{outside} the retrieved-chunk set so that a retrieval retry cannot
+overwrite them and the relevance grader cannot score them.
+
+The consequence for verification is the contribution we wish to emphasise. A
+conventional grounding check asks whether the answer's claims appear in
+retrieved text; under that rule, a correct court-fee figure derived from a
+computation is judged ungrounded, because no retrieved provision states it. Our
+verifier is told that engine output is computed ground truth, and that an answer
+faithfully restating an engine's result \emph{is} grounded. Correspondingly, the
+abstention policy in Section~\ref{sec:abstain} never refuses a turn in which an
+engine produced a result, since refusing a computed figure because the
+surrounding statutory context scored poorly is strictly worse than answering.
+
+\subsection{Three-Signal Confidence}
+\label{sec:scoring}
+Each retrieved chunk receives a confidence score combining three signals: a
+lexical score $k$, the fraction of legal terms in the query present in the
+chunk; an embedding similarity $e$; and a binary relevance grade $\ell$ from a
+fast language model. The signals are mapped into probability space by the
+calibration layer (Section~\ref{sec:calib}) and combined additively,
+\begin{equation}
+s = 0.40\,k + 0.35\,\hat{e} + 0.25\,\hat{\ell},
+\label{eq:score}
+\end{equation}
+with the lexical term weighted highest for the same reason the lexical
+retrieval channel is.
+
+Disagreement between the signals is retained rather than averaged away. Let
+$\sigma^2$ be the variance of $\{k,\hat{e},\hat{\ell}\}$. When $\sigma^2$
+exceeds an adaptive threshold $\tau_\sigma$, the score is penalised by
+$\sigma^2$, and the mean variance across chunks is passed forward to the
+arbitration layer, where it is the signal that distinguishes ``ask for more
+information'' from ``answer'' at equal mean confidence. If the relevance grader
+is unavailable, its signal degrades to a neutral value rather than failing
+closed, so that a provider outage falls through to the lexical evidence path
+instead of becoming indistinguishable from an absence of relevant law.
+
+\subsection{Calibration and Drift Monitoring}
+\label{sec:calib}
+Raw scores are mapped to calibrated probabilities before arbitration: Platt
+scaling for the language-model signal and isotonic regression for the lexical
+signal, with cosine similarity clamped as it already occupies probability space.
+\TODO{State plainly that the fitted parameters are estimated from the labelled
+set of Section~\ref{sec:eval}, and report the fitted values. Until they are
+fitted the transforms are identity, and the paper must not claim otherwise ---
+this is why the title says ``selective'' rather than ``calibrated''.}
+
+Distribution shift is monitored by the population stability index over a
+rolling window of retrieval confidences, with a shift flagged at
+$\mathrm{PSI}\ge0.20$ and stability below $0.10$. Both the calibration state
+and the threshold state described next are held in a shared store rather than
+in process memory, so that a horizontally scaled deployment does not maintain
+divergent thresholds per worker.
+
+\subsection{Adaptive Thresholds}
+Decision thresholds are seeded and then re-estimated from observed data:
+the generation floor from the 10th percentile of retrieval scores, a routing
+gap from the 25th percentile, and a similarity threshold from the 90th
+percentile, recomputed periodically over a rolling window once a warm-up
+volume of queries has been observed. Threshold reads occur once per chunk and
+are served from a process-local snapshot refreshed on a fixed interval, so the
+hot path performs no remote reads; writes are batched.
+
+\subsection{Arbitration and Abstention}
+\label{sec:abstain}
+All routing flows through a single arbitration node; the graph's edge functions
+read its verdict and do not recompute confidence. The node selects one of three
+actions --- \textsc{answer}, \textsc{defer} (request clarification and retry
+retrieval), or \textsc{refuse} --- over the available evidence sources.
+
+Evidence may come from the graded retrieval path, from a version-matched cache
+hit, or from the lexical channel alone. Lexical-only evidence is capped at
+confidence $0.55$, so that it can support an answer but cannot present itself as
+a confident judgement. Each candidate source is assigned a utility
+\begin{equation}
+u(c,a) = \frac{c}{\mathrm{cost}(a)},
+\label{eq:utility}
+\end{equation}
+where $c$ is calibrated confidence and $\mathrm{cost}(\cdot)$ encodes the
+asymmetry of the domain: answering is cheap ($0.10$), deferring costs more
+($0.30$), and refusing is most expensive ($0.60$) in user-experience terms,
+which is what makes an unnecessary refusal a real cost rather than a free safe
+default. Action selection is
+\begin{equation}
+a =
+\begin{cases}
+\textsc{defer}  & \sigma^2 > \tau_\sigma\\
+\textsc{refuse} & c < \tau_{\text{ceiling}}\\
+\textsc{answer} & c \ge \tau_{\text{floor}}\\
+\textsc{defer}  & \text{otherwise,}
+\end{cases}
+\label{eq:action}
+\end{equation}
+subject to two overrides. A turn retrieving zero chunks refuses unconditionally.
+And after a bounded number of consecutive deferrals the node enters a binary
+mode in which it must answer or refuse, so that a mid-confidence query cannot
+loop indefinitely asking for clarification. Retry budget is deliberately kept
+outside the arbitration node: the node judges evidence, while the graph decides
+whether another retrieval pass is affordable.
+
+\TODO{Equation~\eqref{eq:utility} is the weakest formal point in the paper and
+a reviewer will press on it. Either derive the action from expected utility
+over an explicit harm matrix, or state honestly that the cost vector is a
+hand-set prior and show a sensitivity analysis over it.}
+
+\subsection{Grounding Verification}
+Generated answers are checked against the evidence actually supplied ---
+retrieved provisions, admitted judgments, and engine output. An answer judged
+ungrounded has its confidence halved and receives an explicit caution directing
+the user to a qualified lawyer, and generation may be retried within budget.
+The system never presents an ungrounded answer as though it were verified.
+
+\subsection{Adversarial Robustness}
+Because the assistant is instruction-following and publicly reachable, prompt
+injection is a live concern. A gatekeeper runs first, in two layers: a
+zero-cost regular-expression filter for high-signal attack strings, and a
+fast-model classifier for subtler attempts. The filter is deliberately narrow,
+because in this domain the obvious keywords are ordinary vocabulary --- a
+question about disregarding a court order, or acting as an unrestricted agent
+under a power of attorney, is a legitimate legal query and must not be refused.
+The classifier fails open, so that a model-provider outage does not become a
+total service outage while the regex layer remains active.
+
+One implementation finding is worth reporting because it generalises. An
+intent-classification shortcut answered certain conversational turns without
+entering the graph, and therefore bypassed the gatekeeper entirely; an injection
+phrased to end in an affirmation was routed to a canned reply, unlogged and
+unaudited. Defence-in-depth at a single point in a pipeline is insufficient when
+alternative paths exist that skip that point, and any robustness figure measured
+under such a configuration is computed only over the traffic that reached the
+defended component.
+
+\subsection{Provenance}
+\label{sec:prov}
+Each turn writes a durable record linking the emitted output to the evidence and
+decisions behind it: retrieved chunk identifiers, admitted case-law citations,
+engine invocations with success state, the arbitration verdict and the signals
+it was computed from, convergence counters, the models that served the turn, and
+the embedding and chunking versions required to reproduce retrieval. The answer
+is stored as a cryptographic digest plus a redacted preview rather than
+duplicated in full, so a record identifies the answer it describes without
+becoming a second copy of the user's legal correspondence. Personally
+identifying information is masked with the same routine applied to user-facing
+output, covering national identity numbers in both Latin and Urdu digit forms.
+Records are typed by turn kind --- answer, clarification, or blocked --- so that
+turns which asked a question rather than answering one are audited without being
+treated as answers.
+
+%-----------------------------------------------------------------------------
+\section{Evaluation Protocol}
+\label{sec:eval}
+
+\subsection{Dataset Construction}
+Rather than authoring question--answer pairs, we label recorded traffic. Each
+answered turn has already stored its query, the identifiers of the chunks
+retrieved for it, and the verdict reached, so annotation reduces to judging
+relevance over a fixed candidate set rather than inventing candidates. Following
+standard pooling practice, judgements are collected to a fixed depth of the
+ranked list; the depth is stored with each label, and metrics at deeper cut-offs
+are refused, since ranks below the pool are unjudged rather than known
+irrelevant.
+
+Each turn additionally receives one of four outcome verdicts: correct,
+incorrect, correct refusal, or wrong refusal. Separating a correct abstention
+from a mistaken one is what makes risk--coverage analysis possible; collapsing
+them loses exactly the distinction the system is designed around. Turns on which
+no retrieved evidence was relevant are retained as the unanswerable split rather
+than discarded, since these are the cases where refusal is the correct
+behaviour.
+
+\subsection{Query Set}
+Evaluation queries span six categories: answerable questions the corpus should
+support; out-of-jurisdiction queries using Indian statutory names; questions
+unanswerable from this corpus; code-switched queries in Roman Urdu and Urdu
+script; adversarial prompt-injection attempts; and off-topic input.
+\TODO{State the final counts per category, and be explicit about provenance of
+the queries. A set authored by the system's own developer is a bootstrap, not a
+benchmark; if the final set remains developer-authored, say so in Limitations
+rather than letting a reviewer find it.}
+
+\subsection{Metrics}
+Retrieval is reported by Hit@$k$, mean reciprocal rank, and
+nDCG@$k$~\cite{jarvelin2002ndcg} at cut-offs within the pooling depth. Selective prediction is reported by
+risk--coverage curves, the area under the risk--coverage curve, and
+expected calibration error, together with the rate of ungrounded answers at a
+given coverage. Robustness is reported as the proportion of adversarial inputs
+refused, measured with all bypass paths closed.
+
+\section{Results}
+\TODO{Pending the labelled set. Do not draft narrative text here before the
+numbers exist. Planned tables:
+(1) retrieval metrics overall and per legal domain;
+(2) ablation --- hybrid vs.\ lexical-only vs.\ dense-only; one-hop vs.\ two-hop;
+normalised vs.\ raw Roman Urdu;
+(3) abstention --- arbitration enabled vs.\ always-answer, with risk--coverage;
+(4) grounding --- ungrounded rate with and without engine-aware verification.
+Ablation (4) is the strongest single result available and should be prioritised
+if space is short.}
+
+\section{Discussion and Limitations}
+
+Two findings from deployment generalise beyond this system. First, defence in
+depth at a single point in a pipeline is insufficient when alternative paths
+exist that skip that point. An intent-classification shortcut answered certain
+turns without entering the graph and so bypassed the injection gatekeeper
+entirely; the classifier was not weak, it was simply not consulted. Any
+robustness figure measured in that configuration is computed only over traffic
+that reached the defended component, which is a measurement error rather than a
+model error. Second, in a specialised domain, keyword-based safety filters
+collide with legitimate vocabulary: our injection filter matched a
+power-of-attorney question containing the phrase ``unrestricted agent''. The
+cost of a false positive here is refusing a user with a genuine legal problem,
+which argues for narrow patterns backed by a model layer rather than broad ones.
+
+The work has substantive limitations, which we state rather than leave to be
+discovered. \emph{Calibration} is fitted on a modest volume of labelled data
+drawn from a single deployment, so the mapping should be expected to shift under
+a different user population; conformal methods~\cite{angelopoulos2021conformal}
+would give coverage guarantees that our post-hoc fitting does not.
+\emph{Relevance judgements are the authors' own}, not adjudicated by qualified
+practitioners, which is a real constraint on any claim about legal correctness
+as opposed to retrieval quality. \emph{Evaluation queries were authored
+alongside the system}, making them a bootstrap rather than an independent
+benchmark. \emph{The cost vector} in \eqref{eq:utility} is a hand-set prior
+encoding a plausible ordering of harms, not a quantity elicited from
+practitioners or derived from outcomes. \emph{Coverage is single-jurisdiction},
+and the corpus is weighted towards statute relative to case law, so performance
+on precedent-driven questions is likely weaker than on statutory ones. Finally,
+the pooled relevance judgements bound the depth at which ranking metrics are
+meaningful, and we report only cut-offs within that depth.
+
+\section{Conclusion}
+Legal question answering in a low-resource, code-switched jurisdiction is not
+served by transplanting an English common-law pipeline, and it is not
+adequately measured by answer quality alone. We described a system that treats
+deterministic statutory computation as evidence its own verifier can accept,
+that routes every query through an explicit decision between answering,
+clarifying and refusing, and that records for each turn the evidence and
+decisions behind the answer it emitted. We further described an evaluation
+protocol that builds an abstention-aware test set by labelling recorded traffic,
+so that correct refusals are measured rather than discarded.
+\TODO{Close with one concrete number once measured --- ideally the reduction in
+ungrounded answers from engine-aware verification, which is the cleanest
+single result available.}
+
+\section*{Ethical Considerations}
+The system provides legal information, not legal advice, and every answer
+carries an explicit disclaimer directing users to a qualified practitioner.
+Refusal is treated as a first-class outcome precisely because a confident wrong
+answer in this domain can cause material harm. Stored records mask personally
+identifying information, and audit records are retrievable only by the user who
+produced them.
+
+%-----------------------------------------------------------------------------
+\section*{Acknowledgment}
+\TODO{supervisor, department, any funding}
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
