@@ -1,39 +1,57 @@
 """
-build_law_graph.py — Builds a NetworkX statute cross-reference graph from ChromaDB.
+build_law_graph.py — Statute cross-reference graph for graph-guided hop-2.
 
-Run this ONCE (and re-run whenever you ingest new statutes):
+Run after any ingest (chunk ids change):
     python scripts/build_law_graph.py
 
-The graph is saved to: backend/chroma_data/law_graph.gpickle
+Output: backend/chroma_data/law_graph.json (node-link JSON, not pickle —
+unpickling executes arbitrary code and a build artifact should not do that)
 
-Graph structure (adapted from Fan-Luo/Legal-RAG graph_retriever.py):
-  - Nodes: statute sections identified by chunk_id
-  - Edges: cross-references with relation_type + weight
-    - "cite"       weight=1.15  (explicit "see PPC Section X")
-    - "ref"        weight=1.10  (general reference)
-    - "amend"      weight=1.05  (amendment references)
-    - "defined_by" weight=1.20  (definitional cross-link)
+What was wrong with the previous version
+----------------------------------------
+It produced 44 edges across 2,639 nodes — effectively no graph at all. Three
+causes, all measured:
 
-Hop-2 in retrieval_node.py traverses this graph instead of using regex.
+1. It looked for lawyer shorthand ("PPC 302", "CrPC 154"). Across 3,998
+   criminal chunks that pattern matched ZERO times. Legislation does not cite
+   itself that way; briefs do.
+
+2. It ignored bare intra-statute references ("section 12", "under section 5"),
+   which is how statutes actually cross-reference — 492 of those same 3,998
+   chunks contain one.
+
+3. Source nodes were keyed on the canonical statute name ("PPC 1860" ->
+   ppc_1860_302) while citation targets were keyed on the abbreviation ("PPC"
+   -> ppc_302). The two never matched, so every edge landed on an orphan stub
+   that pointed at no chunk.
+
+How this version works
+----------------------
+Pass 1 indexes every (statute, section) that actually EXISTS, with all the chunk
+ids that make it up — a section spanning several chunks keeps all of them.
+
+Pass 2 extracts references and resolves them against that index. An edge is only
+created when the target section genuinely exists, so every edge is traversable.
+Unresolved references are counted and reported rather than silently turned into
+dangling stubs.
+
+A bare "section N" resolves within the SAME statute, which is the common case.
+"section N of the X Act" resolves against X via the alias table.
 """
-
 from __future__ import annotations
 
-import os
+import collections
+import json
 import re
 import sys
-import pickle
 from pathlib import Path
 
 import networkx as nx
 
-# Add backend to path so we can import app modules
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-from app.db.chroma import get_chroma, connect_chroma  # noqa: E402 (after path fix)
-
-# ── Config ────────────────────────────────────────────────────────────────────
+from app.db.chroma import connect_chroma, get_chroma  # noqa: E402
 
 COLLECTIONS = [
     "civil_collection",
@@ -42,9 +60,9 @@ COLLECTIONS = [
     "constitutional_collection",
 ]
 
-OUTPUT_PATH = BACKEND_DIR / "chroma_data" / "law_graph.gpickle"
+OUTPUT_PATH = BACKEND_DIR / "chroma_data" / "law_graph.json"
 
-# Relation weights — higher = more important to follow in hop-2
+# Higher = more worth following in hop-2.
 RELATION_WEIGHTS = {
     "defined_by": 1.20,
     "cite":       1.15,
@@ -52,125 +70,181 @@ RELATION_WEIGHTS = {
     "amend":      1.05,
 }
 
-# Regex to find statute section mentions in chunk text
-# Matches: "PPC 302", "Section 302 PPC", "Article 14", "MFLO 7", "CrPC 154"
-_CITE_RE = re.compile(
-    r'\b(PPC|CrPC|MFLO|QSO|PECA|CPC|MCA)\s+(?:Section\s+)?(\d+(?:[A-Z])?)'
-    r'|(?:Section|Article)\s+(\d+(?:[A-Z])?)\s+(?:of\s+)?(?:the\s+)?'
-    r'(Pakistan Penal Code|Code of Criminal Procedure|Muslim Family Laws Ordinance)',
-    re.IGNORECASE
+# Shorthand -> canonical statute name as stored in chunk metadata. Validated
+# against the corpus at build time; unknown targets are reported, not guessed.
+STATUTE_ALIASES = {
+    "ppc":                          "PPC 1860",
+    "pakistan penal code":          "PPC 1860",
+    "penal code":                   "PPC 1860",
+    "crpc":                         "CrPC 1898",
+    "code of criminal procedure":   "CrPC 1898",
+    "criminal procedure code":      "CrPC 1898",
+    "mflo":                         "Muslim Family Laws Ordinance 1961",
+    "muslim family laws ordinance": "Muslim Family Laws Ordinance 1961",
+    "qso":                          "Qanun-e-Shahadat Order 1984",
+    "qanun-e-shahadat":             "Qanun-e-Shahadat Order 1984",
+    "constitution":                 "Constitution of Pakistan 1973",
+}
+
+# "section 12", "sections 12", optionally "... of the <Something> Act 1861"
+_REF_RE = re.compile(
+    r"\bsections?\s+(\d+[A-Z]?)\b"
+    r"(?:\s+of\s+(?:the\s+)?"
+    r"([A-Za-z][A-Za-z\s\-'\.]{3,60}?(?:Act|Code|Ordinance|Order)(?:[,\s]+\d{4})?))?",
+    re.IGNORECASE,
 )
+# Constitution uses articles
+_ARTICLE_RE = re.compile(r"\barticles?\s+(\d+[A-Z]?)\b", re.IGNORECASE)
 
 _AMEND_RE = re.compile(
-    r'\b(amend|substitut|insert|replac|omit)\w*\s+(?:by|vide|through)',
-    re.IGNORECASE
+    r"\b(amend|substitut|insert|replac|omit)\w*", re.IGNORECASE)
+_DEFINED_RE = re.compile(
+    r"(?:as\s+defined|has\s+the\s+meaning\s+assigned|within\s+the\s+meaning)",
+    re.IGNORECASE)
+
+
+def node_id(statute: str, section: str) -> str:
+    return f"{statute.lower().replace(' ', '_')}::{section}"
+
+
+# Anaphoric self-reference: inside a statute, "this Code" / "the said Act" /
+# "the same Ordinance" point back at the statute doing the referring.
+_ANAPHORA_RE = re.compile(
+    r"^(?:this|the|that|same|said|the\s+said|the\s+same)\s+"
+    r"(?:code|act|ordinance|order)$",
+    re.IGNORECASE,
 )
 
-_DEFINED_BY_RE = re.compile(
-    r'(?:as\s+defined|has\s+the\s+meaning\s+assigned)\s+in\s+(?:Section|Article)\s+(\d+)',
-    re.IGNORECASE
-)
+
+def resolve_statute(raw: str | None, source_statute: str, known: set[str]) -> str | None:
+    """Map a referenced statute name onto a canonical one that exists in the corpus."""
+    if not raw:
+        return source_statute          # bare "section N" -> same statute
+    low = " ".join(raw.split()).lower().strip(" ,.")
+    if _ANAPHORA_RE.match(low):
+        return source_statute
+    if low in STATUTE_ALIASES:
+        cand = STATUTE_ALIASES[low]
+        return cand if cand in known else None
+    for alias, canon in STATUTE_ALIASES.items():
+        if alias in low:
+            return canon if canon in known else None
+
+    # Fuzzy name match, deliberately conservative. A false edge sends hop-2 to
+    # the WRONG statute, which is worse than no edge at all — so require a
+    # reasonably specific string and refuse when several statutes match.
+    if len(low) < 8:
+        return None
+    candidates = {k for k in known if low in k.lower() or k.lower() in low}
+    return candidates.pop() if len(candidates) == 1 else None
 
 
-def _make_node_id(statute: str, section_number: str, chunk_id: str) -> str:
-    """Stable node identifier."""
-    if statute and section_number:
-        return f"{statute.lower().replace(' ', '_')}_{section_number}"
-    return chunk_id or f"unknown_{hash(statute)}"
-
-
-def _detect_relation(text: str) -> str:
-    """Infer the relation type from chunk text."""
-    if _DEFINED_BY_RE.search(text):
+def _relation(window: str) -> str:
+    if _DEFINED_RE.search(window):
         return "defined_by"
-    if _AMEND_RE.search(text):
+    if _AMEND_RE.search(window):
         return "amend"
-    cites = _CITE_RE.findall(text)
-    if cites:
-        return "cite"
-    return "ref"
+    return "cite"
 
 
 def build_graph() -> nx.DiGraph:
-    """
-    Extract all statute sections from ChromaDB collections and build
-    a directed cross-reference graph.
-    """
     connect_chroma()
     chroma = get_chroma()
     G = nx.DiGraph()
 
-    print(f"Building law graph from {len(COLLECTIONS)} collections...")
+    # ── Pass 1: index every section that actually exists ─────────────────────
+    sections: dict[tuple[str, str], list[str]] = collections.defaultdict(list)
+    records: list[tuple[str, str, str, dict]] = []   # statute, section, text, meta
 
-    for collection_name in COLLECTIONS:
+    for cname in COLLECTIONS:
         try:
-            col    = chroma.get_collection(collection_name)
-            result = col.get(include=["documents", "metadatas"])
-        except Exception as e:
-            print(f"  ⚠ Could not load {collection_name}: {e}")
+            col = chroma.get_collection(cname)
+            res = col.get(include=["documents", "metadatas"], limit=100000)
+        except Exception as exc:
+            print(f"  could not load {cname}: {exc}")
             continue
+        docs = res.get("documents") or []
+        metas = res.get("metadatas") or []
+        print(f"  {cname}: {len(docs)} chunks")
+        for text, meta in zip(docs, metas):
+            meta = meta or {}
+            statute = str(meta.get("statute", "")).strip()
+            section = str(meta.get("section_number", "")).strip()
+            if not statute or not section:
+                continue
+            sections[(statute, section)].append(str(meta.get("chunk_id", "")))
+            records.append((statute, section, text or "", {**meta, "collection": cname}))
 
-        docs      = result.get("documents", [])
-        metadatas = result.get("metadatas", [])
-        print(f"  {collection_name}: {len(docs)} chunks")
+    known_statutes = {s for s, _ in sections}
+    print(f"\n  indexed {len(sections)} distinct (statute, section) nodes "
+          f"across {len(known_statutes)} statutes")
 
-        for text, meta in zip(docs, metadatas):
-            statute        = meta.get("statute", "")
-            section_number = meta.get("section_number", "")
-            chunk_id       = meta.get("chunk_id", "")
-            province       = meta.get("province", "federal")
-            law_type       = meta.get("law_type", "")
+    for (statute, section), chunk_ids in sections.items():
+        G.add_node(node_id(statute, section),
+                   statute=statute, section_number=section,
+                   chunk_ids=[c for c in chunk_ids if c])
 
-            src_id = _make_node_id(statute, section_number, chunk_id)
+    # ── Pass 2: resolve references against real sections only ────────────────
+    resolved = collections.Counter()
+    unresolved = collections.Counter()
 
-            # Add source node with metadata
-            G.add_node(src_id, **{
-                "statute":        statute,
-                "section_number": section_number,
-                "chunk_id":       chunk_id,
-                "province":       province,
-                "law_type":       law_type,
-                "collection":     collection_name,
-            })
+    for statute, section, text, _meta in records:
+        src = node_id(statute, section)
+        is_constitution = "constitution" in statute.lower()
+        pattern = _ARTICLE_RE if is_constitution else _REF_RE
 
-            # Find cross-references in text
-            citations = _CITE_RE.findall(text)
-            for match in citations:
-                # match is a tuple from the regex groups
-                if match[0] and match[1]:
-                    ref_statute = match[0].upper()
-                    ref_section = match[1]
-                elif match[2] and match[3]:
-                    ref_statute = match[3]
-                    ref_section = match[2]
-                else:
-                    continue
-
-                tgt_id       = _make_node_id(ref_statute, ref_section, "")
-                relation     = _detect_relation(text)
-                weight       = RELATION_WEIGHTS.get(relation, 1.0)
-
-                # Add a stub node for the target if it doesn't exist yet
-                if not G.has_node(tgt_id):
-                    G.add_node(tgt_id, statute=ref_statute, section_number=ref_section)
-
-                if src_id != tgt_id:
-                    G.add_edge(src_id, tgt_id, relation=relation, weight=weight)
+        for m in pattern.finditer(text):
+            tgt_section = m.group(1)
+            raw_statute = None if is_constitution else (
+                m.group(2) if m.lastindex and m.lastindex >= 2 else None)
+            tgt_statute = resolve_statute(raw_statute, statute, known_statutes)
+            if tgt_statute is None:
+                unresolved[(raw_statute or "?")[:40]] += 1
+                continue
+            if (tgt_statute, tgt_section) not in sections:
+                unresolved[f"{tgt_statute} s.{tgt_section}"] += 1
+                continue
+            tgt = node_id(tgt_statute, tgt_section)
+            if tgt == src:
+                continue
+            window = text[max(0, m.start() - 60): m.end() + 20]
+            rel = _relation(window)
+            G.add_edge(src, tgt, relation=rel, weight=RELATION_WEIGHTS.get(rel, 1.0))
+            resolved[rel] += 1
 
     print(f"\nGraph built: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+    print(f"  references resolved  : {sum(resolved.values())}  {dict(resolved)}")
+    print(f"  references unresolved: {sum(unresolved.values())}")
+    for label, n in unresolved.most_common(6):
+        print(f"      {n:>5}  {label}")
+
+    orphans = [n for n, d in G.nodes(data=True) if not d.get("chunk_ids")]
+    print(f"  nodes with no chunk_ids (should be 0): {len(orphans)}")
+    if G.number_of_nodes():
+        deg = [d for _, d in G.degree()]
+        print(f"  mean degree: {sum(deg)/len(deg):.2f}   "
+              f"connected nodes: {sum(1 for d in deg if d)}")
     return G
 
 
 def save_graph(G: nx.DiGraph, path: Path) -> None:
+    """Write node-link JSON.
+
+    Deliberately not pickle: unpickling executes arbitrary code, and a build
+    artifact that may be copied between machines or restored from a backup
+    should not carry that property. JSON is also inspectable and diffable.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "wb") as f:
-        pickle.dump(G, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"Saved to: {path}")
+    data = nx.node_link_data(G, edges="edges")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    print(f"Saved to: {path}  ({path.stat().st_size:,} bytes)")
+
+    legacy = path.with_suffix(".gpickle")
+    if legacy.exists():
+        legacy.unlink()
+        print(f"Removed superseded pickle: {legacy}")
 
 
 if __name__ == "__main__":
-    G = build_graph()
-    save_graph(G, OUTPUT_PATH)
-    print("\nSample nodes:")
-    for node in list(G.nodes)[:5]:
-        print(f"  {node}: {dict(list(G.nodes[node].items())[:3])}")
+    save_graph(build_graph(), OUTPUT_PATH)

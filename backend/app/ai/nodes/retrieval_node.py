@@ -102,6 +102,52 @@ def _extract_statute_refs(docs: list[Document]) -> str:
     return " ".join(sorted(refs)[:8])
 
 
+def _graph_hop2(docs_hop1: list[Document], case_type: str) -> list[Document]:
+    """
+    Follow the statute cross-reference graph from the hop-1 sections.
+
+    Returns Documents for the referenced provisions, fetched by chunk id so the
+    resolution is exact. Empty when the graph is unavailable or those sections
+    have no outgoing edges, which is the caller's signal to fall back to the
+    text re-query.
+    """
+    try:
+        from app.ai.pipelines.law_graph import expand
+        from app.ai.pipelines.retriever import CASE_TYPE_TO_COLLECTION
+        from app.db.chroma import get_chroma
+
+        refs = []
+        for d in docs_hop1:
+            statute = (d.metadata or {}).get("statute", "")
+            section = (d.metadata or {}).get("section_number", "")
+            if statute and section:
+                refs.append((statute, section))
+        if not refs:
+            return []
+
+        chunk_ids = expand(refs)
+        if not chunk_ids:
+            return []
+
+        # chunk_id is the Chroma document id, so this is a direct lookup.
+        collection = CASE_TYPE_TO_COLLECTION.get(case_type, "civil_collection")
+        got = get_chroma().get_collection(collection).get(
+            ids=chunk_ids, include=["documents", "metadatas"])
+
+        out = [
+            Document(page_content=text or "", metadata=meta or {})
+            for text, meta in zip(got.get("documents") or [],
+                                  got.get("metadatas") or [])
+        ]
+        if out:
+            logger.info("retrieval: graph hop-2 resolved %d referenced section(s)",
+                        len(out))
+        return out
+    except Exception:
+        logger.exception("retrieval: graph hop-2 failed — falling back to text re-query")
+        return []
+
+
 async def _web_search(query: str, case_type: str) -> list[dict]:
     """DuckDuckGo search — no API key. Returns chunks in the same format as local retrieval."""
     try:
@@ -262,13 +308,22 @@ async def retrieval_node(state: AgentState) -> dict:
     all_hops: list[list[Document]] = [docs_hop1]
 
     if docs_hop1:
-        stat_refs = _extract_statute_refs(docs_hop1)
-        if stat_refs:
-            # Anchor the hop-2 query with case context so province filter still applies
-            hop2_query = f"{stat_refs} {state['case_type']} {state['province']}"
-            docs_hop2: list[Document] = retriever.invoke(hop2_query)
-            if docs_hop2:
-                all_hops.append(docs_hop2)
+        # Preferred: follow the cross-reference graph. A hop-1 section's
+        # references resolve to exact chunk ids, where the text re-query below
+        # only *hopes* BM25 surfaces the referenced provision.
+        graph_docs = _graph_hop2(docs_hop1, state.get("case_type", ""))
+        if graph_docs:
+            all_hops.append(graph_docs)
+        else:
+            # Fallback when the graph is missing, stale, or the hop-1 sections
+            # have no outgoing edges.
+            stat_refs = _extract_statute_refs(docs_hop1)
+            if stat_refs:
+                # Anchor the hop-2 query with case context so province filter still applies
+                hop2_query = f"{stat_refs} {state['case_type']} {state['province']}"
+                docs_hop2: list[Document] = retriever.invoke(hop2_query)
+                if docs_hop2:
+                    all_hops.append(docs_hop2)
 
     # ── Merge with RRF across hops (deduplicates by content+metadata key) ─────
     if len(all_hops) > 1:
