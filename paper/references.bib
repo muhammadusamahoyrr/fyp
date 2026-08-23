@@ -205,13 +205,17 @@
 
 % NEEDS-VERIFICATION: confirm the correct citation form and licence for the
 % Pakistani statute collection used to build the corpus.
+% 969 laws/acts from Ministry of Law and Justice PDFs. Owner and ODC-BY licence
+% verified 2026-08-07; publisher gives no citation form, so this entry follows
+% the dataset card.
+% NB: these comments sit OUTSIDE the entry deliberately. BibTeX only accepts
+% comments between entries -- a '%' line inside braces raises "missing a field
+% name" and it then SKIPS THE REST OF THE ENTRY, silently. That is what dropped
+% year and the ODC-BY note from this citation until 2026-08-23.
 @misc{paklaws,
   author       = {Jadoon, Ayesha},
   title        = {Pakistan Laws Dataset},
   howpublished = {\url{https://huggingface.co/datasets/AyeshaJadoon/Pakistan_Laws_Dataset}},
-  % 969 laws/acts from Ministry of Law and Justice PDFs. Owner and ODC-BY
-  % licence verified 2026-08-07; publisher gives no citation form, so this
-  % entry follows the dataset card.
   note         = {969 statutes, ODC-BY},
   year         = {2024}
 }

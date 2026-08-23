@@ -29,6 +29,10 @@
 \usepackage{booktabs}
 \usepackage{url}
 \usepackage{microtype}
+% Loaded last, per hyperref's own requirement. The author block calls \href,
+% so without this the document does not compile at all -- "Undefined control
+% sequence" at \maketitle. IEEEtran wants breaklinks for its two-column URLs.
+\usepackage[hidelinks,breaklinks]{hyperref}
 
 \setlength{\floatsep}{3pt plus 1pt minus 1pt}
 \setlength{\textfloatsep}{4pt plus 1pt minus 1pt}
@@ -373,7 +377,19 @@ claims are restricted to federal law plus Punjab throughout
 Generation correctness is unmeasured &
 end-to-end benefit to a user &
 all claims are retrieval-level; practitioner adjudication is the measurement we
-would prioritise (Section~\ref{sec:future}) \\
+would prioritise (Section~\ref{sec:future}). One recorded instance indicates the
+cost is not hypothetical: for the query \emph{``What is the punishment for theft
+under the Pakistan Penal Code?''} the system cited PPC~382 (theft after
+preparation for causing hurt) rather than PPC~379 (theft), and attributed
+procedure to a non-existent provincial Criminal Procedure Code. The turn was
+recorded with \texttt{bm25\_confidence} $=0.0$ and retrieval relevance $0.2396$,
+yet was reported at confidence $0.85$, marked grounded, and returned. The
+failure is upstream of generation: query normalisation rewrote the English
+question into corrupted Urdu, injecting the token \emph{sarkari} (``official'')
+three times despite a specification requiring English queries to pass through
+unchanged, so retrieval searched a different concept and returned no chunk of
+PPC~379. Signals that would have supported abstention were present and
+unheeded \\
 
 The scope-rule and reranking result rests on one worked case &
 how far the rank $3\!\to\!10$ demotion generalises &
