@@ -148,6 +148,14 @@ async def lifespan(app: FastAPI):
     ws_subscriber_task.cancel()
     for task in scheduler_tasks:
         task.cancel()
+
+    # Before Redis closes: threshold samples are batched, so up to
+    # _FLUSH_EVERY-1 of them exist only in this process. Dropping them loses
+    # queries that were answered and counted locally but never reached the
+    # shared warmup total. Covers graceful exit only — a hard kill runs nothing.
+    from app.ai import threshold_manager as _tm
+    await _tm.flush_pending()
+
     await close_redis()
     await close_db()
     close_chroma()

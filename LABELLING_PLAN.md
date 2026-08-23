@@ -91,6 +91,28 @@ threshold warmup counts, so it discharges two prerequisites at once.
 > mixed with nothing to tell them apart, every turn in the pool inherits the
 > doubt.
 
+#### Reading the warmup counter
+
+`threshold_manager` batches samples and writes to Redis every **25** queries, to
+bound the Upstash command budget. Two consequences:
+
+- **Progress is only visible in 25-query steps.** A count read from any other
+  process (a script, a second worker) shows the last flushed total, not the
+  live one. A counter reading `0` after a handful of queries is batching, not
+  breakage.
+- **Stop the server gracefully.** SIGTERM or Ctrl+C now flushes the buffer on
+  the way out (`flush_pending()`, wired into the lifespan shutdown ahead of
+  `close_redis()`). A hard kill — `taskkill /F`, SIGKILL, power loss — runs no
+  shutdown code and still loses whatever is buffered.
+
+> **Before that flush existed, every restart silently dropped up to 24
+> buffered queries.** They had been answered and counted in-process, but the
+> shared total never saw them. Nothing errored; the count simply read low. Any
+> warmup progress recorded before this fix — including the runs on 2026-08-23,
+> which were stopped with `taskkill /F` — is understated by up to 24 per
+> restart, and warmup figures from those runs should not be trusted or
+> resumed from. Start the 1000-query run fresh.
+
 **Step 2 — two annotators, per the protocol.** Neither may be the person who
 built the system. Each runs:
 

@@ -283,6 +283,49 @@ async def record_query(
             _buffer = pending + _buffer
 
 
+async def flush_pending() -> int:
+    """Write buffered samples to Redis now. Returns how many were written.
+
+    Samples are batched _FLUSH_EVERY at a time to bound the Upstash command
+    budget, which means up to _FLUSH_EVERY-1 of them live only in this
+    process's memory at any moment. Without this, stopping the server threw
+    them away silently: the queries had been answered and counted locally, but
+    the shared warmup total never saw them, so a 1000-query warmup run driven
+    in batches with a restart between each would quietly lose up to 24 records
+    per restart and never reach its target.
+
+    Called from the lifespan shutdown. It covers a GRACEFUL exit — SIGTERM, or
+    Ctrl+C — and cannot cover a hard kill (`taskkill /F`, SIGKILL, power loss),
+    where no code runs at all. Stop a warmup server gently.
+
+    Fails open like the batched path: on a Redis error the samples go back on
+    the buffer rather than being dropped.
+    """
+    global _buffer
+
+    client = get_redis()
+    if client is None:
+        return 0
+
+    with _lock:
+        pending, _buffer = _buffer, []
+    if not pending:
+        return 0
+
+    try:
+        total = await _flush_to_redis(client, pending)
+        await _maybe_recompute_shared(client, total)
+        logger.info("threshold_manager: flushed %d buffered queries on shutdown "
+                    "(shared total now %d)", len(pending), total)
+        return len(pending)
+    except Exception:
+        logger.exception("threshold_manager: shutdown flush failed — %d samples "
+                         "kept buffered", len(pending))
+        with _lock:
+            _buffer = pending + _buffer
+        return 0
+
+
 async def refresh() -> None:
     """Force a threshold refresh from Redis. No-op when Redis is disabled."""
     client = get_redis()
