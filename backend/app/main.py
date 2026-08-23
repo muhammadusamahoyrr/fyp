@@ -48,7 +48,7 @@ from app.core.exceptions import (
     http_exception_handler,
     rate_limit_handler,
 )
-from app.core.rate_limit import limiter
+from app.core.rate_limit import RateLimitStateDefault, limiter
 from app.db.chroma import close_chroma, connect_chroma
 from app.db.indexes import create_all_indexes
 from app.db.mongodb import close_db, connect_db
@@ -171,6 +171,11 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
+# AFTER SlowAPIMiddleware, therefore outermost and running first: it seeds the
+# state attribute slowapi reads but fails to set when its storage is down. See
+# RateLimitStateDefault -- without it a Redis outage 500s every limited
+# endpoint despite swallow_errors.
+app.add_middleware(RateLimitStateDefault)
 
 _base = settings.frontend_url.rstrip("/")
 _cors_origins = {

@@ -41,3 +41,45 @@ limiter = Limiter(
     storage_uri=settings.redis_url or "memory://",
     swallow_errors=True,
 )
+
+
+class RateLimitStateDefault:
+    """Pre-seed `request.state.view_rate_limit` so a Redis outage fails OPEN.
+
+    swallow_errors above is necessary but NOT sufficient, and the gap is easy to
+    miss because the log looks like the fail-open worked. Inside slowapi:
+
+        __evaluate_limits()   ->  self.limiter.hit(...)          # raises: Redis down
+                              ->  request.state.view_rate_limit = ...   # never reached
+        _check_request_limit  ->  "Failed to rate limit. Swallowing error"
+        SlowAPIMiddleware     ->  request.state.view_rate_limit  # AttributeError -> 500
+
+    The attribute is assigned *after* the call that raises, so swallowing the
+    error leaves it unset, and slowapi's own middleware then crashes reading it.
+    The request 500s on the header-injection step, having already been allowed
+    through the limiter -- so the outage produces exactly the outcome
+    swallow_errors was set to prevent.
+
+    Observed live: Upstash dropped the connection mid-run and every
+    /auth/ws-ticket call returned 500 with
+    `AttributeError: 'State' object has no attribute 'view_rate_limit'`,
+    which halted the traffic run.
+
+    None is the value slowapi itself uses for "no limit applied" --
+    _inject_headers is guarded with `current_limit is not None` -- so seeding it
+    restores the intended behaviour rather than papering over it. Pure ASGI and
+    scope-level so it costs nothing per request; Starlette's `request.state` is
+    backed by `scope["state"]`, so the default is visible to every Request built
+    from this scope.
+
+    Must be registered AFTER SlowAPIMiddleware: add_middleware inserts at the
+    front of the stack, so the last one added is the outermost and runs first.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            scope.setdefault("state", {}).setdefault("view_rate_limit", None)
+        await self.app(scope, receive, send)
