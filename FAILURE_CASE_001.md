@@ -167,7 +167,27 @@ question. Those defects would simply have stayed hidden behind a better answer.
    failure is only visible by reading the answer against the law. That is what
    the two-annotator protocol is for.
 
-## 6. Reproducing
+## 6. Remediation status
+
+| Defect | Status |
+|---|---|
+| No post-condition on triage's `en` contract | **Fixed** 2026-08-23 (`a3cb25b`). `_enforce_en_invariant` repairs to the original query, logs at ERROR, and flags the record. Repairs rather than raises: the contract names the correct value, so failing the turn would deny a user an answer over a fault we can fix exactly. |
+| Contaminated turns reaching annotators | **Fixed.** `invariant_violation` rides into provenance and the labelling pool excludes it. |
+| Corrupted cache keys | **None existed.** Checked both the corrupted and correct keys for this turn, and the whole `aicache:*` namespace — 0 entries. Nothing to purge. |
+| `bm25_confidence == 0.0` does not trigger abstention | **Open.** |
+| `is_grounded` returns True over zero-overlap passages | **Open.** |
+
+**Pool audit (`scripts/audit_triage_invariant.py`, 2026-08-23):** 128 provenance
+records, 57 en-language, **1 violation** — this turn. It is `is_synthetic: true`,
+so it was already outside the labelling pool; it is now flagged explicitly rather
+than excluded incidentally. **No annotator ever saw it.**
+
+The two open items are the ones that let a wrong answer through *after* the query
+corruption. Fixing normalization removes this instance; it does not restore the
+gates that failed to catch it, and any future retrieval failure would pass the
+same way.
+
+## 7. Reproducing
 
 ```bash
 python scripts/serve.py start --local-only     # OLLAMA_MODEL=qwen2.5:7b
