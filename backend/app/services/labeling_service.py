@@ -35,7 +35,7 @@ from app.db.collections import get_answer_provenance_col, get_retrieval_labels_c
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "label-v1"
+SCHEMA_VERSION = "label-v2"
 
 # Verdicts. The four together give the full selective-prediction confusion
 # matrix — you cannot draw a risk-coverage curve without separating a correct
@@ -71,10 +71,23 @@ async def save_label(
     labeler:       str = "",
     notes:         str = "",
     labeled_depth: int = 0,
+    is_adjudication: bool = False,
 ) -> dict:
     """
-    Record one human judgement. Idempotent — re-labeling replaces the previous
-    verdict for that request_id rather than accumulating duplicates.
+    Record one human judgement. Idempotent per (request_id, labeler) — the same
+    annotator re-labeling replaces their own verdict rather than accumulating
+    duplicates, while a SECOND annotator's judgement is stored alongside the
+    first.
+
+    That key is the whole point. Keyed on request_id alone, a second annotator
+    silently overwrote the first, which makes inter-annotator agreement
+    unmeasurable — and unmeasured agreement is the standard reason a legal-NLP
+    evaluation set is not believed. Agreement on this data is expected to be
+    moderate (published legal annotation reports Krippendorff's alpha around
+    0.65), so the number has to be reported, not assumed away.
+
+    `is_adjudication` marks a tie-breaking judgement that supersedes the
+    annotators it resolves. See agreement.py.
 
     `labeled_depth` is how far down the ranked list the human actually looked
     (0 = every retrieved chunk). This is load-bearing, not bookkeeping: chunks
@@ -95,6 +108,12 @@ async def save_label(
 
     relevant = sorted(cid for cid, ok in chunk_labels.items() if ok)
 
+    if not labeler:
+        raise LabelError(
+            "labeler is required: an unattributed label cannot be checked for "
+            "agreement, and agreement is what makes the set credible"
+        )
+
     doc = {
         "schema_version":  SCHEMA_VERSION,
         "request_id":      request_id,
@@ -106,19 +125,27 @@ async def save_label(
         "answer_verdict":  answer_verdict,
         "labeled_depth":   labeled_depth or len(chunk_labels),
         "labeler":         labeler,
+        "is_adjudication": is_adjudication,
         "notes":           notes,
         "labeled_at":      datetime.now(timezone.utc),
     }
     await get_retrieval_labels_col().replace_one(
-        {"request_id": request_id}, doc, upsert=True
+        {"request_id": request_id, "labeler": labeler}, doc, upsert=True
     )
     return doc
 
 
 # ── Selecting work ────────────────────────────────────────────────────────────
 
-async def labeled_request_ids() -> set[str]:
-    cursor = get_retrieval_labels_col().find({}, {"request_id": 1, "_id": 0})
+async def labeled_request_ids(labeler: str = "") -> set[str]:
+    """Request ids already labelled — by `labeler` if given, else by anyone.
+
+    Scoped per annotator on purpose. Unscoped, the second annotator opens the
+    tool and is told there is nothing left to do, which is precisely how a set
+    ends up single-labelled and unusable for agreement.
+    """
+    query = {"labeler": labeler} if labeler else {}
+    cursor = get_retrieval_labels_col().find(query, {"request_id": 1, "_id": 0})
     return {d["request_id"] async for d in cursor}
 
 
@@ -140,10 +167,15 @@ _ANSWER_TURNS_ONLY = {
 }
 
 
-async def unlabeled_records(limit: int = 25, include_all_turns: bool = False) -> list[dict]:
+async def unlabeled_records(limit: int = 25, include_all_turns: bool = False,
+                            labeler: str = "") -> list[dict]:
     """
-    Provenance records with no label yet, oldest first so labeling follows the
-    order queries actually arrived.
+    Provenance records this annotator has not labelled yet, oldest first so
+    labeling follows the order queries actually arrived.
+
+    `labeler` scopes the queue. Unscoped, a second annotator is told there is
+    nothing left to do the moment the first finishes, and the set can never be
+    double-labelled — which is what agreement is computed from.
 
     Clarification and blocked turns are audited but excluded by default — pass
     include_all_turns=True to inspect them.
@@ -152,7 +184,7 @@ async def unlabeled_records(limit: int = 25, include_all_turns: bool = False) ->
     is built for — a few thousand records — that is simpler and faster than an
     aggregation $lookup, and it keeps the provenance collection read-only.
     """
-    done  = await labeled_request_ids()
+    done  = await labeled_request_ids(labeler)
     query: dict = {"request_id": {"$nin": list(done)}}
     if not include_all_turns:
         query.update(_ANSWER_TURNS_ONLY)
@@ -172,18 +204,27 @@ async def stats() -> dict:
     # Counting clarification and blocked turns in the denominator would report
     # work remaining that can never be done.
     labelable = await get_answer_provenance_col().count_documents(_ANSWER_TURNS_ONLY)
-    labeled   = await get_retrieval_labels_col().count_documents({})
+    # DISTINCT turns, not label documents. Counting documents once a turn can
+    # carry two annotators plus an adjudication would report 300% coverage and
+    # tell the annotators they were finished when a third of the set was
+    # untouched.
+    labeled_ids = await get_retrieval_labels_col().distinct("request_id")
+    labeled     = len(labeled_ids)
 
     by_turn: dict[str, int] = {}
     for turn in ("answer", "clarification", "blocked"):
         by_turn[turn] = await get_answer_provenance_col().count_documents(
             _ANSWER_TURNS_ONLY if turn == "answer" else {"turn_type": turn}
         )
-    by_verdict: dict[str, int] = {}
-    for verdict in VERDICTS:
-        by_verdict[verdict] = await get_retrieval_labels_col().count_documents(
-            {"answer_verdict": verdict}
-        )
+    # Verdict counts come from the AUTHORITATIVE set, so a disputed turn is not
+    # counted twice under two different verdicts.
+    from app.services.agreement import authoritative_labels
+    authoritative, resolution = await authoritative_labels()
+    by_verdict: dict[str, int] = {v: 0 for v in VERDICTS}
+    for lab in authoritative.values():
+        v = lab.get("answer_verdict")
+        if v in by_verdict:
+            by_verdict[v] += 1
     # Shallowest pool across all labels. Metrics at k above this are not
     # trustworthy, because ranks below it were never judged.
     depths = [
@@ -201,6 +242,7 @@ async def stats() -> dict:
         "by_verdict":         by_verdict,
         "min_labeled_depth":  min(depths) if depths else 0,
         "max_labeled_depth":  max(depths) if depths else 0,
+        "resolution":         resolution,
     }
 
 
@@ -227,10 +269,12 @@ async def export_retrieval_dataset() -> tuple[list[dict], list[dict]]:
                      these, but they are exactly the abstention split: the cases
                      where the correct behaviour is to refuse.
     """
-    labels = {
-        d["request_id"]: d
-        async for d in get_retrieval_labels_col().find({}, {"_id": 0})
-    }
+    # Authoritative labels only — NOT a dict comprehension over the raw
+    # collection. With two annotators per turn that would silently keep
+    # whichever document the cursor yielded last, making the exported set
+    # depend on iteration order and discarding the disagreement entirely.
+    from app.services.agreement import authoritative_labels
+    labels, _ = await authoritative_labels()
     if not labels:
         return [], []
 
@@ -260,10 +304,8 @@ async def export_calibration_pairs() -> list[dict]:
     arbitrated on — the number calibration is supposed to map into probability
     space, so it is the one that must be fitted.
     """
-    labels = {
-        d["request_id"]: d
-        async for d in get_retrieval_labels_col().find({}, {"_id": 0})
-    }
+    from app.services.agreement import authoritative_labels
+    labels, _ = await authoritative_labels()
     if not labels:
         return []
 

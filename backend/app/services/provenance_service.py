@@ -54,6 +54,16 @@ SCHEMA_VERSION = "prov-v1"
 TURN_ANSWER        = "answer"        # the system produced (or refused) an answer
 TURN_CLARIFICATION = "clarification" # the system asked the user for more facts
 TURN_BLOCKED       = "blocked"       # the gatekeeper stopped the message
+TURN_SHORTCUT      = "shortcut"      # answered by intent shortcut, graph not run
+TURN_ERROR         = "error"         # the turn failed and the user saw a fault
+
+# Every turn type a user-visible output can carry. The socket layer asserts the
+# turn type it is about to write is in this set, so adding an output path
+# without deciding how it is audited fails loudly rather than silently leaving
+# a hole in the trail.
+TURN_TYPES = frozenset({
+    TURN_ANSWER, TURN_CLARIFICATION, TURN_BLOCKED, TURN_SHORTCUT, TURN_ERROR,
+})
 
 _QUERY_MAX   = 1000
 _PREVIEW_MAX = 500

@@ -244,9 +244,19 @@ async def cmd_stats() -> None:
 
 
 async def cmd_label(limit: int, labeler: str, top_k: int) -> None:
-    records = await ls.unlabeled_records(limit=limit)
+    if not labeler:
+        raise SystemExit(
+            "--labeler is required. An unattributed label cannot be checked "
+            "for inter-annotator agreement, and agreement is what makes the "
+            "evaluation set credible. See ANNOTATION_PROTOCOL.md."
+        )
+    # Scoped to this annotator: unscoped, the second labeller is told there is
+    # nothing left the moment the first finishes, and the set can never be
+    # double-labelled.
+    records = await ls.unlabeled_records(limit=limit, labeler=labeler)
     if not records:
-        print("\n  Nothing left to label. Run with --stats to confirm.\n")
+        print(f"\n  Nothing left for {labeler!r} to label. "
+              "Run with --stats to confirm.\n")
         return
 
     depth = f"top {top_k}" if top_k else "all"

@@ -60,6 +60,15 @@ class FakeCollection:
                 return False
         return True
 
+    async def distinct(self, field, query=None):
+        """Mirrors Motor's distinct(). stats() counts DISTINCT turns, because a
+        turn can now carry two annotators plus an adjudication and counting
+        documents would report coverage above 100%."""
+        return sorted({
+            d.get(field) for d in self.docs
+            if self._match(d, query) and d.get(field) is not None
+        })
+
     def find(self, query=None, projection=None):
         return FakeCursor([d for d in self.docs if self._match(d, query)])
 
@@ -109,6 +118,11 @@ def store(monkeypatch):
     labels = FakeCollection()
     monkeypatch.setattr(ls, "get_answer_provenance_col", lambda: prov)
     monkeypatch.setattr(ls, "get_retrieval_labels_col",  lambda: labels)
+    # stats() and both exports now resolve labels through agreement.py, which
+    # holds its own reference to the collection accessor. Patching only the
+    # labeling_service copy would leave those three reading the real database.
+    from app.services import agreement as ag
+    monkeypatch.setattr(ag, "get_retrieval_labels_col", lambda: labels)
     return prov, labels
 
 
@@ -133,8 +147,8 @@ async def test_relabelling_replaces_rather_than_duplicates(store):
     prov, labels = store
     prov.docs.append(_prov("r1"))
 
-    await ls.save_label("r1", {"c1": True},  ls.VERDICT_CORRECT)
-    await ls.save_label("r1", {"c1": False}, ls.VERDICT_INCORRECT)
+    await ls.save_label("r1", {"c1": True},  ls.VERDICT_CORRECT, labeler="ann_a")
+    await ls.save_label("r1", {"c1": False}, ls.VERDICT_INCORRECT, labeler="ann_a")
 
     assert len(labels.docs) == 1, "a corrected judgement must not accumulate"
     assert labels.docs[0]["answer_verdict"] == ls.VERDICT_INCORRECT
@@ -146,13 +160,13 @@ async def test_an_unknown_verdict_is_rejected(store):
     prov, _ = store
     prov.docs.append(_prov("r1"))
     with pytest.raises(ls.LabelError):
-        await ls.save_label("r1", {"c1": True}, "probably_fine")
+        await ls.save_label("r1", {"c1": True}, "probably_fine", labeler="ann_a")
 
 
 @pytest.mark.asyncio
 async def test_labelling_an_unknown_request_is_rejected(store):
     with pytest.raises(ls.LabelError):
-        await ls.save_label("nope", {"c1": True}, ls.VERDICT_CORRECT)
+        await ls.save_label("nope", {"c1": True}, ls.VERDICT_CORRECT, labeler="ann_a")
 
 
 # ── work selection (resumability) ─────────────────────────────────────────────
@@ -162,8 +176,8 @@ async def test_already_labeled_records_are_not_offered_again(store):
     prov, _ = store
     prov.docs.extend([_prov("r1"), _prov("r2"), _prov("r3")])
 
-    await ls.save_label("r2", {"c1": True}, ls.VERDICT_CORRECT)
-    remaining = await ls.unlabeled_records(limit=10)
+    await ls.save_label("r2", {"c1": True}, ls.VERDICT_CORRECT, labeler="ann_a")
+    remaining = await ls.unlabeled_records(limit=10, labeler="ann_a")
 
     assert {r["request_id"] for r in remaining} == {"r1", "r3"}
 
@@ -181,7 +195,7 @@ async def test_clarification_and_blocked_turns_are_not_offered_for_labelling(sto
         _prov("r3", turn_type="blocked"),
     ])
 
-    offered = await ls.unlabeled_records(limit=10)
+    offered = await ls.unlabeled_records(limit=10, labeler="ann_a")
     assert {r["request_id"] for r in offered} == {"r1"}
 
 
@@ -195,7 +209,7 @@ async def test_retrieval_faults_are_not_offered_for_labelling(store):
         _prov("r2", arbitration={"output": "refuse", "source": "error",
                                  "confidence": 0.0}),
     ])
-    offered = await ls.unlabeled_records(limit=10)
+    offered = await ls.unlabeled_records(limit=10, labeler="ann_a")
     assert {r["request_id"] for r in offered} == {"r1"}
 
 
@@ -206,7 +220,7 @@ async def test_a_genuine_no_evidence_refusal_is_still_labelable(store):
     prov, _ = store
     prov.docs.append(_prov("r1", arbitration={"output": "refuse", "source": "none",
                                               "confidence": 0.0}))
-    offered = await ls.unlabeled_records(limit=10)
+    offered = await ls.unlabeled_records(limit=10, labeler="ann_a")
     assert [r["request_id"] for r in offered] == ["r1"]
 
 
@@ -230,7 +244,7 @@ async def test_records_predating_turn_type_still_count_as_answers(store):
     legacy.pop("turn_type", None)
     prov.docs.append(legacy)
 
-    offered = await ls.unlabeled_records(limit=10)
+    offered = await ls.unlabeled_records(limit=10, labeler="ann_a")
     assert [r["request_id"] for r in offered] == ["r1"]
 
 
@@ -245,7 +259,7 @@ async def test_progress_is_measured_against_labelable_turns_only(store):
         _prov("r3", turn_type="clarification"),
         _prov("r4", turn_type="blocked"),
     ])
-    await ls.save_label("r1", {"c1": True}, ls.VERDICT_CORRECT)
+    await ls.save_label("r1", {"c1": True}, ls.VERDICT_CORRECT, labeler="ann_a")
 
     s = await ls.stats()
     assert s["provenance_records"] == 4
@@ -264,7 +278,7 @@ async def test_pooling_depth_is_recorded_with_the_label(store):
     prov.docs.append(_prov("r1"))
 
     await ls.save_label("r1", {"c1": True, "c2": False},
-                        ls.VERDICT_CORRECT, labeled_depth=5)
+                        ls.VERDICT_CORRECT, labeled_depth=5, labeler="ann_a")
     assert labels.docs[0]["labeled_depth"] == 5
 
 
@@ -273,7 +287,7 @@ async def test_depth_defaults_to_the_number_actually_judged(store):
     prov, labels = store
     prov.docs.append(_prov("r1"))
 
-    await ls.save_label("r1", {"c1": True, "c2": False}, ls.VERDICT_CORRECT)
+    await ls.save_label("r1", {"c1": True, "c2": False}, ls.VERDICT_CORRECT, labeler="ann_a")
     assert labels.docs[0]["labeled_depth"] == 2
 
 
@@ -283,8 +297,8 @@ async def test_stats_expose_the_shallowest_pool(store):
     prov, _ = store
     prov.docs.extend([_prov("r1"), _prov("r2")])
 
-    await ls.save_label("r1", {"c1": True},  ls.VERDICT_CORRECT, labeled_depth=5)
-    await ls.save_label("r2", {"c1": False}, ls.VERDICT_CORRECT, labeled_depth=3)
+    await ls.save_label("r1", {"c1": True},  ls.VERDICT_CORRECT, labeled_depth=5, labeler="ann_a")
+    await ls.save_label("r2", {"c1": False}, ls.VERDICT_CORRECT, labeled_depth=3, labeler="ann_a")
 
     s = await ls.stats()
     assert s["min_labeled_depth"] == 3
@@ -296,8 +310,8 @@ async def test_stats_report_progress_and_verdict_breakdown(store):
     prov, _ = store
     prov.docs.extend([_prov("r1"), _prov("r2"), _prov("r3"), _prov("r4")])
 
-    await ls.save_label("r1", {"c1": True},  ls.VERDICT_CORRECT)
-    await ls.save_label("r2", {"c1": False}, ls.VERDICT_CORRECT_REFUSAL)
+    await ls.save_label("r1", {"c1": True},  ls.VERDICT_CORRECT, labeler="ann_a")
+    await ls.save_label("r2", {"c1": False}, ls.VERDICT_CORRECT_REFUSAL, labeler="ann_a")
 
     s = await ls.stats()
     assert s["provenance_records"] == 4
@@ -315,7 +329,7 @@ async def test_export_matches_the_keys_evaluate_retrieval_reads(store):
     """A key mismatch here would not raise — it would silently score zero."""
     prov, _ = store
     prov.docs.append(_prov("r1"))
-    await ls.save_label("r1", {"c1": True, "c2": True}, ls.VERDICT_CORRECT)
+    await ls.save_label("r1", {"c1": True, "c2": True}, ls.VERDICT_CORRECT, labeler="ann_a")
 
     answerable, _ = await ls.export_retrieval_dataset()
 
@@ -334,8 +348,8 @@ async def test_records_with_no_relevant_chunk_become_the_abstention_split(store)
     prov, _ = store
     prov.docs.extend([_prov("r1"), _prov("r2")])
 
-    await ls.save_label("r1", {"c1": True,  "c2": False}, ls.VERDICT_CORRECT)
-    await ls.save_label("r2", {"c1": False, "c2": False}, ls.VERDICT_CORRECT_REFUSAL)
+    await ls.save_label("r1", {"c1": True,  "c2": False}, ls.VERDICT_CORRECT, labeler="ann_a")
+    await ls.save_label("r2", {"c1": False, "c2": False}, ls.VERDICT_CORRECT_REFUSAL, labeler="ann_a")
 
     answerable, unanswerable = await ls.export_retrieval_dataset()
 
@@ -347,7 +361,7 @@ async def test_records_with_no_relevant_chunk_become_the_abstention_split(store)
 async def test_unlabeled_records_are_excluded_from_the_export(store):
     prov, _ = store
     prov.docs.extend([_prov("r1"), _prov("r2")])
-    await ls.save_label("r1", {"c1": True}, ls.VERDICT_CORRECT)
+    await ls.save_label("r1", {"c1": True}, ls.VERDICT_CORRECT, labeler="ann_a")
 
     answerable, unanswerable = await ls.export_retrieval_dataset()
     assert len(answerable) + len(unanswerable) == 1
@@ -366,7 +380,7 @@ async def test_calibration_pairs_carry_the_raw_score_and_the_outcome(store):
     """Platt/isotonic fit P(correct | raw score) — both halves must be present."""
     prov, _ = store
     prov.docs.append(_prov("r1"))
-    await ls.save_label("r1", {"c1": True}, ls.VERDICT_CORRECT)
+    await ls.save_label("r1", {"c1": True}, ls.VERDICT_CORRECT, labeler="ann_a")
 
     pair = (await ls.export_calibration_pairs())[0]
     assert pair["relevance_score"] == 0.72
@@ -381,7 +395,7 @@ async def test_a_correct_refusal_counts_as_a_good_outcome_but_not_an_answer(stor
     prov, _ = store
     prov.docs.append(_prov("r1", arbitration={"output": "refuse", "source": "none",
                                               "confidence": 0.0}))
-    await ls.save_label("r1", {"c1": False}, ls.VERDICT_CORRECT_REFUSAL)
+    await ls.save_label("r1", {"c1": False}, ls.VERDICT_CORRECT_REFUSAL, labeler="ann_a")
 
     pair = (await ls.export_calibration_pairs())[0]
     assert pair["correct"]  is True
@@ -393,7 +407,7 @@ async def test_a_correct_refusal_counts_as_a_good_outcome_but_not_an_answer(stor
 async def test_a_wrong_refusal_is_a_bad_outcome(store):
     prov, _ = store
     prov.docs.append(_prov("r1"))
-    await ls.save_label("r1", {"c1": True}, ls.VERDICT_WRONG_REFUSAL)
+    await ls.save_label("r1", {"c1": True}, ls.VERDICT_WRONG_REFUSAL, labeler="ann_a")
 
     pair = (await ls.export_calibration_pairs())[0]
     assert pair["correct"]  is False
