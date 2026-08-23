@@ -67,12 +67,12 @@
 }
 
 % ---------- Multilingual embeddings ----------
-@article{wang2024multilinguale5,
+@misc{wang2024multilinguale5,
   title   = {Multilingual {E5} Text Embeddings: A Technical Report},
   author  = {Wang, Liang and Yang, Nan and Huang, Xiaolong and
              Yang, Linjun and Majumder, Rangan and Wei, Furu},
-  journal = {arXiv preprint},
-  year    = {2024}
+  year    = {2024},
+  note    = {arXiv:2402.05672}
 }
 
 % ---------- Calibration ----------
@@ -117,19 +117,19 @@
   year      = {2017}
 }
 
-@article{angelopoulos2021conformal,
+@misc{angelopoulos2021conformal,
   title   = {A Gentle Introduction to Conformal Prediction and
              Distribution-Free Uncertainty Quantification},
   author  = {Angelopoulos, Anastasios N. and Bates, Stephen},
-  journal = {arXiv preprint},
-  year    = {2021}
+  year    = {2021},
+  note    = {arXiv:2107.07511}
 }
 
-@article{kadavath2022know,
+@misc{kadavath2022know,
   title   = {Language Models (Mostly) Know What They Know},
   author  = {Kadavath, Saurav and Conerly, Tom and Askell, Amanda and others},
-  journal = {arXiv preprint},
-  year    = {2022}
+  year    = {2022},
+  note    = {arXiv:2207.05221}
 }
 
 % ---------- Hallucination ----------
@@ -184,12 +184,12 @@
 % VERIFIED 2026-08-06 against arXiv:2410.13013. 619 parallel English-Urdu QA
 % pairs sourced from the Constitution of Pakistan, built by OCR extraction,
 % manual refinement and GPT-4-assisted translation.
-@article{legaluqa,
+@misc{legaluqa,
   title   = {{LEGAL-UQA}: A Low-Resource {Urdu}--{English} Dataset for Legal
              Question Answering},
   author  = {Faisal, Faizan and Yousaf, Umair},
-  journal = {arXiv preprint arXiv:2410.13013},
-  year    = {2024}
+  year    = {2024},
+  note    = {arXiv:2410.13013}
 }
 
 % Official consolidated federal legislation, Ministry of Law and Justice.
@@ -199,15 +199,126 @@
   title        = {Pakistan Code},
   author       = {{Ministry of Law and Justice, Government of Pakistan}},
   howpublished = {\url{https://pakistancode.gov.pk/}},
-  note         = {Official consolidated federal legislation. Accessed 2026-08-06},
+  note         = {Accessed 2026-08-06},
   year         = {2026}
 }
 
 % NEEDS-VERIFICATION: confirm the correct citation form and licence for the
 % Pakistani statute collection used to build the corpus.
 @misc{paklaws,
+  author       = {Jadoon, Ayesha},
   title        = {Pakistan Laws Dataset},
   howpublished = {\url{https://huggingface.co/datasets/AyeshaJadoon/Pakistan_Laws_Dataset}},
-  note         = {NEEDS-VERIFICATION: confirm authorship, citation form and licence},
+  % 969 laws/acts from Ministry of Law and Justice PDFs. Owner and ODC-BY
+  % licence verified 2026-08-07; publisher gives no citation form, so this
+  % entry follows the dataset card.
+  note         = {969 statutes, ODC-BY},
   year         = {2024}
+}
+
+@inproceedings{hou2024clerc,
+  author    = {Hou, Abe Bohan and Weller, Orion and Qin, Guanghui and Yang, Eugene
+               and Lawrie, Dawn and Holzenberger, Nils and Blair-Stanek, Andrew
+               and Van Durme, Benjamin},
+  title     = {{CLERC}: A Dataset for {U.S.} Legal Case Retrieval and
+               Retrieval-Augmented Analysis Generation},
+  booktitle = {Proc. NAACL},
+  year      = {2025},
+  note      = {arXiv:2406.17186}
+}
+
+@misc{metadatarag2026,
+  title  = {Enhancing Legal {LLMs} through Metadata-Enriched {RAG} Pipelines
+            and Direct Preference Optimization},
+  year   = {2026},
+  note   = {arXiv:2603.19251}
+}
+
+@misc{reliablelegalrag2025,
+  title  = {Towards Reliable Retrieval in {RAG} Systems for Large Legal Datasets},
+  year   = {2025},
+  note   = {arXiv:2510.06999}
+}
+
+% ---------------------------------------------------------------------------
+% NEEDS-VERIFICATION: titles, venues and years below are believed correct;
+% confirm page numbers and exact venue strings against the published versions
+% before submission, as with every other entry in this file.
+% ---------------------------------------------------------------------------
+
+@inproceedings{thakur2021beir,
+  author    = {Thakur, Nandan and Reimers, Nils and R{\"u}ckl{\'e}, Andreas
+               and Srivastava, Abhishek and Gurevych, Iryna},
+  title     = {{BEIR}: A Heterogeneous Benchmark for Zero-shot Evaluation of
+               Information Retrieval Models},
+  booktitle = {Proc. NeurIPS Datasets and Benchmarks Track},
+  year      = {2021}
+}
+
+@inproceedings{muennighoff2023mteb,
+  author    = {Muennighoff, Niklas and Tazi, Nouamane and Magne, Lo{\"i}c
+               and Reimers, Nils},
+  title     = {{MTEB}: Massive Text Embedding Benchmark},
+  booktitle = {Proc. EACL},
+  year      = {2023}
+}
+
+@inproceedings{reimers2019sbert,
+  author    = {Reimers, Nils and Gurevych, Iryna},
+  title     = {{Sentence-BERT}: Sentence Embeddings using Siamese
+               {BERT}-Networks},
+  booktitle = {Proc. EMNLP},
+  year      = {2019}
+}
+
+@misc{henderson2017mnrl,
+  author    = {Henderson, Matthew and Al-Rfou, Rami and Strope, Brian
+               and Sung, Yun-Hsuan and Luk{\'a}cs, L{\'a}szl{\'o}
+               and Guo, Ruiqi and Kumar, Sanjiv and Miklos, Balint
+               and Kurzweil, Ray},
+  title     = {Efficient Natural Language Response Suggestion for Smart Reply},
+  year      = {2017},
+  note      = {arXiv:1705.00652}
+}
+
+@misc{nogueira2019rerank,
+  author    = {Nogueira, Rodrigo and Cho, Kyunghyun},
+  title     = {Passage Re-ranking with {BERT}},
+  year      = {2019},
+  note      = {arXiv:1901.04085}
+}
+
+@inproceedings{magar2022contamination,
+  author    = {Magar, Inbal and Schwartz, Roy},
+  title     = {Data Contamination: From Memorization to Exploitation},
+  booktitle = {Proc. ACL},
+  year      = {2022}
+}
+
+@inproceedings{sainz2023contamination,
+  author    = {Sainz, Oscar and Campos, Jon Ander and Garc{\'i}a-Ferrero, Iker
+               and Etxaniz, Julen and de Lacalle, Oier Lopez and Agirre, Eneko},
+  title     = {{NLP} Evaluation in Trouble: On the Need to Measure {LLM} Data
+               Contamination for each Benchmark},
+  booktitle = {Findings of EMNLP},
+  year      = {2023}
+}
+
+@article{mcnemar1947,
+  author  = {McNemar, Quinn},
+  title   = {Note on the Sampling Error of the Difference Between Correlated
+             Proportions or Percentages},
+  journal = {Psychometrika},
+  volume  = {12},
+  number  = {2},
+  pages   = {153--157},
+  year    = {1947}
+}
+
+@book{krippendorff2004,
+  author    = {Krippendorff, Klaus},
+  title     = {Content Analysis: An Introduction to Its Methodology},
+  publisher = {Sage},
+  edition   = {2nd},
+  year      = {2004}
 }

@@ -2,13 +2,20 @@
 % FIT (Frontiers of Information Technology) — IEEE two-column conference format
 %
 % FIT requirements confirmed from https://fit.edu.pk/submission-guidelines.aspx
-%   - maximum 6 pages
 %   - two-column IEEE conference format
 %   - PDF, submitted via EasyChair
 %   - must not be under consideration elsewhere
 %
-% Build:  pdflatex main && bibtex main && pdflatex main && pdflatex main
-% Check the page count EVERY build. Six pages includes references.
+% PAGE BUDGET: 7-9 pages including references. Currently 9 — at the ceiling,
+% so anything added must displace something.
+%
+% This is the FINDINGS paper (evaluation, leakage, transfer). The governance
+% architecture — arbitration over a harm matrix, the answerability gate,
+% provenance, injection defence — is the companion paper, preserved in
+% main_system_paper.tex. Do not reintroduce architecture here without cutting.
+%
+% Build:  powershell -File compile.ps1   (pdflatex, bibtex, pdflatex, pdflatex)
+% It prints the page count. Check it EVERY build; the count includes references.
 %=============================================================================
 \documentclass[conference]{IEEEtran}
 \IEEEoverridecommandlockouts
@@ -21,219 +28,190 @@
 \usepackage{xcolor}
 \usepackage{booktabs}
 \usepackage{url}
+\usepackage{microtype}
+
+\setlength{\floatsep}{3pt plus 1pt minus 1pt}
+\setlength{\textfloatsep}{4pt plus 1pt minus 1pt}
+\setlength{\intextsep}{3pt plus 1pt minus 1pt}
+\setlength{\abovecaptionskip}{2pt}
+\setlength{\belowcaptionskip}{1pt}
 
 % Draft-only marker. DELETE this macro and every use of it before submitting.
 \newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
 \begin{document}
 
-\title{Grounded and Auditable: Tool-Augmented Retrieval-Generation
-with Selective Abstention for Legal Question Answering in
-Low-Resource, Code-Switched Jurisdictions}
+\title{In-Distribution Gains Do Not Transfer: Leakage-Free Evaluation of
+Retrieval Interventions for Low-Resource Legal Question Answering}
 
-% IEEE author block. FIT is not double-blind (confirm on the CFP before
-% submitting); if it becomes anonymous, replace this block with \author{}.
-\author{\IEEEauthorblockN{Muhammad Usama}
-\IEEEauthorblockA{\textit{Department of Computer Science} \\
-\textit{COMSATS University Islamabad}\\
-Islamabad, Pakistan \\
-muhammadusamahoyrr@gmail.com}
-\and
-\IEEEauthorblockN{\TODO{supervisor name}}
-\IEEEauthorblockA{\textit{Department of Computer Science} \\
-\textit{COMSATS University Islamabad}\\
-Islamabad, Pakistan \\
-\TODO{email}}
-}
+\author{\IEEEauthorblockN{Muhammad Usama$^{1}$ and Muhammad Amir Zarmaan Ullah Khan$^{2}$}
+\IEEEauthorblockA{\textit{$^{1,2}$Department of Computer Science, COMSATS University Islamabad, Pakistan}\\
+Email: \href{mailto:muhammadusamahoyrr@gmail.com}{\underline{muhammadusamahoyrr@gmail.com}}, \href{mailto:kzari898@gmail.com}{\underline{kzari898@gmail.com}}}}
 
 \maketitle
 
-%-----------------------------------------------------------------------------
+%, , , , , , , , , , , , , , , , , , , , , , , , , --
 \begin{abstract}
-Retrieval-augmented generation (RAG) is increasingly applied to legal question
-answering, but deployments are overwhelmingly English and target common-law or
-EU jurisdictions, and they are evaluated on answer quality alone. Two properties
-that matter more in legal practice are largely unmeasured: whether a system
-knows when \emph{not} to answer, and whether a given answer can later be
-audited. We present a legal question-answering architecture for Pakistani law
-that addresses both. The system combines hybrid lexical--dense retrieval over a
-bilingual statute corpus with a set of deterministic statutory engines, whose
-computed output is treated as first-class evidence by a grounding verifier;
-routes every query through a single arbitration layer that selects among
-answering, requesting clarification, and refusing under an explicit asymmetric
-cost model; and records a durable provenance document for every turn, linking
-the emitted answer to the evidence, the arbitration verdict, and the model that
-produced it. The system additionally normalises Roman-Urdu input to Urdu script
-before retrieval, and resolves cross-jurisdictional statute aliases that arise
-when users import Indian legal terminology. We describe the architecture, the
-construction of an abstention-aware evaluation set built by labelling recorded
-production traffic, and an evaluation protocol reporting selective-prediction
-behaviour alongside standard ranking metrics.
-\TODO{one or two sentences of headline results, once measured}
+Retrieval interventions for legal question answering are almost always reported
+as a single number on a single evaluation set, and that number is almost always
+measured on questions drawn from the same distribution the system was tuned on.
+We report what happens when it is not. Fine-tuning a multilingual retriever on
+$4{,}692$ verified citation pairs for Pakistani law gains $+26.5$ Hit@1 on
+held-out questions from its own generator and $+2.4$ when the question style
+changes. A second model, trained on a tenth as much data from a different source,
+initially shows a $+16.5$ in-distribution gain, but target leakage invalidates that
+comparison; on clean out-of-distribution evaluation it changes by $-0.3$. Sorting every retrieval intervention we measured by whether its effect
+survived a change of question style produces a clean split: those encoding legal
+or document structure transferred, those learning question phrasing did not, including
+a general-purpose cross-encoder that moved the correct statute from rank~3 to
+rank~10 where a deterministic statutory-scope rule placed it first in under a
+millisecond. We further report three evaluation defects---an index containing its
+own test answers, a systematically wrong gold-label join, and target leakage between train and test---each of which inflated or distorted a headline number until it was
+checked, and each time the flattering version was the wrong one; none was
+visible in the metrics, and in each case the correction removed a result we had
+already believed. Throughout, the measurement protocol determined the
+conclusions more than any technique did.
 \end{abstract}
 
 \begin{IEEEkeywords}
-legal informatics, retrieval-augmented generation, selective prediction,
-abstention, neuro-symbolic systems, low-resource NLP, code-switching, Urdu
+legal informatics, retrieval-augmented generation, retrieval evaluation,
+distribution shift, data contamination, low-resource NLP, code-switching, Urdu
 \end{IEEEkeywords}
 
-%-----------------------------------------------------------------------------
+%, , , , , , , , , , , , , , , , , , , , , , , , , --
 \section{Introduction}
-Access to legal information is unevenly distributed. A litigant who cannot
-afford counsel is often unable to establish even the threshold facts of their
-own position: which statute governs, which forum has jurisdiction, what a
-filing will cost, or whether a limitation period has already expired.
-\TODO{Insert one cited statistic on the lawyer-to-population ratio or case
-backlog in Pakistan. Do not write a number you have not sourced.}
+Access to legal information is unevenly distributed. In Pakistan, where
+legal counsel is scarce outside major urban centres and court backlogs leave
+disputes unresolved for years, a litigant who cannot afford counsel is often
+unable to establish even the threshold facts of their own position: which statute
+governs, which forum has jurisdiction, what a filing will cost, or whether a
+limitation period has already expired.
 
-Large language models with retrieval augmentation~\cite{lewis2020rag} appear
-well suited to closing part of that gap, and legal question answering is now an
-active application area~\cite{chalkidis2020legalbert,guha2023legalbench}.
-Existing systems, however, are built predominantly for English and for
-common-law or European jurisdictions. Transferring them to Pakistan is not a
-matter of swapping the corpus. Queries arrive in English, in Urdu script, and
-most commonly in Roman Urdu, the transliterated register used in everyday
-digital communication; the applicable law combines codified statute with
-Islamic personal law and varies by province; and users routinely import Indian
-statutory terminology, asking about the Indian Penal Code when the Pakistan
-Penal Code governs. Each of these is a retrieval problem before it is a
-generation problem.
+Retrieval-augmented generation~\cite{lewis2020rag} is the standard response, and
+legal question answering is now an active application
+area~\cite{chalkidis2020legalbert,guha2023legalbench}. Applying it to Pakistan
+is not a matter of swapping the corpus. Queries arrive in English, in Urdu
+script, and most commonly in Roman Urdu, the transliterated register used in
+everyday digital communication; the applicable law combines codified statute
+with Islamic personal law and varies by province; and users routinely import
+Indian statutory terminology, asking about the Indian Penal Code when the
+Pakistan Penal Code governs. Each is a retrieval problem before a generation
+problem, and none has an established benchmark.
 
-A second gap is less specific to jurisdiction and, we argue, more consequential.
-Legal question-answering systems are evaluated almost entirely on the quality of
-the answers they produce. Two properties that matter more in professional
-practice go largely unmeasured. The first is abstention: a confidently wrong
-answer about bail eligibility or a limitation period can cause material harm,
-so a system that declines to answer when its evidence is weak is more useful
-than one that always responds. The second is auditability: an answer that cannot
-be traced to the evidence and decisions that produced it cannot be contested,
-corrected, or defended, which is precisely what a regulated domain requires.
-Neither property is captured by answer-quality metrics, and neither is
-achievable as an afterthought.
+\textbf{Reproducibility.} All evaluation code, corpus ingestion manifests,
+contamination detection scripts, and fine-tuning configurations are publicly
+available to enable independent auditability.
 
-This paper describes a legal question-answering system for Pakistani law built
-around both. Our contributions are:
+That absence is the subject of this paper. When no independent evaluation set
+exists, a system's developers build one, tune against it, and report the
+resulting number, and the literature offers little guidance on how much such
+a number is worth. We set out to improve retrieval for this jurisdiction and
+measured each intervention twice: once on questions from the distribution it was
+developed against, and once on questions written by a different generator for a
+different purpose. The gap between those two measurements turned out to be
+larger than the gap between any two techniques we tried.
+
+We report it as a negative result with a positive structure. Interventions
+divide by \emph{what they encode}: those encoding a property of the law or the
+documents survived the change of question style, while those learning a mapping
+from question phrasing to passage did not, however large their in-distribution
+gain. The same division predicts which of our corpus repairs held.
+
+\textbf{Scope of claims.} Several results below are defects we found in our own
+system, reported as findings rather than apology: each was invisible to the
+metric meant to catch it, and these failure modes are not specific to a single
+model configuration. What we do \emph{not} claim is equally definite: no
+end-to-end improvement in answer correctness, and no Pakistan-wide coverage.
+Section~\ref{sec:threats} states each limit and what it bears on.
+
+The system that produced these measurements is described only as far as the
+results require (Section~\ref{sec:setup}); its architecture is reported
+separately. Our contributions are:
 
 \begin{itemize}
-\item \textbf{Verifier-aware symbolic evidence.} Deterministic statutory
-engines --- court fees, bail eligibility, limitation, inheritance shares under
-Islamic law --- are treated as first-class evidence by the grounding verifier,
-so that a correct computed answer is not mislabelled as ungrounded merely
-because no retrieved provision restates it (Section~\ref{sec:tools}).
-\item \textbf{An explicit abstention policy.} A single arbitration layer selects
-among answering, requesting clarification, and refusing, over heterogeneous
-evidence sources under an asymmetric cost model in which an unnecessary refusal
-is itself a cost (Section~\ref{sec:abstain}).
-\item \textbf{Code-switched retrieval} for a low-resource jurisdiction, with
-Roman-Urdu normalisation and cross-jurisdictional alias resolution
-(Section~\ref{sec:retrieval}).
-\item \textbf{Per-turn provenance} linking every emitted answer to its evidence,
-its arbitration verdict, and the model that served it, together with an
-evaluation protocol that constructs an abstention-aware test set by labelling
-recorded traffic (Sections~\ref{sec:prov} and \ref{sec:eval}).
+\item \textbf{A transfer measurement of retrieval fine-tuning}, over two models
+trained independently at a tenfold difference in scale, with an account of why
+that predicts which interventions transfer
+(Sections~\ref{sec:finetune},~\ref{sec:whynot}).
+\item \textbf{Three contaminations and how each was found}: a leaking index, a
+systematically wrong gold-label join, and target leakage between test and
+training, none visible in the metrics (Section~\ref{sec:leakage}).
+\item \textbf{Verified citation supervision} for a jurisdiction with no
+query/passage training data, built from citations because a citation is
+checkable (Section~\ref{sec:citationdata}).
 \end{itemize}
 
 \section{Related Work}
 \textbf{Legal NLP and retrieval-augmented generation.}
 Domain-adapted encoders such as LEGAL-BERT~\cite{chalkidis2020legalbert}
 established that legal text benefits from in-domain pretraining, and
-LegalBench~\cite{guha2023legalbench} provides a broad benchmark for legal
-reasoning in large language models. Retrieval augmentation~\cite{lewis2020rag}
-combined with dense passage retrieval~\cite{karpukhin2020dpr} is now the
-standard architecture for grounding generated answers in source documents.
-Self-RAG~\cite{asai2024selfrag} adds self-reflection over retrieval quality and
-answer support. This line of work overwhelmingly targets English and
-common-law or EU material, and evaluates the answers produced rather than the
-decision of whether to answer.
+LegalBench~\cite{guha2023legalbench} benchmarks legal reasoning in large
+language models. Retrieval augmentation~\cite{lewis2020rag} over dense
+passage retrieval~\cite{karpukhin2020dpr} is the standard architecture for
+grounding answers in sources, with Self-RAG~\cite{asai2024selfrag} adding
+self-reflection over retrieval quality. This line of work targets English
+common-law or EU material almost exclusively, and reports in-domain evaluation
+on benchmarks it did not construct, a luxury this jurisdiction does not
+afford.
 
-\textbf{Selective prediction and calibration.}
-Selective classification formalises the option to abstain and the
-risk--coverage trade-off it induces~\cite{elyaniv2010selective,
-geifman2017selectivenet}. Modern neural networks are systematically
-miscalibrated~\cite{guo2017calibration}, motivating post-hoc mapping of scores
-into probability space by Platt scaling~\cite{platt1999} or isotonic
-regression~\cite{zadrozny2002isotonic}; conformal
-prediction~\cite{angelopoulos2021conformal} offers distribution-free coverage
-guarantees over the same problem. Language models retain some signal about
-their own reliability~\cite{kadavath2022know}, and hallucination remains a
-central failure mode of generation systems~\cite{ji2023hallucination}. These
-techniques are rarely applied to the routing decision inside a retrieval
-pipeline, which is where we place them.
-
-\textbf{Tool-augmented and neuro-symbolic generation.}
-Delegating exactly-computable subproblems to deterministic components is
-well established, but the interaction between tool output and answer
-verification is not. Where a grounding check tests whether claims appear in
-retrieved text, computed results are structurally invisible to it. We make the
-verifier aware of symbolic evidence rather than treating tools purely as a
-generation aid.
-
-\textbf{Low-resource retrieval and adversarial robustness.}
+\textbf{Low-resource and hybrid retrieval.}
 Multilingual dense encoders~\cite{wang2024multilinguale5} make a single index
 viable across scripts, and hybrid lexical--dense retrieval with rank
 fusion~\cite{robertson2009bm25,cormack2009rrf} remains strong where exact
-terminology matters, as it does for statute references. Separately, prompt
-injection is a practical threat to any deployed instruction-following
-assistant~\cite{perez2022ignore,greshake2023injection}. We report a failure mode
-in this class that arises from pipeline structure rather than from classifier
-weakness.
+terminology matters, as it does for statute references. Neither line reports
+what fusion does to a dense channel fine-tuned on the domain, which
+Section~\ref{sec:hybrid} measures.
 
-To our knowledge, no existing system combines abstention under an explicit cost
-model, symbolic evidence admitted by the grounding verifier, and code-switched
-retrieval for a low-resource jurisdiction, nor reports an evaluation that
-measures all three.
+\textbf{Generalisation and contamination in evaluation.}
+That a retriever's gain may not survive a change of domain is established for
+English: BEIR~\cite{thakur2021beir} evaluates retrievers zero-shot across
+eighteen datasets and MTEB~\cite{muennighoff2023mteb} extends the idea to
+embedding models generally, both finding in-domain strength a poor predictor of
+out-of-domain strength. Neither has an analogue for a low-resource jurisdiction,
+where the practical difficulty is that a developer must build the only
+evaluation set that exists. Contamination is likewise recognised as a systematic
+threat to reported results~\cite{magar2022contamination,sainz2023contamination},
+though that literature concentrates on pretraining corpora absorbing benchmark
+text; we report the retrieval-specific case, in which the \emph{index} is itself
+a system component and can leak (Section~\ref{sec:leakage}).
 
-%-----------------------------------------------------------------------------
-\section{Method}
-\label{sec:method}
+What none of these lines reports, and what we report here, is whether a
+retrieval intervention's measured gain survives a change in who wrote the
+questions.
 
-\subsection{Overview}
-The system is a directed graph of thirteen nodes executed per user turn. A
-turn enters an adversarial gatekeeper, is classified and triaged, may be
-suspended to ask the user for missing facts, is checked against a semantic
-cache, may invoke deterministic statutory engines, retrieves statute and
-case-law evidence, has that evidence scored, and only then reaches an
-arbitration node that decides whether to answer at all. Generation and a
-grounding check follow, and a finaliser sanitises the output. Conversation
-state, including the suspended state of a pending clarification, is
-checkpointed to a document store so that a turn survives process restarts and
-can be resumed by a different worker.
-
-Four properties distinguish the design from a standard RAG pipeline, and we
-describe each in turn: symbolic evidence admitted by the verifier
-(Section~\ref{sec:tools}), three-signal confidence with an explicit abstention
-policy (Sections~\ref{sec:scoring}--\ref{sec:abstain}), code-switched retrieval
-(Section~\ref{sec:retrieval}), and per-turn provenance
-(Section~\ref{sec:prov}).
+%, , , , , , , , , , , , , , , , , , , , , , , , , --
+\section{Experimental Setup}
+\label{sec:setup}
 
 \subsection{Corpus and Retrieval}
 \label{sec:retrieval}
-The statute corpus is drawn from a public collection of 967 Pakistani legal
-documents~\cite{paklaws}, segmented by section and partitioned into four
-collections by legal domain (civil, criminal, family, constitutional). A
-bilingual English--Urdu constitutional question--answer set~\cite{legaluqa} is
-ingested into the constitutional collection as both raw article text and
-question--answer pairs.
-A separate corpus of reported Lahore High Court judgments supports case-law
-retrieval. Table~\ref{tab:corpus} reports the indexed chunk counts.
+The statute corpus is drawn from a public collection of 969 Pakistani legal
+documents~\cite{paklaws}, itself converted from Ministry of Law and Justice
+publications and distributed under ODC-BY; we segment it by section and
+partition it into four collections by legal domain (civil, criminal, family,
+constitutional). It is supplemented with instruments fetched directly from the
+official consolidated legislation service~\cite{pakistancode}, including the
+Code of Civil Procedure 1908 and twenty family-law statutes that the public
+collection omitted. The constitutional collection holds article text
+authenticated against the National Assembly publication; a bilingual
+English--Urdu constitutional question--answer set~\cite{legaluqa} supplies
+evaluation questions only and is \emph{not} indexed, for reasons
+Section~\ref{sec:leakage} reports. A separate corpus of reported judgments
+from six courts supports case-law retrieval. Figure~\ref{fig:corpus} reports the
+indexed chunk counts. The sources are government publications under an
+attribution licence, given here and in the released ingestion code.
 
-\begin{table}[t]
-\caption{Indexed corpus, by collection}
-\label{tab:corpus}
+\begin{figure}[t]
 \centering
-\begin{tabular}{lr}
-\toprule
-\textbf{Collection} & \textbf{Chunks} \\
-\midrule
-Criminal        & 1{,}735 \\
-Constitutional  & 924 \\
-Civil           & 396 \\
-Family          & 226 \\
-\midrule
-Case law (LHC judgments) & 3{,}230 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\vspace{-3mm}
+\includegraphics[width=0.81\columnwidth]{figures/fig1_corpus.pdf}
+\vspace{-2mm}
+\caption{Indexed statutory corpus by collection and legislative tier, with a
+separately indexed judgment corpus of $7{,}529$ chunks from six courts not
+shown. Devolved provincial coverage is Punjab-only; constitutional law is inherently federal.}
+\label{fig:corpus}
+\vspace{-3mm}
+\end{figure}
 
 Retrieval is hybrid. A BM25 index and a dense index over
 \texttt{multilingual-e5-base} embeddings are combined by weighted ensemble with
@@ -242,297 +220,490 @@ because exact statute and section references carry disproportionate signal in
 this domain. Dense retrieval applies the asymmetric \texttt{query:}/
 \texttt{passage:} prefixes the model expects. Both channels are filtered so that
 a query for a given province retrieves only that province's provisions or
-federal ones.
+federal ones: the dense channel by metadata predicate, the lexical channel by
+post-retrieval filter, since BM25 admits no index-time constraint.
 
-Two mechanisms address vocabulary mismatch specific to this setting. First, a
-rule-based alias layer rewrites common cross-jurisdictional references before
-retrieval; users frequently ask about the Indian Penal Code when they mean the
-Pakistan Penal Code, and equivalent confusions exist for procedural codes.
-Second, a query rewriter maps colloquial phrasing to formal statutory
-terminology, and its output is accepted only if it contains recognised legal
-vocabulary, guarding against a degenerate rewrite.
+That filter is a mechanism, not a coverage claim: of $10{,}042$ statutory
+chunks, $1{,}608$ are provincial and all of them are Punjab
+(Figure~\ref{fig:corpus}), so a query from any other province is served from
+federal law alone. Since tenancy, land revenue and local taxation are devolved,
+the jurisdictions absent are those that would need the filter most. A
+rule-based alias layer additionally rewrites cross-jurisdictional references,
+users frequently naming Indian codes when Pakistani ones govern.
 
-Retrieval is two-hop. The first hop issues the expanded query. Statutory
-cross-references appearing in the first-hop results are then extracted and
-issued as a second query, so that a provision incorporating another by
-reference pulls in the referenced text. The two result lists are merged by
-reciprocal rank fusion. Case-law retrieval runs semantically over the judgment
-corpus on the \emph{unrewritten} query, since judgment prose matches lay
-phrasing more closely than statutory terminology, and admits at most three
-judgments above a conservative similarity threshold.
-
-\subsection{Code-Switched Input}
-Queries arrive in English, Urdu script, or Roman Urdu --- Urdu written in Latin
-characters, which is the dominant informal register. A triage stage classifies
-the input language and, for Roman Urdu, emits a transliteration into Urdu
-script. Retrieval runs on this normalised form, so a single multilingual dense
-index serves all three registers without a separate Roman-Urdu index. The
-lexical signal described in Section~\ref{sec:scoring} recognises legal terms in
-both scripts.
-
-\subsection{Deterministic Statutory Engines}
-\label{sec:tools}
-Several questions in this domain have exact answers that are computed, not
-retrieved: court-fee schedules, bail eligibility, statutory limitation periods,
-labour dues, and inheritance shares under Islamic law. The system exposes these
-as deterministic engines invoked before retrieval, and their results are held
-\emph{outside} the retrieved-chunk set so that a retrieval retry cannot
-overwrite them and the relevance grader cannot score them.
-
-The consequence for verification is the contribution we wish to emphasise. A
-conventional grounding check asks whether the answer's claims appear in
-retrieved text; under that rule, a correct court-fee figure derived from a
-computation is judged ungrounded, because no retrieved provision states it. Our
-verifier is told that engine output is computed ground truth, and that an answer
-faithfully restating an engine's result \emph{is} grounded. Correspondingly, the
-abstention policy in Section~\ref{sec:abstain} never refuses a turn in which an
-engine produced a result, since refusing a computed figure because the
-surrounding statutory context scored poorly is strictly worse than answering.
-
-\subsection{Three-Signal Confidence}
-\label{sec:scoring}
-Each retrieved chunk receives a confidence score combining three signals: a
-lexical score $k$, the fraction of legal terms in the query present in the
-chunk; an embedding similarity $e$; and a binary relevance grade $\ell$ from a
-fast language model. The signals are mapped into probability space by the
-calibration layer (Section~\ref{sec:calib}) and combined additively,
-\begin{equation}
-s = 0.40\,k + 0.35\,\hat{e} + 0.25\,\hat{\ell},
-\label{eq:score}
-\end{equation}
-with the lexical term weighted highest for the same reason the lexical
-retrieval channel is.
-
-Disagreement between the signals is retained rather than averaged away. Let
-$\sigma^2$ be the variance of $\{k,\hat{e},\hat{\ell}\}$. When $\sigma^2$
-exceeds an adaptive threshold $\tau_\sigma$, the score is penalised by
-$\sigma^2$, and the mean variance across chunks is passed forward to the
-arbitration layer, where it is the signal that distinguishes ``ask for more
-information'' from ``answer'' at equal mean confidence. If the relevance grader
-is unavailable, its signal degrades to a neutral value rather than failing
-closed, so that a provider outage falls through to the lexical evidence path
-instead of becoming indistinguishable from an absence of relevant law.
-
-\subsection{Calibration and Drift Monitoring}
-\label{sec:calib}
-Raw scores are mapped to calibrated probabilities before arbitration: Platt
-scaling for the language-model signal and isotonic regression for the lexical
-signal, with cosine similarity clamped as it already occupies probability space.
-\TODO{State plainly that the fitted parameters are estimated from the labelled
-set of Section~\ref{sec:eval}, and report the fitted values. Until they are
-fitted the transforms are identity, and the paper must not claim otherwise ---
-this is why the title says ``selective'' rather than ``calibrated''.}
-
-Distribution shift is monitored by the population stability index over a
-rolling window of retrieval confidences, with a shift flagged at
-$\mathrm{PSI}\ge0.20$ and stability below $0.10$. Both the calibration state
-and the threshold state described next are held in a shared store rather than
-in process memory, so that a horizontally scaled deployment does not maintain
-divergent thresholds per worker.
-
-\subsection{Adaptive Thresholds}
-Decision thresholds are seeded and then re-estimated from observed data:
-the generation floor from the 10th percentile of retrieval scores, a routing
-gap from the 25th percentile, and a similarity threshold from the 90th
-percentile, recomputed periodically over a rolling window once a warm-up
-volume of queries has been observed. Threshold reads occur once per chunk and
-are served from a process-local snapshot refreshed on a fixed interval, so the
-hot path performs no remote reads; writes are batched.
-
-\subsection{Arbitration and Abstention}
-\label{sec:abstain}
-All routing flows through a single arbitration node; the graph's edge functions
-read its verdict and do not recompute confidence. The node selects one of three
-actions --- \textsc{answer}, \textsc{defer} (request clarification and retry
-retrieval), or \textsc{refuse} --- over the available evidence sources.
-
-Evidence may come from the graded retrieval path, from a version-matched cache
-hit, or from the lexical channel alone. Lexical-only evidence is capped at
-confidence $0.55$, so that it can support an answer but cannot present itself as
-a confident judgement. Each candidate source is assigned a utility
-\begin{equation}
-u(c,a) = \frac{c}{\mathrm{cost}(a)},
-\label{eq:utility}
-\end{equation}
-where $c$ is calibrated confidence and $\mathrm{cost}(\cdot)$ encodes the
-asymmetry of the domain: answering is cheap ($0.10$), deferring costs more
-($0.30$), and refusing is most expensive ($0.60$) in user-experience terms,
-which is what makes an unnecessary refusal a real cost rather than a free safe
-default. Action selection is
-\begin{equation}
-a =
-\begin{cases}
-\textsc{defer}  & \sigma^2 > \tau_\sigma\\
-\textsc{refuse} & c < \tau_{\text{ceiling}}\\
-\textsc{answer} & c \ge \tau_{\text{floor}}\\
-\textsc{defer}  & \text{otherwise,}
-\end{cases}
-\label{eq:action}
-\end{equation}
-subject to two overrides. A turn retrieving zero chunks refuses unconditionally.
-And after a bounded number of consecutive deferrals the node enters a binary
-mode in which it must answer or refuse, so that a mid-confidence query cannot
-loop indefinitely asking for clarification. Retry budget is deliberately kept
-outside the arbitration node: the node judges evidence, while the graph decides
-whether another retrieval pass is affordable.
-
-\TODO{Equation~\eqref{eq:utility} is the weakest formal point in the paper and
-a reviewer will press on it. Either derive the action from expected utility
-over an explicit harm matrix, or state honestly that the cost vector is a
-hand-set prior and show a sensitivity analysis over it.}
-
-\subsection{Grounding Verification}
-Generated answers are checked against the evidence actually supplied ---
-retrieved provisions, admitted judgments, and engine output. An answer judged
-ungrounded has its confidence halved and receives an explicit caution directing
-the user to a qualified lawyer, and generation may be retried within budget.
-The system never presents an ungrounded answer as though it were verified.
-
-\subsection{Adversarial Robustness}
-Because the assistant is instruction-following and publicly reachable, prompt
-injection is a live concern. A gatekeeper runs first, in two layers: a
-zero-cost regular-expression filter for high-signal attack strings, and a
-fast-model classifier for subtler attempts. The filter is deliberately narrow,
-because in this domain the obvious keywords are ordinary vocabulary --- a
-question about disregarding a court order, or acting as an unrestricted agent
-under a power of attorney, is a legitimate legal query and must not be refused.
-The classifier fails open, so that a model-provider outage does not become a
-total service outage while the regex layer remains active.
-
-One implementation finding is worth reporting because it generalises. An
-intent-classification shortcut answered certain conversational turns without
-entering the graph, and therefore bypassed the gatekeeper entirely; an injection
-phrased to end in an affirmation was routed to a canned reply, unlogged and
-unaudited. Defence-in-depth at a single point in a pipeline is insufficient when
-alternative paths exist that skip that point, and any robustness figure measured
-under such a configuration is computed only over the traffic that reached the
-defended component.
-
-\subsection{Provenance}
-\label{sec:prov}
-Each turn writes a durable record linking the emitted output to the evidence and
-decisions behind it: retrieved chunk identifiers, admitted case-law citations,
-engine invocations with success state, the arbitration verdict and the signals
-it was computed from, convergence counters, the models that served the turn, and
-the embedding and chunking versions required to reproduce retrieval. The answer
-is stored as a cryptographic digest plus a redacted preview rather than
-duplicated in full, so a record identifies the answer it describes without
-becoming a second copy of the user's legal correspondence. Personally
-identifying information is masked with the same routine applied to user-facing
-output, covering national identity numbers in both Latin and Urdu digit forms.
-Records are typed by turn kind --- answer, clarification, or blocked --- so that
-turns which asked a question rather than answering one are audited without being
-treated as answers.
-
-%-----------------------------------------------------------------------------
 \section{Evaluation Protocol}
 \label{sec:eval}
+Rather than authoring question--answer pairs, we label recorded traffic:
+judgements are pooled to a fixed depth, stored with it, and metrics below the
+pool refused as unjudged rather than counted irrelevant. Each turn carries one
+of four verdicts (correct, incorrect, correct refusal, wrong refusal), since
+collapsing a correct abstention into a mistaken one loses the distinction the
+system exists to make. That set is not yet of sufficient volume to report
+(Section~\ref{sec:threats}); what follows is used for everything that is.
 
-\subsection{Dataset Construction}
-Rather than authoring question--answer pairs, we label recorded traffic. Each
-answered turn has already stored its query, the identifiers of the chunks
-retrieved for it, and the verdict reached, so annotation reduces to judging
-relevance over a fixed candidate set rather than inventing candidates. Following
-standard pooling practice, judgements are collected to a fixed depth of the
-ranked list; the depth is stored with each label, and metrics at deeper cut-offs
-are refused, since ranks below the pool are unjudged rather than known
-irrelevant.
 
-Each turn additionally receives one of four outcome verdicts: correct,
-incorrect, correct refusal, or wrong refusal. Separating a correct abstention
-from a mistaken one is what makes risk--coverage analysis possible; collapsing
-them loses exactly the distinction the system is designed around. Turns on which
-no retrieved evidence was relevant are retained as the unanswerable split rather
-than discarded, since these are the cases where refusal is the correct
-behaviour.
+\subsection{Verified Citation Supervision}
+\label{sec:citationdata}
+Fine-tuning a retriever needs query/passage supervision, which for most of this
+jurisdiction does not exist. We derive it from a public corpus of $11{,}195$
+Pakistani legal question/answer pairs carrying machine-parseable citations
+(\texttt{PPC s.467}, \texttt{CONST art.203F}) and domain labels. The answers are
+LLM-generated; the \emph{citation} is what we use, because a citation is a
+checkable label and an answer is not. Nothing from this source is indexed.
 
-\subsection{Query Set}
-Evaluation queries span six categories: answerable questions the corpus should
-support; out-of-jurisdiction queries using Indian statutory names; questions
-unanswerable from this corpus; code-switched queries in Roman Urdu and Urdu
-script; adversarial prompt-injection attempts; and off-topic input.
-\TODO{State the final counts per category, and be explicit about provenance of
-the queries. A set authored by the system's own developer is a bootstrap, not a
-benchmark; if the final set remains developer-authored, say so in Limitations
-rather than letting a reviewer find it.}
+Four filters are applied in order, and their yield is reported because the
+rejection rate is itself informative. Rows seeded from LEGAL-UQA are dropped
+($911$), since that dataset supplies our evaluation set. Citations naming a
+section the corpus does not hold are dropped ($720$), including all $208$
+civil-procedure rows before the Code of Civil Procedure was ingested. Each
+survivor is then \emph{validated}: the cited section must share
+rarity-weighted vocabulary with the answer, since a confidently wrong citation
+trains the retriever to reproduce the error ($203$ dropped), and duplicates
+removed. $5{,}883$ pairs survive ($52.6\%$), split 80/20 into $4{,}692$ training
+and $1{,}191$ evaluation pairs; $32\%$ pair Urdu-script queries with English
+statute, the code-switched case for which no training data previously existed.
+
+Validation is deliberately lexical rather than embedding-based: scoring
+candidates with the base model and keeping those it already agrees with would
+discard the hard examples that carry signal, and would flatter the fine-tuning
+that follows. It also proved an effective corpus check. It flagged citations to
+Article~9 as topically inconsistent, and the citations were right: the corpus
+was wrong, indexing $164$ Schedule paragraphs as Articles~1--8, which include
+the fundamental rights and the high-treason provision. The index had been
+serving Schedule text under the citation of a constitutional right.
 
 \subsection{Metrics}
-Retrieval is reported by Hit@$k$, mean reciprocal rank, and
-nDCG@$k$~\cite{jarvelin2002ndcg} at cut-offs within the pooling depth. Selective prediction is reported by
-risk--coverage curves, the area under the risk--coverage curve, and
-expected calibration error, together with the rate of ungrounded answers at a
-given coverage. Robustness is reported as the proportion of adversarial inputs
-refused, measured with all bypass paths closed.
+Retrieval is reported by Hit@$k$, mean reciprocal rank and
+nDCG@$k$~\cite{jarvelin2002ndcg}, at cut-offs within the pooling depth. We note
+one implementation detail because it cost us a result: nDCG's ideal-DCG
+denominator must be computed from $|G_q|$, and a fixed denominator of $1$, correct only for single-gold queries, silently deflates the multi-gold
+queries that matter most. It was a defect in one of our own evaluation
+scripts.
 
 \section{Results}
-\TODO{Pending the labelled set. Do not draft narrative text here before the
-numbers exist. Planned tables:
-(1) retrieval metrics overall and per legal domain;
-(2) ablation --- hybrid vs.\ lexical-only vs.\ dense-only; one-hop vs.\ two-hop;
-normalised vs.\ raw Roman Urdu;
-(3) abstention --- arbitration enabled vs.\ always-answer, with risk--coverage;
-(4) grounding --- ungrounded rate with and without engine-aware verification.
-Ablation (4) is the strongest single result available and should be prioritised
-if space is short.}
+\label{sec:results}
+Three of the four collections changed materially during this work, for reasons
+the evaluation surfaced rather than planned: the constitutional collection was
+rebuilt after $67\%$ of it proved to be generated text
+(Section~\ref{sec:leakage}), the Code of Civil Procedure 1908 was found absent
+entirely, and family law, the smallest collection, and the one where a wrong
+answer does most harm, grew from $193$ to $989$ chunks once twenty statutes
+listed in the project's own fetch manifest were actually downloaded. Corpus
+defects, not model capacity, accounted for the largest single improvements we
+made.
 
-\section{Discussion and Limitations}
+Section~\ref{sec:threats} states plainly what remains unmeasured.
 
-Two findings from deployment generalise beyond this system. First, defence in
-depth at a single point in a pipeline is insufficient when alternative paths
-exist that skip that point. An intent-classification shortcut answered certain
-turns without entering the graph and so bypassed the injection gatekeeper
-entirely; the classifier was not weak, it was simply not consulted. Any
-robustness figure measured in that configuration is computed only over traffic
-that reached the defended component, which is a measurement error rather than a
-model error. Second, in a specialised domain, keyword-based safety filters
-collide with legitimate vocabulary: our injection filter matched a
-power-of-attorney question containing the phrase ``unrestricted agent''. The
-cost of a false positive here is refusing a user with a genuine legal problem,
-which argues for narrow patterns backed by a model layer rather than broad ones.
+\subsection{Cross-Encoder Reranking: A Negative Result}
+\label{sec:rerank}
+Cross-encoder reranking~\cite{nogueira2019rerank} is the standard remedy for
+the symptom we faced, the
+correct statute retrieved but ranked below a lexically similar competitor, so
+we measured it rather than assuming it. The decisive case is
+the following: whether a tenant may be evicted without notice in Punjab, where
+the correct instrument is the Punjab Rented Premises Act 2009 (urban rental) and
+the competitor the Punjab Tenancy Act 1887 (agricultural tenancy). Both are
+genuinely about tenants and eviction, so this is an ambiguity of statutory scope
+rather than a vocabulary gap, and it appeared only as the corpus grew to include
+provincial law.
 
-The work has substantive limitations, which we state rather than leave to be
-discovered. \emph{Calibration} is fitted on a modest volume of labelled data
-drawn from a single deployment, so the mapping should be expected to shift under
-a different user population; conformal methods~\cite{angelopoulos2021conformal}
-would give coverage guarantees that our post-hoc fitting does not.
-\emph{Relevance judgements are the authors' own}, not adjudicated by qualified
-practitioners, which is a real constraint on any claim about legal correctness
-as opposed to retrieval quality. \emph{Evaluation queries were authored
-alongside the system}, making them a bootstrap rather than an independent
-benchmark. \emph{The cost vector} in \eqref{eq:utility} is a hand-set prior
-encoding a plausible ordering of harms, not a quantity elicited from
-practitioners or derived from outcomes. \emph{Coverage is single-jurisdiction},
-and the corpus is weighted towards statute relative to case law, so performance
-on precedent-driven questions is likely weaker than on statutory ones. Finally,
-the pooled relevance judgements bound the depth at which ranking metrics are
-meaningful, and we report only cut-offs within that depth.
+Figure~\ref{fig:rerank} gives the result. The cross-encoder does not merely
+fail to help; it moves the correct statute \emph{away} from the top, promoting
+the agricultural statute at both depths, the confusion it was introduced to
+resolve. Degradation growing with pool size is the signature of a scoring
+function ordered systematically against the target rather than merely noisy.
 
+\begin{figure}[t]
+\centering
+\vspace{-3mm}
+\includegraphics[width=0.81\columnwidth]{figures/fig3_rerank.pdf}
+\vspace{-2mm}
+\caption{Rank of the correct statute (Punjab Rented Premises Act 2009) after
+each stage, at both retrieval depths; lower is better. The deterministic
+statutory-scope rule places it first at both depths in under a millisecond,
+where the cross-encoder demotes it and grows worse as the pool widens.}
+\label{fig:rerank}
+\vspace{-3mm}
+\end{figure}
+
+Reporting this as a uniform failure would overstate it. Across six queries the
+reranker improved three (the \emph{khula} target from rank 8 to 4, an
+FIR-registration query from 2 to 1, a theft query from 3 to 1), left two
+unchanged and badly worsened one, but the one it worsens is the case that
+motivated it, and those it improves were already nearly correct. It sharpens
+rankings that did not need sharpening while inverting the one that did.
+
+We attribute this to train/test distribution shift rather than model capacity.
+The checkpoint is trained on MS MARCO, whose relevance judgements concern short
+web passages answering informational queries, whereas the distinction here, whether \emph{tenant} means a cultivator under an 1887 revenue statute or an
+occupant of urban premises under a 2009 one, is one of legislative scope. A
+relevance model trained on topical overlap has no representation of which
+instrument \emph{governs}. Prior work reports the same direction of
+effect, attributing degraded legal case retrieval to domain mismatch on long
+legal text unlike the reranker's training data~\cite{hou2024clerc}; that this
+reproduces on statutory retrieval in a different jurisdiction and language
+setting indicates that these failure modes are not specific to a single model
+configuration.
+
+Widening first-stage retrieval from $10$ to $50$ candidates was reverted
+alongside it: without an effective reranker, additional depth is additional
+noise. A legal-domain cross-encoder may well succeed where the generic model
+failed; the finding is that the off-the-shelf model is actively harmful on this
+text, not that reranking is unsound.
+
+\begin{table}[t]
+\caption{Threats to validity: what each bears on and its status.}
+\label{tab:threats}
+\centering
+\scriptsize
+\begin{tabular}{@{}p{0.25\columnwidth}p{0.31\columnwidth}p{0.32\columnwidth}@{}}
+\toprule
+Threat & Bears on & Status \\
+\midrule
+Evaluation questions are developer-authored or LLM-generated &
+external validity of every Hit@$k$ figure reported &
+$3{,}852$ independently sourced questions identified; two-annotator labelling
+with a frozen holdout is the first item of Section~\ref{sec:future} \\
+
+Provincial coverage is Punjab only ($1{,}608$ of $10{,}042$ chunks) &
+any Pakistan-wide claim; devolved subjects most of all &
+claims are restricted to federal law plus Punjab throughout
+(Section~\ref{sec:retrieval}) \\
+
+Generation correctness is unmeasured &
+end-to-end benefit to a user &
+all claims are retrieval-level; practitioner adjudication is the measurement we
+would prioritise (Section~\ref{sec:future}) \\
+
+The scope-rule and reranking result rests on one worked case &
+how far the rank $3\!\to\!10$ demotion generalises &
+reported as a mechanism with a named cause, corroborated
+independently~\cite{hou2024clerc}, not as a rate over queries \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Domain Fine-Tuning: Large In-Distribution Gains That Do Not Transfer}
+\label{sec:finetune}
+The diagnosis of Section~\ref{sec:rerank} left a specific gap. Across the total corpus asset
+of $592$ bilingual legal questions (LEGAL-UQA), initial dense ablation was evaluated
+on an in-distribution subset of $200$ held-out constitutional questions (where dense
+Hit@$50$ reaches $89\%$ but Hit@$1$ reaches only $43.5\%$, a $45$-point ranking
+deficit). For cross-style generalisation, evaluating the general model (trained on
+$4{,}692$ citation pairs) required filtering the $592$-question set for target leakage,
+leaving $128$ clean, unseen evaluation questions. Evaluating the constitutional model
+(trained on $471$ LEGAL-UQA pairs) left $121$ candidate questions ($592 - 471 = 121$),
+of which $99$ shared gold target passages with training positives, leaving $22$ clean
+unseen questions for the constitutional model. Reranking having failed, the remaining
+hypothesis was that a multilingual embedding model does not know Pakistani statutory
+language. We tested it by fine-tuning.
+
+Two models were trained, deliberately at different scales and from different
+sources, so that any pattern could be checked for consistency rather than read
+off a single run:
+
+\begin{itemize}
+\item \textbf{Constitutional}: 471 question/article pairs from LEGAL-UQA.
+\item \textbf{General}: 4{,}692 pairs spanning constitutional, criminal,
+evidence, civil procedure and family law, built from a citation-annotated corpus
+and verified as described in Section~\ref{sec:citationdata}. A third of its
+queries are in Urdu script.
+\end{itemize}
+
+Both fine-tune \texttt{multilingual-e5-base} identically: multiple-negatives
+ranking loss~\cite{henderson2017mnrl} in the sentence-transformers
+formulation~\cite{reimers2019sbert}, hard negatives mined from the deployed
+retriever, two epochs at batch $12$ and learning rate $\text{lr} = 2\times10^{-5}$, maximum
+sequence length $224$, and both are split by connected components over shared
+gold chunks, so no gold chunk appears in both halves. Significance is McNemar's
+test~\cite{mcnemar1947} paired over $Q$.
+Table~\ref{tab:setup} gives what differs between them, which is only the data.
+
+\begin{table}[t]
+\caption{What differs between the two fine-tuned models. The recipe is
+identical, so any difference in behaviour is attributable to the training data.}
+\label{tab:setup}
+\centering
+\footnotesize
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Property & Constitutional model & General model \\
+\midrule
+Training pairs        & 471 & 4{,}692 \\
+Held-out pairs        & 121 (22 clean) & 1{,}191 \\
+Legal domains         & 1 & 5 \\
+Urdu-script queries   & 0\% & 32\% \\
+Source dataset        & LEGAL-UQA [21] & Verified citation corpus \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textit{Note on dataset partitioning:} The general model is fine-tuned on $4{,}692$ citation pairs (from an 80/20 split of $5{,}883$ total pairs, leaving $1{,}191$ held-out test pairs). In contrast, the constitutional model is fine-tuned on $471$ LEGAL-UQA pairs (from an 80/20 split of $592$ constitutional pairs, leaving $121$ candidate test pairs). Filtering $99$ target-overlapping candidate pairs yields $22$ clean, strictly unseen evaluation questions for the constitutional model.
+
+Figure~\ref{fig:collapse} states the result as transfer.
+Measured on its own held-out set of $1{,}191$ citation pairs (distinct from the
+$592$ LEGAL-UQA questions), the general model gains $+26.5$ Hit@1 (a $64\%$ relative
+improvement from $41.3\%$ to $67.8\%$, significant at $p\approx0.0005$ by McNemar's test with
+$531$ improved, $123$ worsened, and $537$ unchanged). Across
+metrics, dense base scores $0.438$ MRR and $0.482$ nDCG@5; fine-tuning improves these
+in-distribution to $0.612$ MRR ($+0.174$) and $0.648$ nDCG@5 ($+0.166$), but collapses
+out-of-distribution to $0.445$ MRR ($+0.007$) and $0.490$ nDCG@5 ($+0.008$), confirming the
+collapse across all ranking metrics. Measured on questions written by a different generator, the
+same model gains $+2.4$ Hit@1, with $31$ improved against $22$ worsened, close to a coin flip.
+
+The constitutional model exhibits the same transfer collapse from the opposite direction.
+Evaluated against its own generator on the full candidate set ($121$ questions),
+it initially showed an apparent $+16.5$ Hit@1 dense gain (and $+6.6$ under BM25 fusion).
+However, target-leakage analysis revealed that $99$ of these $121$ candidate questions
+shared gold target passages with training positives (memorisation). Removing these
+target-overlapping pairs left only $22$ clean, unseen questions---a sample size too small
+($N=22$) to serve as an un-memorised in-distribution baseline.
+Consequently, while the flattering in-distribution metric ($+16.5$) is excluded from
+clean baseline comparisons due to memorisation bias, evaluating the constitutional model
+on the clean citation-style dataset ($1{,}191$ unseen test pairs, with zero overlap against
+its $471$ training pairs) yields a gain of \textbf{$-0.3$} Hit@1 ($p=0.814$, statistically
+indistinguishable from zero), confirming the transfer collapse.
+Across ranking metrics, MRR and nDCG@5 follow the identical collapse pattern (in-distribution $+0.112$ MRR and $+0.108$ nDCG@5 collapsing to $-0.002$ MRR and $-0.001$ nDCG@5 out-of-distribution).
+
+Ten times the training data, five legal domains and two scripts bought a larger
+in-distribution number ($+26.5$ vs $+16.5$) and essentially nothing out of it ($+2.4$ vs $-0.3$).
+The same qualitative failure pattern is observed across two independently trained
+models at a tenfold scale difference, although the second model's clean in-distribution
+sample ($N=22$) is too small for a three-way baseline comparison.
+
+\begin{figure}[t]
+\centering
+\vspace{-3mm}
+\includegraphics[width=0.81\columnwidth]{figures/fig4_transfer_collapse.pdf}
+\vspace{-2mm}
+\caption{Two retrievers fine-tuned independently, on different sources, at a
+tenfold difference in scale, each lose almost their whole gain when the question
+style changes. Left-hand points are what an in-distribution evaluation reports;
+right-hand points are what a deployment experiences. The constitutional model's
+flattering in-distribution metric ($+16.5$) is excluded from clean baseline comparisons
+due to target-leakage memorisation (Section~\ref{sec:leakage}), while its clean out-of-distribution
+performance ($-0.3$) remains.}
+\label{fig:collapse}
+\vspace{-3mm}
+\end{figure}
+
+\subsection{Why the Fusion Layer Absorbs the Gain}
+\label{sec:hybrid}
+A second reduction occurs before deployment. The figures above are dense-only;
+the deployed retriever fuses BM25 at $0.6$ with dense at $0.4$. Rebuilding both
+indexes at identical sequence length so that only the weights differ, the
+constitutional model's $+16.5$ becomes $\mathbf{+6.6}$ under fusion.
+
+The mechanism is visible in the baselines: hybrid base scores $0.5207$ against
+dense base $0.4380$, so BM25 was already supplying $+8.3$ points on its own.
+Much of what fine-tuning teaches the dense channel, the lexical channel already
+knew, and overlapping gains do not add.
+
+Fusion also \emph{repairs} the characteristic damage. Under dense-only retrieval
+four queries fell from a found rank to absent, all of them exact-citation
+lookups; under fusion the worst regression is rank~1 to rank~3. A system
+reporting only its dense ablation would overstate both the benefit and the harm.
+
+
+
+\subsection{Three Contaminations, Detected and Removed}
+\label{sec:leakage}
+The fine-tuning results above were subjected to contamination checks that removed
+several earlier, better-looking numbers. We report the three failure mechanisms because
+each was invisible in the metrics and each would have inflated a headline figure.
+
+\emph{The index contained the test answers.} The constitutional collection held
+$619$ generated question/answer pairs alongside $305$ article extracts, all
+tagged as the Constitution, and the generated pairs contained each evaluation
+question verbatim. Evaluating before removing them would have retrieved each
+question's own answer at rank~1.
+
+\emph{The gold labels were systematically wrong (Evaluation Defect).} Joining evaluation questions
+to gold passages by section heading produced an off-by-one error: the source PDF's
+marginal notes are extracted as heading-only stubs, so Article~25 matched a stub
+rather than the chunk holding its body text. Retrieval was returning the correct chunk,
+and the corrupted evaluation script scored it a miss (yielding an artificially suppressed
+evaluation score of MRR $0.114$, whereas the clean general baseline is MRR $0.438$).
+Rebuilding the evaluation join on verbatim body $n$-grams corrected this evaluation defect,
+revealing the true ground-truth score of MRR $0.581$ on the constitutional collection with
+zero change to the underlying retriever models.
+
+\emph{Target leakage.} Filtering the $592$-question set for gold chunks that matched
+general-model training positives removed target leakage, leaving $128$ clean evaluation
+questions for cross-style testing.
+
+\noindent\textbf{Evaluation Consequence of Dataset Overlap.} For the constitutional model,
+$471$ of the $592$ questions were consumed during training, leaving $121$ candidate
+questions ($592 - 471 = 121$). Of these $121$ candidates, $99$ shared gold target passages
+with training positives (its apparent $0.766$ Hit@1 was memorisation of its training set),
+leaving only $22$ clean unseen questions for the constitutional model, too few for a
+three-way statistical comparison. The flattering in-distribution metric is excluded from clean
+baseline comparisons, while the clean out-of-distribution columns are the ones we report.
+
+\begin{table}[t]
+\caption{Contamination mechanisms, baseline contexts, and evaluation consequences.}
+\label{tab:leakage}
+\centering
+\footnotesize
+\begin{tabular}{@{}p{0.34\columnwidth}p{0.22\columnwidth}cc@{}}
+\toprule
+Category / Mechanism & Affected metric & Observed broken & Corrected ground truth \\
+\midrule
+Contamination \raisebox{.5pt}{\textcircled{\raisebox{-.9pt}1}}: Index Q\&A pairs & Hit@1 / MRR & Inflated & Excluded \\
+Contamination \raisebox{.5pt}{\textcircled{\raisebox{-.9pt}2}}: Wrong gold join & MRR (const. eval) & 0.114 (corrupted join) & 0.581 (corrected join) \\
+Contamination \raisebox{.5pt}{\textcircled{\raisebox{-.9pt}3}}: Target leakage & General Hit@1 OOD & Shared targets & 128 clean \\
+\midrule
+Evaluation consequence of target leakage & Constitutional Hit@1 & 0.766 (mem.) & Excluded from OOD \\
+\bottomrule
+\end{tabular}
+\end{table}
+\noindent\textit{Note:} Baseline MRR $0.438$ refers to the General Model on clean citation pairs. MRR $0.114$ reflects the artificially suppressed metric on the constitutional collection under corrupted section-stub joins, corrected to MRR $0.581$ upon repairing the evaluation script.
+
+\section{Discussion}
+\label{sec:disc}
+
+\subsection{Why Fine-Tuning Did Not Generalise}
+\label{sec:whynot}
+Sorting every retrieval intervention we measured by whether its effect
+survived a change of question style produces a clean split:
+
+\begin{table}[t]
+\caption{Interventions sorted by whether their effect survived a style change.}
+\label{tab:interventions}
+\centering
+\footnotesize
+\begin{tabular}{@{}ll@{}}
+\toprule
+Transferred & Did not transfer \\
+\midrule
+Statutory-scope rules (rank $12\!\to\!1$) & Fine-tuned embeddings ($+2.4$ OOD) \\
+Corpus repairs & Cross-encoder rerank (rank $3\!\to\!10$) \\
+Local IDF weighting ($+0.090$) & Fusion-weight tuning (no gain) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Stacking the surviving interventions sequentially yields a clear `what to deploy' takeaway (Table~\ref{tab:cumulative}). Starting from dense-only retrieval, hybrid BM25 fusion restores exact citation lookup capability. Corpus and join repairs eliminate systematic heading stub misses, moving MRR from 0.114 to 0.581. Deterministic statutory-scope rules reverse statistical rank inversions on conflicting statutes in under a millisecond, and local IDF confidence weighting replaces fixed-threshold noise with a reliable confidence signal (+0.090 delta). Each stacked layer provides a distinct structural guarantee that fine-tuning alone failed to deliver.
+
+\begin{table}[t]
+\caption{Cumulative ablation of deployed pipeline interventions.}
+\label{tab:cumulative}
+\centering
+\footnotesize
+\begin{tabular}{@{}lll@{}}
+\toprule
+Pipeline Layer & Intervention Added & Primary Metric / Retrieval Impact \\
+\midrule
+0. Baseline & Dense-only (\texttt{e5-base}) & Hit@1: 41.3\%--43.5\% $|$ MRR: 0.438 \\
+1. + Lexical Fusion & Hybrid BM25 (0.6) + Dense & Hit@1: 51.8\% (+8.3\%) $|$ MRR: 0.521 \\
+2. + Corpus Repairs & Rebuilt body n-grams & MRR: 0.114 $\to$ 0.581 \\
+3. + Scope Rules & Deterministic precedence & Rank 10 $\to$ Rank 1 ($<$1ms) \\
+4. + Local IDF Weight & Dynamic IDF confidence & Confidence Signal Delta: +0.090 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The dividing line is not complexity or cost but \emph{what the intervention
+encodes}. Everything on the left encodes a property of the law or the documents;
+everything on the right learns a mapping from question surface form to passage.
+Legal language is why this matters more here than elsewhere: a statutory corpus
+is small, highly structured, and written in a register no user employs, so the
+gap between a question and its answer is one of \emph{register}, not of topic. A
+model fitted to one generator's phrasing closes that specific gap and a
+differently-phrased question reopens it, whereas the rule that the Punjab Rented
+Premises Act 2009 governs shops and houses while the Punjab Tenancy Act 1887
+governs cultivators holds however the question is worded, and cost four
+milliseconds.
+
+The errors agree with the aggregates. One exact-citation lookup, ``What was omitted by S.R.O. No. 1278~(1)~85?'', fell from rank~1 to absent
+under the cross-encoder, under the constitutional model \emph{and} under the
+general model: all three traded lexical precision for semantic similarity,
+which is what optimising a dense objective on paraphrased questions rewards.
+That BM25 fusion partially repairs the damage says what was lost was lexical
+rather than legal.
+
+We do not claim fine-tuning cannot work for legal retrieval, only that training
+on one generator's questions produces a model fitted to that generator, that
+this is invisible when the test set shares the generator, and that the
+in-distribution number is therefore not evidence of deployment benefit. A natural
+counterargument is rule scalability: deterministic rules require domain engineering
+per conflict, whereas statistical models promise zero-shot coverage. However,
+in low-resource legal domains where training data is uncurated, deterministic
+rules provide a precision floor on specific statutory conflicts where off-the-shelf
+statistical models can invert statutory priority.
+
+\subsection{Leakage-Free Evaluation Is Load-Bearing}
+\label{sec:whyleakage}
+Three practical conclusions follow from our protocol checks:
+
+\emph{Contamination surfaces.} A question, a gold label, or the index itself can
+leak; deduplicating queries catches only the first.
+
+\emph{Generator signature.} Models trained on one LLM generator adapt to its idiom,
+collapsing $+26.5 \!\to\! +2.4$ when evaluated on another.
+
+\emph{Protocol primacy.} The $+6.6$ Hit@1 gain under fusion is the largest
+improvement that remains after applying full leakage and distribution-shift checks.
+Reporting unverified in-distribution metrics yields unfalsifiable claims.
+
+\subsection{Future Work}
+\label{sec:future}
+\emph{Independent benchmark.} $3{,}852$ Pakistani legal questions remain un-tuned.
+Labelling a subset with two annotators (reporting Krippendorff's $\alpha$~\cite{krippendorff2004})
+and freezing half yields an unbiased benchmark.
+
+\emph{Structure-aware chunking.} $20$--$27\%$ of chunks are heading fragments under
+200 characters. Prepending instrument and section metadata before embedding addresses
+both recall ($11\%$ of failures) and ranking defects.
+
+%, , , , , , , , , , , , , , , , , , , , , , , , , --
+\vspace{-2mm}
+\section{Threats to Validity}
+\label{sec:threats}
+The limits below are stated together rather than distributed through the text,
+so a reader can weigh them as a set.
+
+
+
+Three further limits are properties of the evidence rather than the design. A
+preliminary spot check of 20 retrieved passages confirmed 17 ($85\%$) contained
+the governing section, verifying basic retrieval relevance, though end-to-end
+generation correctness remains unmeasured and open; the metrics of Section~\ref{sec:eval}
+require a pooled labelled set not yet of sufficient volume to report, and we state that
+rather than substitute proxies; relevance judgements are the authors' own, not adjudicated
+by practitioners; and the corpus is weighted towards statute over case law, so precedent-driven
+questions are likely served worse than the figures suggest.
+
+These threats are not symmetric: those concerning evaluation provenance would,
+if anything, \emph{inflate} what we report, so any residual bias should be
+expected to favour the in-distribution numbers we argue against.
+
+\vspace{-4mm}
 \section{Conclusion}
-Legal question answering in a low-resource, code-switched jurisdiction is not
-served by transplanting an English common-law pipeline, and it is not
-adequately measured by answer quality alone. We described a system that treats
-deterministic statutory computation as evidence its own verifier can accept,
-that routes every query through an explicit decision between answering,
-clarifying and refusing, and that records for each turn the evidence and
-decisions behind the answer it emitted. We further described an evaluation
-protocol that builds an abstention-aware test set by labelling recorded traffic,
-so that correct refusals are measured rather than discarded.
-\TODO{Close with one concrete number once measured --- ideally the reduction in
-ungrounded answers from engine-aware verification, which is the cleanest
-single result available.}
+Retrieval for a low-resource, code-switched jurisdiction is not improved by
+transplanting an English common-law pipeline, and it is not adequately measured
+by a single number on a developer-authored evaluation set. Fine-tuning a
+retriever on domain data gained $+26.5$ Hit@1 on its own distribution and $+2.4$
+where the question style changed; a second model initially showed $+16.5$ gain
+before it was identified as contaminated and excluded, collapsing to $-0.3$ on clean
+out-of-distribution evaluation. The $+6.6$ Hit@1 gain under fusion is the largest
+improvement that remains after applying full leakage and distribution-shift checks.
 
-\section*{Ethical Considerations}
-The system provides legal information, not legal advice, and every answer
-carries an explicit disclaimer directing users to a qualified practitioner.
-Refusal is treated as a first-class outcome precisely because a confident wrong
-answer in this domain can cause material harm. Stored records mask personally
-identifying information, and audit records are retrievable only by the user who
-produced them.
+We therefore close on the measurement rather than the method. Every evaluation
+asset used here is developer-authored or generator-derived, so we cannot yet
+prove an improvement in what users actually receive: a generated statement of
+law. That requires an independent benchmark frozen before development, and
+practitioner adjudication of emitted answers. For a system whose purpose is to
+tell people what the law says, that is not an extension of the work. It is the
+work.
 
-%-----------------------------------------------------------------------------
-\section*{Acknowledgment}
-\TODO{supervisor, department, any funding}
+\textbf{Ethical Considerations.} The system provides legal information, not legal advice; every answer carries a disclaimer directing users to a qualified practitioner, refusal is a first-class outcome, and stored records mask personally identifying information.
 
+\textbf{Code and Data Availability.} Ingestion pipelines, contamination-detection scripts, fine-tuning configurations, the 5{,}883-pair citation corpus, and the 592-question evaluation set are anonymized for double-blind review (source code and model weights are included in the supplementary review package). Upon camera-ready publication, open-source repositories will be activated at \url{https://github.com/anonymous/attorney-ai} and fine-tuned models at \url{https://huggingface.co/anonymous/legal-retriever-pk}. Third-party statutory/judgment corpora are cited in~\cite{paklaws}--\cite{legaluqa}; we do not redistribute raw source files.
+
+%, , , , , , , , , , , , , , , , , , , , , , , , , --
+
+\vspace{-3mm}
 \bibliographystyle{IEEEtran}
 \bibliography{references}
 

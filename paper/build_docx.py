@@ -140,26 +140,42 @@ TITLE = ("Grounded and Auditable: Tool-Augmented Retrieval-Generation with "
          "Code-Switched Jurisdictions")
 
 ABSTRACT = (
-    "Retrieval-augmented generation (RAG) is increasingly applied to legal "
-    "question answering, but deployments are overwhelmingly English and target "
-    "common-law or EU jurisdictions, and they are evaluated on answer quality "
-    "alone. Two properties that matter more in legal practice are largely "
-    "unmeasured: whether a system knows when not to answer, and whether a given "
-    "answer can later be audited. We present a legal question-answering "
-    "architecture for Pakistani law that addresses both. The system combines "
-    "hybrid lexical-dense retrieval over a bilingual statute corpus with a set "
-    "of deterministic statutory engines, whose computed output is treated as "
-    "first-class evidence by a grounding verifier; routes every query through a "
-    "single arbitration layer that selects among answering, requesting "
-    "clarification, and refusing under an explicit asymmetric cost model; and "
-    "records a durable provenance document for every turn, linking the emitted "
-    "answer to the evidence, the arbitration verdict, and the model that "
-    "produced it. The system additionally normalises Roman-Urdu input to Urdu "
-    "script before retrieval, and resolves cross-jurisdictional statute aliases "
-    "that arise when users import Indian legal terminology. We describe the "
-    "architecture, the construction of an abstention-aware evaluation set built "
-    "by labelling recorded production traffic, and an evaluation protocol "
-    "reporting selective-prediction behaviour alongside standard ranking metrics."
+    "Retrieval-augmented legal question answering is evaluated almost entirely "
+    "on answer quality, leaving two properties that matter more in practice "
+    "unmeasured: whether a system knows when not to answer, and whether an "
+    "answer can later be audited. We present a governance architecture for "
+    "Pakistani law that treats both as first-class - hybrid retrieval over a "
+    "bilingual statute corpus, deterministic statutory engines admitted as "
+    "evidence by the grounding verifier, Roman-Urdu normalisation, and a single "
+    "enforced output path that records every turn - and report what measuring "
+    "those properties revealed. Decomposing our own confidence score gives the "
+    "principal finding: its highest-weighted component was anti-correlated with "
+    "answerability, scoring questions the corpus cannot answer above those it "
+    "can by 0.343, a defect that worsened as the corpus grew and that the "
+    "aggregate concealed. Correcting it restores the ordering, yet the "
+    "answerable and unanswerable distributions still overlap, so no threshold "
+    "separates them; we argue abstention here is not a question of degree in "
+    "confidence but of the kind of fact requested, and decide it from the query "
+    "before evidence is weighed. We further replace a hand-set action-cost "
+    "vector with an expected-loss rule over an explicit harm matrix, under "
+    "which the operating threshold is the harm ratio by derivation - revealing "
+    "that our deployed threshold had implicitly assumed a missed answer to be "
+    "four times worse than a misstatement of law. Our second finding concerns "
+    "how such systems are evaluated. Fine-tuning the retriever on domain data "
+    "yields +26.5 Hit@1 when tested on questions from its own training "
+    "distribution and +2.4 when the question style changes; a second model, "
+    "trained independently on a tenth as much data from a different source, "
+    "shows the same collapse in the opposite direction. Sorting every "
+    "retrieval intervention we measured by whether its gain survived a change "
+    "of question style produces a clean split: those encoding legal or "
+    "document structure transferred, those learning question phrasing did not, "
+    "including a general-purpose cross-encoder that moved the correct statute "
+    "from rank 3 to rank 10 where a deterministic statutory-scope rule placed "
+    "it first in under a millisecond. Three separate contaminations - an index "
+    "containing its own test answers, a systematically wrong gold-label join, "
+    "and a test set sharing targets with training - each inflated a headline "
+    "number until it was checked, and in every case the flattering version was "
+    "the wrong one."
 )
 
 KEYWORDS = ("legal informatics, retrieval-augmented generation, selective "
@@ -170,85 +186,55 @@ KEYWORDS = ("legal informatics, retrieval-augmented generation, selective "
 # must stay in sync with references.bib (which drives the LaTeX build).
 # EVERY ENTRY NEEDS VERIFYING against the real paper before submission.
 REFERENCES = [
-    'P. Lewis et al., "Retrieval-augmented generation for knowledge-intensive '
-    'NLP tasks," in Proc. Advances in Neural Information Processing Systems '
-    '(NeurIPS), 2020.',
+    'P. Lewis et al., "Retrieval-augmented generation for knowledge-intensive NLP tasks," in Proc. Advances in Neural Information Processing Systems (NeurIPS), 2020.',
 
-    'I. Chalkidis, M. Fergadiotis, P. Malakasiotis, N. Aletras, and I. '
-    'Androutsopoulos, "LEGAL-BERT: The muppets straight out of law school," in '
-    'Findings of EMNLP, 2020.',
+    'I. Chalkidis, M. Fergadiotis, P. Malakasiotis, N. Aletras, and I. Androutsopoulos, "LEGAL-BERT: The muppets straight out of law school," in Findings of EMNLP, 2020.',
 
-    'N. Guha et al., "LegalBench: A collaboratively built benchmark for '
-    'measuring legal reasoning in large language models," in Proc. NeurIPS, '
-    '2023.',
+    'N. Guha et al., "LegalBench: A collaboratively built benchmark for measuring legal reasoning in large language models," in Proc. NeurIPS, 2023.',
 
-    'V. Karpukhin et al., "Dense passage retrieval for open-domain question '
-    'answering," in Proc. EMNLP, 2020.',
+    'V. Karpukhin et al., "Dense passage retrieval for open-domain question answering," in Proc. EMNLP, 2020.',
 
-    'A. Asai, Z. Wu, Y. Wang, A. Sil, and H. Hajishirzi, "Self-RAG: Learning '
-    'to retrieve, generate, and critique through self-reflection," in Proc. '
-    'International Conference on Learning Representations (ICLR), 2024.',
+    'A. Asai, Z. Wu, Y. Wang, A. Sil, and H. Hajishirzi, "Self-RAG: Learning to retrieve, generate, and critique through self-reflection," in Proc. International Conference on Learning Representations (ICLR), 2024.',
 
-    'R. El-Yaniv and Y. Wiener, "On the foundations of noise-free selective '
-    'classification," Journal of Machine Learning Research, vol. 11, '
-    'pp. 1605-1641, 2010.',
+    'R. El-Yaniv and Y. Wiener, "On the foundations of noise-free selective classification," Journal of Machine Learning Research, vol. 11, pp. 1605-1641, 2010.',
 
-    'Y. Geifman and R. El-Yaniv, "Selective classification for deep neural '
-    'networks," in Proc. NeurIPS, 2017.',
+    'Y. Geifman and R. El-Yaniv, "Selective classification for deep neural networks," in Proc. NeurIPS, 2017.',
 
-    'C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger, "On calibration of '
-    'modern neural networks," in Proc. International Conference on Machine '
-    'Learning (ICML), 2017.',
+    'C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger, "On calibration of modern neural networks," in Proc. International Conference on Machine Learning (ICML), 2017.',
 
-    'J. Platt, "Probabilistic outputs for support vector machines and '
-    'comparisons to regularized likelihood methods," in Advances in Large '
-    'Margin Classifiers, MIT Press, 1999.',
+    'J. Platt, "Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods," in Advances in Large Margin Classifiers, MIT Press, 1999.',
 
-    'B. Zadrozny and C. Elkan, "Transforming classifier scores into accurate '
-    'multiclass probability estimates," in Proc. ACM SIGKDD, 2002.',
+    'B. Zadrozny and C. Elkan, "Transforming classifier scores into accurate multiclass probability estimates," in Proc. ACM SIGKDD, 2002.',
 
-    'A. N. Angelopoulos and S. Bates, "A gentle introduction to conformal '
-    'prediction and distribution-free uncertainty quantification," arXiv '
-    'preprint, 2021.',
+    'A. N. Angelopoulos and S. Bates, "A gentle introduction to conformal prediction and distribution-free uncertainty quantification," arXiv preprint, 2021.',
 
-    'S. Kadavath et al., "Language models (mostly) know what they know," arXiv '
-    'preprint, 2022.',
+    'S. Kadavath et al., "Language models (mostly) know what they know," arXiv preprint, 2022.',
 
-    'Z. Ji et al., "Survey of hallucination in natural language generation," '
-    'ACM Computing Surveys, vol. 55, no. 12, 2023.',
+    'Z. Ji et al., "Survey of hallucination in natural language generation," ACM Computing Surveys, vol. 55, no. 12, 2023.',
 
-    'L. Wang, N. Yang, X. Huang, L. Yang, R. Majumder, and F. Wei, '
-    '"Multilingual E5 text embeddings: A technical report," arXiv preprint, '
-    '2024.',
+    'L. Wang, N. Yang, X. Huang, L. Yang, R. Majumder, and F. Wei, "Multilingual E5 text embeddings: A technical report," arXiv preprint, 2024.',
 
-    'S. Robertson and H. Zaragoza, "The probabilistic relevance framework: '
-    'BM25 and beyond," Foundations and Trends in Information Retrieval, '
-    'vol. 3, no. 4, pp. 333-389, 2009.',
+    'S. Robertson and H. Zaragoza, "The probabilistic relevance framework: BM25 and beyond," Foundations and Trends in Information Retrieval, vol. 3, no. 4, pp. 333-389, 2009.',
 
-    'G. V. Cormack, C. L. A. Clarke, and S. Buttcher, "Reciprocal rank fusion '
-    'outperforms Condorcet and individual rank learning methods," in Proc. ACM '
-    'SIGIR, 2009.',
+    'G. V. Cormack, C. L. A. Clarke, and S. Buttcher, "Reciprocal rank fusion outperforms Condorcet and individual rank learning methods," in Proc. ACM SIGIR, 2009.',
 
-    'F. Perez and I. Ribeiro, "Ignore previous prompt: Attack techniques for '
-    'language models," in NeurIPS ML Safety Workshop, 2022.',
+    'F. Perez and I. Ribeiro, "Ignore previous prompt: Attack techniques for language models," in NeurIPS ML Safety Workshop, 2022.',
 
-    'K. Greshake, S. Abdelnabi, S. Mishra, C. Endres, T. Holz, and M. Fritz, '
-    '"Not what you\'ve signed up for: Compromising real-world LLM-integrated '
-    'applications with indirect prompt injection," in Proc. ACM Workshop on '
-    'Artificial Intelligence and Security (AISec), 2023.',
+    'K. Greshake, S. Abdelnabi, S. Mishra, C. Endres, T. Holz, and M. Fritz, "Not what you\'ve signed up for: Compromising real-world LLM-integrated applications with indirect prompt injection," in Proc. ACM Workshop on Artificial Intelligence and Security (AISec), 2023.',
 
-    '"Pakistan Laws Dataset." [Online]. Available: '
-    'https://huggingface.co/datasets/AyeshaJadoon/Pakistan_Laws_Dataset '
-    '[VERIFY authorship, citation form and licence]',
+    '"Pakistan Laws Dataset." [Online]. Available: https://huggingface.co/datasets/AyeshaJadoon/Pakistan_Laws_Dataset [VERIFY authorship, citation form and licence]',
 
-    '"LEGAL-UQA: A bilingual English-Urdu legal question answering dataset." '
-    '[Online]. Available: '
-    'https://huggingface.co/datasets/nlp-anonymous-researcher/LEGAL-UQA '
-    '[VERIFY authorship, citation form and licence]',
+    'Ministry of Law and Justice, Government of Pakistan, "Pakistan Code: official consolidated federal legislation." [Online]. Available: https://pakistancode.gov.pk/ (accessed Aug. 6, 2026).',
 
-    'K. Jarvelin and J. Kekalainen, "Cumulated gain-based evaluation of IR '
-    'techniques," ACM Transactions on Information Systems, vol. 20, no. 4, '
-    'pp. 422-446, 2002.',
+    '"LEGAL-UQA: A bilingual English-Urdu legal question answering dataset." [Online]. Available: https://huggingface.co/datasets/nlp-anonymous-researcher/LEGAL-UQA [VERIFY authorship, citation form and licence]',
+
+    'K. Jarvelin and J. Kekalainen, "Cumulated gain-based evaluation of IR techniques," ACM Transactions on Information Systems, vol. 20, no. 4, pp. 422-446, 2002.',
+
+    'A. B. Hou, O. Weller, G. Qin, E. Yang, D. Lawrie, N. Holzenberger, A. Blair-Stanek, and B. Van Durme, "CLERC: A dataset for U.S. legal case retrieval and retrieval-augmented analysis generation," in Proc. NAACL, 2025.',
+
+    '"Enhancing legal LLMs through metadata-enriched RAG pipelines and direct preference optimization," arXiv:2603.19251, 2026. [VERIFY author list and venue]',
+
+    '"Towards reliable retrieval in RAG systems for large legal datasets," arXiv:2510.06999, 2025. [VERIFY author list and venue]',
 ]
 
 
@@ -267,28 +253,37 @@ def build_paper(path: Path) -> None:
 
     _para(doc, TITLE, size=24, align="center", space_after=10)
 
-    _para(doc, "Muhammad Usama", size=11, align="center", space_after=0)
-    _para(doc, "Department of Computer Science", size=10, italic=True,
-          align="center", space_after=0)
-    _para(doc, "COMSATS University Islamabad", size=10, italic=True,
-          align="center", space_after=0)
-    _para(doc, "Islamabad, Pakistan", size=10, align="center", space_after=0)
-    _para(doc, "muhammadusamahoyrr@gmail.com", size=10, align="center",
-          space_after=6)
-    _rich(doc, [("[TODO: add supervisor as co-author — name, affiliation, "
-                 "email. Confirm whether FIT review is double-blind; if so, "
-                 "remove this entire author block.]", True, False, TODO_RED)],
-          align="center", first_line_indent=0)
+    # Author Block (IEEE Conference Format - 2 Authors)
+    _rich(doc, [
+        ("Muhammad Usama", True, False),
+        ("\u00b9", True, False),
+        (" and ", False, False),
+        ("Muhammad Amir Zarmaan Ullah Khan", True, False),
+        ("\u00b2", True, False),
+    ], size=11, align="center", space_after=2, first_line_indent=0)
+
+    _para(doc, "\u00b9,\u00b2Department of Computer Science, COMSATS University Islamabad, Pakistan",
+          size=10, italic=True, align="center", space_after=2)
+
+    p_email = doc.add_paragraph()
+    p_email.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_email.paragraph_format.space_after = Pt(10)
+    p_email.paragraph_format.space_before = Pt(0)
+    _add_hyperlink(p_email, "mailto:muhammadusamahoyrr@gmail.com", "muhammadusamahoyrr@gmail.com", font_size=Pt(9), color="000000", underline=True)
+    r_sep = p_email.add_run(", ")
+    r_sep.font.name = "Times New Roman"
+    r_sep.font.size = Pt(9)
+    _add_hyperlink(p_email, "mailto:kzari898@gmail.com", "kzari898@gmail.com", font_size=Pt(9), color="000000", underline=True)
 
     # ── Section 2: two-column body ───────────────────────────────────────────
     s1 = doc.add_section(WD_SECTION.CONTINUOUS)
     _margins(s1)
     _set_columns(s1, 2)
 
-    _rich(doc, [("Abstract—", True, True), (ABSTRACT, False, True)],
-          size=9, first_line_indent=0.2)
-    _rich(doc, [("Index Terms—", True, True), (KEYWORDS, False, True)],
-          size=9, first_line_indent=0.2)
+    _rich(doc, [("Abstract", True, True), ("\u2014", True, True), (ABSTRACT, True, True)],
+          size=9, first_line_indent=0)
+    _rich(doc, [("Keywords", True, True), ("\u2014", True, True), (KEYWORDS, False, True)],
+          size=9, first_line_indent=0)
 
     # I. Introduction
     _heading(doc, "I", "Introduction")
@@ -329,7 +324,15 @@ def build_paper(path: Path) -> None:
         "answer-quality metrics, and neither is achievable as an afterthought.")
     _body(doc,
         "This paper describes a legal question-answering system for Pakistani "
-        "law built around both. Our contributions are: (i) verifier-aware "
+        "law built around both. We do not claim a new retrieval or generation "
+        "model; the components are largely standard, and deliberately so. The "
+        "contribution is a GOVERNANCE ARCHITECTURE - the arrangement that "
+        "determines which evidence a verifier will accept, what the system does "
+        "when the evidence is weak, which paths may produce output, and what "
+        "record survives the turn - and a set of measurements showing that this "
+        "arrangement is where the interesting failures live. Every substantive "
+        "defect we report was invisible to answer quality and visible only to "
+        "the governance layer. Our contributions are: (i) verifier-aware "
         "symbolic evidence - deterministic statutory engines for court fees, "
         "bail eligibility, limitation and inheritance shares under Islamic law "
         "are treated as first-class evidence by the grounding verifier, so a "
@@ -390,8 +393,41 @@ def build_paper(path: Path) -> None:
                  "failure mode in this class that arises from pipeline "
                  "structure rather than from classifier weakness.",
                  False, False)])
+    _table(doc,
+        "TABLE I.\tPOSITIONING AGAINST THE CLOSEST PRIOR WORK. NO "
+        "PERFORMANCE FIGURES ARE COMPARED ACROSS ROWS: THE SYSTEMS TARGET "
+        "DIFFERENT JURISDICTIONS, LANGUAGES AND TASKS, AND A TABLE OF HEADLINE "
+        "ACCURACIES DRAWN FROM DIFFERENT DATASETS WOULD INVITE EXACTLY THE "
+        "CROSS-STUDY COMPARISON SECTION VI-B ARGUES AGAINST.",
+        [("Line of work", "Representative", "Contribution",
+          "What it leaves open here"),
+         ("Domain-adapted legal encoders", "[2], [3]",
+          "In-domain pretraining and benchmarking for legal text",
+          "English common-law/EU text; no abstention decision, and no evidence "
+          "that adaptation transfers across question style"),
+         ("Retrieval-augmented generation", "[1], [4], [5]",
+          "Grounding generated answers in retrieved passages; self-reflection "
+          "over retrieval quality",
+          "Evaluates the answer produced, not the decision of WHETHER to "
+          "answer; retrieval quality is judged, not the query's answerability"),
+         ("Selective prediction and calibration", "[6], [7], [8], [11]",
+          "Formalises abstention, the risk-coverage trade-off, and "
+          "distribution-free coverage",
+          "Applied to classifier outputs, rarely to the routing decision "
+          "inside a retrieval pipeline; the operating point is tuned rather "
+          "than derived from harm"),
+         ("Low-resource and hybrid retrieval", "[14], [15], [16]",
+          "One index across scripts; lexical-dense fusion where exact "
+          "terminology matters",
+          "Code-switching is treated as a language-identification problem; no "
+          "account of what fusion does to a fine-tuned dense channel"),
+         ("Prompt-injection robustness", "[17], [18]",
+          "Attack taxonomies and classifier defences",
+          "Assumes the defended component is reached; says nothing about "
+          "paths that bypass it, which is the failure we report")])
     _body(doc,
-        "To our knowledge, no existing system combines abstention under an "
+        "Table I positions this work against those lines. To our knowledge, no "
+        "existing system combines abstention under an "
         "explicit cost model, symbolic evidence admitted by the grounding "
         "verifier, and code-switched retrieval for a low-resource "
         "jurisdiction, nor reports an evaluation that measures all three.")
@@ -412,24 +448,58 @@ def build_paper(path: Path) -> None:
         "suspended state of a pending clarification, is checkpointed to a "
         "document store so that a turn survives process restarts and can be "
         "resumed by a different worker.")
+    _figure(doc, "fig1_pipeline.png",
+        "The governance pipeline. Two stages carry the argument of this "
+        "paper: the answerability gate, which decides from the QUERY whether "
+        "the corpus could hold the answer at all, before any evidence is "
+        "weighed (Section V-B); and arbitration, whose operating threshold is "
+        "derived from a harm ratio rather than tuned (Section V-C). Every "
+        "branch terminates at one enforced output path, which is what makes "
+        "the provenance record of Fig. 2 complete rather than best-effort.", 1)
     _body(doc,
-        "Four properties distinguish the design from a standard RAG pipeline: "
+        "Table II collects the notation used throughout. Four properties "
+        "distinguish the design from a standard RAG pipeline: "
         "symbolic evidence admitted by the verifier (Section III-D), "
         "three-signal confidence with an explicit abstention policy "
         "(Sections III-E and III-H), code-switched retrieval (Section III-B), "
         "and per-turn provenance (Section III-K).")
 
+    _table(doc, "TABLE II.	NOTATION USED THROUGHOUT",
+           [("Symbol", "Meaning"),
+            ("s", "composite confidence, (1)"),
+            ("k, e-hat, l-hat", "lexical, embedding and grader signals"),
+            ("T, C", "content terms of one query; its candidate set"),
+            ("w(t)", "local IDF weight of term t, (2)"),
+            ("c", "calibrated confidence entering arbitration"),
+            ("d", "disagreement among the three signals"),
+            ("L_wrong", "harm of a confident misstatement of law"),
+            ("L_missed", "harm of refusing an answerable question"),
+            ("L_ask", "friction of one clarification round"),
+            ("rho", "harm ratio L_missed / L_wrong, (6)"),
+            ("alpha", "target joint error rate, conformal layer"),
+            ("Q", "evaluation query set"),
+            ("G(q), R(q)", "gold chunks and ranked results for query q")])
+
     _subheading(doc, "B", "Corpus and Retrieval")
     _body(doc,
-        "The statute corpus is drawn from a public collection of 967 Pakistani "
-        "legal documents [19], segmented by section and partitioned into four "
-        "collections by legal domain (civil, criminal, family, "
-        "constitutional). A bilingual English-Urdu constitutional "
-        "question-answer set [20] is ingested into the constitutional "
-        "collection as both raw article text and question-answer pairs. A "
-        "separate corpus of "
-        "reported Lahore High Court judgments supports case-law retrieval. "
-        "Table I reports the indexed chunk counts.")
+        "The statute corpus is drawn from a public collection of 969 Pakistani "
+        "legal documents [19], itself converted from Ministry of Law and "
+        "Justice publications and distributed under ODC-BY; we segment it by "
+        "section and partition it into four collections by legal domain "
+        "(civil, criminal, family, constitutional). It is supplemented with "
+        "instruments fetched directly from the official consolidated "
+        "legislation service [20], including the Code of Civil Procedure 1908 "
+        "and twenty family-law statutes that the public collection omitted. "
+        "The constitutional collection holds article text authenticated "
+        "against the National Assembly publication; a bilingual English-Urdu "
+        "constitutional question-answer set [21] supplies evaluation questions "
+        "only and is NOT indexed, for reasons Section V-H reports. A separate "
+        "corpus of reported judgments from six courts supports case-law "
+        "retrieval. Table III reports the indexed chunk counts. Because the "
+        "underlying instruments are government publications and the "
+        "redistributed collection carries an attribution licence, reuse is "
+        "permitted with attribution, which we give here and in the released "
+        "ingestion code.")
 
     _table_corpus(doc)
 
@@ -441,7 +511,23 @@ def build_paper(path: Path) -> None:
         "signal in this domain. Dense retrieval applies the asymmetric query and "
         "passage prefixes the model expects. Both channels are filtered so that "
         "a query for a given province retrieves only that province's provisions "
-        "or federal ones.")
+        "or federal ones - the dense channel by metadata predicate, the lexical "
+        "channel by post-retrieval filter, since BM25 admits no index-time "
+        "constraint.")
+    _body(doc,
+        "The filter is a mechanism, not a coverage claim, and we separate the "
+        "two because conflating them would overstate the system. Of 10,042 "
+        "statutory chunks, 8,434 are federal and 1,608 are provincial, and ALL "
+        "of the provincial material is Punjab. A query from Sindh, Khyber "
+        "Pakhtunkhwa, Balochistan, Gilgit-Baltistan or Azad Jammu and Kashmir "
+        "is therefore served correctly from federal law and silently has no "
+        "provincial law to consult. This matters most where devolution matters "
+        "most - tenancy, rent restriction, land revenue and local taxation are "
+        "provincial subjects - so the jurisdictions absent here are precisely "
+        "those whose users would most need the filter to have something to "
+        "select. We report the gap rather than the mechanism alone because a "
+        "reader could otherwise infer five-province coverage from a filter that "
+        "supports it.")
     _body(doc,
         "Two mechanisms address vocabulary mismatch specific to this setting. "
         "First, a rule-based alias layer rewrites common cross-jurisdictional "
@@ -496,8 +582,7 @@ def build_paper(path: Path) -> None:
     _subheading(doc, "E", "Three-Signal Confidence")
     _body(doc,
         "Each retrieved chunk receives a confidence score combining three "
-        "signals: a lexical score k, the fraction of legal terms in the query "
-        "present in the chunk; an embedding similarity e; and a binary "
+        "signals: a lexical score k, an embedding similarity e, and a binary "
         "relevance grade l from a fast language model. The signals are mapped "
         "into probability space by the calibration layer (Section III-F) and "
         "combined additively:")
@@ -505,6 +590,29 @@ def build_paper(path: Path) -> None:
     _body(doc,
         "with the lexical term weighted highest for the same reason the lexical "
         "retrieval channel is.")
+    _body(doc,
+        "The lexical signal measures rarity-weighted coverage of the query's "
+        "own distinctive terms, and the weighting is essential rather than "
+        "cosmetic. Let T be the content terms of the query and C the retrieved "
+        "candidate set. Each term t in T is weighted by its discriminating "
+        "power within that candidate set:")
+    _equation(doc, "w(t) = log(1 + |C| / (1 + df(t, C)))", "2")
+    _body(doc,
+        "and a chunk scores the share of the total weight that it contains. Two "
+        "consequences follow, and Section V-A shows that both are load-bearing. "
+        "A term occurring in every candidate carries almost no weight, so it "
+        "cannot saturate the score; and a term occurring in no candidate "
+        "remains in the denominator permanently, so an unmet requirement of the "
+        "question depresses the score for as long as it goes unmet. Because df "
+        "is computed over the retrieved pool rather than a fixed vocabulary, "
+        "the signal adapts as the corpus grows instead of degrading with it.")
+    _body(doc,
+        "The embedding signal is recovered from the passage vectors already "
+        "stored at ingestion, which makes it a lookup rather than a "
+        "re-encoding, and is rescaled onto [0, 1] across the operating band of "
+        "the embedding model. Raw multilingual E5 cosines occupy a narrow high "
+        "band on this corpus (Section V-A), and passing them through unscaled "
+        "would contribute a near-constant offset to every score.")
     _body(doc,
         "Disagreement between the signals is retained rather than averaged "
         "away. Let σ² be the variance of the three calibrated signals. "
@@ -523,11 +631,12 @@ def build_paper(path: Path) -> None:
         "Platt scaling for the language-model signal and isotonic regression "
         "for the lexical signal, with cosine similarity clamped as it already "
         "occupies probability space.")
-    _todo(doc, "State plainly that fitted parameters are estimated from the "
-               "labelled set of Section IV, and report the fitted values. Until "
-               "they are fitted the transforms are identity, and the paper must "
-               "not claim otherwise - this is why the title says 'selective' "
-               "rather than 'calibrated'.")
+    _body(doc,
+        "The transforms are fitted on the labelled set of Section IV. Until "
+        "that set reaches sufficient volume they remain identity maps, and we "
+        "report accordingly in Section V-E: the scores this paper reports are "
+        "ranked, not calibrated. This is why we claim selective prediction "
+        "rather than calibrated prediction.")
     _body(doc,
         "Distribution shift is monitored by the population stability index over "
         "a rolling window of retrieval confidences, with a shift flagged at "
@@ -558,28 +667,57 @@ def build_paper(path: Path) -> None:
         "version-matched cache hit, or from the lexical channel alone. "
         "Lexical-only evidence is capped at confidence 0.55, so that it can "
         "support an answer but cannot present itself as a confident judgement. "
-        "Each candidate source is assigned a utility:")
-    _equation(doc, "u(c, a) = c / cost(a)", "2")
+        "The source carrying the highest confidence is selected, and the "
+        "action is then chosen for it by minimising expected loss.")
     _body(doc,
-        "where c is calibrated confidence and cost encodes the asymmetry of the "
-        "domain: answering is cheap (0.10), deferring costs more (0.30), and "
-        "refusing is most expensive (0.60) in user-experience terms, which is "
-        "what makes an unnecessary refusal a real cost rather than a free safe "
-        "default. The action is DEFER when signal variance exceeds its "
-        "threshold; REFUSE when confidence falls below a refusal ceiling; "
-        "ANSWER when confidence meets or exceeds a generation floor; and DEFER "
-        "otherwise. Two overrides apply. A turn retrieving zero chunks refuses "
-        "unconditionally. And after a bounded number of consecutive deferrals "
-        "the node enters a binary mode in which it must answer or refuse, so "
-        "that a mid-confidence query cannot loop indefinitely asking for "
-        "clarification. Retry budget is deliberately kept outside the "
-        "arbitration node: the node judges evidence, while the graph decides "
-        "whether another retrieval pass is affordable.")
-    _todo(doc, "Equation (2) is the weakest formal point in the paper and a "
-               "reviewer will press on it. Either derive the action from "
-               "expected utility over an explicit harm matrix, or state "
-               "honestly that the cost vector is a hand-set prior and show a "
-               "sensitivity analysis over it.")
+        "Two harms are possible and they are not symmetric: L_wrong, a "
+        "confident misstatement of law acted on by the user, and L_missed, a "
+        "refusal on a question the system could have answered. Writing c for "
+        "the calibrated confidence and d for the disagreement among the "
+        "confidence signals:")
+    _equation(doc, "E[L(ANSWER)] = (1 - c) * L_wrong", "3")
+    _equation(doc, "E[L(REFUSE)] = c * L_missed", "4")
+    _equation(doc, "E[L(DEFER)] = L_ask + min(E[L(ANSWER)], E[L(REFUSE)]) - g*d", "5")
+    _body(doc,
+        "where L_ask is the friction of one clarification round and g is how "
+        "much of the disagreement a clarification is expected to resolve. "
+        "Answering has lower expected loss than refusing exactly when:")
+    _equation(doc, "c > L_wrong / (L_wrong + L_missed) = 1 / (1 + rho),"
+                   "   rho = L_missed / L_wrong", "6")
+    _body(doc,
+        "so the operating threshold IS the harm ratio. This matters for "
+        "elicitation. A full 3x2 utility matrix has six entries, but only one "
+        "degree of freedom is identifiable from behaviour: any assignment with "
+        "the same ratio induces the same decision. Asking a practitioner for "
+        "six numbers therefore invites answers that cannot be validated "
+        "against each other, whereas rho can be elicited directly - how many "
+        "unnecessary refusals are worth preventing one misstatement of law - "
+        "and maps to a threshold by derivation rather than by tuning.")
+    _body(doc,
+        "Deferring is priced against disagreement rather than against the loss "
+        "itself. A clarification does not reduce the harm of answering a "
+        "question the system already understands; it reduces the chance that "
+        "the confidence estimate is wrong, which is what signal disagreement "
+        "measures. Consequently, when the signals agree there is nothing for a "
+        "clarification to resolve and asking is strictly worse than acting. "
+        "This is a departure from a threshold rule, under which every query "
+        "between a refusal ceiling and a generation floor bought a "
+        "clarification round regardless of whether the evidence was internally "
+        "consistent.")
+    _body(doc,
+        "The rule is subject to three overrides. A turn retrieving zero chunks "
+        "refuses unconditionally. After a bounded number of consecutive "
+        "deferrals the node enters a binary mode in which it must answer or "
+        "refuse, so that a mid-confidence query cannot loop indefinitely "
+        "asking for clarification. Retry budget is deliberately kept outside "
+        "the arbitration node: the node judges evidence, while the graph "
+        "decides whether another retrieval pass is affordable. The third "
+        "override, the query-side answerability check, precedes the evidence "
+        "branches entirely and is described in Section V-B.")
+    _body(doc,
+        "The single free parameter rho is reported with a sensitivity analysis "
+        "in Section V-C, and the value the deployed threshold implicitly "
+        "assumes is stated there rather than left to be inferred.")
 
     _subheading(doc, "I", "Grounding Verification")
     _body(doc,
@@ -612,9 +750,36 @@ def build_paper(path: Path) -> None:
         "exist that skip that point, and any robustness figure measured under "
         "such a configuration is computed only over the traffic that reached "
         "the defended component.")
+    _body(doc,
+        "Closing that gap required distinguishing the shortcuts by what they "
+        "do rather than treating them alike. Two of the three emit a fixed "
+        "string and invoke no model: an injection routed to an affirmation "
+        "receives a canned acknowledgement, so there is nothing for it to "
+        "steer and nothing to exfiltrate, and screening those turns with a "
+        "classifier would add a model call to every 'ok' while preventing "
+        "nothing. The third rewrites the previous answer to a user-supplied "
+        "instruction, which places attacker-controlled text into a model "
+        "prompt, and it is reachable within the length bound that governs "
+        "shortcut eligibility. The regex layer runs on all traffic; the "
+        "classifier now additionally runs on that third path. We report the "
+        "asymmetry rather than claiming both layers apply uniformly, since the "
+        "distinction - screen where a model consumes untrusted text, not where "
+        "a constant is returned - is what makes the cost defensible. Blocked "
+        "turns record which layer stopped them, so the share of attacks caught "
+        "without a model call is measurable rather than assumed.")
 
     _subheading(doc, "K", "Provenance")
+    _verbatim(doc, 'turn_type   : answer\nquery       : "What is the current stamp duty\n               rate ... in Gilgit-Baltistan?"\narbitration : output=answer source=llm conf=0.70\nsignals     : relevance=0.70 variance=0.056\n              bm25=1.00\nstatute_chunks : 20 x Transfer of Property\n              Act 1882 (ss. 2, 130, ...)\ntool_calls  : calculate_court_fee -> FAILED\n              (validation error)\nis_grounded : true\nanswer_sha256: 4df67020...d127ade\nexecution   : 48.7 s, 9 LLM calls,\n              models=[llama-3.1-8b,\n                      llama-3.3-70b]\nversions    : e5-base/v1, chunking v1')
+    _para(doc,
+        "Fig. 2.  An abridged real provenance record, from the abstention "
+        "failure of Section V-A. It is legible as a diagnosis WITHOUT "
+        "re-running the system: a stamp-duty question answered at 0.70 "
+        "confidence and marked grounded, on twenty chunks of the Transfer of "
+        "Property Act, none of which state a rate, with the statutory engine "
+        "having failed. The record is what made the defect findable.",
+        size=8, align="justify", space_after=6)
     _body(doc,
+        "Fig. 2 shows an abridged real record. "
         "Each turn writes a durable record linking the emitted output to the "
         "evidence and decisions behind it: retrieved chunk identifiers, "
         "admitted case-law citations, engine invocations with success state, "
@@ -667,10 +832,70 @@ def build_paper(path: Path) -> None:
                "remains developer-authored, say so in Limitations rather than "
                "letting a reviewer find it.")
 
-    _subheading(doc, "C", "Metrics")
+    _subheading(doc, "C", "Verified Citation Supervision")
     _body(doc,
-        "Retrieval is reported by Hit@k, mean reciprocal rank, and nDCG@k [21] "
-        "at cut-offs within the pooling depth. Selective prediction is reported by "
+        "Fine-tuning a retriever needs query/passage supervision, which for "
+        "most of this jurisdiction does not exist. We derive it from a public "
+        "corpus of 11,195 Pakistani legal question/answer pairs carrying "
+        "machine-parseable citations (PPC s.467, CONST art.203F) and domain "
+        "labels. The answers are LLM-generated; the CITATION is what we use, "
+        "because a citation is a checkable label and an answer is not. Nothing "
+        "from this source is indexed.")
+    _body(doc,
+        "Four filters are applied in order, and their yield is reported "
+        "because the rejection rate is itself informative. (1) Rows seeded "
+        "from LEGAL-UQA are dropped (911), since that dataset provides our "
+        "evaluation set and training on it would contaminate every other "
+        "number in this paper. (2) Citations are resolved against the indexed "
+        "corpus; those naming a section we do not hold are dropped (720), "
+        "including all 208 civil-procedure rows before the Code of Civil "
+        "Procedure was ingested. (3) Each surviving citation is VALIDATED: the "
+        "cited section must share rarity-weighted vocabulary with the answer, "
+        "because LLM-generated citations are sometimes wrong and a confidently "
+        "wrong citation trains the retriever to reproduce the error (203 "
+        "dropped). (4) Duplicates are removed. 5,883 pairs survive (52.6%), of "
+        "which 32% have Urdu-script queries against English statute - the "
+        "code-switched retrieval case this system exists to serve, and one for "
+        "which we previously had no training data at all.")
+    _body(doc,
+        "Validation is deliberately lexical rather than embedding-based. "
+        "Scoring candidate pairs with the base model and keeping those it "
+        "already agrees with would discard exactly the hard examples that "
+        "carry signal, and would flatter the fine-tuning that follows. It also "
+        "proved to be an effective corpus check: it flagged citations to "
+        "Article 9 as topically inconsistent, and the citations were correct - "
+        "the corpus was wrong, indexing 164 Schedule paragraphs as Articles "
+        "1-8, which include the fundamental rights and the high-treason "
+        "provision. That defect had been serving Schedule text under the "
+        "citation of a constitutional right.")
+
+    _subheading(doc, "D", "Metrics")
+    _body(doc,
+        "Let Q be the evaluation query set and, for a query q, let R(q) = "
+        "(c_1, ..., c_k) be the ranked chunk identifiers returned at cut-off k "
+        "and G(q) the set of gold chunks. Write rank(q) for the position of "
+        "the first relevant chunk, and infinity if none is retrieved. "
+        "Retrieval [22] is then reported by:")
+    _equation(doc, "Hit@k = (1/|Q|) * SUM_q  1[ rank(q) <= k ]", "7")
+    _equation(doc, "MRR = (1/|Q|) * SUM_q  1 / rank(q)", "8")
+    _equation(doc, "nDCG@k = (1/|Q|) * SUM_q  DCG(q) / IDCG(q)", "9")
+    _para(doc,
+          "DCG(q)  = SUM over i=1..k  of  1[ c_i in G(q) ] / log2(i + 1)",
+          size=9, align="center", space_after=1)
+    _para(doc,
+          "IDCG(q) = SUM over i=1..min(|G(q)|, k)  of  1 / log2(i + 1)",
+          size=9, align="center", space_after=4)
+    _body(doc,
+        "where 1[.] is the indicator function and 1/infinity = 0 by "
+        "convention, so a query with no relevant chunk in the top k "
+        "contributes zero to every metric. We state the ideal-DCG denominator "
+        "of (9) explicitly because a fixed denominator of 1 - correct only "
+        "when |G(q)| = 1 - is a defect we found in one of our own evaluation "
+        "scripts, and it silently deflates nDCG on the multi-gold queries that "
+        "matter most.")
+    _body(doc,
+        "Metrics are computed at cut-offs within the pooling depth. "
+        "Selective prediction is reported by "
         "risk-coverage curves, the area under the risk-coverage curve, and "
         "expected calibration error, together with the rate of ungrounded "
         "answers at a given coverage. Robustness is reported as the proportion "
@@ -678,46 +903,635 @@ def build_paper(path: Path) -> None:
 
     # V. Results
     _heading(doc, "V", "Results")
-    _todo(doc, "Pending the labelled set. Do not draft narrative text here "
-               "before the numbers exist. Planned tables: (1) retrieval metrics "
-               "overall and per legal domain; (2) ablation - hybrid vs "
-               "lexical-only vs dense-only, one-hop vs two-hop, normalised vs "
-               "raw Roman Urdu; (3) abstention - arbitration enabled vs "
-               "always-answer, with risk-coverage; (4) grounding - ungrounded "
-               "rate with and without engine-aware verification. Ablation (4) "
-               "is the strongest single result available and should be "
-               "prioritised if space is short.")
+    _body(doc,
+        "The corpus comprises 10,042 statutory chunks across the four "
+        "retrieval collections (Table III) and a separately indexed judgment "
+        "corpus of 7,529 chunks drawn from six courts. Three of the four "
+        "collections changed materially during this work, and for reasons the "
+        "evaluation surfaced rather than planned: the constitutional "
+        "collection was rebuilt after 67% of it proved to be generated text "
+        "(Subsection H), the Code of Civil Procedure 1908 was found to be "
+        "absent entirely, and family law - the smallest collection and the one "
+        "where a wrong answer does most harm - grew from 193 to 989 chunks "
+        "once twenty statutes listed in the project's own fetch manifest were "
+        "actually downloaded. Corpus defects, not model capacity, accounted "
+        "for the largest single improvements we made.")
+    _body(doc,
+        "We report studies that do not require the labelled set. We "
+        "distinguish three kinds of "
+        "result explicitly, because they carry different evidential weight and "
+        "conflating them would overstate the work. DESIGN RESULTS are "
+        "properties of the architecture we argue for and demonstrate: that "
+        "abstention is decidable from the query (Subsection B), and that a "
+        "decision threshold can be derived from a harm ratio rather than tuned "
+        "(Subsection C). EMPIRICAL FINDINGS are measurements whose interest "
+        "does not depend on this system being well built - the inverted "
+        "confidence signal (Subsection A) and the reranking result (Subsection "
+        "D) would hold for any system making the same reasonable choices, and "
+        "the latter is corroborated independently. IMPLEMENTATION DEFECTS are "
+        "bugs we found and fixed; they are reported because their FAILURE "
+        "MODES generalise - a malformed model response accepted as a confident "
+        "judgement, a cache serving answers that outlived the logic producing "
+        "them - but a bug fixed is not a contribution and we do not present it "
+        "as one. Subsection I states plainly what remains unmeasured.")
+
+    _subheading(doc, "A", "The Confidence Signal Was Anti-Correlated with "
+                          "Answerability")
+    _body(doc,
+        "A regression prompted this analysis. After the corpus was expanded, a "
+        "query the corpus cannot answer - the current stamp-duty rate for "
+        "property transfer in Gilgit-Baltistan - became more confident, rising "
+        "from 0.57 to 0.70 and moving from ungrounded to grounded. Growing the "
+        "evidence base had made the system more assured about a question it "
+        "could not answer.")
+    _body(doc,
+        "Decomposing (1) showed why. Of the three signals, one was defective "
+        "and two were constants. The lexical signal, weighted highest at 0.40, "
+        "matched the query against a fixed list of general legal terms and "
+        "scored a chunk by the fraction of those terms it contained. Almost "
+        "every question contains exactly one such term, so the signal collapsed "
+        "into a test of whether a chunk mentions that single word - which "
+        "nearly every chunk does. 'Property' occurs in every provision of the "
+        "Transfer of Property Act; 'court' occurs in most statutes; while "
+        "'stamp duty', 'Gilgit-Baltistan' and '2019', the terms that actually "
+        "determine whether the corpus holds an answer, were invisible to the "
+        "scorer.")
+    _body(doc,
+        "Table IV gives the effect. Under the fixed-vocabulary signal, the mean "
+        "lexical score of the unanswerable queries exceeded that of the "
+        "answerable ones by 0.343: confidence was not merely uninformative but "
+        "inverted with respect to the system's ability to answer. The failure "
+        "also worsened monotonically with corpus growth, because a larger "
+        "corpus retrieves more chunks containing the common term. Replacing it "
+        "with rarity-weighted coverage restores the ordering to +0.090.")
+    _table(doc, "TABLE IV.\tMEAN LEXICAL SCORE, FIXED VOCABULARY VS "
+                "RARITY-WEIGHTED COVERAGE",
+           [("", "Query", "Fixed", "Weighted"),
+            ("A", "punishment for theft (PPC)", "0.438", "0.569"),
+            ("A", "eviction without notice", "0.000", "0.358"),
+            ("A", "grounds for khula", "0.444", "0.162"),
+            ("A", "refusal to register an FIR", "0.053", "0.098"),
+            ("A", "fundamental rights", "0.000", "0.184"),
+            ("A", "limitation period, civil suit", "0.056", "0.216"),
+            ("A", "dishonoured cheque (s. 489-F)", "0.462", "0.160"),
+            ("A", "share in Islamic inheritance", "0.000", "0.061"),
+            ("U", "current stamp-duty rate", "0.789", "0.118"),
+            ("U", "cases pending in the LHC, 2019", "0.733", "0.227"),
+            ("U", "my lawyer's phone number", "0.050", "0.063"),
+            ("", "mean, answerable (A)", "0.181", "0.226"),
+            ("", "mean, unanswerable (U)", "0.524", "0.136"),
+            ("", "separation", "-0.343", "+0.090")],
+           bold_last_rows=1)
+    _body(doc,
+        "The second signal was not a signal at all. The ensemble retriever "
+        "exposes no per-document scores, so every chunk was assigned a neutral "
+        "0.5 embedding similarity: 35% of every confidence score was a fixed "
+        "offset, contributed identically to an exact statutory match and to an "
+        "unanswerable question. Recovering the ingestion-time passage vectors "
+        "costs 26 ms for 19 chunks plus 150 ms for one query encoding, and "
+        "yields a signal that does discriminate - though weakly. Averaged per "
+        "query, answerable queries score 0.818 (range 0.790-0.848) against "
+        "0.789 (0.768-0.801) for unanswerable ones. The bands are narrow and "
+        "adjacent, which is why the raw cosine must be rescaled over the "
+        "operating range rather than treated as a probability.")
+    _body(doc,
+        "The third signal was unvalidated. The relevance grader runs on a small "
+        "fast-tier model, which was observed returning an array of 130 grades "
+        "for 8 chunks; because the scorer pads and truncates its inputs, this "
+        "was silently accepted as a judgement that all eight chunks were "
+        "irrelevant - a malformed response entering the audit trail "
+        "indistinguishably from a considered one. Length-checking the response "
+        "and routing failures into the existing neutral degradation path "
+        "removes this. We note the general lesson: a signal whose failure mode "
+        "is a confident wrong value rather than an absent value is more "
+        "dangerous than no signal, and only length validation distinguishes "
+        "them.")
+
+    _subheading(doc, "B", "Repairing the Signals Does Not Separate "
+                          "Answerability")
+    _body(doc,
+        "With the lexical signal corrected and the embedding signal supplied, "
+        "the aggregate score orders the two classes correctly - mean 0.429 for "
+        "answerable against 0.333 for unanswerable - but their ranges overlap. "
+        "Answerable queries span 0.309-0.662 and unanswerable ones 0.273-0.412, "
+        "so the worst answerable query scores below the best unanswerable one. "
+        "No threshold on c separates the classes; each cut only trades false "
+        "refusals against false answers.")
+    _body(doc,
+        "This is the central negative result on abstention: the difference "
+        "between these classes is not one of degree in confidence, and treating "
+        "it as one is a category error. What distinguishes 'the current "
+        "stamp-duty rate' from 'the grounds for khula' is not that the "
+        "retrieved law is less similar - it is that no statute states a rate in "
+        "force today. Deciding this from the query, before evidence is weighed, "
+        "is deterministic and costs nothing. On a set of 27 queries constructed "
+        "to stress the boundary, the query-side check admitted 17/17 answerable "
+        "queries and identified 10/10 unanswerable ones.")
+    _body(doc,
+        "That set was written by the author while building the check, and both "
+        "figures should be read accordingly. Constructing the boundary cases "
+        "and the rule that separates them together is a design activity, not "
+        "an evaluation: the numbers establish that the classes are separable by "
+        "a deterministic query-side test, which is the claim being made, and "
+        "not that this particular rule generalises to queries it was not "
+        "written against. We report them here rather than in the Limitations "
+        "alone, because a precision figure quoted without its provenance "
+        "invites exactly the reading it does not support.")
+    _body(doc,
+        "Precision matters more than recall here, because a false positive "
+        "refuses a question the system could have answered and the user cannot "
+        "distinguish that refusal from a genuine gap in the law. Two false "
+        "positives found during development are instructive, and both are "
+        "near-misses that share surface vocabulary with an unanswerable class: "
+        "'how many days do I have to file an appeal' is a limitation question "
+        "rather than a court statistic, and 'the procedure to recover my "
+        "lawyer's fee' is the law of costs rather than a personal record. Both "
+        "are retained as regression tests. Refusals name the reason and "
+        "redirect to where the answer does live - the provincial Board of "
+        "Revenue for a notified rate, judicial statistics for a pendency figure "
+        "- since a bare statement of failure is indistinguishable from a "
+        "retrieval miss and simply invites the user to rephrase.")
+    _body(doc,
+        "One architectural finding accompanies this. Verified end-to-end after "
+        "the fix, the stamp-duty query still answered at 0.85 confidence, "
+        "because a cache hit routes directly to the finalising node and "
+        "bypasses arbitration altogether. An answer produced by the defective "
+        "scorer had outlived the correction of that scorer. This is the same "
+        "class of defect reported in Section VI for the injection gatekeeper - "
+        "a decision point that alternative paths can skip - and it suggests "
+        "that any change to a routing authority must be accompanied by an audit "
+        "of every path that reaches the output without consulting it.")
+
+    _subheading(doc, "C", "The Harm Ratio and Its Sensitivity")
+    _body(doc,
+        "The decision rule of (6) has one free parameter. Read in reverse, it "
+        "also tells us what an operating threshold set some other way "
+        "implicitly assumes, and that is worth doing before anything else. Our "
+        "deployed generation floor of 0.20 was seeded as a percentile of a "
+        "score distribution and was never a statement about harm. It "
+        "corresponds to rho = 4: it commits the system to a missed answer "
+        "being FOUR TIMES worse than a misstatement of law, the inverse of the "
+        "asymmetry the system is designed around. Nothing connected the "
+        "threshold to the harm it encodes until it was written down this way.")
+    _body(doc,
+        "Table V sweeps rho over the measured confidences. The parameter "
+        "behaves as it should - raising the penalty on wrong answers raises "
+        "the threshold and reduces coverage - but the columns move TOGETHER. "
+        "There is no rho at which the system answers the answerable queries "
+        "and refuses the unanswerable ones. This is the same overlap reported "
+        "in Subsection B, now visible through the decision rule: because the "
+        "two classes are not separated in confidence, no setting of a "
+        "confidence-based rule can separate them in action either.")
+    _table(doc, "TABLE V.	HARM RATIO VS COVERAGE (A: 9 ANSWERABLE, "
+                "U: 4 UNANSWERABLE)",
+           [("rho", "threshold", "answered A", "answered U"),
+            ("10",   "0.091", "9/9", "4/4"),
+            ("4",    "0.200", "9/9", "4/4"),
+            ("2",    "0.333", "7/9", "2/4"),
+            ("1",    "0.500", "1/9", "0/4"),
+            ("0.5",  "0.667", "0/9", "0/4"),
+            ("0.1",  "0.909", "0/9", "0/4")])
+    _body(doc,
+        "Two practical consequences follow. First, rho governs only how "
+        "conservative the fallback is BEHIND the query-side check of "
+        "Subsection B; it is not the mechanism that distinguishes answerable "
+        "from unanswerable, and presenting it as one would misattribute the "
+        "result. Second, plausible-looking harm assignments are more "
+        "aggressive than they appear. A utility matrix penalising a wrong "
+        "answer at -100 against +10 for a correct one, -10 for an unnecessary "
+        "refusal and +5 for a correct one - values that read as reasonable - "
+        "induces a threshold of 0.84, above every confidence we measured, and "
+        "would refuse all traffic. We therefore retain rho = 4, which "
+        "preserves the deployed operating point, and report the assumption "
+        "rather than presenting a tuned threshold as a principled one.")
+
+    _subheading(doc, "D", "Cross-Encoder Reranking: A Negative Result")
+    _body(doc,
+        "Adding a cross-encoder reranker is the standard remedy for the symptom "
+        "we faced - the correct statute retrieved but ranked below a lexically "
+        "similar competitor - so we implemented and measured it rather than "
+        "assuming it. Table VI reports the decisive case. The query asks "
+        "whether a tenant may be evicted without notice in Punjab; the correct "
+        "instrument is the Punjab Rented Premises Act 2009, governing urban "
+        "rental, and the competitor is the Punjab Tenancy Act 1887, governing "
+        "agricultural tenancy. Both are genuinely about tenants and eviction, "
+        "so this is an ambiguity of statutory scope rather than a vocabulary "
+        "gap, and it appeared only as the corpus grew to include provincial "
+        "law.")
+    _table(doc, "TABLE VI.\tRANK OF THE CORRECT STATUTE (PUNJAB RENTED "
+                "PREMISES ACT 2009) AND MEDIAN LATENCY, AT BOTH DEPTHS",
+           [("Depth", "Configuration", "Rank", "Top-1 statute"),
+            ("k=10 (19)", "first stage",       "3",  "Tenancy 1887"),
+            ("",          "+ scope rules",     "1",  "Rented Premises 2009"),
+            ("",          "+ cross-encoder",   "10", "Tenancy 1887"),
+            ("k=50 (58)", "first stage",       "4",  "Tenancy 1887"),
+            ("",          "+ scope rules",     "1",  "Rented Premises 2009"),
+            ("",          "+ cross-encoder",   "24", "Tenancy 1887")])
+    _body(doc,
+        "The cross-encoder does not merely fail to help here; it moves the "
+        "correct statute AWAY from the top, from rank 3 to rank 10 at the "
+        "deployed depth and from 4 to 24 when the pool is widened, and at both "
+        "depths it promotes the agricultural statute - precisely the confusion "
+        "it was introduced to resolve. The degradation grows with pool size, "
+        "which is the signature of a scoring function that is not merely noisy "
+        "but systematically ordered against the target: more candidates give it "
+        "more opportunities to prefer the wrong one. The deterministic scope "
+        "rules place the correct statute first at both depths in under a "
+        "millisecond, against 0.73 s and 2.43 s for the reranker.")
+    _body(doc,
+        "The failure is not uniform, and reporting it as such would overstate "
+        "it. Across six queries the reranker improved three (the khula target "
+        "from rank 8 to 4, an FIR-registration query from 2 to 1, a theft query "
+        "from 3 to 1), left two unchanged, and badly worsened one. But the one "
+        "it worsens is the case that motivated it. The queries it improves were "
+        "already nearly correct - the right statute was in the top three - so "
+        "it is sharpening rankings that did not need sharpening while inverting "
+        "the one that did.")
+    _body(doc,
+        "We attribute this to a train/test distribution shift rather than to "
+        "model capacity. The checkpoint is trained on MS MARCO, whose relevance "
+        "judgements concern short web passages answering informational queries. "
+        "Pakistani statutory text is long, formally structured, and dense in "
+        "cross-references, and crucially the distinction the query turns on - "
+        "whether 'tenant' means a cultivator under an 1887 revenue statute or "
+        "an occupant of urban premises under a 2009 one - is a matter of "
+        "legislative scope that is not recoverable from lexical similarity "
+        "between the query and the passage. Both statutes discuss tenants, "
+        "eviction and notice. A relevance model trained on topical overlap has "
+        "no representation of which instrument GOVERNS. Prior work reports the "
+        "same direction of effect: cross-encoder reranking has been found to "
+        "degrade legal case retrieval, attributed to domain mismatch on long "
+        "legal text with a style and length unlike the reranker's training "
+        "data [23]. That this reproduces on statutory rather than case-law "
+        "retrieval, in a different jurisdiction and language setting, suggests "
+        "it is a property of the domain and not of one corpus.")
+    _body(doc,
+        "Widening first-stage retrieval from 10 to 50 candidates was reverted "
+        "alongside it. The two are inseparable: without an effective reranker, "
+        "additional depth is additional noise. Under the wider pool the khula "
+        "query's target statute fell from rank 8 to rank 14, and as Table VI "
+        "shows the reranker's own error grows with the pool it is given.")
+    _body(doc,
+        "We report this as a negative result rather than omitting it. A "
+        "legal-domain cross-encoder, or one fine-tuned on statute-scope pairs, "
+        "may well succeed where the generic model failed; the finding is that "
+        "the off-the-shelf model is actively harmful on this text, not that "
+        "reranking is unsound. The mechanism above is testable, and predicts "
+        "that fine-tuning on statute-scope pairs should help where scaling the "
+        "generic model would not.")
+
+    _subheading(doc, "E", "Domain Fine-Tuning: Large In-Distribution Gains "
+                          "That Do Not Transfer")
+    _body(doc,
+        "The diagnosis of Subsection D left a specific gap. On 200 held-out "
+        "constitutional questions the correct article is retrievable at dense "
+        "depth 50 for 89% of them but reaches rank 1 for only 43.5% - a "
+        "45-point RANKING deficit rather than a recall one. Reranking having "
+        "failed, the remaining hypothesis was that a general-purpose "
+        "multilingual embedding model does not know Pakistani statutory "
+        "language. We tested it by fine-tuning.")
+    _body(doc,
+        "Two models were trained, deliberately at different scales and from "
+        "different sources, so that any pattern could be checked for "
+        "consistency rather than read off a single run. The CONSTITUTIONAL "
+        "model uses 471 question/article pairs from LEGAL-UQA. The GENERAL "
+        "model uses 4,692 pairs spanning constitutional, criminal, evidence, "
+        "civil procedure and family law, built from the citation-annotated "
+        "corpus verified in Section IV-C; a third of its queries are in Urdu "
+        "script. Both use multilingual-e5-base with multiple-negatives ranking "
+        "loss and hard negatives mined from the deployed retriever, and both "
+        "are split by connected components over shared gold chunks so that no "
+        "gold chunk appears in both halves. Table VII gives the configuration "
+        "in full, so that the comparison can be reproduced or contradicted.")
+    _table(doc, "TABLE VII.\tFINE-TUNING CONFIGURATION. IDENTICAL "
+                "APART FROM THE TRAINING CORPUS, SO THE DIFFERENCE BETWEEN THE "
+                "TWO MODELS IS THE DATA AND NOT THE RECIPE.",
+           [("Property", "constitutional", "general"),
+            ("Training pairs", "471", "4,692"),
+            ("Held-out pairs", "121", "1,191"),
+            ("Legal domains", "1", "5"),
+            ("Urdu-script queries", "0%", "32%"),
+            ("Source", "LEGAL-UQA", "citation corpus"),
+            ("Base model", "multilingual-e5-base", ""),
+            ("Loss", "multiple-negatives ranking", ""),
+            ("Hard negatives", "mined from the deployed retriever", ""),
+            ("Epochs / batch / lr", "2 / 12 / 2e-5", ""),
+            ("Max sequence length", "224 tokens", ""),
+            ("Train/test split", "connected components over G(q)", ""),
+            ("Significance test", "McNemar, paired on Q", "")])
+    _figure(doc, "fig4_transfer_collapse.png",
+        "The transfer result. Two models trained independently, on "
+        "different sources, at a tenfold difference in scale, lose almost "
+        "the whole of their gain when the question style changes. The "
+        "left-hand points are what an in-distribution evaluation would "
+        "report; the right-hand points are what a deployment would "
+        "experience. The constitutional model's apparent 0.766 on its own "
+        "distribution is excluded as memorisation and is not plotted "
+        "(Section V-H).", 3)
+    _table(doc,
+        "TABLE VIII.\tHIT@1 PER MODEL, ON ITS OWN TRAINING DISTRIBUTION AND ON "
+        "THE OTHER. EACH MODEL'S OUT-OF-DISTRIBUTION COLUMN (ITALICISED IN "
+        "TEXT) IS THE HONEST MEASURE OF TRANSFER.",
+        [("Test set", "base", "constitutional", "general"),
+         ("Citation-style, held out", "0.4148", "0.4114", "0.6801"),
+         ("(general's distribution)", "", "-0.3", "+26.5"),
+         ("LEGAL-UQA style, held out", "0.5234", "0.7656 (a)", "0.5469"),
+         ("(constitutional's dist.)", "", "-", "+2.4")])
+    _para(doc,
+        "(a) Not reportable: 106 of these 128 questions, and 48 of 59 gold "
+        "chunks, were in the constitutional model's training set "
+        "(Subsection H).", size=8, align="justify", space_after=4)
+    _body(doc,
+        "Table VIII reports Hit@1 for every model on both test sets, and "
+        "Fig. 3 states the same result as transfer. Measured on its own "
+        "distribution the general model gains +26.5 Hit@1, "
+        "a 64% relative improvement, significant at p = 0.0005 by McNemar's "
+        "test on 531 improved against 123 worsened pairs. Measured on "
+        "questions written by a different generator, the same model gains "
+        "+2.4, with 31 improved against 22 worsened - close to a coin flip. "
+        "The constitutional model shows the same pattern from the other "
+        "direction: on its own distribution it gains +16.5 dense and +6.6 once "
+        "fused with BM25 (Subsection F); on citation-style questions it gains "
+        "-0.3. We verified that this second figure is clean - none of the "
+        "1,191 citation-style test questions appear in its training set.")
+    _body(doc,
+        "Ten times the training data, five legal domains and two scripts "
+        "bought a larger in-distribution number and essentially nothing out of "
+        "it. The effect replicates across two models trained independently on "
+        "different sources at different scales, which is what makes it a "
+        "finding about the method rather than about one run.")
+
+    _subheading(doc, "F", "Why the Fusion Layer Absorbs the Gain")
+    _body(doc,
+        "A second reduction occurs before deployment. The figures above are "
+        "dense-only; the deployed retriever fuses BM25 at 0.6 with dense at "
+        "0.4. Rebuilding both indexes at identical sequence length so that "
+        "only the weights differ, the constitutional model's +16.5 becomes "
+        "+6.6 under fusion. The mechanism is visible in the baselines: hybrid "
+        "base scores 0.5207 against dense base 0.4380, so BM25 was already "
+        "supplying +8.3 points on its own. Much of what fine-tuning teaches "
+        "the dense channel, the lexical channel already knew, and overlapping "
+        "gains do not add.")
+    _body(doc,
+        "Fusion also REPAIRS the characteristic damage. Under dense-only "
+        "retrieval four queries fell from a found rank to absent, all of them "
+        "exact-citation lookups; under fusion the worst regression is rank 1 "
+        "to rank 3. A system reporting only its dense ablation would overstate "
+        "both the benefit and the harm.")
+
+    _subheading(doc, "G", "Failures Resolved Without Additional Data")
+    _body(doc,
+        "Three queries that failed before the corpus expansion were re-tested "
+        "after it. All three now succeed, and none was fixed by the additional "
+        "data. A maintenance query in Roman Urdu failed because a "
+        "model-assigned language label overrode the script actually observed; "
+        "the eviction query failed on the statutory-scope ambiguity of "
+        "Subsection D; and the khula query failed because the classifier's "
+        "case-type verdict was computed and then discarded one node later, so "
+        "the turn was routed to clarification and never retrieved anything. "
+        "Each was a defect in the handling of a signal, not an absence of law, "
+        "and we note that a purely data-centric response - ingesting more "
+        "statutes - would have resolved none of them while appearing to be the "
+        "obvious remedy.")
+
+    _subheading(doc, "H", "Three Contaminations, Each Found by Looking")
+    _body(doc,
+        "Every fine-tuning result above survived a contamination check that "
+        "removed an earlier, better-looking number. We report the three "
+        "failures because each was invisible in the metrics and each would "
+        "have inflated a headline figure.")
+    _body(doc,
+        "THE INDEX CONTAINED THE TEST ANSWERS. The constitutional collection "
+        "held 619 generated question/answer pairs alongside 305 article "
+        "extracts, all tagged as the Constitution, and the generated pairs "
+        "contained each evaluation question verbatim. They accounted for "
+        "81-100% of retrieved chunks on ordinary constitutional queries. "
+        "Evaluating before removing them would have retrieved each question's "
+        "own answer at rank 1.")
+    _body(doc,
+        "THE GOLD LABELS WERE SYSTEMATICALLY WRONG. Joining evaluation "
+        "questions to gold passages by section heading produced an off-by-one: "
+        "the source PDF's marginal notes are extracted as heading-only stubs, "
+        "so the heading of Article 25 matched a stub rather than the chunk "
+        "holding its text. Retrieval was returning the correct chunk and the "
+        "evaluation scored it as a miss. The signature was Hit@1 of exactly "
+        "0.000 across 568 questions - a number implausible enough to prompt a "
+        "check. Rebuilding the join on verbatim body n-grams moved MRR from "
+        "0.114 to 0.581 with no change to the system.")
+    _body(doc,
+        "THE TEST SET SHARED TARGETS WITH TRAINING. For the cross-style "
+        "evaluation, 99 of 121 candidate questions had gold chunks that were "
+        "also training positives for the general model - different questions, "
+        "identical targets. This is target leakage rather than question "
+        "leakage, and it is not caught by deduplicating queries. Filtering to "
+        "genuinely unseen targets across the full 592-question set left 128 "
+        "usable questions.")
+    _body(doc,
+        "A fourth check applies to Table VIII. The constitutional model's "
+        "apparent 0.7656 on LEGAL-UQA-style questions is memorisation: 106 of "
+        "those 128 questions were in its training set, because that set is "
+        "drawn from LEGAL-UQA. Between them the two models had consumed 464 "
+        "and 471 of the 592 available questions, leaving only 22 unseen by "
+        "both - too few to support a three-way comparison. The "
+        "out-of-distribution columns are the only ones we report.")
+
+    _subheading(doc, "I", "What Is Not Yet Measured")
+    _body(doc,
+        "The ranking and selective-prediction metrics of Section IV - Hit@k, "
+        "MRR, nDCG@k, risk-coverage curves and expected calibration error - "
+        "require the pooled labelled set, which is not yet of sufficient volume "
+        "to report. We state this rather than substitute proxies. The same set "
+        "would settle the generalisation question left open in Subsection B: "
+        "the query-side check needs to be run against queries authored "
+        "independently of it, with the unanswerable classes labelled by someone "
+        "who did not write the rules, before its precision can be claimed as a "
+        "property of the method rather than of the examples it was built from. "
+        "In particular "
+        "the calibration transforms remain identity maps: the architecture "
+        "places Platt scaling and isotonic regression on the correct path and "
+        "the fitted parameters are the only missing component, so the "
+        "confidence values reported above are ranked scores and are not claimed "
+        "to be calibrated probabilities. This is why the contribution is stated "
+        "as selective prediction rather than calibrated prediction.")
 
     # VI. Discussion and Limitations
     _heading(doc, "VI", "Discussion and Limitations")
+
+    _subheading(doc, "A", "Why Fine-Tuning Did Not Generalise")
     _body(doc,
-        "Two findings from deployment generalise beyond this system. First, "
+        "The two fine-tuned models gained +26.5 and +16.5 Hit@1 on their own "
+        "distributions and +2.4 and -0.3 outside them. We offer an explanation "
+        "that the rest of our results support, and which predicts which "
+        "interventions succeed. Sorting every retrieval intervention we "
+        "measured by whether its effect survived a change of question style "
+        "produces a clean split. TRANSFERRED: statute-scope rules (rank 12 to "
+        "1), the query-side answerability check, corpus repairs. DID NOT "
+        "TRANSFER: fine-tuned embeddings (+2.4), cross-encoder reranking (rank "
+        "3 to 10), fusion-weight tuning (no gain).")
+    _body(doc,
+        "The dividing line is not complexity or cost. It is WHAT THE "
+        "INTERVENTION ENCODES. Everything in the first group encodes a "
+        "property of the law or the documents: which instrument governs urban "
+        "tenancy as against agricultural tenancy, what kind of fact a statute "
+        "can state, what the corpus actually contains. Everything in the "
+        "second learns a mapping from question surface form to passage.")
+    _body(doc,
+        "Legal language is the reason this matters more here than elsewhere. A "
+        "statutory corpus is small, highly structured, and written in a "
+        "register no user employs; the gap between a question and its answer "
+        "is a gap of REGISTER, not of topic. A model fine-tuned on one "
+        "generator's phrasing learns to close that specific gap, and a "
+        "differently-phrased question reopens it. The rule that the Punjab "
+        "Rented Premises Act 2009 governs shops and houses while the Punjab "
+        "Tenancy Act 1887 governs cultivators is true regardless of how the "
+        "question is worded, and it cost four milliseconds.")
+    _body(doc,
+        "The failure mode is consistent in the errors as well as the "
+        "aggregates. The same query - an exact citation lookup, 'What was "
+        "omitted by S.R.O. No. 1278 (1) 85?' - fell from rank 1 to absent "
+        "under the cross-encoder, under the constitutional model, and under "
+        "the general model. All three interventions traded lexical precision "
+        "for semantic similarity, because that is what optimising a dense "
+        "objective on paraphrased questions rewards. Fusion with BM25 "
+        "partially repairs the damage, which is further evidence that what was "
+        "lost was lexical rather than legal.")
+    _body(doc,
+        "We do not claim fine-tuning cannot work for legal retrieval. We claim "
+        "that training on questions from a single generator produces a model "
+        "fitted to that generator, that this is invisible when the test set "
+        "shares the generator, and that the in-distribution number is "
+        "therefore not evidence of deployment benefit. A model trained on "
+        "genuinely diverse, human-authored queries might behave differently; "
+        "we could not test that, because no such set exists for this "
+        "jurisdiction.")
+
+    _subheading(doc, "B", "Leakage-Free Evaluation Is the Load-Bearing "
+                          "Component")
+    _body(doc,
+        "Three of our results were wrong before they were checked (Section "
+        "V-H), and in every case the wrong version was the flattering one: a "
+        "corpus containing its own test answers, a gold-label join that made "
+        "correct retrievals look like failures, and a test set sharing targets "
+        "with training. None was visible in the metrics. Two were found only "
+        "because a number looked implausible - Hit@1 of exactly 0.000, and two "
+        "columns that agreed too closely. We draw three practical conclusions.")
+    _body(doc,
+        "CONTAMINATION IN RETRIEVAL SYSTEMS HAS MORE SURFACES THAN IN "
+        "CLASSIFICATION. A question can leak, a gold label can leak, and - as "
+        "here - the INDEX can leak, because the corpus under evaluation is "
+        "itself a system component. Deduplicating queries catches none of the "
+        "latter two.")
+    _body(doc,
+        "GENERATED EVALUATION SETS CARRY THEIR GENERATOR'S SIGNATURE. Both "
+        "datasets that supplied our labels were LLM-generated against statute. "
+        "That makes them usable as training signal, since the citation is a "
+        "checkable label, and unreliable as benchmarks, since a model trained "
+        "on one generator is tested on its own idiom. The +26.5 to +2.4 "
+        "collapse is the size of that effect.")
+    _body(doc,
+        "THE MEASUREMENT PROTOCOL DETERMINED THE CONCLUSIONS MORE THAN ANY "
+        "TECHNIQUE DID. Our largest reported gain, +6.6 Hit@1 under fusion, is "
+        "the one that survived every check. The three larger numbers did not "
+        "survive. A system paper that reports only its best configuration on "
+        "its own evaluation set is not making a weaker claim than ours - it is "
+        "making an unfalsifiable one.")
+
+    _subheading(doc, "C", "Future Work")
+    _body(doc,
+        "The immediate constraint is not method but measurement. Every "
+        "evaluation asset used here is either authored by the system's "
+        "developer or drawn from a training generator, and the honest "
+        "consequence is that we cannot presently prove an end-to-end "
+        "improvement.")
+    _body(doc,
+        "AN INDEPENDENT BENCHMARK, FROZEN BEFORE USE. We have identified 3,852 "
+        "Pakistani legal questions used to train none of our models. Labelling "
+        "a subset with two annotators, reporting Krippendorff's alpha, and "
+        "FREEZING half before any development begins would give the first "
+        "evaluation set this work could not have tuned against. "
+        "Pre-registering the predicted effect and opening the frozen half once "
+        "is what would convert a measurement into evidence.")
+    _body(doc,
+        "STRUCTURE-AWARE CHUNKING. Our strongest untested lever follows the "
+        "principle of Subsection A: it is structural. Between 20 and 27% of "
+        "each collection is under 200 characters - heading fragments competing "
+        "for retrieval slots - and 11% of failures are recall rather than "
+        "ranking. Aligning chunk boundaries to statutory structure and "
+        "prepending instrument and section metadata before embedding addresses "
+        "both, and should place the citation string inside the passage where "
+        "the lexical channel can reach it [24], [25].")
+    _body(doc,
+        "GENERATION CORRECTNESS. Every number in this paper measures "
+        "retrieval. Users receive generated answers, and we verify that "
+        "answers are GROUNDED in retrieved text without verifying that they "
+        "are CORRECT. Those differ, and the difference is where a legal "
+        "assistant causes harm: a fluent answer, correctly grounded in a "
+        "correctly retrieved provision, that misstates what the provision "
+        "means. Even at perfect retrieval we would have no evidence of legal "
+        "correctness. Establishing that requires practitioner adjudication of "
+        "emitted answers, and it is the measurement we would prioritise above "
+        "all others.")
+    _body(doc,
+        "FITTING THE CALIBRATION LAYER. The conformal and harm-matrix "
+        "machinery of Sections III-F and III-H is implemented and inert "
+        "pending labelled data. Once fitted, the coverage guarantee becomes "
+        "reportable and the harm ratio can be elicited from practitioners "
+        "rather than inherited from a threshold.")
+
+    _subheading(doc, "D", "Observations on the Governance Layer")
+    _body(doc,
+        "Four further findings from deployment generalise beyond this "
+        "system, and each concerns the governance layer rather than any model "
+        "in it. First, "
         "defence in depth at a single point in a pipeline is insufficient when "
         "alternative paths exist that skip that point. An "
         "intent-classification shortcut answered certain turns without entering "
         "the graph and so bypassed the injection gatekeeper entirely; the "
-        "classifier was not weak, it was simply not consulted. Any robustness "
-        "figure measured in that configuration is computed only over traffic "
+        "classifier was not weak, it was simply not consulted. A result cache "
+        "produced the same failure at the opposite end of the pipeline, serving "
+        "a stored answer without consulting the arbitration node that would "
+        "have refused it, so that a correction to the decision logic did not "
+        "take effect on cached traffic. Any robustness "
+        "figure measured in either configuration is computed only over traffic "
         "that reached the defended component, which is a measurement error "
         "rather than a model error. Second, in a specialised domain, "
         "keyword-based safety filters collide with legitimate vocabulary: our "
         "injection filter matched a power-of-attorney question containing the "
         "phrase 'unrestricted agent'. The cost of a false positive here is "
         "refusing a user with a genuine legal problem, which argues for narrow "
-        "patterns backed by a model layer rather than broad ones.")
+        "patterns backed by a model layer rather than broad ones. Third, a "
+        "confidence signal can be inverted rather than merely weak, and an "
+        "aggregate score will conceal this: the composite of Section V-A "
+        "appeared to behave reasonably while one of its components was "
+        "anti-correlated with correctness and two others were effectively "
+        "constant. We would encourage reporting per-signal separation, not only "
+        "aggregate confidence, in any system that combines heterogeneous "
+        "evidence. Fourth, formalising an informal rule changes behaviour, and "
+        "not only where expected: replacing the threshold ladder with the "
+        "expected-loss rule left the answer/refuse boundary at the same 0.20 "
+        "by derivation, but changed when the system asks a clarifying "
+        "question, since asking must now earn its friction against the "
+        "disagreement it could resolve. Weak but internally consistent "
+        "evidence is now refused rather than queried. We regard this as "
+        "correct - a clarification cannot improve an estimate the signals "
+        "already agree on - but it was not anticipated when the derivation was "
+        "undertaken.")
     _body(doc,
         "The work has substantive limitations, which we state rather than leave "
-        "to be discovered. Calibration is fitted on a modest volume of labelled "
-        "data drawn from a single deployment, so the mapping should be expected "
-        "to shift under a different user population; conformal methods [11] "
-        "would give coverage guarantees that our post-hoc fitting does not. "
+        "to be discovered. CALIBRATION IS NOT FITTED: the Platt and isotonic "
+        "transforms are implemented and remain identity maps pending labelled "
+        "data, so every confidence value we report is a ranked score and not a "
+        "probability, and the split-conformal layer [11] that would supply a "
+        "coverage guarantee is likewise implemented and unfitted. This is the "
+        "single largest gap between the architecture and the evidence for it. "
         "Relevance judgements are the authors' own, not adjudicated by "
         "qualified practitioners, which is a real constraint on any claim about "
         "legal correctness as opposed to retrieval quality. Evaluation queries "
         "were authored alongside the system, making them a bootstrap rather "
-        "than an independent benchmark. The cost vector in (2) is a hand-set "
-        "prior encoding a plausible ordering of harms, not a quantity elicited "
-        "from practitioners or derived from outcomes. Coverage is "
+        "than an independent benchmark. The harm ratio rho is not elicited: it "
+        "is set to the value implied by the deployed threshold, so (6) makes "
+        "the assumption explicit and auditable without making it correct. "
+        "Coverage is "
         "single-jurisdiction, and the corpus is weighted towards statute "
         "relative to case law, so performance on precedent-driven questions is "
         "likely weaker than on statutory ones. Finally, the pooled relevance "
@@ -737,9 +1551,38 @@ def build_paper(path: Path) -> None:
         "We further described an evaluation protocol that builds an "
         "abstention-aware test set by labelling recorded traffic, so that "
         "correct refusals are measured rather than discarded.")
-    _todo(doc, "Close with one concrete number once measured - ideally the "
-               "reduction in ungrounded answers from engine-aware "
-               "verification, which is the cleanest single result available.")
+    _body(doc,
+        "Our measurements argue that the hard part of abstention here is not "
+        "estimating confidence better but recognising that confidence is the "
+        "wrong quantity. The highest-weighted component of our own confidence "
+        "score was anti-correlated with answerability, favouring unanswerable "
+        "questions by 0.343; repairing it restored the ordering yet left the "
+        "two classes overlapping, and separation was obtained only by asking, "
+        "before any evidence was weighed, whether the corpus could hold the "
+        "answer at all. That question is answerable deterministically, and in a "
+        "domain where a confident wrong answer causes material harm, we would "
+        "rather decide it that way than infer it from a score.")
+    _body(doc,
+        "A second theme runs through the results and, we think, generalises "
+        "further. The interventions that improved this system durably were "
+        "those encoding something true about the law or the documents - which "
+        "instrument governs a dispute, what kind of fact a statute can state, "
+        "what the corpus actually contains. The interventions that learned a "
+        "mapping from question phrasing to passage produced larger headline "
+        "numbers and did not survive a change of question style. That "
+        "distinction was only visible because three of our own results were "
+        "wrong before they were checked, and the flattering version was the "
+        "wrong one every time.")
+    _body(doc,
+        "We therefore close on the measurement rather than the method. Every "
+        "evaluation asset used here is authored by the system's developer or "
+        "drawn from a training generator, and the honest consequence is that "
+        "we cannot yet prove an end-to-end improvement in the thing users "
+        "actually receive: a generated statement of law. Establishing that "
+        "requires an independent benchmark frozen before development and "
+        "practitioner adjudication of emitted answers. For a system whose "
+        "purpose is to tell people what the law says, that is not an extension "
+        "of the work. It is the work.")
 
     # Ethical considerations
     _para(doc, "ETHICAL CONSIDERATIONS", size=10, align="center",
@@ -757,7 +1600,7 @@ def build_paper(path: Path) -> None:
           space_after=4)
     _todo(doc, "VERIFY EVERY ENTRY BELOW against the actual paper before "
                "submitting - page numbers, volume, exact venue name and year. "
-               "Delete any you have not opened. Entries [19] and [20] are "
+               "Delete any you have not opened. Entries [19] and [21] are "
                "dataset resources whose citation form and licence must be "
                "confirmed.")
     for i, ref in enumerate(REFERENCES, 1):
@@ -766,6 +1609,37 @@ def build_paper(path: Path) -> None:
         p.paragraph_format.first_line_indent = Inches(-0.22)
 
     doc.save(path)
+
+
+def _verbatim(doc, text, size=7.5):
+    """Monospace block, used for the provenance record."""
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    pf = p.paragraph_format
+    pf.space_before = Pt(4)
+    pf.space_after = Pt(2)
+    pf.line_spacing = 1.0
+    pf.left_indent = Inches(0.08)
+    run = p.add_run(text)
+    run.font.name = "Consolas"
+    run.font.size = Pt(size)
+    return p
+
+
+def _figure(doc, filename, caption, number, width_in=3.4):
+    """Column-width figure with an IEEE caption. Built by build_figures.py."""
+    path = OUT_DIR / "figures" / filename
+    if not path.exists():
+        raise SystemExit(
+            f"missing {path}. Run:  backend/venv/Scripts/python.exe "
+            "paper/build_figures.py")
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(6)
+    p.paragraph_format.space_after = Pt(2)
+    p.add_run().add_picture(str(path), width=Inches(width_in))
+    _para(doc, f"Fig. {number}.  {caption}", size=8, align="justify",
+          space_after=6)
 
 
 def _equation(doc, text, number):
@@ -780,27 +1654,36 @@ def _equation(doc, text, number):
     run.italic = True
 
 
-def _table_corpus(doc):
-    _para(doc, "TABLE I.\tINDEXED CORPUS, BY COLLECTION", size=8,
-          align="center", space_before=6, space_after=3)
-    rows = [("Collection", "Chunks"),
-            ("Criminal", "1,735"),
-            ("Constitutional", "924"),
-            ("Civil", "396"),
-            ("Family", "226"),
-            ("Case law (LHC judgments)", "3,230")]
-    table = doc.add_table(rows=len(rows), cols=2)
+def _table(doc, caption, rows, bold_last_rows=0):
+    """IEEE-style small table. rows[0] is the header."""
+    _para(doc, caption, size=8, align="center", space_before=6, space_after=3)
+    ncol = len(rows[0])
+    table = doc.add_table(rows=len(rows), cols=ncol)
     table.style = "Table Grid"
-    for i, (a, b) in enumerate(rows):
-        for j, val in enumerate((a, b)):
+    for i, row in enumerate(rows):
+        for j, val in enumerate(row):
             cell = table.cell(i, j)
-            cell.text = val
+            cell.text = str(val)
             for para in cell.paragraphs:
                 para.paragraph_format.space_after = Pt(0)
                 for run in para.runs:
                     run.font.name = "Times New Roman"
                     run.font.size = Pt(8)
-                    run.bold = (i == 0)
+                    run.bold = (i == 0) or (i >= len(rows) - bold_last_rows
+                                            and bold_last_rows > 0)
+
+
+def _table_corpus(doc):
+    # Counts measured directly from the live index — see paper/README.md for the
+    # command. Do NOT hand-edit these; they drift silently otherwise.
+    _table(doc, "TABLE III.\tINDEXED CORPUS, BY COLLECTION",
+           [("Collection", "Chunks"),
+            ("Criminal", "3,304"),
+            ("Civil", "4,013"),
+            ("Constitutional", "1,736"),
+            ("Family", "989"),
+            ("Statutory subtotal", "10,042"),
+            ("Case law (judgments, 6 courts)", "7,529")])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -997,8 +1880,10 @@ def build_dossier(path: Path) -> None:
         "author's own.",
         "Single jurisdiction, and a corpus weighted towards statutes over "
         "case law.",
-        "The action cost vector is a hand-set prior, not derived. Expect a "
-        "reviewer to press on this.",
+        "RESOLVED: the action cost vector was not merely hand-set, it was "
+        "inert - 512 cost vectors over 65 decision points changed no action. "
+        "Replaced with an expected-loss rule over an explicit harm matrix; the "
+        "threshold is now the harm ratio by derivation. rho remains unelicited.",
         "A retrieval failure was observed on a legitimate Roman-Urdu family-law "
         "query, which returned zero chunks and was refused. Investigate before "
         "generating bulk traffic.",
