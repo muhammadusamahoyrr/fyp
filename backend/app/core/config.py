@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     llm_provider: str = "groq"
 
+    # Local Ollama. The model must actually be pulled — a name that isn't
+    # installed fails at request time, and with a cloud key present that
+    # failure is invisible: the chain silently falls through to a paid
+    # provider. Set llm_local_only=true to make that impossible.
+    ollama_model: str = "qwen2.5:7b"
+    ollama_fast_model: str = ""      # blank = use ollama_model for both tiers
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    llm_local_only: bool = False     # true = never call a paid provider
+
     # ChromaDB
     chroma_host: str = "chroma"
     chroma_port: int = 8001

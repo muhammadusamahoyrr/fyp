@@ -10,6 +10,13 @@ instead of crashing the request.
 Set LLM_PROVIDER=ollama to prefer a local Ollama server first (it still falls
 back to the cloud chain if Ollama is unavailable). Any other LLM_PROVIDER value
 just uses the standard Gemini → Groq → OpenRouter chain.
+
+Set LLM_LOCAL_ONLY=true to drop the cloud chain altogether. Use this for
+anything that must not spend money — bulk runs, warmup traffic, offline work.
+The fallback is a liability there rather than a safety net: a local failure
+would otherwise turn into a paid request nobody asked for, and a thousand of
+them before anyone noticed. OLLAMA_MODEL selects the local model and must name
+one that is actually pulled.
 """
 import logging
 from typing import Any
@@ -31,8 +38,20 @@ _MODELS = {
     "gemini":     {"main": "gemini-2.0-flash",                  "fast": "gemini-2.0-flash"},
     "groq":       {"main": "llama-3.3-70b-versatile",           "fast": "llama-3.1-8b-instant"},
     "openrouter": {"main": "meta-llama/llama-3.3-70b-instruct", "fast": "meta-llama/llama-3.1-8b-instruct"},
-    "ollama":     {"main": "llama3.1",                          "fast": "llama3.1"},
 }
+
+
+def _ollama_models() -> dict:
+    """Ollama model names, from settings rather than hardcoded.
+
+    This used to be pinned to "llama3.1", which is not what is necessarily
+    installed. A name that isn't pulled fails at request time, and when a cloud
+    key is configured that failure is silent: the chain falls straight through
+    to a paid provider and the run costs money it was meant not to.
+    """
+    main = (settings.ollama_model or "").strip() or "qwen2.5:7b"
+    fast = (settings.ollama_fast_model or "").strip() or main
+    return {"main": main, "fast": fast}
 
 
 # Cap on generated tokens per call.
@@ -102,7 +121,12 @@ def _build_ollama(model: str):
         from langchain_ollama import ChatOllama
     except ImportError as exc:
         raise _ProviderUnavailable("ollama: langchain-ollama is not installed") from exc
-    return ChatOllama(model=model, temperature=0.1, num_predict=MAX_OUTPUT_TOKENS)
+    return ChatOllama(
+        model=model,
+        temperature=0.1,
+        num_predict=MAX_OUTPUT_TOKENS,
+        base_url=settings.ollama_base_url,
+    )
 
 
 _BUILDERS = {
@@ -114,7 +138,20 @@ _BUILDERS = {
 
 
 def _provider_order() -> list[str]:
-    """Providers to try, in order. LLM_PROVIDER=ollama prepends local Ollama."""
+    """Providers to try, in order.
+
+    LLM_PROVIDER=ollama prepends local Ollama but still falls back to the cloud
+    chain, which is the right default for a deployment that wants local when it
+    can and service when it can't.
+
+    LLM_LOCAL_ONLY=true removes the cloud entirely. That is not the same
+    setting: "prefer local" and "never spend money" differ precisely when
+    Ollama fails, and that is the moment the distinction matters. Under
+    local-only an Ollama failure surfaces as an error, rather than becoming a
+    silent paid request against a balance the operator meant not to touch.
+    """
+    if settings.llm_local_only:
+        return ["ollama"]
     order = list(_FALLBACK_ORDER)
     if (settings.llm_provider or "").lower() == "ollama":
         order = ["ollama", *order]
@@ -179,7 +216,7 @@ def available_models(tier: str) -> list[tuple[str, str, Any]]:
     built: list[tuple[str, str, Any]] = []
     errors: list[str] = []
     for provider in _provider_order():
-        model = _MODELS[provider][tier]
+        model = (_ollama_models() if provider == "ollama" else _MODELS[provider])[tier]
         try:
             built.append((provider, model, _BUILDERS[provider](model)))
             logger.info("LLM provider available: %s (%s, %s)", provider, tier, model)
@@ -188,9 +225,18 @@ def available_models(tier: str) -> list[tuple[str, str, Any]]:
             logger.warning("LLM provider skipped — %s", exc)
     if not built:
         detail = "; ".join(errors) or "no providers configured"
+        # Under local-only, telling the operator to configure a cloud API key is
+        # advice to do the exact thing they set the flag to prevent.
+        fix = (
+            "Local-only mode is on, so the cloud chain is disabled. Install "
+            "langchain-ollama, start the Ollama server, and pull the model named "
+            f"by OLLAMA_MODEL ({_ollama_models()['main']})."
+            if settings.llm_local_only else
+            "Configure at least one of GEMINI_API_KEY, GROQ_API_KEY, or "
+            "OPENROUTER_API_KEY."
+        )
         raise RuntimeError(
-            "No language model is available right now. Configure at least one of "
-            "GEMINI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY. (" + detail + ")"
+            f"No language model is available right now. {fix} ({detail})"
         )
     return built
 

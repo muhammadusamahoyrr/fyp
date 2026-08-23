@@ -48,10 +48,10 @@ langchain-chroma==0.2.6
 langchain-huggingface==0.1.2
 langgraph==1.0.1
 nltk==3.9.4
+langchain-ollama==0.3.10   # local Ollama — required by LLM_LOCAL_ONLY runs
 # Optional LLM providers — install only if you point LLM_PROVIDER at them
 # (llm.py imports them lazily and falls back if absent):
 #   langchain-google-genai   # Gemini
-#   langchain-ollama         # local Ollama
 
 # Voice / STT
 faster-whisper
