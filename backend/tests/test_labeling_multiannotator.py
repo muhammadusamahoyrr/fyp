@@ -57,7 +57,8 @@ def test_progress_counts_distinct_turns_not_label_documents():
     Scoped to the LABELS collection: counting provenance documents is correct
     and stays."""
     src = _src(ls.stats)
-    assert 'get_retrieval_labels_col().distinct("request_id")' in src
+    assert 'get_retrieval_labels_col().distinct(' in src
+    assert '"request_id"' in src
     assert "get_retrieval_labels_col().count_documents({})" not in src
 
 

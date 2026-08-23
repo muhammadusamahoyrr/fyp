@@ -146,6 +146,21 @@ def _prompt_chunks(prov: dict, top_k: int) -> dict[str, bool] | None:
               f"(ranks {len(chunks) + 1}-{total} left unjudged)")
 
     texts  = _chunk_texts(prov.get("case_type", ""), [c["chunk_id"] for c in chunks])
+
+    # A chunk whose text cannot be recovered is UNJUDGEABLE, and inviting a
+    # judgement anyway is worse than skipping it. The corpus was re-ingested
+    # after the earliest turns were recorded and chunk ids changed scheme
+    # (hash-suffixed -> statutes_<slug>_<NNNN>), so some recorded ids now
+    # resolve to nothing. Shown a blank body, protocol section 4 tells the
+    # annotator to answer "not relevant" — which would fill the set with
+    # confident irrelevance judgements nobody actually made.
+    if not any(texts.get(c["chunk_id"]) for c in chunks):
+        print("  ⚠ none of the retrieved chunks resolve in the current corpus "
+              "— skipping.")
+        print("    (recorded ids predate the re-ingest; see --stats for how "
+              "many turns this affects)")
+        return None
+
     labels: dict[str, bool] = {}
 
     for i, chunk in enumerate(chunks, 1):
@@ -156,6 +171,14 @@ def _prompt_chunks(prov: dict, top_k: int) -> dict[str, bool] | None:
             chunk.get("statute", ""),
             f"s.{chunk['section_number']}" if chunk.get("section_number") else "",
         ]))
+        if not body:
+            # Left out of `labels` entirely rather than defaulted: an unjudged
+            # rank is missing data, and recording it as irrelevant would
+            # understate every retrieval metric computed from this set.
+            print(_rule())
+            print(f"  chunk {i}/{len(chunks)}  {head or cid}")
+            print("  ⚠ text unavailable — left UNJUDGED, not marked irrelevant")
+            continue
         print(f"  chunk {i}/{len(chunks)}  {head or cid}")
         print(_rule())
         print(f"  {body[:_PREVIEW_CHARS] or '(text unavailable)'}")
@@ -208,9 +231,12 @@ async def cmd_stats() -> None:
     print(_rule("="))
     print(f"  provenance records : {s['provenance_records']}")
     print(f"  labelable (answers): {s['labelable']}")
-    print(f"  labeled            : {s['labeled']}")
+    print(f"  labeled (human)    : {s['labeled']}")
     print(f"  remaining          : {s['remaining']}")
     print(f"  coverage           : {s['coverage'] * 100:.1f}%")
+    if s.get("baseline_labeled"):
+        print(f"  machine baseline   : {s['baseline_labeled']} "
+              "(excluded from the eval set — see agreement.py)")
 
     print("\n  by turn type (all audited, only answers are labelable):")
     for turn, count in s["by_turn_type"].items():
@@ -285,7 +311,11 @@ async def cmd_label(limit: int, labeler: str, top_k: int) -> None:
                 chunk_labels   = chunk_labels,
                 answer_verdict = verdict,
                 labeler        = labeler,
-                labeled_depth  = top_k or len(chunk_labels),
+                # What was ACTUALLY judged, not what was pooled: chunks whose
+                # text could not be recovered are skipped above, and claiming
+                # depth 5 when three were judged would treat two unjudged
+                # ranks as irrelevant.
+                labeled_depth  = len(chunk_labels),
             )
             saved += 1
             n_rel = sum(1 for ok in chunk_labels.values() if ok)

@@ -111,9 +111,31 @@ def krippendorff_alpha(units: dict[Any, list[Any]]) -> Optional[float]:
 
 # ── Gathering judgements ─────────────────────────────────────────────────────
 
-async def _labels_by_request() -> dict[str, list[dict]]:
+# Machine-authored baseline labels are stored alongside human ones and are
+# excluded HERE, at the single point every consumer reads through — agreement,
+# adjudication, the authoritative set, both exports, and therefore calibration
+# and the conformal threshold.
+#
+# The exclusion is not fastidiousness. A baseline label is authored by the same
+# system under evaluation, so admitting one has two distinct failure modes:
+# on a turn no human has reached it would become authoritative outright (a
+# singly-labelled turn is authoritative by rule 2 below) and flow into the
+# calibration set, making the coverage guarantee self-certified; and on a turn
+# a human does reach it would count as a second annotator, so Krippendorff's
+# alpha would report machine-human concordance while claiming to report
+# agreement between two independent people.
+_HUMAN_ONLY = {"is_baseline": {"$ne": True}}
+
+
+async def _labels_by_request(include_baseline: bool = False) -> dict[str, list[dict]]:
+    """Labels grouped by turn. Human judgements only unless explicitly asked.
+
+    `include_baseline=True` exists for reporting a baseline against the human
+    set — never for building one.
+    """
+    query = {} if include_baseline else dict(_HUMAN_ONLY)
     out: defaultdict[str, list[dict]] = defaultdict(list)
-    async for d in get_retrieval_labels_col().find({}, {"_id": 0}):
+    async for d in get_retrieval_labels_col().find(query, {"_id": 0}):
         out[d["request_id"]].append(d)
     return dict(out)
 

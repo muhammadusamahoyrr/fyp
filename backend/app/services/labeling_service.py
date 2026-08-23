@@ -72,6 +72,7 @@ async def save_label(
     notes:         str = "",
     labeled_depth: int = 0,
     is_adjudication: bool = False,
+    is_baseline:   bool = False,
 ) -> dict:
     """
     Record one human judgement. Idempotent per (request_id, labeler) — the same
@@ -88,6 +89,13 @@ async def save_label(
 
     `is_adjudication` marks a tie-breaking judgement that supersedes the
     annotators it resolves. See agreement.py.
+
+    `is_baseline` marks a MACHINE-authored judgement. It is stored, and it is
+    excluded from agreement, adjudication, the authoritative set and every
+    export — see _HUMAN_ONLY in agreement.py for why. It exists to smoke-test
+    the pipeline and to report how a machine annotator compares against the
+    humans; it can never become evaluation data. A baseline label must still
+    carry a labeler name, and that name should say what produced it.
 
     `labeled_depth` is how far down the ranked list the human actually looked
     (0 = every retrieved chunk). This is load-bearing, not bookkeeping: chunks
@@ -126,6 +134,7 @@ async def save_label(
         "labeled_depth":   labeled_depth or len(chunk_labels),
         "labeler":         labeler,
         "is_adjudication": is_adjudication,
+        "is_baseline":     is_baseline,
         "notes":           notes,
         "labeled_at":      datetime.now(timezone.utc),
     }
@@ -144,7 +153,11 @@ async def labeled_request_ids(labeler: str = "") -> set[str]:
     tool and is told there is nothing left to do, which is precisely how a set
     ends up single-labelled and unusable for agreement.
     """
-    query = {"labeler": labeler} if labeler else {}
+    # Scoped to one labeler, baseline rows are that labeler's own work and
+    # belong in the answer. Unscoped, they must not count: a machine baseline
+    # over the whole pool would otherwise empty the queue and tell the first
+    # human annotator there was nothing to label.
+    query = {"labeler": labeler} if labeler else {"is_baseline": {"$ne": True}}
     cursor = get_retrieval_labels_col().find(query, {"request_id": 1, "_id": 0})
     return {d["request_id"] async for d in cursor}
 
@@ -208,8 +221,16 @@ async def stats() -> dict:
     # carry two annotators plus an adjudication would report 300% coverage and
     # tell the annotators they were finished when a third of the set was
     # untouched.
-    labeled_ids = await get_retrieval_labels_col().distinct("request_id")
+    # HUMAN labels only. Progress toward the 200-turn target measures human
+    # judgement, so a machine baseline must not read as coverage — that would
+    # report the set finished while it is untouched.
+    labeled_ids = await get_retrieval_labels_col().distinct(
+        "request_id", {"is_baseline": {"$ne": True}}
+    )
     labeled     = len(labeled_ids)
+    baseline_ids = await get_retrieval_labels_col().distinct(
+        "request_id", {"is_baseline": True}
+    )
 
     by_turn: dict[str, int] = {}
     for turn in ("answer", "clarification", "blocked"):
@@ -229,13 +250,16 @@ async def stats() -> dict:
     # trustworthy, because ranks below it were never judged.
     depths = [
         d.get("labeled_depth", 0)
-        async for d in get_retrieval_labels_col().find({}, {"labeled_depth": 1, "_id": 0})
+        async for d in get_retrieval_labels_col().find(
+            {"is_baseline": {"$ne": True}}, {"labeled_depth": 1, "_id": 0}
+        )
     ]
 
     return {
         "provenance_records": total,
         "labelable":          labelable,
         "labeled":            labeled,
+        "baseline_labeled":   len(baseline_ids),
         "remaining":          max(labelable - labeled, 0),
         "coverage":           round(labeled / labelable, 4) if labelable else 0.0,
         "by_turn_type":       by_turn,
