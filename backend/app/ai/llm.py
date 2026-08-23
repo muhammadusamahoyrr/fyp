@@ -35,6 +35,22 @@ _MODELS = {
 }
 
 
+# Cap on generated tokens per call.
+#
+# Left unset, an OpenAI-compatible provider bills against the model's full
+# context: OpenRouter refused every request with 402 "you requested up to 65536
+# tokens, but can only afford 5308" on an account that had credit for hundreds
+# of real answers. The ceiling is what is RESERVED, not what is spent, so an
+# unset value prices a two-paragraph answer as if it were a novel.
+#
+# 2000 fits this app's longest real output. Answers are a structured
+# Issue/Applicable Law/Analysis block over retrieved statute text, and the
+# provenance preview cap is 500 characters; drafting runs long but streams
+# through its own path. Raise deliberately if a real answer is ever truncated —
+# not as a precaution.
+MAX_OUTPUT_TOKENS = 2000
+
+
 class _ProviderUnavailable(Exception):
     """A provider cannot be built (missing package or unconfigured key)."""
 
@@ -50,13 +66,23 @@ def _build_gemini(model: str):
         from langchain_google_genai import ChatGoogleGenerativeAI
     except ImportError as exc:  # package not installed in this env
         raise _ProviderUnavailable("gemini: langchain-google-genai is not installed") from exc
-    return ChatGoogleGenerativeAI(model=model, google_api_key=settings.gemini_api_key, temperature=0.1)
+    return ChatGoogleGenerativeAI(
+        model=model,
+        google_api_key=settings.gemini_api_key,
+        temperature=0.1,
+        max_output_tokens=MAX_OUTPUT_TOKENS,
+    )
 
 
 def _build_groq(model: str):
     if not _key_ok(settings.groq_api_key):
         raise _ProviderUnavailable("groq: GROQ_API_KEY is not configured")
-    return ChatGroq(model=model, api_key=settings.groq_api_key, temperature=0.1)
+    return ChatGroq(
+        model=model,
+        api_key=settings.groq_api_key,
+        temperature=0.1,
+        max_tokens=MAX_OUTPUT_TOKENS,
+    )
 
 
 def _build_openrouter(model: str):
@@ -67,6 +93,7 @@ def _build_openrouter(model: str):
         openai_api_key=settings.openrouter_api_key,
         openai_api_base=_OPENROUTER_BASE,
         temperature=0.1,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
 
 
@@ -75,7 +102,7 @@ def _build_ollama(model: str):
         from langchain_ollama import ChatOllama
     except ImportError as exc:
         raise _ProviderUnavailable("ollama: langchain-ollama is not installed") from exc
-    return ChatOllama(model=model, temperature=0.1)
+    return ChatOllama(model=model, temperature=0.1, num_predict=MAX_OUTPUT_TOKENS)
 
 
 _BUILDERS = {
