@@ -36,9 +36,23 @@ def _user_or_ip(request: Request) -> str:
 # window internally). Empty REDIS_URL → in-memory (per-worker, dev default).
 # swallow_errors: if Redis hiccups, fail OPEN (skip limiting) rather than 500
 # the request — availability of auth/voice endpoints beats strict limiting.
+# slowapi builds its OWN Redis connection from storage_uri — it does not share
+# app.core.redis_client's. That client sets health_check_interval; this one had
+# nothing, which is why a hosted Redis (Upstash, which closes idle connections)
+# dropped the limiter's socket while the app's own client stayed healthy. These
+# options are passed straight through to redis.from_url by limits, and mirror
+# what the app client already uses. Empty on memory:// storage, which takes no
+# connection options.
+_STORAGE_OPTIONS = {
+    "health_check_interval": 30,   # ping idle connections before reusing them
+    "socket_keepalive": True,      # notice a silently dropped socket
+    "retry_on_timeout": True,      # one retry beats a swallowed miss
+} if settings.redis_url else {}
+
 limiter = Limiter(
     key_func=_user_or_ip,
     storage_uri=settings.redis_url or "memory://",
+    storage_options=_STORAGE_OPTIONS,
     swallow_errors=True,
 )
 
