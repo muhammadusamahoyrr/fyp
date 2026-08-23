@@ -14,30 +14,30 @@ const Svg = ({ size = 16, color, strokeWidth = 1.8, fill = 'none', children }) =
     {children}
   </svg>
 );
-const IcEye     = ({ s, c }) => <Svg size={s} color={c}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></Svg>;
-const IcEyeOff  = ({ s, c }) => <Svg size={s} color={c}><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></Svg>;
-const IcUser    = ({ s, c }) => <Svg size={s} color={c}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></Svg>;
-const IcMail    = ({ s, c }) => <Svg size={s} color={c}><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></Svg>;
-const IcPhone   = ({ s, c }) => <Svg size={s} color={c}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.27h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.82a16 16 0 0 0 5.89 5.89l1.87-1.87a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></Svg>;
-const IcLock    = ({ s, c }) => <Svg size={s} color={c}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></Svg>;
-const IcCert    = ({ s, c }) => <Svg size={s} color={c}><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></Svg>;
-const IcCheck   = ({ s, c }) => <Svg size={s} color={c} strokeWidth={2.5}><polyline points="20,6 9,17 4,12"/></Svg>;
-const IcArrow   = ({ s, c }) => <Svg size={s} color={c} strokeWidth={2.2}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12,5 19,12 12,19"/></Svg>;
-const IcScale   = ({ s, c }) => <Svg size={s} color={c}><path d="M12 2v20M3 6l9-4 9 4M4 10l8 4 8-4M4 18l8 4 8-4"/></Svg>;
+const IcEye = ({ s, c }) => <Svg size={s} color={c}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></Svg>;
+const IcEyeOff = ({ s, c }) => <Svg size={s} color={c}><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" /></Svg>;
+const IcUser = ({ s, c }) => <Svg size={s} color={c}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Svg>;
+const IcMail = ({ s, c }) => <Svg size={s} color={c}><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M22 7l-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></Svg>;
+const IcPhone = ({ s, c }) => <Svg size={s} color={c}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.27h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.82a16 16 0 0 0 5.89 5.89l1.87-1.87a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></Svg>;
+const IcLock = ({ s, c }) => <Svg size={s} color={c}><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></Svg>;
+const IcCert = ({ s, c }) => <Svg size={s} color={c}><circle cx="12" cy="8" r="6" /><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11" /></Svg>;
+const IcCheck = ({ s, c }) => <Svg size={s} color={c} strokeWidth={2.5}><polyline points="20,6 9,17 4,12" /></Svg>;
+const IcArrow = ({ s, c }) => <Svg size={s} color={c} strokeWidth={2.2}><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12,5 19,12 12,19" /></Svg>;
+const IcScale = ({ s, c }) => <Svg size={s} color={c}><path d="M12 2v20M3 6l9-4 9 4M4 10l8 4 8-4M4 18l8 4 8-4" /></Svg>;
 
 /* ─── Mesh background ─────────────────────────────────────────── */
 function MeshBg() {
   const nodes = [
-    [80,80],[220,140],[400,60],[520,190],[170,270],
-    [310,320],[460,300],[60,390],[270,430],[500,410],
-    [370,185],[145,200],[440,105],[560,320],[35,210],
-    [620,150],[680,380],[720,80],[750,260],[600,450],
+    [80, 80], [220, 140], [400, 60], [520, 190], [170, 270],
+    [310, 320], [460, 300], [60, 390], [270, 430], [500, 410],
+    [370, 185], [145, 200], [440, 105], [560, 320], [35, 210],
+    [620, 150], [680, 380], [720, 80], [750, 260], [600, 450],
   ];
   const edges = [
-    [0,1],[0,14],[1,2],[1,4],[1,11],[2,12],[2,3],[3,6],[3,10],
-    [4,5],[4,11],[5,6],[5,8],[6,9],[7,8],[8,9],[10,3],[10,5],
-    [10,12],[11,4],[12,3],[13,6],[13,9],[14,4],[15,2],[15,12],
-    [16,9],[16,13],[17,15],[18,16],[18,13],[19,16],
+    [0, 1], [0, 14], [1, 2], [1, 4], [1, 11], [2, 12], [2, 3], [3, 6], [3, 10],
+    [4, 5], [4, 11], [5, 6], [5, 8], [6, 9], [7, 8], [8, 9], [10, 3], [10, 5],
+    [10, 12], [11, 4], [12, 3], [13, 6], [13, 9], [14, 4], [15, 2], [15, 12],
+    [16, 9], [16, 13], [17, 15], [18, 16], [18, 13], [19, 16],
   ];
   return (
     <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0.12 }}
@@ -91,17 +91,17 @@ export default function RegisterPage() {
   const D = DARK;
   const L = LIGHT;
 
-  const [role,      setRole]      = useState('client');
+  const [role, setRole] = useState('client');
   const [firstName, setFirstName] = useState('');
-  const [lastName,  setLastName]  = useState('');
-  const [email,     setEmail]     = useState('');
-  const [phone,     setPhone]     = useState('');
-  const [cnic,      setCnic]      = useState('');
-  const [password,  setPassword]  = useState('');
-  const [showPw,    setShowPw]    = useState(false);
-  const [terms,     setTerms]     = useState(false);
-  const [loading,   setLoading]   = useState(false);
-  const [apiError,  setApiError]  = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [cnic, setCnic] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [terms, setTerms] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState('');
 
   // Redirect already-authenticated users (only after auth hydration finishes)
   useEffect(() => {
@@ -112,7 +112,7 @@ export default function RegisterPage() {
 
   const strength = password.length === 0 ? 0
     : password.length < 8 ? 1
-    : (password.length >= 12 && /[A-Z]/.test(password) && /[0-9]/.test(password)) ? 3 : 2;
+      : (password.length >= 12 && /[A-Z]/.test(password) && /[0-9]/.test(password)) ? 3 : 2;
   const sColors = [D.border, D.danger, D.warn, D.success];
   const sLabels = ['', 'Weak — use 8+ characters', 'Good — add numbers', 'Strong ✓'];
 
@@ -141,7 +141,7 @@ export default function RegisterPage() {
       router.push('/login');
       return;
     }
-    if (role === 'lawyer') { try { localStorage.removeItem(ONBOARDED_KEY); } catch {} }
+    if (role === 'lawyer') { try { localStorage.removeItem(ONBOARDED_KEY); } catch { } }
     login(tokenData);
     router.push(tokenData.role === 'lawyer' ? '/lawyer' : '/dashboard');
   }
@@ -161,11 +161,42 @@ export default function RegisterPage() {
         .chk { accent-color: ${L.primary}; width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; margin-top: 1px; }
         .rg-card::-webkit-scrollbar { display: none; }
         .rg-card { scrollbar-width: none; -ms-overflow-style: none; }
+
+        /* Auth shell — flex row on desktop, stacks on tablet/mobile.
+           Kept in CSS (not inline) so the media queries below can win. */
+        .auth-shell {
+          height: 100vh; overflow: hidden;
+          display: flex; align-items: center; justify-content: center;
+          gap: 48px; padding: 0 64px;
+        }
+        .auth-hero {
+          flex: 1 1 440px; max-width: 440px; z-index: 1;
+          display: flex; flex-direction: column; align-items: flex-start;
+        }
+        .auth-card-wrap { flex: 0 0 440px; width: 440px; max-width: 100%; z-index: 1; }
+
+        @media (max-width: 1024px) {
+          html, body { height: auto; overflow: auto; }
+          .auth-shell {
+            height: auto; min-height: 100vh; overflow-y: auto;
+            flex-direction: column; justify-content: flex-start;
+            gap: 28px; padding: 40px 20px;
+          }
+          .auth-hero { flex: none; max-width: 100%; align-items: center; text-align: center; }
+          .auth-hero-extras { display: none; }
+          .auth-hero img { width: 84px !important; height: 84px !important; }
+          .auth-hero > div:first-child { margin-bottom: 0 !important; }
+          .auth-card-wrap { flex: none; width: 100%; max-width: 440px; }
+          .rg-card { max-height: none !important; overflow-y: visible !important; }
+        }
+        @media (max-width: 420px) {
+          .auth-shell { padding: 24px 14px; }
+        }
       `}</style>
 
       {/* ── Full dark background ─────────────────────────────── */}
-      <div style={{
-        height: '100vh', width: '100vw', overflow: 'hidden',
+      <div className="auth-shell" style={{
+        width: '100%',
         background: `linear-gradient(140deg, ${D.bg} 0%, #162E38 55%, #0E2028 100%)`,
         fontFamily: "'Inter', sans-serif",
         position: 'relative',
@@ -177,12 +208,7 @@ export default function RegisterPage() {
         <div style={{ position: 'absolute', width: 400, height: 400, borderRadius: '50%', background: 'radial-gradient(circle, rgba(64,240,220,0.06) 0%, transparent 65%)', bottom: -80, right: 340, pointerEvents: 'none' }} />
 
         {/* ── LEFT — hero ────────────────────────────────────── */}
-        <div style={{
-          position: 'absolute',
-          left: 64, top: '50%', transform: 'translateY(-50%)',
-          maxWidth: 440, zIndex: 1,
-          display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-        }}>
+        <div className="auth-hero">
           {/* Logo + brand */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 32 }}>
             <img src="/logo.png" alt="AttorneyAI"
@@ -197,6 +223,7 @@ export default function RegisterPage() {
             </div>
           </div>
 
+          <div className="auth-hero-extras">
           <h1 style={{ fontSize: 'clamp(28px, 3vw, 42px)', fontWeight: 800, color: D.text, lineHeight: 1.12, letterSpacing: '-0.02em', marginBottom: 16, maxWidth: 380 }}>
             Start Your<br />Legal Journey
           </h1>
@@ -224,14 +251,11 @@ export default function RegisterPage() {
             <span style={{ fontSize: 13 }}>⚡</span>
             <span style={{ fontSize: 12, color: D.textDim, fontWeight: 500 }}>Free to get started — no credit card required</span>
           </div>
+          </div>
         </div>
 
         {/* ── RIGHT — floating white card ──────────────────────── */}
-        <div style={{
-          position: 'absolute',
-          right: 72, top: '50%', transform: 'translateY(-50%)',
-          width: 440, zIndex: 1,
-        }}>
+        <div className="auth-card-wrap">
           <div className="rg-card" style={{
             background: L.surface,
             borderRadius: 28,
@@ -267,7 +291,9 @@ export default function RegisterPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
 
               {/* Name row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9 }}>
+              {/* minmax(0,1fr): grid items default to min-width:auto, which lets
+                  the inputs push the row wider than the card on narrow screens. */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 9 }}>
                 <Field label="First Name">
                   <Input placeholder="Ahmad" value={firstName} onChange={e => setFirstName(e.target.value)}
                     icon={<IcUser s={13} c={L.textFaint} />} />

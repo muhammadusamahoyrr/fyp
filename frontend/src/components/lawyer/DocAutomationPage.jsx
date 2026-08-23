@@ -144,7 +144,7 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
             </div>
 
             {/* Hero Cards */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
                 {[
                     { label: "New Document", sub: "Start with a blank legal document.", icon: I.plus, color: t.primary, onClick: () => onSelect({ id: 0, name: "Blank Document", cat: "General", desc: "", icon: "📄" }) },
                     { label: "My Drafts", sub: `${drafts.length} saved draft${drafts.length === 1 ? "" : "s"} — continue where you left off.`, icon: I.save, color: t.warn, onClick: () => setShowDrafts(v => !v) },
@@ -202,7 +202,7 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
             )}
 
             {/* Template Grid */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {filtered.map(tmpl => (
                     <button key={tmpl.id} onClick={() => onSelect(tmpl)}
                         style={{ padding: "18px 18px 16px", borderRadius: 14, textAlign: "left", border: `1.5px solid ${t.border}`, background: t.card, cursor: "pointer", transition: "all .18s", position: "relative" }}
@@ -845,7 +845,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                         </div>
 
                         <div style={{ padding: 16, overflowY: "auto" }}>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
                                 <input value={urduMeta.court_ur} onChange={e => setUrduMeta(m => ({ ...m, court_ur: e.target.value }))} placeholder="عدالت (court header, optional)" dir="rtl"
                                     style={{ padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${t.border}`, background: t.card, color: t.text, fontSize: 13, fontFamily: "inherit", outline: "none" }} />
                                 <input value={urduMeta.title_ur} onChange={e => setUrduMeta(m => ({ ...m, title_ur: e.target.value }))} placeholder="عنوان (title, optional)" dir="rtl"
@@ -952,7 +952,7 @@ function DocAutomationPage() {
     }, []);
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", position: "fixed", top: 0, left: sidebarCollapsed ? 56 : 240, right: 0, bottom: 0, background: t.bg, zIndex: 10, transition: "left .25s ease" }}>
+        <div className="lw-fixed-pane" style={{ display: "flex", flexDirection: "column", position: "fixed", top: 0, left: sidebarCollapsed ? 56 : 240, right: 0, bottom: 0, background: t.bg, zIndex: 10, transition: "left .25s ease" }}>
             {/* Case selector strip — always visible */}
             {apiCases.length > 0 && (
                 <div style={{ flexShrink: 0, padding: "8px 24px", background: t.surface, borderBottom: `1px solid ${t.border}`, display: "flex", alignItems: "center", gap: 10 }}>

@@ -5,6 +5,7 @@ import { DARK, LIGHT, ThemeCtx, ToggleCtx, CaseCtx, NotifCtx } from "./theme.js"
 import { ToastContainer } from "@/components/shared/Toast.jsx";
 import { injectGS } from "./globalStyles.js";
 import { Sidebar, Topbar, ActiveCaseBanner } from "./layout.jsx";
+import { Icon, I } from "./icons.jsx";
 import { DashboardPage } from "./DashboardPage.jsx";
 import { CasesPage } from "./CasesPage.jsx";
 import { DocWorkflowApp } from "./DocumentsPage.jsx";
@@ -71,6 +72,7 @@ export default function App({ initialPage = "dashboard" }) {
         return () => { cancelled = true; };
     }, [initialPage]);
     const [collapsed, setCollapsed] = useState(false);
+    const [navOpen, setNavOpen] = useState(false);   // mobile sidebar drawer
     const [activeCase, setActiveCaseState] = useState(null);
     const [openCaseId, setOpenCaseId] = useState(null);           // FIX: global workspace state
     const [notifs, setNotifs] = useState([]);
@@ -168,7 +170,28 @@ export default function App({ initialPage = "dashboard" }) {
                             : "radial-gradient(ellipse at 15% 12%, rgba(44,96,110,0.07) 0%, transparent 52%), radial-gradient(ellipse at 82% 78%, rgba(44,140,150,0.05) 0%, transparent 48%), radial-gradient(ellipse at 48% 95%, rgba(91,140,212,0.04) 0%, transparent 42%)" }} />
                         {/* Noise texture overlay */}
                         <div aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0, opacity: t.mode === "dark" ? 0.035 : 0.022, backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")" }} />
-                        {page !== "onboarding" && <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} unreadMsgs={unreadMsgs} toggleTheme={toggle} isDark={isDark} />}
+                        {page !== "onboarding" && (
+                            <>
+                                {/* Mobile hamburger — .lw-burger hides it above 900px */}
+                                <button
+                                    className="lw-burger"
+                                    onClick={() => setNavOpen(true)}
+                                    aria-label="Open navigation"
+                                    aria-expanded={navOpen}
+                                    style={{
+                                        position: "fixed", top: 12, left: 12, zIndex: 50,
+                                        width: 38, height: 38, borderRadius: 10,
+                                        background: t.surface, border: `1px solid ${t.border}`,
+                                        color: t.primary, cursor: "pointer",
+                                    }}>
+                                    <Icon d={I.menu} size={17} />
+                                </button>
+                                {navOpen && <div className="lw-scrim" onClick={() => setNavOpen(false)} aria-hidden />}
+                                <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed}
+                                    unreadMsgs={unreadMsgs} toggleTheme={toggle} isDark={isDark}
+                                    mobileOpen={navOpen} onNavigate={() => setNavOpen(false)} />
+                            </>
+                        )}
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0, position: "relative", zIndex: 1 }}>
                             {!hideTopbar && <Topbar page={page} collapsed={collapsed} setCollapsed={setCollapsed} toggleTheme={toggle} />}
                             {/* Active case banner — visible on all pages except ai-legal */}
@@ -176,7 +199,7 @@ export default function App({ initialPage = "dashboard" }) {
                                 <ActiveCaseBanner caseId={activeCase} onClear={() => { setActiveCaseState(null); setOpenCaseId(null); }} />
                             )}
                             {/* FIX: removed key={page} — was destroying all page state on every navigation */}
-                            <main ref={mainRef} data-lenis-prevent className="page-enter" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: ["ai-legal", "cases", "doc-automation", "documents", "onboarding"].includes(page) ? "hidden" : "auto", scrollBehavior: "smooth", padding: ["ai-legal", "cases", "doc-automation", "documents", "onboarding"].includes(page) ? 0 : 24 }}>
+                            <main ref={mainRef} data-lenis-prevent className="page-enter lw-main" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: ["ai-legal", "cases", "doc-automation", "documents", "onboarding"].includes(page) ? "hidden" : "auto", scrollBehavior: "smooth", padding: ["ai-legal", "cases", "doc-automation", "documents", "onboarding"].includes(page) ? 0 : 24 }}>
                                 {page === "onboarding"
                                     ? <OnboardingPage t={t} role="lawyer" onComplete={() => {
                                         try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch {}

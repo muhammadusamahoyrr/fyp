@@ -30,7 +30,24 @@ export default function AdminApp({ initialSection = 'dashboard' }) {
   const T = DARK;
   const normalizedInitial = PAGE_MAP[initialSection] ? initialSection : 'dashboard';
   const [nav, setNav] = useState(normalizedInitial);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const Page = useMemo(() => PAGE_MAP[nav] ?? Dashboard, [nav]);
+
+  // Lock body scroll while the mobile drawer is open.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [drawerOpen]);
+
+  // Close the drawer on Escape.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = e => { if (e.key === 'Escape') setDrawerOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawerOpen]);
 
   useEffect(() => {
     const id = 'admin-gs'; if (document.getElementById(id)) return;
@@ -40,6 +57,18 @@ export default function AdminApp({ initialSection = 'dashboard' }) {
       .admin-card-lift{transition:transform .22s cubic-bezier(.4,0,.2,1),box-shadow .22s cubic-bezier(.4,0,.2,1)}
       .admin-card-lift:hover{transform:translateY(-3px);box-shadow:0 14px 38px rgba(0,0,0,.5),0 0 0 1px rgba(64,240,220,0.12)}
       @keyframes adminFadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+      .admin-burger{display:none}
+      .admin-scrim{display:none}
+      @media (max-width:900px){
+        .admin-sidebar{position:fixed;top:0;left:0;bottom:0;z-index:60;
+          transform:translateX(-100%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+          box-shadow:0 0 40px rgba(0,0,0,.5)}
+        .admin-sidebar.open{transform:translateX(0)}
+        .admin-scrim{display:block;position:fixed;inset:0;z-index:55;
+          background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
+        .admin-burger{display:inline-flex;align-items:center;justify-content:center}
+        .admin-main{padding:16px !important;padding-top:64px !important}
+      }
     `;
     document.head.appendChild(s);
   }, []);
@@ -52,8 +81,28 @@ export default function AdminApp({ initialSection = 'dashboard' }) {
       {/* Noise texture overlay */}
       <div aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0, opacity: 0.035,
         backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")" }} />
+      {/* Mobile hamburger — hidden above 900px by .admin-burger */}
+      <button
+        className="admin-burger"
+        onClick={() => setDrawerOpen(true)}
+        aria-label="Open navigation"
+        aria-expanded={drawerOpen}
+        style={{
+          position: 'fixed', top: 14, left: 14, zIndex: 50,
+          width: 38, height: 38, borderRadius: 10,
+          background: T.surface, border: `1px solid ${T.border}`,
+          color: T.primary, cursor: 'pointer',
+        }}>
+        <Ic d="M3 6h18M3 12h18M3 18h18" size={18} color={T.primary} />
+      </button>
+
+      {/* Scrim — only rendered while the drawer is open */}
+      {drawerOpen && (
+        <div className="admin-scrim" onClick={() => setDrawerOpen(false)} aria-hidden />
+      )}
+
       {/* Sidebar */}
-      <aside style={{ width: 220, background: T.surface, borderRight: `1px solid ${T.border}`, display: 'flex', flexDirection: 'column', padding: '24px 0', flexShrink: 0, position: 'relative', zIndex: 1 }}>
+      <aside className={`admin-sidebar${drawerOpen ? ' open' : ''}`} style={{ width: 220, background: T.surface, borderRight: `1px solid ${T.border}`, display: 'flex', flexDirection: 'column', padding: '24px 0', flexShrink: 0, position: 'relative', zIndex: 1 }}>
         <div style={{ padding: '0 20px 24px', borderBottom: `1px solid ${T.border}40` }}>
           <span style={{ fontFamily: "'Cormorant Garamond',serif", fontSize: 20, fontWeight: 700, color: T.primary }}>AttorneyAI</span>
           <div style={{ fontSize: 10, color: T.textFaint, fontWeight: 600, letterSpacing: '.06em', marginTop: 2 }}>ADMIN PANEL</div>
@@ -62,7 +111,7 @@ export default function AdminApp({ initialSection = 'dashboard' }) {
           {NAV.map(item => {
             const active = nav === item.id;
             return (
-              <button key={item.id} onClick={() => setNav(item.id)} style={{
+              <button key={item.id} onClick={() => { setNav(item.id); setDrawerOpen(false); }} style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
                 borderRadius: 10, border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%',
                 background: active ? T.primaryGlow2 : 'transparent',
@@ -80,7 +129,7 @@ export default function AdminApp({ initialSection = 'dashboard' }) {
       </aside>
 
       {/* Main content */}
-      <main style={{ flex: 1, overflow: 'auto', padding: 28, position: 'relative', zIndex: 1 }}>
+      <main className="admin-main" style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: 28, position: 'relative', zIndex: 1 }}>
         <AnimatePresence mode="wait">
           <motion.div
             key={nav}

@@ -85,7 +85,7 @@ export const KYCVerification = ({ T }) => {
         <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 14 }}>Review and verify lawyer credentials · click cards to filter</p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 22 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 22 }}>
         <StatCard label="Pending Requests" value={pending} sub="Requires attention" subColor={T.danger}
           sparkData={[1,2,2,3,2,2,2,pending]} sparkColor={T.warn}
           iconEl={<IconBox icon={IC.clock} variant="Warn" T={T} size={42} />}

@@ -64,18 +64,18 @@ function mapApiCase(c) {
     const pct = total > 0 ? Math.round(completedCount / total * 100) : 0;
     const nextHearing = hearings[0]?.date
         ? new Date(hearings[0].date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) + ", " +
-          new Date(hearings[0].date).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+        new Date(hearings[0].date).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
         : "—";
     return {
-        id:          c._id || c.id,
-        title:       c.title || "Case",
-        status:      c.status || "pending",
-        type:        c.case_type || "civil",
-        filed:       c.created_at ? new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",
-        court:       hearings[0]?.court || "—",
-        judge:       hearings[0]?.judge || "—",
-        lawyer:      c.lawyer_id ? c.lawyer_id.slice(-6) : "—",
-        progress:    completedCount,
+        id: c._id || c.id,
+        title: c.title || "Case",
+        status: c.status || "pending",
+        type: c.case_type || "civil",
+        filed: c.created_at ? new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",
+        court: hearings[0]?.court || "—",
+        judge: hearings[0]?.judge || "—",
+        lawyer: c.lawyer_id ? c.lawyer_id.slice(-6) : "—",
+        progress: completedCount,
         total,
         nextHearing,
         pct,
@@ -85,13 +85,13 @@ function mapApiCase(c) {
 function mapApiMilestone(m, idx) {
     const date = new Date(m.date);
     return {
-        id:          idx + 1,
-        status:      m.completed ? "done" : "pending",
-        event:       m.title,
-        date:        date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-        time:        date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-        desc:        m.description || "",
-        tag:         m.completed ? "complete" : "pending",
+        id: idx + 1,
+        status: m.completed ? "done" : "pending",
+        event: m.title,
+        date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        time: date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        desc: m.description || "",
+        tag: m.completed ? "complete" : "pending",
         milestoneId: `m${idx + 1}`,
     };
 }
@@ -249,14 +249,14 @@ const priorityOrder = { critical: 0, overdue: 1, urgent: 2, upcoming: 3, normal:
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 const TRACKING_PAGES = [
-    { key: "overview",       label: "Overview",       ur: "جائزہ",          ico: "overview",       badge: null },
-    { key: "appointments",   label: "Appointments",   ur: "ملاقاتیں",       ico: "appointments",   badge: null },
-    { key: "timeline",       label: "Case Timeline",  ur: "کیس ٹائم لائن",  ico: "timeline",       badge: null },
-    { key: "documents",      label: "Documents",      ur: "دستاویزات",      ico: "documents",      badge: null },
-    { key: "payments",       label: "Payments",       ur: "ادائیگیاں",       ico: "documents",      badge: null },
-    { key: "notifications",  label: "Notifications",  ur: "اطلاعات",        ico: "notifications",  badge: null },
-    { key: "communication",  label: "Communication",  ur: "رابطہ",          ico: "communication",  badge: null },
-    { key: "reminders",      label: "Reminders",      ur: "یاد دہانیاں",     ico: "reminders",      badge: null },
+    { key: "overview", label: "Overview", ur: "جائزہ", ico: "overview", badge: null },
+    { key: "appointments", label: "Appointments", ur: "ملاقاتیں", ico: "appointments", badge: null },
+    { key: "timeline", label: "Case Timeline", ur: "کیس ٹائم لائن", ico: "timeline", badge: null },
+    { key: "documents", label: "Documents", ur: "دستاویزات", ico: "documents", badge: null },
+    { key: "payments", label: "Payments", ur: "ادائیگیاں", ico: "documents", badge: null },
+    { key: "notifications", label: "Notifications", ur: "اطلاعات", ico: "notifications", badge: null },
+    { key: "communication", label: "Communication", ur: "رابطہ", ico: "communication", badge: null },
+    { key: "reminders", label: "Reminders", ur: "یاد دہانیاں", ico: "reminders", badge: null },
 ];
 
 const Sidebar = ({ page, onNavigate, collapsed, onToggle }) => {
@@ -541,7 +541,7 @@ function HearingUpdates({ hearings, caseTitle, court }) {
                                 onMouseEnter={e => { e.currentTarget.style.background = "#25D36630"; e.currentTarget.style.borderColor = "#25D366"; }}
                                 onMouseLeave={e => { e.currentTarget.style.background = "#25D36615"; e.currentTarget.style.borderColor = "#25D36650"; }}
                             >
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" /></svg>
                                 {showUrdu ? "شیئر" : "Share"}
                             </button>
                         </div>
@@ -619,7 +619,7 @@ function PageOverview({ setPage, activeCase, feed, hearings }) {
             {/* Peshi tracker — hearing updates in plain language */}
             <HearingUpdates hearings={hearings} caseTitle={activeCase?.title} court={activeCase?.court} />
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 16 }}>
                 {/* Action Required — unified feed preview */}
                 <Card t={t} onClick={() => setPage("reminders")}>
                     <SH icon="🚨" title="Action Required" desc="Deadlines, hearings & reminders"
@@ -742,7 +742,7 @@ function PageOverview({ setPage, activeCase, feed, hearings }) {
             </div>
 
             {/* Bottom row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <Card t={t} onClick={() => setPage("documents")}>
                     <SH icon="📁" title="Documents" desc="Case files & uploads"
                         badge={<Badge variant="primary" t={t}>{DOCUMENTS_INIT.length} Files</Badge>} t={t} />
@@ -828,7 +828,7 @@ function PageTimeline({ milestones: propMilestones }) {
 
     return (
         <div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 288px", gap: 16 }}>
+            <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 288px", gap: 16 }}>
                 <Card t={t}>
                     <SH icon="🕐" title="Case Timeline" desc="Milestones, hearings & court instructions"
                         badge={<Badge variant="success" t={t}>{allMilestones.filter(m => m.status === "done").length}/{allMilestones.length} Done</Badge>} t={t} />
@@ -1113,9 +1113,11 @@ function PagePayments({ t }) {
             expired: t.badgeGray, failed: t.badgeDanger, cancelled: t.badgeGray,
         };
         const b = map[status] || t.badgeInfo;
-        const label = { paid: T("Paid", "ادا شدہ"), pending: T("Processing", "زیرِ عمل"),
+        const label = {
+            paid: T("Paid", "ادا شدہ"), pending: T("Processing", "زیرِ عمل"),
             created: T("Due", "واجب"), expired: T("Expired", "میعاد ختم"),
-            failed: T("Failed", "ناکام"), cancelled: T("Cancelled", "منسوخ") }[status] || status;
+            failed: T("Failed", "ناکام"), cancelled: T("Cancelled", "منسوخ")
+        }[status] || status;
         return <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: b.bg, color: b.color, border: `1px solid ${b.border}` }}>{label}</span>;
     };
 
@@ -1202,7 +1204,7 @@ function PageNotifications({ feed, onMarkDone, onMarkAllDone }) {
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                 <Btn t={t} variant="ghost" onClick={onMarkAllDone}>✓ Mark All Read</Btn>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 308px", gap: 16 }}>
+            <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 308px", gap: 16 }}>
                 <Card t={t}>
                     <SH icon="🔔" title="Notifications" desc="Sorted by urgency — critical items first"
                         badge={unread > 0 ? <Badge variant="danger" t={t}>{unread} Unread</Badge> : null} t={t} />
@@ -1281,6 +1283,7 @@ function PageCommunication({ caseId, milestones: propMilestones }) {
     const [input, setInput] = useState("");
     const [tab, setTab] = useState("messages");
     const [selMilestone, setSelMilestone] = useState("");
+    const [selDoc, setSelDoc] = useState("");
     const [noteInput, setNoteInput] = useState("");
     const [tagL, setTagL] = useState(false);
     const [noteMilestone, setNoteMilestone] = useState("");
@@ -1332,7 +1335,7 @@ function PageCommunication({ caseId, milestones: propMilestones }) {
         } else {
             setMsgs(p => [...p, { id: Date.now(), from: "client", text: input, date: "Just now", status: "pending", seenByLawyer: false }]);
         }
-        setInput(""); setSelMilestone("");
+        setInput(""); setSelMilestone(""); setSelDoc("");
         setSending(false);
     };
     const saveNote = () => {
@@ -1346,7 +1349,7 @@ function PageCommunication({ caseId, milestones: propMilestones }) {
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                 <Badge variant="success" t={t}>● Atty. Ahmad Raza — Online</Badge>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 290px", gap: 16 }}>
+            <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 290px", gap: 16 }}>
                 <Card t={t} style={{ display: "flex", flexDirection: "column" }}>
                     <SH icon="💬" title="Client–Lawyer Communication" desc="Messages, Q&A & milestone notes"
                         badge={<Badge variant="warn" t={t}>1 Awaiting</Badge>} t={t} />
@@ -1396,7 +1399,7 @@ function PageCommunication({ caseId, milestones: propMilestones }) {
                                 <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
                                     Link to context before sending
                                 </div>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                                     <select value={selMilestone} onChange={e => setSelMilestone(e.target.value)}
                                         style={{
                                             background: t.inputBg, border: `1px solid ${selMilestone ? t.primary : t.border}`, borderRadius: 10,
@@ -1531,7 +1534,7 @@ function PageReminders({ feed, setFeed }) {
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                 <Btn t={t} variant="primary" onClick={() => document.getElementById("reminder-form")?.scrollIntoView({ behavior: "smooth" })}>+ New Reminder</Btn>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <Card t={t}>
                     <SH icon="📋" title="All Events & Deadlines" desc="Hearings, deadlines & reminders — one view"
                         badge={<Badge variant="danger" t={t}>{feed.filter(f => !f.done && (f.urgency === "overdue" || f.urgency === "critical")).length} Overdue</Badge>} t={t} />
@@ -1590,7 +1593,7 @@ function PageReminders({ feed, setFeed }) {
                                     </div>
                                     {isEditing && (
                                         <div style={{ padding: "10px 14px", borderTop: `1px solid ${t.border}`, background: t.cardHi }}>
-                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                                            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                                                 <Inp placeholder="Description" value={editForm.desc} onChange={v => setEditForm(p => ({ ...p, desc: v }))} t={t} />
                                                 <Inp type="date" value={editForm.date} onChange={v => setEditForm(p => ({ ...p, date: v }))} t={t} />
                                             </div>
@@ -1625,7 +1628,7 @@ function PageReminders({ feed, setFeed }) {
                                     {MILESTONES.map(m => <option key={m.id} value={m.milestoneId}>{m.event}</option>)}
                                 </select>
                             </div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+                            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
                                 <div>
                                     <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Date</div>
                                     <Inp type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} t={t} />
@@ -1676,11 +1679,11 @@ function PageReminders({ feed, setFeed }) {
 function PageAppointments({ appointments, loading, t }) {
     const { T } = useLang();
     const statusStyle = {
-        pending:   { bg: `${t.warn}18`,    color: t.warn,    label: "⏳ Pending Confirmation" },
+        pending: { bg: `${t.warn}18`, color: t.warn, label: "⏳ Pending Confirmation" },
         confirmed: { bg: `${t.primary}18`, color: t.primary, label: "✅ Confirmed" },
         cancelled: { bg: "rgba(255,107,122,0.12)", color: t.danger, label: "❌ Cancelled" },
-        completed: { bg: `${t.info}14`,    color: t.info,    label: "🏁 Completed" },
-        no_show:   { bg: t.cardHi,          color: t.textMuted, label: "👻 No Show" },
+        completed: { bg: `${t.info}14`, color: t.info, label: "🏁 Completed" },
+        no_show: { bg: t.cardHi, color: t.textMuted, label: "👻 No Show" },
     };
     const modeIcon = { video: "📹", in_person: "🏛", phone: "📞" };
 
@@ -1702,7 +1705,7 @@ function PageAppointments({ appointments, loading, t }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: t.text, marginBottom: 4 }}>{T("Your Appointments", "آپ کی ملاقاتیں")}</div>
             {appointments.map(appt => {
-                const s    = statusStyle[appt.status] || statusStyle.pending;
+                const s = statusStyle[appt.status] || statusStyle.pending;
                 const date = new Date(appt.scheduled_at);
                 const dateStr = date.toLocaleDateString("en-PK", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
                 const timeStr = date.toLocaleTimeString("en-PK", { hour: "2-digit", minute: "2-digit" });
@@ -1813,7 +1816,7 @@ export default function Module7({ isDark }) {
         });
     }, [activeCaseId]);
 
-    const displayCases      = apiCases.length ? apiCases : CASES;
+    const displayCases = apiCases.length ? apiCases : CASES;
     const displayMilestones = apiMilestones.length ? apiMilestones : MILESTONES;
 
     // Local reminders created inside PageReminders (notifications come from CaseContext)
@@ -1838,16 +1841,16 @@ export default function Module7({ isDark }) {
     const unreadCount = feed.filter(f => !f.done).length;
 
     const pages = {
-        overview:      (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} hearings={apiHearings} />,
-        appointments:  (props) => <PageAppointments  {...props} appointments={apiAppointments} loading={apptLoading} />,
-        timeline:      (props) => <PageTimeline      {...props} milestones={allMilestones} />,
-        documents:     (props) => <PageDocuments     {...props} activeCaseId={activeCaseId} />,
-        payments:      (props) => <PagePayments      {...props} />,
+        overview: (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} hearings={apiHearings} />,
+        appointments: (props) => <PageAppointments  {...props} appointments={apiAppointments} loading={apptLoading} />,
+        timeline: (props) => <PageTimeline      {...props} milestones={allMilestones} />,
+        documents: (props) => <PageDocuments     {...props} activeCaseId={activeCaseId} />,
+        payments: (props) => <PagePayments      {...props} />,
         notifications: (props) => <PageNotifications {...props} feed={feed}
             onMarkDone={markNotificationDone}
             onMarkAllDone={markAllNotificationsDone} />,
         communication: (props) => <PageCommunication {...props} caseId={activeCaseId} milestones={allMilestones} />,
-        reminders:     (props) => <PageReminders     {...props} feed={feed} setFeed={setFeed} />,
+        reminders: (props) => <PageReminders     {...props} feed={feed} setFeed={setFeed} />,
     };
     const PageComp = pages[page] || pages.overview;
 

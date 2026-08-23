@@ -6,12 +6,12 @@ import { Card, Badge } from "@/components/shared/shared.jsx";
 import { useCase } from "@/components/shared/CaseContext.jsx";
 
 const STATUS_BADGE = {
-  active:      "success",
-  in_progress: "success",
-  pending:     "warn",
-  in_review:   "info",
-  closed:      "gray",
-  cancelled:   "gray",
+    active: "success",
+    in_progress: "success",
+    pending: "warn",
+    in_review: "info",
+    closed: "gray",
+    cancelled: "gray",
 };
 
 const STitle = ({ icon, sub, children }) => {
@@ -32,18 +32,18 @@ const ModOverview = () => {
     const t = useT();
     const { cases, appointments } = useCase();
 
-    const activeCasesCount  = cases.length;
-    const apptCount         = appointments.length;
-    const nextAppt          = appointments[0];
-    const nextApptLabel     = nextAppt
+    const activeCasesCount = cases.length;
+    const apptCount = appointments.length;
+    const nextAppt = appointments[0];
+    const nextApptLabel = nextAppt
         ? new Date(nextAppt.scheduled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
         : null;
 
     const stats = [
-        { label: "Active Cases",  val: activeCasesCount || "—", sub: activeCasesCount ? `${activeCasesCount} case${activeCasesCount !== 1 ? "s" : ""} open` : "No cases yet", color: t.primary,  icon: "brief", pct: Math.min(activeCasesCount * 20, 100) || 10 },
-        { label: "Pending Docs",  val: "—", sub: "Upload via case",   color: t.info,    icon: "file",  pct: 45 },
-        { label: "Appointments",  val: apptCount || "—", sub: nextApptLabel ? `Next: ${nextApptLabel}` : "None scheduled", color: t.success, icon: "cal",   pct: Math.min(apptCount * 25, 100) || 10 },
-        { label: "Agreements",    val: "—", sub: "Via lawyer portal",  color: t.warn,    icon: "pen",   pct: 80 },
+        { label: "Active Cases", val: activeCasesCount || "—", sub: activeCasesCount ? `${activeCasesCount} case${activeCasesCount !== 1 ? "s" : ""} open` : "No cases yet", color: t.primary, icon: "brief", pct: Math.min(activeCasesCount * 20, 100) || 10 },
+        { label: "Pending Docs", val: "—", sub: "Upload via case", color: t.info, icon: "file", pct: 45 },
+        { label: "Appointments", val: apptCount || "—", sub: nextApptLabel ? `Next: ${nextApptLabel}` : "None scheduled", color: t.success, icon: "cal", pct: Math.min(apptCount * 25, 100) || 10 },
+        { label: "Agreements", val: "—", sub: "Via lawyer portal", color: t.warn, icon: "pen", pct: 80 },
     ];
 
     const recentCases = cases.slice(0, 3);
@@ -51,7 +51,7 @@ const ModOverview = () => {
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
                 {stats.map(({ label, val, sub, color, icon, pct }) => (
                     <Card key={label} style={{ transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
@@ -85,7 +85,7 @@ const ModOverview = () => {
                 ))}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
+            <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
                 <Card>
                     <STitle icon="brief" sub="Your latest active cases">Recent Cases</STitle>
                     {recentCases.length > 0 ? recentCases.map(c => {
@@ -125,11 +125,11 @@ const ModOverview = () => {
                         {upcomingAppts.length > 0 ? upcomingAppts.map((a, i) => {
                             const apptDate = new Date(a.scheduled_at);
                             const label = apptDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                            const time  = apptDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+                            const time = apptDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
                             const accentColor = a.mode === "court" ? t.danger : a.mode === "video" ? t.info : t.primary;
                             const title = a.mode === "court" ? "Court Hearing"
-                                        : a.mode === "video" ? "Video Meeting"
-                                        : a.mode === "in_person" ? "In-Person Meeting"
+                                : a.mode === "video" ? "Video Meeting"
+                                    : a.mode === "in_person" ? "In-Person Meeting"
                                         : "Appointment";
                             return (
                                 <div key={a._id || i} style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "center" }}>

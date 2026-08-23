@@ -92,7 +92,7 @@ function SettingsPage() {
 
     const handleSignOut = async () => {
         await authLogout();
-        try { localStorage.removeItem("aai-role"); } catch {}
+        try { localStorage.removeItem("aai-role"); } catch { }
         // Hard redirect: clears all in-memory app state along with the session
         window.location.assign("/login");
     };
@@ -114,7 +114,7 @@ function SettingsPage() {
                             <Label>Current Password</Label>
                             <Input type="password" placeholder="Enter current password" value={pwd.current} onChange={e => setPwd(p => ({ ...p, current: e.target.value }))} />
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11 }}>
                             <div>
                                 <Label>New Password</Label>
                                 <Input type="password" placeholder="New password (min 8 chars)" value={pwd.newPwd} onChange={e => setPwd(p => ({ ...p, newPwd: e.target.value }))} />
@@ -148,10 +148,12 @@ function SettingsPage() {
                         <span style={{ fontSize: 14 }}>⭐</span>
                         <div className="serif" style={{ fontSize: 14, fontWeight: 600, color: t.text }}>Subscription</div>
                         {sub && (
-                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, textTransform: "uppercase",
+                            <span style={{
+                                fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, textTransform: "uppercase",
                                 background: sub.tier === "free" ? t.border : t.primary + "22",
                                 color: sub.tier === "free" ? t.textMuted : t.primary,
-                                border: `1px solid ${sub.tier === "free" ? t.border : t.primary + "55"}` }}>
+                                border: `1px solid ${sub.tier === "free" ? t.border : t.primary + "55"}`
+                            }}>
                                 {sub.tier}{sub.status === "cancelled" ? " · ending" : ""}
                             </span>
                         )}

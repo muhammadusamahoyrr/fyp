@@ -44,7 +44,7 @@ export const LawyerMonitoring = ({ T }) => {
         <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 14 }}>Track lawyer activity, performance metrics, and ratings</p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 22 }}>
         <StatCard label="Total Active Cases"  value={loading ? "…" : totalActive}  sub={`Across ${lawyers.length} lawyers`}  iconEl={<IconBox icon={IC.briefcase} variant="Primary" T={T} size={42} />} T={T} />
         <StatCard label="Avg. Rating"         value={loading ? "…" : avgRating}     sub={`${lawyers.filter(l => l.total_reviews > 0).length} reviewed`} iconEl={<IconBox icon={IC.star}      variant="Warn"    T={T} size={42} />} T={T} />
         <StatCard label="KYC Verified"        value={loading ? "…" : verified}      sub={`${lawyers.length - verified} pending`} iconEl={<IconBox icon={IC.checkCircle} variant="Success" T={T} size={42} />} T={T} />

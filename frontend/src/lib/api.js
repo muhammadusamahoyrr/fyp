@@ -27,10 +27,10 @@ function _getBC() {
             accessToken = msg.token;                 // adopt without re-broadcasting
             while (_tokenWaiters.length) _tokenWaiters.shift()(msg.token);
           } else if (msg.type === 'token-request') {
-            if (accessToken) { try { _bc.postMessage({ type: 'token', token: accessToken }); } catch {} }
+            if (accessToken) { try { _bc.postMessage({ type: 'token', token: accessToken }); } catch { } }
           } else if (msg.type === 'logout') {
             accessToken = null;
-            if (typeof window !== 'undefined') { try { window.location.href = '/login'; } catch {} }
+            if (typeof window !== 'undefined') { try { window.location.href = '/login'; } catch { } }
           }
         };
       } catch { _bc = false; }
@@ -39,8 +39,8 @@ function _getBC() {
   return _bc || null;
 }
 
-function _broadcastToken(t) { const bc = _getBC(); if (bc) { try { bc.postMessage({ type: 'token', token: t }); } catch {} } }
-export function broadcastLogout() { const bc = _getBC(); if (bc) { try { bc.postMessage({ type: 'logout' }); } catch {} } }
+function _broadcastToken(t) { const bc = _getBC(); if (bc) { try { bc.postMessage({ type: 'token', token: t }); } catch { } } }
+export function broadcastLogout() { const bc = _getBC(); if (bc) { try { bc.postMessage({ type: 'logout' }); } catch { } } }
 
 // Ask sibling tabs for a token; resolve with one if it arrives within `ms`.
 function _requestSiblingToken(ms = 150) {
@@ -99,15 +99,21 @@ function formatResponseError(body) {
 // ─── Core fetch wrapper ───────────────────────────────────────────────────────
 // Returns { data, error, status }
 // Automatically attaches Bearer token and retries once on 401 via refresh cookie.
+//
+// opts.returnResponse — resolve `data` with the raw Response instead of parsed
+// JSON, so callers can use .blob() (downloads) or .body.getReader() (SSE
+// streams) while still getting the 401 auto-refresh. Errors are still parsed
+// into `error`, so the response body is only consumed on the failure path.
 async function apiFetch(path, options = {}) {
+  const { returnResponse = false, ...fetchOptions } = options;
   const token = getToken();
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  const headers = { 'Content-Type': 'application/json', ...fetchOptions.headers };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   let res;
   try {
     res = await fetch(`${BASE}${path}`, {
-      ...options,
+      ...fetchOptions,
       headers,
       credentials: 'include', // sends httpOnly refresh_token cookie
     });
@@ -121,7 +127,7 @@ async function apiFetch(path, options = {}) {
     if (refreshed) {
       headers['Authorization'] = `Bearer ${getToken()}`;
       try {
-        res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include' });
+        res = await fetch(`${BASE}${path}`, { ...fetchOptions, headers, credentials: 'include' });
       } catch {
         return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
       }
@@ -131,8 +137,42 @@ async function apiFetch(path, options = {}) {
     }
   }
 
+  if (returnResponse) {
+    if (res.ok) return { data: res, error: null, status: res.status };
+    const errBody = await res.json().catch(() => ({}));
+    return { data: null, error: formatResponseError(errBody), status: res.status };
+  }
+
   const body = await res.json().catch(() => ({}));
   return { data: res.ok ? body : null, error: res.ok ? null : formatResponseError(body), status: res.status };
+}
+
+// Streams a text/event-stream Response, invoking onToken(chunk) per SSE token.
+// Shared by aiQueryStream / aiDraftStream / aiPleadingUrduStream.
+async function _consumeSSE(res, onToken) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.content) onToken(parsed.content);
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+      }
+    }
+  }
 }
 
 // Single-flight: concurrent callers (parallel 401s + boot) collapse into ONE
@@ -382,9 +422,9 @@ export async function changePassword(current_password, new_password) {
 // ─── Lawyers ─────────────────────────────────────────────────────────────────
 export async function searchLawyers({ province, case_type, min_rating, availability, page = 1, page_size = 10 } = {}) {
   const p = new URLSearchParams();
-  if (province)                             p.set('province', province);
-  if (case_type)                            p.set('case_type', case_type);
-  if (min_rating !== undefined)             p.set('min_rating', min_rating);
+  if (province) p.set('province', province);
+  if (case_type) p.set('case_type', case_type);
+  if (min_rating !== undefined) p.set('min_rating', min_rating);
   if (availability !== undefined && availability !== null) p.set('availability', availability);
   p.set('page', page);
   p.set('page_size', page_size);
@@ -456,17 +496,29 @@ export async function listDocuments(case_id) {
 }
 
 export async function downloadDocument(doc_id, filename = 'document.pdf') {
-  const token = getToken();
   // BASE already includes /api/v1 — do not append it again
-  const res   = await fetch(`${BASE}/documents/${doc_id}/download`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return { error: 'Download failed' };
-  const blob = await res.blob();
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
+  const { data: res, error } = await apiFetch(`/documents/${doc_id}/download`, { returnResponse: true });
+  if (error) return { error: error.message || 'Download failed' };
+  return _saveBlob(res, filename);
+}
+
+// Streams a Response body to a browser download. Shared by the PDF endpoints.
+async function _saveBlob(res, filename) {
+  let blob;
+  try {
+    blob = await res.blob();
+  } catch {
+    return { error: 'Download failed' };
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick — revoking synchronously can abort the download
+  // in Firefox/Safari before the browser has read the object URL.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
   return { data: true };
 }
 
@@ -497,28 +549,23 @@ export async function listReviewQueue() {
 
 // ─── Live notifications ──────────────────────────────────────────────────────
 // Exchanges the JWT for a one-time 60s WS ticket (the JWT itself never goes in
-// the URL) and opens the notification socket. Returns the WebSocket or null.
-export async function openNotificationSocket(onMessage) {
-  const token = getToken();
-  if (!token) return null;
+// the URL). Goes through apiFetch so an expired access token is refreshed and
+// retried rather than failing the socket connect. Returns the ticket or null.
+export async function getWsTicket() {
+  if (!getToken()) return null;
+  const { data } = await apiFetch('/auth/ws-ticket', { method: 'POST' });
+  return data?.ticket ?? null;
+}
 
-  let ticket;
-  try {
-    const resp = await fetch(`${BASE}/auth/ws-ticket`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!resp.ok) return null;
-    ticket = (await resp.json()).ticket;
-  } catch {
-    return null;
-  }
+// Opens the notification socket. Returns the WebSocket or null.
+export async function openNotificationSocket(onMessage) {
+  const ticket = await getWsTicket();
   if (!ticket) return null;
 
   const wsBase = BASE.replace(/\/api\/v1$/, '').replace(/^http/, 'ws');
   const ws = new WebSocket(`${wsBase}/ws/notifications?ticket=${encodeURIComponent(ticket)}`);
   ws.onmessage = (ev) => {
-    try { onMessage(JSON.parse(ev.data)); } catch {}
+    try { onMessage(JSON.parse(ev.data)); } catch { }
   };
   return ws;
 }
@@ -571,17 +618,9 @@ export async function mockPay(id) {
 }
 
 export async function downloadReceipt(id, filename = 'receipt.pdf') {
-  const token = getToken();
-  const res = await fetch(`${BASE}/payments/${id}/receipt`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return { error: 'Download failed' };
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-  return { data: true };
+  const { data: res, error } = await apiFetch(`/payments/${id}/receipt`, { returnResponse: true });
+  if (error) return { error: error.message || 'Download failed' };
+  return _saveBlob(res, filename);
 }
 
 // ─── Billing / subscription ──────────────────────────────────────────────────
@@ -981,128 +1020,36 @@ export async function aiResearch(message, session_id, { language = 'en', provinc
 // Streaming version — calls onToken(chunk) for each token, resolves when done.
 // opts: { templateId?: "chat" | "case_context", context?: object, history?: array }
 export async function aiQueryStream(message, { templateId = "chat", context = {}, history = [] } = {}, onToken) {
-  const token = getToken();
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}/ai/query/stream`, {
+  const { data: res, error, status } = await apiFetch('/ai/query/stream', {
     method: 'POST',
-    headers,
-    credentials: 'include',
+    returnResponse: true,
     body: JSON.stringify({ message, template_id: templateId, context, history }),
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail || `HTTP ${res.status}`);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
-      if (raw === '[DONE]') return;
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed.error) throw new Error(parsed.error);
-        if (parsed.content) onToken(parsed.content);
-      } catch (e) {
-        if (!(e instanceof SyntaxError)) throw e;
-      }
-    }
-  }
+  if (error) throw new Error(error.message || `HTTP ${status}`);
+  return _consumeSSE(res, onToken);
 }
 
 // RAG-grounded drafting: retrieves real Pakistani law before the LLM drafts.
 export async function aiDraftStream({ instruction, document = '', template = '', case_type = 'civil', province = 'federal', history = [] }, onToken) {
-  const token = getToken();
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}/ai/draft/stream`, {
+  const { data: res, error, status } = await apiFetch('/ai/draft/stream', {
     method: 'POST',
-    headers,
-    credentials: 'include',
+    returnResponse: true,
     body: JSON.stringify({ instruction, document, template, case_type, province, history }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail || `HTTP ${res.status}`);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
-      if (raw === '[DONE]') return;
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed.error) throw new Error(parsed.error);
-        if (parsed.content) onToken(parsed.content);
-      } catch (e) {
-        if (!(e instanceof SyntaxError)) throw e;
-      }
-    }
-  }
+  if (error) throw new Error(error.message || `HTTP ${status}`);
+  return _consumeSSE(res, onToken);
 }
 
 // ─── Court-Urdu pleading generator ────────────────────────────────────────────
 
 export async function aiPleadingUrduStream({ document = '', template = '' }, onToken) {
-  const token = getToken();
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}/ai/pleading-urdu/stream`, {
+  const { data: res, error, status } = await apiFetch('/ai/pleading-urdu/stream', {
     method: 'POST',
-    headers,
-    credentials: 'include',
+    returnResponse: true,
     body: JSON.stringify({ document, template }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.detail || `HTTP ${res.status}`);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
-      if (raw === '[DONE]') return;
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed.error) throw new Error(parsed.error);
-        if (parsed.content) onToken(parsed.content);
-      } catch (e) {
-        if (!(e instanceof SyntaxError)) throw e;
-      }
-    }
-  }
+  if (error) throw new Error(error.message || `HTTP ${status}`);
+  return _consumeSSE(res, onToken);
 }
 
 export async function pleadingUrduPdf({ urdu_text, title_ur = '', court_ur = '', english_label = '' }) {

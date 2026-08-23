@@ -50,26 +50,26 @@ const T = {
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const Ic = {
-  shield: (c=T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
-  user: (c=T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>,
-  cert: (c=T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 10h8M8 14h5"/></svg>,
-  clock: (c=T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>,
-  camera: (c=T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>,
-  map: (c=T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>,
-  phone: (c=T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 10.8a19.79 19.79 0 01-3.07-8.67A2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 7.91a16 16 0 006.13 6.13l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>,
-  money: (c=T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/></svg>,
-  check: (c=T.success,s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5"><path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  upload: (c=T.primary) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>,
-  download: (c=T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>,
-  arrow: (dir="right",c="#fff") => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round">{dir==="right"?<path d="M5 12h14M12 5l7 7-7 7"/>:<path d="M19 12H5M12 19l-7-7 7-7"/>}</svg>,
-  home: (c=T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
-  star: (c=T.textMuted) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
-  target: (c=T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
-  doc: (c=T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
-  rocket: (c=T.primary) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09zM12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M15 12v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>,
-  lock: (c=T.primary) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,
-  briefcase: (c=T.textMuted) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2M12 12v4M8 12v4"/></svg>,
-  hammer: (c=T.textMuted) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M15 12l-8.5 8.5a2.12 2.12 0 01-3-3L12 9"/><path d="M17.64 15L22 10.64"/><path d="M20.91 11.7l-1.25-1.25c-.6-.6-.93-1.4-.93-2.25v-.86L16.01 4.6a5.56 5.56 0 00-3.94-1.64H9l.92.82A6.18 6.18 0 0112 8.4v1.56l2 2h2.47l2.26 1.91z"/></svg>,
+  shield: (c = T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
+  user: (c = T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" /></svg>,
+  cert: (c = T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 10h8M8 14h5" /></svg>,
+  clock: (c = T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></svg>,
+  camera: (c = T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" /><circle cx="12" cy="13" r="4" /></svg>,
+  map: (c = T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" /></svg>,
+  phone: (c = T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 10.8a19.79 19.79 0 01-3.07-8.67A2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 7.91a16 16 0 006.13 6.13l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" /></svg>,
+  money: (c = T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2" /><path d="M1 10h22" /></svg>,
+  check: (c = T.success, s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5"><path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+  upload: (c = T.primary) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" /></svg>,
+  download: (c = T.primary) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>,
+  arrow: (dir = "right", c = "#fff") => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round">{dir === "right" ? <path d="M5 12h14M12 5l7 7-7 7" /> : <path d="M19 12H5M12 19l-7-7 7-7" />}</svg>,
+  home: (c = T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>,
+  star: (c = T.textMuted) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>,
+  target: (c = T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></svg>,
+  doc: (c = T.primary) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>,
+  rocket: (c = T.primary) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09zM12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z" /><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M15 12v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" /></svg>,
+  lock: (c = T.primary) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>,
+  briefcase: (c = T.textMuted) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2M12 12v4M8 12v4" /></svg>,
+  hammer: (c = T.textMuted) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2"><path d="M15 12l-8.5 8.5a2.12 2.12 0 01-3-3L12 9" /><path d="M17.64 15L22 10.64" /><path d="M20.91 11.7l-1.25-1.25c-.6-.6-.93-1.4-.93-2.25v-.86L16.01 4.6a5.56 5.56 0 00-3.94-1.64H9l.92.82A6.18 6.18 0 0112 8.4v1.56l2 2h2.47l2.26 1.91z" /></svg>,
 };
 
 // ─── Sidebar Steps ─────────────────────────────────────────────────────────────
@@ -83,8 +83,8 @@ const STEPS = [
 // Labels map to the platform's case types — matching runs on these values
 const SPECS_CORE = ["Civil Litigation", "Criminal", "Family", "Constitutional"];
 const SPEC_VALUE = { "Civil Litigation": "civil", Criminal: "criminal", Family: "family", Constitutional: "constitutional" };
-const DAYS = ["M","T","W","T","F","S","S"];
-const DAY_FULL = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
+const DAY_FULL = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const CONTENT_PAD = 18;
 
 // ─── Shared UI Atoms ──────────────────────────────────────────────────────────
@@ -267,16 +267,16 @@ function Sidebar({ step, submitted }) {
 
 // ─── Spec icon SVGs ───────────────────────────────────────────────────────────
 const SpecIcons = {
-  Corporate: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
-  Criminal:  (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>,
-  Family:    (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
-  "Civil Litigation": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>,
-  "Real Estate": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><rect x="2" y="7" width="20" height="14" rx="1"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>,
-  Immigration: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4"/></svg>,
-  "Environment Law": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M17 8C8 10 5.9 16.17 3.82 19.15A2 2 0 005.49 22h13a2 2 0 001.92-2.56C19 16 19 8 17 8z"/><path d="M17 8C17 8 17 2 12 2c0 0 0 6-5 8"/></svg>,
-  "Intellectual Property": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3M12 17h.01"/></svg>,
-  Arbitration: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M15 12l-8.5 8.5a2.12 2.12 0 01-3-3L12 9M18 9l3-3M17 3l4 4M3 14l4 4"/></svg>,
-  Constitutional: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M12 3v18M5 6h14M7 6l-2 5a3 3 0 006 0L9 6M17 6l-2 5a3 3 0 006 0l-2-5"/></svg>,
+  Corporate: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
+  Criminal: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" /></svg>,
+  Family: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>,
+  "Civil Litigation": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>,
+  "Real Estate": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><rect x="2" y="7" width="20" height="14" rx="1" /><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2" /><line x1="12" y1="12" x2="12" y2="16" /><line x1="10" y1="14" x2="14" y2="14" /></svg>,
+  Immigration: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4" /></svg>,
+  "Environment Law": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M17 8C8 10 5.9 16.17 3.82 19.15A2 2 0 005.49 22h13a2 2 0 001.92-2.56C19 16 19 8 17 8z" /><path d="M17 8C17 8 17 2 12 2c0 0 0 6-5 8" /></svg>,
+  "Intellectual Property": (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3M12 17h.01" /></svg>,
+  Arbitration: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M15 12l-8.5 8.5a2.12 2.12 0 01-3-3L12 9M18 9l3-3M17 3l4 4M3 14l4 4" /></svg>,
+  Constitutional: (c) => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8"><path d="M12 3v18M5 6h14M7 6l-2 5a3 3 0 006 0L9 6M17 6l-2 5a3 3 0 006 0l-2-5" /></svg>,
 };
 
 // ─── Step 1: Professional Profile ─────────────────────────────────────────────
@@ -291,7 +291,7 @@ function StepProfessional({ onNext }) {
     getMe().then(({ data }) => {
       if (data?.full_name) setName(prev => prev || data.full_name);
       if (data?.lawyer_profile?.bar_number) setLicense(prev => prev || data.lawyer_profile.bar_number);
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   const togCore = (s) => setCoreSpecs(p => p.includes(s) ? p.filter(x => x !== s) : p.length < 3 ? [...p, s] : p);
@@ -363,9 +363,9 @@ function StepProfessional({ onNext }) {
             borderRadius: T.r.lg, padding: "8px 14px",
           }}>
             <svg width="32" height="32" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="14" fill="none" stroke={T.border} strokeWidth="3"/>
+              <circle cx="18" cy="18" r="14" fill="none" stroke={T.border} strokeWidth="3" />
               <circle cx="18" cy="18" r="14" fill="none" stroke={T.primary} strokeWidth="3"
-                strokeDasharray={`${(1/4)*88} 88`} strokeLinecap="round" transform="rotate(-90 18 18)"/>
+                strokeDasharray={`${(1 / 4) * 88} 88`} strokeLinecap="round" transform="rotate(-90 18 18)" />
               <text x="18" y="22" textAnchor="middle" fill={T.text} fontSize="9" fontWeight="700">1/4</text>
             </svg>
             <div>
@@ -375,7 +375,7 @@ function StepProfessional({ onNext }) {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "1fr", gap: 14, flex: 1 }}>
+        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "1fr", gap: 14, flex: 1 }}>
 
           {/* ── Identity Details ── */}
           <div style={{
@@ -385,7 +385,7 @@ function StepProfessional({ onNext }) {
             {/* Card header */}
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ width: 32, height: 32, borderRadius: 8, background: T.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.primary} strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.primary} strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
               </div>
               <span style={{ fontSize: 17, fontWeight: 800, color: T.text }}>Identity Details</span>
             </div>
@@ -415,10 +415,10 @@ function StepProfessional({ onNext }) {
               <Label>Bar Council</Label>
               <div style={{ position: "relative" }}>
                 <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2"><path d="M15 12l-8.5 8.5a2.12 2.12 0 01-3-3L12 9M18 9l3-3M17 3l4 4"/></svg>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2"><path d="M15 12l-8.5 8.5a2.12 2.12 0 01-3-3L12 9M18 9l3-3M17 3l4 4" /></svg>
                 </span>
                 <input value={council} onChange={e => setCouncil(e.target.value)} style={{
-                  width:"100%", boxSizing:"border-box", background: T.inputBg,
+                  width: "100%", boxSizing: "border-box", background: T.inputBg,
                   border: `1.5px solid ${T.inputBorder}`, borderRadius: T.r.md,
                   color: T.text, fontSize: 13.5, padding: "10px 12px 10px 36px",
                   outline: "none", fontFamily: "inherit",
@@ -431,10 +431,10 @@ function StepProfessional({ onNext }) {
               </div>
               <div style={{ position: "relative" }}>
                 <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
                 </span>
                 <input value={license} onChange={e => setLicense(e.target.value)} placeholder="e.g. PBC/12345/2019" style={{
-                  width:"100%", boxSizing:"border-box", background: T.inputBg,
+                  width: "100%", boxSizing: "border-box", background: T.inputBg,
                   border: `1.5px solid ${T.inputBorder}`, borderRadius: T.r.md,
                   color: T.text, fontSize: 13, padding: "10px 12px 10px 36px",
                   outline: "none", fontFamily: "inherit",
@@ -446,7 +446,7 @@ function StepProfessional({ onNext }) {
               background: "rgba(13,148,136,0.06)", border: `1px solid rgba(13,148,136,0.2)`,
               borderRadius: T.r.sm, padding: "9px 12px",
             }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.primary} strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.primary} strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
               <span style={{ fontSize: 11.5, color: T.primaryLight, fontWeight: 600 }}>SUBMITTED FOR ADMIN VERIFICATION AFTER ONBOARDING</span>
             </div>
           </div>
@@ -466,7 +466,7 @@ function StepProfessional({ onNext }) {
             {/* Core — grid */}
             <div>
               <Label>Core Specializations (Select up to 3)</Label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginTop: 8 }}>
+              <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginTop: 8 }}>
                 {SPECS_CORE.map(s => (
                   <SpecCard key={s} label={s} selected={coreSpecs.includes(s)} onClick={() => togCore(s)} size="core" />
                 ))}
@@ -531,7 +531,7 @@ function StepCredentials({ onNext, onBack }) {
       </div>
       {/* Sub — fixed height zone */}
       <div style={{ height: 48, display: "flex", alignItems: "flex-start", justifyContent: "center", marginBottom: 12 }}>
-        <p style={{ fontSize: 11, color: T.textFaint, textAlign: "center", lineHeight: 1.55 }}>{sub1} ·<br/>{sub2}</p>
+        <p style={{ fontSize: 11, color: T.textFaint, textAlign: "center", lineHeight: 1.55 }}>{sub1} ·<br />{sub2}</p>
       </div>
       {/* Upload button — same height for all */}
       <GlowBtn style={{ width: "100%", justifyContent: "center", fontSize: 13, padding: "8px" }}>
@@ -573,28 +573,28 @@ function StepCredentials({ onNext, onBack }) {
   // Decorative SVG icons matching screenshot style
   const CertIcon = () => (
     <svg width="52" height="52" viewBox="0 0 64 64" fill="none">
-      <rect x="6" y="10" width="44" height="36" rx="3" fill="#c8972a" opacity=".9"/>
-      <rect x="10" y="14" width="36" height="28" rx="2" fill="#e8b84b"/>
-      <rect x="14" y="20" width="24" height="3" rx="1" fill="#c8972a"/>
-      <rect x="14" y="26" width="18" height="2" rx="1" fill="#c8972a" opacity=".6"/>
-      <circle cx="32" cy="48" r="8" fill="#d4a835" stroke="#f0c040" strokeWidth="2"/>
-      <path d="M28 48l3 3 6-6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <rect x="6" y="10" width="44" height="36" rx="3" fill="#c8972a" opacity=".9" />
+      <rect x="10" y="14" width="36" height="28" rx="2" fill="#e8b84b" />
+      <rect x="14" y="20" width="24" height="3" rx="1" fill="#c8972a" />
+      <rect x="14" y="26" width="18" height="2" rx="1" fill="#c8972a" opacity=".6" />
+      <circle cx="32" cy="48" r="8" fill="#d4a835" stroke="#f0c040" strokeWidth="2" />
+      <path d="M28 48l3 3 6-6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
   const EduIcon = () => (
     <svg width="52" height="52" viewBox="0 0 64 64" fill="none">
-      <path d="M8 28l24-14 24 14-24 14-24-14z" fill="#1a9aaa" opacity=".9"/>
-      <path d="M20 35v12l12 6 12-6V35" fill="#0e7a88"/>
-      <path d="M52 28v10" stroke="#1a9aaa" strokeWidth="3" strokeLinecap="round"/>
-      <circle cx="52" cy="41" r="3" fill="#1a9aaa"/>
+      <path d="M8 28l24-14 24 14-24 14-24-14z" fill="#1a9aaa" opacity=".9" />
+      <path d="M20 35v12l12 6 12-6V35" fill="#0e7a88" />
+      <path d="M52 28v10" stroke="#1a9aaa" strokeWidth="3" strokeLinecap="round" />
+      <circle cx="52" cy="41" r="3" fill="#1a9aaa" />
     </svg>
   );
   const AwardIcon = () => (
     <svg width="52" height="52" viewBox="0 0 64 64" fill="none">
-      <circle cx="32" cy="26" r="18" fill="none" stroke="#9b6dd4" strokeWidth="3"/>
-      <circle cx="32" cy="26" r="12" fill="none" stroke="#7c4daa" strokeWidth="2"/>
-      <path d="M32 14l2.47 7.6H42l-6.18 4.49 2.36 7.25L32 29l-6.18 4.34 2.36-7.25L22 21.6h7.53z" fill="#9b6dd4"/>
-      <path d="M24 44l-4 8M40 44l4 8" stroke="#9b6dd4" strokeWidth="2.5" strokeLinecap="round"/>
+      <circle cx="32" cy="26" r="18" fill="none" stroke="#9b6dd4" strokeWidth="3" />
+      <circle cx="32" cy="26" r="12" fill="none" stroke="#7c4daa" strokeWidth="2" />
+      <path d="M32 14l2.47 7.6H42l-6.18 4.49 2.36 7.25L32 29l-6.18 4.34 2.36-7.25L22 21.6h7.53z" fill="#9b6dd4" />
+      <path d="M24 44l-4 8M40 44l4 8" stroke="#9b6dd4" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
   );
 
@@ -636,9 +636,9 @@ function StepCredentials({ onNext, onBack }) {
             borderRadius: T.r.lg, padding: "8px 14px",
           }}>
             <svg width="32" height="32" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="14" fill="none" stroke={T.border} strokeWidth="3"/>
+              <circle cx="18" cy="18" r="14" fill="none" stroke={T.border} strokeWidth="3" />
               <circle cx="18" cy="18" r="14" fill="none" stroke={T.primary} strokeWidth="3"
-                strokeDasharray={`${(2/4)*88} 88`} strokeLinecap="round" transform="rotate(-90 18 18)"/>
+                strokeDasharray={`${(2 / 4) * 88} 88`} strokeLinecap="round" transform="rotate(-90 18 18)" />
               <text x="18" y="22" textAnchor="middle" fill={T.text} fontSize="9" fontWeight="700">2/4</text>
             </svg>
             <div>
@@ -698,7 +698,7 @@ function StepCredentials({ onNext, onBack }) {
               display: "flex", gap: 10, alignItems: "center", alignSelf: "stretch",
             }}>
               <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(255,200,87,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.warning} strokeWidth="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.warning} strokeWidth="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
               </div>
               <div>
                 <p style={{ fontSize: 12, fontWeight: 700, color: T.warning, margin: 0 }}>2 items pending verification</p>
@@ -724,9 +724,9 @@ function StepCredentials({ onNext, onBack }) {
         }}>{Ic.arrow("left", T.textFaint)} Back</button>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <svg width="34" height="34" viewBox="0 0 44 44" style={{ flexShrink: 0 }}>
-            <circle cx="22" cy="22" r="18" fill="none" stroke={T.border} strokeWidth="3.5"/>
+            <circle cx="22" cy="22" r="18" fill="none" stroke={T.border} strokeWidth="3.5" />
             <circle cx="22" cy="22" r="18" fill="none" stroke={T.primary} strokeWidth="3.5"
-              strokeDasharray={`${(2/4)*113} 113`} strokeLinecap="round" transform="rotate(-90 22 22)"/>
+              strokeDasharray={`${(2 / 4) * 113} 113`} strokeLinecap="round" transform="rotate(-90 22 22)" />
             <text x="22" y="27" textAnchor="middle" fill={T.text} fontSize="10" fontWeight="700">2/4</text>
           </svg>
           {/* Skip had no onClick — inert. This step is uploads only, so skipping
@@ -793,9 +793,9 @@ function StepOffice({ onNext, onBack, saving, error }) {
             borderRadius: T.r.lg, padding: "8px 14px",
           }}>
             <svg width="32" height="32" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="14" fill="none" stroke={T.border} strokeWidth="3"/>
+              <circle cx="18" cy="18" r="14" fill="none" stroke={T.border} strokeWidth="3" />
               <circle cx="18" cy="18" r="14" fill="none" stroke={T.primary} strokeWidth="3"
-                strokeDasharray={`${(3/4)*88} 88`} strokeLinecap="round" transform="rotate(-90 18 18)"/>
+                strokeDasharray={`${(3 / 4) * 88} 88`} strokeLinecap="round" transform="rotate(-90 18 18)" />
               <text x="18" y="22" textAnchor="middle" fill={T.text} fontSize="9" fontWeight="700">3/4</text>
             </svg>
             <div>
@@ -805,7 +805,7 @@ function StepOffice({ onNext, onBack, saving, error }) {
           </div>
         </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "1fr", gap: 12, flex: 1 }}>
+        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "1fr", gap: 12, flex: 1 }}>
           {/* Location & Contact */}
           <CardPanel>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -931,7 +931,7 @@ function StepOffice({ onNext, onBack, saving, error }) {
                 <span style={{ fontSize: 10, color: T.textFaint }}>ⓘ</span>
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                {["AM","Min","AM","Min"].map((p, i) => (
+                {["AM", "Min", "AM", "Min"].map((p, i) => (
                   <select key={i} style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: T.r.sm, color: T.textMuted, fontSize: 12, padding: "8px 6px", outline: "none" }}>
                     <option>{p}</option>
                   </select>
@@ -947,7 +947,7 @@ function StepOffice({ onNext, onBack, saving, error }) {
               <span style={{ color: T.textMuted }}>▾</span>
             </div>
           </CardPanel>
-      </div>
+        </div>
       </div>
 
       {/* Inline nav */}
@@ -955,9 +955,9 @@ function StepOffice({ onNext, onBack, saving, error }) {
         <OutlineBtn onClick={onBack}>{Ic.arrow("left", T.textMuted)} Back</OutlineBtn>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <svg width="32" height="32" viewBox="0 0 36 36">
-            <circle cx="18" cy="18" r="14" fill="none" stroke={T.border} strokeWidth="3"/>
+            <circle cx="18" cy="18" r="14" fill="none" stroke={T.border} strokeWidth="3" />
             <circle cx="18" cy="18" r="14" fill="none" stroke={T.primary} strokeWidth="3"
-              strokeDasharray={`${(3/4)*88} 88`} strokeLinecap="round" transform="rotate(-90 18 18)"/>
+              strokeDasharray={`${(3 / 4) * 88} 88`} strokeLinecap="round" transform="rotate(-90 18 18)" />
             <text x="18" y="22" textAnchor="middle" fill={T.text} fontSize="9" fontWeight="700">3/4</text>
           </svg>
           {error && <span style={{ fontSize: 12, color: "#e8526a", fontWeight: 600 }}>{error}</span>}
@@ -983,7 +983,7 @@ function StepSubmitted({ onBack, onComplete }) {
             position: "relative", overflow: "hidden", boxShadow: `0 0 60px rgba(13,148,136,0.2)`,
           }}>
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", paddingLeft: 28 }}>
-              {[T.primary,T.primaryLight,T.accent].map((c, i) => (
+              {[T.primary, T.primaryLight, T.accent].map((c, i) => (
                 <div key={i} style={{ width: 14, height: 60 + i * 12, background: c, borderRadius: 3, marginRight: 4, opacity: .7 + i * .1 }} />
               ))}
               <div style={{ width: 36, height: 85, background: T.card, borderRadius: 4, marginRight: 4, border: `1px solid ${T.primary}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1009,7 +1009,7 @@ function StepSubmitted({ onBack, onComplete }) {
         </div>
 
         {/* Status cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, margin: "16px 0" }}>
+        <div className="rgrid-3" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 12, margin: "16px 0" }}>
           {[
             { icon: "📤", title: "Profile Submitted", sub: "Verification pending", iconRight: Ic.check(T.success, 18) },
             { icon: "🔒", title: "Security Active", sub: "AES-256 protected.", iconRight: null },
@@ -1027,15 +1027,15 @@ function StepSubmitted({ onBack, onComplete }) {
         </div>
 
         {/* Approval progress */}
-        <div style={{ display: "flex", gap: 12, marginBottom: 0 }}>
-          <div style={{ flex: 1, background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: T.r.lg, padding: "14px 16px" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 0 }}>
+          <div style={{ flex: "1 1 280px", minWidth: 0, background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: T.r.lg, padding: "14px 16px" }}>
             <p style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 10 }}>Approval Status: Reviewing Your Details.</p>
             <div style={{ background: T.inputBg, borderRadius: 99, height: 7, overflow: "hidden", marginBottom: 7 }}>
               <div style={{ width: "15%", height: "100%", background: `linear-gradient(90deg, ${T.primary}, ${T.primaryLight})`, borderRadius: 99 }} />
             </div>
             <p style={{ fontSize: 11, color: T.textFaint }}>15% Admin verification (Step 1/2) in progress.</p>
           </div>
-          <div style={{ width: 240, background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: T.r.lg, padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ flex: "1 1 240px", maxWidth: 240, minWidth: 0, background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: T.r.lg, padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 20 }}>✉️</span>
             <p style={{ fontSize: 12, color: T.textMuted }}>Questions? Contact <span style={{ color: T.primaryLight, cursor: "pointer" }}>Admin Support</span>.</p>
           </div>

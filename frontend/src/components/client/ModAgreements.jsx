@@ -226,7 +226,7 @@ const PageDashboard = ({ onNavigate }) => {
             </div>
 
             {/* Stats row */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 20 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 20 }}>
                 {stats.map(s => (
                     <Card key={s.label} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: 20 }}>
                         <div>
@@ -243,7 +243,7 @@ const PageDashboard = ({ onNavigate }) => {
             </div>
 
             {/* Quick actions */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
                 {[
                     { ico: "📄", title: "Create Agreement", sub: "Start from a template or scratch", page: "templates" },
                     { ico: "✍️", title: "Sign Agreement", sub: "Review and sign pending documents", page: "all" },
@@ -343,7 +343,7 @@ const PageTemplates = ({ onNavigate, onSelectTemplate }) => {
             </div>
 
             {/* Template grid */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
                 {filtered.map((tmpl, i) => (
                     <Card key={i} style={{
                         padding: 24, display: "flex", flexDirection: "column", gap: 0, position: "relative",
@@ -601,7 +601,7 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                 <div style={{ maxWidth: 780 }}>
 
                     {/* ── Top info row ── */}
-                    <div style={{
+                    <div className="rgrid-2" style={{
                         display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 22,
                     }}>
                         {/* Creator info card */}
@@ -1016,7 +1016,7 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                         const sigData = sigMode === "draw"
                             ? (canvasRef.current?.toDataURL() || "")
                             : sigMode === "type" ? typedSig
-                            : (uploadedSig || "");
+                                : (uploadedSig || "");
                         if (!sigData) { toast.show("⚠️ Please add your signature first", "warn"); return; }
                         setSubmitting(true);
                         try {
@@ -1110,10 +1110,11 @@ const PageAllAgreements = ({ onNavigate }) => {
             </div>
 
             {/* Table */}
-            <Card style={{ padding: 0, overflow: "hidden" }}>
+            {/* 5 columns can't stack — scroll sideways on narrow screens. */}
+            <Card style={{ padding: 0, overflowX: "auto", overflowY: "hidden" }}>
                 {/* Header */}
                 <div style={{
-                    display: "grid", gridTemplateColumns: "2fr 1fr 80px 120px 100px",
+                    display: "grid", gridTemplateColumns: "2fr 1fr 80px 120px 100px", minWidth: 620,
                     padding: "10px 20px", borderBottom: `1px solid ${t.border}`, background: t.surface
                 }}>
                     {["AGREEMENT", "WITH", "SIGNED", "STATUS", "ACTIONS"].map(h => (
@@ -1125,7 +1126,7 @@ const PageAllAgreements = ({ onNavigate }) => {
                 </div>
                 {filtered.map((a, i) => (
                     <div key={a.id} onClick={() => { setViewing(a); setSignName(user?.full_name || ""); }} style={{
-                        display: "grid", gridTemplateColumns: "2fr 1fr 80px 120px 100px",
+                        display: "grid", gridTemplateColumns: "2fr 1fr 80px 120px 100px", minWidth: 620,
                         alignItems: "center", padding: "16px 20px",
                         borderBottom: i < filtered.length - 1 ? `1px solid ${t.border}` : "none",
                         transition: "background 0.15s", cursor: "pointer",

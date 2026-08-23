@@ -387,7 +387,7 @@ function ScreenInbox({ t, onOpen, docs, loading }) {
             </div>
 
             {/* ── Stat cards ─────────────────────────────────── */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 26 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 26 }}>
                 {statCards.map(s => (
                     <div key={s.label} style={{
                         display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -439,15 +439,18 @@ function ScreenInbox({ t, onOpen, docs, loading }) {
             </div>
 
             {/* ── Document Table ─────────────────────────────── */}
+            {/* 8 columns can't meaningfully stack — scroll the table sideways
+                on narrow screens instead of crushing the cells. */}
             <div style={{
                 background: t.card, borderRadius: 14,
-                border: `1px solid ${t.border}`, overflow: "hidden",
+                border: `1px solid ${t.border}`, overflowX: "auto", overflowY: "hidden",
             }}>
 
                 {/* ── Table header — high contrast, clearly visible ── */}
                 <div style={{
                     display: "grid",
                     gridTemplateColumns: "2.4fr 0.9fr 0.9fr 1.1fr 1.15fr 0.85fr 1.25fr 32px",
+                    minWidth: 900,
                     padding: "14px 22px",
                     /* Distinct teal-tinted dark background so headers stand out */
                     background: "linear-gradient(90deg, rgba(28,68,80,0.95) 0%, rgba(22,58,70,0.95) 100%)",
@@ -478,6 +481,7 @@ function ScreenInbox({ t, onOpen, docs, loading }) {
                         <div key={doc.id} style={{
                             display: "grid",
                             gridTemplateColumns: "2.4fr 0.9fr 0.9fr 1.1fr 1.15fr 0.85fr 1.25fr 32px",
+                    minWidth: 900,
                             padding: "14px 22px", alignItems: "center", gap: 8,
                             borderBottom: idx < filtered.length - 1 ? `1px solid ${t.border}` : "none",
                             transition: "background .12s", cursor: "pointer",
@@ -618,7 +622,7 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
     };
 
     return (
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
+        <div className="rgrid" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
             {/* Left — document */}
             <div style={{ display: "flex", flexDirection: "column", padding: "20px 24px", overflowY: "auto", borderRight: `1px solid ${t.border}` }}>
                 {/* Doc header */}
@@ -795,7 +799,7 @@ function ScreenDecision({ doc, t, onBack, onDecide, busy }) {
     const [returnNote, setReturnNote] = useState("");
 
     return (
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 320px", gap: 0, overflow: "hidden" }}>
+        <div className="rgrid" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 320px", gap: 0, overflow: "hidden" }}>
 
             {/* Left — decision actions */}
             <div style={{ padding: "22px 26px", overflowY: "auto", borderRight: `1px solid ${t.border}` }}>
@@ -823,7 +827,7 @@ function ScreenDecision({ doc, t, onBack, onDecide, busy }) {
                 <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 18 }}>Select an action for this document</div>
 
                 {/* Decision cards */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginBottom: 28 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16, marginBottom: 28 }}>
                     {[
                         { id: "approve", icon: "✅", label: "Approve & Sign", desc: "Document is legally sound", color: "#4DD4A3", bg: "rgba(77,212,163,0.1)", border: "rgba(77,212,163,0.3)" },
                         { id: "edit", icon: "✏️", label: "Edit & Return", desc: "Return with corrections", color: "#FFC857", bg: "rgba(255,200,87,0.1)", border: "rgba(255,200,87,0.3)" },
@@ -960,7 +964,7 @@ function ScreenFinal({ doc, t, onBack }) {
     const { user } = useAuth();
     const lawyerName = user?.full_name || "Advocate";
     return (
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
+        <div className="rgrid" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
 
             {/* Left — final document */}
             <div style={{ padding: "22px 26px", overflowY: "auto", borderRight: `1px solid ${t.border}` }}>
@@ -1011,7 +1015,7 @@ function ScreenFinal({ doc, t, onBack }) {
                 </div>
 
                 {/* Export options */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8 }}>
                     {[["📄", "PDF"], ["⬇", "Download"], ["✉️", "Email"], ["🖨", "Print"]].map(([ic, lbl]) => (
                         <button key={lbl} style={{
                             padding: "10px 0", borderRadius: 10,

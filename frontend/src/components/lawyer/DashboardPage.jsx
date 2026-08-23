@@ -64,7 +64,7 @@ function DashboardPage() {
             <div style={{ flex: 1, overflowY: "auto", padding: 0 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
                     <div className="fade-up"><div className="serif" style={{ fontSize: 24, fontWeight: 700, color: t.text }}>Good morning, {greetName} ☀️</div><div style={{ fontSize: 13, color: t.textMuted, marginTop: 3 }}>Here's what's happening across your practice today.</div></div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
                         {stats.map((s, i) => (
                             <Card key={s.l} className={`fade-up s${i + 1}`} style={{ padding: 16, cursor: "pointer" }} onClick={() => setPage(s.pg)}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -77,7 +77,7 @@ function DashboardPage() {
                             </Card>
                         ))}
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 290px", gap: 18 }}>
+                    <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 290px", gap: 18 }}>
                         <Card className="fade-up s2">
                             <div style={{ padding: "14px 18px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${t.border}` }}>
                                 <div className="serif" style={{ fontSize: 16, fontWeight: 600, color: t.text }}>Recent Cases</div>

@@ -10,234 +10,6 @@ import { fmtDate, fmtTime, CSB, typeColor, typeIcon, DSB, PRIO } from "./data.js
 import { listCases, addHearing as apiAddHearing, recordHearingOutcome as apiRecordOutcome, aiQueryStream, listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask, toggleTask as apiToggleTask, listEngagements, acceptEngagement, declineEngagement } from "@/lib/api.js";
 import { avatarBg } from "./utils.js";
 
-function WorkspaceOverview({ c, docs, apts, msgs, tasks, hearings, setTab, setPage }) {
-    const { t } = useTheme();
-    const pendingTasks = tasks.filter(t => !t.done);
-    const upcomingHearings = hearings.filter(h => !h.outcome);
-    const unreadMsgs = msgs.filter(m => m.status === "Unanswered");
-
-    return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            {/* Stats row */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }} className="fade-up">
-                {[
-                    { l: "Documents", v: docs.length, c: t.primary, ic: "documents", tab: "documents" },
-                    { l: "Hearings", v: hearings.length, c: t.info, ic: "gavel", tab: "hearings" },
-                    { l: "Pending Tasks", v: pendingTasks.length, c: pendingTasks.length > 0 ? t.warn : t.success, ic: "checkCircle", tab: "tasks" },
-                    { l: "Unread Messages", v: unreadMsgs.length, c: unreadMsgs.length > 0 ? t.danger : t.success, ic: "chat", tab: "messages" },
-                ].map(s => (
-                    <Card key={s.l} style={{ padding: 16, cursor: "pointer" }} onClick={() => setTab(s.tab)}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                            <div>
-                                <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>{s.l}</div>
-                                <div style={{ fontSize: 28, fontWeight: 700, color: s.c, lineHeight: 1 }}>{s.v}</div>
-                            </div>
-                            <div style={{ width: 34, height: 34, borderRadius: 10, background: `${s.c}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                <Icon d={I[s.ic]} size={14} style={{ color: s.c }} />
-                            </div>
-                        </div>
-                    </Card>
-                ))}
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-                {/* Upcoming Hearing */}
-                <Card style={{ padding: 18 }} className="fade-up s1">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                        <div className="serif" style={{ fontSize: 15, fontWeight: 600, color: t.text }}>Next Hearing</div>
-                        <button onClick={() => setTab("hearings")} style={{ fontSize: 11, color: t.primary, background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>All <Icon d={I.arrowRight} size={10} /></button>
-                    </div>
-                    {upcomingHearings.length === 0 ? (
-                        <div style={{ fontSize: 12, color: t.textFaint, padding: "20px 0", textAlign: "center" }}>No upcoming hearings</div>
-                    ) : upcomingHearings.slice(0, 1).map(h => (
-                        <div key={h.id} style={{ padding: 14, borderRadius: 10, background: t.primaryGlow2, border: `1px solid ${t.primary}30` }}>
-                            <div style={{ fontSize: 16, fontWeight: 700, color: t.primary }}>{h.date}</div>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: t.text, marginTop: 4 }}>{h.purpose}</div>
-                            <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
-                                <span style={{ fontSize: 11, color: t.textMuted, display: "flex", alignItems: "center", gap: 4 }}><Icon d={I.clock} size={11} />{h.time}</span>
-                                <span style={{ fontSize: 11, color: t.textMuted, display: "flex", alignItems: "center", gap: 4 }}><Icon d={I.map} size={11} />{h.court}</span>
-                            </div>
-                            <div style={{ fontSize: 11, color: t.textFaint, marginTop: 6 }}>{h.judge}</div>
-                        </div>
-                    ))}
-                </Card>
-
-                {/* Pending Tasks */}
-                <Card style={{ padding: 18 }} className="fade-up s2">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                        <div className="serif" style={{ fontSize: 15, fontWeight: 600, color: t.text }}>Pending Tasks</div>
-                        <button onClick={() => setTab("tasks")} style={{ fontSize: 11, color: t.primary, background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>All <Icon d={I.arrowRight} size={10} /></button>
-                    </div>
-                    {pendingTasks.length === 0 ? (
-                        <div style={{ fontSize: 12, color: t.success, padding: "8px 0", display: "flex", alignItems: "center", gap: 6 }}><Icon d={I.checkCircle} size={14} /> All tasks complete!</div>
-                    ) : pendingTasks.slice(0, 3).map(task => (
-                        <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${t.border}` }}>
-                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: t[PRIO[task.priority]] || t.textMuted, flexShrink: 0 }} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 500, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</div>
-                                <div style={{ fontSize: 10, color: t.textFaint }}>Due {task.due}</div>
-                            </div>
-                        </div>
-                    ))}
-                </Card>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-                {/* Recent Documents */}
-                <Card style={{ padding: 18 }} className="fade-up s3">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                        <div className="serif" style={{ fontSize: 15, fontWeight: 600, color: t.text }}>Documents</div>
-                        <button onClick={() => setTab("documents")} style={{ fontSize: 11, color: t.primary, background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>All <Icon d={I.arrowRight} size={10} /></button>
-                    </div>
-                    {docs.length === 0 ? <div style={{ fontSize: 12, color: t.textFaint, padding: "10px 0" }}>No documents yet</div> : docs.map(doc => (
-                        <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${t.border}` }}>
-                            <div style={{ width: 32, height: 32, borderRadius: 8, background: t.primaryGlow2, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                <Icon d={I.fileText} size={13} style={{ color: t.primary }} />
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.title}</div>
-                                <div style={{ fontSize: 10, color: t.textFaint }}>{doc.modified}</div>
-                            </div>
-                            <Badge type={DSB[doc.status]}>{doc.status}</Badge>
-                        </div>
-                    ))}
-                </Card>
-
-                {/* Client Messages */}
-                <Card style={{ padding: 18 }} className="fade-up s4">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                        <div className="serif" style={{ fontSize: 15, fontWeight: 600, color: t.text }}>Client Messages</div>
-                        <button onClick={() => setTab("messages")} style={{ fontSize: 11, color: t.primary, background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>All <Icon d={I.arrowRight} size={10} /></button>
-                    </div>
-                    {msgs.length === 0 ? <div style={{ fontSize: 12, color: t.textFaint, padding: "10px 0" }}>No messages</div> : msgs.map(msg => (
-                        <div key={msg.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${t.border}` }}>
-                            <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0, background: avatarBg(msg.initials), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{msg.initials}</div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: t.text }}>{msg.client}</div>
-                                <div style={{ fontSize: 11, color: t.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{msg.question}</div>
-                            </div>
-                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-                                <span style={{ fontSize: 10, color: t.textFaint }}>{msg.time}</span>
-                                {msg.status === "Unanswered" && <div style={{ width: 7, height: 7, borderRadius: "50%", background: t.warn }} />}
-                            </div>
-                        </div>
-                    ))}
-                    <div style={{ marginTop: 12 }}>
-                        <Btn variant="accent" size="sm" full onClick={() => setTab("messages")}>
-                            <Icon d={I.chat} size={12} /> Open Messages
-                        </Btn>
-                    </div>
-                </Card>
-            </div>
-        </div>
-    );
-}
-
-// ── Documents Tab ────────────────────────────────────────────
-function WorkspaceDocuments({ docs, caseId, setPage }) {
-    const { t } = useTheme();
-    return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }} className="fade-up">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div className="serif" style={{ fontSize: 16, fontWeight: 600, color: t.text }}>Documents — {docs.length} file{docs.length !== 1 ? "s" : ""}</div>
-                <div style={{ display: "flex", gap: 8 }}>
-                    <Btn variant="secondary" size="sm" onClick={() => setPage("upload")}><Icon d={I.upload} size={12} /> Upload</Btn>
-                    <Btn variant="accent" size="sm" onClick={() => setPage("doc-automation")}><Icon d={I.wand} size={12} /> Generate</Btn>
-                </div>
-            </div>
-            {docs.length === 0 ? (
-                <Card style={{ padding: 40, textAlign: "center" }}>
-                    <Icon d={I.fileText} size={32} style={{ color: t.textFaint, opacity: .3, display: "block", margin: "0 auto 12px" }} />
-                    <div style={{ fontSize: 13, color: t.textMuted }}>No documents linked to this case yet.</div>
-                    <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "center" }}>
-                        <Btn variant="primary" size="sm" onClick={() => setPage("upload")}>Upload Document</Btn>
-                        <Btn variant="secondary" size="sm" onClick={() => setPage("doc-automation")}>Generate with AI</Btn>
-                    </div>
-                </Card>
-            ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-                    {docs.map(doc => (
-                        <Card key={doc.id} style={{ padding: 16 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                                <div style={{ width: 38, height: 38, borderRadius: 10, background: t.primaryGlow2, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    <Icon d={I.fileText} size={16} style={{ color: t.primary }} />
-                                </div>
-                                <Badge type={DSB[doc.status]}>{doc.status}</Badge>
-                            </div>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: t.text, marginBottom: 4, lineHeight: 1.4 }}>{doc.title}</div>
-                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 12 }}>{doc.type} · {doc.modified}</div>
-                            <div style={{ display: "flex", gap: 6 }}>
-                                <Btn variant="ghost" size="sm" style={{ flex: 1 }}><Icon d={I.eye} size={11} /> View</Btn>
-                                <Btn variant="ghost" size="sm" style={{ flex: 1 }}><Icon d={I.download} size={11} /> Download</Btn>
-                            </div>
-                        </Card>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-// ── Hearings Tab ─────────────────────────────────────────────
-function WorkspaceHearings({ hearings, c }) {
-    const { t } = useTheme();
-    const upcoming = hearings.filter(h => !h.outcome);
-    const past = hearings.filter(h => h.outcome);
-    return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }} className="fade-up">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div className="serif" style={{ fontSize: 16, fontWeight: 600, color: t.text }}>Hearing Schedule</div>
-                <Btn variant="accent" size="sm"><Icon d={I.plus} size={12} /> Add Hearing</Btn>
-            </div>
-
-            {upcoming.length > 0 && (
-                <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Upcoming</div>
-                    {upcoming.map(h => (
-                        <div key={h.id} style={{ padding: 16, borderRadius: 12, background: t.primaryGlow2, border: `1px solid ${t.primary}30`, marginBottom: 10 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                                <div style={{ fontSize: 16, fontWeight: 700, color: t.primary }}>{h.date}</div>
-                                <Badge type="info">Upcoming</Badge>
-                            </div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: t.text, marginBottom: 6 }}>{h.purpose}</div>
-                            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                                <span style={{ fontSize: 12, color: t.textMuted, display: "flex", alignItems: "center", gap: 5 }}><Icon d={I.clock} size={12} />{h.time}</span>
-                                <span style={{ fontSize: 12, color: t.textMuted, display: "flex", alignItems: "center", gap: 5 }}><Icon d={I.map} size={12} />{h.court}</span>
-                                <span style={{ fontSize: 12, color: t.textMuted, display: "flex", alignItems: "center", gap: 5 }}><Icon d={I.user} size={12} />{h.judge}</span>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {past.length > 0 && (
-                <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Past Hearings</div>
-                    {past.map(h => (
-                        <Card key={h.id} style={{ padding: 14, opacity: .8, marginBottom: 8 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                <div>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{h.purpose}</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted, marginTop: 3 }}>{h.date} · {h.court}</div>
-                                </div>
-                                <div style={{ textAlign: "right" }}>
-                                    <Badge type="gray">Concluded</Badge>
-                                    {h.outcome && <div style={{ fontSize: 11, color: t.textMuted, marginTop: 4, maxWidth: 200, textAlign: "right" }}>{h.outcome}</div>}
-                                </div>
-                            </div>
-                        </Card>
-                    ))}
-                </div>
-            )}
-
-            {hearings.length === 0 && (
-                <Card style={{ padding: 40, textAlign: "center" }}>
-                    <div style={{ fontSize: 13, color: t.textMuted }}>No hearings recorded yet.</div>
-                </Card>
-            )}
-        </div>
-    );
-}
 
 // ── Messages Tab ─────────────────────────────────────────────
 function WorkspaceMessages({ caseId, c }) {
@@ -507,7 +279,7 @@ function WorkspaceTasks({ caseId, c }) {
                         <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 16 }}>Add Task</div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                             <div><Label>Title *</Label><Input value={form.title} onChange={f("title")} placeholder="e.g. File reply brief" /></div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                                 <div><Label>Due Date</Label><Input type="date" value={form.due} onChange={f("due")} /></div>
                                 <div>
                                     <Label>Priority</Label>
@@ -865,7 +637,7 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
             {modal && (
                 <Modal title={modal === "add" ? "Schedule New Hearing" : "Edit Hearing"} subtitle={`Case: ${caseId}`} onClose={() => setModal(null)}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <Input label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
                             <Input label="Time" type="time" value={form.time} onChange={v => setForm(p => ({ ...p, time: v }))} />
                         </div>
@@ -888,7 +660,7 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                         <div>
                             <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>What happened? *</div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+                            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
                                 {OUTCOME_OPTIONS.map(([key, label]) => (
                                     <button key={key} onClick={() => setOForm(p => ({ ...p, outcome: key }))} style={{
                                         padding: "9px 10px", borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "left",
@@ -900,7 +672,7 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                             </div>
                         </div>
                         <Textarea label="Note for the client (optional)" value={oForm.note} onChange={v => setOForm(p => ({ ...p, note: v }))} rows={2} placeholder="e.g. Opposing counsel sought time to file reply" />
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <Input label="Next hearing date (auto-schedules)" type="date" value={oForm.next_date} onChange={v => setOForm(p => ({ ...p, next_date: v }))} />
                             <Input label="Time" type="time" value={oForm.next_time} onChange={v => setOForm(p => ({ ...p, next_time: v }))} />
                         </div>
@@ -982,7 +754,7 @@ function DocumentsTab({ caseId, docs, setDocs, timeline, setTimeline }) {
                     <Btn onClick={openAdd}>Add First Document</Btn>
                 </Card>
             ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
                     {cDocs.map(doc => (
                         <Card key={doc.id} style={{ padding: 18 }}>
                             <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 12 }}>
@@ -1032,7 +804,7 @@ function DocumentsTab({ caseId, docs, setDocs, timeline, setTimeline }) {
                 <Modal title={modal === "add" ? "Add Document" : "Edit Document"} subtitle={`Case: ${caseId}`} onClose={() => setModal(null)} width={700}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                         <Input label="Document Title *" value={form.title} onChange={v => setForm(p => ({ ...p, title: v }))} placeholder="e.g. Plaint — Singh vs. Municipal Corp." />
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <Select label="Document Type" value={form.type} onChange={v => setForm(p => ({ ...p, type: v }))} options={docTypes} />
                             <Select label="Status" value={form.status} onChange={v => setForm(p => ({ ...p, status: v }))} options={docStatuses} />
                         </div>
@@ -1177,7 +949,7 @@ function TimelineTab({ caseId, timeline, setTimeline, cases }) {
             {modal && (
                 <Modal title={editEntry ? "Edit Timeline Entry" : "Add Timeline Entry"} subtitle={`Case: ${caseId}`} onClose={() => setModal(false)}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <Input label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
                             <Select label="Entry Type" value={form.type} onChange={v => setForm(p => ({ ...p, type: v }))} options={typeOptions} />
                         </div>
@@ -1267,7 +1039,7 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
             <div style={{ flex: 1, overflowY: "auto", padding: 22 }}>
                 {tab === "overview" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
                             {[
                                 { l: "Documents", v: cDocs.length, c: T.primary, emoji: "📄", gotoTab: "documents" },
                                 { l: "Hearings", v: cHearings.length, c: T.info, emoji: "⚖️", gotoTab: "hearings" },
@@ -1286,7 +1058,7 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                             ))}
                         </div>
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+                        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
                             {/* Next Hearing */}
                             <Card style={{ padding: 18 }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
@@ -1477,7 +1249,7 @@ function EngagementInbox({ requests, onChanged }) {
                     width={480}
                 >
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <FieldInput label="Fee (PKR, optional)" type="number" value={feeAmount} onChange={setFeeAmount} placeholder="e.g. 50000" />
                             <Select label="Fee Type" value={feeType} onChange={setFeeType} options={FEE_TYPE_OPTIONS} />
                         </div>
@@ -1529,7 +1301,7 @@ function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {} 
 
             <EngagementInbox requests={requests} onChanged={onRequestsChanged} />
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
                 {stats.map(s => (
                     <Card key={s.l} style={{ padding: "14px 16px", cursor: s.f ? "pointer" : undefined, border: statusF === s.f ? `1px solid ${s.c}60` : undefined }} onClick={() => s.f && setStatusF(s.f === statusF ? "All" : s.f)}>
                         <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{s.l}</div>

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "@/components/shared/CaseContext.jsx";
-import { getToken, rateAnswer } from "@/lib/api.js";
+import { getToken, rateAnswer, getWsTicket } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import Ic from "./Ic.jsx";
 import { Badge, Tooltip } from "@/components/shared/shared.jsx";
@@ -15,33 +15,33 @@ const WS_BASE = (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_WS_U
    MODULE: AI CHATBOT  (WebSocket-backed)
 ══════════════════════════════════════════════════════ */
 const ModChatbot = () => {
-    const t      = useT();
-    const toast  = useToast();
+    const t = useT();
+    const toast = useToast();
     const router = useRouter();
     const { caseType } = useCase();
-    const { user }     = useAuth();
+    const { user } = useAuth();
 
     /* ── UI state ─────────────────────────────────────────────────────── */
-    const [msgs,      setMsgs]      = useState([]);
-    const [inp,       setInp]       = useState("");
-    const [typing,    setTyping]    = useState(false);
-    const [lang,      setLang]      = useState("EN");
-    const [sideOpen,  setSideOpen]  = useState(true);
+    const [msgs, setMsgs] = useState([]);
+    const [inp, setInp] = useState("");
+    const [typing, setTyping] = useState(false);
+    const [lang, setLang] = useState("EN");
+    const [sideOpen, setSideOpen] = useState(true);
     const [webSearch, setWebSearch] = useState(false);
     const [listening, setListening] = useState(false);
-    const [history,   setHistory]   = useState([
-        { group: "This Week",  items: [] },
-        { group: "Last Week",  items: ["Contract dispute analysis", "NDA review help"] },
+    const [history, setHistory] = useState([
+        { group: "This Week", items: [] },
+        { group: "Last Week", items: ["Contract dispute analysis", "NDA review help"] },
     ]);
 
     /* ── WebSocket state ──────────────────────────────────────────────── */
-    const wsRef          = useRef(null);
-    const sessionIdRef   = useRef(null);
-    const bottomRef      = useRef(null);
-    const retryRef       = useRef(null);
-    const stableRef      = useRef(null); // timer to reset retry count after stable connection
-    const retryCount     = useRef(0);
-    const listeningRef   = useRef(false); // mirror of `listening` state for WS closures
+    const wsRef = useRef(null);
+    const sessionIdRef = useRef(null);
+    const bottomRef = useRef(null);
+    const retryRef = useRef(null);
+    const stableRef = useRef(null); // timer to reset retry count after stable connection
+    const retryCount = useRef(0);
+    const listeningRef = useRef(false); // mirror of `listening` state for WS closures
     const [wsStatus, setWsStatus] = useState("disconnected");
 
     /* Generate a stable session ID per component mount */
@@ -62,19 +62,9 @@ const ModChatbot = () => {
 
         // Exchange access token for a one-time 60-second WS ticket.
         // Never put the JWT itself in the URL — it ends up in server logs.
-        const apiBase = WS_BASE.replace(/^ws/, 'http');
-        let ticket;
-        try {
-            const resp = await fetch(`${apiBase}/api/v1/auth/ws-ticket`, {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!resp.ok) return;
-            const data = await resp.json();
-            ticket = data.ticket;
-        } catch {
-            return;
-        }
+        // getWsTicket goes through apiFetch, so an expired access token is
+        // refreshed and retried instead of silently failing the connect.
+        const ticket = await getWsTicket();
         if (!ticket) return;
 
         const url = `${WS_BASE}/ws/chat/${sid}?ticket=${encodeURIComponent(ticket)}`;
@@ -82,7 +72,7 @@ const ModChatbot = () => {
         setWsStatus("connecting");
         const ws = new WebSocket(url);
 
-        ws.onopen  = () => {
+        ws.onopen = () => {
             setWsStatus("connected");
             // Reset retry count only after the connection has been stable for 10 s
             // (not immediately on open — that caused an infinite retry loop)
@@ -118,35 +108,35 @@ const ModChatbot = () => {
                     .map(c => [c.statute, c.section ? `§${c.section}` : ""].filter(Boolean).join(" "))
                     .filter(Boolean);
                 setMsgs(m => [...m, {
-                    role:           "ai",
-                    text:           msg.content || "",
-                    time:           now,
-                    refs:           citations,
-                    confidence:     msg.confidence,
-                    status:         msg.convergence_status,
+                    role: "ai",
+                    text: msg.content || "",
+                    time: now,
+                    refs: citations,
+                    confidence: msg.confidence,
+                    status: msg.convergence_status,
                     matchedLawyers: msg.suggest_lawyer ? (msg.matched_lawyers || []) : [],
-                    suggestLawyer:  !!msg.suggest_lawyer,
+                    suggestLawyer: !!msg.suggest_lawyer,
                 }]);
 
             } else if (msg.type === "clarification") {
                 setTyping(false);
                 setMsgs(m => [...m, {
-                    role:            "ai",
-                    text:            msg.question || "",
-                    time:            now,
-                    refs:            [],
+                    role: "ai",
+                    text: msg.question || "",
+                    time: now,
+                    refs: [],
                     isClarification: true,
-                    matchedLawyers:  msg.matched_lawyers || [],
+                    matchedLawyers: msg.matched_lawyers || [],
                 }]);
 
             } else if (msg.type === "error") {
                 setTyping(false);
                 toast.show("AI pipeline error — please try again.", "error", 3000);
                 setMsgs(m => [...m, {
-                    role:    "ai",
-                    text:    msg.content || "AI assistant temporarily unavailable.",
-                    time:    now,
-                    refs:    [],
+                    role: "ai",
+                    text: msg.content || "AI assistant temporarily unavailable.",
+                    time: now,
+                    refs: [],
                     isError: true,
                 }]);
             }
@@ -214,11 +204,11 @@ const ModChatbot = () => {
         const caseId = typeof window !== "undefined" ? localStorage.getItem("aai-case-id") : null;
 
         wsRef.current.send(JSON.stringify({
-            content:    txt,
-            case_id:    caseId  || null,
-            case_type:  caseType || null,
-            province:   null,
-            language:   lang === "UR" ? "ur" : "en",
+            content: txt,
+            case_id: caseId || null,
+            case_type: caseType || null,
+            province: null,
+            language: lang === "UR" ? "ur" : "en",
             web_search: webSearch,
         }));
     };
@@ -234,8 +224,8 @@ const ModChatbot = () => {
         rec.continuous = false;
         rec.interimResults = false;
 
-        rec.onstart  = () => { setListening(true);  listeningRef.current = true; };
-        rec.onend    = () => {
+        rec.onstart = () => { setListening(true); listeningRef.current = true; };
+        rec.onend = () => {
             setListening(false);
             listeningRef.current = false;
             // Reconnect WS if it dropped while mic was active
@@ -244,7 +234,7 @@ const ModChatbot = () => {
                 connect();
             }
         };
-        rec.onerror  = () => {
+        rec.onerror = () => {
             setListening(false);
             listeningRef.current = false;
             toast.show("Voice recognition failed — please try again.", "error", 2500);
@@ -546,7 +536,7 @@ const ModChatbot = () => {
                                                                     answer_preview: (m.text || "").slice(0, 300),
                                                                     question_preview: (msgs[i - 1]?.text || "").slice(0, 300),
                                                                     source: "chat",
-                                                                }).catch(() => {});
+                                                                }).catch(() => { });
                                                             }}
                                                             style={{
                                                                 width: 26, height: 26, borderRadius: 7, cursor: "pointer",
@@ -710,11 +700,11 @@ const ModChatbot = () => {
                                         cursor: "pointer", fontFamily: "'Inter',sans-serif",
                                         transition: "all 0.15s", fontWeight: webSearch ? 700 : 400,
                                     }}
-                                    onMouseEnter={e => { if (!webSearch) { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}}
-                                    onMouseLeave={e => { if (!webSearch) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}}
+                                    onMouseEnter={e => { if (!webSearch) { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; } }}
+                                    onMouseLeave={e => { if (!webSearch) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; } }}
                                 >
                                     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                                        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
                                     </svg>
                                     Web
                                 </button>
@@ -733,10 +723,10 @@ const ModChatbot = () => {
                                     }}
                                 >
                                     <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke={listening ? t.primary : t.textMuted} strokeWidth="2">
-                                        <rect x="9" y="2" width="6" height="11" rx="3"/>
-                                        <path d="M5 10a7 7 0 0 0 14 0"/>
-                                        <line x1="12" y1="19" x2="12" y2="23"/>
-                                        <line x1="8" y1="23" x2="16" y2="23"/>
+                                        <rect x="9" y="2" width="6" height="11" rx="3" />
+                                        <path d="M5 10a7 7 0 0 0 14 0" />
+                                        <line x1="12" y1="19" x2="12" y2="23" />
+                                        <line x1="8" y1="23" x2="16" y2="23" />
                                     </svg>
                                 </button>
 

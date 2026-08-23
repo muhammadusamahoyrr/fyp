@@ -141,8 +141,8 @@ const ModDocuments = () => {
                 avail: !!l.lawyer_profile?.availability,
                 avatar: (l.full_name || "L").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
             })));
-        }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        }).catch(() => { });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [step]);
 
     // If the linked case already has a lawyer, the document goes to them
@@ -167,7 +167,7 @@ const ModDocuments = () => {
         refresh();
         const iv = setInterval(refresh, 12000);
         return () => clearInterval(iv);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reviewSent, docId, genCaseId, reviewStatus]);
 
     const submitToLawyer = async () => {
@@ -331,7 +331,7 @@ const ModDocuments = () => {
                 {step === 0 && (
                     <div>
                         {/* Stats bar */}
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 14 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 14 }}>
                             {[["Templates", String(DRAFTS_DATA.length), "📄", t.primary], ["Categories", String(new Set(DRAFTS_DATA.map(d => d.cat)).size), "📁", t.success]].map(([label, val, ico, col]) => (
                                 <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderRadius: 14, background: t.card, border: `1px solid ${t.border}` }}>
                                     <div>
@@ -355,7 +355,7 @@ const ModDocuments = () => {
                         </div>
 
                         {/* Template grid — 3 columns, full width */}
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 14 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
                             {filteredDrafts.length ? filteredDrafts.map(d => {
                                 const gi = DRAFTS_DATA.indexOf(d);
                                 const sel = selectedDraft === gi;
@@ -422,7 +422,7 @@ const ModDocuments = () => {
                                     </div>
                                 )}
                                 <div><Lbl>Case Reference No.</Lbl><ThemedInput value={caseRef} onChange={e => setCaseRef(e.target.value)} placeholder="e.g. CASE-2026-00142" /></div>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                                     <div><Lbl>Jurisdiction</Lbl>
                                         <select value={jurisdiction} onChange={e => setJurisdiction(e.target.value)} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5 }}>
                                             <option>Lahore High Court</option><option>Islamabad High Court</option><option>Sindh High Court</option><option>Supreme Court</option>
@@ -478,7 +478,7 @@ const ModDocuments = () => {
             STEP 3 — User Review & Edit
         ════════════════════════════════════════════════ */}
                 {step === 2 && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
+                    <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
 
                         {/* Left: editable document */}
                         <Card style={{ display: "flex", flexDirection: "column", minHeight: 540 }}>
@@ -579,7 +579,7 @@ const ModDocuments = () => {
             STEP 4 — Submit to Lawyer → Lawyer Review
         ════════════════════════════════════════════════ */}
                 {step === 3 && !reviewSent && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 18 }}>
+                    <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 18 }}>
 
                         {/* Left: lawyer selection */}
                         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -683,7 +683,7 @@ const ModDocuments = () => {
 
                 {/* ── Lawyer Review in Progress ── */}
                 {step === 3 && reviewSent && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+                    <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
 
                         {/* Left: live tracking */}
                         <Card>
@@ -771,7 +771,7 @@ const ModDocuments = () => {
 
                             <Card>
                                 <STitle icon="dl" sub="Export your document">Export</STitle>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                                     {[["📄", "Generate PDF"], ["📥", "Download"], ["✉️", "Email"], ["🖨️", "Print"]].map(([ico, lbl]) => (
                                         <div key={lbl} onClick={() => toast.show(`${ico} ${lbl}…`, "success")} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 11, border: `1.5px solid ${t.border}`, background: t.inputBg, cursor: "pointer", transition: "all 0.2s" }}
                                             onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.background = t.primaryGlow; }}
@@ -798,7 +798,7 @@ const ModDocuments = () => {
             STEP 5 — Final Version + Export
         ════════════════════════════════════════════════ */}
                 {step === 4 && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 18 }}>
+                    <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 18 }}>
 
                         {/* Left: final document */}
                         <Card style={{ display: "flex", flexDirection: "column" }}>
@@ -831,7 +831,7 @@ const ModDocuments = () => {
 
                             {/* Export actions */}
                             <div style={{ marginTop: 14 }}>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8, marginBottom: 8 }}>
                                     {[["📄", "Generate PDF"], ["📥", "Download"], ["✉️", "Email"], ["🖨️", "Print"]].map(([ico, lbl]) => (
                                         <div key={lbl} onClick={() => { setExported(true); if (lbl === "Download" && docId) { downloadDocument(docId, docTitle || "document"); } else { toast.show(`${ico} ${lbl}…`, "success"); } }} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "12px 8px", borderRadius: 12, border: `1.5px solid ${t.border}`, background: t.inputBg, cursor: "pointer", transition: "all 0.2s" }}
                                             onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.background = t.primaryGlow; }}
@@ -918,7 +918,7 @@ const ModTracking = () => {
     ];
     const markRead = (id) => setNotifs(n => n.map(x => x.id === id ? { ...x, read: true } : x));
     return (
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
+        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <Card>
                     <STitle icon="clock" sub="Case C-001 — Employment Dispute">Case Timeline</STitle>
@@ -987,7 +987,7 @@ const ModTracking = () => {
                     <STitle icon="clock" sub="Set custom reminders for deadlines">Reminders</STitle>
                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                         <div><Lbl>Description</Lbl><ThemedInput placeholder="e.g. File plaint tomorrow" /></div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                             <div><Lbl>Date</Lbl><ThemedInput type="date" /></div>
                             <div><Lbl>Time</Lbl><ThemedInput type="time" /></div>
                         </div>

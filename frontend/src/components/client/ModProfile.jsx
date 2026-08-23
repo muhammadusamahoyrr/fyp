@@ -231,11 +231,11 @@ const HeroBgIcons = ({ color }) => (
 );
 
 const PROVINCE_OPTIONS = [
-    { value: "punjab",      label: "Punjab",          sub: "Lahore · Rawalpindi · Faisalabad",   flag: "🌾" },
-    { value: "sindh",       label: "Sindh",           sub: "Karachi · Hyderabad · Sukkur",       flag: "🌊" },
-    { value: "kpk",         label: "KPK",             sub: "Peshawar · Abbottabad · Mardan",     flag: "⛰️" },
-    { value: "balochistan", label: "Balochistan",     sub: "Quetta · Gwadar · Turbat",           flag: "🏜️" },
-    { value: "federal",     label: "Federal (ICT)",   sub: "Islamabad Capital Territory",        flag: "🏛️" },
+    { value: "punjab", label: "Punjab", sub: "Lahore · Rawalpindi · Faisalabad", flag: "🌾" },
+    { value: "sindh", label: "Sindh", sub: "Karachi · Hyderabad · Sukkur", flag: "🌊" },
+    { value: "kpk", label: "KPK", sub: "Peshawar · Abbottabad · Mardan", flag: "⛰️" },
+    { value: "balochistan", label: "Balochistan", sub: "Quetta · Gwadar · Turbat", flag: "🏜️" },
+    { value: "federal", label: "Federal (ICT)", sub: "Islamabad Capital Territory", flag: "🏛️" },
 ];
 
 /* ══════════════════════════════════════════════════════════════
@@ -516,7 +516,7 @@ const ModProfile = () => {
                             {/* Personal details grid */}
                             <div>
                                 <SectionLabel>Personal Details</SectionLabel>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
                                     <FieldTile label="First Name" value={displayName.split(" ")[0] || displayName} icon="user" />
                                     <FieldTile label="Last Name" value={displayName.split(" ").slice(1).join(" ") || "—"} icon="user" />
                                     <FieldTile label="Member Since" value={user?.created_at
@@ -533,7 +533,7 @@ const ModProfile = () => {
                         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
                             <div>
                                 <SectionLabel>Contact Information</SectionLabel>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                                     <div>
                                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7, fontSize: 10, color: tk.textMuted, fontWeight: 700, letterSpacing: "0.6px", textTransform: "uppercase" }}>
                                             <Ic n="mail" s={11} c={tk.textMuted} />
@@ -552,7 +552,7 @@ const ModProfile = () => {
                             </div>
                             <div>
                                 <SectionLabel>Personal Details</SectionLabel>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                                     <EditField
                                         label="Full Name"
                                         value={editData.full_name}
@@ -578,7 +578,7 @@ const ModProfile = () => {
                                                     const spaceRight = window.innerWidth - r.right;
                                                     const shouldDropUp = spaceBelow < dropdownHeight + 20;
                                                     const shouldAlignRight = spaceRight < dropdownWidth + 20;
-                                                    
+
                                                     setDropUp(shouldDropUp);
                                                     setProvinceRect({
                                                         top: shouldDropUp ? r.top - dropdownHeight - 6 : r.bottom + 6,

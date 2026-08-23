@@ -75,7 +75,7 @@ function ClientsPage() {
                             {clients.length === 0 ? "No cases assigned yet — clients will appear here once cases are linked." : "No clients match your search."}
                         </div>
                     ) : (
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }} className="fade-up s2">
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }} className="fade-up s2">
                             {filtered.map(client => {
                                 const ini = client.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
                                 return (

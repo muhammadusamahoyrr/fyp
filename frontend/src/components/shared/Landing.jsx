@@ -2,6 +2,10 @@
 import React from 'react';
 import PublicLayout from './PublicLayout';
 
+// Marketing art is decorative — if an asset is missing, collapse the image
+// rather than leaving a broken-image icon in the hero.
+const hideOnError = (e) => { e.currentTarget.style.display = 'none'; };
+
 function HeroSection() {
   return (
     <section className="relative isolate pt-20 lg:pt-24">
@@ -29,7 +33,7 @@ function HeroSection() {
               </div>
             </div>
             <div className="relative flex justify-center items-center h-full mt-8 lg:mt-0">
-              <img alt="Attorney AI Hero" src="/hero.png" className="w-auto md:w-full max-w-md lg:max-w-lg" />
+              <img alt="Attorney AI Hero" src="/hero.png" onError={hideOnError} className="w-auto md:w-full max-w-md lg:max-w-lg" />
             </div>
           </div>
         </div>
@@ -43,7 +47,7 @@ function AboutSection() {
     <div className="mx-auto max-w-7xl px-6 lg:flex lg:px-8 py-16">
       <div className="mx-auto flex max-w-2xl flex-col-reverse gap-x-12 gap-y-16 lg:mx-0 lg:min-w-full lg:max-w-none lg:flex-row lg:gap-x-12 lg:gap-y-0">
         <div className="w-auto flex-auto lg:ml-auto lg:w-1/2 lg:flex-none lg:self-center">
-          <img alt="Attorney AI Illustration" src="/illustrate.png" className="w-auto md:w-[35rem] h-auto px-0 md:px-12" />
+          <img alt="Attorney AI Illustration" src="/illustrate.png" onError={hideOnError} className="w-auto md:w-[35rem] h-auto px-0 md:px-12" />
         </div>
         <div className="lg:col-end-1 lg:w-1/2 lg:max-w-lg lg:pb-8 lg:self-center">
           <h2 className="text-4xl font-semibold tracking-tight text-[#025E56] sm:text-5xl">What is Attorney AI?</h2>
@@ -121,7 +125,7 @@ function WhyChooseSection() {
             </div>
           </div>
           <div className="flex items-center justify-center w-full">
-            <img alt="Attorney AI Features" src="/feature.png" className="w-auto md:w-[37rem] rounded-2xl object-cover shadow-xl" />
+            <img alt="Attorney AI Features" src="/feature.png" onError={hideOnError} className="w-auto md:w-[37rem] rounded-2xl object-cover shadow-xl" />
           </div>
         </div>
       </div>

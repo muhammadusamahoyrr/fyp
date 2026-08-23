@@ -40,9 +40,9 @@ const SPEC_TO_CASE_TYPE = {
    MODULE: LAWYER DISCOVERY
 ══════════════════════════════════════════════════════ */
 const ModLawyers = () => {
-    const t          = useT();
+    const t = useT();
     const searchParams = useSearchParams();
-    const router     = useNextRouter();
+    const router = useNextRouter();
     const { selectLawyer, confirmAppointment, addNotification, caseType } = useCase();
     const toast = useToast();
     const [query, setQuery] = useState("");
@@ -75,29 +75,29 @@ const ModLawyers = () => {
     const [loadingLawyers, setLoadingLawyers] = useState(true);
     const [aiMatch, setAiMatch] = useState(null);
     const [loadingMatch, setLoadingMatch] = useState(false);
-    const [showReviewForm, setShowReviewForm]     = useState(false);
-    const [reviewStars, setReviewStars]           = useState(5);
-    const [reviewComment, setReviewComment]       = useState("");
+    const [showReviewForm, setShowReviewForm] = useState(false);
+    const [reviewStars, setReviewStars] = useState(5);
+    const [reviewComment, setReviewComment] = useState("");
     const [reviewSubmitting, setReviewSubmitting] = useState(false);
     // Engagement (hire a lawyer) state
     const [showHireModal, setShowHireModal] = useState(false);
-    const [hireLawyer, setHireLawyer]       = useState(null);
-    const [hireCaseId, setHireCaseId]       = useState("");
-    const [hireMessage, setHireMessage]     = useState("");
+    const [hireLawyer, setHireLawyer] = useState(null);
+    const [hireCaseId, setHireCaseId] = useState("");
+    const [hireMessage, setHireMessage] = useState("");
     const [hireSubmitting, setHireSubmitting] = useState(false);
-    const [myCases, setMyCases]             = useState([]);
+    const [myCases, setMyCases] = useState([]);
     const [myEngagements, setMyEngagements] = useState([]);
 
     const refreshEngagements = () => {
         listEngagements().then(({ data }) => {
             if (Array.isArray(data)) setMyEngagements(data);
-        }).catch(() => {});
+        }).catch(() => { });
     };
 
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => {
             if (data?.items) setMyCases(data.items);
-        }).catch(() => {});
+        }).catch(() => { });
         refreshEngagements();
     }, []);
 
@@ -110,7 +110,7 @@ const ModLawyers = () => {
     }, [myEngagements]);
     const hireableCases = useMemo(() =>
         myCases.filter(c => !c.lawyer_id && !["closed", "dismissed"].includes(c.status) && !pendingByCase[c._id]),
-    [myCases, pendingByCase]);
+        [myCases, pendingByCase]);
 
     // Engagement state for one lawyer: "requested" | "accepted" | null
     const engagementWith = (lawyerId) => {
@@ -134,32 +134,32 @@ const ModLawyers = () => {
 
     // Map a backend user document to the shape the UI expects
     const mapApiLawyer = (raw, idx) => {
-        const lp    = raw.lawyer_profile || {};
+        const lp = raw.lawyer_profile || {};
         const specs = (lp.specializations || []).map(s =>
             s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ")
         );
         const province = raw.province || "";
         const provinceLabel = province.charAt(0).toUpperCase() + province.slice(1);
         return {
-            _id:          raw._id || `api-${idx}`,
-            name:         raw.full_name || "Unknown",
-            spec:         specs.join(", ") || "General Practice",
-            city:         provinceLabel || "Pakistan",
-            exp:          lp.experience_years || 0,
-            fee:          lp.hourly_rate || null,          // null = not set
-            rating:       lp.rating || 0,
-            avail:        !!lp.availability,
-            reviews:      lp.total_reviews || 0,
-            bar:          lp.bar_number || `BAR-API-${String(idx + 1).padStart(3, "0")}`,
-            bio:          lp.bio || null,
-            lat:          lp.lat  ?? null,
-            lng:          lp.lng  ?? null,
-            distance:     null,
-            hours:        "Mon–Fri: 9am–5pm",
-            address:      lp.address || `${provinceLabel}, Pakistan`,
-            credentials:  specs,
-            reviewList:   [],
-            match_score:  raw.match_score,
+            _id: raw._id || `api-${idx}`,
+            name: raw.full_name || "Unknown",
+            spec: specs.join(", ") || "General Practice",
+            city: provinceLabel || "Pakistan",
+            exp: lp.experience_years || 0,
+            fee: lp.hourly_rate || null,          // null = not set
+            rating: lp.rating || 0,
+            avail: !!lp.availability,
+            reviews: lp.total_reviews || 0,
+            bar: lp.bar_number || `BAR-API-${String(idx + 1).padStart(3, "0")}`,
+            bio: lp.bio || null,
+            lat: lp.lat ?? null,
+            lng: lp.lng ?? null,
+            distance: null,
+            hours: "Mon–Fri: 9am–5pm",
+            address: lp.address || `${provinceLabel}, Pakistan`,
+            credentials: specs,
+            reviewList: [],
+            match_score: raw.match_score,
             match_reason: raw.match_reason,
         };
     };
@@ -213,7 +213,7 @@ const ModLawyers = () => {
             }
         }, 400);
         return () => { cancelled = true; clearTimeout(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filters.city, filters.specialization, filters.rating, filters.availability]);
 
     // Reset review form whenever the selected lawyer changes
@@ -232,19 +232,19 @@ const ModLawyers = () => {
         getLawyerAvailability(apptLawyer._id, apptDate).then(({ data }) => {
             setBookedSlots(data?.booked_slots || []);
         });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [apptDate, apptLawyer?._id]);
 
     const isSlotBooked = (timeStr) => {
         if (!apptDate || !bookedSlots.length) return false;
         // Build UTC timestamp for the slot (local → ISO → UTC via Date)
         const slotStart = new Date(`${apptDate}T${timeStr}:00`);
-        const slotEnd   = new Date(slotStart.getTime() + 60 * 60 * 1000);
+        const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
         return bookedSlots.some(b => {
             // Ensure strings without 'Z' are treated as UTC (backend now always sends Z)
             const ensureUtc = s => new Date(s.endsWith("Z") || s.includes("+") ? s : s + "Z");
             const bStart = ensureUtc(b.start);
-            const bEnd   = ensureUtc(b.end);
+            const bEnd = ensureUtc(b.end);
             return slotStart < bEnd && slotEnd > bStart;
         });
     };
@@ -258,7 +258,7 @@ const ModLawyers = () => {
         searchParams?.get("case_id") || localStorage.getItem("aai-case-id") || null;
 
     const MAX_POLL_ATTEMPTS = 5;
-    const POLL_INTERVAL_MS  = 3000;
+    const POLL_INTERVAL_MS = 3000;
 
     const handleAiMatch = async () => {
         if (loadingMatch) return; // prevent concurrent calls
@@ -327,7 +327,7 @@ const ModLawyers = () => {
         if (caseId && !aiMatch) {
             handleAiMatch();
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [backendUp, searchParams]);
 
     const lawyers = apiLawyers;
@@ -437,7 +437,7 @@ const ModLawyers = () => {
     const submitBooking = async () => {
         try {
             console.log("📋 Booking submission started...");
-            
+
             if (!apptDate) {
                 console.warn("⚠️ No date selected");
                 toast.show("Please select an appointment date first.", "warn", 3500);
@@ -450,9 +450,9 @@ const ModLawyers = () => {
                 return;
             }
 
-            console.log("📝 Booking details:", { 
-                lawyer: apptLawyer?.name, 
-                date: apptDate, 
+            console.log("📝 Booking details:", {
+                lawyer: apptLawyer?.name,
+                date: apptDate,
                 time: apptTime,
                 mode: apptMode
             });
@@ -488,11 +488,11 @@ const ModLawyers = () => {
                     mode: apptMode,
                     notes: apptDetails || null,
                 });
-                
+
                 setApptSubmitting(false);
-                
+
                 console.log("📡 API Response:", { error, data });
-                
+
                 if (error) {
                     // 422 detail is a Pydantic array: [{msg: "...", loc: [...]}]
                     const raw = error.detail;
@@ -525,7 +525,7 @@ const ModLawyers = () => {
             toast.show("Appointment booked! Redirecting to tracking…", "success", 2500);
             setShowApptModal(false);
             setTimeout(() => router.push("/tracking"), 600);
-            
+
         } catch (err) {
             console.error("💥 Booking exception:", err);
             toast.show("An unexpected error occurred. Please try again.", "error", 4000);
@@ -656,93 +656,93 @@ const ModLawyers = () => {
     const AppointmentModal = () => {
         if (!apptLawyer || typeof document === "undefined") return null;
         return createPortal(
-        <div style={{
-            position: "fixed", inset: 0, zIndex: 9999,
-            background: "rgba(0,0,0,0.65)",
-            backdropFilter: "blur(4px)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            borderRadius: 0,
-        }}>
             <div style={{
-                background: t.card, borderRadius: 20, border: `1.5px solid ${t.border}`,
-                padding: 28, width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto",
-                boxShadow: "0 24px 64px rgba(0,0,0,0.4)", position: "relative",
+                position: "fixed", inset: 0, zIndex: 9999,
+                background: "rgba(0,0,0,0.65)",
+                backdropFilter: "blur(4px)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                borderRadius: 0,
             }}>
-                {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 22 }}>
-                    <div style={{ width: 46, height: 46, borderRadius: 14, background: t.primaryGlow, border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 800, color: t.primary, flexShrink: 0 }}>
-                        {apptLawyer.name.split(" ").map(w => w[0]).join("").slice(0, 2)}
+                <div style={{
+                    background: t.card, borderRadius: 20, border: `1.5px solid ${t.border}`,
+                    padding: 28, width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto",
+                    boxShadow: "0 24px 64px rgba(0,0,0,0.4)", position: "relative",
+                }}>
+                    {/* Header */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 22 }}>
+                        <div style={{ width: 46, height: 46, borderRadius: 14, background: t.primaryGlow, border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 800, color: t.primary, flexShrink: 0 }}>
+                            {apptLawyer.name.split(" ").map(w => w[0]).join("").slice(0, 2)}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 800, color: t.text, fontSize: 15 }}>{apptLawyer.name}</div>
+                            <div style={{ fontSize: 12, color: t.textMuted }}>{apptLawyer.spec} · {fmtFee(apptLawyer.fee)}/hr</div>
+                        </div>
+                        <button onClick={() => setShowApptModal(false)} style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, width: 30, height: 30, cursor: "pointer", color: t.textMuted, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
                     </div>
-                    <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 800, color: t.text, fontSize: 15 }}>{apptLawyer.name}</div>
-                        <div style={{ fontSize: 12, color: t.textMuted }}>{apptLawyer.spec} · {fmtFee(apptLawyer.fee)}/hr</div>
+
+                    {/* Date */}
+                    <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Date *</label>
+                        <input type="date" value={apptDate} min={new Date().toISOString().split("T")[0]} onChange={e => setApptDate(e.target.value)}
+                            style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${apptDate ? t.primary : t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
                     </div>
-                    <button onClick={() => setShowApptModal(false)} style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 8, width: 30, height: 30, cursor: "pointer", color: t.textMuted, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
-                </div>
 
-                {/* Date */}
-                <div style={{ marginBottom: 14 }}>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Date *</label>
-                    <input type="date" value={apptDate} min={new Date().toISOString().split("T")[0]} onChange={e => setApptDate(e.target.value)}
-                        style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${apptDate ? t.primary : t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
-                </div>
+                    {/* Time */}
+                    <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Preferred Time</label>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            {["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"].map(slot => {
+                                const booked = isSlotBooked(slot);
+                                const past = isSlotPast(slot);
+                                const unavailable = booked || past;
+                                return (
+                                    <button key={slot} disabled={unavailable} onClick={() => !unavailable && setApptTime(slot)}
+                                        style={{ padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${unavailable ? t.border : apptTime === slot ? t.primary : t.border}`, background: unavailable ? t.inputBg : apptTime === slot ? t.primaryGlow : "transparent", color: unavailable ? t.border : apptTime === slot ? t.primary : t.textMuted, fontSize: 12, fontWeight: 700, cursor: unavailable ? "not-allowed" : "pointer", transition: "all 0.15s", textDecoration: booked ? "line-through" : "none", opacity: unavailable ? 0.35 : 1 }}>
+                                        {slot}{past && !booked ? " ✕" : ""}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
 
-                {/* Time */}
-                <div style={{ marginBottom: 14 }}>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Preferred Time</label>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"].map(slot => {
-                            const booked = isSlotBooked(slot);
-                            const past   = isSlotPast(slot);
-                            const unavailable = booked || past;
-                            return (
-                                <button key={slot} disabled={unavailable} onClick={() => !unavailable && setApptTime(slot)}
-                                    style={{ padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${unavailable ? t.border : apptTime === slot ? t.primary : t.border}`, background: unavailable ? t.inputBg : apptTime === slot ? t.primaryGlow : "transparent", color: unavailable ? t.border : apptTime === slot ? t.primary : t.textMuted, fontSize: 12, fontWeight: 700, cursor: unavailable ? "not-allowed" : "pointer", transition: "all 0.15s", textDecoration: booked ? "line-through" : "none", opacity: unavailable ? 0.35 : 1 }}>
-                                    {slot}{past && !booked ? " ✕" : ""}
+                    {/* Notes */}
+                    <div style={{ marginBottom: 22 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Consultation Notes (optional)</label>
+                        <textarea value={apptDetails} onChange={e => setApptDetails(e.target.value)}
+                            placeholder={`Brief description of your case for ${apptLawyer.name}…`}
+                            style={{ width: "100%", minHeight: 72, padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+                    </div>
+
+                    {/* Consultation mode */}
+                    <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Consultation Mode</label>
+                        <div style={{ display: "flex", gap: 8 }}>
+                            {[["video", "Video Call"], ["in_person", "In-Person"], ["phone", "Phone"]].map(([val, label]) => (
+                                <button key={val} onClick={() => setApptMode(val)}
+                                    style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${apptMode === val ? t.primary : t.border}`, background: apptMode === val ? t.primaryGlow : "transparent", color: apptMode === val ? t.primary : t.textMuted, fontSize: 12, fontWeight: 700, cursor: "pointer", transition: "all 0.15s" }}>
+                                    {label}
                                 </button>
-                            );
-                        })}
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Working hours info */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, marginBottom: 18 }}>
+                        <Ic n="clock" s={13} c={t.textMuted} />
+                        <span style={{ fontSize: 12, color: t.textMuted }}>{apptLawyer.hours}</span>
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: "flex", gap: 10 }}>
+                        <BtnOutline onClick={() => setShowApptModal(false)} style={{ flex: 1, fontSize: 13 }}>Cancel</BtnOutline>
+                        <BtnPrimary disabled={apptSubmitting} onClick={submitBooking} style={{ flex: 2, fontSize: 13, padding: "12px", opacity: apptSubmitting ? 0.7 : 1 }}>
+                            {apptSubmitting ? "Booking…" : "Confirm Appointment →"}
+                        </BtnPrimary>
                     </div>
                 </div>
-
-                {/* Notes */}
-                <div style={{ marginBottom: 22 }}>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Consultation Notes (optional)</label>
-                    <textarea value={apptDetails} onChange={e => setApptDetails(e.target.value)}
-                        placeholder={`Brief description of your case for ${apptLawyer.name}…`}
-                        style={{ width: "100%", minHeight: 72, padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
-                </div>
-
-                {/* Consultation mode */}
-                <div style={{ marginBottom: 14 }}>
-                    <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Consultation Mode</label>
-                    <div style={{ display: "flex", gap: 8 }}>
-                        {[["video", "Video Call"], ["in_person", "In-Person"], ["phone", "Phone"]].map(([val, label]) => (
-                            <button key={val} onClick={() => setApptMode(val)}
-                                style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${apptMode === val ? t.primary : t.border}`, background: apptMode === val ? t.primaryGlow : "transparent", color: apptMode === val ? t.primary : t.textMuted, fontSize: 12, fontWeight: 700, cursor: "pointer", transition: "all 0.15s" }}>
-                                {label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Working hours info */}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, marginBottom: 18 }}>
-                    <Ic n="clock" s={13} c={t.textMuted} />
-                    <span style={{ fontSize: 12, color: t.textMuted }}>{apptLawyer.hours}</span>
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: "flex", gap: 10 }}>
-                    <BtnOutline onClick={() => setShowApptModal(false)} style={{ flex: 1, fontSize: 13 }}>Cancel</BtnOutline>
-                    <BtnPrimary disabled={apptSubmitting} onClick={submitBooking} style={{ flex: 2, fontSize: 13, padding: "12px", opacity: apptSubmitting ? 0.7 : 1 }}>
-                        {apptSubmitting ? "Booking…" : "Confirm Appointment →"}
-                    </BtnPrimary>
-                </div>
-            </div>
-        </div>,
-        document.body
-    );
+            </div>,
+            document.body
+        );
     };
 
     // Stable single-item array so LeafletMap doesn't re-run on every render
@@ -761,7 +761,7 @@ const ModLawyers = () => {
                     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={t.primary} strokeWidth="2"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
                     Back to Lawyers
                 </button>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                         <Card>
                             <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
@@ -784,7 +784,7 @@ const ModLawyers = () => {
                             {l.bio && (
                                 <p style={{ fontSize: 13, color: t.textDim, margin: "12px 0 0", lineHeight: 1.6 }}>{l.bio}</p>
                             )}
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 16, background: t.inputBg, borderRadius: 12, padding: 14 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginTop: 16, background: t.inputBg, borderRadius: 12, padding: 14 }}>
                                 {[["Experience", `${l.exp} yrs`], ["Fee/hr", fmtFee(l.fee)], ["City", l.city]].map(([k, v]) => (
                                     <div key={k} style={{ textAlign: "center" }}>
                                         <div style={{ fontSize: 10, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>{k}</div>
@@ -845,7 +845,7 @@ const ModLawyers = () => {
                             <LeafletMap
                                 lawyers={profileMapLawyers}
                                 height={200}
-                                onSelect={() => {}}
+                                onSelect={() => { }}
                             />
                             <div style={{ padding: "10px 14px", borderTop: `1px solid ${t.border}` }}>
                                 <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 8 }}>
@@ -1011,7 +1011,7 @@ const ModLawyers = () => {
     const visibleEngagements = myEngagements.filter(e => e.status === "requested" || e.status === "accepted");
     const ENG_BADGE = {
         requested: { label: "Pending", color: "#EF9F27" },
-        accepted:  { label: "Accepted", color: "#1D9E75" },
+        accepted: { label: "Accepted", color: "#1D9E75" },
     };
     return (
         <div style={{ position: "relative" }}>
@@ -1127,7 +1127,7 @@ const ModLawyers = () => {
                         <span style={{ fontSize: 14, fontWeight: 800, color: t.text }}>Filters</span>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
                         <div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
                                 <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></svg>
@@ -1156,7 +1156,7 @@ const ModLawyers = () => {
                         </div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
                         <div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
                                 <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>

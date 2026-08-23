@@ -228,7 +228,7 @@ function SectionLabel({ label, collapsed, t }) {
         : null;
 }
 
-function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
+function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs, mobileOpen = false, onNavigate }) {
     const { t, toggle } = useTheme();
     const { user } = useAuth();
     const { notifs, clearNotif, clearAll } = useNotif();
@@ -236,6 +236,8 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
     const unreadCount = notifs.filter(n => n.unread).length;
     const displayName = user?.full_name || "Advocate";
     const initials = displayName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+    // Navigating always dismisses the mobile drawer; a no-op on desktop.
+    const navigate = (p) => { setPage(p); onNavigate?.(); };
 
     const bellBtn = (size) => (
         <button
@@ -263,7 +265,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
     );
 
     return (
-        <div data-sidebar style={{
+        <div data-sidebar className={`lw-sidebar${mobileOpen ? " open" : ""}`} style={{
             width: collapsed ? 56 : 240,
             minWidth: collapsed ? 56 : 240,
             height: "100vh", background: t.surface,
@@ -349,7 +351,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
                     <div key={section.id}>
                         <SectionLabel label={section.label} collapsed={collapsed} t={t} />
                         {section.items.map(item => (
-                            <NavItem key={item.id} item={item} page={page} setPage={setPage} collapsed={collapsed} t={t} unreadMsgs={unreadMsgs} />
+                            <NavItem key={item.id} item={item} page={page} setPage={navigate} collapsed={collapsed} t={t} unreadMsgs={unreadMsgs} />
                         ))}
                     </div>
                 ))}
@@ -360,7 +362,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
                 {!collapsed ? (
                     <>
                         <div
-                            onClick={() => setPage("profile")}
+                            onClick={() => navigate("profile")}
                             style={{
                                 display: "flex", alignItems: "center", gap: 10,
                                 padding: "9px 10px", borderRadius: 10, cursor: "pointer",
@@ -399,7 +401,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs }) {
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                         {bellBtn(32)}
                         <button
-                            onClick={() => setPage("profile")}
+                            onClick={() => navigate("profile")}
                             style={{
                                 width: 36, height: 36, borderRadius: "50%", background: t.grad1,
                                 border: "none", cursor: "pointer", display: "flex",
@@ -450,7 +452,8 @@ function Topbar({ page, collapsed, setCollapsed, toggleTheme, children }) {
         profile: "Lawyer Profile", settings: "Settings",
     };
 
-    const hideSearch = page === "documents";
+    const isComm = page === "communication";
+    const hideSearch = page === "documents" || isComm;
 
     return (
         <div style={{

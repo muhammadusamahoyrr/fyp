@@ -85,7 +85,7 @@ const NotifDrawer = ({ open, onClose, onGoTracking, t }) => {
                 onMouseDown={e => e.stopPropagation()}
                 style={{
                     position: "absolute", top: 0, right: 0, bottom: 0,
-                    width: 380, background: t.surface,
+                    width: "min(380px, 100vw)", background: t.surface,
                     borderLeft: `1.5px solid ${t.border}`,
                     display: "flex", flexDirection: "column",
                     boxShadow: "-8px 0 32px rgba(0,0,0,0.25)",
@@ -230,19 +230,19 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
     const pathname = usePathname();
     useEffect(() => {
         const PATH_TAB = {
-            "/dashboard":  "overview",
-            "/intake":     "intake",
-            "/chat":       "chatbot",
-            "/tools":      "tools",
-            "/lawyers":    "lawyers",
-            "/documents":  "documents",
+            "/dashboard": "overview",
+            "/intake": "intake",
+            "/chat": "chatbot",
+            "/tools": "tools",
+            "/lawyers": "lawyers",
+            "/documents": "documents",
             "/agreements": "agreements",
-            "/tracking":   "tracking",
-            "/profile":    "profile",
+            "/tracking": "tracking",
+            "/profile": "profile",
         };
         const next = PATH_TAB[pathname];
         if (next && next !== tab) setTab(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pathname]);
 
     const liveDate = getLiveDate(lang);

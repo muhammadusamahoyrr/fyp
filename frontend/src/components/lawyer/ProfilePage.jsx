@@ -78,7 +78,7 @@ function ProfilePage() {
                 <div className="serif" style={{ fontSize: 22, fontWeight: 700, color: t.text }}>Lawyer Profile</div>
                 <div style={{ fontSize: 13, color: t.textMuted, marginTop: 3 }}>Manage your professional profile and credentials</div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "250px 1fr", gap: 18 }}>
+            <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "250px 1fr", gap: 18 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                     <Card className="fade-up" style={{ padding: 20, textAlign: "center" }}>
                         <div style={{ position: "relative", width: 76, height: 76, margin: "0 auto 12px" }}>
@@ -108,16 +108,16 @@ function ProfilePage() {
                 <Card className="fade-up s1" style={{ padding: 22 }}>
                     <div className="serif" style={{ fontSize: 16, fontWeight: 600, color: t.text, marginBottom: 18 }}>Edit Profile</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <div><Label>First Name</Label><Input value={form.first_name} onChange={f("first_name")} placeholder="First name" /></div>
                             <div><Label>Last Name</Label><Input value={form.last_name} onChange={f("last_name")} placeholder="Last name" /></div>
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <div><Label>Email</Label><Input value={form.email} onChange={f("email")} type="email" placeholder="Email" /></div>
                             <div><Label>Phone</Label><Input value={form.phone} onChange={f("phone")} placeholder="+92 3XX XXXXXXX" /></div>
                         </div>
                         <div><Label>Specialization (comma-separated)</Label><Input value={form.specialization} onChange={f("specialization")} placeholder="e.g. Civil Law, Property Law" /></div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <div><Label>Bar License / Registration No.</Label><Input value={form.bar_number} onChange={f("bar_number")} placeholder="e.g. PBA-2015-4582" /></div>
                             <div><Label>Experience (years)</Label><Input value={form.experience} onChange={f("experience")} type="number" placeholder="e.g. 8" /></div>
                         </div>

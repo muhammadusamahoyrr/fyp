@@ -1,8 +1,6 @@
 'use client';
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { getToken, setToken, clearToken, authLogout, bootstrapAuth, broadcastLogout } from '@/lib/api';
-
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+import { setToken, clearToken, authLogout, bootstrapAuth, broadcastLogout, getMe } from '@/lib/api';
 
 const AuthCtx = createContext(null);
 
@@ -13,7 +11,7 @@ export function useAuth() {
 }
 
 export function AuthProvider({ children }) {
-  const [user, setUser]       = useState(null);
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Hydrate auth state on mount (audit #5): the access token is in-memory only,
@@ -24,12 +22,11 @@ export function AuthProvider({ children }) {
       try {
         const ok = await bootstrapAuth();
         if (!ok) { setLoading(false); return; }
-        const res = await fetch(`${BASE}/users/me`, {
-          headers: { Authorization: `Bearer ${getToken()}` },
-          credentials: 'include',
-        });
-        if (res.ok) setUser(await res.json());
-        else clearToken();
+        // getMe goes through apiFetch — one endpoint definition, and a stale
+        // access token is refreshed and retried instead of dropping the session.
+        const { data, status } = await getMe();
+        if (data) setUser(data);
+        else if (status === 401) clearToken();
       } catch {
         // Network error — stay unauthenticated (isAuthenticated false) until a
         // real /users/me succeeds; the in-memory token is left for retry.
@@ -41,24 +38,21 @@ export function AuthProvider({ children }) {
   // Call after successful login — tokenData = { access_token, role, user_id }
   const login = useCallback((tokenData) => {
     setToken(tokenData.access_token);
-    try { localStorage.setItem('aai-role', tokenData.role); } catch {}
+    try { localStorage.setItem('aai-role', tokenData.role); } catch { }
     // Set immediately with minimal data so ProtectedRoute unblocks right away
     setUser({ _id: tokenData.user_id, role: tokenData.role });
-    // Enrich with full profile in background
-    fetch(`${BASE}/users/me`, {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
-      credentials: 'include',
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(profile => { if (profile) setUser(profile); })
-      .catch(() => {});
+    // Enrich with full profile in background. setToken above already published
+    // the token, so getMe picks it up — and refreshes it if it 401s.
+    getMe()
+      .then(({ data }) => { if (data) setUser(data); })
+      .catch(() => { });
   }, []);
 
   const logout = useCallback(async () => {
-    try { await authLogout(); } catch {}
+    try { await authLogout(); } catch { }
     clearToken();
     broadcastLogout();   // sibling tabs clear their in-memory token + redirect
-    try { localStorage.removeItem('aai-role'); } catch {}
+    try { localStorage.removeItem('aai-role'); } catch { }
     setUser(null);
   }, []);
 

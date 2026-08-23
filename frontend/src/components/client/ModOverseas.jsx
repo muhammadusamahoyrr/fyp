@@ -211,32 +211,36 @@ function MyPoas() {
                     <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                         {[["special", "Special (one property/matter)"], ["general", "General (broad, non-property)"]].map(([v, l]) => (
                             <button key={v} onClick={() => setForm(f => ({ ...f, poa_type: v, powers: v === "general" ? f.powers.filter(p => !POWERS.find(x => x.code === p)?.disp) : f.powers }))}
-                                style={{ flex: 1, height: 40, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                                    border: `1.5px solid ${form.poa_type === v ? t.primary : t.border}`, background: form.poa_type === v ? t.primary + "18" : "transparent", color: form.poa_type === v ? t.primary : t.textMuted }}>{l}</button>
+                                style={{
+                                    flex: 1, height: 40, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                                    border: `1.5px solid ${form.poa_type === v ? t.primary : t.border}`, background: form.poa_type === v ? t.primary + "18" : "transparent", color: form.poa_type === v ? t.primary : t.textMuted
+                                }}>{l}</button>
                         ))}
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                         {field("attorney_name", "Attorney (agent) full name *")}
                         {field("attorney_relation", "Relationship e.g. brother")}
                         {field("attorney_cnic", "Attorney CNIC")}
                         {field("attorney_address", "Attorney address in Pakistan")}
                     </div>
                     {form.poa_type === "special" && <div style={{ marginBottom: 8 }}>{field("subject", "Property / matter e.g. House No.5, Model Town, Lahore")}</div>}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
                         {field("country_of_execution", "Your country of residence")}
                         <ThemedInput type="date" value={form.expiry_date} onChange={e => setForm(f => ({ ...f, expiry_date: e.target.value }))} placeholder="Expiry (optional)" />
                     </div>
 
                     <Lbl>Powers granted</Lbl>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 12 }}>
+                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 12 }}>
                         {POWERS.map(p => {
                             const on = form.powers.includes(p.code);
                             const blocked = isGeneral && p.disp;
                             return (
                                 <label key={p.code} onClick={() => togglePower(p.code, p.disp)}
-                                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, cursor: blocked ? "not-allowed" : "pointer", opacity: blocked ? 0.4 : 1,
-                                        border: `1px solid ${on ? t.primary : t.border}`, background: on ? t.primary + "12" : "transparent", fontSize: 12.5, color: t.text }}>
+                                    style={{
+                                        display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, cursor: blocked ? "not-allowed" : "pointer", opacity: blocked ? 0.4 : 1,
+                                        border: `1px solid ${on ? t.primary : t.border}`, background: on ? t.primary + "12" : "transparent", fontSize: 12.5, color: t.text
+                                    }}>
                                     <input type="checkbox" readOnly checked={on} style={{ accentColor: t.primary }} /> {p.label}{p.disp && <span style={{ fontSize: 9, color: t.textMuted }}>(Special only)</span>}
                                 </label>
                             );
@@ -721,7 +725,7 @@ function DisputeFlow() {
                 {/* STEP 3 — guided intake */}
                 {step === 2 && (
                     <>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                             {iField("property_description", "The property (e.g. House 5, Model Town, Lahore) *")}
                             <select value={intake.province} onChange={e => setIntake(i => ({ ...i, province: e.target.value }))} style={selectStyle(t)}>
                                 {provinces.map(p => <option key={p.code} value={p.code}>{p.name}</option>)}

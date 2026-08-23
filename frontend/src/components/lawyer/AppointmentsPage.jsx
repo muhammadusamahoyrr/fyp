@@ -125,7 +125,7 @@ function JoinCallModal({ apt, onClose, t }) {
                     }}>Copy</button>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     <button onClick={onClose} style={{
                         padding: "10px", borderRadius: 10, border: `1px solid ${t.border}`,
                         background: "transparent", color: t.textMuted,
@@ -144,14 +144,50 @@ function JoinCallModal({ apt, onClose, t }) {
     );
 }
 
+// Appointments are held in list state as display strings ("Mar 15, 2026",
+// "10:00 AM"), but the modal uses native date/time pickers, which require
+// ISO values. These convert across that boundary in both directions.
+const toISODate = (display) => {
+    if (!display) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(display)) return display;
+    const d = new Date(display);
+    if (Number.isNaN(d.getTime())) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const fromISODate = (iso) => {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-").map(Number);
+    if (!y || !m || !d) return iso;
+    return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+};
+const toISOTime = (display) => {
+    if (!display) return "";
+    if (/^\d{2}:\d{2}$/.test(display)) return display;
+    const m = display.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+    if (!m) return "";
+    let h = Number(m[1]);
+    const ampm = m[3]?.toUpperCase();
+    if (ampm === "PM" && h !== 12) h += 12;
+    if (ampm === "AM" && h === 12) h = 0;
+    return `${String(h).padStart(2, "0")}:${m[2]}`;
+};
+const fromISOTime = (iso) => {
+    if (!iso) return "";
+    const [h, min] = iso.split(":").map(Number);
+    if (Number.isNaN(h)) return iso;
+    const ampm = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${String(h12).padStart(2, "0")}:${String(min).padStart(2, "0")} ${ampm}`;
+};
+
 // ── Schedule / New Appointment modal ─────────────────────────
 function ScheduleModal({ apt, onClose, onConfirm, t }) {
     const isNew = !apt;
     const [form, setForm] = useState({
         client: apt?.client || "",
         purpose: apt?.purpose || "",
-        date: apt?.date || "",
-        time: apt?.time || "",
+        date: toISODate(apt?.date),
+        time: toISOTime(apt?.time),
         duration: apt?.duration || "30 min",
         type: apt?.type || "In-Person",
     });
@@ -169,6 +205,9 @@ function ScheduleModal({ apt, onClose, onConfirm, t }) {
         color: t.text, fontSize: 13, outline: "none",
         boxSizing: "border-box", fontFamily: "inherit",
         transition: "border-color .15s",
+        // Tells the browser to render native date/time picker chrome (the
+        // calendar/clock glyph) for this theme, so it isn't a black-on-black icon.
+        colorScheme: t.mode === "dark" ? "dark" : "light",
     };
 
     return (
@@ -223,22 +262,22 @@ function ScheduleModal({ apt, onClose, onConfirm, t }) {
                     </div>
                 )}
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <Field label="Date">
-                        <input value={form.date} onChange={e => f("date")(e.target.value)}
-                            placeholder="Mar 15, 2026" style={inp}
+                        <input type="date" value={form.date} onChange={e => f("date")(e.target.value)}
+                            style={inp}
                             onFocus={e => e.target.style.borderColor = t.primary}
                             onBlur={e => e.target.style.borderColor = t.border} />
                     </Field>
                     <Field label="Time">
-                        <input value={form.time} onChange={e => f("time")(e.target.value)}
-                            placeholder="10:00 AM" style={inp}
+                        <input type="time" value={form.time} onChange={e => f("time")(e.target.value)}
+                            style={inp}
                             onFocus={e => e.target.style.borderColor = t.primary}
                             onBlur={e => e.target.style.borderColor = t.border} />
                     </Field>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <Field label="Duration">
                         <select value={form.duration} onChange={e => f("duration")(e.target.value)} style={{ ...inp, cursor: "pointer" }}>
                             {["30 min", "45 min", "60 min", "90 min"].map(d => <option key={d}>{d}</option>)}
@@ -251,7 +290,7 @@ function ScheduleModal({ apt, onClose, onConfirm, t }) {
                     </Field>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 6 }}>
+                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 6 }}>
                     <button onClick={onClose} style={{
                         padding: "8px 10px", borderRadius: 8,
                         border: `1px solid ${t.border}`, background: "transparent",
@@ -324,10 +363,10 @@ function AppointmentsPage() {
     const handleAccept = async (id) => {
         const apt = appointments.find(a => a.id === id);
         console.log("🔍 Confirming appointment:", id, apt?.client);
-        
+
         const result = await apiConfirm(id);
         console.log("📡 API Response:", result);
-        
+
         const { error } = result;
         if (error) {
             console.error("❌ Confirmation failed:", error);
@@ -336,7 +375,7 @@ function AppointmentsPage() {
             addNotif({ type: "appointment", title: "Failed to Confirm", body: errMsg, time: "Just now" });
             return;
         }
-        
+
         console.log("✅ Appointment confirmed successfully");
         setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Upcoming" } : a));
         const msg = `✅ Appointment confirmed with ${apt?.client}`;
@@ -371,7 +410,9 @@ function AppointmentsPage() {
         toast.show(msg, "success", 3000);
         addNotif({ type: "appointment", title: "Appointment Completed", body: msg, time: "Just now" });
     };
-    const confirmSchedule = (form) => {
+    const confirmSchedule = (raw) => {
+        // Native pickers give ISO values — store the display strings the list renders.
+        const form = { ...raw, date: fromISODate(raw.date), time: fromISOTime(raw.time) };
         if (scheduleModal === null) {
             // New appointment
             const newApt = {
@@ -532,13 +573,13 @@ function AppointmentsPage() {
                                             whiteSpace: "nowrap"
                                         }}
                                         onMouseEnter={e => {
-                                            if (!viewMode === v) {
+                                            if (viewMode !== v) {
                                                 e.currentTarget.style.background = `${t.primary}15`;
                                                 e.currentTarget.style.color = t.primary;
                                             }
                                         }}
                                         onMouseLeave={e => {
-                                            if (!viewMode === v) {
+                                            if (viewMode !== v) {
                                                 e.currentTarget.style.background = "transparent";
                                                 e.currentTarget.style.color = t.textMuted;
                                             }
@@ -553,11 +594,11 @@ function AppointmentsPage() {
                     </div>
 
                     {viewMode === "list" ? (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 18 }}>
+                        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 18 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
                                 {/* ── Stat cards ──────────────────────── */}
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
                                     <StatCard label="Today" value={statCounts.today} color="#38d8c4" bg="rgba(56,216,196,0.12)" border="rgba(56,216,196,0.30)" />
                                     <StatCard label="Upcoming" value={statCounts.upcoming} color="#5ab3ff" bg="rgba(90,179,255,0.12)" border="rgba(90,179,255,0.30)" />
                                     <StatCard label="Pending" value={statCounts.pending} color="#e8b84b" bg="rgba(232,184,75,0.12)" border="rgba(232,184,75,0.30)" />
@@ -589,7 +630,7 @@ function AppointmentsPage() {
                                 </div>
 
                                 {/* ── Appointment cards ───────────────── */}
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                                     {filtered.map(apt => (
                                         <Card key={apt.id} style={{ padding: 16 }}>
                                             {/* Card header */}
@@ -702,7 +743,7 @@ function AppointmentsPage() {
                                     <div style={{ fontSize: 12, fontWeight: 700, color: t.textFaint, letterSpacing: "0.1em", textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>
                                         TODAY'S SCHEDULE
                                     </div>
-                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 14 }}>
+                                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 14 }}>
                                         {["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30"].map(slot => {
                                             const booked = bookedToday.has(slot);
                                             return (
@@ -746,7 +787,7 @@ function AppointmentsPage() {
                         </div>
                     ) : (
                         /* ── Calendar view ──────────────────────────── */
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
+                        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
                             <Card style={{ overflow: "hidden" }}>
                                 <div style={{ overflowX: "auto" }}>
                                     <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 650 }}>
@@ -796,7 +837,7 @@ function AppointmentsPage() {
                             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                                 <Card style={{ padding: 16 }}>
                                     <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 10 }}>Quick Summary</div>
-                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 12 }}>
+                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8, marginBottom: 12 }}>
                                         {[{ l: "Upcoming", v: statCounts.upcoming, c: "#5ab3ff" }, { l: "Pending", v: statCounts.pending, c: "#e8b84b" }, { l: "Done", v: statCounts.completed, c: "#3ec99a" }].map(s => (
                                             <div key={s.l} style={{ padding: "8px 6px", borderRadius: 8, background: t.cardHi, border: `1px solid ${t.border}`, textAlign: "center" }}>
                                                 <div style={{ fontSize: 15, fontWeight: 700, color: s.c }}>{s.v}</div>

@@ -73,14 +73,14 @@ export const Dashboard = ({ T, nav }) => {
         <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 14 }}>System overview · click any card to explore</p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 20 }}>
         {stats.map(s => (
           <StatCard key={s.label} label={s.label} value={s.value} sub={s.sub} subColor={s.subColor}
             iconEl={s.icon} sparkData={s.sparkData} sparkColor={s.sparkColor} onClick={s.onClick} T={T} />
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 14, marginBottom: 16 }}>
+      <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 14, marginBottom: 16 }}>
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: "20px 22px", boxShadow: T.shadowCard }}>
           <div style={{ fontWeight: 600, fontSize: 14, color: T.text, marginBottom: 10 }}>Case Trends</div>
           <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
@@ -99,7 +99,7 @@ export const Dashboard = ({ T, nav }) => {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: "20px 22px", boxShadow: T.shadowCard }}>
           <div style={{ fontWeight: 600, fontSize: 14, color: T.text, marginBottom: 14 }}>Recent Activity</div>
           {recent.map((a, i) => (

@@ -104,7 +104,7 @@ function InheritanceCalc() {
     };
 
     return (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 380px) 1fr", gap: 18, alignItems: "start" }}>
+        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "minmax(300px, 380px) 1fr", gap: 18, alignItems: "start" }}>
             {/* left: inputs */}
             <Card style={{ padding: 18 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: t.text, marginBottom: 4 }}>Who survives the deceased?</div>
@@ -172,7 +172,7 @@ function InheritanceCalc() {
 
                         <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${t.border}` }}>
                             <Lbl>For the PDF documents (optional)</Lbl>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
                                 <ThemedInput value={deceasedName} onChange={e => setDeceasedName(e.target.value)} placeholder="Deceased's name" />
                                 <ThemedInput value={dateOfDeath} onChange={e => setDateOfDeath(e.target.value)} placeholder="Date of death e.g. 12 March 2026" />
                             </div>
@@ -186,7 +186,7 @@ function InheritanceCalc() {
                         {demandOpen && (
                             <div style={{ marginTop: 14, padding: 14, borderRadius: 12, border: `1.5px solid ${t.primary}40`, background: t.inputBg }}>
                                 <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 10 }}>Generate a demand notice for your share</div>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                                     <ThemedInput value={demand.claimant_name} onChange={e => setDemand(p => ({ ...p, claimant_name: e.target.value }))} placeholder="Your full name *" />
                                     <ThemedInput value={demand.relation} onChange={e => setDemand(p => ({ ...p, relation: e.target.value }))} placeholder="Your relation e.g. daughter" />
                                     <ThemedInput value={demand.claimant_address} onChange={e => setDemand(p => ({ ...p, claimant_address: e.target.value }))} placeholder="Your address" />
@@ -210,9 +210,9 @@ function InheritanceCalc() {
 
 /* ══════════════ TAB — WASIYYAT (ISLAMIC WILL) ══════════════ */
 const _STATUS = {
-    valid:                            { c: "#10b981", label: "Within 1/3 — valid" },
-    exceeds_one_third_needs_consent:  { c: "#f59e0b", label: "Excess — needs heirs' consent" },
-    to_heir_needs_consent:            { c: "#f59e0b", label: "To an heir — needs heirs' consent" },
+    valid: { c: "#10b981", label: "Within 1/3 — valid" },
+    exceeds_one_third_needs_consent: { c: "#f59e0b", label: "Excess — needs heirs' consent" },
+    to_heir_needs_consent: { c: "#f59e0b", label: "To an heir — needs heirs' consent" },
 };
 
 function WasiyyatBuilder() {
@@ -262,7 +262,7 @@ function WasiyyatBuilder() {
     const money = (n) => "Rs " + Number(n || 0).toLocaleString();
 
     return (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 400px) 1fr", gap: 18, alignItems: "start" }}>
+        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "minmax(300px, 400px) 1fr", gap: 18, alignItems: "start" }}>
             {/* left: inputs */}
             <Card style={{ padding: 18 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: t.text, marginBottom: 4 }}>The estate</div>
@@ -270,7 +270,7 @@ function WasiyyatBuilder() {
 
                 <Lbl>Gross estate (PKR)</Lbl>
                 <ThemedInput value={gross} onChange={e => setGross(e.target.value)} placeholder="e.g. 6,000,000" />
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
                     <div><Lbl>Funeral expenses</Lbl><ThemedInput value={funeral} onChange={e => setFuneral(e.target.value)} placeholder="0" /></div>
                     <div><Lbl>Debts owed</Lbl><ThemedInput value={debts} onChange={e => setDebts(e.target.value)} placeholder="0" /></div>
                 </div>
@@ -282,7 +282,7 @@ function WasiyyatBuilder() {
                 </div>
                 {bequests.map((b, i) => (
                     <div key={i} style={{ border: `1px solid ${t.border}`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                             <ThemedInput value={b.beneficiary} onChange={e => setBequests(p => p.map((x, xi) => xi === i ? { ...x, beneficiary: e.target.value } : x))} placeholder="Beneficiary" />
                             <ThemedInput value={b.amount} onChange={e => setBequests(p => p.map((x, xi) => xi === i ? { ...x, amount: e.target.value } : x))} placeholder="Amount (PKR)" />
                         </div>
@@ -376,7 +376,7 @@ function WasiyyatBuilder() {
                             <BtnOutline onClick={() => setWillOpen(o => !o)}>📜 Draft my Wasiyyat Nama (will)</BtnOutline>
                             {willOpen && (
                                 <div style={{ marginTop: 12, padding: 14, borderRadius: 12, border: `1.5px solid ${t.primary}40`, background: t.inputBg }}>
-                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                                         <ThemedInput value={will.testator_name} onChange={setW("testator_name")} placeholder="Your full name" />
                                         <ThemedInput value={will.testator_father_name} onChange={setW("testator_father_name")} placeholder="Father's name" />
                                         <ThemedInput value={will.testator_cnic} onChange={setW("testator_cnic")} placeholder="CNIC" />
@@ -439,7 +439,7 @@ function CourtFeePanel() {
     };
 
     return (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px,360px) 1fr", gap: 18, alignItems: "start" }}>
+        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "minmax(280px,360px) 1fr", gap: 18, alignItems: "start" }}>
             <Card style={{ padding: 18 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: t.text, marginBottom: 12 }}>Estimate the court fee</div>
                 <Lbl>Suit type</Lbl>
@@ -504,12 +504,12 @@ function LabourDuesPanel() {
     };
 
     return (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px,360px) 1fr", gap: 18, alignItems: "start" }}>
+        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "minmax(280px,360px) 1fr", gap: 18, alignItems: "start" }}>
             <Card style={{ padding: 18 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: t.text, marginBottom: 12 }}>What are you owed?</div>
                 <Lbl>Monthly wage (PKR)</Lbl>
                 <ThemedInput value={f.monthly_wage} onChange={set("monthly_wage")} placeholder="e.g. 50,000" />
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
                     <div><Lbl>Years of service</Lbl><ThemedInput value={f.years_of_service} onChange={set("years_of_service")} placeholder="0" /></div>
                     <div><Lbl>+ extra months</Lbl><ThemedInput value={f.extra_months} onChange={set("extra_months")} placeholder="0" /></div>
                     <div><Lbl>Unpaid months</Lbl><ThemedInput value={f.unpaid_months} onChange={set("unpaid_months")} placeholder="0" /></div>
@@ -542,7 +542,7 @@ function LabourDuesPanel() {
                             <BtnOutline onClick={() => setDmOpen(o => !o)}>✉️ Generate demand letter</BtnOutline>
                             {dmOpen && (
                                 <div style={{ marginTop: 12, padding: 14, borderRadius: 12, border: `1.5px solid ${t.primary}40`, background: t.inputBg }}>
-                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                                         <ThemedInput value={dm.worker_name} onChange={e => setDm(p => ({ ...p, worker_name: e.target.value }))} placeholder="Your name *" />
                                         <ThemedInput value={dm.designation} onChange={e => setDm(p => ({ ...p, designation: e.target.value }))} placeholder="Your designation" />
                                         <ThemedInput value={dm.worker_address} onChange={e => setDm(p => ({ ...p, worker_address: e.target.value }))} placeholder="Your address" />

@@ -70,7 +70,7 @@ export function AgreementsPage() {
             </div>
 
             {/* Stats */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
                 {[
                     { l: "Awaiting My Signature", v: awaitingMe.length, c: awaitingMe.length ? T.warn : T.success, ic: "✍️" },
                     { l: "Pending Others", v: items.filter(a => a.status === "Pending" && !a.needsMySig).length, c: T.info, ic: "⏰" },
