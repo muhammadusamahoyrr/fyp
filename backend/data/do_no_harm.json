@@ -1,0 +1,40 @@
+{
+  "criminal_collection": {
+    "n_pairs": 97,
+    "base": {
+      "hit@1": 0.0206,
+      "hit@3": 0.6804,
+      "hit@5": 0.701,
+      "mrr": 0.3497,
+      "ndcg@5": 0.3377
+    },
+    "tuned": {
+      "hit@1": 0.0,
+      "hit@3": 0.6598,
+      "hit@5": 0.701,
+      "mrr": 0.3371,
+      "ndcg@5": 0.3244
+    },
+    "improved": 5,
+    "worsened": 8
+  },
+  "civil_collection": {
+    "n_pairs": 53,
+    "base": {
+      "hit@1": 0.0,
+      "hit@3": 0.2642,
+      "hit@5": 0.2642,
+      "mrr": 0.1385,
+      "ndcg@5": 0.1356
+    },
+    "tuned": {
+      "hit@1": 0.0,
+      "hit@3": 0.2642,
+      "hit@5": 0.2642,
+      "mrr": 0.1289,
+      "ndcg@5": 0.1323
+    },
+    "improved": 0,
+    "worsened": 4
+  }
+}

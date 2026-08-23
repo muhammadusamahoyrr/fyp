@@ -35,6 +35,8 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
 from app.ai.pipelines.retriever import build_retriever  # noqa: E402
+from app.ai.nodes.retrieval_node import _is_synthetic  # noqa: E402
+from app.db.chroma import connect_chroma  # noqa: E402
 
 
 # ── Metric functions ──────────────────────────────────────────────────────────
@@ -90,6 +92,14 @@ def evaluate(dataset: list[dict], ks: list[int]) -> dict[str, Any]:
         except Exception as e:
             print(f"  ⚠ Item {i} retrieval failed: {e}")
             continue
+
+        # Apply the same exclusion the live pipeline applies in _docs_to_chunks.
+        # This script calls build_retriever directly, so without this it sees
+        # chunks the system would never serve — and for the LEGAL-UQA set those
+        # are the generated QA pairs containing each question VERBATIM, which
+        # occupy rank 1 and turn the evaluation into a measurement of its own
+        # contamination.
+        docs = [d for d in docs if not _is_synthetic(d.metadata or {})]
 
         retrieved_ids = [
             doc.metadata.get("chunk_id", f"__pos_{j}")
@@ -174,6 +184,7 @@ def _print_report(summary: dict, ks: list[int]) -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    connect_chroma()
     parser = argparse.ArgumentParser(description="Evaluate Attorney.AI retrieval pipeline.")
     parser.add_argument("--dataset", required=True, help="Path to LEGAL-UQA JSON file")
     parser.add_argument("--k",       nargs="+", type=int, default=[1, 3, 5], help="K values for Hit@K and nDCG@K")

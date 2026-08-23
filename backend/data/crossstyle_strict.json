@@ -1,0 +1,266 @@
+[
+  {
+    "question": "When was the proclamation of withdrawal of Martial Law issued?",
+    "question_urdu": "مارشل لاء اٹھانے کا اعلان کب جاری کیا گیا؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0653"
+    ],
+    "gold_span": "s.r.o. no. 1278 (1) 85, dated 30-12-85, read",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the President of Pakistan hold another job that pays for services rendered?",
+    "question_urdu": "کیا پاکستان کا صدر کوئی اور ملازمت کر سکتا ہے جو خدمات کے بدلے معاوضہ دیتی ہو؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0124"
+    ],
+    "gold_span": "(1) the president shall not hold any office",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who can represent a party in proceedings before the Court?",
+    "question_urdu": "عدالت کے سامنے کسی کارروائی میں فریق کی نمائندگی کون کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0605"
+    ],
+    "gold_span": "203e. (1) for the purposes of the performance",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Is the Governor allowed to request the presence of Provincial Assembly members?",
+    "question_urdu": "کیا گورنر صوبائی اسمبلی کے ارکان کی حاضری کا مطالبہ کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0162"
+    ],
+    "gold_span": "the governor may address the provincial assembly and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can a person holding an office of profit in the service of Pakistan continue to be a member of the first Provincial Assembly indefinitely?",
+    "question_urdu": "کیا ملازمت پاکستان میں کسی منفعت بخش عہدے پر فائز شخص پہلی صوبائی اسمبلی کا رکن غیر معینہ مدت تک رہ سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0892"
+    ],
+    "gold_span": "1273. (1) notwithstanding anything contained in the constitution,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What powers does the Court have when performing its functions?",
+    "question_urdu": "عدالت کو اپنے کارہائے منصبی کی انجام دہی کے دوران کون سے اختیارات حاصل ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0605"
+    ],
+    "gold_span": "203e. (1) for the purposes of the performance",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What was omitted by S.R.O. No. 1278 (1) 85?",
+    "question_urdu": "ایس آر او نمبر ۱۲۷۸ (۱) ۸۵ کے ذریعے کیا حذف کیا گیا؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0653"
+    ],
+    "gold_span": "s.r.o. no. 1278 (1) 85, dated 30-12-85, read",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens if a member of the first Provincial Assembly does not take the oath within twenty-one days from the first meeting?",
+    "question_urdu": "اگر پہلی صوبائی اسمبلی کا کوئی رکن پہلے اجلاس کے دن سے اکیس روز کے اندر حلف نہ اٹھائے تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0892"
+    ],
+    "gold_span": "1273. (1) notwithstanding anything contained in the constitution,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Governor speak to the Provincial Assembly?",
+    "question_urdu": "کیا گورنر صوبائی اسمبلی سے خطاب کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0162"
+    ],
+    "gold_span": "the governor may address the provincial assembly and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What is the national language of Pakistan?",
+    "question_urdu": "پاکستان کی قومی زبان کیا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0796"
+    ],
+    "gold_span": "(1) the national language of pakistan is urdu,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who can the President appoint to temporarily act as a Judge of the Supreme Court if a current Judge is unable to perform their duties?",
+    "question_urdu": "اگر موجودہ جج اپنے فرائض انجام دینے سے قاصر ہو تو صدر کس کو عارضی طور پر عدالت عظمیٰ کے جج کی حیثیت سے کام کرنے کے لیے مقرر کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0516"
+    ],
+    "gold_span": "(1) at any time when— the office of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens to a member of Parliament or a Provincial Assembly if they are elected as President?",
+    "question_urdu": "اگر پارلیمنٹ یا صوبائی اسمبلی کا کوئی رکن صدر منتخب ہو جائے تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0124"
+    ],
+    "gold_span": "(1) the president shall not hold any office",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What can the President do if he wants to communicate with either House regarding a Bill or other matters?",
+    "question_urdu": "اگر صدر کسی بل یا دیگر معاملات کے بارے میں کسی ایوان سے بات کرنا چاہے تو وہ کیا کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0162"
+    ],
+    "gold_span": "3[(1)] the president may address either house or",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What two types of expenditure must be shown separately in the Annual Budget Statement?",
+    "question_urdu": "سالانہ کیفیت نامہ بجٹ میں کون سے دو اقسام کے مصارف علیحدہ علیحدہ ظاہر کیے جانے چاہئیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0240"
+    ],
+    "gold_span": "(1) the federal government shall, in respect of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can English be used for official purposes in Pakistan?",
+    "question_urdu": "کیا پاکستان میں سرکاری اغراض کے لیے انگریزی زبان استعمال کی جا سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0796"
+    ],
+    "gold_span": "(1) the national language of pakistan is urdu,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens if someone who is not entitled participates in the proceedings of a House?",
+    "question_urdu": "اگر کوئی ایسا شخص جو کارروائی میں حصہ لینے کا حق نہیں رکھتا، ایوان کی کارروائی میں حصہ لے تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0207"
+    ],
+    "gold_span": "(1) subject to the constitution, a house may",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Court regulate its own procedures?",
+    "question_urdu": "کیا عدالت اپنے طریقہ کار کو منضبط کر سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0605"
+    ],
+    "gold_span": "203e. (1) for the purposes of the performance",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who are the members of the first Provincial Assembly under the Constitution?",
+    "question_urdu": "دستور کے تحت پہلی صوبائی اسمبلی کے اراکین کون ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0892"
+    ],
+    "gold_span": "1273. (1) notwithstanding anything contained in the constitution,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who is responsible for presenting the budget to the National Assembly each year?",
+    "question_urdu": "ہر سال قومی اسمبلی کے سامنے بجٹ پیش کرنے کی ذمہ داری کس کی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0240"
+    ],
+    "gold_span": "(1) the federal government shall, in respect of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can a House continue to function if there are vacancies in its membership?",
+    "question_urdu": "کیا کوئی ایوان اپنی رکنیت میں خالی جگہوں کے باوجود کام جاری رکھ سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0207"
+    ],
+    "gold_span": "(1) subject to the constitution, a house may",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "When is the President required to address both Houses of Parliament together?",
+    "question_urdu": "صدر کو دونوں ایوانوں سے یکجا خطاب کب کرنا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0162"
+    ],
+    "gold_span": "3[(1)] the president may address either house or",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How long does the temporary appointment of a Judge of the Supreme Court last?",
+    "question_urdu": "عدالت عظمیٰ کے جج کی عارضی تقرری کتنی دیر تک برقرار رہتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0516"
+    ],
+    "gold_span": "(1) at any time when— the office of",
+    "source": "LEGAL-UQA"
+  }
+]

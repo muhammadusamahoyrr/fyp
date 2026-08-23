@@ -1,0 +1,53 @@
+{
+  "source": "abdullah693/adaption-pakistan-law-qa-pairs",
+  "source_rows": 11195,
+  "filters": {
+    "kept": 5883,
+    "dropped_seed_legaluqa": 911,
+    "dropped_unresolved": 720,
+    "dropped_failed_validation": 203,
+    "dropped_no_citation": 3478
+  },
+  "per_domain": {
+    "evidence": {
+      "input": 1117,
+      "kept": 1010,
+      "unresolved": 82,
+      "failed_validation": 25
+    },
+    "constitutional": {
+      "input": 2951,
+      "seed": 911,
+      "kept": 1675,
+      "unresolved": 250,
+      "failed_validation": 115
+    },
+    "criminal": {
+      "input": 3349,
+      "kept": 3025,
+      "unresolved": 277,
+      "failed_validation": 47
+    },
+    "family": {
+      "input": 92,
+      "kept": 85,
+      "failed_validation": 3,
+      "unresolved": 4
+    },
+    "civil_procedure": {
+      "input": 208,
+      "kept": 88,
+      "unresolved": 107,
+      "failed_validation": 13
+    },
+    "unknown": {
+      "input": 3478,
+      "no_citation": 3478
+    }
+  },
+  "validation_floor": 0.12,
+  "validation_median": 0.4109,
+  "unmapped_citation_prefixes": {
+    "CPC": 122
+  }
+}

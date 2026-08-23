@@ -1,0 +1,1546 @@
+[
+  {
+    "question": "Can the National Assembly discuss or vote on the authenticated schedule of authorized expenditure?",
+    "question_urdu": "کیا قومی اسمبلی منظور شدہ مصارف کی توثیق شدہ جدول پر بحث یا رائے شماری کر سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0249"
+    ],
+    "gold_span": "(1) the prime minister shall authenticate by his",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How does the State plan to promote the understanding of life according to Islamic teachings?",
+    "question_urdu": "ریاست اسلامی تعلیمات کے مطابق زندگی کے مفہوم کو فروغ دینے کا کیا منصوبہ رکھتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0095"
+    ],
+    "gold_span": "(1) steps shall be taken to enable the",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can Pakistani citizens live and travel anywhere within the country?",
+    "question_urdu": "کیا پاکستانی شہری ملک کے کسی بھی حصے میں رہ سکتے ہیں اور سفر کر سکتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0053"
+    ],
+    "gold_span": "every citizen shall have the right to remain",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens if the Speaker of the National Assembly is unable to perform his duties?",
+    "question_urdu": "اگر قومی اسمبلی کا اسپیکر اپنے فرائض انجام دینے سے قاصر ہو تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0152"
+    ],
+    "gold_span": "(1) after a general election, the national assembly",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who is the head of the National Economic Council?",
+    "question_urdu": "قومی اقتصادی کونسل کا سربراہ کون ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0433"
+    ],
+    "gold_span": "2[156. (1) the president shall constitute a national",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are there any exceptions to the rule that no court or tribunal can exercise power over matters within the jurisdiction of the Court?",
+    "question_urdu": "کیا کوئی استثنیٰ ہے کہ کوئی عدالت یا ٹربیونل عدالت کے دائرہ اختیار میں معاملات پر اختیار استعمال نہیں کر سکتا؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0616"
+    ],
+    "gold_span": "203g. save as provided in article 203f, no",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who will be given special representation in local Government institutions?",
+    "question_urdu": "بلدیاتی اداروں میں کسے خصوصی نمائندگی دی جائے گی؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0097"
+    ],
+    "gold_span": "the state shall encourage local government institutions composed",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What authority does the Supreme Court have to ensure justice in cases before it?",
+    "question_urdu": "عدالت عظمیٰ کو مقدمات میں انصاف کو یقینی بنانے کے لیے کیا اختیار حاصل ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0533"
+    ],
+    "gold_span": "(1) 2[subject to clause (2) of article 175,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How long is the term for the Chairman or Deputy Chairman of the Senate?",
+    "question_urdu": "سینیٹ کے چیئرمین یا ڈپٹی چیئرمین کی میعاد کتنی ہوتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0176"
+    ],
+    "gold_span": "(1) after the senate has been duly constituted,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Under what circumstances can the President declare a state of emergency in Pakistan?",
+    "question_urdu": "صدر پاکستان میں ہنگامی حالت کا اعلان کن حالات میں کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0722",
+      "statutes_constitution_of_pakistan_1973_0747"
+    ],
+    "gold_span": "(1) if the president is satisfied that a",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What must a newly elected Speaker or Deputy Speaker do before taking office?",
+    "question_urdu": "نئے منتخب شدہ اسپیکر یا ڈپٹی اسپیکر کو عہدہ سنبھالنے سے پہلے کیا کرنا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0152"
+    ],
+    "gold_span": "(1) after a general election, the national assembly",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "In whose name are all executive actions of the Federal Government taken?",
+    "question_urdu": "وفاقی حکومت کی کل عاملانہ کارروائیاں کس کے نام سے کی جاتی ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0292"
+    ],
+    "gold_span": "2[99. (1) all executive actions of the federal",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What was the term of office for the members of the first and second groups in the Senate?",
+    "question_urdu": "سینیٹ کے پہلے اور دوسرے گروہوں کے ارکان کی میعاد عہدہ کیا تھی؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0886"
+    ],
+    "gold_span": "2272. 3*notwithstanding anything contained in the constitution, but",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens to the laws made between July 5, 1977, and the date this Article comes into force?",
+    "question_urdu": "پانچ جولائی 1977ء اور اس تاریخ کے درمیان وضع کردہ قوانین کا کیا ہوتا ہے جس پر یہ آرٹیکل نافذ العمل ہو؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0863"
+    ],
+    "gold_span": "2[3[270a.— (1) the proclamation of the fifth day",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How were the members of the Senate divided into groups?",
+    "question_urdu": "سینیٹ کے ارکان کو گروہوں میں کیسے تقسیم کیا گیا؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0886"
+    ],
+    "gold_span": "2272. 3*notwithstanding anything contained in the constitution, but",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Court review decisions made by criminal courts regarding Hudood laws?",
+    "question_urdu": "کیا عدالت حدود قوانین کے بارے میں فوجداری عدالتوں کے فیصلوں کا جائزہ لے سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0602"
+    ],
+    "gold_span": "6[203dd. (1) the court may call for and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What can the President do to address issues or make the Constitution work effectively before the specified time period ends?",
+    "question_urdu": "صدر مشکلات کے ازالہ یا دستور کو مؤثر طور پر عمل میں لانے کے لئے مخصوص مدت کے ختم ہونے سے پہلے کیا کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0844"
+    ],
+    "gold_span": "(1) at any time before the commencing day",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens to a law that conflicts with the rights given in this Chapter?",
+    "question_urdu": "ایسے قانون کا کیا ہوتا ہے جو اس باب میں دیے گئے حقوق کے متناقض ہو؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0028"
+    ],
+    "gold_span": "(1) any law, or any custom or usage",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who continues to hold office until the care-taker Prime Minister or Chief Minister is appointed?",
+    "question_urdu": "نگران وزیر اعظم یا نگران وزیر اعلیٰ کے تقرر تک کون اپنے عہدے پر فائز رہتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0698"
+    ],
+    "gold_span": "224a. (1) in case the prime minister and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Does a direction given by the President affect the operation of the law before the specified date?",
+    "question_urdu": "کیا صدر کی دی گئی ہدایت مصرحہ تاریخ سے پہلے قانون کے عملدرآمد پر اثر انداز ہوتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0798"
+    ],
+    "gold_span": "(1) notwithstanding anything contained in the constitution or",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can a Proclamation issued under this part be changed or canceled?",
+    "question_urdu": "کیا اس حصہ کے تحت جاری ہونے والا اعلان تبدیل یا منسوخ کیا جا سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0751"
+    ],
+    "gold_span": "(1) a proclamation issued under this part may",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who has the authority to amend the laws referred to in the Article?",
+    "question_urdu": "آرٹیکل میں محولہ قوانین میں ترمیم کرنے کا اختیار کس کے پاس ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0863"
+    ],
+    "gold_span": "2[3[270a.— (1) the proclamation of the fifth day",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Supreme Court handle cases that fall under the jurisdiction of the Court mentioned in this article?",
+    "question_urdu": "کیا سپریم کورٹ اس آرٹیکل میں مذکور عدالت کے دائرہ اختیار میں آنے والے مقدمات کو سن سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0616"
+    ],
+    "gold_span": "203g. save as provided in article 203f, no",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How are the women members of the Senate elected?",
+    "question_urdu": "سینیٹ کی خواتین ارکان کیسے منتخب ہوتی ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0170"
+    ],
+    "gold_span": "1[59. (1) the senate shall consist of 2[ninety-six]",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What are the two components of the Parliament of Pakistan?",
+    "question_urdu": "پاکستان کی پارلیمنٹ کے دو اجزاء کون سے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0142"
+    ],
+    "gold_span": "majlis-e-shoora (parliament) 2 [50. there shall be a",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Does the press in Pakistan have unrestricted freedom?",
+    "question_urdu": "کیا پاکستان میں پریس کو غیر محدود آزادی حاصل ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0062"
+    ],
+    "gold_span": "every citizen shall have the right to freedom",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who is responsible for appointing the Chairman of the Public Service Commission for a Province?",
+    "question_urdu": "صوبے کے پبلک سروس کمیشن کے چیئرمین کے تقرر کی ذمہ داری کس پر ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0764"
+    ],
+    "gold_span": "(1) 1[majlis-e-shoora (parliament)] in relation to the affairs",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who appoints the Chairman of the Public Service Commission for the Federation?",
+    "question_urdu": "وفاق کے پبلک سروس کمیشن کے چیئرمین کا تقرر کون کرتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0764"
+    ],
+    "gold_span": "(1) 1[majlis-e-shoora (parliament)] in relation to the affairs",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can any legal action be taken against authorities or individuals for actions taken under the powers mentioned in the Article?",
+    "question_urdu": "کیا آرٹیکل میں مذکور اختیارات کے تحت کی گئی کارروائیوں کے لئے حکام یا افراد کے خلاف کوئی قانونی کارروائی کی جا سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0863"
+    ],
+    "gold_span": "2[3[270a.— (1) the proclamation of the fifth day",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the validity of an order or instrument made in the President's name be questioned in court?",
+    "question_urdu": "کیا صدر کے نام سے جاری کردہ کسی حکم یا دستاویز کے جواز کو عدالت میں چیلنج کیا جا سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0292"
+    ],
+    "gold_span": "2[99. (1) all executive actions of the federal",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What must the President and the Governors do each year regarding the Principles of Policy?",
+    "question_urdu": "صدر اور گورنرز کو ہر سال حکمت عملی کے اصولوں کے بارے میں کیا کرنا چاہیے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0090"
+    ],
+    "gold_span": "(1) the principles set out in this chapter",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens to the right to move any court for the enforcement of Fundamental Rights during an emergency?",
+    "question_urdu": "ہنگامی حالت کے دوران بنیادی حقوق کے نفاذ کے لیے کسی عدالت سے رجوع کرنے کے حق کا کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0732"
+    ],
+    "gold_span": "period (1) nothing contained in articles 15, 16,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What should be done if there is a problem in implementing the Eighteenth Amendment Act, 2010?",
+    "question_urdu": "اگر اٹھارویں ترمیم ایکٹ، 2010 کے نفاذ میں کوئی مسئلہ پیش آئے تو کیا کرنا چاہیے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0845"
+    ],
+    "gold_span": "1[267a. if any difficulty arises in giving effect",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "When was the proclamation of withdrawal of Martial Law issued?",
+    "question_urdu": "مارشل لاء اٹھانے کا اعلان کب جاری کیا گیا؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0653"
+    ],
+    "gold_span": "s.r.o. no. 1278 (1) 85, dated 30-12-85, read",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the President of Pakistan hold another job that pays for services rendered?",
+    "question_urdu": "کیا پاکستان کا صدر کوئی اور ملازمت کر سکتا ہے جو خدمات کے بدلے معاوضہ دیتی ہو؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0124"
+    ],
+    "gold_span": "(1) the president shall not hold any office",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How are orders made during an emergency period approved?",
+    "question_urdu": "ہنگامی حالت کی مدت کے دوران صادر کردہ فرامین کی منظوری کیسے دی جاتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0732"
+    ],
+    "gold_span": "period (1) nothing contained in articles 15, 16,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are new laws allowed to contradict the principles of Islam according to the Holy Quran and Sunnah?",
+    "question_urdu": "کیا نئے قوانین قرآن پاک اور سنت کے اصولوں کے منافی ہو سکتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0706"
+    ],
+    "gold_span": "(1) all existing laws shall be brought in",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Is the Court allowed to change an acquittal to a conviction?",
+    "question_urdu": "کیا عدالت کو بریت کو سزا میں تبدیل کرنے کی اجازت ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0602"
+    ],
+    "gold_span": "6[203dd. (1) the court may call for and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What is the minimum value of the subject matter in dispute for an appeal to be made to the Supreme Court?",
+    "question_urdu": "سپریم کورٹ میں اپیل درج کرنے کے لیے نفس الامر نزاع کی کم از کم مالیت کیا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0526"
+    ],
+    "gold_span": "(1) subject to this article, the supreme court",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the President reduce the salaries and allowances of provincial employees during a financial emergency?",
+    "question_urdu": "کیا صدر مالیاتی ایمرجنسی کے دوران صوبائی ملازمین کی تنخواہوں اور بھتے جات میں کمی کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0722",
+      "statutes_constitution_of_pakistan_1973_0747"
+    ],
+    "gold_span": "(1) if the president is satisfied that a",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What is the maximum percentage of the total membership of Parliament that the Cabinet, including Ministers of State, can have?",
+    "question_urdu": "کابینہ کی کل تعداد، بشمول وزرائے مملکت، پارلیمنٹ کے مجموعی اراکین کے کتنے فیصد سے زیادہ نہیں ہو سکتی؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0278"
+    ],
+    "gold_span": "(1) subject to clauses 1[(9) and (10) of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can acts of high treason be validated by any court in Pakistan?",
+    "question_urdu": "کیا پاکستان میں کسی بھی عدالت کے ذریعے سنگین غداری کے اعمال کو جائز قرار دیا جا سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0023"
+    ],
+    "gold_span": "2[(1) any person who abrogates or subverts or",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who can represent a party in proceedings before the Court?",
+    "question_urdu": "عدالت کے سامنے کسی کارروائی میں فریق کی نمائندگی کون کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0605"
+    ],
+    "gold_span": "203e. (1) for the purposes of the performance",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How many members did the Senate have until the first National Assembly continued in existence?",
+    "question_urdu": "پہلی قومی اسمبلی کے وجود برقرار رہنے تک سینیٹ میں کتنے ارکان تھے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0886"
+    ],
+    "gold_span": "2272. 3*notwithstanding anything contained in the constitution, but",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who decides the number of Judges in a High Court?",
+    "question_urdu": "عدالت عالیہ میں ججوں کی تعداد کا فیصلہ کون کرتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0544"
+    ],
+    "gold_span": "(1) a high court shall consist of a",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Do citizens have the right to maintain their unique cultural practices?",
+    "question_urdu": "کیا شہریوں کو اپنی منفرد ثقافتی روایات کو برقرار رکھنے کا حق ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0088"
+    ],
+    "gold_span": "subject to article 251 any section of citizens",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who is responsible for keeping the President updated on government matters?",
+    "question_urdu": "حکومتی معاملات پر صدر کو باخبر رکھنے کی ذمہ داری کس کی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0129"
+    ],
+    "gold_span": "1[46. the prime minister shall keep the president",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are there any conditions under which the Supreme Court can review its judgments?",
+    "question_urdu": "کیا کوئی شرائط ہیں جن کے تحت عدالت عظمیٰ اپنے فیصلوں پر نظرثانی کر سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0533"
+    ],
+    "gold_span": "1 new art. 186a ins. by p. o.",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens if the Prime Minister and the Leader of the Opposition cannot agree on a care-taker Prime Minister?",
+    "question_urdu": "اگر وزیر اعظم اور قائد حزب اختلاف نگران وزیر اعظم پر متفق نہ ہوں تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0698"
+    ],
+    "gold_span": "224a. (1) in case the prime minister and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "When does the Senate elect a new Chairman or Deputy Chairman?",
+    "question_urdu": "سینیٹ نیا چیئرمین یا ڈپٹی چیئرمین کب منتخب کرتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0176"
+    ],
+    "gold_span": "(1) after the senate has been duly constituted,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What rights do individuals have regarding their treatment under the law in Pakistan?",
+    "question_urdu": "پاکستان میں افراد کو قانون کے تحت اپنے سلوک کے بارے میں کیا حقوق حاصل ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0019"
+    ],
+    "gold_span": "(1) to enjoy the protection of law and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What can the President do if he believes the financial stability of Pakistan is at risk?",
+    "question_urdu": "اگر صدر کو یقین ہو کہ پاکستان کی مالی استحکام خطرے میں ہے تو وہ کیا کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0722",
+      "statutes_constitution_of_pakistan_1973_0747"
+    ],
+    "gold_span": "(1) if the president is satisfied that a",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What is the status of taxes and fees levied before the Constitution (Eighteenth Amendment) Act, 2010?",
+    "question_urdu": "دستور (اٹھارویں ترمیم) ایکٹ، ۲۰۱۰ء سے پہلے عائد کردہ محاصل اور فیسوں کی حیثیت کیا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0868"
+    ],
+    "gold_span": "2[270aa. (1) the proclamation of emergency of the",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How long does an Order made by the President remain in force?",
+    "question_urdu": "صدر کے جاری کردہ فرمان کتنی مدت تک نافذ العمل رہتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0844"
+    ],
+    "gold_span": "(1) at any time before the commencing day",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who is responsible for authenticating the schedule of authorized expenditure?",
+    "question_urdu": "منظور شدہ مصارف کی توثیق کا ذمہ دار کون ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0249"
+    ],
+    "gold_span": "(1) the prime minister shall authenticate by his",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Is the Governor allowed to request the presence of Provincial Assembly members?",
+    "question_urdu": "کیا گورنر صوبائی اسمبلی کے ارکان کی حاضری کا مطالبہ کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0162"
+    ],
+    "gold_span": "the governor may address the provincial assembly and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are actions taken by authorities before the 1985 amendment regarding tax imposition on certain incomes considered valid?",
+    "question_urdu": "کیا ۱۹۸۵ء کی ترمیم سے قبل حکام کی طرف سے آمدنی پر محصول عائد کرنے کے حوالے سے کیے گئے اقدامات جائز سمجھے جاتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0464"
+    ],
+    "gold_span": "2 [165a. (1) for the removal of doubt,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How can the office of the Speaker or Deputy Speaker become vacant?",
+    "question_urdu": "اسپیکر یا ڈپٹی اسپیکر کا عہدہ کیسے خالی ہو سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0152"
+    ],
+    "gold_span": "(1) after a general election, the national assembly",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can a person holding an office of profit in the service of Pakistan continue to be a member of the first Provincial Assembly indefinitely?",
+    "question_urdu": "کیا ملازمت پاکستان میں کسی منفعت بخش عہدے پر فائز شخص پہلی صوبائی اسمبلی کا رکن غیر معینہ مدت تک رہ سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0892"
+    ],
+    "gold_span": "1273. (1) notwithstanding anything contained in the constitution,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the President temporarily change the application of laws at major ports or aerodromes?",
+    "question_urdu": "کیا صدر بڑی بندرگاہوں یا ہوائی اڈوں پر قوانین کے اطلاق کو عارضی طور پر تبدیل کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0798"
+    ],
+    "gold_span": "(1) notwithstanding anything contained in the constitution or",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What powers does the Court have when performing its functions?",
+    "question_urdu": "عدالت کو اپنے کارہائے منصبی کی انجام دہی کے دوران کون سے اختیارات حاصل ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0605"
+    ],
+    "gold_span": "203e. (1) for the purposes of the performance",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who has the authority to create rules for the purposes of this Chapter?",
+    "question_urdu": "اس باب کی اغراض کے لیے قواعد وضع کرنے کا اختیار کس کے پاس ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0622"
+    ],
+    "gold_span": "203j. (1) the court may, by notification in",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Court or the Supreme Court issue an injunction or interim order for cases pending in other courts?",
+    "question_urdu": "کیا عدالت یا عدالت عظمیٰ دیگر عدالتوں میں زیر سماعت مقدمات کے لیے حکم امتناعی یا عبوری حکم جاری کر سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0614",
+      "statutes_constitution_of_pakistan_1973_0715"
+    ],
+    "gold_span": "1 subs. by the constitution (third amdt.) order,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Supreme Court of Pakistan review its own decisions?",
+    "question_urdu": "کیا پاکستان کی عدالت عظمیٰ اپنے فیصلوں کا جائزہ لے سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0533"
+    ],
+    "gold_span": "1 new art. 186a ins. by p. o.",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What type of government does Pakistan have?",
+    "question_urdu": "پاکستان میں کس قسم کی حکومت ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0011"
+    ],
+    "gold_span": "11. (1) pakistan shall be federal republic to",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What was omitted by S.R.O. No. 1278 (1) 85?",
+    "question_urdu": "ایس آر او نمبر ۱۲۷۸ (۱) ۸۵ کے ذریعے کیا حذف کیا گیا؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0653"
+    ],
+    "gold_span": "s.r.o. no. 1278 (1) 85, dated 30-12-85, read",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the government make laws that would normally be restricted during an emergency period?",
+    "question_urdu": "کیا حکومت ہنگامی حالت کے دوران ایسے قوانین بنا سکتی ہے جو عام حالات میں محدود ہوں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0732"
+    ],
+    "gold_span": "period (1) nothing contained in articles 15, 16,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are there any limitations on the right to freedom of speech and expression in Pakistan?",
+    "question_urdu": "کیا پاکستان میں تقریر اور اظہار خیال کی آزادی کے حق پر کوئی پابندیاں ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0062"
+    ],
+    "gold_span": "every citizen shall have the right to freedom",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are there any exceptions to the binding nature of the Court's decisions on lower courts?",
+    "question_urdu": "کیا عدالت کے فیصلوں کی ماتحت عدالتوں پر پابندی کے حوالے سے کوئی استثنیٰ ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0616"
+    ],
+    "gold_span": "2[203gg. subject to articles 203d and 203f, any",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How long is the power to remove difficulties available after the commencement of the Eighteenth Amendment Act, 2010?",
+    "question_urdu": "اٹھارویں ترمیم ایکٹ، 2010 کے آغاز نفاذ کے بعد مشکلات کے ازالے کا اختیار کتنی مدت تک میسر ہوگا؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0845"
+    ],
+    "gold_span": "1[267a. if any difficulty arises in giving effect",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who appoints the acting Chief Justice when the Chief Justice of Pakistan is unable to perform his duties?",
+    "question_urdu": "جب چیف جسٹس پاکستان اپنے فرائض انجام دینے سے قاصر ہو تو قائم مقام چیف جسٹس کو کون مقرر کرتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0514"
+    ],
+    "gold_span": "at any time when— the office of chief",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens if a member of the first Provincial Assembly does not take the oath within twenty-one days from the first meeting?",
+    "question_urdu": "اگر پہلی صوبائی اسمبلی کا کوئی رکن پہلے اجلاس کے دن سے اکیس روز کے اندر حلف نہ اٹھائے تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0892"
+    ],
+    "gold_span": "1273. (1) notwithstanding anything contained in the constitution,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What is the role of the Election Commission if the Committee cannot decide on a care-taker Prime Minister or Chief Minister?",
+    "question_urdu": "اگر کمیٹی نگران وزیر اعظم یا نگران وزیر اعلیٰ کے بارے میں فیصلہ نہ کر سکے تو الیکشن کمیشن کا کیا کردار ہوگا؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0698"
+    ],
+    "gold_span": "224a. (1) in case the prime minister and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Federation or a Province provide financial support for purposes outside their legislative authority?",
+    "question_urdu": "کیا وفاق یا کوئی صوبہ اپنی قانون سازی کی حدود سے باہر مقاصد کے لئے مالی امداد فراہم کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0461"
+    ],
+    "gold_span": "the federation or a province may make grants",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens to the laws made between October 12, 1999, and December 31, 2003?",
+    "question_urdu": "۱۲ اکتوبر ۱۹۹۹ء سے ۳۱ دسمبر ۲۰۰۳ء کے درمیان بنائے گئے قوانین کا کیا ہوگا؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0868"
+    ],
+    "gold_span": "2[270aa. (1) the proclamation of emergency of the",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can citizens in Pakistan own and sell property anywhere in the country?",
+    "question_urdu": "کیا پاکستان میں شہری کسی بھی جگہ جائیداد خرید اور فروخت کر سکتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0072"
+    ],
+    "gold_span": "every citizen shall have the right to acquire,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who appoints the Federal Ministers and Ministers of State in Pakistan?",
+    "question_urdu": "پاکستان میں وفاقی وزراء اور وزرائے مملکت کا تقرر کون کرتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0278"
+    ],
+    "gold_span": "(1) subject to clauses 1[(9) and (10) of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What measures will the State take to help Muslims in Pakistan live according to Islamic principles?",
+    "question_urdu": "ریاست پاکستان کے مسلمانوں کو اسلامی اصولوں کے مطابق زندگی گزارنے میں مدد کے لیے کیا اقدامات کرے گی؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0095"
+    ],
+    "gold_span": "(1) steps shall be taken to enable the",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can any law take away the powers of the Election Commission?",
+    "question_urdu": "کیا کوئی قانون الیکشن کمیشن کے اختیارات کو سلب کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0683"
+    ],
+    "gold_span": "subject to the constitution, 1[majlis-e-shoora (parliament)] may by",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How are the Supreme Court's orders enforced across different regions of Pakistan?",
+    "question_urdu": "پاکستان کے مختلف علاقوں میں عدالت عظمیٰ کے احکامات کو کیسے نافذ کیا جاتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0533"
+    ],
+    "gold_span": "(1) 2[subject to clause (2) of article 175,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Governor speak to the Provincial Assembly?",
+    "question_urdu": "کیا گورنر صوبائی اسمبلی سے خطاب کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0162"
+    ],
+    "gold_span": "the governor may address the provincial assembly and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are judges who took the oath under the Oath of Office (Judges) Order, 2000, considered to have held their positions legally?",
+    "question_urdu": "کیا جج صاحبان جنہوں نے فرمان جج صاحبان عہدہ کا حلف ۲۰۰۰ء کے تحت حلف اٹھایا تھا، قانونی طور پر اپنے عہدوں پر فائز تصور کیے جاتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0868"
+    ],
+    "gold_span": "2[270aa. (1) the proclamation of emergency of the",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the rights conferred by this Chapter be suspended?",
+    "question_urdu": "کیا اس باب کی رو سے عطا کردہ حقوق معطل کیے جا سکتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0028"
+    ],
+    "gold_span": "(1) any law, or any custom or usage",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Supreme Court hear appeals from decisions made by a High Court?",
+    "question_urdu": "کیا سپریم کورٹ ہائی کورٹ کے فیصلوں کے خلاف اپیلوں کی سماعت کر سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0526"
+    ],
+    "gold_span": "(1) subject to this article, the supreme court",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What is the national language of Pakistan?",
+    "question_urdu": "پاکستان کی قومی زبان کیا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0796"
+    ],
+    "gold_span": "(1) the national language of pakistan is urdu,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What is guaranteed to a person facing a criminal charge?",
+    "question_urdu": "کسی شخص کو جرم کے الزام کا سامنا کرنے پر کیا ضمانت دی جاتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0042"
+    ],
+    "gold_span": "2[10a. for the determination of his civil rights",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens if the members of a Bench are equally divided in their opinion on a case?",
+    "question_urdu": "اگر کسی مقدمے میں بینچ کے ارکان کی آراء مساوی ہوں تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0622"
+    ],
+    "gold_span": "203j. (1) the court may, by notification in",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who can the President appoint to temporarily act as a Judge of the Supreme Court if a current Judge is unable to perform their duties?",
+    "question_urdu": "اگر موجودہ جج اپنے فرائض انجام دینے سے قاصر ہو تو صدر کس کو عارضی طور پر عدالت عظمیٰ کے جج کی حیثیت سے کام کرنے کے لیے مقرر کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0516"
+    ],
+    "gold_span": "(1) at any time when— the office of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who is responsible for ensuring that the Principles of Policy are followed?",
+    "question_urdu": "حکمت عملی کے اصولوں پر عمل درآمد کو یقینی بنانے کی ذمہ داری کس کی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0090"
+    ],
+    "gold_span": "(1) the principles set out in this chapter",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens to cases under Article 203B that are pending before any High Court when the new chapter starts?",
+    "question_urdu": "جب نیا باب شروع ہوتا ہے تو آرٹیکل 203B کے تحت کسی بھی عدالت عالیہ میں زیر التواء مقدمات کا کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0614",
+      "statutes_constitution_of_pakistan_1973_0715"
+    ],
+    "gold_span": "1 subs. by the constitution (third amdt.) order,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who has the authority to establish separate High Courts for Balochistan and Sindh?",
+    "question_urdu": "بلوچستان اور سندھ کے لیے الگ عدالت عالیہ قائم کرنے کا اختیار کس کے پاس ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0544"
+    ],
+    "gold_span": "(1) a high court shall consist of a",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens to a member of Parliament or a Provincial Assembly if they are elected as President?",
+    "question_urdu": "اگر پارلیمنٹ یا صوبائی اسمبلی کا کوئی رکن صدر منتخب ہو جائے تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0124"
+    ],
+    "gold_span": "(1) the president shall not hold any office",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can ongoing court cases be paused just because a petition has been made to check if a law is against Islamic injunctions?",
+    "question_urdu": "کیا زیر سماعت عدالت کے مقدمات کو صرف اس وجہ سے روکا جا سکتا ہے کہ ایک درخواست دی گئی ہے کہ یہ جانچا جائے کہ آیا کوئی قانون اسلامی احکام کے خلاف ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0614",
+      "statutes_constitution_of_pakistan_1973_0715"
+    ],
+    "gold_span": "1 subs. by the constitution (third amdt.) order,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Which area gets priority in using natural gas from a well-head located within its boundaries?",
+    "question_urdu": "قدرتی گیس کے سرچشمے سے واقع علاقے کو ترجیح کس کو ملتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0440"
+    ],
+    "gold_span": "the province in which a well-head of natural",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are there any exceptions to the rule that laws conflicting with fundamental rights are void?",
+    "question_urdu": "کیا بنیادی حقوق کے متناقض قوانین کالعدم ہونے کے اصول کے کوئی استثنات ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0028"
+    ],
+    "gold_span": "(1) any law, or any custom or usage",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What can the rules made by the Court include regarding payments?",
+    "question_urdu": "عدالت کی طرف سے وضع کردہ قواعد میں ادائیگیوں کے بارے میں کیا شامل ہو سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0622"
+    ],
+    "gold_span": "203j. (1) the court may, by notification in",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What can the President do if he wants to communicate with either House regarding a Bill or other matters?",
+    "question_urdu": "اگر صدر کسی بل یا دیگر معاملات کے بارے میں کسی ایوان سے بات کرنا چاہے تو وہ کیا کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0162"
+    ],
+    "gold_span": "3[(1)] the president may address either house or",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How often is the National Economic Council required to meet?",
+    "question_urdu": "قومی اقتصادی کونسل کو کتنی بار اجلاس کرنا ضروری ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0433"
+    ],
+    "gold_span": "2[156. (1) the president shall constitute a national",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What two types of expenditure must be shown separately in the Annual Budget Statement?",
+    "question_urdu": "سالانہ کیفیت نامہ بجٹ میں کون سے دو اقسام کے مصارف علیحدہ علیحدہ ظاہر کیے جانے چاہئیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0240"
+    ],
+    "gold_span": "(1) the federal government shall, in respect of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who needs to approve the rules of procedure for the Islamic Council?",
+    "question_urdu": "اسلامی کونسل کے قواعد طریق کار کی منظوری کون دیتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0719"
+    ],
+    "gold_span": "the proceedings of the islamic council shall be",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What can the Court do if it finds irregularities in the proceedings of a criminal court case?",
+    "question_urdu": "اگر عدالت کو کسی فوجداری مقدمے کی کارروائی میں بے قاعدگیاں نظر آئیں تو وہ کیا کر سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0602"
+    ],
+    "gold_span": "6[203dd. (1) the court may call for and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens to the laws made by the Parliament during a state of emergency once the emergency is over?",
+    "question_urdu": "ہنگامی حالت کے ختم ہونے کے بعد پارلیمنٹ کے بنائے گئے قوانین کا کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0722",
+      "statutes_constitution_of_pakistan_1973_0747"
+    ],
+    "gold_span": "(1) if the president is satisfied that a",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can a Pakistani citizen accept an award from a foreign country without any conditions?",
+    "question_urdu": "کیا کوئی پاکستانی شہری بغیر کسی شرط کے کسی غیر ملکی ملک سے کوئی اعزاز قبول کر سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0813"
+    ],
+    "gold_span": "(1) no citizen shall accept any title, honour",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can English be used for official purposes in Pakistan?",
+    "question_urdu": "کیا پاکستان میں سرکاری اغراض کے لیے انگریزی زبان استعمال کی جا سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0796"
+    ],
+    "gold_span": "(1) the national language of pakistan is urdu,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens if someone who is not entitled participates in the proceedings of a House?",
+    "question_urdu": "اگر کوئی ایسا شخص جو کارروائی میں حصہ لینے کا حق نہیں رکھتا، ایوان کی کارروائی میں حصہ لے تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0207"
+    ],
+    "gold_span": "(1) subject to the constitution, a house may",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How many members does the Senate have?",
+    "question_urdu": "سینیٹ میں کتنے ارکان ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0170"
+    ],
+    "gold_span": "1[59. (1) the senate shall consist of 2[ninety-six]",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Under what circumstances can an appeal be made to the Supreme Court if a High Court has sentenced someone to death or life imprisonment?",
+    "question_urdu": "کن حالات میں سپریم کورٹ میں اپیل کی جا سکتی ہے اگر ہائی کورٹ نے کسی کو سزائے موت یا عمر قید کی سزا دی ہو؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0526"
+    ],
+    "gold_span": "(1) subject to this article, the supreme court",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Do the provisions regarding the Holy Quran and Sunnah affect the personal laws of non-Muslim citizens?",
+    "question_urdu": "کیا قرآن پاک اور سنت کے احکام غیر مسلم شہریوں کے قوانین شخصی پر اثر انداز ہوتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0706"
+    ],
+    "gold_span": "(1) all existing laws shall be brought in",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens to court judgments that contradict the provisions allowing Parliament to impose taxes on certain incomes?",
+    "question_urdu": "ان عدالتی فیصلوں کا کیا ہوتا ہے جو پارلیمنٹ کو مخصوص آمدنی پر ٹیکس عائد کرنے کی اجازت دینے والی دفعات کے خلاف ہوں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0464"
+    ],
+    "gold_span": "2 [165a. (1) for the removal of doubt,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What courts are established in Pakistan according to the Constitution?",
+    "question_urdu": "پاکستان کے آئین کے مطابق کون کون سی عدالتیں قائم کی گئی ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0494"
+    ],
+    "gold_span": "(1) there shall be a supreme court of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are there any exceptions to the separation of the Judiciary from the Executive?",
+    "question_urdu": "کیا عدلیہ کو انتظامیہ سے علیحدہ کرنے میں کوئی استثنیٰ ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0494"
+    ],
+    "gold_span": "(1) there shall be a supreme court of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can the Court regulate its own procedures?",
+    "question_urdu": "کیا عدالت اپنے طریقہ کار کو منضبط کر سکتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0605"
+    ],
+    "gold_span": "203e. (1) for the purposes of the performance",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who are the members of the first Provincial Assembly under the Constitution?",
+    "question_urdu": "دستور کے تحت پہلی صوبائی اسمبلی کے اراکین کون ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0892"
+    ],
+    "gold_span": "1273. (1) notwithstanding anything contained in the constitution,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who is responsible for the delimitation of constituencies?",
+    "question_urdu": "حلقوں کی حدبندی کا ذمہ دار کون ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0683"
+    ],
+    "gold_span": "subject to the constitution, 1[majlis-e-shoora (parliament)] may by",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who has the authority to impose a tax on the income of corporations and other bodies established by federal or provincial law?",
+    "question_urdu": "وفاقی یا صوبائی قانون کے تحت قائم شدہ کارپوریشنز اور دیگر اداروں کی آمدنی پر محصول عائد کرنے کا اختیار کس کے پاس ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0464"
+    ],
+    "gold_span": "2 [165a. (1) for the removal of doubt,",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can new states or areas become part of Pakistan?",
+    "question_urdu": "کیا نئی ریاستیں یا علاقے پاکستان کا حصہ بن سکتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0011"
+    ],
+    "gold_span": "11. (1) pakistan shall be federal republic to",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who is responsible for presenting the budget to the National Assembly each year?",
+    "question_urdu": "ہر سال قومی اسمبلی کے سامنے بجٹ پیش کرنے کی ذمہ داری کس کی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0240"
+    ],
+    "gold_span": "(1) the federal government shall, in respect of",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Who has the authority to award decorations for gallantry or meritorious service in Pakistan?",
+    "question_urdu": "پاکستان میں شجاعت یا قابل تعریف خدمت کے اعتراف میں اعزازی نشانات دینے کا اختیار کس کے پاس ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0813"
+    ],
+    "gold_span": "(1) no citizen shall accept any title, honour",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What happens if the Chief Justice of Pakistan is absent or the position is vacant?",
+    "question_urdu": "اگر چیف جسٹس پاکستان موجود نہ ہو یا عہدہ خالی ہو تو کیا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0514"
+    ],
+    "gold_span": "at any time when— the office of chief",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can a person be forced to do something that is not required by law in Pakistan?",
+    "question_urdu": "کیا پاکستان میں کسی شخص کو ایسا کام کرنے پر مجبور کیا جا سکتا ہے جو قانوناً ضروری نہ ہو؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0019"
+    ],
+    "gold_span": "(1) to enjoy the protection of law and",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Are decisions made by the Court under this Chapter applicable to lower courts?",
+    "question_urdu": "کیا اس باب کے تحت عدالت کے فیصلے ماتحت عدالتوں پر لاگو ہوتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0616"
+    ],
+    "gold_span": "2[203gg. subject to articles 203d and 203f, any",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What is the term length for members of the Senate?",
+    "question_urdu": "سینیٹ کے ارکان کی میعاد کتنی ہوتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0170"
+    ],
+    "gold_span": "1[59. (1) the senate shall consist of 2[ninety-six]",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "Can a House continue to function if there are vacancies in its membership?",
+    "question_urdu": "کیا کوئی ایوان اپنی رکنیت میں خالی جگہوں کے باوجود کام جاری رکھ سکتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0207"
+    ],
+    "gold_span": "(1) subject to the constitution, a house may",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What actions can make a person guilty of high treason?",
+    "question_urdu": "کون سے اقدامات کسی شخص کو سنگین غداری کا مجرم بنا سکتے ہیں؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0023"
+    ],
+    "gold_span": "2[(1) any person who abrogates or subverts or",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What change occurred regarding the High Court for the Provinces of Balochistan and Sindh?",
+    "question_urdu": "بلوچستان اور سندھ کے صوبوں کے لیے عدالت عالیہ کے حوالے سے کیا تبدیلی واقع ہوئی؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0544"
+    ],
+    "gold_span": "(1) a high court shall consist of a",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "What must happen if the President declares an emergency due to internal disturbances without a resolution from the Provincial Assembly?",
+    "question_urdu": "اگر صدر صوبائی اسمبلی کی قرارداد کے بغیر داخلی خلفشار کی وجہ سے ہنگامی حالت کا اعلان کرے تو کیا ہونا چاہیے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0722",
+      "statutes_constitution_of_pakistan_1973_0747"
+    ],
+    "gold_span": "(1) if the president is satisfied that a",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "When is the President required to address both Houses of Parliament together?",
+    "question_urdu": "صدر کو دونوں ایوانوں سے یکجا خطاب کب کرنا ہوتا ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0162"
+    ],
+    "gold_span": "3[(1)] the president may address either house or",
+    "source": "LEGAL-UQA"
+  },
+  {
+    "question": "How long does the temporary appointment of a Judge of the Supreme Court last?",
+    "question_urdu": "عدالت عظمیٰ کے جج کی عارضی تقرری کتنی دیر تک برقرار رہتی ہے؟",
+    "answer": "",
+    "case_type": "constitutional",
+    "province": "federal",
+    "relevant_chunks": [
+      "statutes_constitution_of_pakistan_1973_0516"
+    ],
+    "gold_span": "(1) at any time when— the office of",
+    "source": "LEGAL-UQA"
+  }
+]

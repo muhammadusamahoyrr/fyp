@@ -122,8 +122,37 @@ REGISTRY: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("dissolution",           "Dissolution of Muslim Marriages Act 1939", "family",    (FAMILY,)),
     ("family court",          "Family Courts Act 1964",               "family",        (FAMILY,)),
     ("guardians",             "Guardians and Wards Act 1890",         "family",        (FAMILY,)),
-    ("child marriage",        "Child Marriage Restraint Act 1929",    "family",        (FAMILY,)),
+    ("child-marriage",        "Child Marriage Restraint Act 1929",    "family",        (FAMILY,)),
     ("shariat",               "Muslim Personal Law (Shariat) Application Act 1962", "family", (FAMILY,)),
+    # ── Family law, downloaded from pakistancode.gov.pk ─────────────────────
+    # family_collection held 193 chunks, the smallest in the corpus and the
+    # highest-harm domain: khula and maintenance queries failed on BOTH the base
+    # and fine-tuned retrievers. That is a coverage gap, not a ranking problem —
+    # the Dissolution of Muslim Marriages Act 1939 states the grounds for khula
+    # and was simply not indexed.
+    ("dissolution of muslim", "Dissolution of Muslim Marriages Act 1939", "family", (FAMILY,)),
+    ("dowry",                 "Dowry and Bridal Gifts (Restriction) Act 1976", "family", (FAMILY,)),
+    ("claims-for-maintenance","Claims for Maintenance (Recovery Abroad) Ordinance 1959", "family", (FAMILY,)),
+    ("married-womens-property","Married Women's Property Act 1874",    "family",        (FAMILY,)),
+    ("marriage-functions",    "Marriage Functions (Prohibition of Ostentatious Displays) Ordinance 2000", "family", (FAMILY,)),
+    ("west-pakistan-family",  "West Pakistan Family Courts Act 1964",  "family",        (FAMILY,)),
+
+    # Non-Muslim personal law. Pakistan applies personal law by religion, so a
+    # family assistant that only indexes Muslim law silently cannot answer a
+    # Christian, Hindu or Parsi litigant.
+    ("christian-marriage",    "Christian Marriage Act 1872",           "family",        (FAMILY,)),
+    ("divorce-act-1869",      "Divorce Act 1869",                      "family",        (FAMILY,)),
+    ("parsi-marriage",        "Parsi Marriage and Divorce Act 1936",   "family",        (FAMILY,)),
+    ("special-marriage",      "Special Marriage Act 1872",             "family",        (FAMILY,)),
+    ("anand-marriage",        "Anand Marriage Act 1909",               "family",        (FAMILY,)),
+    ("arya-marriage",         "Arya Marriage Validation Act 1937",     "family",        (FAMILY,)),
+    ("hindu-disposition",     "Hindu Disposition of Property Act 1916", "family",       (FAMILY,)),
+    ("hindu-inheritance",     "Hindu Inheritance (Removal of Disabilities) Act 1928", "family", (FAMILY,)),
+    ("hindu-marriage-disabilities", "Hindu Marriage Disabilities Removal Act 1946", "family", (FAMILY,)),
+    ("hindu-married-womens",  "Hindu Married Women's Right to Separate Residence and Maintenance Act 1946", "family", (FAMILY,)),
+    ("hindu-widows",          "Hindu Widows' Re-marriage Act 1856",    "family",        (FAMILY,)),
+    ("hindu-womens-rights",   "Hindu Women's Rights to Property Act 1937", "family",    (FAMILY,)),
+
     # Constitutional
     ("constitution",          "Constitution of Pakistan 1973",        "constitutional", (CONSTITUTIONAL,)),
 
