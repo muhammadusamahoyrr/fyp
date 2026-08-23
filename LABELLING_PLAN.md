@@ -8,6 +8,34 @@ any number here.
 
 ---
 
+## 0. Priority: labelling is the critical path; warmup is parked
+
+**Threshold warmup is DEPRIORITISED at 2/1000. The progress is kept, not
+discarded** — the counter is cumulative in Redis and a later run resumes from
+2 rather than starting over. Nothing needs to be re-run.
+
+The reason for parking it is [FAILURE_CASE_001.md](FAILURE_CASE_001.md). Warmup
+feeds the adaptive *threshold* mechanism, and the measurements in
+`abstention-findings` already showed thresholds cannot separate answerable from
+unanswerable queries. Failure Case 001 shows what that costs in practice: an
+answer citing the wrong section of the Penal Code, over passages with
+`bm25_confidence = 0.0`, reported at `confidence 0.85` and `is_grounded = True`.
+
+The mechanism intended to fix that is conformal abstention, and **conformal
+abstention cannot be fitted without labels**. So labels are the binding
+constraint, not traffic. Spending days of compute to reach 1000 warmup queries
+would improve a number nothing downstream now depends on.
+
+Warmup also cannot resume cheaply today: there is no working cloud LLM provider
+(Groq key invalid, Gemini unset, OpenRouter balance exhausted), and the local
+CPU path costs ~15.7 min/turn — roughly 100 hours for the remaining 998.
+
+**Resume warmup when** a working provider exists AND the conformal path is
+fitted and shown to need an adaptive threshold underneath it. Until then it
+stays parked.
+
+---
+
 ## 1. The pool is smaller than the target, and not by a little
 
 | | Turns |
