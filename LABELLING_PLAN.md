@@ -13,7 +13,7 @@ any number here.
 | | Turns |
 |---|---|
 | Provenance records | 63 |
-| Labelable (answer turns, retrieval faults excluded) | 51 |
+| Labelable (answer turns; retrieval faults **and synthetic traffic** excluded) | 51 |
 | **Judgeable today** | **37** |
 | Unjudgeable — no retrieved chunk resolves in the current corpus | 14 |
 | Human labels so far | 0 |
@@ -22,6 +22,18 @@ any number here.
 Labelling every judgeable turn reaches **18.5%** of the target. The remaining
 163 turns do not exist yet. They are produced by *using the system*, not by
 labelling harder.
+
+### What the pool excludes, and why
+
+| Excluded | Reason |
+|---|---|
+| `turn_type` ≠ `answer` | A clarifying question or a gatekeeper block has no answer to judge. Audited, not labellable. |
+| `arbitration.source == "error"` | A refusal caused by a retrieval fault is not an abstention decision — the system never saw the evidence. Labelling it would put an outage into the risk–coverage curve. |
+| `is_synthetic == true` | Warmup, replay and demo traffic. Counted toward the threshold, never an evaluation question. |
+| `is_baseline == true` (on labels, not turns) | Machine-authored judgements. Excluded from agreement, adjudication, the authoritative set and both exports. |
+
+Each filter is `$ne: true` rather than `== false`, so records written before a
+field existed are kept rather than silently vanishing from the pool.
 
 ### Why 14 turns are unjudgeable
 
@@ -54,11 +66,30 @@ real questions through it until the labelable pool is comfortably past 200.
 Every answered turn writes one provenance record. This is also what the
 threshold warmup counts, so it discharges two prerequisites at once.
 
-> If traffic is ever synthesised rather than real, mark it in provenance first.
-> Warmup traffic and the labelling pool are the same records, so unmarked
-> synthetic queries end up in the eval set as fabricated questions — which is
-> precisely the "developer-authored or LLM-generated" threat the paper already
-> concedes.
+> **Marking synthetic traffic.** Warmup traffic and the labelling pool are the
+> same records, so any query not asked by a real person must be marked at write
+> time. Set `PROVENANCE_SYNTHETIC=1` on the **API server**, not on the client
+> script — the server is the process that writes the record, and a seeding
+> script only sends WebSocket frames. Run warmup as a dedicated server session:
+>
+> ```bash
+> PROVENANCE_SYNTHETIC=1 ./venv/Scripts/uvicorn.exe app.main:app \
+>     --host 127.0.0.1 --port 8000
+> ```
+>
+> Everything that server records is marked, which is the intent — a warmup
+> session is not serving real users.
+>
+> Records then carry `is_synthetic: true`. They are still written, still
+> audited, and still counted toward the 1000-query warmup — they are simply
+> never offered for labelling and can never enter the eval set or the
+> calibration pairs. The default is `false`, so a driver that never heard of
+> the flag produces *real* records; the opposite default would silently discard
+> genuine traffic.
+>
+> The flag cannot be applied retroactively. Once real and synthetic turns are
+> mixed with nothing to tell them apart, every turn in the pool inherits the
+> doubt.
 
 **Step 2 — two annotators, per the protocol.** Neither may be the person who
 built the system. Each runs:

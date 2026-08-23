@@ -177,6 +177,14 @@ _ANSWER_TURNS_ONLY = {
     # system never saw the evidence. Labelling it as a correct or wrong refusal
     # would put a system outage into the risk-coverage curve.
     "arbitration.source": {"$ne": "error"},
+    # Traffic generated to warm the threshold, replay a script or demo the app
+    # is NOT an evaluation question. Warmup counts queries and the pool is built
+    # from the same records, so without this every load-generator question would
+    # arrive in the annotators' queue as if a user had asked it — the
+    # "developer-authored or LLM-generated" threat, manufactured by our own
+    # tooling. `$ne: True` and not `False`, so records written before the field
+    # existed (all of them real) are kept.
+    "is_synthetic": {"$ne": True},
 }
 
 
@@ -217,6 +225,12 @@ async def stats() -> dict:
     # Counting clarification and blocked turns in the denominator would report
     # work remaining that can never be done.
     labelable = await get_answer_provenance_col().count_documents(_ANSWER_TURNS_ONLY)
+    # Reported, not hidden: warmup traffic still counts toward the 1000-query
+    # threshold target even though it can never be labelled, and the two numbers
+    # moving apart is the expected, correct behaviour.
+    synthetic = await get_answer_provenance_col().count_documents(
+        {"is_synthetic": True}
+    )
     # DISTINCT turns, not label documents. Counting documents once a turn can
     # carry two annotators plus an adjudication would report 300% coverage and
     # tell the annotators they were finished when a third of the set was
@@ -258,6 +272,7 @@ async def stats() -> dict:
     return {
         "provenance_records": total,
         "labelable":          labelable,
+        "synthetic_excluded": synthetic,
         "labeled":            labeled,
         "baseline_labeled":   len(baseline_ids),
         "remaining":          max(labelable - labeled, 0),
@@ -305,8 +320,13 @@ async def export_retrieval_dataset() -> tuple[list[dict], list[dict]]:
     answerable:   list[dict] = []
     unanswerable: list[dict] = []
 
+    # Synthetic turns are already absent from the pool, so nothing should have
+    # been labelled. Re-asserted here because this function BUILDS the published
+    # evaluation set: if a synthetic record ever reaches it — a hand-written
+    # label, a restored backup — it must not become a benchmark question.
     cursor = get_answer_provenance_col().find(
-        {"request_id": {"$in": list(labels)}}, {"_id": 0}
+        {"request_id": {"$in": list(labels)}, "is_synthetic": {"$ne": True}},
+        {"_id": 0},
     )
     async for prov in cursor:
         label = labels[prov["request_id"]]
@@ -334,8 +354,12 @@ async def export_calibration_pairs() -> list[dict]:
         return []
 
     pairs: list[dict] = []
+    # Same re-assertion as export_retrieval_dataset: these pairs fit the
+    # calibration map and the conformal threshold, so a synthetic turn here
+    # would put a guarantee on the board that no real query supported.
     cursor = get_answer_provenance_col().find(
-        {"request_id": {"$in": list(labels)}}, {"_id": 0}
+        {"request_id": {"$in": list(labels)}, "is_synthetic": {"$ne": True}},
+        {"_id": 0},
     )
     async for prov in cursor:
         label   = labels[prov["request_id"]]

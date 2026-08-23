@@ -231,6 +231,9 @@ async def cmd_stats() -> None:
     print(_rule("="))
     print(f"  provenance records : {s['provenance_records']}")
     print(f"  labelable (answers): {s['labelable']}")
+    if s.get("synthetic_excluded"):
+        print(f"  synthetic (warmup) : {s['synthetic_excluded']} "
+              "(counts toward threshold warmup, never labellable)")
     print(f"  labeled (human)    : {s['labeled']}")
     print(f"  remaining          : {s['remaining']}")
     print(f"  coverage           : {s['coverage'] * 100:.1f}%")

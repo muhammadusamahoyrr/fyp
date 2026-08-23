@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -46,7 +47,46 @@ from app.utils.pii import scrub_pii
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "prov-v1"
+SCHEMA_VERSION = "prov-v2"   # v2 adds is_synthetic
+
+# ── Synthetic traffic ─────────────────────────────────────────────────────────
+#
+# Threshold warmup counts QUERIES and needs ~1000 of them; the labelling pool is
+# built from the SAME records. So traffic generated to warm the threshold lands
+# in the pool an annotator later draws from, and unmarked, a load generator's
+# questions become "evaluation questions" indistinguishable from a user's.
+#
+# That is the exact threat the paper already concedes — evaluation questions
+# that are developer-authored or LLM-generated — so it must be recorded at write
+# time, not guessed at afterwards. A record cannot be reclassified later: once
+# real and synthetic turns are mixed with nothing to tell them apart, the whole
+# pool inherits the doubt.
+#
+# Read from the environment rather than threaded through the graph. NOTE the
+# environment that counts is the one belonging to the process that WRITES the
+# record — the API server — not the client driving the queries. Setting it on a
+# seeding script does nothing, because the script only sends WebSocket frames;
+# the server builds the record. Run a warmup session as a dedicated server:
+#
+#   GROQ_API_KEY="" PROVENANCE_SYNTHETIC=1 ./venv/Scripts/uvicorn.exe app.main:app ...
+#
+# Everything that server records is then marked, which is the intent: a warmup
+# session is not serving real users. The default for anything that does not
+# think about it is FALSE (treated as real), because the opposite default would
+# silently discard genuine traffic. state["is_synthetic"] overrides, for a
+# driver that runs mixed traffic in one process.
+SYNTHETIC_ENV_VAR = "PROVENANCE_SYNTHETIC"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def is_synthetic_env() -> bool:
+    return os.getenv(SYNTHETIC_ENV_VAR, "").strip().lower() in _TRUTHY
+
+
+def _is_synthetic(state: dict) -> bool:
+    if "is_synthetic" in state:
+        return bool(state.get("is_synthetic"))
+    return is_synthetic_env()
 
 # What kind of turn a record describes. All three are audited; only "answer"
 # turns are offered for answer-correctness labeling, because asking a human
@@ -174,6 +214,9 @@ def build_record(
     return {
         "schema_version": SCHEMA_VERSION,
         "turn_type":      turn_type,
+        # Whether a real person asked this. Recorded at write time because it
+        # cannot be recovered later; see SYNTHETIC_ENV_VAR above.
+        "is_synthetic":   _is_synthetic(state),
         "request_id":     request_id,
         "session_id":     session_id,
         "user_id":        user_id,
