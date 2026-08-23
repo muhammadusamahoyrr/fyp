@@ -148,6 +148,13 @@ def _report(sent: int, target: int, counter: int, spent: float,
 # ── Run ──────────────────────────────────────────────────────────────────────
 
 async def run(args) -> None:
+    # --free: the provider does not bill (Groq/Gemini free tier, local Ollama),
+    # so there is no balance to read and no reason to gate on one. The limit
+    # there is throughput and rate limits, not money, so the increment report
+    # switches to queries/minute and consecutive-failure tracking.
+    if args.free:
+        return await run_free(args)
+
     remaining, usage_start = await credit_state()
     counter_start = await warmup_count()
 
@@ -232,6 +239,93 @@ async def run(args) -> None:
           "flushes.\n  NEVER taskkill /F — the remainder is lost.\n")
 
 
+async def run_free(args) -> None:
+    """Warmup against a non-billing provider.
+
+    Money is not the constraint here, so nothing is gated on a balance. What
+    does go wrong is rate limiting: a free tier that starts refusing produces a
+    long run of fast failures that looks like progress in the counter but adds
+    no usable traffic. So this tracks CONSECUTIVE failures and stops rather than
+    hammering a provider that has already said no -- the same rule as the paid
+    path, for the same reason.
+    """
+    counter_start = await warmup_count()
+    print("=" * 74)
+    print("  WARMUP (free provider — no billing)")
+    print("=" * 74)
+    print(f"  warmup counter  : {counter_start}/{tm.WARMUP_QUERY_COUNT} (Redis-visible)")
+    print(f"  target this run : {args.target} queries")
+    if args.preflight:
+        print("\n  Preflight only — nothing sent.\n")
+        return
+
+    api     = f"{args.base_url.rstrip('/')}/api/v1"
+    ws_base = args.base_url.replace("http://", "ws://").replace("https://", "wss://").rstrip("/")
+
+    started = time.monotonic()
+    sent = ok = 0
+    consecutive_failures = 0
+    kinds: dict[str, int] = {}
+    failures: list[str] = []
+
+    async with httpx.AsyncClient(timeout=60) as http:
+        token = await _auth(http, api, args.email, args.password)
+
+        while sent < args.target:
+            kind, content, meta = QUERIES[sent % len(QUERIES)]
+            sent += 1
+            try:
+                msg   = await _one_turn(http, api, ws_base, token, content,
+                                        meta, args.timeout)
+                mtype = msg.get("type", "?")
+                kinds[mtype] = kinds.get(mtype, 0) + 1
+                if mtype != "error":
+                    ok += 1
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    failures.append(f"[{sent}] {kind}: {(msg.get('content') or '')[:120]}")
+            except Exception as exc:
+                consecutive_failures += 1
+                failures.append(f"[{sent}] {kind}: {type(exc).__name__}: {exc}")
+
+            if consecutive_failures >= args.max_consecutive_failures:
+                print(f"\n  *** STOPPING: {consecutive_failures} failures in a row. ***")
+                print("  A free tier that has started refusing will keep "
+                      "refusing; hammering it turns one clear failure into "
+                      "hundreds. Last few:")
+                for line in failures[-3:]:
+                    print(f"    ! {line}")
+                break
+
+            if sent % REPORT_EVERY == 0 or sent == args.target:
+                elapsed = time.monotonic() - started
+                counter = await warmup_count()
+                rate    = sent / (elapsed / 60) if elapsed else 0
+                left    = (args.target - sent) / rate if rate else 0
+                print(f"\n  ── {sent}/{args.target} sent | clean {ok} | "
+                      f"warmup counter {counter}/{tm.WARMUP_QUERY_COUNT} "
+                      f"(Redis-visible)")
+                print(f"     {elapsed / 60:.1f} min elapsed | {rate:.1f} queries/min | "
+                      f"~{left:.0f} min to target")
+
+    elapsed = time.monotonic() - started
+    counter = await warmup_count()
+    print("\n" + "=" * 74)
+    print("  SUMMARY")
+    print("=" * 74)
+    print(f"  sent           : {sent}    clean: {ok}    failed: {sent - ok}")
+    print(f"  by outcome     : {kinds}")
+    print(f"  warmup counter : {counter_start} -> {counter} / {tm.WARMUP_QUERY_COUNT}")
+    print(f"  elapsed        : {elapsed / 60:.1f} min")
+    if failures:
+        print(f"\n  first failures ({len(failures)} total):")
+        for line in failures[:10]:
+            print(f"    ! {line}")
+    print("\n  Stop the server with `python scripts/serve.py stop` so the "
+          "buffered remainder flushes.\n")
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Drive threshold warmup with cost control.")
     p.add_argument("--target",    type=int, default=1000, help="queries to send")
@@ -240,4 +334,9 @@ if __name__ == "__main__":
     p.add_argument("--email",     default="")
     p.add_argument("--password",  default="")
     p.add_argument("--timeout",   type=int, default=180)
+    p.add_argument("--free", action="store_true",
+                   help="provider does not bill (Groq/Gemini free tier, Ollama): "
+                        "skip balance gating, watch throughput and rate limits")
+    p.add_argument("--max-consecutive-failures", type=int, default=5,
+                   help="stop after this many failures in a row (--free)")
     asyncio.run(run(p.parse_args()))
