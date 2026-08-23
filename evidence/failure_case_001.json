@@ -1,0 +1,219 @@
+{
+ "schema_version": "prov-v2",
+ "turn_type": "answer",
+ "is_synthetic": true,
+ "request_id": "37a76e77-2510-4095-9890-3c44606f089a",
+ "session_id": "<redacted: synthetic seed session>",
+ "user_id": "<redacted: synthetic seed account>",
+ "created_at": "2026-08-23 14:27:21.720000",
+ "query": "What is the punishment for theft under the Pakistan Penal Code?",
+ "normalized_query": "ما سرکاری جرائم کے تحت سرکاری قانون میں سرکاری تھیف کی مجازیت کیا ہے؟",
+ "language": "en",
+ "case_type": "criminal",
+ "province": "punjab",
+ "answer_sha256": "347aed6960802f794141735bcb88504f14252811089aa30e60bd97515051a2d0",
+ "answer_preview": "**Issue:**\nWhat is the legal procedure for prosecuting a case of official theft under the Punjab Criminal Procedure Code and Pakistan Penal Code?\n\n**Applicable Law:**\n- PPC Section 382 — Theft\n- CrPC 1898 Section 15\n\n**Legal Analysis:**\nThe case of official theft would be prosecuted under Section 382 of the Pakistan Penal Code, which deals with theft. According to CrPC 1898 Section 15, the charge should include the date, place, and details of the theft. The prosecution must prove that the accuse…",
+ "statute_chunks": [
+  {
+   "chunk_id": "statutes_crpc_1898_1473",
+   "statute": "CrPC 1898",
+   "section_number": "15",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_1472",
+   "statute": "CrPC 1898",
+   "section_number": "15",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_ppc_1860_0273",
+   "statute": "PPC 1860",
+   "section_number": "184",
+   "source_file": "PAKISTAN PENAL CODE.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_0821",
+   "statute": "CrPC 1898",
+   "section_number": "221",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_0434",
+   "statute": "CrPC 1898",
+   "section_number": "3",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_0842",
+   "statute": "CrPC 1898",
+   "section_number": "234",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_0435",
+   "statute": "CrPC 1898",
+   "section_number": "3",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_1476",
+   "statute": "CrPC 1898",
+   "section_number": "15",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_0533",
+   "statute": "CrPC 1898",
+   "section_number": "68",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_0973",
+   "statute": "CrPC 1898",
+   "section_number": "367",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_1229",
+   "statute": "CrPC 1898",
+   "section_number": "555",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_0615",
+   "statute": "CrPC 1898",
+   "section_number": "108",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_1477",
+   "statute": "CrPC 1898",
+   "section_number": "15",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_0887",
+   "statute": "CrPC 1898",
+   "section_number": "260",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_1474",
+   "statute": "CrPC 1898",
+   "section_number": "15",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_ppc_1860_0222",
+   "statute": "PPC 1860",
+   "section_number": "161",
+   "source_file": "PAKISTAN PENAL CODE.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_ppc_1860_0801",
+   "statute": "PPC 1860",
+   "section_number": "511",
+   "source_file": "PAKISTAN PENAL CODE.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  },
+  {
+   "chunk_id": "statutes_crpc_1898_0850",
+   "statute": "CrPC 1898",
+   "section_number": "235",
+   "source_file": "Code_of_criminal_procedure_1898.pdf",
+   "province": "federal",
+   "law_type": "criminal"
+  }
+ ],
+ "case_law": [
+  {
+   "judgment_id": "SC:c_p_253_p_2023",
+   "citation": "LHC SC:c_p_253_p_2023",
+   "title": "c.p._253_p_2023",
+   "score": 0.9746
+  },
+  {
+   "judgment_id": "SC:crl_p_837_2023_dn",
+   "citation": "LHC SC:crl_p_837_2023_dn",
+   "title": "crl.p._837_2023_dn",
+   "score": 0.9745
+  },
+  {
+   "judgment_id": "SC:c_p_1041_2024",
+   "citation": "LHC SC:c_p_1041_2024",
+   "title": "Petitioners vs The District Police Officer, DG Khan",
+   "score": 0.972
+  }
+ ],
+ "tool_calls": [],
+ "web_search_used": false,
+ "arbitration": {
+  "output": "defer",
+  "source": "llm",
+  "confidence": 0.2396
+ },
+ "signals": {
+  "relevance_score": 0.2396,
+  "signal_variance": 0.0852,
+  "bm25_confidence": 0.0,
+  "confidence": 0.85
+ },
+ "is_grounded": true,
+ "cache_hit": false,
+ "convergence_status": "converged",
+ "attempts": {
+  "retrieval": 2,
+  "generation": 1,
+  "clarification_depth": 2
+ },
+ "execution": {
+  "total_ms": 938673.7,
+  "llm_calls": 8,
+  "llm_ms": 895555.2,
+  "tokens_in": 6217,
+  "tokens_out": 662,
+  "tool_calls": [],
+  "errors": [],
+  "models": [
+   "qwen2.5:7b"
+  ]
+ },
+ "versions": {
+  "embedding_model": "intfloat/multilingual-e5-base/v1",
+  "chunking": "v1"
+ }
+}
