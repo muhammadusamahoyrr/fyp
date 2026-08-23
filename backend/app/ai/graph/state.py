@@ -31,6 +31,10 @@ class AgentState(TypedDict):
 
     # ── Intermediate intent (typed Any to avoid serializer warnings) ──────────
     followup_intent: Optional[Any]
+    # Set when a node caught its own contract being broken and repaired it.
+    # Carried into provenance so a turn produced from repaired-but-suspect input
+    # is not graded as if the pipeline had behaved. None on a healthy turn.
+    invariant_violation: Optional[str]
 
     # ── Clarification ─────────────────────────────────────────────────────────
     needs_clarification:    bool

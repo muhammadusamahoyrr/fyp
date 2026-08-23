@@ -50,6 +50,45 @@ def _is_gibberish(query: str) -> bool:
 _URDU_SCRIPT_RE = re.compile(r'[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]')
 
 
+EN_INVARIANT_VIOLATION = "triage_en_normalization"
+
+
+def _enforce_en_invariant(
+    query: str, language: str, normalized: str
+) -> tuple[str, str | None]:
+    """An English query passes through untouched. Returns (normalized, flag).
+
+    The prompt states this ("If language is 'en': return the original query
+    unchanged") and nothing enforced it until FAILURE_CASE_001, where "What is
+    the punishment for theft under the Pakistan Penal Code?" was labelled "en"
+    and rewritten into corrupted Urdu injecting سرکاری ("official") three times.
+    That matters more than a mangled string: normalized_query is what retrieval
+    searches AND what the answer cache is keyed on, so the corruption sent
+    retrieval after a different concept -- 18 chunks, none of them PPC 379 --
+    and the answer cited the wrong section while every downstream gate reported
+    success, because each of them trusted this field.
+
+    REPAIRS rather than raises. The contract names the correct value, so failing
+    the turn would deny a user an answer over a fault we can fix exactly. But it
+    is never a silent repair: the caller flags the record, so a turn built from
+    corrupted input cannot be graded as though the pipeline had behaved.
+
+    Compared stripped -- trailing whitespace is not corruption. An empty
+    normalized is the caller's own fallback to the raw query, not a violation.
+    """
+    if language != "en" or not normalized.strip():
+        return normalized, None
+    if normalized.strip() == query.strip():
+        return normalized, None
+
+    logger.error(
+        "triage: INVARIANT VIOLATED — language='en' must return the query "
+        "unchanged. Repairing to the original. query=%r normalized=%r",
+        query[:200], normalized[:200],
+    )
+    return query, EN_INVARIANT_VIOLATION
+
+
 def _reconcile_language(query: str, language: str) -> str:
     """
     Correct the LLM's language label against the script actually present.
@@ -337,6 +376,29 @@ async def triage_node(state: AgentState) -> dict:
 
     language = _reconcile_language(query, result.language)
     normalized = result.normalized_query or query
+    invariant_violation = None
+
+    # INVARIANT: an English query passes through untouched.
+    #
+    # The prompt states this ("If language is 'en': return the original query
+    # unchanged"), and until this check existed nothing enforced it. Observed in
+    # production (FAILURE_CASE_001.md, request 37a76e77): "What is the punishment
+    # for theft under the Pakistan Penal Code?" was labelled "en" and then
+    # rewritten into corrupted Urdu that injected سرکاری ("official") three
+    # times. Retrieval faithfully searched that instead and returned 18 chunks,
+    # none of them PPC 379; the answer cited the wrong section and no gate
+    # downstream noticed, because every one of them trusted normalized_query.
+    #
+    # This REPAIRS rather than raises. The contract names the correct value --
+    # the original query -- so failing the turn would deny a user an answer over
+    # a fault we can fix exactly. But the repair is never silent: it logs at
+    # ERROR and flags the record, because an answer produced from a corrupted
+    # query must not be gradeable as if the pipeline had behaved.
+    #
+    # Compared stripped: trailing whitespace is not corruption.
+    normalized, invariant_violation = _enforce_en_invariant(
+        query, language, normalized
+    )
 
     if language != result.language:
         logger.info(
@@ -360,4 +422,5 @@ async def triage_node(state: AgentState) -> dict:
         "known_facts":          result.known_facts,
         "convergence_status":   "pending",
         "followup_intent":      None,
+        "invariant_violation":  invariant_violation,
     }

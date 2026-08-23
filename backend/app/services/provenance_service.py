@@ -217,6 +217,12 @@ def build_record(
         # Whether a real person asked this. Recorded at write time because it
         # cannot be recovered later; see SYNTHETIC_ENV_VAR above.
         "is_synthetic":   _is_synthetic(state),
+        # Non-null when a node caught its own contract being broken and repaired
+        # the input rather than failing the turn. The answer still reached the
+        # user, but it was produced from repaired-and-suspect state, so it must
+        # not enter the eval set as though the pipeline had behaved. Excluded
+        # from the labelling pool for the same reason machine labels are.
+        "invariant_violation": state.get("invariant_violation") or None,
         "request_id":     request_id,
         "session_id":     session_id,
         "user_id":        user_id,

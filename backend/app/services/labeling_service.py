@@ -185,6 +185,13 @@ _ANSWER_TURNS_ONLY = {
     # tooling. `$ne: True` and not `False`, so records written before the field
     # existed (all of them real) are kept.
     "is_synthetic": {"$ne": True},
+    # A turn where a node caught its own contract being broken and repaired the
+    # input. The answer reached the user, but it was produced from state the
+    # pipeline itself flagged as corrupt, so grading it measures the bug rather
+    # than the system. Annotator time is the scarcest input here; spending it on
+    # known-contaminated output is the one waste that also damages the result.
+    # Null-safe: records written before the field existed have no value for it.
+    "invariant_violation": {"$in": [None, ""]},
 }
 
 
