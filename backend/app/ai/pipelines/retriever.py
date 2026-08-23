@@ -67,7 +67,9 @@ else:
 #     rank 8 to rank 14, because more competitors enter the pool and the grader
 #     only scores the leading chunks.
 #   * the cross-encoder that was supposed to justify the extra depth scored the
-#     legally WRONG statute highest on this corpus (see reranker.py).
+#     legally WRONG statute highest on this corpus, and got WORSE with depth —
+#     the eviction target fell to #10 at k=10 and to #24 at k=50, at 0.73 s and
+#     2.43 s respectively (see reranker.py).
 # Depth and reranking are a pair: neither is useful here without the other
 # working, and the generic reranker does not work on this text.
 FIRST_STAGE_K = 10

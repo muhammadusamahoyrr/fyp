@@ -36,9 +36,34 @@ def test_evidence_below_the_refusal_ceiling_refuses():
     assert action == "refuse"
 
 
-def test_evidence_between_ceiling_and_floor_defers():
+def test_weak_but_consistent_evidence_refuses_rather_than_asking():
+    """BEHAVIOUR CHANGE, deliberate. The old threshold ladder deferred on
+    anything between the refusal ceiling and the generation floor, so every such
+    query cost the user a clarification round. Under the harm matrix, deferring
+    is priced against signal DISAGREEMENT: when the signals agree there is
+    nothing a clarification can resolve, so paying its friction is strictly
+    worse than acting on what is already known. At c=0.15 with rho=4, refusing
+    costs 0.60 against 0.85 for answering and 0.65 for asking.
+
+    The answer/refuse boundary itself is unchanged — it still sits at the
+    deployed generation floor of 0.20, by derivation rather than by tuning."""
     action, _, _ = arbitrate(_llm(0.15), _NONE, _NONE, variance=0.0)
+    assert action == "refuse"
+
+
+def test_the_same_weak_evidence_defers_once_the_signals_disagree():
+    """The other half of the change: a clarification is bought when, and only
+    when, there is disagreement for it to resolve."""
+    action, _, _ = arbitrate(_llm(0.15), _NONE, _NONE, variance=0.40)
     assert action == "defer"
+
+
+def test_the_answer_refuse_boundary_still_sits_at_the_generation_floor():
+    """Introducing the derivation must not move the operating point."""
+    from app.ai.threshold_manager import get_generation_floor
+    floor = get_generation_floor()
+    assert arbitrate(_llm(floor + 0.02), _NONE, _NONE, variance=0.0)[0] == "answer"
+    assert arbitrate(_llm(floor - 0.02), _NONE, _NONE, variance=0.0)[0] == "refuse"
 
 
 def test_high_signal_disagreement_defers_even_on_strong_evidence():
@@ -131,11 +156,14 @@ def test_node_writes_the_verdict_into_state():
 
 
 def test_defer_increments_clarification_depth():
-    """Depth must advance or binary mode never activates and defers loop."""
+    """Depth must advance or binary mode never activates and defers loop.
+
+    Needs disagreeing signals to produce a defer at all — see
+    test_weak_but_consistent_evidence_refuses_rather_than_asking."""
     out = run_decision_engine({
         "reranked_chunks": [{"content": "..."}],
         "relevance_score": 0.15,
-        "signal_variance": 0.0,
+        "signal_variance": 0.40,
         "clarification_depth": 0,
     })
     assert out["arbitration_output"] == "defer"

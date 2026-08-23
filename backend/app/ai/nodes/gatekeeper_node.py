@@ -140,6 +140,33 @@ def _block(reason: str, layer: str, query: str) -> dict:
     }
 
 
+def llm_injection_reason(query: str) -> str | None:
+    """Layer 2 on its own: the reason this looks like an injection, or None.
+
+    Public because the graph is not the only place an LLM is run on user text.
+    The chat socket's format_brief shortcut feeds the user's message to a model
+    as an instruction, and it does so WITHOUT entering the graph — so if this
+    layer lived only inside gatekeeper_node, that path would be screened by
+    regex alone. See chat_socket for which shortcuts need it and which do not.
+
+    Fail-open, as in the node: an LLM outage must not block all traffic, and the
+    heuristic layer still catches the obvious attacks.
+    """
+    try:
+        llm = get_structured_llm(GatekeeperVerdict, fast=_prefer_fast())
+        verdict: GatekeeperVerdict = llm.invoke([
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user",   "content": query},
+        ])
+    except Exception:
+        logger.exception("gatekeeper LLM classifier failed — allowing (fail-open)")
+        return None
+
+    if verdict.is_injection:
+        return verdict.reason or "classifier flagged injection"
+    return None
+
+
 def gatekeeper_node(state: AgentState) -> dict:
     query = (state.get("query") or "").strip()
     if not query:
@@ -151,19 +178,8 @@ def gatekeeper_node(state: AgentState) -> dict:
         return _block(matched, "heuristic", query)
 
     # ── Layer 2: LLM classifier (subtle/obfuscated attempts) ──────────────────
-    try:
-        llm = get_structured_llm(GatekeeperVerdict, fast=_prefer_fast())
-        verdict: GatekeeperVerdict = llm.invoke([
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user",   "content": query},
-        ])
-    except Exception:
-        # Fail-open: an LLM outage must not block all traffic — the heuristic
-        # layer already caught the obvious attacks.
-        logger.exception("gatekeeper LLM classifier failed — allowing (fail-open)")
-        return {}
-
-    if verdict.is_injection:
-        return _block(verdict.reason or "classifier flagged injection", "llm", query)
+    reason = llm_injection_reason(query)
+    if reason:
+        return _block(reason, "llm", query)
 
     return {}

@@ -10,6 +10,7 @@ from langgraph.types import Command
 from app.ai.nodes.gatekeeper_node import (
     CANNED_REFUSAL as GATEKEEPER_REFUSAL,
     heuristic_injection_match,
+    llm_injection_reason,
 )
 from app.core.security import decode_token
 from app.db.collections import get_users_col
@@ -167,33 +168,27 @@ def _build_state(
     }
 
 
-async def _record_blocked(
-    query: str, session_id: str, user_id: str, tracer, pattern: str,
-) -> None:
-    """Write a provenance record for a blocked injection.
+def _blocked_state(query: str, layer: str = "heuristic") -> dict:
+    """Audit state for a message stopped by the injection gatekeeper.
 
-    Blocked attempts are exactly the traffic an audit most needs: without this
-    they left no trace at all, and any adversarial-robustness number measured
-    from the provenance store would be computed over the attempts that got
-    through while ignoring the ones that were stopped.
+    `layer` records WHICH defence caught it — the regex pre-filter or the LLM
+    classifier. Without that the audit cannot answer the question any robustness
+    claim depends on: how much of the blocking is done by the cheap layer, and
+    how much needs the model.
+
+    Pure: the write itself goes through _emit like every other output, so a
+    blocked turn is recorded by the same path and cannot drift from it.
     """
-    await provenance_service.record_answer(
-        state = {
-            "query":              query,
-            "answer":             GATEKEEPER_REFUSAL,
-            "is_grounded":        True,
-            "confidence":         1.0,
-            "convergence_status": "off_topic",
-            "arbitration_output": "refuse",
-            "arbitration_source": "gatekeeper:heuristic",
-            "arbitration_confidence": 1.0,
-        },
-        session_id    = session_id,
-        user_id       = user_id,
-        request_id    = tracer.request_id,
-        trace_summary = {"blocked_by": "gatekeeper:heuristic", "pattern": pattern},
-        turn_type     = provenance_service.TURN_BLOCKED,
-    )
+    return {
+        "query":              query,
+        "answer":             GATEKEEPER_REFUSAL,
+        "is_grounded":        True,
+        "confidence":         1.0,
+        "convergence_status": "off_topic",
+        "arbitration_output": "refuse",
+        "arbitration_source": f"gatekeeper:{layer}",
+        "arbitration_confidence": 1.0,
+    }
 
 
 async def _reformat(query: str, last_ai: str) -> str:
@@ -213,6 +208,72 @@ async def _reformat(query: str, last_ai: str) -> str:
         return result.content.strip() + _DISCLAIMER
     except Exception:
         return last_ai
+
+
+async def _emit(
+    *,
+    websocket,
+    ws_response: dict,
+    db_content:  str,
+    prov_state:  dict | None,
+    turn_type:   str | None,
+    session_id:  str,
+    user_id:     str,
+    tracer,
+) -> None:
+    """The one place a chat turn becomes visible to the user.
+
+    Writes the audit record, sends the frame, and persists the message — in that
+    order, so an answer never reaches the user before the record describing it
+    exists. record_answer never raises, so this cannot fail the turn.
+
+    The system claims a durable provenance document for every turn. That claim
+    was previously false: the graph paths recorded, but the intent shortcuts
+    (canned replies and LLM reformats) and the exception handler emitted without
+    any record, so roughly the least supervised outputs were also the least
+    audited. Routing every path through here makes the claim structural rather
+    than a convention that each new branch has to remember.
+
+    A missing turn_type is a programming error and is treated as one. It means
+    an output path was added without deciding how it is audited, which is
+    exactly the defect this function exists to prevent, so it is logged loudly
+    and recorded as an error rather than silently skipped.
+    """
+    if turn_type is None or prov_state is None:
+        logger.error(
+            "chat_socket: output path did not set audit state (session=%s type=%s) "
+            "— recording as error; this is a bug, not a user condition",
+            session_id, ws_response.get("type"),
+        )
+        prov_state = {"query": "", "answer": db_content,
+                      "is_grounded": False, "confidence": 0.0,
+                      "convergence_status": "error",
+                      "arbitration_source": "unaudited_path"}
+        turn_type = provenance_service.TURN_ERROR
+
+    if turn_type not in provenance_service.TURN_TYPES:
+        logger.error("chat_socket: unknown turn_type %r — recording as error", turn_type)
+        turn_type = provenance_service.TURN_ERROR
+
+    await provenance_service.record_answer(
+        state         = prov_state,
+        session_id    = session_id,
+        user_id       = user_id,
+        request_id    = tracer.request_id,
+        trace_summary = tracer.summary(),
+        spans         = tracer.spans,
+        turn_type     = turn_type,
+    )
+
+    await websocket.send_json(ws_response)
+
+    await chat_repo.append_message(session_id, {
+        "role":       "assistant",
+        "content":    db_content,
+        "citations":  ws_response.get("citations", []),
+        "confidence": ws_response.get("confidence", 0.0),
+        "created_at": datetime.now(timezone.utc),
+    })
 
 
 def _extract_interrupt_question(snapshot) -> str | None:
@@ -303,6 +364,13 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                 tracer      = TraceHandler(session_id=session_id)
                 turn_config = {**graph_config, "callbacks": [tracer]}
 
+                # Audit state for this turn. Every branch below must set both
+                # before producing output; the emission point at the bottom of
+                # the loop enforces it. See the module docstring on the single
+                # output choke point.
+                prov_state = None
+                turn_type  = None
+
                 # ── Interrupt resume (HITL clarification) ─────────────────────
                 pre_snap         = await chat_graph.aget_state(config=graph_config)
                 pending_question = _extract_interrupt_question(pre_snap)
@@ -327,9 +395,6 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                             "gatekeeper blocked injection [pre-nlu]: %s | session=%s query=%r",
                             injection, session_id, query[:200],
                         )
-                        await _record_blocked(
-                            query, session_id, str(user_id), tracer, injection,
-                        )
                         ws_response = {
                             "type": "final", "content": GATEKEEPER_REFUSAL,
                             "citations": [], "confidence": 1.0,
@@ -337,13 +402,22 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                             "arbitration_source": "gatekeeper:heuristic",
                             "request_id": tracer.request_id,
                         }
-                        await websocket.send_json(ws_response)
-                        await chat_repo.append_message(session_id, {
-                            "role":       "assistant",
-                            "content":    GATEKEEPER_REFUSAL,
-                            "citations":  [], "confidence": 1.0,
-                            "created_at": datetime.now(timezone.utc),
-                        })
+                        # Blocked attempts are exactly the traffic an audit most
+                        # needs: any adversarial-robustness rate computed from
+                        # the store would otherwise count the attempts that got
+                        # through and ignore the ones that were stopped.
+                        prov_state = _blocked_state(query)
+                        turn_type  = provenance_service.TURN_BLOCKED
+                        await _emit(
+                            websocket   = websocket,
+                            ws_response = ws_response,
+                            db_content  = GATEKEEPER_REFUSAL,
+                            prov_state  = prov_state,
+                            turn_type   = turn_type,
+                            session_id  = session_id,
+                            user_id     = str(user_id),
+                            tracer      = tracer,
+                        )
                         last_ai_content = GATEKEEPER_REFUSAL
                         continue
 
@@ -362,6 +436,10 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                     shortcut    = True
                     ws_response = None
                     db_content  = ""
+                    # Set by whichever branch below produces the output. The
+                    # emission point asserts it was set, so a new branch that
+                    # forgets to decide how it is audited fails immediately
+                    # instead of quietly emitting an unaudited answer.
 
                     # A canned-reply intent may only fire for a SHORT utterance.
                     # Real affirmations are 1-3 words ("ok", "thanks", "theek
@@ -382,6 +460,44 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
 
                     # ── Route by intent ───────────────────────────────────────
                     if intent_name == "format_brief" and last_ai_content:
+                        # Layer 2 of the gatekeeper, which otherwise runs only
+                        # inside the graph. This shortcut feeds the user's
+                        # message to a model AS AN INSTRUCTION, alongside the
+                        # previous answer — so it is the one shortcut where an
+                        # obfuscated injection has something to act on, and
+                        # regex screening alone is not the two-layer defence the
+                        # system claims. affirm and stop do not need this: they
+                        # emit fixed strings and invoke no model, so there is
+                        # nothing for an injection to steer or exfiltrate, and
+                        # putting an LLM call in front of every "ok" would cost
+                        # a second per trivial turn for no security gain.
+                        subtle = await asyncio.to_thread(llm_injection_reason, query)
+                        if subtle is not None:
+                            logger.warning(
+                                "gatekeeper blocked injection [pre-reformat]: %s | "
+                                "session=%s query=%r",
+                                subtle, session_id, query[:200],
+                            )
+                            ws_response = {
+                                "type": "final", "content": GATEKEEPER_REFUSAL,
+                                "citations": [], "confidence": 1.0,
+                                "convergence_status": "off_topic",
+                                "arbitration_source": "gatekeeper:llm",
+                                "request_id": tracer.request_id,
+                            }
+                            await _emit(
+                                websocket   = websocket,
+                                ws_response = ws_response,
+                                db_content  = GATEKEEPER_REFUSAL,
+                                prov_state  = _blocked_state(query, "llm"),
+                                turn_type   = provenance_service.TURN_BLOCKED,
+                                session_id  = session_id,
+                                user_id     = str(user_id),
+                                tracer      = tracer,
+                            )
+                            last_ai_content = GATEKEEPER_REFUSAL
+                            continue
+
                         reformatted = await _reformat(query, last_ai_content)
                         ws_response = {
                             "type": "final", "content": reformatted,
@@ -390,6 +506,15 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                             "arbitration_source": "nlu:format_brief",
                         }
                         db_content = reformatted
+                        # This path rewrites a previous legal answer with an LLM
+                        # and emits it, without retrieval, grounding or
+                        # arbitration. It is the least supervised output the
+                        # system produces, so it is the one that most needs a
+                        # record saying so.
+                        prov_state = {**ws_response, "query": query,
+                                      "answer": reformatted, "is_grounded": False,
+                                      "arbitration_output": "answer"}
+                        turn_type  = provenance_service.TURN_SHORTCUT
 
                     elif intent_name == "affirm":
                         ws_response = {
@@ -399,6 +524,12 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                             "arbitration_source": "nlu:affirm",
                         }
                         db_content = _CANNED_AFFIRM
+                        prov_state = {"query": query, "answer": _CANNED_AFFIRM,
+                                      "is_grounded": True, "confidence": 1.0,
+                                      "convergence_status": "converged",
+                                      "arbitration_output": "answer",
+                                      "arbitration_source": "nlu:affirm"}
+                        turn_type  = provenance_service.TURN_SHORTCUT
 
                     elif intent_name == "stop":
                         ws_response = {
@@ -408,6 +539,12 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                             "arbitration_source": "nlu:stop",
                         }
                         db_content = _CANNED_STOP
+                        prov_state = {"query": query, "answer": _CANNED_STOP,
+                                      "is_grounded": True, "confidence": 1.0,
+                                      "convergence_status": "converged",
+                                      "arbitration_output": "answer",
+                                      "arbitration_source": "nlu:stop"}
+                        turn_type  = provenance_service.TURN_SHORTCUT
 
                     else:
                         # new_query / format_detail / clarify / unknown → full graph
@@ -447,15 +584,8 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                         # answer. Without this those decisions were unaudited,
                         # and the audit trail had a hole for roughly a fifth of
                         # turns. The question is recorded as the emitted output.
-                        await provenance_service.record_answer(
-                            state         = {**post_snap.values, "answer": new_question},
-                            session_id    = session_id,
-                            user_id       = str(user_id),
-                            request_id    = tracer.request_id,
-                            trace_summary = tracer.summary(),
-                            spans         = tracer.spans,
-                            turn_type     = provenance_service.TURN_CLARIFICATION,
-                        )
+                        prov_state = {**post_snap.values, "answer": new_question}
+                        turn_type  = provenance_service.TURN_CLARIFICATION
                     else:
                         result      = post_snap.values
                         clar_count  = result.get("clarification_attempts")
@@ -485,14 +615,8 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                         # verdict, and which model served it. The trace spans
                         # are discarded when the request ends, so this is the
                         # only lasting link between an answer and its evidence.
-                        await provenance_service.record_answer(
-                            state         = result,
-                            session_id    = session_id,
-                            user_id       = str(user_id),
-                            request_id    = tracer.request_id,
-                            trace_summary = tracer.summary(),
-                            spans         = tracer.spans,
-                        )
+                        prov_state = result
+                        turn_type  = provenance_service.TURN_ANSWER
                         # Surfaced so a user challenging this answer can quote
                         # the id that identifies its audit record.
                         ws_response["request_id"] = tracer.request_id
@@ -506,16 +630,31 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                     "citations": [], "confidence": 0.0,
                 }
                 db_content = ws_response["content"]
+                # A fault the user saw is a turn the audit must contain. Without
+                # this, an outage is invisible in the trail and every refusal
+                # rate computed from it is measured only over turns that worked.
+                prov_state = {"query": query, "answer": ws_response["content"],
+                              "is_grounded": False, "confidence": 0.0,
+                              "convergence_status": "error",
+                              "arbitration_output": "refuse",
+                              "arbitration_source": "error"}
+                turn_type  = provenance_service.TURN_ERROR
 
-            await websocket.send_json(ws_response)
-
-            await chat_repo.append_message(session_id, {
-                "role":       "assistant",
-                "content":    db_content,
-                "citations":  ws_response.get("citations", []),
-                "confidence": ws_response.get("confidence", 0.0),
-                "created_at": datetime.now(timezone.utc),
-            })
+            # ── Single output choke point ────────────────────────────────────
+            # Every user-visible turn leaves through here and writes exactly one
+            # audit record. Previously the graph paths recorded and the intent
+            # shortcuts did not, so the "provenance for every turn" property was
+            # false for canned replies, LLM reformats and faults alike.
+            await _emit(
+                websocket   = websocket,
+                ws_response = ws_response,
+                db_content  = db_content,
+                prov_state  = prov_state,
+                turn_type   = turn_type,
+                session_id  = session_id,
+                user_id     = str(user_id),
+                tracer      = tracer,
+            )
 
             if db_content:
                 last_ai_content = db_content

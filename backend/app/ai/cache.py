@@ -10,6 +10,7 @@ Cache key: sha256(normalized_query.lower() + "|" + case_type + ":" + province)
 Every entry carries version tags:
   embedding_model_version   — bump when embedding model changes
   chunking_strategy_version — bump when document chunking changes
+  decision_policy_version   — bump when routing/abstention logic changes
   collection_versions       — per-collection ingestion hash (set on ingest)
 
 Version mismatch = cache miss.  TTL is safety net only.
@@ -38,6 +39,21 @@ logger = logging.getLogger(__name__)
 # ── Version constants (bump on model/strategy change) ─────────────────────────
 EMBEDDING_MODEL_VERSION   = "intfloat/multilingual-e5-base/v1"
 CHUNKING_STRATEGY_VERSION = "v1"
+
+# Bump whenever a change would make the system answer a question DIFFERENTLY:
+# the answerability rules, the harm ratio, the confidence signals, or the
+# thresholds. Cached answers outlive the logic that produced them otherwise.
+#
+# This was learned the hard way. When the inverted lexical signal and the
+# answerability gate landed, a stored answer to "the current stamp duty rate in
+# Gilgit-Baltistan" kept being served at 0.85 confidence, because a cache hit
+# routes straight to the finalizer and never reaches the Decision Engine. The
+# fix at the time was a manual purge, which is exactly the kind of step that is
+# forgotten on the deployment where it matters.
+#
+# v2: expected-loss arbitration over a harm matrix, rarity-weighted lexical
+#     signal, real embedding similarity, query-side answerability gate.
+DECISION_POLICY_VERSION = "v2"
 
 # TTL values (safety net — version mismatch invalidates before TTL in most cases)
 _RESULT_TTL = settings.cache_result_ttl   # default 10 min
@@ -90,6 +106,10 @@ def _valid(entry: dict, ttl: int, current_col_versions: dict[str, str]) -> bool:
         return False
     if entry.get("chunking_strategy_version") != CHUNKING_STRATEGY_VERSION:
         return False
+    # Absent on entries written before policy versioning existed, so `!=`
+    # correctly rejects them rather than letting them through untagged.
+    if entry.get("decision_policy_version") != DECISION_POLICY_VERSION:
+        return False
     for col, ver in entry.get("collection_versions", {}).items():
         if current_col_versions.get(col) != ver:
             return False
@@ -101,6 +121,7 @@ def _build_entry(payload: dict, collection_names: Optional[list[str]], current: 
         "payload":                   payload,
         "embedding_model_version":   EMBEDDING_MODEL_VERSION,
         "chunking_strategy_version": CHUNKING_STRATEGY_VERSION,
+        "decision_policy_version":   DECISION_POLICY_VERSION,
         "collection_versions":       _col_versions(collection_names, current),
         "cached_at":                 time.time(),
     }

@@ -262,11 +262,39 @@ def _apply_topic_rules(chunks: list[dict], query: str) -> list[dict]:
         return chunks
 
 
-def _docs_to_chunks(docs: list[Document], province: str = "") -> list[dict]:
+# LEGAL-UQA ships each constitutional article together with GPT-4-generated
+# question/answer pairs about it, and the ingestion indexed BOTH, tagging every
+# one `statute: "Constitution of Pakistan 1973"`. The generated pairs outnumber
+# the article text two to one and dominate retrieval — measured at 81-100% of
+# returned chunks on ordinary constitutional queries.
+#
+# That makes the system cite model output as the Constitution. The grounding
+# verifier then confirms an answer against text a model wrote, the provenance
+# record stores it as statutory evidence, and the citation shown to the user
+# names an instrument the text does not come from. For a system whose claims are
+# grounding and auditability, this is the most consequential defect available.
+#
+# Excluded from retrieval here rather than deleted from the index: the pairs are
+# still useful for evaluating retrieval (they carry a known gold article), and
+# an index that silently loses documents is harder to reason about than one
+# whose retrieval path filters explicitly.
+_SYNTHETIC_QA_PREFIX = "legal_uqa_qa_"
+
+
+def _is_synthetic(meta: dict) -> bool:
+    return str(meta.get("chunk_id", "")).startswith(_SYNTHETIC_QA_PREFIX)
+
+
+def _docs_to_chunks(docs: list[Document], province: str = "",
+                    allow_synthetic: bool = False) -> list[dict]:
     chunks = []
     dropped = 0
+    synthetic = 0
     for doc in docs:
         meta = doc.metadata or {}
+        if not allow_synthetic and _is_synthetic(meta):
+            synthetic += 1
+            continue
         if _is_superseded_for(meta, province):
             dropped += 1
             continue
@@ -283,6 +311,11 @@ def _docs_to_chunks(docs: list[Document], province: str = "") -> list[dict]:
         logger.info(
             "retrieval: dropped %d chunk(s) superseded in province=%s",
             dropped, province,
+        )
+    if synthetic:
+        logger.info(
+            "retrieval: excluded %d generated QA chunk(s) — model output must "
+            "not be cited as statute", synthetic,
         )
     return chunks
 
