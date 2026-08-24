@@ -16,6 +16,84 @@ case_repo  = CaseRepository()
 doc_repo   = DocumentRepository()
 draft_repo = DraftRepository()
 
+def _citable_text(fields: dict) -> str:
+    """Every piece of prose that reaches the PDF, as one string to check.
+
+    Citations live inside field values — the body of a notice, the grounds of a
+    petition — not in a dedicated field, so the whole draft is searched.
+    """
+    parts: list[str] = []
+
+    def walk(v) -> None:
+        if isinstance(v, str):
+            parts.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+
+    walk(fields or {})
+    return "\n".join(parts)
+
+
+async def _verification_record(fields: dict) -> dict:
+    """Existence-check every authority the draft cites, to store with the document.
+
+    ADVISORY AND FAIL-OPEN, for two separate reasons.
+
+    Advisory because the evidence does not yet support blocking. Measured on
+    this system's recorded answers the flag rate is 0% over 17 answers carrying
+    citations — enough to show the checker is quiet, nowhere near enough to let
+    it stop a lawyer filing on time.
+
+    Fail-open because a citation checker must never be the reason a document
+    cannot be produced. If Chroma is down the honest outcome is a document that
+    says its citations were not checked, not a failed generation. The record
+    distinguishes the two: `ran: False` is not the same as "no problems found",
+    and a caller that treats a missing check as a pass has misread it.
+
+    Stored rather than recomputed on read, matching `compliance` above: the
+    corpus grows, so a check re-run next month would describe a different
+    system than the one that produced this PDF. The stored record is what was
+    true when the document was generated, which is the only thing worth putting
+    in front of a court.
+    """
+    checked_at = datetime.now(timezone.utc)
+    try:
+        from app.ai.citation_verification import verify_text
+        from app.ai.corpus_index import get_index
+
+        result = await verify_text(_citable_text(fields))
+        index = get_index()
+        record = result.to_dict()
+        record["ran"] = True
+        record["checked_at"] = checked_at
+        # What the corpus was at the moment of checking. Without it a verdict
+        # cannot be reproduced or defended later.
+        record["corpus"] = {
+            "statutes": len(index),
+            "statutes_dense_enough_to_flag": sum(
+                1 for s in index.statutes if index.coverage(s).dense),
+            "sections_indexed": index.total_sections(),
+        }
+        return record
+    except Exception as exc:                       # never block generation
+        logger.warning("citation verification unavailable: %s", exc)
+        return {
+            "ran": False,
+            "checked_at": checked_at,
+            "reason": f"Citation verification did not run: {exc}",
+            "summary": ("Citations in this draft were NOT checked. This is not "
+                        "a finding that they are sound."),
+            "needs_human_check": True,
+            "checks": [],
+            "counts": {"total": 0, "verified": 0, "not_in_corpus": 0,
+                       "unverifiable": 0},
+        }
+
+
 TEMPLATE_TITLES = {
     DocumentTemplate.PLAINT_CIVIL:           "Civil Plaint",
     DocumentTemplate.WRITTEN_STATEMENT:      "Written Statement",
@@ -262,6 +340,9 @@ async def generate_document(
         # Stored rather than recomputed so the report always matches the PDF the
         # user actually downloaded, even if the checker changes later.
         "compliance":    pleading_rules.check_pleading(template_type, fields),
+        # Existence-check of every authority cited in the draft, computed here
+        # and frozen with the document for the same reason as `compliance`.
+        "verification":  await _verification_record(fields),
         "file_path":     None,
         "status":        "pending",
         "created_at":    datetime.now(timezone.utc),

@@ -86,13 +86,19 @@ class StatuteCoverage:
     def has(self, section: str) -> bool:
         return str(section).strip().upper() in self.sections
 
-    def describe(self) -> str:
-        """Plain-language coverage, so a lawyer can see why we said what we said."""
+    def describe(self, unit: str = "section") -> str:
+        """Plain-language coverage, so a lawyer can see why we said what we said.
+
+        `unit` because the Constitution is numbered in Articles, and a tool whose
+        subject is citation precision should not call them sections.
+        """
+        plural = f"{unit}s"
         if self.dense:
             missing = self.highest - len(self.numbered)
-            gap = f"{missing} section(s) absent" if missing else "no gaps"
-            return f"{len(self.numbered)} sections covering 1-{self.highest} ({gap})"
-        return (f"only {len(self.numbered)} sections held, scattered up to "
+            gap = f"{missing} {unit if missing == 1 else plural} absent" \
+                if missing else "no gaps"
+            return f"{len(self.numbered)} {plural} covering 1-{self.highest} ({gap})"
+        return (f"only {len(self.numbered)} {plural} held, scattered up to "
                 f"{self.highest} - coverage is partial")
 
 

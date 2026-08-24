@@ -93,6 +93,8 @@ const ModDocuments = () => {
     const [genDone, setGenDone] = useState(false);
     // Statutory completeness of the generated draft, returned by the API.
     const [compliance, setCompliance] = useState(null);
+    // Existence-check of every authority the draft cites, frozen at generation.
+    const [verification, setVerification] = useState(null);
     // Step 3 — review / edit
     const [editMode, setEditMode] = useState(false);
     const [docContent, setDocContent] = useState(null);       // null until generated
@@ -272,6 +274,7 @@ const ModDocuments = () => {
             setDocId(newDocId);
             if (genRes.data?.title) setDocTitle(genRes.data.title);
             setCompliance(genRes.data?.compliance || null);
+            setVerification(genRes.data?.verification || null);
             setGenPct(100);
             setTimeout(() => { setGenerating(false); setGenDone(true); toast.show("✅ Draft generated!", "success"); }, 300);
         } catch {
@@ -511,6 +514,64 @@ const ModDocuments = () => {
                                     ))}
                                     <div style={{ fontSize: 10, color: t.textMuted, marginTop: 6, fontStyle: "italic" }}>
                                         {compliance.advisory}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Citation verification. Deliberately NOT a green tick:
+                                this checks only that an authority EXISTS, never that
+                                it supports the point it is cited for, and the corpus
+                                cannot speak to every statute. So the "cannot check"
+                                count is always on screen next to the verified count —
+                                a panel that showed only "4 verified" would read as a
+                                clean bill of health the check never gave. A run that
+                                failed says so rather than showing nothing, because a
+                                silent panel looks identical to a clean one. */}
+                            {genDone && verification && (
+                                <div style={{ marginTop: 13, padding: 13, borderRadius: 11,
+                                    background: verification.counts?.not_in_corpus > 0 ? `${t.danger}12` : `${t.textMuted}0e`,
+                                    border: `1.5px solid ${verification.counts?.not_in_corpus > 0 ? `${t.danger}55` : `${t.textMuted}33`}` }}>
+                                    <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 7,
+                                        color: verification.counts?.not_in_corpus > 0 ? t.danger : t.text }}>
+                                        {verification.ran === false
+                                            ? "Citations were not checked"
+                                            : verification.counts?.not_in_corpus > 0
+                                                ? `${verification.counts.not_in_corpus} citation${verification.counts.not_in_corpus === 1 ? "" : "s"} could not be found in the statute`
+                                                : "Citations checked for existence"}
+                                    </div>
+
+                                    {verification.ran === false ? (
+                                        <div style={{ fontSize: 11, color: t.textMuted }}>
+                                            {verification.summary}
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 9 }}>
+                                                {verification.counts?.verified || 0} found in the corpus ·{" "}
+                                                {verification.counts?.unverifiable || 0} this corpus cannot check
+                                            </div>
+
+                                            {(verification.checks || [])
+                                                .filter(c => c.status !== "VERIFIED")
+                                                .map((c, i) => (
+                                                    <div key={`${c.canonical}-${i}`} style={{ marginBottom: 8, paddingLeft: 10,
+                                                        borderLeft: `2px solid ${c.status === "NOT_IN_CORPUS" ? `${t.danger}66` : `${t.textMuted}44`}` }}>
+                                                        <div style={{ fontSize: 11.5, fontWeight: 600,
+                                                            color: c.status === "NOT_IN_CORPUS" ? t.danger : t.text }}>
+                                                            {c.canonical}
+                                                            <span style={{ fontWeight: 500, color: t.textMuted }}>
+                                                                {c.status === "NOT_IN_CORPUS" ? " — not found" : " — cannot verify"}
+                                                            </span>
+                                                        </div>
+                                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>{c.detail}</div>
+                                                    </div>
+                                                ))}
+                                        </>
+                                    )}
+
+                                    <div style={{ fontSize: 10, color: t.textMuted, marginTop: 6, fontStyle: "italic" }}>
+                                        Existence only — a real provision cited for something it does not
+                                        say still shows as found. Read every authority before filing.
                                     </div>
                                 </div>
                             )}

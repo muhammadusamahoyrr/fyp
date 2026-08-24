@@ -47,6 +47,12 @@ class DocumentOut(BaseModel):
     # is dropped silently on serialization, which is how POAOut lost verify_url
     # and opppa_status. Wide and evolving, so it stays a raw dict.
     compliance: dict[str, Any] | None = None
+    # Existence-check of the authorities the draft cites, frozen at generation.
+    # Same allowlist hazard as `compliance`: omit this line and the whole record
+    # vanishes from every response while the document still carries it, so the
+    # UI would show a draft with no citation warnings and no way to know any
+    # were raised. A silently dropped safety check is worse than none.
+    verification: dict[str, Any] | None = None
     created_at: datetime | None = None
     # Review-pipeline fields — present once a doc has been submitted/reviewed.
     review_status: str | None = None

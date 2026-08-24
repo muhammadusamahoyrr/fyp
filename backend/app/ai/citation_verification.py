@@ -264,21 +264,21 @@ def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
     if cov.has(section):
         return CitationCheck(
             raw, "statute", canonical, VERIFIED,
-            f"Present in the corpus ({cov.describe()}). Existence only — this "
+            f"Present in the corpus ({cov.describe(cite.unit)}). Existence only — this "
             f"does not confirm the section supports the proposition.", in_ev)
 
     if cov.dense:
         return CitationCheck(
             raw, "statute", canonical, NOT_IN_CORPUS,
             f"Not found, and the corpus holds {statute} densely "
-            f"({cov.describe()}), so absence is meaningful. Treat as likely "
+            f"({cov.describe(cite.unit)}), so absence is meaningful. Treat as likely "
             f"fabricated or misnumbered until checked against the bare act.",
             in_ev)
 
     return CitationCheck(
         raw, "statute", canonical, UNVERIFIABLE,
         f"Not found, but the corpus holds {statute} only partially "
-        f"({cov.describe()}) — absence here is not evidence. Verify manually.",
+        f"({cov.describe(cite.unit)}) — absence here is not evidence. Verify manually.",
         in_ev)
 
 
