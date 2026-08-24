@@ -10,11 +10,6 @@ Reallocating 'singl_function' (item size: 4) to 100 items.
 Reallocating 'wiz_functions' (item size: 4) to 6000 items.
 Reallocating 'singl_function' (item size: 4) to 100 items.
 Database file #1: references.bib
-You're missing a field name---line 423 of file references.bib
- :   
- :   % 969 laws/acts from Ministry of Law and Justice PDFs. Owner and ODC-BY
-(Error may have been on previous line)
-I'm skipping whatever remains of this entry
 -- IEEEtran.bst version 1.14 (2015/08/26) by Michael Shell.
 -- http://www.michaelshell.org/tex/ieeetran/bibtex/
 -- See the "IEEEtran_bst_HOWTO.pdf" manual for usage information.
@@ -22,37 +17,37 @@ I'm skipping whatever remains of this entry
 Done.
 You've used 22 entries,
             4087 wiz_defined-function locations,
-            928 strings with 11442 characters,
-and the built_in function-call counts, 12905 in all, are:
-= -- 898
+            929 strings with 11462 characters,
+and the built_in function-call counts, 12982 in all, are:
+= -- 911
 > -- 412
 < -- 36
 + -- 202
 - -- 92
-* -- 589
-:= -- 1947
+* -- 594
+:= -- 1966
 add.period$ -- 44
 call.type$ -- 22
-change.case$ -- 28
+change.case$ -- 29
 chr.to.int$ -- 81
 cite$ -- 22
-duplicate$ -- 1017
-empty$ -- 1243
+duplicate$ -- 1021
+empty$ -- 1245
 format.name$ -- 110
-if$ -- 2997
+if$ -- 3014
 int.to.chr$ -- 0
 int.to.str$ -- 22
-missing$ -- 231
+missing$ -- 232
 newline$ -- 89
 num.names$ -- 22
-pop$ -- 634
+pop$ -- 635
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 2
-skip$ -- 999
+skip$ -- 1004
 stack$ -- 0
-substring$ -- 209
-swap$ -- 654
+substring$ -- 211
+swap$ -- 659
 text.length$ -- 9
 text.prefix$ -- 0
 top$ -- 5
@@ -60,5 +55,4 @@ type$ -- 22
 warning$ -- 0
 while$ -- 35
 width$ -- 24
-write$ -- 207
-(There was 1 error message)
+write$ -- 209

@@ -1,12 +1,15 @@
 \relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
 \citation{lewis2020rag}
 \citation{chalkidis2020legalbert,guha2023legalbench}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{section.1}\protected@file@percent }
 \citation{chalkidis2020legalbert}
 \citation{guha2023legalbench}
 \citation{lewis2020rag}
 \citation{karpukhin2020dpr}
 \citation{asai2024selfrag}
-\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{}\protected@file@percent }
 \citation{wang2024multilinguale5}
 \citation{robertson2009bm25,cormack2009rrf}
 \citation{thakur2021beir}
@@ -15,58 +18,61 @@
 \citation{paklaws}
 \citation{pakistancode}
 \citation{legaluqa}
-\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {III}Experimental Setup}{2}{}\protected@file@percent }
-\newlabel{sec:setup}{{III}{2}{}{section.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}Corpus and Retrieval}{2}{}\protected@file@percent }
-\newlabel{sec:retrieval}{{\mbox  {III-A}}{2}{}{subsection.3.1}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Indexed statutory corpus by collection and legislative tier, with a separately indexed judgment corpus of $7{,}529$ chunks from six courts not shown. Devolved provincial coverage is Punjab-only; constitutional law is inherently federal.}}{2}{}\protected@file@percent }
-\newlabel{fig:corpus}{{1}{2}{}{figure.1}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {IV}Evaluation Protocol}{2}{}\protected@file@percent }
-\newlabel{sec:eval}{{IV}{2}{}{section.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Verified Citation Supervision}{2}{}\protected@file@percent }
-\newlabel{sec:citationdata}{{\mbox  {IV-A}}{2}{}{subsection.4.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {III}Experimental Setup}{2}{section.3}\protected@file@percent }
+\newlabel{sec:setup}{{III}{2}{Experimental Setup}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}Corpus and Retrieval}{2}{subsection.3.1}\protected@file@percent }
+\newlabel{sec:retrieval}{{\mbox  {III-A}}{2}{Corpus and Retrieval}{subsection.3.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Indexed statutory corpus by collection and legislative tier, with a separately indexed judgment corpus of $7{,}529$ chunks from six courts not shown. Devolved provincial coverage is Punjab-only; constitutional law is inherently federal.}}{2}{figure.1}\protected@file@percent }
+\newlabel{fig:corpus}{{1}{2}{Indexed statutory corpus by collection and legislative tier, with a separately indexed judgment corpus of $7{,}529$ chunks from six courts not shown. Devolved provincial coverage is Punjab-only; constitutional law is inherently federal}{figure.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Evaluation Protocol}{2}{section.4}\protected@file@percent }
+\newlabel{sec:eval}{{IV}{2}{Evaluation Protocol}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Verified Citation Supervision}{2}{subsection.4.1}\protected@file@percent }
+\newlabel{sec:citationdata}{{\mbox  {IV-A}}{2}{Verified Citation Supervision}{subsection.4.1}{}}
 \citation{jarvelin2002ndcg}
 \citation{nogueira2019rerank}
 \citation{hou2024clerc}
 \citation{hou2024clerc}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Metrics}{3}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {V}Results}{3}{}\protected@file@percent }
-\newlabel{sec:results}{{V}{3}{}{section.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Cross-Encoder Reranking: A Negative Result}{3}{}\protected@file@percent }
-\newlabel{sec:rerank}{{\mbox  {V-A}}{3}{}{subsection.5.1}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Rank of the correct statute (Punjab Rented Premises Act 2009) after each stage, at both retrieval depths; lower is better. The deterministic statutory-scope rule places it first at both depths in under a millisecond, where the cross-encoder demotes it and grows worse as the pool widens.}}{3}{}\protected@file@percent }
-\newlabel{fig:rerank}{{2}{3}{}{figure.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Domain Fine-Tuning: Large In-Distribution Gains That Do Not Transfer}{3}{}\protected@file@percent }
-\newlabel{sec:finetune}{{\mbox  {V-B}}{3}{}{subsection.5.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Metrics}{3}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {V}Results}{3}{section.5}\protected@file@percent }
+\newlabel{sec:results}{{V}{3}{Results}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Cross-Encoder Reranking: A Negative Result}{3}{subsection.5.1}\protected@file@percent }
+\newlabel{sec:rerank}{{\mbox  {V-A}}{3}{Cross-Encoder Reranking: A Negative Result}{subsection.5.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Rank of the correct statute (Punjab Rented Premises Act 2009) after each stage, at both retrieval depths; lower is better. The deterministic statutory-scope rule places it first at both depths in under a millisecond, where the cross-encoder demotes it and grows worse as the pool widens.}}{3}{figure.2}\protected@file@percent }
+\newlabel{fig:rerank}{{2}{3}{Rank of the correct statute (Punjab Rented Premises Act 2009) after each stage, at both retrieval depths; lower is better. The deterministic statutory-scope rule places it first at both depths in under a millisecond, where the cross-encoder demotes it and grows worse as the pool widens}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Domain Fine-Tuning: Large In-Distribution Gains That Do Not Transfer}{3}{subsection.5.2}\protected@file@percent }
+\newlabel{sec:finetune}{{\mbox  {V-B}}{3}{Domain Fine-Tuning: Large In-Distribution Gains That Do Not Transfer}{subsection.5.2}{}}
 \citation{henderson2017mnrl}
 \citation{reimers2019sbert}
 \citation{mcnemar1947}
-\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Threats to validity: what each bears on and its status.}}{4}{}\protected@file@percent }
-\newlabel{tab:threats}{{I}{4}{}{table.1}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces What differs between the two fine-tuned models. The recipe is identical, so any difference in behaviour is attributable to the training data.}}{4}{}\protected@file@percent }
-\newlabel{tab:setup}{{II}{4}{}{table.2}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Two retrievers fine-tuned independently, on different sources, at a tenfold difference in scale, each lose almost their whole gain when the question style changes. Left-hand points are what an in-distribution evaluation reports; right-hand points are what a deployment experiences. The constitutional model's apparent $0.766$ on its own distribution is excluded as memorisation (Section~\ref {sec:leakage}).}}{4}{}\protected@file@percent }
-\newlabel{fig:collapse}{{3}{4}{}{figure.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Why the Fusion Layer Absorbs the Gain}{4}{}\protected@file@percent }
-\newlabel{sec:hybrid}{{\mbox  {V-C}}{4}{}{subsection.5.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Three Contaminations, Detected and Removed}{4}{}\protected@file@percent }
-\newlabel{sec:leakage}{{\mbox  {V-D}}{4}{}{subsection.5.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Threats to validity: what each bears on and its status.}}{4}{table.1}\protected@file@percent }
+\newlabel{tab:threats}{{I}{4}{Threats to validity: what each bears on and its status}{table.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces What differs between the two fine-tuned models. The recipe is identical, so any difference in behaviour is attributable to the training data.}}{4}{table.2}\protected@file@percent }
+\newlabel{tab:setup}{{II}{4}{What differs between the two fine-tuned models. The recipe is identical, so any difference in behaviour is attributable to the training data}{table.2}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Two retrievers fine-tuned independently, on different sources, at a tenfold difference in scale, each lose almost their whole gain when the question style changes. Left-hand points are what an in-distribution evaluation reports; right-hand points are what a deployment experiences. The constitutional model's flattering in-distribution metric ($+16.5$) is excluded from clean baseline comparisons due to target-leakage memorisation (Section~\ref {sec:leakage}), while its clean out-of-distribution performance ($-0.3$) remains.}}{5}{figure.3}\protected@file@percent }
+\newlabel{fig:collapse}{{3}{5}{Two retrievers fine-tuned independently, on different sources, at a tenfold difference in scale, each lose almost their whole gain when the question style changes. Left-hand points are what an in-distribution evaluation reports; right-hand points are what a deployment experiences. The constitutional model's flattering in-distribution metric ($+16.5$) is excluded from clean baseline comparisons due to target-leakage memorisation (Section~\ref {sec:leakage}), while its clean out-of-distribution performance ($-0.3$) remains}{figure.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Why the Fusion Layer Absorbs the Gain}{5}{subsection.5.3}\protected@file@percent }
+\newlabel{sec:hybrid}{{\mbox  {V-C}}{5}{Why the Fusion Layer Absorbs the Gain}{subsection.5.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Three Contaminations, Detected and Removed}{5}{subsection.5.4}\protected@file@percent }
+\newlabel{sec:leakage}{{\mbox  {V-D}}{5}{Three Contaminations, Detected and Removed}{subsection.5.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Contamination mechanisms, baseline contexts, and evaluation consequences.}}{5}{table.3}\protected@file@percent }
+\newlabel{tab:leakage}{{III}{5}{Contamination mechanisms, baseline contexts, and evaluation consequences}{table.3}{}}
 \citation{krippendorff2004}
-\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Contamination mechanisms and evaluation consequences.}}{5}{}\protected@file@percent }
-\newlabel{tab:leakage}{{III}{5}{}{table.3}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {IV}{\ignorespaces Interventions sorted by whether their effect survived a style change.}}{5}{}\protected@file@percent }
-\newlabel{tab:interventions}{{IV}{5}{}{table.4}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion}{5}{}\protected@file@percent }
-\newlabel{sec:disc}{{VI}{5}{}{section.6}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Why Fine-Tuning Did Not Generalise}{5}{}\protected@file@percent }
-\newlabel{sec:whynot}{{\mbox  {VI-A}}{5}{}{subsection.6.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Leakage-Free Evaluation Is Load-Bearing}{5}{}\protected@file@percent }
-\newlabel{sec:whyleakage}{{\mbox  {VI-B}}{5}{}{subsection.6.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}Future Work}{5}{}\protected@file@percent }
-\newlabel{sec:future}{{\mbox  {VI-C}}{5}{}{subsection.6.3}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {VII}Threats to Validity}{5}{}\protected@file@percent }
-\newlabel{sec:threats}{{VII}{5}{}{section.7}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {IV}{\ignorespaces Interventions sorted by whether their effect survived a style change.}}{6}{table.4}\protected@file@percent }
+\newlabel{tab:interventions}{{IV}{6}{Interventions sorted by whether their effect survived a style change}{table.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {V}{\ignorespaces Cumulative ablation of deployed pipeline interventions.}}{6}{table.5}\protected@file@percent }
+\newlabel{tab:cumulative}{{V}{6}{Cumulative ablation of deployed pipeline interventions}{table.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion}{6}{section.6}\protected@file@percent }
+\newlabel{sec:disc}{{VI}{6}{Discussion}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Why Fine-Tuning Did Not Generalise}{6}{subsection.6.1}\protected@file@percent }
+\newlabel{sec:whynot}{{\mbox  {VI-A}}{6}{Why Fine-Tuning Did Not Generalise}{subsection.6.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Leakage-Free Evaluation Is Load-Bearing}{6}{subsection.6.2}\protected@file@percent }
+\newlabel{sec:whyleakage}{{\mbox  {VI-B}}{6}{Leakage-Free Evaluation Is Load-Bearing}{subsection.6.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}Future Work}{6}{subsection.6.3}\protected@file@percent }
+\newlabel{sec:future}{{\mbox  {VI-C}}{6}{Future Work}{subsection.6.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Threats to Validity}{6}{section.7}\protected@file@percent }
+\newlabel{sec:threats}{{VII}{6}{Threats to Validity}{section.7}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusion}{6}{section.8}\protected@file@percent }
 \citation{paklaws}
 \citation{legaluqa}
 \bibstyle{IEEEtran}
@@ -93,6 +99,5 @@
 \bibcite{reimers2019sbert}{20}
 \bibcite{mcnemar1947}{21}
 \bibcite{krippendorff2004}{22}
-\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusion}{6}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{References}{6}{}\protected@file@percent }
-\gdef \@abspage@last{6}
+\@writefile{toc}{\contentsline {section}{References}{7}{section*.1}\protected@file@percent }
+\gdef \@abspage@last{7}

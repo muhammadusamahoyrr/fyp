@@ -83,7 +83,8 @@ O.~Sainz, J.~A. Campos, I.~Garc{\'i}a-Ferrero, J.~Etxaniz, O.~L. de~Lacalle,
 
 \bibitem{paklaws}
 A.~Jadoon, ``Pakistan laws dataset,''
-  \url{https://huggingface.co/datasets/AyeshaJadoon/Pakistan_Laws_Dataset}.
+  \url{https://huggingface.co/datasets/AyeshaJadoon/Pakistan_Laws_Dataset},
+  2024, 969 statutes, ODC-BY.
 
 \bibitem{pakistancode}
 {Ministry of Law and Justice, Government of Pakistan}, ``Pakistan code,''
