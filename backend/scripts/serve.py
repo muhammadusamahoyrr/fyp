@@ -43,6 +43,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 BACKEND   = Path(__file__).resolve().parents[1]
@@ -75,9 +76,47 @@ def _read_pid() -> int | None:
     return pid if _running(pid) else None
 
 
+def _port_holder(host: str, port: int) -> int | None:
+    """PID already listening on host:port, if any.
+
+    The pid file is not enough. It only knows about servers THIS script started,
+    so an instance left over from another shell — or one whose pid file was
+    cleaned up — is invisible to it. Asking the OS is the only reliable check.
+    """
+    try:
+        out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True).stdout
+    except Exception:
+        return None
+    needle = f"{host}:{port}"
+    for line in out.splitlines():
+        parts = line.split()
+        # Columns: Proto  Local  Foreign  State  PID. Compare the LOCAL address
+        # as a whole token — a substring test reports the holder of :8000 when
+        # asked about :800, since one is a prefix of the other.
+        if len(parts) >= 5 and parts[1] == needle and parts[3] == "LISTENING":
+            if parts[-1].isdigit():
+                return int(parts[-1])
+    return None
+
+
 def start(args) -> int:
     if (pid := _read_pid()):
         print(f"already running (pid {pid}). Use `stop` first.")
+        return 1
+
+    # Refuse to start on an occupied port. Without this, uvicorn binds, fails
+    # with [Errno 10048], and dies — while this script has already printed
+    # "started pid N -> http://...". The old server keeps answering, so the port
+    # looks healthy and the operator believes their new build is live when it is
+    # not. That cost a debugging session: a UI bug was investigated against a
+    # server running different code, and the truncated log (see below) hid it.
+    if (holder := _port_holder(args.host, args.port)):
+        print(f"  REFUSING TO START: {args.host}:{args.port} is already held by "
+              f"pid {holder}.")
+        print(f"  That process is serving right now — anything you test will hit "
+              f"IT, not this build.")
+        print(f"  Stop it first:  python scripts/serve.py stop")
+        print(f"  Or if it is orphaned:  taskkill /PID {holder} /F")
         return 1
 
     env = os.environ.copy()
@@ -92,7 +131,15 @@ def start(args) -> int:
            str(Path(__file__).resolve()), "_child",
            "--host", args.host, "--port", str(args.port)]
 
-    log = open(LOG_FILE, "w", encoding="utf-8", errors="replace")
+    # APPEND, never truncate. Opening "w" destroyed the log of whatever was
+    # already running — including the access lines needed to see whether a
+    # user's click ever reached the server. Losing that evidence is worse than
+    # a large file, and the banner below keeps runs separable.
+    log = open(LOG_FILE, "a", encoding="utf-8", errors="replace")
+    log.write(f"\n{'=' * 70}\n=== serve.py start {datetime.now().isoformat(timespec='seconds')} "
+              f"— {args.host}:{args.port}"
+              f"{' — LLM_LOCAL_ONLY' if args.local_only else ''}\n{'=' * 70}\n")
+    log.flush()
     proc = subprocess.Popen(cmd, cwd=str(BACKEND), env=env, stdout=log,
                             stderr=subprocess.STDOUT)
     PID_FILE.write_text(json.dumps({"pid": proc.pid, "started": time.time()}))

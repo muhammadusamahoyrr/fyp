@@ -227,6 +227,15 @@ const ModDocuments = () => {
         if (selectedDraft !== null) setDocTitle(DRAFTS_DATA[selectedDraft].name + " — " + key);
     };
 
+    // The one fact the whole draft step depends on: is there a case to draft
+    // from? handleGenerate resolves the id exactly this way, so the readiness
+    // strip and the button can never disagree with what the handler will do.
+    const activeCaseId = selectedCaseId || (cases[0]?._id || cases[0]?.id) || "";
+    const activeCase = cases.find(c => (c._id || c.id) === activeCaseId);
+    const activeCaseTitle = activeCase?.title || activeCase?.case_type || "your case";
+    const unsupportedType = Boolean(selectedType && DOC_TYPE_MAP[selectedType] === null);
+    const canGenerate = Boolean(activeCaseId) && !unsupportedType;
+
     const handleGenerate = async () => {
         const templateKey = DOC_TYPE_MAP[selectedType];
         if (selectedType && templateKey === null) {
@@ -439,11 +448,22 @@ const ModDocuments = () => {
                                 </div>
                             </div>
 
-                            {/* AI readiness strip */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 13px", borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}30`, marginTop: 12 }}>
-                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: t.success, flexShrink: 0 }} />
-                                <span style={{ fontSize: 11.5, color: t.textMuted, flex: 1 }}>Case data extracted · AI recommendations ready</span>
-                                <Badge type="success">✓ Ready</Badge>
+                            {/* Readiness strip — reflects real state.
+                                This used to be hardcoded to "Case data extracted · AI
+                                recommendations ready / ✓ Ready" regardless of whether a
+                                case existed. It told users everything was ready, they
+                                pressed Generate, and handleGenerate bailed before making
+                                any request because there was no case to generate from.
+                                A panel that asserts state it never checks turns a working
+                                feature into a dead button. */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 13px", borderRadius: 10, background: canGenerate ? t.primaryGlow : t.inputBg, border: `1px solid ${canGenerate ? t.primary + "30" : t.border}`, marginTop: 12 }}>
+                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: canGenerate ? t.success : t.warn, flexShrink: 0 }} />
+                                <span style={{ fontSize: 11.5, color: t.textMuted, flex: 1 }}>
+                                    {canGenerate
+                                        ? `Linked to "${activeCaseTitle}" · ready to draft`
+                                        : "No case linked yet — complete your Legal Intake first, then come back to draft a document."}
+                                </span>
+                                <Badge type={canGenerate ? "success" : "warn"}>{canGenerate ? "✓ Ready" : "Not ready"}</Badge>
                             </div>
 
                             {/* Progress bar */}
@@ -460,8 +480,14 @@ const ModDocuments = () => {
                             )}
 
                             {!genDone ? (
-                                <BtnPrimary onClick={handleGenerate} disabled={generating} style={{ width: "100%", marginTop: 13, fontSize: 13, padding: "13px", borderRadius: 12, justifyContent: "center" }}>
-                                    {generating ? "⏳ Generating…" : "✨ Generate Draft"}
+                                <BtnPrimary onClick={handleGenerate} disabled={generating || !canGenerate} style={{ width: "100%", marginTop: 13, fontSize: 13, padding: "13px", borderRadius: 12, justifyContent: "center" }}>
+                                    {generating
+                                        ? "⏳ Generating…"
+                                        : !activeCaseId
+                                            ? "Link a case to generate"
+                                            : unsupportedType
+                                                ? `${selectedType} isn't supported yet`
+                                                : "✨ Generate Draft"}
                                 </BtnPrimary>
                             ) : (
                                 <div style={{ display: "flex", gap: 8, marginTop: 13 }}>
