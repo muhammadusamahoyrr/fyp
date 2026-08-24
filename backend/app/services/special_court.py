@@ -32,8 +32,12 @@ SOURCE OF TRUTH — reconcile before relying on any of this in production:
 """
 from __future__ import annotations
 
-# Last reconciled against the federal Act + provincial gazettes / HC notifications.
-EFFECTIVE_AS_OF = "2026-07"
+# Last reconciled against the federal Act, provincial gazettes / HC notifications,
+# and press reporting of the February 2026 Punjab Ordinances. Bump this ONLY when the facts
+# below are actually re-checked -- it previously read 2026-07 while missing the
+# 18 Feb 2026 Punjab Ordinances, which is worse than no date at all: it asserted
+# a currency the file did not have.
+EFFECTIVE_AS_OF = "2026-08"
 
 # Court status vocabulary.
 OPERATIONAL = "operational"          # a designated court is hearing cases now
@@ -54,10 +58,14 @@ _FEDERAL_ACT = "Protection of Overseas Pakistanis' Property Act, 2024 (federal)"
 #                    the disposal figure, this varies by jurisdiction — it is a dated,
 #                    per-province fact, not one national number.
 #   efiling / video_link — supported filing modes where known.
-#   confidence     — "established" | "single_source" | "unconfirmed" — how sure the
-#                    facts below are. Anything not "established" MUST be verified.
+#   confidence     — "established" | "reported" | "single_source" | "unconfirmed" —
+#                    how sure the facts below are. "reported" means corroborated
+#                    across press sources but not yet read against the gazette.
+#                    Anything not "established" MUST be verified.
 #   note           — jurisdiction-specific caveat surfaced to the user.
 JURISDICTIONS: dict[str, dict] = {
+    # ICT: a special court is sitting in Islamabad -- two District & Sessions
+    # judges designated, plus a nominated IHC judge and a special IHC bench.
     "ICT": {
         "name": "Islamabad Capital Territory / federal",
         "act": _FEDERAL_ACT,
@@ -78,16 +86,27 @@ JURISDICTIONS: dict[str, dict] = {
     },
     "PB": {
         "name": "Punjab",
-        "act": "Punjab's provincial Overseas Pakistanis' Property law (rolling out)",
+        "act": "Punjab Establishment of Special Courts (Overseas Pakistanis Property) "
+               "Act 2025",
         "court_status": ENACTED_PENDING,
         "disposal_days": None,
         "appeal_days": 15,         # single-source; verify against the Punjab gazette
         "efiling": None,
         "video_link": None,
-        "confidence": "single_source",
-        "note": "Punjab is standing up its provincial regime, reportedly with a 15-day "
-                "window to appeal to the High Court. Confirm whether a designated special "
-                "court is hearing cases yet, and the exact windows, with the Lahore High Court.",
+        "confidence": "reported",
+        "note": "The Punjab Act is PASSED; designation of judges was still under way as "
+                "of August 2026, so the special court is not confirmed to be hearing "
+                "cases. Two separate Ordinances promulgated on 18 February 2026 also "
+                "bear on Punjab property disputes and are NOT this Act: the Punjab Land "
+                "Revenue (Amendment) Ordinance 2026 (e-registration; mutation requires a "
+                "registered deed; patwaris limited to inheritance transfers) and the "
+                "Punjab Protection of Ownership of Immovable Property (Amendment) "
+                "Ordinance 2026 (see POIP_TRIBUNAL below -- 30-day tribunal decisions, "
+                "5-10 years for illegal possession, Rs 500,000 and up to five years for "
+                "a FALSE complaint). Confirm with the Lahore High Court whether a "
+                "designated special court is sitting, and the exact windows.",
+        "source": "Punjab Establishment of Special Courts (Overseas Pakistanis Property) "
+                  "Act 2025 (press-reported; verify against the Punjab Gazette).",
     },
     "KP": {
         "name": "Khyber Pakhtunkhwa",
@@ -170,6 +189,65 @@ def _code(province: str) -> str | None:
     if p.upper() in JURISDICTIONS:
         return p.upper()
     return _PROVINCE_ALIASES.get(p)
+
+
+# ── The other forum: provincial anti-dispossession tribunals ─────────────────
+#
+# The special-court regime above is not the only route, and for the commonest
+# grievance it is not the fastest. Punjab's Protection of Ownership of Immovable
+# Property (Amendment) Ordinance 2026 (promulgated 18 Feb 2026) tightened an
+# existing tribunal regime aimed squarely at illegal possession:
+#
+#   * tribunal decision within 30 days (previously 90)
+#   * scrutiny report within 30 days (previously extendable to 90)
+#   * a Scrutiny Committee replaces the Dispute Resolution Committee
+#   * SERVING judges hear complaints, not retired ones
+#   * illegal possession now carries 5-10 years and a fine up to Rs 10,000,000
+#   * tribunals, not District Coordinators, authorise preventive action
+#
+# This matters because Punjab's SPECIAL court is still ENACTED_PENDING. Routing a
+# Punjab dispossession case only to a court that is not yet sitting, while a
+# tribunal with a 30-day clock exists, is the wrong answer given confidently.
+# The tribunal is offered as an ALTERNATIVE, never as a replacement: which forum
+# is right depends on facts this system does not have, so it names both and says
+# a lawyer chooses.
+
+POIP_TRIBUNAL: dict[str, dict] = {
+    "PB": {
+        "name": "Punjab Protection of Ownership of Immovable Property tribunal",
+        "act": "Punjab Protection of Ownership of Immovable Property (Amendment) "
+               "Ordinance 2026 (promulgated 18 February 2026), amending the "
+               "principal Punjab enactment",
+        # Only the grievances this forum is actually for. An inheritance dispute
+        # or a sale-agreement quarrel does not belong in an anti-dispossession
+        # tribunal, and offering it there would be worse than saying nothing.
+        "applies_to": ("illegal_occupation", "encroachment"),
+        "decision_days": 30,
+        "scrutiny_report_days": 30,
+        "bench": "Serving judges (the Ordinance replaced retired-judge benches).",
+        "penalties": "Illegal possession: 5-10 years and a fine up to Rs 10,000,000.",
+        "confidence": "reported",   # press-reported; verify against the gazette
+        "verify": "Confirm against the Punjab Gazette text of the 2026 Ordinance "
+                  "before relying on the 30-day timelines or the penalty range.",
+    },
+}
+
+
+def poip_tribunal(province: str, category: str = "") -> dict | None:
+    """The anti-dispossession tribunal route for `province`, if one applies.
+
+    Returns None when the province has no such regime recorded, or when the
+    grievance is not the kind this forum handles. Category-aware on purpose: a
+    tribunal for illegal possession is the fast route for a land grab and the
+    wrong route for an inheritance quarrel.
+    """
+    code = _code(province)
+    rec = POIP_TRIBUNAL.get(code) if code else None
+    if rec is None:
+        return None
+    if category and category not in rec["applies_to"]:
+        return None
+    return dict(rec)
 
 
 def resolve(province: str) -> dict:

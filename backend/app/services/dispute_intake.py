@@ -258,9 +258,102 @@ async def classify_grievance(text: str) -> dict:
 # ── Guided intake (fixed fields only — no free-form) ─────────────────────────
 
 DOCUMENT_OPTIONS = {
-    "title_deed_fard", "power_of_attorney", "cnic_nicop",
-    "sale_agreement", "fir", "tax_receipts", "none",
+    "title_deed_fard", "registered_deed", "power_of_attorney", "cnic_nicop",
+    "sale_agreement", "unregistered_agreement", "mutation_inteqal",
+    "fir", "tax_receipts", "none",
 }
+
+# ── What the documents are actually worth ────────────────────────────────────
+#
+# These were a flat list, which quietly implied a Power of Attorney and a title
+# deed carry the same weight. Since the Punjab Land Revenue (Amendment) Ordinance
+# 2026 (promulgated 18 February 2026) they emphatically do not:
+#
+#   * all land transfers move to e-registration, and a mutation (inteqal) is not
+#     recognised without a registered deed behind it;
+#   * patwaris retain authority over INHERITANCE transfers only, so a patwari
+#     entry for a sale no longer carries the weight it once did;
+#   * partition is tied to transfer of possession, closing "paper-only" transfers.
+#
+# A POA was never title -- it is authority to act for someone else, and
+# poa_misuse is one of the grievance categories precisely because it gets used as
+# if it were ownership. Treating it as equivalent evidence flattered weak cases,
+# which is the expensive direction to be wrong in: a user encouraged to file on a
+# POA alone now also carries the false-complaint exposure in FALSE_COMPLAINT_RISK.
+#
+# Strength is advisory, not a merits ruling. It orders what to gather next; it
+# does not decide who owns the land.
+
+DOCUMENT_STRENGTH: dict[str, dict] = {
+    "registered_deed":        {"weight": 3, "label": "Registered deed (registry)",
+                               "why": "Registration is now the backbone of title. Post-2026 a "
+                                      "mutation cannot be entered without it."},
+    "title_deed_fard":        {"weight": 3, "label": "Title deed / fard",
+                               "why": "Primary record of title."},
+    "mutation_inteqal":       {"weight": 2, "label": "Mutation (inteqal) entry",
+                               "why": "Strong WITH the registered deed behind it. Alone, a "
+                                      "mutation no longer establishes a transfer in Punjab."},
+    "tax_receipts":           {"weight": 1, "label": "Tax receipts",
+                               "why": "Supports possession and dealing over time; not title."},
+    "fir":                    {"weight": 1, "label": "FIR",
+                               "why": "Evidence of the dispute, not of ownership."},
+    "sale_agreement":         {"weight": 1, "label": "Sale agreement",
+                               "why": "An agreement to sell is not a transfer. Its value depends "
+                                      "on whether it was registered."},
+    "unregistered_agreement": {"weight": 0, "label": "Unregistered agreement / stamp paper",
+                               "why": "Since the 2026 reforms an unregistered instrument does not "
+                                      "move title and cannot found a mutation."},
+    "power_of_attorney":      {"weight": 0, "label": "Power of attorney",
+                               "why": "A POA is authority to act for someone else — never proof "
+                                      "that you own the property."},
+    "cnic_nicop":             {"weight": 0, "label": "CNIC / NICOP",
+                               "why": "Proves who you are, not what you own."},
+}
+
+_REGISTRY_BACKED = {"registered_deed", "title_deed_fard"}
+
+
+def assess_documents(documents_held: list[str] | None) -> dict:
+    """Rank the evidence and say plainly when title is not yet shown.
+
+    Pure. Returns the strongest document, whether anything registry-backed is
+    held, and what to gather next. Deliberately conservative: it never says a
+    case is good, only whether the documents that establish title are present.
+    """
+    docs = [d for d in (documents_held or []) if d != "none"]
+    known = [d for d in docs if d in DOCUMENT_STRENGTH]
+    best = max((DOCUMENT_STRENGTH[d]["weight"] for d in known), default=0)
+    registry_backed = any(d in _REGISTRY_BACKED for d in known)
+
+    if registry_backed:
+        summary = "You hold a registry-backed document, which is the strongest evidence of title."
+    elif best >= 2:
+        summary = ("You hold a mutation entry but no registered deed. Since the 2026 Punjab "
+                   "reforms a mutation without a registered deed behind it does not establish "
+                   "a transfer — obtain the registry.")
+    elif best >= 1:
+        summary = ("Your documents support the story but do not establish title. A registered "
+                   "deed or fard is what shows ownership.")
+    else:
+        summary = ("None of the documents listed establish that you own the property. A power of "
+                   "attorney, a CNIC or an unregistered agreement will not do it — obtain the "
+                   "registered deed or fard before filing.")
+
+    return {
+        "strongest": max(known, key=lambda d: DOCUMENT_STRENGTH[d]["weight"], default=None) if known else None,
+        "registry_backed": registry_backed,
+        "title_evidence_shown": bool(registry_backed),
+        "summary": summary,
+        "held": [{"code": d, **DOCUMENT_STRENGTH[d]} for d in
+                 sorted(known, key=lambda d: -DOCUMENT_STRENGTH[d]["weight"])],
+        "recommended_next": [] if registry_backed else [
+            "Obtain a certified copy of the registered deed (registry) for the property.",
+            "Obtain the current fard / land-record extract from the PLRA record.",
+        ],
+        "source": "Punjab Land Revenue (Amendment) Ordinance 2026, promulgated "
+                  "18 February 2026 (e-registration; mutation requires a registered "
+                  "deed; patwari authority limited to inheritance transfers).",
+    }
 RELIEF_OPTIONS = {
     "restore_possession", "cancel_transfer_or_poa", "declare_ownership", "injunction", "other",
 }
@@ -374,9 +467,31 @@ def _decide_state(eligibility: dict, grievance: dict, jurisdiction: dict) -> dic
         reasons.append("The grievance could not be confidently classified — a lawyer should decide the "
                        "correct cause of action before any petition is drafted.")
     if jurisdiction.get("court_status") != special_court.OPERATIONAL:
-        reasons.append(f"The special court for {jurisdiction.get('province')} is not confirmed operational — "
-                       "a lawyer should confirm the forum (the federal framework may still apply).")
+        reason = (f"The special court for {jurisdiction.get('province')} is not confirmed operational — "
+                  "a lawyer should confirm the forum (the federal framework may still apply).")
+        # Not-operational is a reason to hold, but it is not the whole picture.
+        # Where an anti-dispossession tribunal covers this grievance, saying only
+        # "no court yet" would hide the faster route that does exist today.
+        tribunal = alternative_forum(jurisdiction, grievance)
+        if tribunal:
+            reason += (f" A separate route may be open now: the {tribunal['name']} decides "
+                       f"within about {tribunal['decision_days']} days. Which forum fits your "
+                       "facts is a decision for your lawyer.")
+        reasons.append(reason)
     return {"state": STATE_HELD if reasons else STATE_READY, "hold_reasons": reasons}
+
+
+def alternative_forum(jurisdiction: dict, grievance: dict) -> dict | None:
+    """The tribunal route for this province and grievance, if one applies.
+
+    Kept separate from `_decide_state` so the record can carry it whether or not
+    the dispute was held: a user whose special court IS operational should still
+    learn that a 30-day tribunal covers their land grab.
+    """
+    return special_court.poip_tribunal(
+        jurisdiction.get("province") or "",
+        (grievance or {}).get("category") or "",
+    )
 
 
 def _public(doc: dict) -> dict:
@@ -430,6 +545,12 @@ async def create_dispute(client_id: str, id_type: str, days_abroad, grievance_te
             "confidence": jurisdiction.get("confidence"),
             "verify": jurisdiction.get("verify"),
         },
+        # The other forum, when one covers this grievance. Recorded even when the
+        # dispute is ready to draft: a faster tribunal is worth knowing about
+        # regardless of whether the special court is sitting.
+        "alternative_forum": alternative_forum(jurisdiction, grievance),
+        # Whether the documents held actually establish title, post-2026 rules.
+        "evidence": assess_documents(parsed.documents_held),
         "state":        decision["state"],
         "hold_reasons": decision["hold_reasons"],
         # What the complainant was shown and accepted, stored with the record
