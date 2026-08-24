@@ -108,12 +108,11 @@ The backend exposes **25 route modules**. Highlights:
 | 🧮 **Calculators** | Court-fee and related legal calculators as audited code |
 | 🕌 **Inheritance & Wasiyyat** | Islamic inheritance-share and will (wasiyyat) computation |
 | ✍️ **Petition / pleading drafter** | RAG-assisted document generation, incl. Urdu translation + RTL PDF |
-| 🌍 **Overseas desk** | Apostille, POA advisory, attested-document verification for overseas Pakistanis |
+| 🌍 **Property-dispute intake** | Guided intake and petition drafting under the Overseas Pakistanis Property Protection Act |
 | 👨‍⚖️ **Lawyer matching** | Embedding-based lawyer discovery with an interactive map |
 | 📅 **Appointments & engagements** | Booking, case management, client–lawyer engagements |
 | 💳 **Payments & billing** | Subscription plans and payment integration (Safepay) |
 | 🎙️ **Voice** | Speech-to-text intake via `faster-whisper` |
-| 💬 **WhatsApp** | Conversational access over WhatsApp |
 | 🔔 **Real-time notifications** | WebSocket fan-out backed by Redis pub/sub |
 
 ---
@@ -141,8 +140,8 @@ attorney-ai/
 │   │   │   ├── intent/          # ONNX NLU / intent detection
 │   │   │   ├── pipelines/       # hybrid retriever (dense + BM25)
 │   │   │   └── llm.py           # pluggable multi-provider LLM interface
-│   │   ├── api/v1/routes/       # 25 REST/WS route modules
-│   │   ├── services/            # business logic (payments, overseas, wasiyyat…)
+│   │   ├── api/v1/routes/       # 23 REST/WS route modules
+│   │   ├── services/            # business logic (payments, disputes, wasiyyat…)
 │   │   ├── repositories/        # data access layer
 │   │   ├── schemas/             # Pydantic models
 │   │   └── core/                # config, security, rate limiting, exceptions
@@ -210,7 +209,9 @@ cd backend
 venv/Scripts/python -m pytest        # 21 test modules
 ```
 
-Tests cover the deterministic legal engines (bail, calculators, inheritance, wasiyyat), the graph routing, RAG tooling, payments, and the overseas-desk workflows — i.e. the parts where being *wrong* has real consequences.
+Tests cover the deterministic legal engines (bail, calculators, inheritance, wasiyyat), the graph routing, RAG tooling, payments, and the property-dispute workflows — i.e. the parts where being *wrong* has real consequences.
+
+For what is verified versus merely built, see [FEATURE_AUDIT.md](FEATURE_AUDIT.md).
 
 ---
 
