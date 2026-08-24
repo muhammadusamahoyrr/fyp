@@ -385,7 +385,7 @@ const ModLawyers = () => {
     // ── REVIEW SUBMISSION ─────────────────────────────────────────
     const submitUserReview = async (lawyerId) => {
         if (!lawyerId || lawyerId.startsWith("api-")) {
-            toast.show("Reviews can only be submitted for verified API lawyers.", "warn", 3000);
+            toast.show("Reviews can only be submitted for listed lawyers.", "warn", 3000);
             return;
         }
         console.log("📝 Submitting review:", { lawyerId, stars: reviewStars, comment: reviewComment.trim() || null });
@@ -465,7 +465,7 @@ const ModLawyers = () => {
 
             const isApiLawyer = apptLawyer?._id && !apptLawyer._id.startsWith("api-");
             if (!isApiLawyer) {
-                toast.show("This lawyer is a sample profile — only verified lawyers can be booked.", "warn", 4000);
+                toast.show("This lawyer is a sample profile — only listed lawyers can be booked.", "warn", 4000);
                 return;
             }
             let bookingData = null;
@@ -536,7 +536,7 @@ const ModLawyers = () => {
     // ── HIRE (ENGAGEMENT) HELPERS ─────────────────────────────────
     const openHire = (lawyer) => {
         if (!lawyer?._id || lawyer._id.startsWith("api-")) {
-            toast.show("This lawyer is a sample profile — only verified lawyers can be hired.", "warn", 4000);
+            toast.show("This lawyer is a sample profile — only listed lawyers can be hired.", "warn", 4000);
             return;
         }
         if (!hireableCases.length) {
@@ -820,6 +820,15 @@ const ModLawyers = () => {
                             <div style={{ fontWeight: 700, color: t.text, fontSize: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
                                 <Ic n="shield" s={15} c={t.primary} /> Credentials & Qualifications
                             </div>
+                            {/* The platform reviews what a lawyer submits; it does not
+                                confirm enrolment with any Bar Council — no such check
+                                exists in the system. Saying so here is the difference
+                                between a listing and a guarantee. */}
+                            <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.5, marginBottom: 12, padding: "8px 10px", borderRadius: 8, background: t.border + "40" }}>
+                                Credentials below are provided by the lawyer and reviewed by our team.
+                                We do not independently confirm Bar Council enrolment — please verify
+                                directly before engaging.
+                            </div>
                             {l.credentials.map((c, i) => (
                                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: i < l.credentials.length - 1 ? `1px solid ${t.border}` : "none" }}>
                                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: ac.solid, flexShrink: 0 }} />
@@ -1038,7 +1047,7 @@ const ModLawyers = () => {
                             Find Expert Legal Counsel
                         </div>
                         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.62)", maxWidth: 260, lineHeight: 1.6, marginBottom: 18 }}>
-                            Browse verified lawyers, check real-time availability, and book appointments in seconds.
+                            Browse listed lawyers, check real-time availability, and book appointments in seconds.
                         </div>
                         {/* Quick stats */}
                         <div style={{ display: "flex", gap: 20 }}>

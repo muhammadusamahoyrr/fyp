@@ -136,6 +136,45 @@ async def _users_indexes() -> None:
         IndexModel([("is_active", ASCENDING)]),
     ])
 
+    # One bar number, one lawyer. Until now nothing stopped two accounts
+    # claiming the same enrolment number, and the database already contains
+    # proof that this happens: BAR-TEST-001 on three accounts, BAR-PENDING-001
+    # on two. A number that identifies nobody in particular cannot support the
+    # verification decision that gates hiring, payments and document generation.
+    #
+    # Partial, so the many lawyers who have not entered a number yet are not all
+    # colliding on null.
+    #
+    # Creation is guarded because it is EXPECTED to fail on a database that
+    # already holds duplicates. Letting that raise would take create_all_indexes
+    # -- and therefore startup -- down over a data problem the operator has to
+    # resolve by hand. Failing loudly and continuing is the honest trade: the
+    # log names the offenders, and the constraint applies as soon as they are
+    # cleaned up.
+    try:
+        await col.create_indexes([
+            IndexModel(
+                [("lawyer_profile.bar_number", ASCENDING)],
+                unique=True,
+                name="uniq_bar_number",
+                partialFilterExpression={
+                    "lawyer_profile.bar_number": {"$type": "string"}
+                },
+            )
+        ])
+    except Exception:
+        dupes = await col.aggregate([
+            {"$match": {"lawyer_profile.bar_number": {"$type": "string"}}},
+            {"$group": {"_id": "$lawyer_profile.bar_number", "n": {"$sum": 1}}},
+            {"$match": {"n": {"$gt": 1}}},
+        ]).to_list(length=50)
+        logger.error(
+            "users: could not create the unique bar_number index — duplicates "
+            "exist and must be resolved by hand. Until then two accounts can "
+            "claim one enrolment number. Offenders: %s",
+            {d["_id"]: d["n"] for d in dupes} or "unknown",
+        )
+
 
 async def _cases_indexes() -> None:
     col = get_cases_col()

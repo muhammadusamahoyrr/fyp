@@ -45,7 +45,17 @@ class PasswordChange(BaseModel):
 
 
 class LawyerProfileUpdate(BaseModel):
-    bar_number: str | None = None
+    # Shape only. This CANNOT establish that the number is real, that it belongs
+    # to this person, or that they are in good standing — only the Bar Council
+    # can, and nothing in this system talks to one. It rejects blanks and
+    # obvious junk so the admin reviewing a KYC request is at least looking at
+    # something of the right form. Deliberately permissive on the format itself:
+    # enrolment numbers differ by provincial bar, and rejecting a valid lawyer's
+    # real number would be a worse failure than accepting a well-formed fake.
+    bar_number: str | None = Field(
+        None, min_length=4, max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9\-/ .]*[A-Za-z0-9]$",
+    )
     specializations: list[str] | None = None
     availability: bool | None = None
     bio: str | None = None

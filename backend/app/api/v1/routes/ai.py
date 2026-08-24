@@ -16,6 +16,29 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 logger = logging.getLogger(__name__)
 
 
+# An SSE stream cannot return a normal error response: by the time generation
+# fails the StreamingResponse has already begun, so the only channel left is the
+# stream itself. That made `str(exc)` tempting, and it was wrong — it put raw
+# provider output in front of the user. Verified live: someone asking about
+# theft received
+#
+#   data: {"error": "Error code: 401 - {'error': {'message': 'Invalid API Key',
+#          'type': 'invalid_request_error', 'code': 'invalid_api_key'}}"}
+#
+# which names the provider and our auth state, and on other failures would name
+# billing status or the local model path. The WebSocket chat path already got
+# this right ("AI assistant is temporarily unavailable"); these HTTP streams did
+# not — and they are the ones the chat UI actually calls.
+_STREAM_ERROR = ("The AI assistant is temporarily unavailable. Please try again "
+                 "shortly — your question was not lost.")
+
+
+def _stream_error(where: str) -> str:
+    """One SSE error frame: full detail to the log, nothing operational to the user."""
+    logger.exception("%s: streaming generation failed", where)
+    return "data: " + json.dumps({"error": _STREAM_ERROR}) + "\n\n"
+
+
 _SYSTEM_PREFIX = (
     "You are an AI assistant for Attorney.AI, a legal management platform in Pakistan. "
     "Assist only with lawful, ethical legal tasks under Pakistani law. "
@@ -245,7 +268,7 @@ async def ai_query_stream(
                 if chunk.content:
                     yield f"data: {json.dumps({'content': chunk.content})}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            yield _stream_error("ai.stream")
         finally:
             yield "data: [DONE]\n\n"
 
@@ -351,7 +374,7 @@ async def ai_draft_stream(
                 if chunk.content:
                     yield f"data: {json.dumps({'content': chunk.content})}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            yield _stream_error("ai.stream")
         finally:
             yield "data: [DONE]\n\n"
 
@@ -423,7 +446,7 @@ async def ai_pleading_urdu_stream(
                 if chunk.content:
                     yield f"data: {json.dumps({'content': chunk.content})}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            yield _stream_error("ai.stream")
         finally:
             yield "data: [DONE]\n\n"
 
