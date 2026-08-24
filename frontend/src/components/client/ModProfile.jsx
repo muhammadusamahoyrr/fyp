@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { updateMe, changePassword } from "@/lib/api.js";
+import { updateMe, changePassword, closeAccount, authLogout } from "@/lib/api.js";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, ConfirmDialog, Tooltip, Badge } from "@/components/shared/shared.jsx";
 
@@ -249,6 +249,8 @@ const ModProfile = () => {
     const [edit, setEdit] = useState(false);
     const [pwdMode, setPwdMode] = useState(false);
     const [delConfirm, setDelConfirm] = useState(false);
+    const [delPassword, setDelPassword] = useState("");
+    const [closing, setClosing] = useState(false);
     const [twoFAEnabled, setTwoFAEnabled] = useState(false);
     const [activeTab, setActiveTab] = useState("profile");
     const [avatarHover, setAvatarHover] = useState(false);
@@ -334,21 +336,35 @@ const ModProfile = () => {
         }
         setSaving(false);
     };
-    const handleDeleteConfirm = () => {
+    // Closure is irreversible, so the password is re-checked server-side. This
+    // used to announce "Your account has been deleted" on a two-second timer and
+    // call nothing at all — name, email, phone, case and payment records all
+    // stayed exactly where they were.
+    const handleDeleteConfirm = async () => {
         setDelConfirm(false);
-        toast.show("Account deletion in progress...", "warn");
-        setTimeout(() => toast.show("Your account has been deleted", "danger"), 2000);
-    };
-    const handle2FA = () => {
-        setTwoFAEnabled(v => !v);
-        toast.show(twoFAEnabled ? "Two-factor authentication disabled" : "Two-factor authentication enabled!", "success");
+        if (!delPassword.trim()) { toast.show("Enter your password to confirm", "warn"); return; }
+        setClosing(true);
+        const { data, error } = await closeAccount(delPassword);
+        setClosing(false);
+        setDelPassword("");
+        if (error || !data?.closed) {
+            // The server refuses while engagements or payments are live and says
+            // which — surface that verbatim rather than a generic failure.
+            toast.show(error?.detail || data?.error || "Could not close the account", "danger");
+            return;
+        }
+        toast.show("Account closed. Signing you out…", "info", 4000);
+        setTimeout(() => { authLogout(); window.location.href = "/login"; }, 1500);
     };
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <ConfirmDialog isOpen={delConfirm} isDanger title="Delete Account?"
-                message="This action cannot be undone. All your data will be permanently deleted. Are you absolutely sure?"
-                onConfirm={handleDeleteConfirm} onCancel={() => setDelConfirm(false)} />
+            <ConfirmDialog isOpen={delConfirm} isDanger title="Close your account?"
+                message={"This cannot be undone. Your personal details are erased and you are signed out everywhere. Case, payment and audit records are kept where the law or another party's rights require it. Enter your password below to confirm."}
+                onConfirm={handleDeleteConfirm} onCancel={() => { setDelConfirm(false); setDelPassword(""); }}>
+                <ThemedInput type="password" value={delPassword} autoComplete="current-password"
+                    onChange={e => setDelPassword(e.target.value)} placeholder="Your password" />
+            </ConfirmDialog>
             <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handlePhotoChange} />
 
             {/* ══ HERO CARD ════════════════════════════════════════════ */}
@@ -706,7 +722,7 @@ const ModProfile = () => {
                                 <SectionLabel>Account Security</SectionLabel>
                                 <SecurityRow icon="lock" label="Password" desc="Last changed: December 2025 · Use a strong, unique password" onClick={() => setPwdMode(true)} />
                                 <SecurityRow icon="shield" label="Two-Factor Authentication" desc={twoFAEnabled ? "2FA is active — your account is extra secure" : "Add a second layer of protection to your account"}>
-                                    <button onClick={handle2FA} style={{
+                                    <button onClick={() => toast.show("Two-factor authentication is not available yet — we will not pretend it is protecting your account.", "info", 5000)} style={{
                                         padding: "8px 18px", borderRadius: 10, fontSize: 12, fontWeight: 700,
                                         border: `1.5px solid ${twoFAEnabled ? t.success : t.primary}`,
                                         background: twoFAEnabled
@@ -716,10 +732,10 @@ const ModProfile = () => {
                                         cursor: "pointer", transition: "all 0.15s", flexShrink: 0,
                                         fontFamily: "'Inter', sans-serif",
                                     }}>
-                                        {twoFAEnabled ? "Disable" : "Enable"}
+                                        {"Not available"}
                                     </button>
                                 </SecurityRow>
-                                <SecurityRow icon="monitor" label="Active Sessions" desc="3 devices connected · Manage or revoke access" onClick={() => toast.show("Session management coming soon", "info")} />
+                                <SecurityRow icon="monitor" label="Active Sessions" desc="Session management is not available yet" onClick={() => toast.show("Session management coming soon", "info")} />
                                 <div style={{ marginTop: 8 }}>
                                     <SectionLabel>Danger Zone</SectionLabel>
                                     <SecurityRow icon="trash" label="Delete Account" desc="Permanently delete your account and all associated data" danger onClick={() => setDelConfirm(true)} />

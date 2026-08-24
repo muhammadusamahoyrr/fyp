@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from app.dependencies import get_current_user, require_admin, require_lawyer
 from app.schemas.user import (
@@ -34,6 +35,32 @@ async def change_password(
 ):
     await user_service.change_password(current_user["_id"], body.current_password, body.new_password)
     return {"message": "Password updated successfully"}
+
+
+class AccountClosure(BaseModel):
+    # Required. Closure is irreversible and is precisely what someone with a
+    # borrowed session would do for spite.
+    password: str
+
+
+@router.post("/me/close")
+async def close_account(
+    body: AccountClosure,
+    current_user: dict = Depends(get_current_user),
+):
+    """Close your own account: revoke access and erase personal details.
+
+    Replaces a UI button that announced "Your account has been deleted" after a
+    two-second timer and called nothing at all.
+
+    This does NOT hard-delete. Payments are financial records, provenance is an
+    audit trail, and a lawyer's case history evidences obligations to clients who
+    did not ask for anything to be erased — so the identifying data is
+    overwritten and the skeleton kept, rather than the row removed and every
+    reference to it orphaned. Refuses while engagements or payments are still
+    live, and says which.
+    """
+    return await user_service.close_account(current_user["_id"], body.password)
 
 
 @router.patch("/me/lawyer-profile", response_model=UserProfileResponse)

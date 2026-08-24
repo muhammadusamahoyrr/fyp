@@ -419,6 +419,12 @@ export async function changePassword(current_password, new_password) {
   return apiFetch('/users/me/password', { method: 'PATCH', body: JSON.stringify({ current_password, new_password }) });
 }
 
+// Close your own account: revokes access and erases personal details. Refuses
+// while engagements or payments are still live, and says which.
+export async function closeAccount(password) {
+  return apiFetch('/users/me/close', { method: 'POST', body: JSON.stringify({ password }) });
+}
+
 // ─── Lawyers ─────────────────────────────────────────────────────────────────
 export async function searchLawyers({ province, case_type, min_rating, availability, page = 1, page_size = 10 } = {}) {
   const p = new URLSearchParams();
