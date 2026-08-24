@@ -30,7 +30,7 @@ document.
 |---|---|
 | Backend API operations | **132** |
 | Frontend routes compiling | **41** (build exit 0, no warnings) |
-| Backend tests | **759 passing, 0 failing** |
+| Backend tests | **784 passing, 0 failing** |
 | GET operations exercised live | **58 — zero crashes** |
 | `TODO` / `FIXME` / `NotImplementedError` in `app/` | **0** |
 
@@ -110,7 +110,15 @@ the Punjab Gazette and corrected — see §5.5.
    `max(candidates, key=confidence)`, so no signal is capable of counting *against* an
    answer. Disagreement is structurally impossible.
 4. **~35 open UI issues**, mostly responsive-layout. Both Critical items are fixed.
-5. **Punjab Special Court operational status is unverified**, and the property-dispute
+5. **The client↔lawyer engagement flow has no consent step and no exit.** A lawyer
+   sets the fee unilaterally at acceptance; `accepted` is absorbing for both parties
+   and only an admin can end the relationship. The money half is closed (`8ef0dca` —
+   billing now requires a signed engagement letter), the sequence itself is not. The
+   redesign is scoped in [ENGAGEMENT_REDESIGN.md](ENGAGEMENT_REDESIGN.md) and resolves
+   this together with the missing close-out and the invisible pricing.
+6. **No refund path or platform dispute resolution.** `REFUNDED` is declared and
+   unreachable; nothing sets it. Deliberately held until the engagement redesign ships.
+7. **Punjab Special Court operational status is unverified**, and the property-dispute
    feature is held from real-user exposure until it resolves. This is an external,
    human-only dependency — the designating instrument is an administrative notification,
    not a gazetted Act, so no amount of code will settle it. See
@@ -139,6 +147,7 @@ the Punjab Gazette and corrected — see §5.5.
 | [ANNOTATOR_ONBOARDING.md](ANNOTATOR_ONBOARDING.md) | Recruiting the two annotators |
 | [FAILURE_CASE_001.md](FAILURE_CASE_001.md) | A wrong citation that passed every gate |
 | [OPEN_DEPENDENCY_001.md](OPEN_DEPENDENCY_001.md) | Open external ask: is the Punjab Special Court sitting? |
+| [ENGAGEMENT_REDESIGN.md](ENGAGEMENT_REDESIGN.md) | Next feature: two-step engagement flow with real exits |
 | [UIISSUES.md](UIISSUES.md) | Frontend audit |
 | [INTAKE_AI_APPROACH.md](INTAKE_AI_APPROACH.md) | AI pipeline design + viva reference |
 | [LAWYER_MATCHING_PLAN.md](LAWYER_MATCHING_PLAN.md) | Matching design |
