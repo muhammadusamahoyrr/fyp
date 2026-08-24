@@ -42,6 +42,11 @@ class DocumentOut(BaseModel):
     # stays a raw dict; a strict nested model would silently drop template keys.
     fields: dict[str, Any] | None = None
     status: str
+    # Completeness against the Code of Civil Procedure, computed at generation.
+    # Declared explicitly because this model is an ALLOWLIST — an undeclared key
+    # is dropped silently on serialization, which is how POAOut lost verify_url
+    # and opppa_status. Wide and evolving, so it stays a raw dict.
+    compliance: dict[str, Any] | None = None
     created_at: datetime | None = None
     # Review-pipeline fields — present once a doc has been submitted/reviewed.
     review_status: str | None = None

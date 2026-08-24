@@ -91,6 +91,8 @@ const ModDocuments = () => {
     const [generating, setGenerating] = useState(false);
     const [genPct, setGenPct] = useState(0);
     const [genDone, setGenDone] = useState(false);
+    // Statutory completeness of the generated draft, returned by the API.
+    const [compliance, setCompliance] = useState(null);
     // Step 3 — review / edit
     const [editMode, setEditMode] = useState(false);
     const [docContent, setDocContent] = useState(null);       // null until generated
@@ -269,6 +271,7 @@ const ModDocuments = () => {
             const newDocId = genRes.data?._id || genRes.data?.doc_id;
             setDocId(newDocId);
             if (genRes.data?.title) setDocTitle(genRes.data.title);
+            setCompliance(genRes.data?.compliance || null);
             setGenPct(100);
             setTimeout(() => { setGenerating(false); setGenDone(true); toast.show("✅ Draft generated!", "success"); }, 300);
         } catch {
@@ -475,6 +478,39 @@ const ModDocuments = () => {
                                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: t.textMuted }}>
                                         <span>{genDone ? "✅ Draft created successfully" : GEN_STEPS[Math.min(Math.floor(genPct / 20), 4)]}</span>
                                         <span>{genPct}%</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* What the Code requires, and what this draft is missing.
+                                Deterministic and cited — Order VII Rule 1 CPC lists the
+                                particulars a plaint must contain, and Order VI Rule 3
+                                makes the Appendix A forms mandatory. Advisory: it reports,
+                                it does not block. */}
+                            {genDone && compliance?.checked && (
+                                <div style={{ marginTop: 13, padding: 13, borderRadius: 11,
+                                    background: compliance.complete ? `${t.success}12` : `${t.warn}12`,
+                                    border: `1.5px solid ${compliance.complete ? t.success : t.warn}45` }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                                        <span style={{ fontSize: 12.5, fontWeight: 700, color: compliance.complete ? t.success : t.warn }}>
+                                            {compliance.complete
+                                                ? "✓ Contains every particular the Code requires"
+                                                : `${compliance.missing} required particular${compliance.missing === 1 ? "" : "s"} missing`}
+                                        </span>
+                                    </div>
+                                    <div style={{ fontSize: 10.5, color: t.textMuted, marginBottom: compliance.complete ? 0 : 9 }}>
+                                        Checked against {compliance.basis}
+                                    </div>
+                                    {compliance.items.filter(i => i.status === "missing").map(i => (
+                                        <div key={i.clause} style={{ marginBottom: 8, paddingLeft: 10, borderLeft: `2px solid ${t.warn}55` }}>
+                                            <div style={{ fontSize: 11.5, color: t.text, fontWeight: 600 }}>
+                                                {i.clause} — {i.requirement}
+                                            </div>
+                                            <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>{i.hint}</div>
+                                        </div>
+                                    ))}
+                                    <div style={{ fontSize: 10, color: t.textMuted, marginTop: 6, fontStyle: "italic" }}>
+                                        {compliance.advisory}
                                     </div>
                                 </div>
                             )}

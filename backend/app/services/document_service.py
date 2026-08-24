@@ -8,6 +8,7 @@ from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundErro
 from app.repositories.case_repo import CaseRepository
 from app.repositories.document_repo import DocumentRepository
 from app.repositories.draft_repo import DraftRepository
+from app.services import pleading_rules
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +256,12 @@ async def generate_document(
         "template_type": template_type,
         "title":         TEMPLATE_TITLES.get(template_enum, template_type),
         "fields":        fields,
+        # Completeness against the Code, computed at generation and stored with
+        # the document. Deterministic and advisory — it reports what the CPC
+        # requires and what this draft is missing, each finding citing its rule.
+        # Stored rather than recomputed so the report always matches the PDF the
+        # user actually downloaded, even if the checker changes later.
+        "compliance":    pleading_rules.check_pleading(template_type, fields),
         "file_path":     None,
         "status":        "pending",
         "created_at":    datetime.now(timezone.utc),
