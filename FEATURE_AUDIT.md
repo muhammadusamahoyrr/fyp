@@ -30,7 +30,7 @@ document.
 |---|---|
 | Backend API operations | **132** |
 | Frontend routes compiling | **41** (build exit 0, no warnings) |
-| Backend tests | **723 passing, 0 failing** |
+| Backend tests | **759 passing, 0 failing** |
 | GET operations exercised live | **58 — zero crashes** |
 | `TODO` / `FIXME` / `NotImplementedError` in `app/` | **0** |
 
@@ -46,7 +46,7 @@ These were checked against ground truth, not just for a 200 response.
 | **Bail checker** | PPC 302 → non-bailable, Qisas/Diyat compoundable, Court of Session. PPC 379 → non-bailable, cognizable, Magistrate |
 | **Court-fee calculator** | Rs 1,000,000 money-recovery → 75,000 ad valorem; simple declaration → 500 fixed |
 | **Labour dues** | 30k × 5 yrs → gratuity 150,000 + unpaid wages 60,000 |
-| **Dispute intake** | 28 tests, 11 real records, live eligibility check correct |
+| **Dispute intake** | 28 tests, live eligibility check correct. Its 11 records are a single-day dev batch, all one category — not organic usage — but the full path did execute: petitions generated, lawyers assigned |
 | **Auth** | register → login → refresh → ws-ticket, all 200 |
 | **Provenance / audit trail** | 128 records, pool filters verified null-safe |
 | **RAG pipeline (mechanics)** | Full 15-node graph completed end-to-end including adaptive re-retrieval |
@@ -91,8 +91,9 @@ and no external party.
   cards are unrelated and remain.
 
 Property-dispute intake was **kept** and moved to `routes/disputes.py`. It shared the
-`/overseas` prefix only because both derive from the same statute; it has 38 tests and
-real records behind it.
+`/overseas` prefix only because both derive from the same statute; it has 38 tests and a
+demonstrated end-to-end path behind it. Its legal model was subsequently checked against
+the Punjab Gazette and corrected — see §5.5.
 
 ## 5. Known defects
 
@@ -109,6 +110,12 @@ real records behind it.
    `max(candidates, key=confidence)`, so no signal is capable of counting *against* an
    answer. Disagreement is structurally impossible.
 4. **~35 open UI issues**, mostly responsive-layout. Both Critical items are fixed.
+5. **Punjab Special Court operational status is unverified**, and the property-dispute
+   feature is held from real-user exposure until it resolves. This is an external,
+   human-only dependency — the designating instrument is an administrative notification,
+   not a gazetted Act, so no amount of code will settle it. See
+   [OPEN_DEPENDENCY_001.md](OPEN_DEPENDENCY_001.md). Everything else on that feature was
+   verified against the Punjab Gazette and corrected.
 
 ## 6. What to do next, in order
 
@@ -131,6 +138,7 @@ real records behind it.
 | [ANNOTATION_PROTOCOL.md](ANNOTATION_PROTOCOL.md) | How an annotator judges a turn |
 | [ANNOTATOR_ONBOARDING.md](ANNOTATOR_ONBOARDING.md) | Recruiting the two annotators |
 | [FAILURE_CASE_001.md](FAILURE_CASE_001.md) | A wrong citation that passed every gate |
+| [OPEN_DEPENDENCY_001.md](OPEN_DEPENDENCY_001.md) | Open external ask: is the Punjab Special Court sitting? |
 | [UIISSUES.md](UIISSUES.md) | Frontend audit |
 | [INTAKE_AI_APPROACH.md](INTAKE_AI_APPROACH.md) | AI pipeline design + viva reference |
 | [LAWYER_MATCHING_PLAN.md](LAWYER_MATCHING_PLAN.md) | Matching design |

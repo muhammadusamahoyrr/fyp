@@ -94,7 +94,13 @@ JURISDICTIONS: dict[str, dict] = {
         "efiling": None,
         "video_link": None,
         "confidence": "reported",
-        "note": "The Punjab Act is PASSED. UNRESOLVED: press reporting of a Services & "
+        # DO NOT re-attempt this in code. Tracked as an external, human-only
+        # dependency in OPEN_DEPENDENCY_001.md at the repo root: the designating
+        # instrument is an S&GAD / LHC administrative notification, which is not
+        # gazetted and not published anywhere a fetch can reach. Searching again
+        # returns the same nothing.
+        "note": "The Punjab Act is PASSED. UNRESOLVED (see OPEN_DEPENDENCY_001.md): "
+                "press reporting of a Services & "
                 "General Administration Department notification says District and "
                 "Additional District & Sessions Judges have ALREADY been designated as "
                 "Special Court Judges across all districts of Punjab. If that is "

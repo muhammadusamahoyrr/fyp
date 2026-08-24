@@ -66,6 +66,15 @@ A short brief, which can be pasted directly:
 > resulting paper. You are judging recorded output, not endorsing the system,
 > and we publish the agreement figure whether it is flattering or not.
 
+### One extra question worth asking in the same email
+
+A law faculty member can very likely answer, or redirect, a separate open
+question the project is blocked on — whether the Punjab Special Court for
+overseas Pakistanis' property is actually sitting. It is one paragraph, it is
+easy for a senior lawyer, and it is the kind of thing the local bar simply knows.
+The exact wording is in [OPEN_DEPENDENCY_001.md](OPEN_DEPENDENCY_001.md). Asking
+it costs nothing and saves a separate approach later.
+
 Then send them, in this order:
 
 1. **[ANNOTATION_PROTOCOL.md](ANNOTATION_PROTOCOL.md)** — the four verdicts and
