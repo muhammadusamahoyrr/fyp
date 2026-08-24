@@ -24,11 +24,29 @@ class TestTheWarningItself:
         assert "five years" in r["penalty"]
         assert "2026" in r["source"]
 
-    def test_punjab_cites_the_ordinance_not_a_vague_reference(self):
-        """A citation the next auditor can check beats 'recent changes'."""
+    def test_punjab_cites_the_enacted_act_not_the_superseded_ordinance(self):
+        """Verified against the Punjab Gazette of 14 May 2026. The February 2026
+        Ordinance that press coverage cites has since been enacted as Act XXXVII
+        of 2026 — citing the spent Ordinance would send an auditor to the wrong
+        instrument."""
         src = di.false_complaint_risk("punjab")["source"]
-        assert "Protection of Ownership of Immovable Property" in src
-        assert "18 February 2026" in src
+        assert "Act XXXVII of 2026" in src
+        assert "s.16(3)" in src
+        assert "14 May 2026" in src
+        assert "Ordinance" not in src
+
+    def test_the_mandatory_one_year_minimum_is_not_hidden(self):
+        """s.16(3) reads 'may extend to five years but NOT LESS THAN ONE YEAR'.
+        Press coverage rendered this as 'up to five years', which conceals a
+        mandatory custodial floor. Understating a floor is the dangerous error."""
+        pen = di.false_complaint_risk("punjab")["penalty"]
+        assert "not less than one year" in pen
+
+    def test_the_fine_is_stated_as_a_ceiling_not_a_flat_figure(self):
+        """'fine which may extend to five hundred thousand rupees' is a maximum.
+        Reporting it as 'a fine of Rs 500,000' overstates the certainty."""
+        pen = di.false_complaint_risk("punjab")["penalty"]
+        assert "may extend to Rs 500,000" in pen
 
     def test_other_provinces_get_a_warning_without_invented_figures(self):
         """The Punjab figures are Punjab's. Quoting them elsewhere would be

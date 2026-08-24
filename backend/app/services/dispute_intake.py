@@ -29,11 +29,20 @@ logger = logging.getLogger(__name__)
 
 # ── Filing risk: a false complaint is itself an offence ──────────────────────
 #
-# The Punjab Protection of Ownership of Immovable Property (Amendment) Ordinance
-# 2026 (promulgated 18 Feb 2026) raised the penalty for illegal possession to
-# 5–10 years and a fine up to Rs 10,000,000 — and, in the same breath, made a
-# FALSE complaint punishable by a fine of Rs 500,000 and imprisonment up to five
-# years.
+# VERIFIED against the Punjab Gazette (Extraordinary) of 14 May 2026: the Punjab
+# Protection of Ownership of Immovable Property (Amendment) Act 2026, ACT XXXVII
+# OF 2026, passed 7 May 2026 and assented 14 May 2026, substituting s.16 of the
+# principal Act (Act CI of 2025, Gazette of 18 Dec 2025).
+#
+# s.16(3): a complainant whose complaint is found false, frivolous or vexatious
+# "shall be liable to be punished with imprisonment for a term which may extend
+# to five years but not less than one year and fine which may extend to five
+# hundred thousand rupees."
+#
+# Note what press coverage got wrong and this comment now fixes: the fine is a
+# CEILING, not a flat Rs 500,000, and the imprisonment carries a MANDATORY
+# ONE-YEAR MINIMUM that "up to five years" concealed. The February 2026 Ordinance
+# frequently cited in reporting has since been enacted as this Act; cite the Act.
 #
 # That second half is why this exists. Everything else in this feature helps a
 # user press a claim; nothing warned them that pressing a weak or angry claim is
@@ -50,13 +59,24 @@ FALSE_COMPLAINT_RISK: dict[str, dict] = {
     "PB": {
         "applies": True,
         "headline": "Filing a false complaint is itself a criminal offence in Punjab.",
-        "penalty": "A fine of Rs 500,000 and imprisonment of up to five years.",
-        "source": "Punjab Protection of Ownership of Immovable Property "
-                  "(Amendment) Ordinance 2026, promulgated 18 February 2026.",
-        "detail": "The same Ordinance raised the penalty for illegal possession to "
-                  "5–10 years and a fine of up to Rs 10,000,000. The heavier penalties "
-                  "cut both ways: complaints are taken more seriously, and so is making "
-                  "one that turns out to be false.",
+        # Read off the Gazette text, and both halves were wrong when taken from
+        # press coverage. The fine is a CEILING ("may extend to"), not a flat
+        # figure — and the imprisonment carries a MANDATORY MINIMUM of one year,
+        # which the press framing of "up to five years" hid entirely. Understating
+        # a floor is the more dangerous error of the two.
+        "penalty": "Imprisonment of not less than one year and up to five years, "
+                   "and a fine which may extend to Rs 500,000.",
+        "source": "Punjab Protection of Ownership of Immovable Property (Amendment) "
+                  "Act 2026 (Act XXXVII of 2026), s.16(3), as published in the Punjab "
+                  "Gazette (Extraordinary), 14 May 2026 — substituting s.16 of the "
+                  "Punjab Protection of Ownership of Immovable Property Act 2025 "
+                  "(Act CI of 2025).",
+        "detail": "The same Act sets the penalty for illegal possession at 5–10 years, "
+                  "or a fine up to Rs 10,000,000, or both. The heavier penalties cut "
+                  "both ways: complaints are taken more seriously, and so is making one "
+                  "that turns out to be false. Under the 2026 Act it is the Tribunal "
+                  "itself that decides a complaint was false, frivolous or vexatious.",
+        "confidence": "established",
     },
 }
 
@@ -474,9 +494,12 @@ def _decide_state(eligibility: dict, grievance: dict, jurisdiction: dict) -> dic
         # "no court yet" would hide the faster route that does exist today.
         tribunal = alternative_forum(jurisdiction, grievance)
         if tribunal:
-            reason += (f" A separate route may be open now: the {tribunal['name']} decides "
-                       f"within about {tribunal['decision_days']} days. Which forum fits your "
-                       "facts is a decision for your lawyer.")
+            reason += (f" A separate route may be open now: the {tribunal['name']} must decide "
+                       f"within {tribunal['decision_days']} days of receiving the Scrutiny "
+                       f"Committee's report — realistically about "
+                       f"{tribunal['realistic_floor_days']} days from filing, since the report "
+                       "itself has a 30-day window. Which forum fits your facts is a decision "
+                       "for your lawyer.")
         reasons.append(reason)
     return {"state": STATE_HELD if reasons else STATE_READY, "hold_reasons": reasons}
 

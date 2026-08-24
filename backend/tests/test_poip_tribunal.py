@@ -44,11 +44,30 @@ class TestTheTribunalLookup:
         should not have to pass a grievance."""
         assert sc.poip_tribunal("punjab") is not None
 
-    def test_it_carries_its_own_verify_duty(self):
-        """Press-reported figures must say so, like every other fact in this file."""
+    def test_the_statutory_text_is_established_not_merely_reported(self):
+        """Read off the Punjab Gazette of 14 May 2026 (Act XXXVII of 2026), so it
+        is no longer 'reported'. The citation must name the Act, not the spent
+        February Ordinance that press coverage quotes."""
         t = sc.poip_tribunal("punjab", "illegal_occupation")
-        assert t["confidence"] == "reported"
-        assert "Gazette" in t["verify"]
+        assert t["confidence"] == "established"
+        assert "Act XXXVII of 2026" in t["act"]
+        assert "14 May 2026" in t["source"]
+
+    def test_it_still_disclaims_what_the_statute_cannot_tell_us(self):
+        """Verifying the Act does not verify that a Tribunal has actually been
+        notified for a district under s.11(1) — that is an executive act, not
+        part of the statute. The verify duty narrows; it does not vanish."""
+        t = sc.poip_tribunal("punjab", "illegal_occupation")
+        assert "notified" in t["verify"]
+
+    def test_the_thirty_day_clock_records_what_it_runs_from(self):
+        """s.16(6) runs 30 days from RECEIPT OF THE COMMITTEE'S REPORT, not from
+        filing — the same trap as the special court's 90-day leave-to-defend
+        clock. A bare '30 days' sets the wrong expectation."""
+        t = sc.poip_tribunal("punjab", "illegal_occupation")
+        assert t["decision_days"] == 30
+        assert "report" in t["decision_clock_starts"]
+        assert t["realistic_floor_days"] == 63   # 3 (s.7(3)) + 30 (s.8(4)) + 30 (s.16(6))
 
     def test_the_caller_cannot_mutate_the_table(self):
         t = sc.poip_tribunal("punjab", "illegal_occupation")
@@ -59,7 +78,7 @@ class TestTheTribunalLookup:
 class TestItReachesTheUser:
     def test_a_held_punjab_land_grab_names_the_tribunal(self):
         """The hold reason must not stop at 'no court yet' when a faster route is
-        open today."""
+        open today -- and must not promise 30 days from filing either."""
         out = di._decide_state(
             {"eligible": True},
             {"needs_triage": False, "category": "illegal_occupation"},
@@ -68,6 +87,7 @@ class TestItReachesTheUser:
         assert out["state"] == di.STATE_HELD
         joined = " ".join(out["hold_reasons"])
         assert "30 days" in joined
+        assert "63 days from filing" in joined, "must not imply 30 days from filing"
         assert "lawyer" in joined.lower()
 
     def test_a_held_inheritance_case_is_not_offered_the_tribunal(self):

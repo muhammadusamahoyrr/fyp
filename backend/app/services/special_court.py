@@ -94,19 +94,24 @@ JURISDICTIONS: dict[str, dict] = {
         "efiling": None,
         "video_link": None,
         "confidence": "reported",
-        "note": "The Punjab Act is PASSED; designation of judges was still under way as "
-                "of August 2026, so the special court is not confirmed to be hearing "
-                "cases. Two separate Ordinances promulgated on 18 February 2026 also "
-                "bear on Punjab property disputes and are NOT this Act: the Punjab Land "
-                "Revenue (Amendment) Ordinance 2026 (e-registration; mutation requires a "
-                "registered deed; patwaris limited to inheritance transfers) and the "
-                "Punjab Protection of Ownership of Immovable Property (Amendment) "
-                "Ordinance 2026 (see POIP_TRIBUNAL below -- 30-day tribunal decisions, "
-                "5-10 years for illegal possession, Rs 500,000 and up to five years for "
-                "a FALSE complaint). Confirm with the Lahore High Court whether a "
-                "designated special court is sitting, and the exact windows.",
+        "note": "The Punjab Act is PASSED. UNRESOLVED: press reporting of a Services & "
+                "General Administration Department notification says District and "
+                "Additional District & Sessions Judges have ALREADY been designated as "
+                "Special Court Judges across all districts of Punjab. If that is "
+                "correct, this status should be OPERATIONAL and this entry is currently "
+                "UNDERSTATING the remedy. It is left at ENACTED_PENDING because the "
+                "notification itself could not be read -- and because the fail-safe "
+                "direction is not to promise a court. A human with access to the S&GAD "
+                "notification or the LHC roll should settle this; it is the single most "
+                "consequential unverified fact in this file. Separately, two Punjab "
+                "instruments of 2026 bear on these disputes and are NOT this Act: the "
+                "Punjab Land Revenue (Amendment) Ordinance 2026 (e-registration; "
+                "mutation requires a registered deed; patwaris limited to inheritance "
+                "transfers) and the Punjab Protection of Ownership of Immovable Property "
+                "(Amendment) Act 2026, Act XXXVII of 2026 -- see POIP_TRIBUNAL below.",
         "source": "Punjab Establishment of Special Courts (Overseas Pakistanis Property) "
-                  "Act 2025 (press-reported; verify against the Punjab Gazette).",
+                  "Act 2025 -- Act text not read; existence and passage are "
+                  "press-reported. Operational status UNVERIFIED (see note).",
     },
     "KP": {
         "name": "Khyber Pakhtunkhwa",
@@ -191,44 +196,74 @@ def _code(province: str) -> str | None:
     return _PROVINCE_ALIASES.get(p)
 
 
-# ── The other forum: provincial anti-dispossession tribunals ─────────────────
+# ── The other forum: the Punjab Property Tribunal ────────────────────────────
 #
-# The special-court regime above is not the only route, and for the commonest
-# grievance it is not the fastest. Punjab's Protection of Ownership of Immovable
-# Property (Amendment) Ordinance 2026 (promulgated 18 Feb 2026) tightened an
-# existing tribunal regime aimed squarely at illegal possession:
+# VERIFIED against the Punjab Gazette (Extraordinary), 14 May 2026 — the Punjab
+# Protection of Ownership of Immovable Property (Amendment) Act 2026, ACT XXXVII
+# OF 2026, substituting sections of the principal Act (Act CI of 2025, Gazette of
+# 18 December 2025). Read off the gazette text, not press coverage.
 #
-#   * tribunal decision within 30 days (previously 90)
-#   * scrutiny report within 30 days (previously extendable to 90)
-#   * a Scrutiny Committee replaces the Dispute Resolution Committee
-#   * SERVING judges hear complaints, not retired ones
-#   * illegal possession now carries 5-10 years and a fine up to Rs 10,000,000
-#   * tribunals, not District Coordinators, authorise preventive action
+# Why it belongs here: Punjab's SPECIAL court (Overseas Pakistanis Property) is a
+# different statute and is not confirmed sitting. Routing a Punjab dispossession
+# case only to that court, while a tribunal with a 30-day clock exists, is a
+# confident wrong answer. Offered as an ALTERNATIVE, never a replacement — which
+# forum fits depends on facts this system does not have.
 #
-# This matters because Punjab's SPECIAL court is still ENACTED_PENDING. Routing a
-# Punjab dispossession case only to a court that is not yet sitting, while a
-# tribunal with a 30-day clock exists, is the wrong answer given confidently.
-# The tribunal is offered as an ALTERNATIVE, never as a replacement: which forum
-# is right depends on facts this system does not have, so it names both and says
-# a lawyer chooses.
+# THE 30 DAYS IS NOT FROM FILING. Same trap as the special court's 90-day clock,
+# and it is worth spelling out because press coverage reported a bare "30 days":
+#
+#   s.7(3)   Tribunal refers the complaint to the Committee within 3 days
+#   s.8(4)   Scrutiny Committee reports within 30 days of that referral
+#   s.16(6)  Tribunal decides within 30 days OF RECEIPT OF THAT REPORT,
+#            day-to-day, no adjournment beyond 7 days
+#
+# So the realistic floor from filing is roughly 63 days, not 30. Quoting "30 days"
+# without that chain would set exactly the wrong expectation.
+#
+# Verified in the same reading:
+#   s.4     illegal possession — 5 to 10 years, OR fine up to Rs 10,000,000, OR
+#           both (the 2025 Act carried no fine in s.4; the 2026 Act added it)
+#   s.8     "Scrutiny Committee" replaces the Dispute Resolution Committee
+#   s.11    Punjab Property Tribunal per district; Judge designated from among
+#           SERVING Additional Sessions Judges, in consultation with the CJ LHC
+#   s.16(3) false/frivolous/vexatious complaint — 1 to 5 years and fine up to
+#           Rs 500,000, found by the TRIBUNAL (the 2025 Act left it to the
+#           Committee). Surfaced to users in dispute_intake.FALSE_COMPLAINT_RISK
+#   s.16(10) only the Lahore High Court may grant bail
+#   s.19    appeal to the LHC within 30 days; appeals decided within 30 days
+#   s.20    alienation of the property is prohibited once a complaint is filed
 
 POIP_TRIBUNAL: dict[str, dict] = {
     "PB": {
         "name": "Punjab Protection of Ownership of Immovable Property tribunal",
         "act": "Punjab Protection of Ownership of Immovable Property (Amendment) "
-               "Ordinance 2026 (promulgated 18 February 2026), amending the "
-               "principal Punjab enactment",
+               "Act 2026 (Act XXXVII of 2026), amending the Punjab Protection of "
+               "Ownership of Immovable Property Act 2025 (Act CI of 2025)",
         # Only the grievances this forum is actually for. An inheritance dispute
         # or a sale-agreement quarrel does not belong in an anti-dispossession
         # tribunal, and offering it there would be worse than saying nothing.
         "applies_to": ("illegal_occupation", "encroachment"),
+        # 30 days FROM RECEIPT OF THE COMMITTEE'S REPORT (s.16(6)) — not from
+        # filing. The chain below is what a user actually waits through.
         "decision_days": 30,
-        "scrutiny_report_days": 30,
-        "bench": "Serving judges (the Ordinance replaced retired-judge benches).",
-        "penalties": "Illegal possession: 5-10 years and a fine up to Rs 10,000,000.",
-        "confidence": "reported",   # press-reported; verify against the gazette
-        "verify": "Confirm against the Punjab Gazette text of the 2026 Ordinance "
-                  "before relying on the 30-day timelines or the penalty range.",
+        "decision_clock_starts": "receipt of the Scrutiny Committee's report by the Tribunal",
+        "referral_days": 3,          # s.7(3) complaint -> Committee
+        "scrutiny_report_days": 30,  # s.8(4) Committee -> Tribunal
+        "realistic_floor_days": 63,  # 3 + 30 + 30, if nothing slips
+        "appeal_days": 30,           # s.19(1) to the Lahore High Court
+        "appeal_disposal_days": 30,  # s.19(2)
+        "bench": "A Judge designated from among the SERVING Additional Sessions "
+                 "Judges, in consultation with the Chief Justice of the Lahore High "
+                 "Court (s.11).",
+        "penalties": "Illegal possession: 5-10 years, OR a fine up to Rs 10,000,000, "
+                     "OR both (s.4).",
+        "confidence": "established",
+        "source": "Punjab Gazette (Extraordinary), 14 May 2026 — Act XXXVII of 2026, "
+                  "ss.4, 7, 8, 11, 16, 19, 20.",
+        "verify": "Statutory text confirmed against the Gazette. What is NOT confirmed "
+                  "from the statute is operational reality: whether a Tribunal has been "
+                  "notified for a given district under s.11(1). That is an executive "
+                  "notification, not part of the Act.",
     },
 }
 
