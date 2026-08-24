@@ -874,6 +874,9 @@ export async function disputeSpecialCourtPath(province) {
 }
 
 // Property-dispute intake (Special Courts, 2024 Act) — Phase 5a/5b/5c
+export async function disputeFilingRisk(province) {
+  return apiFetch(`/disputes/filing-risk?province=${encodeURIComponent(province)}`);
+}
 export async function disputeEligibility(id_type, days_abroad) {
   return apiFetch('/disputes/eligibility', { method: 'POST', body: JSON.stringify({ id_type, days_abroad }) });
 }

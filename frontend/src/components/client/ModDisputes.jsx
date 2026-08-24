@@ -13,7 +13,7 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput } from "@/components/shared/shared.jsx";
 import {
-    disputeEligibility, disputeClassify, disputeCreate,
+    disputeEligibility, disputeClassify, disputeCreate, disputeFilingRisk,
     disputeList, disputeDraftPetition, disputeSendToLawyer,
     disputeSpecialCourtProvinces, downloadDocument,
 } from "@/lib/api.js";
@@ -61,6 +61,11 @@ export default function ModDisputes() {
     const [disputes, setDisputes] = useState([]);
     const [step, setStep] = useState(0);          // 0..2 wizard, 3 = result
     const [busy, setBusy] = useState(false);
+    // The false-complaint warning and whether the user has accepted it.
+    // The API refuses to file without the acknowledgement, so this is not
+    // decoration — it is the only path to a successful submit.
+    const [risk, setRisk] = useState(null);
+    const [riskOk, setRiskOk] = useState(false);
     const [elig, setElig] = useState({ id_type: "nicop", days_abroad: "" });
     const [eligResult, setEligResult] = useState(null);
     const [grievance, setGrievance] = useState("");
@@ -96,6 +101,13 @@ export default function ModDisputes() {
         if (error || !data || data.error) return toast.show(data?.error || "Could not analyse that", "warn");
         setClassify(data);
     };
+    // Load the province-specific warning as soon as the details step is reachable,
+    // so it is on screen well before the submit button is.
+    useEffect(() => {
+        if (step !== 2 || !intake.province) return;
+        disputeFilingRisk(intake.province).then(({ data }) => { if (data) setRisk(data); });
+    }, [step, intake.province]);
+
     const submit = async () => {
         if (!intake.property_description.trim() || !intake.opposing_party.trim() || !intake.timeline.trim())
             return toast.show("Fill the property, the other party, and when it happened", "warn");
@@ -103,6 +115,7 @@ export default function ModDisputes() {
         const { data, error } = await disputeCreate({
             id_type: elig.id_type, days_abroad: parseInt(elig.days_abroad || "0", 10),
             grievance_text: grievance.trim(), intake: { ...intake },
+            acknowledged_filing_risk: riskOk,
         });
         setBusy(false);
         if (error || !data || data.error) return toast.show(data?.error || error?.detail || "Could not submit", "danger");
@@ -131,6 +144,7 @@ export default function ModDisputes() {
     // Open a prior dispute back into the result view so it can be sent / drafted.
     const openDispute = (d) => { setResult(d); setPetition(null); setStep(3); };
     const restart = () => {
+        setRisk(null); setRiskOk(false);
         setStep(0); setEligResult(null); setGrievance(""); setClassify(null); setResult(null); setPetition(null);
         setIntake(i => ({ ...i, property_description: "", opposing_party: "", opposing_party_relation: "", timeline: "", khasra_number: "", documents_held: [] }));
     };
@@ -262,10 +276,38 @@ export default function ModDisputes() {
                         <select value={intake.relief_wanted} onChange={e => setIntake(i => ({ ...i, relief_wanted: e.target.value }))} style={selectStyle(t)}>
                             {DISPUTE_RELIEFS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                         </select>
+                        {risk && (
+                            <div style={{ marginTop: 18, padding: 14, borderRadius: 10,
+                                background: "#ef444412", border: "1.5px solid #ef444455" }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#ef4444", marginBottom: 6 }}>
+                                    ⚠ {risk.headline}
+                                </div>
+                                <div style={{ fontSize: 12.5, color: t.text, marginBottom: 6 }}>{risk.penalty}</div>
+                                {risk.detail && (
+                                    <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 8 }}>{risk.detail}</div>
+                                )}
+                                <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 10 }}>{risk.source}</div>
+                                <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+                                    <input type="checkbox" checked={riskOk}
+                                        onChange={e => setRiskOk(e.target.checked)}
+                                        style={{ marginTop: 3, cursor: "pointer" }} />
+                                    <span style={{ fontSize: 12.5, color: t.text }}>
+                                        I understand, and the facts I have given are true to the best of my knowledge.
+                                    </span>
+                                </label>
+                            </div>
+                        )}
                         <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
                             <BtnOutline onClick={() => setStep(1)}>Back</BtnOutline>
-                            <BtnPrimary onClick={submit} disabled={busy}>{busy ? "Submitting…" : "Submit dispute"}</BtnPrimary>
+                            <BtnPrimary onClick={submit} disabled={busy || !riskOk}>
+                                {busy ? "Submitting…" : "Submit dispute"}
+                            </BtnPrimary>
                         </div>
+                        {!riskOk && (
+                            <div style={{ marginTop: 8, fontSize: 11.5, color: t.textMuted }}>
+                                Tick the box above to submit.
+                            </div>
+                        )}
                     </>
                 )}
 

@@ -27,6 +27,71 @@ from app.services import special_court
 logger = logging.getLogger(__name__)
 
 
+# ── Filing risk: a false complaint is itself an offence ──────────────────────
+#
+# The Punjab Protection of Ownership of Immovable Property (Amendment) Ordinance
+# 2026 (promulgated 18 Feb 2026) raised the penalty for illegal possession to
+# 5–10 years and a fine up to Rs 10,000,000 — and, in the same breath, made a
+# FALSE complaint punishable by a fine of Rs 500,000 and imprisonment up to five
+# years.
+#
+# That second half is why this exists. Everything else in this feature helps a
+# user press a claim; nothing warned them that pressing a weak or angry claim is
+# now itself a prosecutable act. A system that walks someone into a five-year
+# exposure without mentioning it is not neutral, and "the user should have known"
+# is not a defence we get to offer.
+#
+# It is enforced as an ACKNOWLEDGEMENT rather than displayed and hoped for: the
+# client must send acknowledged_filing_risk=True, so a UI that forgets to show
+# the warning fails loudly at the API instead of quietly filing on the user's
+# behalf. Seeing the risk is the only part of this we can actually guarantee.
+
+FALSE_COMPLAINT_RISK: dict[str, dict] = {
+    "PB": {
+        "applies": True,
+        "headline": "Filing a false complaint is itself a criminal offence in Punjab.",
+        "penalty": "A fine of Rs 500,000 and imprisonment of up to five years.",
+        "source": "Punjab Protection of Ownership of Immovable Property "
+                  "(Amendment) Ordinance 2026, promulgated 18 February 2026.",
+        "detail": "The same Ordinance raised the penalty for illegal possession to "
+                  "5–10 years and a fine of up to Rs 10,000,000. The heavier penalties "
+                  "cut both ways: complaints are taken more seriously, and so is making "
+                  "one that turns out to be false.",
+    },
+}
+
+# Outside Punjab the specific figures above do not apply, and inventing a number
+# for another province would be exactly the fabrication this codebase tries to
+# avoid. The general warning is still true everywhere: knowingly false criminal
+# complaints are prosecutable under the Penal Code.
+_FALSE_COMPLAINT_GENERIC = {
+    "applies": True,
+    "headline": "Filing a false complaint is a criminal offence.",
+    "penalty": "Penalties vary by province and by the provision used; a lawyer "
+               "should advise on the exposure in your jurisdiction.",
+    "source": "Pakistan Penal Code (false information / false charge provisions). "
+              "Punjab has a specific statutory penalty — see FALSE_COMPLAINT_RISK.",
+    "detail": "Only bring facts you can support. If you are unsure whether what "
+              "happened amounts to illegal occupation, say so and let a lawyer "
+              "decide before anything is filed.",
+}
+
+
+def false_complaint_risk(province: str) -> dict:
+    """The filing risk a user must see before a dispute is created.
+
+    Province-specific where a statute names a figure, generic where it does not.
+    Pure — no I/O — so the wizard, the record and the tests all read the same text.
+    """
+    code = special_court.resolve(province).get("province_code") or ""
+    entry = FALSE_COMPLAINT_RISK.get(code)
+    return dict(entry or _FALSE_COMPLAINT_GENERIC)
+
+
+class FilingRiskNotAcknowledged(ValueError):
+    """Raised when a dispute is submitted without the filing-risk acknowledgement."""
+
+
 # ── Eligibility (deterministic — no LLM) ─────────────────────────────────────
 
 # The Act defines an "overseas Pakistani" as a holder of one of these IDs living,
@@ -321,14 +386,28 @@ def _public(doc: dict) -> dict:
 
 
 async def create_dispute(client_id: str, id_type: str, days_abroad, grievance_text: str,
-                         intake: dict) -> dict:
+                         intake: dict, acknowledged_filing_risk: bool = False) -> dict:
     """Run the full 5a pipeline and persist a property_disputes record with its
-    lifecycle state. Reuses special_court.resolve for the forum."""
+    lifecycle state. Reuses special_court.resolve for the forum.
+
+    Refuses to file without `acknowledged_filing_risk`. In Punjab a false complaint
+    now carries Rs 500,000 and up to five years (POIP (Amendment) Ordinance 2026),
+    and this is the last point at which the user can still be told so. Defaulting
+    it to False is deliberate: a caller that forgets the warning gets an error,
+    not a filing.
+    """
     from app.db.collections import get_disputes_col
+
+    parsed = DisputeIntake(**intake)                       # validates fixed fields
+    risk = false_complaint_risk(parsed.province)
+    if not acknowledged_filing_risk:
+        raise FilingRiskNotAcknowledged(
+            f"{risk['headline']} {risk['penalty']} The complainant must acknowledge "
+            "this before a dispute can be filed."
+        )
 
     eligibility = check_eligibility(id_type, days_abroad)
     grievance = await classify_grievance(grievance_text)
-    parsed = DisputeIntake(**intake)                       # validates fixed fields
     jurisdiction = special_court.resolve(parsed.province)  # reuse — do not replace
     decision = _decide_state(eligibility, grievance, jurisdiction)
 
@@ -353,6 +432,14 @@ async def create_dispute(client_id: str, id_type: str, days_abroad, grievance_te
         },
         "state":        decision["state"],
         "hold_reasons": decision["hold_reasons"],
+        # What the complainant was shown and accepted, stored with the record
+        # rather than assumed. If the penalty text later changes, this says which
+        # version this person actually agreed to.
+        "filing_risk_ack": {
+            "acknowledged":  True,
+            "acknowledged_at": now,
+            "shown":         risk,
+        },
         # 5c handoff bookkeeping. triage_notified_at is set ONLY on a successful send;
         # triage_notify_error records a failure. So a held record with BOTH still null
         # means the notification never fired — a bug we can detect, not one that hides

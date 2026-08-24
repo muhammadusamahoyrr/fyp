@@ -9,7 +9,7 @@ meant deleting one to remove the other.
 The endpoints are unchanged apart from the prefix (/overseas/dispute -> /disputes,
 /overseas/lawyer/disputes -> /disputes/lawyer).
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.dependencies import get_current_user, require_lawyer
@@ -61,21 +61,48 @@ class DisputeCreateBody(BaseModel):
     days_abroad: int
     grievance_text: str = Field(..., min_length=1)
     intake: DisputeIntake
+    # Not optional in practice: the service refuses to file without it. Declared
+    # with a False default so a caller that omits it gets a clear 422 naming the
+    # penalty, rather than a schema error that says nothing about why.
+    acknowledged_filing_risk: bool = False
 
 
 @router.post("")
 async def create_dispute(body: DisputeCreateBody, current_user: dict = Depends(get_current_user)):
     """Run the full 5a pipeline: eligibility → classify → intake → jurisdiction →
     state (ready_for_drafting | held_for_lawyer_triage). No petition text (that is 5b)."""
-    return await dispute_intake.create_dispute(
-        current_user["_id"], body.id_type, body.days_abroad, body.grievance_text,
-        body.intake.model_dump(),
-    )
+    try:
+        return await dispute_intake.create_dispute(
+            current_user["_id"], body.id_type, body.days_abroad, body.grievance_text,
+            body.intake.model_dump(),
+            acknowledged_filing_risk=body.acknowledged_filing_risk,
+        )
+    except dispute_intake.FilingRiskNotAcknowledged as exc:
+        # 422, not 400: the request is well-formed, but a precondition the law
+        # imposes on the user has not been met.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("")
 async def list_disputes(current_user: dict = Depends(get_current_user)):
     return await dispute_intake.list_disputes(current_user["_id"])
+
+
+# MUST be declared before /{dispute_id}: FastAPI matches in registration order,
+# so a static single-segment path registered after the parameterised one is
+# swallowed by it — "filing-risk" arrives as a dispute id and 404s. The
+# /special-court/* routes escape this only because they are two segments deep.
+@router.get("/filing-risk")
+async def filing_risk(province: str, current_user: dict = Depends(get_current_user)):
+    """What the complainant must be shown before filing, by province.
+
+    In Punjab a false complaint carries Rs 500,000 and up to five years under the
+    Protection of Ownership of Immovable Property (Amendment) Ordinance 2026. The
+    wizard calls this before its submit step; create_dispute independently refuses
+    to file unless the acknowledgement comes back, so this endpoint being skipped
+    cannot result in a silent filing.
+    """
+    return dispute_intake.false_complaint_risk(province)
 
 
 @router.get("/{dispute_id}")
@@ -141,3 +168,4 @@ async def special_court_path(province: str, current_user: dict = Depends(get_cur
     exist yet.
     """
     return special_court.resolve(province)
+
