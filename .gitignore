@@ -82,3 +82,26 @@ backend/verify_*.py
 
 # Nested tooling repo (not part of project)
 claude-skill-registry/
+
+# Fine-tuned model weights (2.2 GB). Reproducible, so not worth versioning —
+# backend/scripts/fetch_tuned_model.py downloads them. Committing these would
+# also make the repo unpushable: GitHub rejects files over 100 MB, and each
+# safetensors here is ~1.1 GB.
+backend/models/
+
+# Word lock files — transient, created while a .docx is open, deleted on close.
+~$*.docx
+~$*.doc
+~$*.xlsx
+
+# Playwright MCP page snapshots — debugging artifacts from browser sessions.
+.playwright-mcp/
+
+# Accidental literal "dev/null" directory. On Windows a shell redirect to
+# `> dev/null` creates a real folder instead of discarding output; this one
+# caught a set of git hook files. Safe to delete.
+dev/null/
+
+# LaTeX build artifact from hyperref (main.aux/.bbl/.blg are tracked; this
+# regenerates the same way and carries no information the others don't).
+paper/main.out
