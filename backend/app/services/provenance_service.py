@@ -122,6 +122,23 @@ def _truncate(value: Any, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def _citation_grounding(state: dict) -> dict:
+    """Groundedness of the answer's statutory citations against its own evidence.
+
+    Never raises: this is telemetry, and a measurement failure must not cost us
+    the provenance record it was meant to describe.
+    """
+    try:
+        from app.ai.citation_grounding import grounding_report
+        return grounding_report(
+            state.get("answer") or "",
+            state.get("reranked_chunks") or state.get("statute_chunks") or [],
+        )
+    except Exception:
+        logger.exception("citation grounding measurement failed")
+        return {"measurable": False, "reason": "measurement error"}
+
+
 def _statute_evidence(state: dict) -> list[dict]:
     """Identify retrieved statute chunks by id — enough to re-fetch and verify."""
     out: list[dict] = []
@@ -242,6 +259,13 @@ def build_record(
         # detects tampering or divergence without duplicating the text.
         "answer_sha256":  _sha256(answer),
         "answer_preview": scrub_pii(_truncate(answer, _PREVIEW_MAX)),
+
+        # How much of what the answer CITED was actually in the evidence it was
+        # given. A measurement, not a verdict — ungrounded includes correct law
+        # recalled from parametric memory, so this must never be read as an
+        # error rate. Recorded at write time because the retrieved set is not
+        # reconstructable later. See app/ai/citation_grounding.py.
+        "citation_grounding": _citation_grounding(state),
 
         # ── Evidence ──────────────────────────────────────────────────────────
         "statute_chunks": _statute_evidence(state),
