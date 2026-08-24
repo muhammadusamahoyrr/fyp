@@ -106,3 +106,24 @@ class TestFailureCase001:
             chunks)
         assert "PPC 1860 s.382" in r["ungrounded"]
         assert "CrPC 1898 s.15" in r["grounded"]
+
+
+class TestTheReportDisclosesItsLimits:
+    """The stored data cannot support a precise figure, and the script must say
+    so. Both caps bias the same way — they overstate ungroundedness — so a
+    number quoted without the caveat is wrong in a flattering-to-the-finding
+    direction, which is the worst kind."""
+
+    def test_the_script_warns_about_both_caps(self):
+        import pathlib
+        src = (pathlib.Path(__file__).resolve().parents[1]
+               / "scripts" / "citation_grounding_report.py").read_text(encoding="utf-8")
+        assert "TRUNCATED at 500 chars" in src
+        assert "20-chunk cap" in src
+        assert "LOWER BOUND" in src
+
+    def test_it_points_readers_at_the_unbiased_source(self):
+        import pathlib
+        src = (pathlib.Path(__file__).resolve().parents[1]
+               / "scripts" / "citation_grounding_report.py").read_text(encoding="utf-8")
+        assert "computed at" in src and "write time" in src

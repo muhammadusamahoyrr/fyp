@@ -118,7 +118,24 @@ the Punjab Gazette and corrected — see §5.5.
    this together with the missing close-out and the invisible pricing.
 6. **No refund path or platform dispute resolution.** `REFUNDED` is declared and
    unreachable; nothing sets it. Deliberately held until the engagement redesign ships.
-7. **Punjab Special Court operational status is unverified**, and the property-dispute
+7. **No judgment in the corpus has a real citation.** All 502 have `citation: None`
+   and no title contains PLD/SCMR/CLC/YLR/MLD/PLJ. What is shown to users as a
+   citation — `LHC 2026LHC3442` — is synthesised from the court prefix plus the
+   internal document id. A lawyer cannot verify, cite or look that up. The `title`
+   field does hold the real case name and number and is the usable identifier.
+   Directly relevant competitively: Pakistan Law Bot's headline claim is "Every
+   citation is real & clickable".
+8. **Retrieved case law is almost never used.** 31 of 41 recorded answers retrieved
+   case-law chunks; none cited a law report. Where the model does reference them it
+   uses the internal id. Expensive retrieval whose output does not reach the answer.
+9. **Citation groundedness measured at 0.200 (lower bound).** Of statutes cited in
+   real answers, roughly one in five was present in the retrieved evidence — the
+   pipeline is largely answering from parametric memory. Reproduce with
+   `scripts/citation_grounding_report.py`. Read the measurement-limits block it
+   prints before quoting the figure: stored previews are capped at 500 characters
+   (68% truncated) and stored evidence at 20 chunks, and both biases overstate
+   ungroundedness.
+10. **Punjab Special Court operational status is unverified**, and the property-dispute
    feature is held from real-user exposure until it resolves. This is an external,
    human-only dependency — the designating instrument is an administrative notification,
    not a gazetted Act, so no amount of code will settle it. See

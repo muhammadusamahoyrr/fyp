@@ -45,6 +45,7 @@ async def main(n_examples: int, include_synthetic: bool) -> None:
         q["is_synthetic"] = {"$ne": True}
 
     total = measurable = fully = partly = none_grounded = 0
+    truncated = capped = 0
     ratios: list[float] = []
     ungrounded_counter: Counter[str] = Counter()
     examples: list[tuple] = []
@@ -53,7 +54,14 @@ async def main(n_examples: int, include_synthetic: bool) -> None:
         q, {"answer_preview": 1, "statute_chunks": 1, "query": 1, "signals": 1})
     async for rec in cur:
         total += 1
-        r = grounding_report(rec.get("answer_preview"), rec.get("statute_chunks"))
+        preview = rec.get("answer_preview") or ""
+        chunks = rec.get("statute_chunks") or []
+        # Both stored fields are capped, and both bias this measurement.
+        if len(preview) >= 498 or preview.rstrip().endswith("…"):
+            truncated += 1
+        if len(chunks) >= 20:
+            capped += 1
+        r = grounding_report(preview, chunks)
         if not r["measurable"]:
             continue
         measurable += 1
@@ -99,6 +107,28 @@ async def main(n_examples: int, include_synthetic: bool) -> None:
     print("  This rate is NOT an error rate. Correct law recalled from parametric")
     print("  memory is counted here too. What it evidences is how much of the")
     print("  answer came from retrieval rather than from the model.")
+
+    # Historical records cannot support a precise figure, and saying so is the
+    # difference between a measurement and a number that merely looks like one.
+    print()
+    print("  " + "-" * 74)
+    print("  MEASUREMENT LIMITS ON STORED RECORDS — read before quoting a figure")
+    print("  " + "-" * 74)
+    print(f"  answers whose preview was TRUNCATED at 500 chars : {truncated}"
+          f"  ({100 * truncated / max(total, 1):.0f}%)")
+    print("      The full answer is never stored — only a hash and this preview —")
+    print("      so citations past 500 characters are invisible here.")
+    print(f"  answers whose evidence hit the 20-chunk cap      : {capped}")
+    print("      Their true retrieved set was larger, so a citation can look")
+    print("      ungrounded when it was in a chunk that was never stored.")
+    print()
+    print("  Both biases run the SAME way: they OVERSTATE ungroundedness. Treat the")
+    print("  ratio above as a LOWER BOUND on how grounded this system's citations")
+    print("  really are.")
+    print()
+    print("  Records written from now on carry `citation_grounding` computed at")
+    print("  write time against the FULL answer and the FULL reranked set, so they")
+    print("  do not suffer either bias. Prefer those for any published figure.")
 
     if ungrounded_counter:
         print("\n  most frequently ungrounded citations:")
