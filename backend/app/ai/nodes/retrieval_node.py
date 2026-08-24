@@ -173,6 +173,16 @@ async def _web_search(query: str, case_type: str) -> list[dict]:
         return []
 
 
+def _reference(hit: dict, jid: str) -> str:
+    """Format one case-law hit as a lookup-able reference.
+
+    Search hits already carry the judgment's stored fields (title, case_no,
+    court, year), so the formatter can work directly on them.
+    """
+    from app.services.citator_service import format_reference
+    return format_reference({**hit, "_id": jid})
+
+
 async def _retrieve_case_law(query: str, province: str | None = None) -> list[dict]:
     """Semantic search over the judgment corpus. Returns chunk dicts marked
     law_type='judgment'. Degrades to [] when the corpus is empty, embeddings are
@@ -197,7 +207,11 @@ async def _retrieve_case_law(query: str, province: str | None = None) -> list[di
             "content":      h.get("snippet") or h.get("tag_line") or "",
             "law_type":     "judgment",
             "judgment_id":  jid,
-            "citation":     f"LHC {jid}" if jid else "LHC judgment",
+            # A reference a lawyer can look up, not the internal id with a
+            # court prefix. `f"LHC {jid}"` produced "LHC 2026LHC3442", which
+            # cannot be verified or cited — and sits in the slot a lawyer would
+            # copy into a filing.
+            "citation":     _reference(h, jid),
             "title":        h.get("title") or h.get("case_no") or jid,
             "pdf_url":      h.get("pdf_url", ""),
             "score":        h.get("score", 0.0),

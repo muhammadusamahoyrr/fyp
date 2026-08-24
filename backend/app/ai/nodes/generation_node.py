@@ -97,7 +97,7 @@ _CASE_LAW_RIDER_UR = """
 def _format_case_law(chunks: list[dict]) -> str:
     lines = []
     for c in chunks:
-        cite = c.get("citation") or c.get("judgment_id", "LHC judgment")
+        cite = c.get("citation") or _case_reference(c)
         title = c.get("title", "")
         snippet = (c.get("content") or "")[:400]
         lines.append(f"- {cite} ({title})\n  {snippet}")
@@ -284,7 +284,9 @@ async def generation_node(state: AgentState) -> dict:
     # `statute` doubles as the flat display label used by the string-based chip render.
     for c in case_law:
         citations.append({
-            "statute": c.get("citation") or f"LHC {c.get('judgment_id', '')}".strip(),
+            # Never fall back to the internal id dressed as a citation — that
+            # string ends up in the citation slot a lawyer copies into a filing.
+            "statute": c.get("citation") or _case_reference(c),
             "section": "",
             "source":  c.get("pdf_url", ""),
             "type":    "judgment",

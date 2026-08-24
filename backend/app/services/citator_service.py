@@ -418,3 +418,56 @@ async def corpus_stats() -> dict:
     async for d in col.aggregate([{"$project": {"n": {"$size": "$citations_out"}}}]):
         edges += d["n"]
     return {"judgments": total, "with_citations": with_cites, "citation_edges": edges}
+
+
+# ── Human-usable references ──────────────────────────────────────────────────
+#
+# What the pipeline previously showed as a citation was `f"LHC {judgment_id}"`,
+# producing "LHC 2026LHC4480". That is an internal document id with a court
+# prefix bolted on. A lawyer cannot look it up, cannot cite it, and cannot check
+# it — and presenting it in the same slot as a citation invites them to paste it
+# into a filing. Courts fined lawyers $145,000 in Q1 2026 over citations that
+# could not be verified; handing them an unverifiable string is not a neutral
+# act.
+#
+# These judgments are mostly UNREPORTED — recent High Court decisions that have
+# no PLD/SCMR number yet. That is not a gap in the corpus: the correct way to
+# refer to an unreported judgment is party names, case number, court and year,
+# and all four are already stored.
+#
+#     Nisar Ahmad Khan Vs The State etc. — Crl. Misc. 3189/26 (LHC 2026)
+#
+# Metadata extraction is imperfect (some records have the parties split across
+# title and case_no), so this degrades a piece at a time rather than failing.
+
+def format_reference(doc: dict) -> str:
+    """A reference a lawyer can actually look up, from whatever fields exist."""
+    title = (doc.get("title") or "").strip()
+    case_no = (doc.get("case_no") or "").strip()
+    court = (doc.get("court") or "").strip()
+    year = str(doc.get("year") or "").strip()
+
+    head = " — ".join(p for p in (title, case_no) if p)
+    tail = " ".join(p for p in (court, year) if p)
+
+    if head and tail:
+        return f"{head} ({tail})"
+    if head:
+        return head
+    if tail:
+        # No party names and no case number: say what this is rather than
+        # dressing the internal id up as a citation.
+        jid = doc.get("_id") or doc.get("judgment_id") or ""
+        return f"{tail} judgment [ref: {jid}]" if jid else f"{tail} judgment"
+    jid = doc.get("_id") or doc.get("judgment_id") or ""
+    return f"Unidentified judgment [ref: {jid}]" if jid else "Unidentified judgment"
+
+
+def is_reportable_citation(ref: str) -> bool:
+    """True when `ref` looks like a real reference rather than an internal id.
+
+    Used to keep synthesised ids out of anywhere that implies citability.
+    """
+    if not ref:
+        return False
+    return "[ref:" not in ref and not ref.startswith("Unidentified")
