@@ -16,6 +16,8 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.config import settings
 from app.core.constants import (
+    AgreementStatus,
+    EngagementStatus,
     NotificationType,
     PaymentKind,
     PaymentPurpose,
@@ -28,6 +30,8 @@ from app.core.exceptions import (
     NotFoundError,
 )
 from app.db.collections import (
+    get_agreements_col,
+    get_engagements_col,
     get_payment_events_col,
     get_payments_col,
 )
@@ -71,6 +75,61 @@ def _public(doc: dict) -> dict:
 
 # ── Fee requests (client → lawyer) ─────────────────────────────────────────────
 
+async def _require_executed_engagement_letter(case_id: str, lawyer_id: str) -> None:
+    """Refuse to bill a client who has not signed the engagement letter.
+
+    The letter records the fee the lawyer set and the scope they agreed to. It
+    is generated automatically when an engagement is accepted and signed by both
+    parties through the e-sign service — so an EXECUTED letter is the only place
+    in this system where the CLIENT has agreed to a price.
+
+    Without this check the client's consent was decorative. Verified live before
+    the guard existed: a lawyer accepted an engagement, set a fee of Rs 500,000
+    that the client had never seen, and raised a fee request against it while the
+    letter sat unsigned — HTTP 200. The client meanwhile could not cancel or
+    decline (422, 'accepted' is a terminal state), so the only party who had
+    agreed to that number was the one being paid.
+
+    A MISSING letter is refused for the same reason as an unsigned one: both mean
+    no consent is on record. It matters because letter generation is wrapped in
+    `except Exception: pass` in engagement_service — the engagement stands even
+    when the letter never gets written, and that silent gap must not become a
+    billing loophole.
+    """
+    eng = await get_engagements_col().find_one(
+        {"case_id": case_id, "lawyer_id": lawyer_id,
+         "status": EngagementStatus.ACCEPTED.value},
+        sort=[("created_at", -1)],
+    )
+    if not eng:
+        raise AppValidationError(
+            "No accepted engagement was found for this case, so there is no "
+            "agreed fee to bill against."
+        )
+
+    agreement_id = eng.get("agreement_id")
+    agreement = (
+        await get_agreements_col().find_one({"_id": agreement_id})
+        if agreement_id else None
+    )
+    status = (agreement or {}).get("status")
+
+    if status != AgreementStatus.EXECUTED.value:
+        # Name the actual state: "not signed yet" and "never generated" need
+        # different actions from the lawyer, and a single vague error would send
+        # them chasing the wrong one.
+        detail = (
+            "the engagement letter has not been generated for this engagement"
+            if agreement is None else
+            f"the engagement letter is still '{status}' — it must be signed by "
+            "both you and the client"
+        )
+        raise AppValidationError(
+            f"Cannot raise a fee request: {detail}. The client has to agree to "
+            "the fee in writing before they can be billed for it."
+        )
+
+
 async def create_fee_request(lawyer_id: str, data: dict) -> dict:
     """Lawyer raises a fee (peshi/professional) on one of their cases."""
     amount = data.get("amount")
@@ -91,6 +150,10 @@ async def create_fee_request(lawyer_id: str, data: dict) -> dict:
     client_id = case.get("client_id")
     if not client_id:
         raise AppValidationError("This case has no client to bill")
+
+    # Consent gate. Runs before anything is written, so a refused request leaves
+    # no half-made payment record behind.
+    await _require_executed_engagement_letter(case["_id"], lawyer_id)
 
     lawyer = await user_repo.find_by_id(lawyer_id)
     client = await user_repo.find_by_id(client_id)

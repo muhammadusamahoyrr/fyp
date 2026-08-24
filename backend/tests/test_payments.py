@@ -84,7 +84,8 @@ class TestSettlement:
         from datetime import datetime, timezone
 
         from app.db.collections import (
-            get_cases_col, get_payment_events_col, get_payments_col, get_users_col,
+            get_agreements_col, get_cases_col, get_engagements_col,
+            get_payment_events_col, get_payments_col, get_users_col,
         )
         from app.services import payment_service as ps
 
@@ -101,6 +102,26 @@ class TestSettlement:
             "created_at": datetime.now(timezone.utc),
         })
 
+        # Billing now requires an accepted engagement whose letter both parties
+        # have signed — the client's only opportunity to agree to the fee. The
+        # fixture has to build that, because bypassing it would mean these tests
+        # exercise a path production no longer allows.
+        agr_id = "testagr_" + secrets.token_hex(4)
+        eng_id = "testeng_" + secrets.token_hex(4)
+        await get_agreements_col().insert_one({
+            "_id": agr_id, "case_id": case_id, "engagement_id": eng_id,
+            "title": "Engagement Letter — Test", "status": "executed",
+            "parties": [{"user_id": lawyer["_id"], "signed": True},
+                        {"user_id": client["_id"], "signed": True}],
+            "created_at": datetime.now(timezone.utc),
+        })
+        await get_engagements_col().insert_one({
+            "_id": eng_id, "case_id": case_id, "lawyer_id": lawyer["_id"],
+            "client_id": client["_id"], "status": "accepted",
+            "fee_amount": 50_000, "fee_type": "fixed", "agreement_id": agr_id,
+            "created_at": datetime.now(timezone.utc),
+        })
+
         fee = await ps.create_fee_request(
             lawyer["_id"], {"case_id": case_id, "amount": 50_000, "purpose": "professional_fee"})
         pid = fee.get("id") or fee["_id"]
@@ -110,6 +131,8 @@ class TestSettlement:
         await get_payments_col().delete_one({"_id": pid})
         await get_payment_events_col().delete_many({"payment_id": pid})
         await get_cases_col().delete_one({"_id": case_id})
+        await get_engagements_col().delete_one({"_id": eng_id})
+        await get_agreements_col().delete_one({"_id": agr_id})
 
     async def test_fee_split_is_exact(self, paid_scenario):
         fee = paid_scenario["fee"]

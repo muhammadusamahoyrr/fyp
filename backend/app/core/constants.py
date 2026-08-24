@@ -163,6 +163,11 @@ PROPERTY_DISPOSITION_POWERS = {"sell", "transfer", "gift", "mortgage"}
 
 class NotificationType(str, Enum):
     CASE_UPDATE = "case_update"
+    # Case messaging is the working channel between client and lawyer, and it
+    # had no notification type at all — a message was stored and surfaced only
+    # if the other party happened to reopen the case. Clients on Desktop-plus-
+    # WhatsApp habits do not poll a web app.
+    CASE_MESSAGE = "case_message"
     LAWYER_ASSIGNED = "lawyer_assigned"
     ENGAGEMENT_REQUESTED = "engagement_requested"
     ENGAGEMENT_ACCEPTED = "engagement_accepted"

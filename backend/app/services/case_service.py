@@ -315,6 +315,42 @@ async def send_message(
         "created_at": datetime.now(timezone.utc),
     }
     await case_repo.add_message(case_id, msg)
+
+    # Tell the other side. Without this the message is stored and surfaced only
+    # if they happen to reopen the case — so a lawyer asking for a document, or
+    # a client answering, could sit unread indefinitely while both parties
+    # believed the ball was in the other's court.
+    #
+    # Best-effort, like every other notify in this file: a notification failure
+    # must never lose a message that has already been written.
+    try:
+        from app.core.constants import NotificationType
+        from app.services import notification_service
+
+        recipient = (
+            case.get("lawyer_id")
+            if sender_id == case.get("client_id")
+            else case.get("client_id")
+        )
+        # No lawyer engaged yet (or a malformed case) — nobody to tell.
+        if recipient and recipient != sender_id:
+            preview = text.strip().replace("\n", " ")
+            if len(preview) > 140:
+                preview = preview[:139] + "…"
+            await notification_service.create_notification(
+                recipient,
+                NotificationType.CASE_MESSAGE,
+                f"New message from {sender_name}",
+                # The preview carries the message itself, so an urgent request
+                # ("send me the fard before Thursday") is legible without
+                # opening the app.
+                f"{case.get('title', 'Your case')}: {preview}",
+                payload={"case_id": case_id, "message_id": msg["_id"],
+                         "sender_role": sender_role},
+            )
+    except Exception:
+        logger.exception("case message notification failed for case %s", case_id)
+
     return msg
 
 
