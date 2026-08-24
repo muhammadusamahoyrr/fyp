@@ -644,20 +644,6 @@ export async function cancelSubscription() {
   return apiFetch('/billing/cancel', { method: 'POST' });
 }
 
-// ─── WhatsApp linking ────────────────────────────────────────────────────────
-
-export async function whatsappLinkCode() {
-  return apiFetch('/whatsapp/link-code', { method: 'POST' });
-}
-
-export async function whatsappStatus() {
-  return apiFetch('/whatsapp/status');
-}
-
-export async function whatsappUnlink() {
-  return apiFetch('/whatsapp/link', { method: 'DELETE' });
-}
-
 // ─── Cause-list watcher (lawyer) ─────────────────────────────────────────────
 
 export async function createCauselistWatch({ case_no, title_hint, case_id } = {}) {
@@ -868,104 +854,43 @@ export async function wasiyyatPdf(payload) {
 
 // ─── Overseas Desk (Power of Attorney) ────────────────────────────────────────
 
-export async function overseasCreatePoa(payload) {
-  return apiFetch('/overseas/poa', { method: 'POST', body: JSON.stringify(payload) });
-}
 
-export async function overseasListPoas() {
-  return apiFetch('/overseas/poa');
-}
 
-export async function overseasGetPoa(id) {
-  return apiFetch(`/overseas/poa/${id}`);
-}
 
-export async function overseasRevokePoa(id) {
-  return apiFetch(`/overseas/poa/${id}/revoke`, { method: 'POST' });
-}
 
-export async function overseasSetExecution(id, execution_status) {
-  return apiFetch(`/overseas/poa/${id}/execution`, {
-    method: 'PATCH',
-    body: JSON.stringify({ execution_status }),
-  });
-}
 
-export async function overseasAcknowledge(id) {
-  return apiFetch(`/overseas/poa/${id}/acknowledge`, { method: 'POST' });
-}
 
 // Attestation Navigator (objection-aware apostille vs legacy consular chain)
-export async function overseasAttestationCountries() {
-  return apiFetch('/overseas/attestation/countries');
-}
-export async function overseasAttestationPath(country, forProperty = true) {
-  return apiFetch(`/overseas/attestation/path?country=${encodeURIComponent(country)}&for_property=${forProperty}`);
-}
 
 // Special-Court jurisdiction engine (Protection of Overseas Pakistanis' Property Act 2024)
-export async function overseasSpecialCourtProvinces() {
-  return apiFetch('/overseas/special-court/provinces');
-}
-export async function overseasSpecialCourtPath(province) {
-  return apiFetch(`/overseas/special-court/path?province=${encodeURIComponent(province)}`);
-}
 
 // Plain-English -> POA structure, and the deterministic risk scorer
-export async function overseasSuggestPoa(intent) {
-  return apiFetch('/overseas/poa/suggest', { method: 'POST', body: JSON.stringify({ intent }) });
-}
-export async function overseasPoaRisk(payload) {
-  return apiFetch('/overseas/poa/risk', { method: 'POST', body: JSON.stringify(payload) });
-}
-
-// OPPPA registration guidance + per-POA status
-export async function overseasOpppaGuidance() {
-  return apiFetch('/overseas/opppa/guidance');
-}
-export async function overseasSetOpppa(id, status) {
-  return apiFetch(`/overseas/poa/${id}/opppa`, { method: 'PATCH', body: JSON.stringify({ status }) });
-}
-
-// Point-of-use verification (public) + attested-document check
-export async function overseasVerifyToken(token) {
-  return apiFetch(`/overseas/verify/${encodeURIComponent(token)}`);
-}
-// Public QR image URL for a verify link (served by the backend, no auth).
-export function overseasVerifyQrUrl(token) {
-  return `${BASE}/overseas/verify/${encodeURIComponent(token)}/qr.svg`;
-}
 
 // Property-dispute intake (Special Courts, 2024 Act) — Phase 5a/5b/5c
 export async function overseasDisputeEligibility(id_type, days_abroad) {
-  return apiFetch('/overseas/dispute/eligibility', { method: 'POST', body: JSON.stringify({ id_type, days_abroad }) });
+  return apiFetch('/disputes/eligibility', { method: 'POST', body: JSON.stringify({ id_type, days_abroad }) });
 }
 export async function overseasDisputeClassify(text) {
-  return apiFetch('/overseas/dispute/classify', { method: 'POST', body: JSON.stringify({ text }) });
+  return apiFetch('/disputes/classify', { method: 'POST', body: JSON.stringify({ text }) });
 }
 export async function overseasDisputeCreate(payload) {
-  return apiFetch('/overseas/dispute', { method: 'POST', body: JSON.stringify(payload) });
+  return apiFetch('/disputes', { method: 'POST', body: JSON.stringify(payload) });
 }
 export async function overseasDisputeList() {
-  return apiFetch('/overseas/dispute');
+  return apiFetch('/disputes');
 }
 export async function overseasDraftPetition(id) {
-  return apiFetch(`/overseas/dispute/${id}/petition`, { method: 'POST' });
+  return apiFetch(`/disputes/${id}/petition`, { method: 'POST' });
 }
 // Case-brief handoff (read/handoff only — no fee, engagement or payment)
 export async function overseasSendDisputeToLawyer(id) {
-  return apiFetch(`/overseas/dispute/${id}/send-to-lawyer`, { method: 'POST' });
+  return apiFetch(`/disputes/${id}/send-to-lawyer`, { method: 'POST' });
 }
 export async function overseasDisputeBrief(id) {
-  return apiFetch(`/overseas/dispute/${id}/brief`);
+  return apiFetch(`/disputes/${id}/brief`);
 }
 export async function overseasLawyerDisputes() {
-  return apiFetch('/overseas/lawyer/disputes');
-}
-export async function overseasVerifyAttested(id, file) {
-  const fd = new FormData();
-  fd.append('file', file);
-  return apiFetchMultipart(`/overseas/poa/${id}/verify-attested`, fd);
+  return apiFetch('/disputes/lawyer/inbox');
 }
 
 // ─── Legal calculators ────────────────────────────────────────────────────────

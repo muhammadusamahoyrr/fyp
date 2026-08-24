@@ -19,7 +19,6 @@ from app.db.collections import (
     get_password_reset_col,
     get_payment_events_col,
     get_payments_col,
-    get_poas_col,
     get_refresh_blocklist_col,
     get_retrieval_labels_col,
     get_subscriptions_col,
@@ -60,7 +59,6 @@ async def create_all_indexes() -> None:
     await _lawyer_reviews_indexes()
     await _auth_indexes()
     await _payments_indexes()
-    await _poa_indexes()
     await _checkpoint_indexes()
     await _provenance_indexes()
 
@@ -267,15 +265,6 @@ async def _payments_indexes() -> None:
     await get_payment_events_col().create_indexes([
         IndexModel([("event_id", ASCENDING)], unique=True),
         IndexModel([("created_at", ASCENDING)], expireAfterSeconds=90 * 24 * 3600),
-    ])
-
-
-async def _poa_indexes() -> None:
-    await get_poas_col().create_indexes([
-        IndexModel([("principal_id", ASCENDING)]),
-        IndexModel([("status", ASCENDING)]),
-        IndexModel([("expiry_date", ASCENDING)], sparse=True),
-        IndexModel([("created_at", DESCENDING)]),
     ])
 
 

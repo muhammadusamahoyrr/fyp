@@ -25,18 +25,17 @@ from app.api.v1.routes import (
     cases,
     causelist,
     citator,
+    disputes,
     documents,
     engagements,
     inheritance,
     intake,
     lawyers,
     notifications,
-    overseas,
     payments,
     provenance,
     users,
     voice,
-    whatsapp,
 )
 from app.core.config import settings
 from app.core.logging import RequestIdMiddleware, setup_logging
@@ -77,27 +76,6 @@ async def _causelist_scheduler():
             raise
         except Exception:
             logging.getLogger(__name__).exception("Cause-list scheduler sweep failed")
-
-
-async def _poa_expiry_scheduler():
-    """Daily sweep: warn on POAs nearing expiry and expire past-due ones.
-
-    Redis period-lock coordinates a single sweep across workers (see
-    :func:`_causelist_scheduler`)."""
-    import asyncio
-    import logging
-    from app.core.redis_client import acquire_period_lock
-    from app.services.overseas_service import check_expiring
-
-    while True:
-        try:
-            await asyncio.sleep(24 * 3600)
-            if await acquire_period_lock("lock:scheduler:poa", ttl_seconds=3600):
-                await check_expiring()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logging.getLogger(__name__).exception("POA expiry scheduler sweep failed")
 
 
 async def _warmup_models():
@@ -141,7 +119,6 @@ async def lifespan(app: FastAPI):
     if redis_enabled() or settings.run_schedulers:
         scheduler_tasks = [
             _asyncio.create_task(_causelist_scheduler()),
-            _asyncio.create_task(_poa_expiry_scheduler()),
         ]
     yield
     warmup_task.cancel()
@@ -230,12 +207,11 @@ app.include_router(voice.router, prefix=API_PREFIX)
 app.include_router(appointments.router, prefix=API_PREFIX)
 app.include_router(engagements.router, prefix=API_PREFIX)
 app.include_router(causelist.router, prefix=API_PREFIX)
-app.include_router(whatsapp.router, prefix=API_PREFIX)
 app.include_router(citator.router, prefix=API_PREFIX)
 app.include_router(payments.router, prefix=API_PREFIX)
 app.include_router(payments.webhook_router, prefix=API_PREFIX)
 app.include_router(billing.router, prefix=API_PREFIX)
-app.include_router(overseas.router, prefix=API_PREFIX)
+app.include_router(disputes.router, prefix=API_PREFIX)
 app.include_router(calculators.router, prefix=API_PREFIX)
 app.include_router(bail.router, prefix=API_PREFIX)
 app.include_router(provenance.router, prefix=API_PREFIX)

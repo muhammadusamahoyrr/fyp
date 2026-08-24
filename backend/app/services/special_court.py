@@ -16,7 +16,7 @@ Why this is a jurisdiction engine and not a paragraph of static text:
   * "Which court, is it running, how long, can I file by video" is precisely the
     per-jurisdiction lookup a static list gets wrong the moment a province moves.
 
-FAIL-SAFE, same principle as apostille_status.resolve:
+FAIL-SAFE, the same principle the removed apostille table used:
   When a province's special court is not confirmed OPERATIONAL, the engine does NOT
   tell the user to e-file into it. Sending someone to file in a court that isn't
   hearing cases yet wastes the one thing they're short on — time and trust. Instead
@@ -28,7 +28,7 @@ SOURCE OF TRUTH — reconcile before relying on any of this in production:
   The federal Act's text + each province's gazette notification and the relevant
   High Court's notification of the designated special court. Court operational
   status and timelines change week to week right now. This file is a dated SEED
-  with the same `verify` duty as the court-fee and apostille tables.
+  with the same `verify` duty as the court-fee table.
 """
 from __future__ import annotations
 

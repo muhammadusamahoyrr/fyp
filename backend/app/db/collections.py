@@ -59,18 +59,6 @@ def get_causelist_entries_col() -> AsyncIOMotorCollection:
     return get_database()["causelist_entries"]
 
 
-def get_whatsapp_links_col() -> AsyncIOMotorCollection:
-    return get_database()["whatsapp_links"]
-
-
-def get_whatsapp_outbox_col() -> AsyncIOMotorCollection:
-    return get_database()["whatsapp_outbox"]
-
-
-def get_whatsapp_messages_col() -> AsyncIOMotorCollection:
-    return get_database()["whatsapp_messages"]
-
-
 def get_intent_logs_col() -> AsyncIOMotorCollection:
     return get_database()["intent_logs"]
 
@@ -93,10 +81,6 @@ def get_subscriptions_col() -> AsyncIOMotorCollection:
 
 def get_payment_events_col() -> AsyncIOMotorCollection:
     return get_database()["payment_events"]
-
-
-def get_poas_col() -> AsyncIOMotorCollection:
-    return get_database()["powers_of_attorney"]
 
 
 def get_ws_tickets_col() -> AsyncIOMotorCollection:

@@ -4,23 +4,19 @@ import { useTheme } from "./theme.js";
 import { Card, Btn, Label, Input, Divider } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
-import { changePassword, authLogout, whatsappLinkCode, whatsappStatus, whatsappUnlink, mySubscription, billingPlans, subscribePlan, cancelSubscription, mockPay } from "@/lib/api.js";
+import { changePassword, authLogout, mySubscription, billingPlans, subscribePlan, cancelSubscription, mockPay } from "@/lib/api.js";
 
 function SettingsPage() {
     const { t } = useTheme();
     const toast = useToast();
     const [pwd, setPwd] = useState({ current: "", newPwd: "", confirm: "" });
     const [saving, setSaving] = useState(false);
-    const [wa, setWa] = useState({ linked: false });
-    const [waCode, setWaCode] = useState(null);
-    const [waBusy, setWaBusy] = useState(false);
     const [sub, setSub] = useState(null);
     const [plans, setPlans] = useState([]);
     const [subBusy, setSubBusy] = useState(false);
     const [annual, setAnnual] = useState(false);
 
     useEffect(() => {
-        whatsappStatus().then(({ data }) => { if (data) setWa(data); });
         mySubscription().then(({ data }) => { if (data) setSub(data); });
         billingPlans().then(({ data }) => { if (Array.isArray(data)) setPlans(data); });
     }, []);
@@ -51,28 +47,6 @@ function SettingsPage() {
         if (error) { toast.show("❌ " + (error.message || "Cancel failed"), "error", 3000); return; }
         await refreshSub();
         toast.show("Subscription cancelled — access continues until period end", "info", 3000);
-    };
-
-    const generateWaCode = async () => {
-        setWaBusy(true);
-        const { data, error } = await whatsappLinkCode();
-        setWaBusy(false);
-        if (error) { toast.show("❌ " + (error.message || "Could not generate code"), "error", 3000); return; }
-        setWaCode(data);
-    };
-
-    const refreshWaStatus = async () => {
-        const { data } = await whatsappStatus();
-        if (data) { setWa(data); if (data.linked) setWaCode(null); }
-    };
-
-    const unlinkWa = async () => {
-        setWaBusy(true);
-        const { error } = await whatsappUnlink();
-        setWaBusy(false);
-        if (error) { toast.show("❌ " + (error.message || "Unlink failed"), "error", 3000); return; }
-        setWa({ linked: false }); setWaCode(null);
-        toast.show("WhatsApp unlinked", "info", 2500);
     };
 
     const handleChangePassword = async () => {
@@ -171,7 +145,7 @@ function SettingsPage() {
                     ) : (
                         <>
                             <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 12 }}>
-                                Upgrade to unlock <b style={{ color: t.text }}>unlimited cause-list watches</b>, unlimited AI research + case-law, document generation and WhatsApp alerts.
+                                Upgrade to unlock <b style={{ color: t.text }}>unlimited cause-list watches</b>, unlimited AI research + case-law, and document generation.
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12, color: t.textMuted }}>
                                 <button onClick={() => setAnnual(false)} style={{ padding: "4px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, background: !annual ? t.primary : t.cardHi, color: !annual ? (t.mode === "dark" ? "#111B1F" : "#fff") : t.textMuted }}>Monthly</button>
@@ -191,54 +165,6 @@ function SettingsPage() {
                                     </div>
                                 ))}
                             </div>
-                        </>
-                    )}
-                </Card>
-
-                <Card className="fade-up s3" style={{ padding: 18 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                        <span style={{ fontSize: 14 }}>💬</span>
-                        <div className="serif" style={{ fontSize: 14, fontWeight: 600, color: t.text }}>WhatsApp Alerts</div>
-                        {wa.linked && (
-                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#25D36618", color: "#25D366", border: "1px solid #25D36640" }}>
-                                LINKED{wa.opted_in === false ? " · PAUSED" : ""}
-                            </span>
-                        )}
-                    </div>
-                    {wa.linked ? (
-                        <>
-                            <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 14 }}>
-                                Hearing updates, cause-list listings and case alerts are delivered to
-                                <span style={{ color: t.text, fontWeight: 700 }}> +{wa.wa_number}</span>.
-                                {wa.opted_in === false && " Delivery is paused — send START to the bot to resume."}
-                            </div>
-                            <Btn variant="outline" onClick={unlinkWa} disabled={waBusy} style={{ borderColor: t.border, color: t.text }}>
-                                {waBusy ? "…" : "Unlink Number"}
-                            </Btn>
-                        </>
-                    ) : (
-                        <>
-                            <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 14 }}>
-                                Get hearing updates, cause-list alerts and case notifications on WhatsApp.
-                                Generate a code, then send <b>LINK &lt;code&gt;</b> to the Attorney.AI WhatsApp number from your phone.
-                            </div>
-                            {waCode ? (
-                                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                                    <div className="mono" style={{ fontSize: 22, fontWeight: 800, letterSpacing: "0.2em", color: t.primary, padding: "8px 16px", borderRadius: 10, background: t.primaryGlow2, border: `1.5px solid ${t.primary}40` }}>
-                                        {waCode.code}
-                                    </div>
-                                    <div style={{ fontSize: 12, color: t.textMuted }}>
-                                        Send <b>LINK {waCode.code}</b> within {waCode.expires_in_minutes} minutes.
-                                    </div>
-                                    <Btn variant="outline" onClick={refreshWaStatus} style={{ borderColor: t.border, color: t.text, fontSize: 12 }}>
-                                        I've sent it — check
-                                    </Btn>
-                                </div>
-                            ) : (
-                                <Btn onClick={generateWaCode} disabled={waBusy}>
-                                    {waBusy ? "Generating…" : "Generate Link Code"}
-                                </Btn>
-                            )}
                         </>
                     )}
                 </Card>

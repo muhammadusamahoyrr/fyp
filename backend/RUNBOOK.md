@@ -57,7 +57,7 @@ DB_NAME=attorney_ai
 REDIS_URL=rediss://...  # Upstash in prod. Empty = cache/rate-limit disabled, app still runs.
 ```
 
-Optional integrations (WhatsApp, SMTP, Safepay, cause-list polling) are in
+Optional integrations (SMTP, Safepay, cause-list polling) are in
 `config.py` and all default to off/empty.
 
 > **Secrets never go in the image or in git.** `.env` holds the Upstash token and

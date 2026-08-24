@@ -62,15 +62,6 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     email_from: str = "noreply@attorney.ai"
 
-    # WhatsApp Business Cloud API (Meta). Empty token = webhook disabled.
-    # whatsapp_dry_run=True writes outbound messages to the whatsapp_outbox
-    # collection instead of calling the Graph API — for dev/demo without
-    # Meta credentials.
-    whatsapp_access_token: str = ""
-    whatsapp_phone_number_id: str = ""
-    whatsapp_verify_token: str = ""
-    whatsapp_app_secret: str = ""
-    whatsapp_dry_run: bool = False
 
     # Cause-list scheduler
     causelist_check_hours: int = 6
@@ -86,7 +77,7 @@ class Settings(BaseSettings):
 
     # Payments (Safepay). Empty keys + payments_dry_run=True → the MockProvider
     # handles the full checkout/webhook loop locally, so the whole pay flow is
-    # demoable without any merchant credentials (mirrors whatsapp_dry_run).
+    # demoable without any merchant credentials.
     safepay_api_key: str = ""
     safepay_secret_key: str = ""
     safepay_webhook_secret: str = ""
