@@ -82,12 +82,26 @@ async def _warmup_models():
     """Heavy AI warmups (Whisper STT + intent embeddings). Runs in the background
     so startup and health checks aren't blocked and a model failure can't take
     down the whole API."""
+    import asyncio
     import logging
     try:
         from app.services.whisper_service import whisper_service
         await whisper_service.warmup()
         from app.ai.intent import warmup as intent_warmup
         await intent_warmup()
+
+        # The retrieval embedder (intfloat/multilingual-e5-base) was missing from
+        # this list, and its absence was expensive in a non-obvious way.
+        # _embeddings() is lru_cached, so it loads once — but that one load is
+        # ~10-30s of synchronous work, and every one of its seven call sites
+        # invokes it ON THE EVENT LOOP. Whichever request touched it first
+        # therefore froze the whole server, not just itself: measured at 31s for
+        # a POST /cases whose own embedding work was already backgrounded with
+        # asyncio.create_task. Loading it here, in a thread, off the request
+        # path, means no user pays that cost and no user waits behind someone
+        # who did.
+        from app.ai.pipelines.retriever import _embeddings
+        await asyncio.to_thread(_embeddings)
     except Exception:
         logging.getLogger(__name__).exception("Background model warmup failed")
 
