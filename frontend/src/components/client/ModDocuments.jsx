@@ -6,7 +6,7 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import { useCase } from "./CaseContext.jsx";
-import { extractDocumentFields, generateDocument, downloadDocument, submitDocumentForReview, listDocuments, searchLawyers } from "@/lib/api.js";
+import { extractDocumentFields, generateDocument, downloadDocument, submitDocumentForReview, listDocuments, searchLawyers, getCaseTimeline } from "@/lib/api.js";
 
 const STitle = ({ icon, sub, children }) => {
     const t = useT();
@@ -532,9 +532,6 @@ const ModDocuments = () => {
                                         <button key={cmd} onClick={() => { try { document.execCommand(cmd); } catch (e) { } }} style={tbBtn}>{label}</button>
                                     ))}
                                     <div style={{ width: 1, height: 16, background: t.border, margin: "0 4px" }} />
-                                    <button onClick={() => toast.show("➕ Clause added", "info")} style={tbBtn}>➕ Clause</button>
-                                    <button onClick={() => toast.show("🗑 Section removed", "warn")} style={tbBtn}>🗑 Remove</button>
-                                    <button onClick={() => toast.show("💾 Saved!", "success")} style={{ ...tbBtn, color: t.primary, borderColor: t.primary, background: t.primaryGlow }}>💾 Save</button>
                                 </div>
                             )}
 
@@ -555,10 +552,7 @@ const ModDocuments = () => {
                             </div>
 
                             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                                <BtnOutline onClick={() => toast.show("📄 PDF generated!", "success")} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>📄 PDF</BtnOutline>
                                 <BtnOutline onClick={() => { if (docId) { downloadDocument(docId, docTitle || "document"); } else { toast.show("⚠️ Generate the document first", "warn"); } }} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>📥 Download</BtnOutline>
-                                <BtnOutline onClick={() => toast.show("✉️ Email sent!", "success")} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>✉️ Email</BtnOutline>
-                                <BtnOutline onClick={() => toast.show("🖨️ Printing…", "info")} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>🖨️ Print</BtnOutline>
                             </div>
                         </Card>
 
@@ -586,7 +580,7 @@ const ModDocuments = () => {
                                 </div>
                                 {!userApproved ? (
                                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                                        <BtnPrimary onClick={() => { setUserApproved(true); toast.show("✅ Document approved!", "success"); }} style={{ width: "100%", fontSize: 12, padding: "10px", borderRadius: 10, justifyContent: "center" }}>✅ Approve Draft</BtnPrimary>
+                                        <BtnPrimary onClick={() => { setUserApproved(true); toast.show("Marked as approved by you. Send it to a lawyer for their review.", "success", 4000); }} style={{ width: "100%", fontSize: 12, padding: "10px", borderRadius: 10, justifyContent: "center" }}>✅ Approve Draft</BtnPrimary>
                                         <BtnOutline onClick={() => { setEditMode(true); toast.show("✏️ Edit mode enabled", "info"); }} style={{ width: "100%", fontSize: 12, padding: "10px", borderRadius: 10 }}>✏️ Edit / Modify</BtnOutline>
                                     </div>
                                 ) : (
@@ -796,17 +790,13 @@ const ModDocuments = () => {
                             </Card>
 
                             <Card>
-                                <STitle icon="dl" sub="Export your document">Export</STitle>
-                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                                    {[["📄", "Generate PDF"], ["📥", "Download"], ["✉️", "Email"], ["🖨️", "Print"]].map(([ico, lbl]) => (
-                                        <div key={lbl} onClick={() => toast.show(`${ico} ${lbl}…`, "success")} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 11, border: `1.5px solid ${t.border}`, background: t.inputBg, cursor: "pointer", transition: "all 0.2s" }}
-                                            onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.background = t.primaryGlow; }}
-                                            onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.inputBg; }}>
-                                            <span style={{ fontSize: 15 }}>{ico}</span>
-                                            <span style={{ fontSize: 11, fontWeight: 600, color: t.textMuted }}>{lbl}</span>
-                                        </div>
-                                    ))}
-                                </div>
+                                <STitle icon="dl" sub="Download the generated PDF">Export</STitle>
+                                <BtnOutline
+                                    onClick={() => { if (docId) { downloadDocument(docId, docTitle || "document"); } else { toast.show("Generate the document first", "warn"); } }}
+                                    disabled={!docId}
+                                    style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 11, justifyContent: "center" }}>
+                                    {docId ? "📥 Download PDF" : "Generate the document first"}
+                                </BtnOutline>
                             </Card>
 
                             <div style={{ padding: "12px 15px", borderRadius: 13, background: `${t.success}10`, border: `1px solid ${t.success}30`, display: "flex", gap: 11, alignItems: "center" }}>
@@ -857,15 +847,17 @@ const ModDocuments = () => {
 
                             {/* Export actions */}
                             <div style={{ marginTop: 14 }}>
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8, marginBottom: 8 }}>
-                                    {[["📄", "Generate PDF"], ["📥", "Download"], ["✉️", "Email"], ["🖨️", "Print"]].map(([ico, lbl]) => (
-                                        <div key={lbl} onClick={() => { setExported(true); if (lbl === "Download" && docId) { downloadDocument(docId, docTitle || "document"); } else { toast.show(`${ico} ${lbl}…`, "success"); } }} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "12px 8px", borderRadius: 12, border: `1.5px solid ${t.border}`, background: t.inputBg, cursor: "pointer", transition: "all 0.2s" }}
-                                            onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.background = t.primaryGlow; }}
-                                            onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.inputBg; }}>
-                                            <span style={{ fontSize: 20 }}>{ico}</span>
-                                            <span style={{ fontSize: 10, fontWeight: 600, color: t.textMuted, textAlign: "center" }}>{lbl}</span>
-                                        </div>
-                                    ))}
+                                {/* Only Download was ever wired. Generate PDF / Email /
+                                    Print each toasted a completed action and did none of
+                                    it — and the PDF already exists by this point, so
+                                    "generate" was meaningless too. */}
+                                <div style={{ marginBottom: 8 }}>
+                                    <BtnOutline
+                                        onClick={() => { if (docId) { setExported(true); downloadDocument(docId, docTitle || "document"); } else { toast.show("Generate the document first", "warn"); } }}
+                                        disabled={!docId}
+                                        style={{ width: "100%", fontSize: 12, padding: "12px", borderRadius: 11, justifyContent: "center" }}>
+                                        {docId ? "📥 Download PDF" : "Generate the document first"}
+                                    </BtnOutline>
                                 </div>
                             </div>
                         </Card>
@@ -920,38 +912,50 @@ const ModDocuments = () => {
 ══════════════════════════════════════════════════════ */
 const ModTracking = () => {
     const t = useT();
-    const [question, setQuestion] = useState("");
     const [notifs, setNotifs] = useState([
         { id: 1, text: "Court Hearing scheduled for Feb 25", read: false, type: "danger" },
         { id: 2, text: "Ahmad Raza Khan responded to your question", read: false, type: "info" },
         { id: 3, text: "NDA Agreement has been signed", read: true, type: "success" },
     ]);
-    const milestones = [
-        { t: "Case Filed", d: "Feb 10", s: "done", desc: "Case registered with court." },
-        { t: "Evidence Review", d: "Feb 15", s: "done", desc: "All documents verified." },
-        { t: "Lawyer Assigned", d: "Feb 18", s: "done", desc: "Ahmad Raza Khan assigned." },
-        { t: "Court Hearing", d: "Feb 25", s: "active", desc: "Initial hearing scheduled." },
-        { t: "Verdict", d: "Mar 15", s: "pending", desc: "Awaiting court decision." },
-    ];
-    const deadlines = [
-        { title: "Submit Evidence", date: "Feb 23", days: 1 },
-        { title: "File Plaint", date: "Mar 1", days: 8 },
-        { title: "Pay Court Fees", date: "Mar 5", days: 12 },
-    ];
-    const qa = [
-        { q: "What are my chances of winning?", a: "Based on evidence strength, approximately 75–80%. Strong documentation is your biggest asset.", done: true },
-        { q: "Can I get interim relief?", a: null, done: false },
-    ];
+    // Case timeline and hearing dates, from the case itself.
+    //
+    // These were three hardcoded arrays presented as the user's own case:
+    // milestones ("Court Hearing — Feb 25", "Ahmad Raza Khan assigned"),
+    // deadlines ("Submit Evidence — 1 day left", "Pay Court Fees — Mar 5") and
+    // a Lawyer Q&A whose sample answer put a fabricated "approximately 75-80%"
+    // win probability in the client's hands. A client can act on a court date
+    // and miss a real one; nobody should ever read an invented probability as
+    // their lawyer's opinion. The Q&A card is gone entirely — there is no
+    // backend for it, and case messaging already exists under Tracking.
+    const [timeline, setTimeline] = useState({ milestones: [], hearing_dates: [] });
+    const timelineCaseId = genCaseId || activeCaseId;
+    useEffect(() => {
+        if (!timelineCaseId) { setTimeline({ milestones: [], hearing_dates: [] }); return; }
+        getCaseTimeline(timelineCaseId).then(({ data }) => {
+            if (data) setTimeline({ milestones: data.milestones || [], hearing_dates: data.hearing_dates || [] });
+        });
+    }, [timelineCaseId]);
+    const milestones = timeline.milestones;
+    const deadlines = timeline.hearing_dates;
     const markRead = (id) => setNotifs(n => n.map(x => x.id === id ? { ...x, read: true } : x));
     return (
         <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <Card>
-                    <STitle icon="clock" sub="Case C-001 — Employment Dispute">Case Timeline</STitle>
+                    <STitle icon="clock" sub={timelineCaseId ? activeCaseTitle : "No case linked"}>Case Timeline</STitle>
+                    {!milestones.length && (
+                        <div style={{ padding: "14px 4px", fontSize: 12.5, color: t.textMuted }}>
+                            {timelineCaseId
+                                ? "No milestones recorded yet. Your lawyer adds these as the case progresses."
+                                : "Link a case to see its timeline."}
+                        </div>
+                    )}
                     <div style={{ position: "relative", paddingLeft: 20 }}>
                         <div style={{ position: "absolute", left: 28, top: 0, bottom: 0, width: 2, background: t.border, borderRadius: 2 }} />
                         {milestones.map((m, i) => {
-                            const isDone = m.s === "done", isActive = m.s === "active";
+                            const isDone = Boolean(m.completed);
+                            // The first not-yet-completed milestone is the live one.
+                            const isActive = !isDone && milestones.findIndex(x => !x.completed) === i;
                             return (
                                 <div key={i} style={{ display: "flex", gap: 16, alignItems: "flex-start", marginBottom: 24, position: "relative" }}>
                                     <div style={{ width: 22, height: 22, borderRadius: "50%", background: isDone ? t.success : isActive ? t.primary : t.inputBg, border: `2px solid ${isDone ? t.success : isActive ? t.primary : t.border}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, zIndex: 1, boxShadow: isActive ? `0 0 14px ${t.primaryGlow}` : "none" }}>
@@ -960,10 +964,10 @@ const ModTracking = () => {
                                     </div>
                                     <div style={{ flex: 1, paddingTop: 1 }}>
                                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                            <div style={{ fontWeight: isActive ? 700 : 600, color: isActive ? t.primary : isDone ? t.text : t.textMuted, fontSize: 13 }}>{m.t}</div>
-                                            <div style={{ fontSize: 11, color: t.textMuted }}>{m.d}</div>
+                                            <div style={{ fontWeight: isActive ? 700 : 600, color: isActive ? t.primary : isDone ? t.text : t.textMuted, fontSize: 13 }}>{m.title}</div>
+                                            <div style={{ fontSize: 11, color: t.textMuted }}>{m.date ? new Date(m.date).toLocaleDateString("en-PK", { day: "numeric", month: "short" }) : ""}</div>
                                         </div>
-                                        <div style={{ fontSize: 12, color: t.textMuted, marginTop: 3 }}>{m.desc}</div>
+                                        <div style={{ fontSize: 12, color: t.textMuted, marginTop: 3 }}>{m.description || ""}</div>
                                         {!isDone && <button style={{ marginTop: 6, background: "none", border: "none", color: t.primary, fontSize: 11, cursor: "pointer", padding: 0 }}>+ Add Note</button>}
                                     </div>
                                 </div>
@@ -971,34 +975,31 @@ const ModTracking = () => {
                         })}
                     </div>
                 </Card>
-                <Card>
-                    <STitle icon="msg" sub="Questions sent to your assigned lawyer">Lawyer Q&A</STitle>
-                    {qa.map((item, i) => (
-                        <div key={i} style={{ marginBottom: 18, background: t.inputBg, borderRadius: 14, padding: 14 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: t.text, marginBottom: 8 }}>Q: {item.q}</div>
-                            {item.a
-                                ? <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.7, padding: "10px 14px", background: item.done ? `${t.success}12` : t.inputBg, borderRadius: 10, border: `1px solid ${item.done ? t.success + "30" : t.border}` }}>A: {item.a}</div>
-                                : <Badge type="warn">Awaiting Response</Badge>}
-                        </div>
-                    ))}
-                    <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                        <ThemedInput value={question} onChange={e => setQuestion(e.target.value)} placeholder="Ask your lawyer a question..." style={{ flex: 1 }} />
-                        <BtnPrimary onClick={() => setQuestion("")} style={{ padding: "10px 16px", borderRadius: 12 }}><Ic n="send" s={15} c={t.mode === "dark" ? "#1A2E35" : "#fff"} /></BtnPrimary>
-                    </div>
-                </Card>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <Card>
-                    <STitle icon="cal" sub="Upcoming legal deadlines">Deadlines</STitle>
-                    {deadlines.map(d => (
-                        <div key={d.title} style={{ padding: "12px 14px", borderRadius: 12, background: d.days <= 3 ? `${t.danger}12` : t.inputBg, border: `1px solid ${d.days <= 3 ? t.danger + "30" : t.border}`, marginBottom: 10 }}>
-                            <div style={{ fontWeight: 600, fontSize: 13, color: d.days <= 3 ? t.danger : t.text }}>{d.title}</div>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
-                                <span style={{ fontSize: 11, color: t.textMuted }}>{d.date}</span>
-                                <span style={{ fontSize: 11, fontWeight: 700, color: d.days <= 3 ? t.danger : t.warn }}>{d.days}d left</span>
-                            </div>
+                    <STitle icon="cal" sub="Scheduled hearings for this case">Hearings</STitle>
+                    {!deadlines.length && (
+                        <div style={{ padding: "14px 4px", fontSize: 12.5, color: t.textMuted }}>
+                            {timelineCaseId ? "No hearings scheduled yet." : "Link a case to see its hearings."}
                         </div>
-                    ))}
+                    )}
+                    {deadlines.map((d, i) => {
+                        const when = d.date ? new Date(d.date) : null;
+                        const days = when ? Math.ceil((when - new Date()) / 86400000) : null;
+                        const soon = days !== null && days <= 3;
+                        return (
+                            <div key={d.id || i} style={{ padding: "12px 14px", borderRadius: 12, background: soon ? `${t.danger}12` : t.inputBg, marginBottom: 9 }}>
+                                <div style={{ fontWeight: 600, fontSize: 13, color: soon ? t.danger : t.text }}>{d.purpose || d.court || "Hearing"}</div>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
+                                    <span style={{ fontSize: 11, color: t.textMuted }}>{when ? when.toLocaleDateString("en-PK", { day: "numeric", month: "short", year: "numeric" }) : "Date not set"}</span>
+                                    {days !== null && days >= 0 && (
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: soon ? t.danger : t.warn }}>{days}d left</span>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
                 </Card>
                 <Card>
                     <STitle icon="bell" sub="Hearing, status & alert updates">Notifications</STitle>

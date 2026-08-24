@@ -32,11 +32,15 @@ function DashboardPage() {
     const { user } = useAuth();
     const [rawCases, setRawCases] = useState([]);
     const [aptCount, setAptCount] = useState(0);
+    const [appts, setAppts] = useState([]);
 
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => { if (data?.items) setRawCases(data.items); });
         listAppointments({ page_size: 50 }).then(({ data }) => {
-            if (data?.items) setAptCount(data.items.filter(a => a.status === "confirmed" || a.status === "pending").length);
+            if (!data?.items) return;
+            const live = data.items.filter(a => a.status === "confirmed" || a.status === "pending");
+            setAptCount(live.length);
+            setAppts(live);
         });
     }, []);
 
@@ -51,7 +55,20 @@ function DashboardPage() {
         { l: "Total Clients", v: rawCases.length ? String(clientCnt) : "—", c: "#42D4A0", ic: "clients", ch: "Across all cases", pg: "clients" },
         { l: "Appointments", v: String(aptCount), c: "#4AAFFF", ic: "gavel", ch: "Pending + Confirmed", pg: "appointments" },
     ];
-    const events = [{ time: "10:00 AM", title: "Court Hearing", color: "#4AAFFF", page: "appointments" }, { time: "12:30 PM", title: "Client Meeting", color: "#3EECD6", page: "appointments" }, { time: "2:00 PM", title: "Document Review", color: "#42D4A0", page: "documents" }, { time: "4:30 PM", title: "New Client Consultation", color: "#FFBE45", page: "appointments" }];
+    // Today's real appointments. This used to be four hardcoded entries —
+    // "Court Hearing 10:00 AM", "Client Meeting 12:30 PM" and so on — shown to
+    // a lawyer as their actual agenda. A fabricated schedule in a legal product
+    // is something a user can plan a day around.
+    const _today = new Date().toDateString();
+    const events = appts
+        .filter(a => a.scheduled_at && new Date(a.scheduled_at).toDateString() === _today)
+        .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))
+        .map(a => ({
+            time: new Date(a.scheduled_at).toLocaleTimeString("en-PK", { hour: "numeric", minute: "2-digit" }),
+            title: a.client_name ? `Consultation — ${a.client_name}` : "Consultation",
+            color: a.status === "confirmed" ? "#3EECD6" : "#FFBE45",
+            page: "appointments",
+        }));
 
     const openCaseFromDashboard = (c) => {
         setActiveCase(c.id);
@@ -107,6 +124,11 @@ function DashboardPage() {
                         </Card>
                         <Card className="fade-up s3" style={{ padding: 16 }}>
                             <div className="serif" style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 14 }}>Today's Schedule</div>
+                            {!events.length && (
+                                <div style={{ padding: "18px 4px", fontSize: 12.5, color: t.textMuted }}>
+                                    Nothing scheduled today.
+                                </div>
+                            )}
                             {events.map((ev, i) => (
                                 <div key={ev.time} style={{ display: "flex", gap: 10, cursor: "pointer" }} onClick={() => setPage(ev.page)}>
                                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -120,7 +142,11 @@ function DashboardPage() {
                                 </div>
                             ))}
                             <Divider />
-                            <div style={{ display: "flex", gap: 6 }}>{[{ v: "3", l: "Hearings", c: t.info, pg: "appointments" }, { v: "5", l: "Tasks", c: t.success, pg: "documents" }, { v: "2", l: "Pending", c: t.warn, pg: "cases" }].map(s => (
+                            <div style={{ display: "flex", gap: 6 }}>{[
+                                { v: String(events.length), l: "Today", c: t.info, pg: "appointments" },
+                                { v: String(aptCount), l: "Upcoming", c: t.success, pg: "appointments" },
+                                { v: String(activeCnt), l: "Active cases", c: t.warn, pg: "cases" },
+                            ].map(s => (
                                 <div key={s.l} onClick={() => setPage(s.pg)} style={{ flex: 1, padding: "9px 6px", borderRadius: 9, background: t.primaryGlow2, border: `1px solid ${t.border}`, textAlign: "center", cursor: "pointer" }}>
                                     <div className="mono" style={{ fontSize: 17, fontWeight: 700, color: s.c }}>{s.v}</div>
                                     <div style={{ fontSize: 11, color: t.textMuted, marginTop: 3 }}>{s.l}</div>
