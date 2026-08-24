@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
-import { overseasLawyerDisputes, overseasDisputeBrief, downloadDocument } from "@/lib/api.js";
+import { disputeLawyerInbox, disputeBrief, downloadDocument } from "@/lib/api.js";
 
 const STATE_META = {
     ready_for_drafting: { label: "Ready to draft", type: "success" },
@@ -45,7 +45,7 @@ export function DisputesInboxPage() {
 
     const reload = useCallback(() => {
         setLoading(true);
-        overseasLawyerDisputes().then(({ data }) => {
+        disputeLawyerInbox().then(({ data }) => {
             if (Array.isArray(data)) setItems(data);
             setLoading(false);
         }).catch(() => setLoading(false));
@@ -54,7 +54,7 @@ export function DisputesInboxPage() {
 
     const openBrief = async (id) => {
         setOpeningId(id); setBrief(null);
-        const { data, error } = await overseasDisputeBrief(id);
+        const { data, error } = await disputeBrief(id);
         setOpeningId(null);
         if (error || !data || data.error) return showToast("❌ Could not load the case brief");
         setBrief(data);

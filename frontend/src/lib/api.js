@@ -866,30 +866,37 @@ export async function wasiyyatPdf(payload) {
 
 // Plain-English -> POA structure, and the deterministic risk scorer
 
+export async function disputeSpecialCourtProvinces() {
+  return apiFetch('/disputes/special-court/provinces');
+}
+export async function disputeSpecialCourtPath(province) {
+  return apiFetch(`/disputes/special-court/path?province=${encodeURIComponent(province)}`);
+}
+
 // Property-dispute intake (Special Courts, 2024 Act) — Phase 5a/5b/5c
-export async function overseasDisputeEligibility(id_type, days_abroad) {
+export async function disputeEligibility(id_type, days_abroad) {
   return apiFetch('/disputes/eligibility', { method: 'POST', body: JSON.stringify({ id_type, days_abroad }) });
 }
-export async function overseasDisputeClassify(text) {
+export async function disputeClassify(text) {
   return apiFetch('/disputes/classify', { method: 'POST', body: JSON.stringify({ text }) });
 }
-export async function overseasDisputeCreate(payload) {
+export async function disputeCreate(payload) {
   return apiFetch('/disputes', { method: 'POST', body: JSON.stringify(payload) });
 }
-export async function overseasDisputeList() {
+export async function disputeList() {
   return apiFetch('/disputes');
 }
-export async function overseasDraftPetition(id) {
+export async function disputeDraftPetition(id) {
   return apiFetch(`/disputes/${id}/petition`, { method: 'POST' });
 }
 // Case-brief handoff (read/handoff only — no fee, engagement or payment)
-export async function overseasSendDisputeToLawyer(id) {
+export async function disputeSendToLawyer(id) {
   return apiFetch(`/disputes/${id}/send-to-lawyer`, { method: 'POST' });
 }
-export async function overseasDisputeBrief(id) {
+export async function disputeBrief(id) {
   return apiFetch(`/disputes/${id}/brief`);
 }
-export async function overseasLawyerDisputes() {
+export async function disputeLawyerInbox() {
   return apiFetch('/disputes/lawyer/inbox');
 }
 

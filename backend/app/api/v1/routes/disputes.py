@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.dependencies import get_current_user, require_lawyer
+from app.services import special_court
 from app.services.dispute_intake import DisputeIntake
 
 router = APIRouter(prefix="/disputes", tags=["disputes"])
@@ -116,3 +117,27 @@ async def lawyer_disputes(current_user: dict = Depends(require_lawyer)):
     """A lawyer's inbox of property-dispute case briefs sent to them (summaries)."""
     return await dispute_intake.list_disputes_for_lawyer(current_user["_id"])
 
+
+
+# ── Special-Court forum lookup ────────────────────────────────────────────────
+# Kept with the dispute flow rather than deleted alongside the POA desk: the
+# intake wizard asks which province, and dispute_intake.py resolves the forum
+# through this same module. Removing the endpoint left the wizard calling a 404.
+
+@router.get("/special-court/provinces")
+async def special_court_provinces(current_user: dict = Depends(get_current_user)):
+    """Provinces offered in the Special-Court picker."""
+    return {"provinces": special_court.supported_provinces()}
+
+
+@router.get("/special-court/path")
+async def special_court_path(province: str, current_user: dict = Depends(get_current_user)):
+    """Resolve the special-court remedy for a property dispute, by province.
+
+    Encodes the Protection of Overseas Pakistanis' Property Act 2024 regime, which
+    differs by province and is standing up on a rolling basis. Fails safe: a
+    province whose court is not confirmed operational is routed to the federal
+    framework and a lawyer rather than told to e-file into a court that may not
+    exist yet.
+    """
+    return special_court.resolve(province)
