@@ -852,19 +852,7 @@ export async function wasiyyatPdf(payload) {
   });
 }
 
-// ─── Overseas Desk (Power of Attorney) ────────────────────────────────────────
-
-
-
-
-
-
-
-// Attestation Navigator (objection-aware apostille vs legacy consular chain)
-
-// Special-Court jurisdiction engine (Protection of Overseas Pakistanis' Property Act 2024)
-
-// Plain-English -> POA structure, and the deterministic risk scorer
+// ─── Special-Court forum lookup (property disputes) ──────────────────────────
 
 export async function disputeSpecialCourtProvinces() {
   return apiFetch('/disputes/special-court/provinces');
