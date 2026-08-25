@@ -1,12 +1,61 @@
 # Citation Verification — Session Report
 
 **Attorney.AI** · Muhammad Usama (SP23-BCS-069), COMSATS
-Commits `3da1650 → 11952b2 → b619818` · 25 August 2026
-Test suite: **943 → 958 → 965 → 970 → 993** passing
+Commits `3da1650 … 5deda5a` (11) · 25 August 2026
+**Test suite: 1,232 collected — 1,231 passed, 1 skipped, 0 failed**
 
 Written for the FYP report. Every figure was measured against the live corpus at
 the time stated; none is estimated. Where something is assumed rather than
 verified it is listed in §5 rather than left inline.
+
+Each numbered section reports the figures **as they stood at that step**, because
+how a number moved is part of the evidence. Where a later step superseded an
+earlier figure, the earlier one carries a forward reference. §A below is the
+current state.
+
+---
+
+## A. Index — current state
+
+**Test suite: 1,232 collected · 1,231 passed · 1 skipped · 0 failed.**
+Corpus: **44 statutes · 3,490 sections indexed · 23 dense enough to flag a
+fabrication · 182 sections excluded as repealed.**
+
+### Shipped
+
+| Capability | What it does | §  |
+|---|---|---|
+| **Existence checking** | Four verdicts — `VERIFIED`, `NOT_IN_CORPUS`, `OMITTED`, `UNVERIFIABLE`. Flag rate on recorded traffic **0.0%** with 9/9 positive controls passing | §1, §2 |
+| **Currency checking** | `OMITTED` verdict; each entry carries the instrument, date and jurisdiction that killed the section | §2.2, §6a |
+| **Coverage model** | A statute must *earn* the right to flag: ≥20 sections held and ≥0.80 of those in force. 23 of 44 qualify | §2.1 |
+| **Order/Rule parsing** | `Order VI Rule 15` and friends now surface as `UNVERIFIABLE` instead of vanishing | §4.2a |
+| **Scope statement** | One constant, shipped on every verification record to both the client and lawyer panels | §0 |
+| **Guardianship petition** | Full instrument, drafted from the twelve clauses of s.10 Guardians and Wards Act 1890 | §0 claim 2 |
+| **Succession route advisor** | Guidance, not a filing — NADRA or District Judge, per s.5(b) of the Punjab Act 2021 | §6b |
+| **Wakalatnama checklist** | Only the part Order III Rule 4 CPC prescribes; the gap is disclosed on the document | §0 claim 3 |
+
+### Tracked and open
+
+| # | Problem | Status | §  |
+|---|---|---|---|
+| ① | **Existence ≠ relevance** | Open. A real section cited for something it does not say reads as `VERIFIED`. Measured, not closed | §4.1 |
+| ⑨ | **CPC Order rules collide with body sections** | Partly mitigated (parser); data fix outstanding, effort M–L | §4.2a |
+| ⑤ | Case law can never be flagged | Structural — 502 judgments cannot support a claim of absence | §4.2 |
+| ⑥ | Small statutes cannot flag when complete | Accepted, conservative by design | §4.2 |
+| ⑦ | Sample size | 0.0% flag rate rests on 17 answers; advisory for that reason | §4.2 |
+| — | **Gazette verification** | 182 omitted sections read from bundled PDFs, not Gazette-checked | §5 #1 |
+| — | **D-lite second annotator** | Single-annotated; no agreement statistic claimed | §5 #4 |
+| — | ss.407 / 438 held | Punjab-only 1996 notification, unconfirmed either way | §6a |
+| — | Repeal-awareness for the 1925 Act | Point-in-time only; not continuously checked | §6b |
+
+### Measured and deliberately not shipped
+
+| | Result | §  |
+|---|---|---|
+| **A1 — support checking** | Precision 1.000 on 5 flags, but 95% CI [0.566, 1.000]; **0/10** on same-topic mismatch. Below the pre-committed bar | §3.1–3.2 |
+| **A2 — entailment** | **Foreclosed by a rule fixed before the data existed**, not skipped | §3.3 |
+| CPC comma-widening | 25% precision over the whole document | §2.2 |
+| Demoting CPC from dense | Rejected as theatre — density gates the wrong verdict | §4.2a |
 
 ---
 
@@ -184,15 +233,21 @@ coverage. **Twelve such ranges exist in the CrPC alone.**
 So the answer was **both** a source gap (correctly — the sections do not exist)
 and a splitter blindness (to the *reason*).
 
-| | Before | After |
+| | Before | After (this step) |
 |---|---:|---:|
 | CrPC density | **0.77** (sparse, could not flag) | **0.998** (dense) |
 | Sections correctly classified | — | **407 of 408 in force** |
 | Sections excluded as repealed | 0 | **157** |
 | Statutes able to flag | 21 | **22** |
 
-Corpus-wide: **185 omitted sections** across 4 statutes (CrPC 157, Transfer of
-Property 12, Police Act 12, Limitation Act 4).
+Corpus-wide at this step: **185 omitted sections** across 4 statutes (CrPC 157,
+Transfer of Property 12, Police Act 12, Limitation Act 4).
+
+> **Superseded — see §6a.** A currency check against the official federal
+> consolidation later pulled 9 of those CrPC entries and restored 6, leaving
+> **154** for the CrPC and **182** corpus-wide, with density **0.9976** on 410 of
+> 411 sections in force. The figures above are what was true at this step and are
+> kept because the correction is part of the evidence.
 
 **New `OMITTED` verdict**, checked **before** existence. A repealed section may
 still have a shell chunk in the corpus; check order is the whole difference
@@ -723,7 +778,7 @@ through the same citation verifier as a drafted document, and fails open with
 > axes, and reports what it cannot check as a first-class verdict rather than
 > folding it into a pass or a failure. Existence and currency ship: the corpus
 > now measures coverage against sections still in force, which raised CrPC from
-> 0.77 to 0.998 and let the second most cited criminal statute in the country
+> 0.77 to 0.9976 and let the second most cited criminal statute in the country
 > flag a fabrication for the first time, and a distinct `OMITTED` verdict catches
 > the citation a lawyer cannot catch by reading — a real section the legislature
 > has deleted. Support does not ship: embedding similarity detects gross
