@@ -1254,6 +1254,137 @@ def urdu_pleading(doc_id: str, f: dict) -> Path:
     return out
 
 
+def guardianship_petition(doc_id: str, f: dict) -> Path:
+    """Petition under s.10, Guardians and Wards Act 1890.
+
+    PROVENANCE. Laid out from the Act itself — s.10(1) enumerates, in clauses
+    (a) to (l), the particulars the petition must state, and s.10(3) requires an
+    accompanying declaration of willingness. The order of the sections below
+    follows the order of those clauses, so the document can be read against the
+    statute line by line.
+
+    It is NOT copied from any court's published guardianship proforma. LHC
+    asserts copyright over its site material and asks that it not be downloaded
+    without prior agreement; IHC's site disclaims its content as "just for
+    Information", not for official use. Statutory requirements are law and carry
+    no such restriction, so the Act is the only source used here.
+
+    A particular the petitioner has not supplied is printed as an explicit
+    "[not stated]" rather than silently dropped. s.10(1) requires the petition to
+    state these things "so far as can be ascertained" — a blank line hides the
+    gap from the judge and from the petitioner, while a marked gap is something
+    the compliance report can also point at.
+    """
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    out = UPLOADS_DIR / f"{doc_id}.pdf"
+    s = _styles()
+    doc = _base_doc(out)
+    story = []
+
+    # Numbered dynamically. A conditional clause that does not apply must not
+    # leave a hole in the sequence — a petition that jumps from 1 to 3 reads to
+    # a judge like a page went missing.
+    n = [0]
+
+    def head(label: str) -> str:
+        n[0] += 1
+        return f"{n[0]}. {label}"
+
+    def stated(key: str) -> str:
+        v = (f.get(key) or "").strip() if isinstance(f.get(key), str) else f.get(key)
+        return v if v else "[not stated]"
+
+    story += [
+        P(f"IN THE {(f.get('court_name') or 'DISTRICT COURT').upper()}", s["title"]),
+        P(f"GUARDIAN CASE NO. _______ / {datetime.now(timezone.utc).year}",
+          ParagraphStyle("gc", parent=s["body"], alignment=TA_CENTER)),
+        P("PETITION UNDER SECTION 10 OF THE GUARDIANS AND WARDS ACT, 1890",
+          ParagraphStyle("gs", parent=s["body"], alignment=TA_CENTER)),
+        _hr(),
+    ]
+
+    story += _field("Petitioner", (f.get("petitioner_name") or "")
+                    + (f", {f.get('petitioner_address')}" if f.get("petitioner_address") else ""), s)
+    if f.get("petitioner_relation"):
+        story += _field("Relationship to the minor", f["petitioner_relation"], s)
+    story += [_hr()]
+
+    # s.10(1)(a)
+    story += [P(head("PARTICULARS OF THE MINOR"), s["heading"]),
+              P(f"Name: {stated('minor_name')} &nbsp;&nbsp; Sex: {stated('minor_sex')}", s["body"]),
+              P(f"Religion: {stated('minor_religion')} &nbsp;&nbsp; "
+                f"Date of birth: {stated('minor_dob')}", s["body"]),
+              P(f"Ordinarily resides at: {stated('minor_residence')}", s["body"])]
+
+    # s.10(1)(b) — only where the minor is female
+    if (f.get("minor_sex") or "").strip().lower().startswith("f") or f.get("minor_marital_status"):
+        story += [P(head("MARITAL STATUS OF THE MINOR (s.10(1)(b))"), s["heading"]),
+                  P(stated("minor_marital_status"), s["body"])]
+
+    # s.10(1)(c)
+    story += [P(head("PROPERTY OF THE MINOR (s.10(1)(c))"), s["heading"]),
+              P(f.get("minor_property") or "The minor is not stated to own property.", s["body"])]
+
+    # s.10(1)(d), (e)
+    story += [P(head("CUSTODY AND RELATIONS"), s["heading"]),
+              P(f"Person having custody or possession: {stated('custodian_name_address')}", s["body"]),
+              P(f"Near relations of the minor and where they reside: {stated('near_relations')}", s["body"])]
+
+    # s.10(1)(f), (g)
+    story += [P(head("EXISTING AND PREVIOUS GUARDIANSHIP"), s["heading"]),
+              P(f"Guardian already appointed or declared: {stated('existing_guardian')}", s["body"]),
+              P(f"Previous applications to this or any other Court: "
+                f"{stated('previous_applications')}", s["body"])]
+
+    # s.10(1)(h), (i), (j)
+    story += [P(head("NATURE OF THIS APPLICATION"), s["heading"]),
+              P(f"Guardianship sought of: {stated('application_scope')}", s["body"])]
+    if f.get("proposed_guardian_qualifications"):
+        story += [P(f"Qualifications of the proposed guardian: "
+                    f"{f['proposed_guardian_qualifications']}", s["body"])]
+    if f.get("declaration_grounds"):
+        story += [P(f"Grounds on which guardianship is claimed: "
+                    f"{f['declaration_grounds']}", s["body"])]
+
+    # s.10(1)(k)
+    story += [P(head("CAUSES LEADING TO THIS APPLICATION (s.10(1)(k))"), s["heading"]),
+              P(stated("causes"), s["body"])]
+
+    # s.17 is the Court's test; naming it keeps the prayer honest about what is
+    # actually being asked and on what basis.
+    story += [P(head("PRAYER"), s["heading"]),
+              P("It is respectfully prayed that this Honourable Court may be pleased to "
+                "appoint or declare the petitioner as guardian as sought above, the same "
+                "being for the welfare of the minor within the meaning of section 17 of "
+                "the Guardians and Wards Act, 1890.", s["body"])]
+
+    story += [_hr(),
+              P(f"Date: {f.get('date', _today())}", s["body"]),
+              Spacer(1, 0.8 * cm),
+              P("______________________", s["body"]),
+              P(f.get("petitioner_name", "Petitioner"), s["small"])]
+
+    # s.10(1) requires verification as for a plaint under the CPC.
+    story += [Spacer(1, 0.4 * cm),
+              P("VERIFICATION", s["heading"]),
+              P("Verified on oath at ____________ on ____________ that the contents of "
+                "this petition are true and correct to the best of my knowledge and "
+                "belief, and that nothing material has been concealed.", s["body"]),
+              Spacer(1, 0.6 * cm),
+              P("______________________", s["body"]),
+              P("Petitioner", s["small"])]
+
+    # s.10(3) — a separate instrument, so it is flagged rather than fabricated.
+    story += [Spacer(1, 0.4 * cm),
+              P("ACCOMPANYING DECLARATION (s.10(3))", s["heading"]),
+              P(f.get("willingness_declaration")
+                or "NOT ATTACHED. Section 10(3) requires this petition to be accompanied "
+                   "by a declaration of the proposed guardian's willingness to act, signed "
+                   "by them and attested by at least two witnesses.", s["small"])]
+
+    doc.build(story)
+    return out
+
 _GENERATORS = {
     "payment_receipt":    payment_receipt,
     "urdu_pleading":      urdu_pleading,
@@ -1274,6 +1405,7 @@ _GENERATORS = {
     "complaint_154_3":        complaint_154_3,
     "petition_22a":           petition_22a,
     "fia_cybercrime":         fia_cybercrime,
+    "guardianship_petition":  guardianship_petition,
 }
 
 

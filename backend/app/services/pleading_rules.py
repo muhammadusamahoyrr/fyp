@@ -151,6 +151,144 @@ _GENERAL_RULES: tuple[dict, ...] = (
 )
 
 
+# ── Section 10, Guardians and Wards Act 1890 — Form of application ───────────
+#
+# PROVENANCE. Drafted from the Act's own text as held in this corpus (Guardians
+# and Wards Act 1890, 53 of 53 sections indexed, dense). It is NOT derived from
+# the Lahore High Court's or Islamabad High Court's published guardianship
+# proformas, structurally or otherwise: LHC asserts copyright over site material
+# and asks that it not be downloaded without prior agreement, and IHC's site
+# carries a blanket disclaimer that its content is "just for Information" and
+# should not be used "for official purpose".
+#
+# What appears below is the statutory requirement itself, which is law and not
+# anyone's copyright. s.10(1) enumerates the particulars a petition must state;
+# the clause letters and wording are quoted from the Act.
+#
+# s.10(1) also requires the petition to be "signed and verified in manner
+# prescribed by the Code of Civil Procedure, 1908 ... for the signing and
+# verification of a plaint" — so the Order VI general rules already encoded in
+# this module apply to a guardianship petition by direct statutory reference,
+# not by analogy.
+GUARDIANSHIP = "guardianship_petition"
+
+_CPC_NOTE = ("Order VI Rule 3 CPC: \"The forms in Appendix A, when "
+                        "applicable, and forms of like character shall be used for "
+                        "all pleadings.\" The structure of a pleading is prescribed "
+                        "by statute.")
+
+_GUARDIANSHIP_NOTE = (
+    "Section 10(1), Guardians and Wards Act 1890 enumerates the particulars a "
+    "guardianship petition must state, and requires it to be signed and verified "
+    "as a plaint under the CPC 1908. Drafted from the Act, not from any court's "
+    "published proforma."
+)
+
+_GUARDIANSHIP_RULES: tuple[dict, ...] = (
+    {
+        "clause": "s.10(1)(a)",
+        "text": ("the name, sex, religion, date of birth and ordinary residence "
+                 "of the minor"),
+        "fields": ("minor_name",),
+        "also_all": ("minor_sex", "minor_religion", "minor_dob", "minor_residence"),
+        "hint": ("All five particulars are named in the clause. Residence also "
+                 "fixes which District Court has jurisdiction under s.9."),
+    },
+    {
+        "clause": "s.10(1)(b)",
+        "text": ("where the minor is a female, whether she is married, and, if "
+                 "so, the name and age of her husband"),
+        "fields": ("minor_marital_status",),
+        "conditional_on": "minor_is_female",
+        "hint": ("Required only where the minor is female. It matters: s.19(a) "
+                 "bars appointing a guardian of the person of a married female "
+                 "minor whose husband is not unfit."),
+    },
+    {
+        "clause": "s.10(1)(c)",
+        "text": ("the nature, situation and approximate value of the property, "
+                 "if any, of the minor"),
+        "fields": ("minor_property",),
+        "conditional_on": "minor_has_property",
+        "hint": ("Required where the minor has property — and it opens the "
+                 "alternative forum in s.9(2), the Court where the property is."),
+    },
+    {
+        "clause": "s.10(1)(d)",
+        "text": ("the name and residence of the person having the custody or "
+                 "possession of the person or property of the minor"),
+        "fields": ("custodian_name_address",),
+        "hint": ("This person must be served under s.11(1)(a)(ii), so the "
+                 "petition has to identify them."),
+    },
+    {
+        "clause": "s.10(1)(e)",
+        "text": "what near relations the minor has, and where they reside",
+        "fields": ("near_relations",),
+        "hint": "The Court weighs nearness of kin under s.17(2).",
+    },
+    {
+        "clause": "s.10(1)(f)",
+        "text": ("whether a guardian of the person or property has been "
+                 "appointed by will or other instrument, or appointed or "
+                 "declared by the Court"),
+        "fields": ("existing_guardian",),
+        "hint": ("s.7(3) blocks appointing a replacement until an existing "
+                 "guardian's powers have ceased, so silence here is not neutral."),
+    },
+    {
+        "clause": "s.10(1)(g)",
+        "text": ("whether an application has at any time been made to the Court "
+                 "or to any other Court with respect to the guardianship of the "
+                 "person or property, or both, of the minor, and, if so, when, "
+                 "to what Court and with what result"),
+        "fields": ("previous_applications",),
+        "hint": ("Answer even when the answer is none — the clause asks whether, "
+                 "not only what."),
+    },
+    {
+        "clause": "s.10(1)(h)",
+        "text": ("whether the application is for the appointment or declaration "
+                 "of a guardian of the person of the minor, or of his property, "
+                 "or of both"),
+        "fields": ("application_scope",),
+        "hint": ("Person, property, or both. It decides the forum under s.9 and "
+                 "the duties that follow under s.24 or s.27."),
+    },
+    {
+        "clause": "s.10(1)(i)",
+        "text": ("where the application is to appoint a guardian, the "
+                 "qualifications of the proposed guardian"),
+        "fields": ("proposed_guardian_qualifications",),
+        "conditional_on": "seeks_appointment",
+        "hint": "Required when asking the Court to APPOINT rather than declare.",
+    },
+    {
+        "clause": "s.10(1)(j)",
+        "text": ("where the application is to declare a person to be a guardian, "
+                 "the grounds on which that person claims"),
+        "fields": ("declaration_grounds",),
+        "conditional_on": "seeks_declaration",
+        "hint": "Required when asking the Court to DECLARE an existing claim.",
+    },
+    {
+        "clause": "s.10(1)(k)",
+        "text": "the causes which have led to the making of the application",
+        "fields": ("causes",),
+        "hint": "Why now — the events that made the application necessary.",
+    },
+    {
+        "clause": "s.10(3)",
+        "text": ("the application must be accompanied by a declaration of the "
+                 "willingness of the proposed guardian to act, signed by him and "
+                 "attested by at least two witnesses"),
+        "fields": ("willingness_declaration",),
+        "hint": ("A separate signed and twice-attested declaration. Without it "
+                 "the application is incomplete on the face of the statute."),
+    },
+)
+
+
 def _has(draft: dict, keys: tuple[str, ...]) -> bool:
     """True when any of `keys` carries non-empty content."""
     for k in keys:
@@ -183,6 +321,16 @@ def _check(rule: dict, draft: dict, context: dict) -> dict:
     if ok and rule.get("also") and not _has(draft, rule["also"]):
         ok = False
         partial = f"present but incomplete — missing {', '.join(rule['also'])}"
+    # `also_all` is for clauses that enumerate several particulars in one breath
+    # — "the name, sex, religion, date of birth and ordinary residence of the
+    # minor". `also` is satisfied by ANY of its fields, which is right for a
+    # clause with one companion particular and far too lenient for a clause with
+    # five: four could be blank and the clause would still read as satisfied.
+    if ok and rule.get("also_all"):
+        absent = [k for k in rule["also_all"] if not _has(draft, (k,))]
+        if absent:
+            ok = False
+            partial = f"present but incomplete — missing {', '.join(absent)}"
 
     return {
         "clause": rule["clause"],
@@ -211,6 +359,13 @@ def check_pleading(template_type: str, draft: dict, context: dict | None = None)
     elif template_type == WRITTEN_STATEMENT:
         rules = _GENERAL_RULES
         basis = "Order VI, Code of Civil Procedure 1908"
+    elif template_type == GUARDIANSHIP:
+        # The Order VI rules are not bolted on by analogy: s.10(1) itself
+        # requires signing and verification "in manner prescribed by the Code of
+        # Civil Procedure, 1908 ... for a plaint".
+        rules = _GUARDIANSHIP_RULES + _GENERAL_RULES
+        basis = ("Section 10, Guardians and Wards Act 1890, read with Order VI, "
+                 "Code of Civil Procedure 1908")
     else:
         return {
             "checked": False,
@@ -220,6 +375,7 @@ def check_pleading(template_type: str, draft: dict, context: dict | None = None)
             "items": [],
         }
 
+    note = (_GUARDIANSHIP_NOTE if template_type == GUARDIANSHIP else _CPC_NOTE)
     items = [_check(r, draft, context) for r in rules]
     missing = [i for i in items if i["status"] == Status.MISSING.value]
 
@@ -227,10 +383,7 @@ def check_pleading(template_type: str, draft: dict, context: dict | None = None)
         "checked": True,
         "template_type": template_type,
         "basis": basis,
-        "source_note": ("Order VI Rule 3 CPC: \"The forms in Appendix A, when "
-                        "applicable, and forms of like character shall be used for "
-                        "all pleadings.\" The structure of a pleading is prescribed "
-                        "by statute."),
+        "source_note": note,
         "satisfied": sum(1 for i in items if i["status"] == Status.SATISFIED.value),
         "missing": len(missing),
         "not_applicable": sum(1 for i in items if i["status"] == Status.NOT_APPLICABLE.value),

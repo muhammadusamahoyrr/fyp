@@ -58,6 +58,7 @@ class DocumentTemplate(str, Enum):
     BAIL_APPLICATION = "bail_application"
     URDU_PLEADING = "urdu_pleading"
     DISPUTE_PETITION = "dispute_petition"
+    GUARDIANSHIP_PETITION = "guardianship_petition"
 
 
 class DocumentReviewStatus(str, Enum):

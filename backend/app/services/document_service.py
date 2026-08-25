@@ -113,6 +113,7 @@ TEMPLATE_TITLES = {
     DocumentTemplate.BAIL_APPLICATION:       "Bail Application (s.497/498 CrPC)",
     DocumentTemplate.URDU_PLEADING:          "Court Urdu Pleading",
     DocumentTemplate.DISPUTE_PETITION:       "Special Court Petition (draft)",
+    DocumentTemplate.GUARDIANSHIP_PETITION:  "Guardianship Petition (s.10 Guardians and Wards Act 1890)",
 }
 
 # ── AI field extraction prompts per template ──────────────────────────────────
@@ -123,6 +124,36 @@ You are a Pakistani legal document specialist. Extract structured fields from th
 Return ONLY a valid JSON object with the exact keys listed. Use empty string "" for any field you cannot determine. Do not add extra keys."""
 
 _EXTRACT_PROMPTS = {
+    # Keys mirror the particulars s.10(1) Guardians and Wards Act 1890 requires,
+    # so a missing field maps to a named clause rather than a vague gap.
+    "guardianship_petition": """\
+Extract these fields from the case description (JSON only). This is a petition
+under section 10 of the Guardians and Wards Act 1890. Leave a field as "" if the
+description does not say — do NOT invent particulars about a child.
+{
+  "court_name": "District Court having jurisdiction where the minor ordinarily resides",
+  "petitioner_name": "full name of the person applying",
+  "petitioner_address": "petitioner's address",
+  "petitioner_relation": "how the petitioner is related to the minor, if at all",
+  "minor_name": "full name of the minor",
+  "minor_sex": "sex of the minor",
+  "minor_religion": "religion of the minor",
+  "minor_dob": "date of birth of the minor",
+  "minor_residence": "where the minor ordinarily resides",
+  "minor_marital_status": "if the minor is female, whether she is married; name and age of husband if so",
+  "minor_property": "nature, situation and approximate value of the minor's property, if any",
+  "custodian_name_address": "name and residence of the person having custody or possession of the minor or the property",
+  "near_relations": "what near relations the minor has and where they reside",
+  "existing_guardian": "whether a guardian has already been appointed by will, instrument or Court",
+  "previous_applications": "whether any application about this guardianship was made before, when, to which Court, and with what result",
+  "application_scope": "whether the application is for guardianship of the person, the property, or both",
+  "proposed_guardian_qualifications": "qualifications of the proposed guardian",
+  "declaration_grounds": "if asking the Court to DECLARE someone guardian, the grounds on which that person claims",
+  "causes": "the causes which have led to the making of this application",
+  "facts": "the material facts relied on, in numbered chronological order (Order VI Rule 2 CPC)",
+  "willingness_declaration": "whether the proposed guardian has signed a declaration of willingness to act",
+  "date": "today's date in DD Month YYYY format"
+}""",
     "legal_notice": """\
 Extract these fields from the case description (JSON only):
 {
