@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.dependencies import get_current_user, require_lawyer
-from app.services import special_court
+from app.services import special_court, succession_route
 from app.services.dispute_intake import DisputeIntake
 
 router = APIRouter(prefix="/disputes", tags=["disputes"])
@@ -169,3 +169,40 @@ async def special_court_path(province: str, current_user: dict = Depends(get_cur
     """
     return special_court.resolve(province)
 
+
+# ── Succession: which forum grants the certificate ───────────────────────────
+# Guidance, not a filing. s.7 of the Punjab Letters of Administration and
+# Succession Certificates Act 2021 leaves the FORM to NADRA, so there is no
+# court format to draft — what a person needs is the right counter.
+#
+# CURRENCY. Succession Act 1925 ss.370 and 372 were checked against the official
+# consolidation at pakistancode.gov.pk: both in force, amended only by
+# post-independence terminology adaptations (A.O. 1937/1949/1961, F.A.O. 1975).
+# That is POINT-IN-TIME verification. Full repeal-awareness for the 1925 Act is
+# NOT wired: build_omission_map.py reads knowledge_base/processed/text, which the
+# PDF ingest path does not populate, so a future repeal of either section would
+# not be picked up automatically. See docs/CITATION_VERIFICATION_SESSION_REPORT.md.
+
+@router.get("/succession/route")
+async def succession_forum_route(
+    heirs_dispute: bool = False,
+    province: str = "",
+    property_in_punjab: bool = False,
+    needs_probate_or_administration: bool = False,
+    current_user: dict = Depends(get_current_user),
+):
+    """Which forum issues the succession certificate — NADRA or the District Judge.
+
+    The referral trigger is s.5(b) of the Punjab Act: a factual controversy
+    amongst the legal heirs, and nothing else. Estate value and the number of
+    heirs do not move the forum, so they are not parameters here.
+
+    Every provision the answer cites is run through the citation verifier before
+    it is returned, exactly as a drafted document is.
+    """
+    return await succession_route.advise_verified(
+        heirs_dispute=heirs_dispute,
+        province=province,
+        property_in_punjab=property_in_punjab,
+        needs_probate_or_administration=needs_probate_or_administration,
+    )

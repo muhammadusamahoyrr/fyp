@@ -548,6 +548,57 @@ needs a Punjab source that publishes the current text — not a decision.
 
 ---
 
+## 6b. Succession routing: point-in-time verification, not continuous currency
+
+**Succession Act 1925 ingested** from pakistancode.gov.pk — 133 pages, 635
+chunks, **388 of 392 sections, ratio 0.9898, DENSE**. Zero ceiling outliers, zero
+extraction artifacts; 4 genuine gaps (ss.50, 57, 116, 117). Corpus: 43 → 44
+statutes, 3,101 → 3,490 sections, 22 → 23 dense.
+
+It was ingested for one reason: **s.5(b) of the Punjab LAS Act 2021 refers
+contested succession cases to the Succession Act 1925**, so without holding the
+1925 Act a citation to s.372 could not be checked at all.
+
+### What was verified, and when
+
+ss.**370** and **372** were checked against the official consolidation's own
+amendment footnotes:
+
+| Section | Amendments | Outcome |
+|---|---|---|
+| s.370 | A.O. 1949, F.A.O. 1975, A.O. 1937 — terminology substitutions | CONFIRMED CURRENT |
+| s.372 | A.O. 1961 Art.2 & Sch. (w.e.f. 23-03-1956, inserted sub-s.(3)); A.O. 1937 | CONFIRMED CURRENT |
+
+The Punjab Act does **not** amend the 1925 Act: s.12 is an overriding clause, and
+s.14 repeals only its own predecessor Ordinance (VIII of 2021). Separately, the
+2021 Act was itself amended in 2025 (LXII of 2025), which **inserted "[or a civil
+court]" into s.3** — the text the advisor quotes — and omitted s.10.
+
+### ⚠️ The limitation this rests on
+
+**This is POINT-IN-TIME verification, not continuous currency checking.**
+
+`build_omission_map.py` reads `knowledge_base/processed/text/`, which the PDF
+ingest path does **not** populate. So the Succession Act 1925 is absent from the
+omission map, and a future repeal of s.370 or s.372 **would not be detected
+automatically** — the advisor would keep citing them.
+
+Same shape as the CrPC omission-map gap in §6a: the coverage is sound, the
+repeal-awareness is not wired. Full integration is separate future work. Until
+then the guidance rests on a check made on 25 August 2026, recorded here and in
+`app/api/v1/routes/disputes.py`.
+
+### What shipped instead of a form
+
+**No court petition was built.** s.7 of the Punjab Act leaves the form to NADRA,
+so drafting one would invent paperwork the statute does not ask for. The feature
+is a **route advisor** returning guidance, not a document — no PDF, no
+`doc_id`, flagged `is_guidance_not_a_filing`. Every provision it cites goes
+through the same citation verifier as a drafted document, and fails open with
+`ran: false` rather than withholding the advice.
+
+---
+
 ## 7. One-paragraph summary for the report
 
 > The system separates existence, currency, and support as three independent

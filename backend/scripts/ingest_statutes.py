@@ -116,6 +116,12 @@ REGISTRY: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("transfer",              "Transfer of Property Act 1882",        "civil",         (CIVIL,)),
     ("contract",              "Contract Act 1872",                    "civil",         (CIVIL,)),
     ("civil procedure",       "CPC 1908",                             "civil",         (CIVIL,)),
+    # Federal succession law. The Punjab LAS Act 2021 routes UNDISPUTED
+    # succession to NADRA, but s.5(b) of that Act refers any case with a
+    # factual controversy between heirs back to "the Succession Act, 1925
+    # (XXXIX of 1925)" — so the 1925 Act governs the contested path and has
+    # to be held to verify a citation to it. Sourced from pakistancode.gov.pk.
+    ("succession-act",        "Succession Act 1925",                  "civil",         (CIVIL,)),
     # Family
     ("muslim-family-laws",    "Muslim Family Laws Ordinance 1961",    "family",        (FAMILY,)),
     ("muslim family laws",    "Muslim Family Laws Ordinance 1961",    "family",        (FAMILY,)),
