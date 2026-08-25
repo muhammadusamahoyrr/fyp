@@ -609,17 +609,15 @@ function ScreenInbox({ t, onOpen, docs, loading }) {
 function ScreenReview({ doc, t, onBack, onContinue }) {
     const [mode, setMode] = useState("view");
     const [content, setContent] = useState(doc?.content || DOC_CONTENT);
-    const [checks] = useState([
-        { label: "Legal Compliance", status: "verified" },
-        { label: "Case Details", status: "verified" },
-        { label: "Factual Info", status: "review" },
-        { label: "Format", status: "passed" },
-    ]);
-    const statusStyle = {
-        verified: { bg: "rgba(77,212,163,0.15)", color: "#4DD4A3", border: "rgba(77,212,163,0.3)", label: "✓ Verified" },
-        review: { bg: "rgba(255,200,87,0.15)", color: "#FFC857", border: "rgba(255,200,87,0.3)", label: "⚠ Review" },
-        passed: { bg: "rgba(64,240,220,0.15)", color: "#40F0DC", border: "rgba(64,240,220,0.3)", label: "✓ Passed" }
-    };
+    // These two come from the document itself, computed when it was generated
+    // and frozen on the record. They replace four hardcoded rows that read
+    // "Legal Compliance ✓ Verified / Case Details ✓ Verified / Factual Info
+    // ⚠ Review / Format ✓ Passed" on EVERY document regardless of content —
+    // nothing was ever checked. Telling the lawyer who signs and files that a
+    // draft is verified, when no check ran, is the most expensive lie this
+    // screen could tell.
+    const compliance = doc?.compliance || null;
+    const verification = doc?.verification || null;
 
     return (
         <div className="rgrid" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
@@ -705,32 +703,99 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                     </div>
                 )}
 
-                {/* Legal Compliance */}
+                {/* Statutory completeness — real, from pleading_rules at generation */}
                 <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "14px 16px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
-                        <span style={{ fontSize: 15 }}>✅</span>
-                        <div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Legal Compliance</div>
-                            <div style={{ fontSize: 10, color: t.textMuted }}>Automated checks</div>
-                        </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>
+                        Required particulars
                     </div>
-                    {checks.map(c => {
-                        const s = statusStyle[c.status];
-                        return (
-                            <div key={c.label} style={{
-                                display: "flex", justifyContent: "space-between",
-                                alignItems: "center", padding: "7px 0", borderBottom: `1px solid ${t.border}30`
-                            }}>
-                                <span style={{ fontSize: 12, color: t.textDim }}>{c.label}</span>
-                                <span style={{
-                                    fontSize: 10, padding: "2px 8px", borderRadius: 20,
-                                    background: s.bg, color: s.color, border: `1px solid ${s.border}`, fontWeight: 700
-                                }}>
-                                    {s.label}
-                                </span>
+                    {!compliance?.checked ? (
+                        // Not "all clear" — the check genuinely does not cover this
+                        // template. Saying so beats an empty panel that reads as a pass.
+                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
+                            No completeness rules apply to this document type. Nothing was checked.
+                        </div>
+                    ) : (
+                        <>
+                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 9 }}>
+                                Checked against {compliance.basis}
                             </div>
-                        );
-                    })}
+                            <div style={{
+                                fontSize: 12, fontWeight: 700, marginBottom: 8,
+                                color: compliance.complete ? "#4DD4A3" : "#FFC857"
+                            }}>
+                                {compliance.complete
+                                    ? "Contains every particular the Code requires"
+                                    : `${compliance.missing} required particular${compliance.missing === 1 ? "" : "s"} missing`}
+                            </div>
+                            {(compliance.items || []).filter(i => i.status === "missing").map(i => (
+                                <div key={i.clause} style={{ marginBottom: 7, paddingLeft: 9, borderLeft: "2px solid rgba(255,200,87,0.35)" }}>
+                                    <div style={{ fontSize: 11.5, fontWeight: 600, color: t.textDim }}>
+                                        {i.clause} — {i.requirement}
+                                    </div>
+                                    <div style={{ fontSize: 10.5, color: t.textMuted, marginTop: 2 }}>{i.hint}</div>
+                                </div>
+                            ))}
+                        </>
+                    )}
+                </div>
+
+                {/* Citation verification. The lawyer signing this is the one who
+                    carries the cost of a bad citation, so the panel leads with what
+                    could NOT be confirmed rather than with a count of successes.
+                    No tick: this checks existence only, never whether an authority
+                    supports the proposition it is cited for. */}
+                <div style={{
+                    background: t.card, borderRadius: 12, padding: "14px 16px",
+                    border: `1px solid ${verification?.counts?.not_in_corpus > 0 ? "rgba(217,54,84,0.45)" : t.border}`
+                }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>
+                        Authorities cited
+                    </div>
+
+                    {!verification ? (
+                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
+                            This document predates citation checking. Its authorities were
+                            never verified — check each one before filing.
+                        </div>
+                    ) : verification.ran === false ? (
+                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
+                            {verification.summary}
+                        </div>
+                    ) : verification.counts?.total === 0 ? (
+                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
+                            No authority is cited anywhere in this draft.
+                        </div>
+                    ) : (
+                        <>
+                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 9 }}>
+                                {verification.counts.verified} found in the corpus ·{" "}
+                                {verification.counts.unverifiable} cannot be checked here
+                            </div>
+                            {(verification.checks || [])
+                                .filter(c => c.status !== "VERIFIED")
+                                .map((c, i) => (
+                                    <div key={`${c.canonical}-${i}`} style={{
+                                        marginBottom: 8, paddingLeft: 9,
+                                        borderLeft: `2px solid ${c.status === "NOT_IN_CORPUS" ? "rgba(217,54,84,0.5)" : "rgba(150,150,150,0.35)"}`
+                                    }}>
+                                        <div style={{
+                                            fontSize: 11.5, fontWeight: 600,
+                                            color: c.status === "NOT_IN_CORPUS" ? "#FF6B7A" : t.textDim
+                                        }}>
+                                            {c.canonical}
+                                            <span style={{ fontWeight: 500, color: t.textMuted }}>
+                                                {c.status === "NOT_IN_CORPUS" ? " — not found" : " — cannot verify"}
+                                            </span>
+                                        </div>
+                                        <div style={{ fontSize: 10.5, color: t.textMuted, marginTop: 2 }}>{c.detail}</div>
+                                    </div>
+                                ))}
+                            <div style={{ fontSize: 10, color: t.textMuted, marginTop: 6, fontStyle: "italic" }}>
+                                Existence only — a real provision cited for something it does
+                                not say still shows as found.
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 {/* Document meta */}
@@ -1133,6 +1198,11 @@ function _mapQueueDoc(d) {
         submitted: d.submitted_at ? new Date(d.submitted_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
         note: d.review_note || "",
         lawyerNote: d.lawyer_note || "",
+        // Carried through verbatim: the review screen shows what was actually
+        // checked when the draft was generated. Dropping them here would leave
+        // the panels blank, which reads as "nothing to report".
+        compliance: d.compliance || null,
+        verification: d.verification || null,
     };
 }
 

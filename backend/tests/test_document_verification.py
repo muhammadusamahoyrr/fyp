@@ -120,3 +120,40 @@ def test_documents_generated_before_this_feature_still_serialize():
            "status": "generated"}
     out = DocumentOut(**doc).model_dump(by_alias=True)
     assert out["verification"] is None
+
+
+# ── the lawyer's inbox ────────────────────────────────────────────────────────
+
+def test_review_queue_carries_both_checks_to_the_lawyer():
+    """ReviewQueueItem is a second allowlist. The reviewing lawyer signs and
+    files the document, so they are the one person who must not be shown a
+    draft whose citation warnings were dropped in serialization."""
+    from app.schemas.document import ReviewQueueItem
+
+    row = {
+        "id": "d1", "template_type": "plaint_civil", "title": "Civil Plaint",
+        "status": "generated", "review_status": "pending",
+        "compliance": {"checked": True, "complete": False, "missing": 2,
+                       "basis": "Order VII Rule 1 CPC", "items": []},
+        "verification": {
+            "ran": True, "needs_human_check": True,
+            "counts": {"total": 2, "verified": 1, "not_in_corpus": 1,
+                       "unverifiable": 0},
+            "checks": [{"raw": "PPC Section 999", "kind": "statute",
+                        "canonical": "PPC 1860 s.999",
+                        "status": "NOT_IN_CORPUS", "detail": "absent",
+                        "in_evidence": None}],
+        },
+    }
+    out = ReviewQueueItem(**row).model_dump()
+    assert out["verification"]["counts"]["not_in_corpus"] == 1
+    assert out["verification"]["checks"][0]["canonical"] == "PPC 1860 s.999"
+    assert out["compliance"]["missing"] == 2
+
+
+def test_review_queue_row_without_the_checks_still_serializes():
+    from app.schemas.document import ReviewQueueItem
+
+    out = ReviewQueueItem(id="old", title="NDA").model_dump()
+    assert out["verification"] is None
+    assert out["compliance"] is None

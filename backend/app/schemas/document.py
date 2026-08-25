@@ -82,6 +82,12 @@ class ReviewQueueItem(BaseModel):
     urgency: str | None = None
     lawyer_note: str | None = None
     reviewed_at: datetime | None = None
+    # The two checks computed when the document was generated. The service
+    # already passes both through; without these lines this allowlist drops
+    # them, and the reviewing lawyer — the person who signs and files — sees no
+    # citation warnings at all, while the client who generated the draft did.
+    compliance: dict[str, Any] | None = None
+    verification: dict[str, Any] | None = None
     # Display enrichment added by the service.
     client_name: str | None = None
     case_number: str | None = None
