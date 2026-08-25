@@ -289,6 +289,115 @@ _GUARDIANSHIP_RULES: tuple[dict, ...] = (
 )
 
 
+# ── Order III Rule 4, CPC 1908 — Appointment of pleader ──────────────────────
+#
+# WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT.
+#
+# This is NOT a Wakalatnama. It is a checklist of the things Order III Rule 4
+# requires for an appointment of a pleader to be valid.
+#
+# The distinction is the whole point. Rule 4 is an EXECUTION rule, not a
+# CONTENTS rule: it says the appointment must be in writing, who must sign it,
+# that it must be filed, and how long it lasts — and never what the document
+# must say. Compare s.10 of the Guardians and Wards Act, which enumerates twelve
+# clauses of required particulars, or s.372 of the Succession Act, which
+# enumerates six. There is no equivalent list here.
+#
+# The contents of the instrument come from the High Court Rules and Orders,
+# which this corpus does not hold — and which the Lahore High Court publishes
+# under an assertion of copyright. Rule 4(4) makes that delegation explicit in
+# the statute itself: "The High Court may, by general order, direct that, where
+# the person by whom a pleader is appointed is unable to write his name, his
+# mark upon the document appointing the pleader shall be attested..."
+#
+# So the checklist covers what statute prescribes and says plainly that the rest
+# is missing. Drafting the instrument would mean inventing clauses and
+# presenting them as statutory.
+#
+# Quoted verbatim from Order III Rule 4 as held in this corpus. Note that the
+# corpus stores the First Schedule's rules in the same field as the body
+# sections (open problem #9), so these rules were reassembled from two chunks
+# and checked clause by clause rather than trusted as one block.
+WAKALATNAMA = "wakalatnama_checklist"
+
+_WAKALATNAMA_NOTE = (
+    "Order III Rule 4 CPC 1908 prescribes how a pleader's appointment must be "
+    "EXECUTED — writing, signature, filing, duration — not what the Wakalatnama "
+    "must contain. The instrument's contents come from the High Court Rules and "
+    "Orders, which this system does not hold; Rule 4(4) delegates to the High "
+    "Court expressly. Only the statutory execution requirements are checked here."
+)
+
+_WAKALATNAMA_RULES: tuple[dict, ...] = (
+    {
+        "clause": "O.III r.4(1) — writing",
+        "text": ("No pleader shall act for any person in any Court, unless he "
+                 "has been appointed for the purpose by such person by a "
+                 "document in writing"),
+        "fields": ("appointer_name",),
+        "also": ("pleader_name",),
+        "hint": ("The appointment must name both the person appointing and the "
+                 "pleader appointed. An oral engagement does not satisfy r.4(1)."),
+    },
+    {
+        "clause": "O.III r.4(1) — signature and capacity",
+        "text": ("signed by such person or by his recognized agent or by some "
+                 "other person duly authorized by or under a power-of-attorney "
+                 "to make such appointment"),
+        "fields": ("appointer_capacity",),
+        "hint": ("Rule 4(1) allows exactly three signatories: the party, a "
+                 "recognized agent, or a power-of-attorney holder authorised to "
+                 "make the appointment. State which one signs."),
+    },
+    {
+        "clause": "O.III r.4(2) — filing",
+        "text": ("Every such appointment shall be filed in Court and shall be "
+                 "deemed to be in force until determined with the leave of the "
+                 "Court"),
+        "fields": ("filed_in_court",),
+        "hint": ("Signing is not enough — an unfiled appointment does not put "
+                 "the pleader on record."),
+    },
+    {
+        "clause": "O.III r.4(4) — mark attestation",
+        "text": ("where the person by whom a pleader is appointed is unable to "
+                 "write his name, his mark upon the document appointing the "
+                 "pleader shall be attested by such person and in such manner as "
+                 "may be specified by [general order of the High Court]"),
+        "fields": ("mark_attestation",),
+        "conditional_on": "appointer_cannot_write",
+        "hint": ("Required only where the appointer signs by mark. The manner of "
+                 "attestation is set by High Court general order, which this "
+                 "system does not hold — confirm it locally."),
+    },
+    {
+        "clause": "O.III r.4(5)(a)",
+        "text": ("[memorandum of appearance] stating the names of the parties "
+                 "to the suit"),
+        "fields": ("parties_named",),
+        "conditional_on": "pleading_only",
+        "hint": ("Required only where the pleader is engaged for the purpose of "
+                 "pleading ONLY — then a memorandum of appearance signed by the "
+                 "pleader must be filed."),
+    },
+    {
+        "clause": "O.III r.4(5)(b)",
+        "text": "the name of the party for whom he appears",
+        "fields": ("party_represented",),
+        "conditional_on": "pleading_only",
+        "hint": "Which party the pleader appears for.",
+    },
+    {
+        "clause": "O.III r.4(5)(c)",
+        "text": "the name of the person by whom he is authorized to appear",
+        "fields": ("authorising_person",),
+        "conditional_on": "pleading_only",
+        "hint": ("Who authorised the appearance — not necessarily the party "
+                 "themselves."),
+    },
+)
+
+
 def _has(draft: dict, keys: tuple[str, ...]) -> bool:
     """True when any of `keys` carries non-empty content."""
     for k in keys:
@@ -359,6 +468,12 @@ def check_pleading(template_type: str, draft: dict, context: dict | None = None)
     elif template_type == WRITTEN_STATEMENT:
         rules = _GENERAL_RULES
         basis = "Order VI, Code of Civil Procedure 1908"
+    elif template_type == WAKALATNAMA:
+        # Order III Rule 4 only. The Order VI pleading rules are NOT added:
+        # this is not a pleading, and r.4 does not incorporate them the way
+        # s.10 of the Guardians and Wards Act incorporates CPC verification.
+        rules = _WAKALATNAMA_RULES
+        basis = "Order III Rule 4, Code of Civil Procedure 1908"
     elif template_type == GUARDIANSHIP:
         # The Order VI rules are not bolted on by analogy: s.10(1) itself
         # requires signing and verification "in manner prescribed by the Code of
@@ -375,7 +490,8 @@ def check_pleading(template_type: str, draft: dict, context: dict | None = None)
             "items": [],
         }
 
-    note = (_GUARDIANSHIP_NOTE if template_type == GUARDIANSHIP else _CPC_NOTE)
+    note = (_GUARDIANSHIP_NOTE if template_type == GUARDIANSHIP else
+            _WAKALATNAMA_NOTE if template_type == WAKALATNAMA else _CPC_NOTE)
     items = [_check(r, draft, context) for r in rules]
     missing = [i for i in items if i["status"] == Status.MISSING.value]
 

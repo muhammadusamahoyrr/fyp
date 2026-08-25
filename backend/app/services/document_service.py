@@ -122,6 +122,7 @@ TEMPLATE_TITLES = {
     DocumentTemplate.URDU_PLEADING:          "Court Urdu Pleading",
     DocumentTemplate.DISPUTE_PETITION:       "Special Court Petition (draft)",
     DocumentTemplate.GUARDIANSHIP_PETITION:  "Guardianship Petition (s.10 Guardians and Wards Act 1890)",
+    DocumentTemplate.WAKALATNAMA_CHECKLIST:  "Wakalatnama — Execution Checklist (Order III Rule 4 CPC)",
 }
 
 # ── AI field extraction prompts per template ──────────────────────────────────
@@ -132,6 +133,31 @@ You are a Pakistani legal document specialist. Extract structured fields from th
 Return ONLY a valid JSON object with the exact keys listed. Use empty string "" for any field you cannot determine. Do not add extra keys."""
 
 _EXTRACT_PROMPTS = {
+    # NOT a Wakalatnama. The contents of the instrument itself come from the High
+    # Court Rules and Orders, which this system does not hold; only the execution
+    # requirements in Order III Rule 4 CPC are statutory, so only those are asked
+    # for here. See pleading_rules._WAKALATNAMA_NOTE.
+    "wakalatnama_checklist": """\
+Extract these fields from the case description (JSON only). This is an execution
+checklist for appointing a pleader under Order III Rule 4 CPC — not the
+Wakalatnama itself. Leave a field as "" if the description does not say.
+{
+  "court_name": "the Court in which the pleader is to act",
+  "case_title": "case title or cause, if stated",
+  "case_number": "case number, if stated",
+  "appointer_name": "full name of the person appointing the pleader",
+  "appointer_capacity": "whether they sign as the party, as a recognized agent, or under a power-of-attorney",
+  "pleader_name": "full name of the advocate being appointed",
+  "is_criminal": "true if these are criminal proceedings, else false",
+  "pleading_only": "true if the pleader is engaged for the purpose of pleading only",
+  "parties_named": "names of the parties to the suit",
+  "party_represented": "the party for whom the pleader appears",
+  "authorising_person": "the person by whom the pleader is authorized to appear",
+  "appointer_cannot_write": "true if the appointer cannot write their name and will affix a mark",
+  "mark_attestation": "who attests the mark, and how",
+  "filed_in_court": "whether the signed appointment has been filed in Court",
+  "date": "today's date in DD Month YYYY format"
+}""",
     # Keys mirror the particulars s.10(1) Guardians and Wards Act 1890 requires,
     # so a missing field maps to a named clause rather than a vague gap.
     "guardianship_petition": """\

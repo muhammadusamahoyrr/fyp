@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
+from app.core.claims import PARTIAL_GROUNDING_NOTICE
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
@@ -1385,6 +1386,127 @@ def guardianship_petition(doc_id: str, f: dict) -> Path:
     doc.build(story)
     return out
 
+def wakalatnama_checklist(doc_id: str, f: dict) -> Path:
+    """Execution checklist for appointing a pleader — Order III Rule 4 CPC 1908.
+
+    THIS IS NOT A WAKALATNAMA, and the document says so on its face.
+
+    Rule 4 prescribes how the appointment must be EXECUTED — in writing, signed
+    by the party or a recognized agent or a power-of-attorney holder, filed in
+    Court, and in force until determined with leave. It never says what the
+    instrument must contain. Compare the Guardianship petition in this module,
+    which is drafted from twelve enumerated clauses of s.10 of the Guardians and
+    Wards Act because that statute lists them.
+
+    The Wakalatnama's contents come from the High Court Rules and Orders, which
+    this system does not hold. Rule 4(4) makes the delegation explicit in the
+    statute. So this produces the part that is verifiably grounded and states the
+    gap, rather than drafting an instrument and implying statutory authority it
+    does not have.
+    """
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    out = UPLOADS_DIR / f"{doc_id}.pdf"
+    s = _styles()
+    doc = _base_doc(out)
+    story = []
+
+    def truthy(key: str) -> bool:
+        v = f.get(key)
+        return str(v).strip().lower() in ("true", "yes", "1") if v is not None else False
+
+    def stated(key: str) -> str:
+        v = f.get(key)
+        v = v.strip() if isinstance(v, str) else v
+        return str(v) if v else "[not stated]"
+
+    n = [0]
+
+    def head(label: str) -> str:
+        n[0] += 1
+        return f"{n[0]}. {label}"
+
+    story += [
+        P("WAKALATNAMA — EXECUTION CHECKLIST", s["title"]),
+        P("Order III Rule 4, Code of Civil Procedure 1908",
+          ParagraphStyle("wk", parent=s["body"], alignment=TA_CENTER)),
+        _hr(),
+    ]
+
+    # The disclosure leads. A reader who stops after the first paragraph must
+    # still know this is not the instrument.
+    story += [
+        P("THIS IS NOT A WAKALATNAMA", s["heading"]),
+        P("This sheet lists what Order III Rule 4 of the Code of Civil Procedure "
+          "1908 requires for the appointment of a pleader to be validly executed. "
+          "It is not the Wakalatnama itself and cannot be filed in its place.", s["body"]),
+        P(PARTIAL_GROUNDING_NOTICE, s["small"]),
+        P("Rule 4(4) delegates expressly to the High Court: where the appointer "
+          "cannot write, the manner of attesting the mark is fixed \"by general "
+          "order\" of the High Court. Obtain the current form and any local "
+          "requirement from the Court where the appointment will be filed.", s["small"]),
+        _hr(),
+    ]
+
+    story += [P(head("THE APPOINTMENT"), s["heading"])]
+    story += _field("Court", stated("court_name"), s)
+    if f.get("case_title") or f.get("case_number"):
+        story += _field("Cause", " ".join(x for x in (f.get("case_title"),
+                                                      f.get("case_number")) if x), s)
+    story += _field("Appointer", stated("appointer_name"), s)
+    story += _field("Pleader appointed", stated("pleader_name"), s)
+
+    story += [P(head("STATUTORY REQUIREMENTS (Rule 4)"), s["heading"])]
+    reqs = [
+        ("r.4(1)", "In writing, naming the appointer and the pleader",
+         bool(f.get("appointer_name") and f.get("pleader_name"))),
+        ("r.4(1)", f"Signed by the party, a recognized agent, or a "
+                   f"power-of-attorney holder — here: {stated('appointer_capacity')}",
+         bool(f.get("appointer_capacity"))),
+        ("r.4(2)", "Filed in Court", truthy("filed_in_court")),
+    ]
+    if truthy("appointer_cannot_write"):
+        reqs.append(("r.4(4)", f"Mark attested as directed by High Court general "
+                               f"order — here: {stated('mark_attestation')}",
+                     bool(f.get("mark_attestation"))))
+    for rule, text, ok in reqs:
+        story += [P(f"{'[x]' if ok else '[ ]'} <b>{rule}</b> — {text}", s["body"])]
+
+    if truthy("pleading_only"):
+        story += [P(head("MEMORANDUM OF APPEARANCE (Rule 4(5))"), s["heading"]),
+                  P("Engaged for the purpose of pleading only, so a memorandum of "
+                    "appearance signed by the pleader must also be filed, stating:",
+                    s["body"]),
+                  P(f"(a) names of the parties to the suit — {stated('parties_named')}", s["body"]),
+                  P(f"(b) the party for whom he appears — {stated('party_represented')}", s["body"]),
+                  P(f"(c) the person by whom he is authorized to appear — "
+                    f"{stated('authorising_person')}", s["body"])]
+
+    story += [P(head("DURATION (Rule 4(2) and 4(3))"), s["heading"]),
+              P("Once filed, the appointment remains in force until it is determined "
+                "with the leave of the Court by a writing signed by the client or the "
+                "pleader and filed in Court, or until the client or the pleader dies, "
+                "or until all proceedings in the suit are ended so far as regards the "
+                "client.", s["body"]),
+              P("Rule 4(3) treats the following as still being proceedings in the "
+                "suit: an application for review of judgment; an application under "
+                "section 144 or section 152 of the Code; any appeal from a decree or "
+                "order; and applications for copies or return of documents, or refund "
+                "of monies paid into Court.", s["small"])]
+
+    if truthy("is_criminal"):
+        story += [P(head("CRIMINAL PROCEEDINGS"), s["heading"]),
+                  P("Section 340 of the Code of Criminal Procedure 1898 gives a person "
+                    "against whom proceedings are instituted the right to be defended "
+                    "by a pleader. Order III Rule 4 governs civil procedure; confirm "
+                    "the appointment requirements of the criminal court concerned.",
+                    s["body"])]
+
+    story += [_hr(),
+              P(f"Prepared: {f.get('date', _today())}", s["small"])]
+
+    doc.build(story)
+    return out
+
 _GENERATORS = {
     "payment_receipt":    payment_receipt,
     "urdu_pleading":      urdu_pleading,
@@ -1406,6 +1528,7 @@ _GENERATORS = {
     "petition_22a":           petition_22a,
     "fia_cybercrime":         fia_cybercrime,
     "guardianship_petition":  guardianship_petition,
+    "wakalatnama_checklist":  wakalatnama_checklist,
 }
 
 
