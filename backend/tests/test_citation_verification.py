@@ -280,7 +280,10 @@ def test_no_citations_is_not_a_pass():
 
 def test_result_always_states_its_limits(index):
     r = VerificationResult(checks=verify_statutes("PPC Section 302", index=index))
-    assert "Existence only" in r.to_dict()["limits"]
+    limits = r.to_dict()["limits"]
+    # Pin what the limit SAYS, not its wording: a real provision cited for
+    # something it does not say is still reported as verified.
+    assert "still reads as VERIFIED" in limits
     assert r.needs_human_check is False
 
 

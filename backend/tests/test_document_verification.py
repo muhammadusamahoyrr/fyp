@@ -49,7 +49,7 @@ async def test_record_states_the_corpus_it_was_checked_against():
     assert rec["corpus"]["statutes"] > 0
     assert rec["corpus"]["statutes_dense_enough_to_flag"] > 0
     assert rec["checked_at"] is not None
-    assert "Existence only" in rec["limits"]
+    assert "still reads as VERIFIED" in rec["limits"]
 
 
 @pytest.mark.asyncio

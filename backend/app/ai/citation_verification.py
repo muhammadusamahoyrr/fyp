@@ -12,14 +12,17 @@ right while being ungrounded. Flagging that teaches a lawyer to ignore warnings.
 Existence is different. A section that is not in a statute we hold in full is
 not a retrieval miss — it is a citation that cannot be filed.
 
-THREE OUTCOMES, AND THE THIRD IS THE IMPORTANT ONE
---------------------------------------------------
-    VERIFIED        found in the corpus; safe to rely on to that extent
+FOUR OUTCOMES, AND THE LAST TWO ARE THE INTERESTING ONES
+--------------------------------------------------------
+    VERIFIED        found in the corpus and still in force
     NOT_IN_CORPUS   absent from a statute we hold densely enough for absence
-                    to mean something — this is the red flag
+                    to mean something — the fabrication flag
+    OMITTED         the Act itself declares this section repealed. A worse
+                    error than a fabrication, because it survives inspection:
+                    the number is real and the text once was too
     UNVERIFIABLE    we cannot speak to it either way
 
-Most tools collapse the third into the second, and that is the failure this
+Most tools collapse the fourth into the second, and that is the failure this
 module exists to avoid. Saying "not found" about a real provision of a statute
 we simply do not hold is a false accusation, and a lawyer who is burned by one
 will discount the flag that mattered. `corpus_index` decides which statutes have
@@ -49,6 +52,11 @@ from app.ai.corpus_index import CorpusIndex, get_index
 VERIFIED = "VERIFIED"
 NOT_IN_CORPUS = "NOT_IN_CORPUS"
 UNVERIFIABLE = "UNVERIFIABLE"
+# Cited a section the legislature has deleted. Distinct from NOT_IN_CORPUS on
+# purpose: a repealed section is a WORSE error than a fabricated one, because it
+# survives inspection. The number is real, the text was real, and only currency
+# betrays it — so a lawyer skimming the draft has nothing to notice.
+OMITTED = "OMITTED"
 
 # Short forms lawyers actually write, mapped to the corpus's own spelling.
 _ABBREV = {
@@ -146,8 +154,12 @@ class CitationCheck:
 
     @property
     def is_flag(self) -> bool:
-        """Only a real absence is a flag. Not knowing is not a flag."""
-        return self.status == NOT_IN_CORPUS
+        """Only a positive finding is a flag. Not knowing is not a flag.
+
+        A repealed section counts: unlike UNVERIFIABLE, it is something we
+        affirmatively know and the lawyer does not.
+        """
+        return self.status in (NOT_IN_CORPUS, OMITTED)
 
     def to_dict(self) -> dict:
         return {
@@ -261,6 +273,16 @@ def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
             f"This corpus does not contain {statute}. Verify against the "
             f"official text before filing.", in_ev)
 
+    # Before existence: a repealed section may still have a shell chunk, and
+    # returning VERIFIED for it would put a dead provision into a live filing.
+    if cov.is_omitted(section):
+        return CitationCheck(
+            raw, "statute", canonical, OMITTED,
+            f"{statute} {prefix}{section} has been REPEALED — the Act itself "
+            f"declares it omitted. It cannot be relied on, and because the "
+            f"number and its history are real this will not look wrong on the "
+            f"page. Replace it with the provision now in force.", in_ev)
+
     if cov.has(section):
         return CitationCheck(
             raw, "statute", canonical, VERIFIED,
@@ -343,6 +365,10 @@ class VerificationResult:
         return [c for c in self.checks if c.status == UNVERIFIABLE]
 
     @property
+    def repealed(self) -> list[CitationCheck]:
+        return [c for c in self.checks if c.status == OMITTED]
+
+    @property
     def verified(self) -> list[CitationCheck]:
         return [c for c in self.checks if c.status == VERIFIED]
 
@@ -356,8 +382,11 @@ class VerificationResult:
             return ("No citation found to check. An assertion of law with no "
                     "authority behind it is not a verified assertion.")
         parts = [f"{len(self.verified)} verified"]
-        if self.flags:
-            parts.append(f"{len(self.flags)} NOT FOUND in a statute we hold in full")
+        if self.repealed:
+            parts.append(f"{len(self.repealed)} REPEALED")
+        not_found = [c for c in self.checks if c.status == NOT_IN_CORPUS]
+        if not_found:
+            parts.append(f"{len(not_found)} NOT FOUND in a statute we hold in full")
         if self.unverifiable:
             parts.append(f"{len(self.unverifiable)} outside what this corpus can check")
         return "; ".join(parts) + "."
@@ -368,16 +397,20 @@ class VerificationResult:
             "counts": {
                 "total": len(self.checks),
                 "verified": len(self.verified),
-                "not_in_corpus": len(self.flags),
+                "not_in_corpus": len([c for c in self.checks
+                                      if c.status == NOT_IN_CORPUS]),
+                "omitted": len(self.repealed),
                 "unverifiable": len(self.unverifiable),
             },
             "needs_human_check": self.needs_human_check,
             "summary": self.summary(),
             "limits": (
-                "Existence only. A real provision cited for something it does "
-                "not say still reads as VERIFIED. Case law can never be marked "
-                "absent, because the corpus is too narrow for absence to mean "
-                "anything."
+                "Existence and repeal only. A real, in-force provision cited "
+                "for something it does not say still reads as VERIFIED. Repeal "
+                "detection reads each Act's own declarations and is a LOWER "
+                "BOUND — footnote-style omissions are not parsed. Case law can "
+                "never be marked absent, because the corpus is too narrow for "
+                "absence to mean anything."
             ),
         }
 

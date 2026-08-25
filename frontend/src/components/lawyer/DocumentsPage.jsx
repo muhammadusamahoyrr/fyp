@@ -746,7 +746,7 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                     supports the proposition it is cited for. */}
                 <div style={{
                     background: t.card, borderRadius: 12, padding: "14px 16px",
-                    border: `1px solid ${verification?.counts?.not_in_corpus > 0 ? "rgba(217,54,84,0.45)" : t.border}`
+                    border: `1px solid ${(verification?.counts?.not_in_corpus > 0 || verification?.counts?.omitted > 0) ? "rgba(217,54,84,0.45)" : t.border}`
                 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>
                         Authorities cited
@@ -769,6 +769,9 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                         <>
                             <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 9 }}>
                                 {verification.counts.verified} found in the corpus ·{" "}
+                                {verification.counts.omitted > 0 && (
+                                    <>{verification.counts.omitted} REPEALED · </>
+                                )}
                                 {verification.counts.unverifiable} cannot be checked here
                             </div>
                             {(verification.checks || [])
@@ -776,15 +779,17 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                                 .map((c, i) => (
                                     <div key={`${c.canonical}-${i}`} style={{
                                         marginBottom: 8, paddingLeft: 9,
-                                        borderLeft: `2px solid ${c.status === "NOT_IN_CORPUS" ? "rgba(217,54,84,0.5)" : "rgba(150,150,150,0.35)"}`
+                                        borderLeft: `2px solid ${(c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? "rgba(217,54,84,0.5)" : "rgba(150,150,150,0.35)"}`
                                     }}>
                                         <div style={{
                                             fontSize: 11.5, fontWeight: 600,
-                                            color: c.status === "NOT_IN_CORPUS" ? "#FF6B7A" : t.textDim
+                                            color: (c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? "#FF6B7A" : t.textDim
                                         }}>
                                             {c.canonical}
                                             <span style={{ fontWeight: 500, color: t.textMuted }}>
-                                                {c.status === "NOT_IN_CORPUS" ? " — not found" : " — cannot verify"}
+                                                {c.status === "OMITTED" ? " — REPEALED"
+                                                    : c.status === "NOT_IN_CORPUS" ? " — not found"
+                                                        : " — cannot verify"}
                                             </span>
                                         </div>
                                         <div style={{ fontSize: 10.5, color: t.textMuted, marginTop: 2 }}>{c.detail}</div>

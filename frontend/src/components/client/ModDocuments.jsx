@@ -529,15 +529,17 @@ const ModDocuments = () => {
                                 silent panel looks identical to a clean one. */}
                             {genDone && verification && (
                                 <div style={{ marginTop: 13, padding: 13, borderRadius: 11,
-                                    background: verification.counts?.not_in_corpus > 0 ? `${t.danger}12` : `${t.textMuted}0e`,
-                                    border: `1.5px solid ${verification.counts?.not_in_corpus > 0 ? `${t.danger}55` : `${t.textMuted}33`}` }}>
+                                    background: (verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? `${t.danger}12` : `${t.textMuted}0e`,
+                                    border: `1.5px solid ${(verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? `${t.danger}55` : `${t.textMuted}33`}` }}>
                                     <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 7,
-                                        color: verification.counts?.not_in_corpus > 0 ? t.danger : t.text }}>
+                                        color: (verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? t.danger : t.text }}>
                                         {verification.ran === false
                                             ? "Citations were not checked"
-                                            : verification.counts?.not_in_corpus > 0
-                                                ? `${verification.counts.not_in_corpus} citation${verification.counts.not_in_corpus === 1 ? "" : "s"} could not be found in the statute`
-                                                : "Citations checked for existence"}
+                                            : verification.counts?.omitted > 0
+                                                ? `${verification.counts.omitted} REPEALED section${verification.counts.omitted === 1 ? "" : "s"} cited`
+                                                : verification.counts?.not_in_corpus > 0
+                                                    ? `${verification.counts.not_in_corpus} citation${verification.counts.not_in_corpus === 1 ? "" : "s"} could not be found in the statute`
+                                                    : "Citations checked for existence"}
                                     </div>
 
                                     {verification.ran === false ? (
@@ -548,6 +550,9 @@ const ModDocuments = () => {
                                         <>
                                             <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 9 }}>
                                                 {verification.counts?.verified || 0} found in the corpus ·{" "}
+                                                {verification.counts?.omitted > 0 && (
+                                                    <>{verification.counts.omitted} repealed · </>
+                                                )}
                                                 {verification.counts?.unverifiable || 0} this corpus cannot check
                                             </div>
 
@@ -555,12 +560,14 @@ const ModDocuments = () => {
                                                 .filter(c => c.status !== "VERIFIED")
                                                 .map((c, i) => (
                                                     <div key={`${c.canonical}-${i}`} style={{ marginBottom: 8, paddingLeft: 10,
-                                                        borderLeft: `2px solid ${c.status === "NOT_IN_CORPUS" ? `${t.danger}66` : `${t.textMuted}44`}` }}>
+                                                        borderLeft: `2px solid ${(c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? `${t.danger}66` : `${t.textMuted}44`}` }}>
                                                         <div style={{ fontSize: 11.5, fontWeight: 600,
-                                                            color: c.status === "NOT_IN_CORPUS" ? t.danger : t.text }}>
+                                                            color: (c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? t.danger : t.text }}>
                                                             {c.canonical}
                                                             <span style={{ fontWeight: 500, color: t.textMuted }}>
-                                                                {c.status === "NOT_IN_CORPUS" ? " — not found" : " — cannot verify"}
+                                                                {c.status === "OMITTED" ? " — REPEALED"
+                                                                    : c.status === "NOT_IN_CORPUS" ? " — not found"
+                                                                        : " — cannot verify"}
                                                             </span>
                                                         </div>
                                                         <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>{c.detail}</div>

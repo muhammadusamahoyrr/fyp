@@ -32,6 +32,7 @@ for _s in (sys.stdout, sys.stderr):
 
 from app.ai.citation_verification import (  # noqa: E402
     NOT_IN_CORPUS,
+    OMITTED,
     UNVERIFIABLE,
     VERIFIED,
     verify_statutes,
@@ -94,7 +95,7 @@ async def main(n_examples: int, include_synthetic: bool) -> None:
     n_cit = sum(status_counts.values())
     print()
     print("  per CITATION:")
-    for st in (VERIFIED, NOT_IN_CORPUS, UNVERIFIABLE):
+    for st in (VERIFIED, NOT_IN_CORPUS, OMITTED, UNVERIFIABLE):
         n = status_counts[st]
         print(f"    {st:16s} : {n:5d}   ({100 * n / max(n_cit, 1):.1f}%)")
 
@@ -142,6 +143,11 @@ async def main(n_examples: int, include_synthetic: bool) -> None:
         ("relief under Article 991 of the Constitution", NOT_IN_CORPUS),
         ("under Section 640 of the Qanun-e-Shahadat Order 1984", NOT_IN_CORPUS),
         ("see Section 900 of the Punjab Land Revenue Act 1967", NOT_IN_CORPUS),
+        # Repealed, not fabricated — the verdict a lawyer cannot reach by
+        # reading, since the number and its history are both real.
+        ("triable under CrPC Section 300", OMITTED),
+        ("under CrPC Section 270", OMITTED),
+        ("Section 154 CrPC", VERIFIED),
     ]
     bad = 0
     for text, expected in controls:
