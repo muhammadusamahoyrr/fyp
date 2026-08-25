@@ -47,7 +47,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from app.ai.corpus_index import CorpusIndex, get_index
+from app.ai.corpus_index import (
+    CorpusIndex,
+    canonical_section,
+    get_index,
+    is_lettered,
+)
 
 VERIFIED = "VERIFIED"
 NOT_IN_CORPUS = "NOT_IN_CORPUS"
@@ -97,10 +102,66 @@ _STATUTE_YEARS = {"1860", "1898", "1908", "1984", "2016", "1872", "1870",
 # Article belongs to a Schedule we do not hold, and the only honest verdict is
 # that we cannot check it.
 _MARKER = r"(Sections?|Sec\.?|ss?\.|§|Articles?|Art\.?)"
-_SECTION_NUM = r"(\d{1,4}[A-Z]{0,2})"
+
+# LETTERED SECTIONS. Amendments insert provisions as 489-F / 22-A / 365-A, and
+# lawyers write them hyphenated, compact or spaced. All three must be captured
+# WHOLE — capturing only the digits produced the worst bug in this stack:
+# "PPC Section 489-F" verified as s.489, a different offence entirely.
+#
+# The trailing (?![A-Za-z]) stops a following word being eaten as a suffix, so
+# "Section 489 For the purposes" still reads as s.489 rather than s.489-F.
+#
+# The space-separated form additionally requires that the letter not be followed
+# by a lowercase word: "Section 302 A man is said to..." is prose, not a
+# citation to s.302-A. That guard costs the reading of "Section 22 A of the
+# Code" — which parses as the base s.22 — and that residual ambiguity is called
+# out in _statute_verdict, which refuses to treat a bare base number as proof of
+# anything for a lettered citation.
+_SECTION_NUM = (
+    r"(\d{1,4}(?:\s*[-–—]\s*[A-Za-z]{1,2}(?![A-Za-z])"
+    r"|[A-Za-z]{1,2}(?![A-Za-z])"
+    r"|\s+[A-Z](?![A-Za-z])(?!\s+[a-z]))?)"
+)
 
 # The one statute whose provisions are Articles rather than sections.
 _ARTICLE_STATUTES = {"Constitution of Pakistan 1973"}
+
+# ORDER/RULE CITATIONS — A THIRD NUMBERING SPACE, AND THE CORPUS MERGES IT INTO
+# THE FIRST.
+#
+# The CPC's First Schedule contains Orders I-LI, each restarting its rule
+# numbering, and Appendices A-H restarting again. All of it was ingested into the
+# same `section_number` field as the 158 body sections: 94 of 165 CPC numbers
+# carry more than one provision, one of them 132. So "Order VII Rule 1" and
+# "Section 1" are different provisions competing for the same slot.
+#
+# Until the corpus separates them (tracked as open problem #9), an Order/Rule
+# citation cannot be verified by number — the number would resolve against
+# whichever provision happens to occupy it. It is therefore parsed and reported
+# UNVERIFIABLE.
+#
+# Parsed rather than ignored, because these citations were previously invisible:
+# "Order VI Rule 15 CPC" matched no pattern at all and vanished from the report
+# while the summary still said everything checked out. That is the same
+# silent-omission failure fixed earlier for unrecognised statutes — a citation
+# the checker cannot see reads as approval.
+_ORDER_RULE = re.compile(
+    r"\b(?:Order|O\.)\s*([IVXL]{1,6}|\d{1,2})\s*[,\-]?\s*"
+    r"(?:Rule|R\.|r\.)\s*(\d{1,3}[A-Z]?)"
+    r"(?:\s*(?:,|\s)?\s*(?:of\s+the\s+)?"
+    r"(CPC|Code of Civil Procedure|CrPC|Code of Criminal Procedure))?",
+    re.I,
+)
+
+# Orders belong to a Code, and in Pakistani practice an unqualified "Order VII
+# Rule 1" means the CPC. Named explicitly rather than guessed at call time.
+_ORDER_DEFAULT_STATUTE = "CPC 1908"
+_ORDER_STATUTES = {
+    "CPC": "CPC 1908",
+    "CODE OF CIVIL PROCEDURE": "CPC 1908",
+    "CRPC": "CrPC 1898",
+    "CODE OF CRIMINAL PROCEDURE": "CrPC 1898",
+}
 
 
 def _unit(marker: str) -> str:
@@ -187,7 +248,10 @@ class ParsedCitation:
     statute: str
     section: str
     raw: str
-    unit: str = "section"        # "section" | "article" — NOT interchangeable
+    # "section" | "article" | "order_rule" — three numbering spaces, and none of
+    # them is interchangeable with another.
+    unit: str = "section"
+    order: str = ""             # set only for unit == "order_rule"
 
 
 def parse_statute_citations(text: str, index: CorpusIndex | None = None
@@ -204,7 +268,10 @@ def parse_statute_citations(text: str, index: CorpusIndex | None = None
     seen: set[tuple[str, str, str]] = set()
 
     def add(fam: str, sec: str, raw: str, marker: str) -> None:
-        sec = sec.strip().upper()
+        # Canonicalise first, so "489-F", "489F" and "489 F" become one citation
+        # rather than three, and so the verdict logic below always sees the same
+        # shape. This is the same canonical form answer_citations uses.
+        sec = canonical_section(sec)
         if sec in _STATUTE_YEARS:
             return
         # An unrecognised statute keeps its own name and is reported as
@@ -246,12 +313,41 @@ def parse_statute_citations(text: str, index: CorpusIndex | None = None
     # Last: anything shaped like a named act, whether or not we hold it.
     for m in _NAMED_ACT.finditer(text or ""):
         add(m.group(3), m.group(2), m.group(0), m.group(1))
+
+    # Order/Rule citations — a separate space, reported rather than dropped.
+    for m in _ORDER_RULE.finditer(text or ""):
+        order, rule, code = m.group(1), m.group(2), m.group(3)
+        statute = _ORDER_STATUTES.get(
+            re.sub(r"\s+", " ", (code or "").strip()).upper(),
+            _ORDER_DEFAULT_STATUTE)
+        key = (statute, rule.upper(), "order_rule", order.upper())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ParsedCitation(statute, rule.upper(), m.group(0).strip(),
+                                  "order_rule", order.upper()))
     return out
 
 
 def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
                      evidence: set[str] | None) -> CitationCheck:
     statute, section, raw = cite.statute, cite.section, cite.raw
+
+    # An Order/Rule citation cannot be resolved by number: the corpus merged the
+    # First Schedule's rules into the same field as the body sections, so the
+    # number would match whichever provision happens to sit there. Reported, not
+    # guessed, and not dropped. See open problem #9.
+    if cite.unit == "order_rule":
+        canonical = f"{statute} Order {cite.order} Rule {section}"
+        return CitationCheck(
+            raw, "statute", canonical, UNVERIFIABLE,
+            f"Order/Rule citations are not yet independently verified against "
+            f"the corpus. The {statute} First Schedule's Orders each restart "
+            f"their rule numbering, and this corpus stores those rules in the "
+            f"same field as the body sections — so this number cannot be "
+            f"resolved to one provision. Check it against the bare Code.",
+            (canonical in evidence) if evidence is not None else None)
+
     prefix = "Art." if cite.unit == "article" else "s."
     canonical = f"{statute} {prefix}{section}"
     in_ev = (canonical in evidence) if evidence is not None else None
@@ -272,6 +368,36 @@ def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
             raw, "statute", canonical, UNVERIFIABLE,
             f"This corpus does not contain {statute}. Verify against the "
             f"official text before filing.", in_ev)
+
+    # LETTERED PROVISIONS — decided here, before any base-number logic runs.
+    #
+    # A lettered section is a different provision from the number it shares
+    # digits with: PPC 489-F is cheque dishonour, s.489 is tampering with a
+    # property mark. Every check below reaches the base number one way or
+    # another — `is_omitted` and `omission_record` both take the leading digits —
+    # so a lettered citation must never be allowed to fall through to them.
+    #
+    # Not held → UNVERIFIABLE, even when the statute is `dense`. Density is
+    # measured over NUMBERED sections; lettered coverage is about 1% of PPC and
+    # 0% of CrPC, so the denominator that earned the right to say "not found"
+    # never included these. Flagging an unheld 489-F as NOT_IN_CORPUS would be a
+    # fabrication accusation against one of the most prosecuted offences in the
+    # country, on evidence that does not exist.
+    if is_lettered(section):
+        if cov.has(section):
+            return CitationCheck(
+                raw, "statute", canonical, VERIFIED,
+                f"Present in the corpus. Existence only — this does not confirm "
+                f"the section supports the proposition, and the repeal map does "
+                f"not cover lettered provisions, so its current status is "
+                f"unverified.", in_ev)
+        return CitationCheck(
+            raw, "statute", canonical, UNVERIFIABLE,
+            f"{statute} {prefix}{section} is a lettered provision inserted by "
+            f"amendment, and this corpus holds almost none of them — absence "
+            f"here is not evidence of anything. It is NOT s.{section.split('-')[0]}, "
+            f"which is a different provision. Verify against the bare act.",
+            in_ev)
 
     # Before existence: a repealed section may still have a shell chunk, and
     # returning VERIFIED for it would put a dead provision into a live filing.

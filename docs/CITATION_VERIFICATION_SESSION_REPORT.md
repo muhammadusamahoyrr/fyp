@@ -10,6 +10,65 @@ verified it is listed in §5 rather than left inline.
 
 ---
 
+## 0. Scope and Claims
+
+**Adopted as formal scope for all current and future document types.** This is
+the complete set of claims this system makes about a generated document. Nothing
+outside it is claimed, and the boundaries are as load-bearing as the capability.
+
+> **We do not claim that any generated document is correct or complete.**
+>
+> We claim only the following four things.
+>
+> **1. Citations are checked.** Every citation in a generated document is checked
+> against the corpus — confirmed to exist, and, where checked, confirmed to still
+> be in force.
+>
+> **2. Where a statute defines the content, we draft the whole instrument.**
+> Where a document's required contents are fully enumerated by statute — as with
+> the Guardians and Wards Act 1890 s.10, or the Succession Act 1925 s.372 — the
+> full instrument is drafted from that statute.
+>
+> **3. Where content is delegated elsewhere, we generate only the grounded part
+> and say what is missing.** Where the contents are delegated to rules or to an
+> authority we do not hold — the Wakalatnama to the High Court Rules and Orders,
+> the succession certificate form to NADRA under s.7 of the Punjab Act 2021 — we
+> generate only the verifiably grounded portion and disclose the gap explicitly.
+> We do not invent the missing part, and we do not copy-fill it from any external
+> source however official it appears.
+>
+> **4. A lawyer reviews before filing.** Every client-generated document routes
+> to a lawyer for review before filing. That review step is mandatory, and it —
+> not the generator — is the safety net.
+
+### Why claim 3 is the one that costs something
+
+It is the claim that makes us ship less. Two of the three document types attempted
+in this work hit it: the succession certificate form is prescribed by NADRA under
+s.7 of the Punjab Act, and the Wakalatnama's contents come from High Court Rules
+and Orders. In both cases a plausible document could have been produced by copying
+a published form — and in both cases the published forms carry either an explicit
+copyright assertion (LHC) or a disclaimer against official use (IHC).
+
+Filling those gaps would have produced something that looked more finished and was
+less true. The pattern is worth stating plainly, because it is a property of the
+domain rather than of this project:
+
+> **Pakistani court forms are largely prescribed by High Court Rules and Orders,
+> or delegated to an authority — not enumerated in statutes.** Drafting from the
+> statute works where the statute lists the particulars, and reaches a ceiling
+> where it does not.
+
+### Why claim 4 is not a hedge
+
+Claim 1 is narrower than it sounds. A verified citation is a citation that
+*exists* — not one that supports the proposition it is cited for. §3 of this
+report measures that gap directly and does not close it. So the lawyer's review
+is not a legal disclaimer bolted on at the end; it is the control that covers what
+the automated checks structurally cannot.
+
+---
+
 ## 1. Problem statement: three axes, not one
 
 A legal AI that invents a citation is worse than one that says nothing. The
@@ -285,6 +344,65 @@ work.**
 | ⑦ | Sample size | **Still small.** The 0.0% flag rate rests on 17 answers carrying parseable citations. Enough to show the checker is quiet; nowhere near enough to justify blocking a filing — which is why it is advisory. |
 | ⑧ | Parser deliberately under-counts | **Untouched, by design.** A bare `PPC 302` with no section marker is not parsed, because that shape is also how a statute year is written. |
 | — | s.468 comma gap | **Documented, not fixed** (§2.2). One live section of 408. |
+
+### 4.2a Problem ⑨ — CPC Order rules collide with body sections · **TRACKED, OPEN**
+
+**Formally tracked, same tier as the Gazette check (§5 #1) and the D-lite
+second-annotator pass (§5 #4).** Not merely noted in a session log.
+
+The CPC's First Schedule holds **Orders I–LI**, each restarting its rule
+numbering, and **Appendices A–H** restarting again. All of it was ingested into
+the same `section_number` field as the 158 body sections:
+
+```
+CPC 1908 chunks              : 1,967
+distinct section_numbers     :   165
+COLLIDING numbers            :    94   (57%)
+max provisions on one number :   132
+```
+
+`CPC 1908 s.1` stores **Order VII Rule 1** (*"Particulars to be contained in
+plaint"*), not the true s.1. `CPC 1908 s.3` stores **Order III Rules 3–4**.
+`s.2`, `s.4`, `s.5` do hold the true body sections.
+
+**Why it matters: false assurance, not false accusation.** Order rules occupy
+most numbers 1–132, so a citation to a CPC section that does not exist — or has
+been repealed — verifies against whichever Order rule shares its number:
+
+```
+CPC s.45   -> VERIFIED        CPC s.130  -> NOT_IN_CORPUS
+CPC s.100  -> VERIFIED        CPC s.900  -> NOT_IN_CORPUS
+```
+
+**Only nine numbers in 1–158 are genuinely empty: 109, 110, 114, 125, 126, 130,
+154, 155, 156.** Everything else is occupied by something, so CPC can almost
+never return `NOT_IN_CORPUS` in that band. That is the evidence for why this is
+worth fixing: the statute is marked DENSE and therefore permitted to flag, while
+57% of its section space cannot be resolved to one provision.
+
+**Partly mitigated (Fix 1, shipped).** `Order N Rule M` is now parsed as a
+distinct citation type and returned `UNVERIFIABLE` with a stated reason.
+Previously such citations matched no pattern at all and vanished from the report
+while the summary still said everything checked out — the same silent-omission
+failure fixed earlier for unrecognised statutes. Variants handled: `Order III
+Rule 4`, `O.III r.4`, `Order III, Rule 4`, `Order 21 Rule 11`, with and without a
+trailing Code name.
+
+**Not fixed (Fix 2, open).** Re-ingest the CPC with `order` and `rule` metadata
+separated from `section_number`. Effort **M–L**: ~1,967 chunks re-embedded plus
+an ingest-script change. Until then a bare CPC section citation in the 1–132
+band carries false assurance.
+
+**Explicitly rejected: demoting CPC from dense.** It looks like a cheap interim
+fix and is theatre — density gates `NOT_IN_CORPUS`, not `VERIFIED`, so it would
+not touch the false-assurance path at all. Recorded so it is not reached for
+later.
+
+Diagnosis shared with the Limitation Act Articles bug (§2) and the CrPC
+Schedule-II rows: a second numbering space flattened into the first. The cure
+differs — there the second space was *absent* and could be routed to
+`UNVERIFIABLE`; here it is *present and colliding*, so the parser fix alone
+cannot clean the section space.
 
 ### 4.3 Two errors this session produced and corrected
 

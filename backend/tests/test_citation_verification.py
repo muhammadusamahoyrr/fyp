@@ -298,3 +298,83 @@ def test_case_law_check_can_never_be_a_flag():
     c = CitationCheck("1996 SCMR 1544", "case", "1996 SCMR 1544", UNVERIFIABLE,
                       "not in this corpus")
     assert c.is_flag is False
+
+
+# ── Order/Rule citations — a third numbering space ────────────────────────────
+# The CPC First Schedule holds Orders I-LI, each restarting its rule numbering,
+# and the corpus merged all of it into the same `section_number` field as the 158
+# body sections: 94 of 165 CPC numbers carry more than one provision, one of them
+# 132. So an Order/Rule citation cannot be resolved by number.
+#
+# Before this, they matched NO pattern at all and vanished from the report while
+# the summary still said everything checked out — the same silent-omission
+# failure fixed earlier for unrecognised statutes.
+
+_ORDER_RULE_CITATIONS = [
+    "verified in manner prescribed by Order VI Rule 15 CPC",
+    "particulars under Order VII Rule 1 CPC",
+    "appointment of pleader under Order III Rule 4 CPC",
+]
+
+
+@pytest.mark.parametrize("text", _ORDER_RULE_CITATIONS)
+def test_order_rule_citations_are_visible_not_dropped(text, index):
+    """Taken from the Guardianship and Wakalatnama forms. Each must SURFACE."""
+    checks = verify_statutes(text, index=index)
+    assert checks, f"{text!r} produced no citation — it is invisible again"
+
+
+@pytest.mark.parametrize("text", _ORDER_RULE_CITATIONS)
+def test_order_rule_citations_are_unverifiable_never_verified(text, index):
+    """Not VERIFIED: the number would resolve against whichever provision happens
+    to occupy that slot, which is false assurance rather than a check."""
+    (check,) = verify_statutes(text, index=index)
+    assert check.status == UNVERIFIABLE
+    assert check.status != VERIFIED
+    assert check.is_flag is False          # not knowing is not an accusation
+    assert "not yet independently verified" in check.detail
+
+
+def test_the_order_and_rule_are_both_named_in_the_verdict(index):
+    """'Rule 1' alone is meaningless — every Order has one."""
+    (check,) = verify_statutes("particulars under Order VII Rule 1 CPC",
+                               index=index)
+    assert check.canonical == "CPC 1908 Order VII Rule 1"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Order III Rule 4 CPC", "CPC 1908 Order III Rule 4"),
+    ("O.III r.4 of the Code of Civil Procedure", "CPC 1908 Order III Rule 4"),
+    ("Order III, Rule 4", "CPC 1908 Order III Rule 4"),
+    ("Order 21 Rule 11 CPC", "CPC 1908 Order 21 Rule 11"),
+])
+def test_the_ways_an_order_rule_is_actually_written(text, expected, index):
+    (check,) = verify_statutes(text, index=index)
+    assert check.canonical == expected
+
+
+def test_an_unqualified_order_rule_is_read_as_the_cpc(index):
+    """Pakistani practice: a bare 'Order VII Rule 1' means the CPC. Named
+    explicitly in the module rather than guessed per call."""
+    (check,) = verify_statutes("Order VII Rule 1", index=index)
+    assert check.canonical.startswith("CPC 1908 Order VII")
+
+
+def test_a_crpc_order_rule_is_not_relabelled_as_cpc(index):
+    (check,) = verify_statutes("Order VIII Rule 2 CrPC", index=index)
+    assert check.canonical.startswith("CrPC 1898 Order VIII")
+
+
+def test_section_and_article_citations_are_untouched(index):
+    """The new pattern must not swallow the two spaces that DO verify."""
+    (sec,) = verify_statutes("liable under PPC Section 302", index=index)
+    assert sec.status == VERIFIED and sec.canonical == "PPC 1860 s.302"
+
+
+def test_an_order_rule_and_a_section_of_the_same_number_are_different(index):
+    """Order VII Rule 1 and s.1 are unrelated provisions. Collapsing them is how
+    the corpus got into this state in the first place."""
+    checks = verify_statutes("Order VII Rule 1 CPC and PPC Section 1", index=index)
+    canon = {c.canonical for c in checks}
+    assert "CPC 1908 Order VII Rule 1" in canon
+    assert len(checks) == 2

@@ -3,6 +3,7 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
+from app.core.claims import GENERATION_SCOPE
 from app.core.constants import DocumentTemplate
 from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
 from app.repositories.case_repo import CaseRepository
@@ -78,6 +79,9 @@ async def _verification_record(fields: dict) -> dict:
                 1 for s in index.statutes if index.coverage(s).dense),
             "sections_indexed": index.total_sections(),
         }
+        # Travels with the record so the client panel and the lawyer review
+        # panel cannot disagree about what was promised. See app/core/claims.py.
+        record["scope"] = GENERATION_SCOPE
         return record
     except Exception as exc:                       # never block generation
         logger.warning("citation verification unavailable: %s", exc)
@@ -91,6 +95,10 @@ async def _verification_record(fields: dict) -> dict:
             "checks": [],
             "counts": {"total": 0, "verified": 0, "not_in_corpus": 0,
                        "unverifiable": 0},
+            # Present even when the checker could not run. The scope statement
+            # is what we promise, not a by-product of a successful check — and
+            # an outage is exactly when a reader most needs to see it.
+            "scope": GENERATION_SCOPE,
         }
 
 

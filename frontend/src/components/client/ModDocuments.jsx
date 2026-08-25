@@ -588,6 +588,15 @@ const ModDocuments = () => {
                                         Existence only — a real provision cited for something it does not
                                         say still shows as found. Read every authority before filing.
                                     </div>
+                                    {/* The adopted scope statement, shipped from the backend so this
+                                        panel and the lawyer's review panel cannot drift apart about
+                                        what was promised. See backend/app/core/claims.py. */}
+                                    {verification.scope && (
+                                        <div style={{ fontSize: 10, color: t.textMuted, marginTop: 8,
+                                            paddingTop: 8, borderTop: `1px solid ${t.textMuted}22`, lineHeight: 1.5 }}>
+                                            {verification.scope}
+                                        </div>
+                                    )}
                                 </div>
                             )}
 

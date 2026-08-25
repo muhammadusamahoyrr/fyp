@@ -752,6 +752,17 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                         Authorities cited
                     </div>
 
+                    {/* Shown OUTSIDE the ran/total branches below: the reviewer needs the
+                        scope statement whether or not the checker ran, and whether or not
+                        the draft cites anything. Shipped from backend/app/core/claims.py so
+                        this panel and the client's cannot promise different things. */}
+                    {verification?.scope && (
+                        <div style={{ fontSize: 10, color: t.textMuted, marginBottom: 9,
+                            paddingBottom: 8, borderBottom: `1px solid ${t.border}`, lineHeight: 1.5 }}>
+                            {verification.scope}
+                        </div>
+                    )}
+
                     {!verification ? (
                         <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6 }}>
                             This document predates citation checking. Its authorities were
