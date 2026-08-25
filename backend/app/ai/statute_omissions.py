@@ -78,6 +78,57 @@ SINGLE_OMISSION = re.compile(
 _MAX_RANGE = 200
 
 
+# HELD BACK PENDING A LEGAL DECISION — see docs/CITATION_VERIFICATION_SESSION_REPORT.md
+#
+# Spot-checking the map against the official federal consolidation at
+# pakistancode.gov.pk (last amended 2017-02-16) confirmed ss.266-336 verbatim,
+# and exposed a conflict of EDITIONS rather than a parsing error:
+#
+#   bundled:  10.  [Omitted by the Ordinance XXXVII of 2001 dt. 13-8-2001.]
+#   official: 10.  District Magistrate.
+#
+#   bundled:  407. [Omitted by Item No. 140 of Punjab Notification SO(J-II) 1-8/75]
+#   official: 407. Appeal from sentence of Magistrate of the second or third class.
+#
+# The bundled PDF is a PUNJAB-ANNOTATED edition folding provincial notifications
+# and the 2001 devolution ordinance into the text; the federal consolidation does
+# not. Whether a citation to s.10 is dead therefore depends on jurisdiction and
+# date, which an unqualified OMITTED verdict cannot express. Asserting it would
+# be a false accusation of the exact kind this subsystem exists to prevent.
+#
+# These are EXCLUDED, not reclassified. Nothing here asserts they are in force
+# either — they simply fall through to whatever verdict the rest of the checker
+# reaches without an omission match, which for a section whose text we hold is
+# VERIFIED.
+_HELD_JURISDICTION: dict[str, frozenset[int]] = {
+    "CrPC 1898": frozenset({10, 11, 13, 14, 407, 438, 562, 563, 564}),
+}
+
+# HELD BACK PENDING RE-VERIFICATION
+#
+# The same spot-check found sections the OFFICIAL text marks omitted that this
+# parser does not: CrPC ss.111, 184, 532, 542, each reading "[Repealed.]" or
+# "[Omitted.]" there. They are deliberately NOT absorbed into the map. They were
+# not part of the twelve ranges the original extraction found, and adding them on
+# the strength of one federal document would repeat in reverse the mistake above
+# — asserting an omission before establishing which edition governs.
+#
+# Recorded here rather than left in a commit message so the gap stays visible.
+_PENDING_VERIFICATION: dict[str, frozenset[int]] = {
+    "CrPC 1898": frozenset({111, 184, 532, 542}),
+}
+
+
+def held_back(statute: str) -> frozenset[int]:
+    """Sections excluded from the omission map pending a decision."""
+    return _HELD_JURISDICTION.get(statute, frozenset())
+
+
+def pending_verification(statute: str) -> frozenset[int]:
+    """Omissions seen in an authoritative source but not yet accepted."""
+    return _PENDING_VERIFICATION.get(statute, frozenset())
+
+
 def parse_omissions(text: str) -> set[int]:
     """Section numbers the text itself declares omitted or repealed."""
     out: set[int] = set()

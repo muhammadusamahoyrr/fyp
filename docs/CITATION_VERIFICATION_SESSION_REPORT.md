@@ -2,7 +2,7 @@
 
 **Attorney.AI** · Muhammad Usama (SP23-BCS-069), COMSATS
 Commits `3da1650 → 11952b2 → b619818` · 25 August 2026
-Test suite: **943 → 958 → 965** passing
+Test suite: **943 → 958 → 965 → 970** passing
 
 Written for the FYP report. Every figure was measured against the live corpus at
 the time stated; none is estimated. Where something is assumed rather than
@@ -334,7 +334,7 @@ gathered in one place.
 
 | # | Assumption | Risk if wrong | Where it bites |
 |---|---|---|---|
-| 1 | **Bundled statute PDFs are authoritative.** Omissions were read from the PDFs in `knowledge_base/`, **not cross-checked against the Punjab Gazette or official Gazette of Pakistan.** | A section wrongly marked repealed produces a false `OMITTED` — the most convincing kind of false accusation. | All 185 omitted sections |
+| 1 | ~~**Bundled statute PDFs are authoritative.**~~ **PARTLY RESOLVED — see §6a.** Spot-checked against the official federal consolidation: 7 of 10 checks matched and ss.266–336 confirmed verbatim, but 9 CrPC sections were found to reflect Punjab-only amendments and have been pulled. The remaining 148 CrPC entries plus 28 in three other statutes are still **not** individually Gazette-checked. | A section wrongly marked repealed produces a false `OMITTED` — the most convincing kind of false accusation. | 176 omitted sections (was 185) |
 | 2 | **`[Repeated]` is OCR for `[Repealed]`.** Corroborated — all 4 occurrences sit in repeal contexts, one reads *"[Repeated by the Federal Laws (Revision and Declaration) Act, XXVI of 1951]"*, and the instance in question sits directly beneath `3-24. [Repealed].` — but it is still an inference. | ss.26–27 wrongly marked repealed | CrPC ss.26–27 |
 | 3 | **PPC's footnote-style omissions are unparsed.** PPC declares omissions as `"The following was omitted by A.O. 1961"` annotating sub-sections. The parser reads only range and single-line declarations. **A statute reporting zero omissions has not been shown to be free of repealed content.** | Repealed PPC sections verify cleanly | PPC entirely; 185 is a **lower bound** |
 | 4 | **D-lite is SINGLE-ANNOTATED.** One annotator, no second pass. **No inter-annotator agreement was measured and none is claimed.** | Label noise is unquantified; every A1 figure inherits it | All of §3 |
@@ -365,6 +365,112 @@ reviewed and approved:**
 `ReviewQueueItem` field was the prior step). **A1 is not wired in**: `app/`
 contains no import of `mismatch_detection`, confirmed by grep. `citation_grounding.py`
 changed only in docstring text.
+
+---
+
+## 6a. Post-session finding: jurisdiction/edition mismatch in the CrPC omission map
+
+**9 sections pulled pending a legal decision · 4 sections held pending
+re-verification.** Test suite 965 → **970**.
+
+Assumption #1 in §5 — *"bundled statute PDFs are authoritative, not
+Gazette-checked"* — was spot-checked against the **official federal
+consolidation at pakistancode.gov.pk** (last amended 2017-02-16, 319 pp). The
+site is reachable; the check was performed, not deferred.
+
+### The headline claim holds
+
+The official text reads, verbatim:
+
+```
+266­336. [Omitted.]
+CHAPTER XXIII[Omitted.]
+```
+
+**Seven of ten spot-checks matched**, including every claim the CrPC density fix
+depends on: ss.266–336 (with s.270 and s.300 inside it), ss.26–27, ss.206–220
+(via `CHAPTER XVIII[Omitted.]`), ss.251–259, ss.443–463, and ss.154/497 confirmed
+in force. It also confirmed **s.468 is a live section** — vindicating the
+decision in §2.2 to record it as an extraction gap rather than an omission.
+
+> A methodological note worth keeping: the first pass reported *everything* as a
+> mismatch. That was my regex, not the map — the official PDF contains **zero
+> ASCII hyphens**, using soft hyphens (`\xad`) throughout. Caught and corrected
+> before reporting. The same failure mode as the Article/Section bug in §2 and
+> the PPC-302 claim in §4.3: a tooling artifact that looks like a finding.
+
+### The mismatch: two editions, not one parser bug
+
+Nine sections disagreed, and the cause is not parsing:
+
+```
+bundled:   10.  [Omitted by the Ordinance XXXVII of 2001 dt. 13-8-2001.]
+official:  10.  District Magistrate.
+
+bundled:   407. [Omitted by Item No. 140 of Punjab Notification SO(J-II) 1-8/75]
+official:  407. Appeal from sentence of Magistrate of the second or third class.
+```
+
+**The bundled PDFs are a Punjab-annotated edition**, folding provincial
+notifications and the 2001 devolution ordinance into the text; the federal
+consolidation does not. ss.10/11/13 concern the office of District Magistrate,
+abolished by the 2001 devolution and partially restored since; ss.407/438 were
+omitted by **Punjab notification only**.
+
+So whether a citation to s.10 is dead depends on **jurisdiction and date** — which
+an unqualified `OMITTED` verdict cannot express. Asserting it is a false
+accusation of exactly the kind this subsystem exists to prevent.
+
+### Action taken
+
+| | |
+|---|---|
+| **Pulled** (9) | CrPC ss. **10, 11, 13, 14, 407, 438, 562, 563, 564** |
+| **Held, not absorbed** (4) | CrPC ss. **111, 184, 532, 542** — marked `[Repealed.]` federally but not found by this parser; adding them on one document would repeat the edition mistake in reverse |
+
+Both lists live in `statute_omissions.py` and are applied **by the generator**,
+not by hand-editing the JSON, so re-running the build cannot silently restore
+them. The JSON records both under `_held_pending_jurisdiction` and
+`_pending_verification` with reasons.
+
+**Excluded, not reclassified.** Nothing asserts these sections are in force. They
+fall through to the ordinary verdict for a section whose text the corpus holds —
+**confirmed live: all 9 now return `VERIFIED`**, which says nothing about
+currency either way. There is deliberately no "in force" register, because the
+checker has no verdict meaning *confirmed current* and inventing one would
+overclaim.
+
+### Effect on CrPC density: negligible
+
+| | Before | After |
+|---|---:|---:|
+| Sections in map | 157 | **148** |
+| Sections in force | 408 | 417 |
+| Held of those | 407 | 416 |
+| **Ratio** | 0.997549 | **0.997602** |
+| Dense | ✅ | ✅ |
+| Statutes able to flag | 22 | **22** |
+
+The ratio is materially unchanged — marginally *higher*, since both numerator and
+denominator rose by nine. **The headline CrPC finding stands**, and it now rests
+on 148 entries cross-checked against an authoritative source rather than 157
+taken on trust from one bundled PDF.
+
+### Three open questions — for you, not for code
+
+Reproduced verbatim; these need a legal answer, not an implementation:
+
+> 1. **Which edition governs** for your users — federal consolidation, or
+>    Punjab-annotated? Attorney.AI is Punjab-focused, so the bundled edition may
+>    actually be the *right* one for your audience.
+> 2. **Are ss.10, 11, 13, 14 currently in force in Punjab?** The 2001 ordinance
+>    omitted them; the federal code still lists them.
+> 3. **Should `OMITTED` carry jurisdiction and date**, rather than being
+>    unqualified?
+
+Until (1) and (2) are answered the 9 stay out. Question (3) is the deeper one: if
+provincial and federal currency genuinely diverge, a single boolean `omitted` is
+the wrong data model regardless of which edition is chosen.
 
 ---
 

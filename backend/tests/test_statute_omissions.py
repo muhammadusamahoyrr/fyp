@@ -267,3 +267,95 @@ def test_real_unlettered_omissions_are_still_read():
             "29. Savings.\n"
             "30. [Repealed]\n31. [Repealed]\n32. [Repealed]\n")
     assert parse_omissions(text) == {28, 30, 31, 32}
+
+
+# ── sections held back pending a jurisdiction decision ────────────────────────
+# Spot-checking the map against the official federal consolidation at
+# pakistancode.gov.pk (last amended 2017-02-16) confirmed ss.266-336 verbatim
+# and exposed a conflict of EDITIONS in nine other entries:
+#
+#     bundled:  10.  [Omitted by the Ordinance XXXVII of 2001 dt. 13-8-2001.]
+#     official: 10.  District Magistrate.
+#
+# The bundled sources are Punjab-annotated. Whether those sections are dead
+# depends on jurisdiction and date, which an unqualified OMITTED cannot express.
+
+_HELD_SECTIONS = (10, 11, 13, 14, 407, 438, 562, 563, 564)
+_PENDING_SECTIONS = (111, 184, 532, 542)
+
+
+def test_held_sections_are_absent_from_the_generated_map():
+    """They must be excluded by the GENERATOR, not by editing the JSON, or the
+    next person to re-run the build silently restores them."""
+    from app.ai.statute_omissions import get_omissions, held_back, set_omissions
+
+    set_omissions(None)                       # read the shipped file
+    try:
+        crpc = get_omissions().get("CrPC 1898", frozenset())
+        assert crpc, "omission map did not load"
+        for n in _HELD_SECTIONS:
+            assert n not in crpc, (
+                f"CrPC s.{n} is back in the omission map. It was pulled because "
+                f"the federal consolidation shows it in force while the bundled "
+                f"Punjab-annotated source marks it omitted. Re-adding it needs "
+                f"the jurisdiction question answered and a fresh check against "
+                f"an authoritative source — not a re-run of the generator.")
+        assert held_back("CrPC 1898") == frozenset(_HELD_SECTIONS)
+    finally:
+        set_omissions(None)
+
+
+def test_a_held_section_does_not_return_OMITTED():
+    """The whole point of pulling them: no false accusation of repeal."""
+    idx = CorpusIndex({"CrPC 1898": _cov(
+        "CrPC 1898", list(range(1, 566)), omitted=set(range(266, 337)))})
+    for n in _HELD_SECTIONS:
+        (check,) = verify_statutes(f"CrPC Section {n}", index=idx)
+        assert check.status != OMITTED, f"s.{n}"
+        assert check.status == VERIFIED, f"s.{n}"
+
+
+def test_holding_them_back_does_not_assert_they_are_in_force():
+    """Excluded, not reclassified. They fall through to the ordinary verdict for
+    a section whose text we hold — which is VERIFIED, and says nothing about
+    currency either way. Nothing in the module claims they are good law."""
+    from app.ai.statute_omissions import held_back, pending_verification
+
+    held = held_back("CrPC 1898")
+    assert held.isdisjoint(pending_verification("CrPC 1898"))
+    # No "in force" register exists, and none should: the checker has no verdict
+    # meaning "confirmed current", and inventing one here would overclaim.
+    import app.ai.statute_omissions as mod
+    assert not hasattr(mod, "IN_FORCE")
+
+
+def test_omissions_seen_only_in_the_federal_text_are_not_absorbed():
+    """ss.111, 184, 532 and 542 read "[Repealed.]" in the federal consolidation
+    but were not found by this parser. Adding them on one document would repeat
+    the edition mistake in reverse."""
+    from app.ai.statute_omissions import get_omissions, pending_verification, set_omissions
+
+    set_omissions(None)
+    try:
+        crpc = get_omissions().get("CrPC 1898", frozenset())
+        for n in _PENDING_SECTIONS:
+            assert n not in crpc, f"s.{n} absorbed without re-verification"
+        assert pending_verification("CrPC 1898") == frozenset(_PENDING_SECTIONS)
+    finally:
+        set_omissions(None)
+
+
+def test_the_confirmed_omissions_are_untouched():
+    """ss.266-336 were verified verbatim against the official text. Pulling the
+    nine must not disturb them, or the CrPC density fix collapses."""
+    from app.ai.statute_omissions import get_omissions, set_omissions
+
+    set_omissions(None)
+    try:
+        crpc = get_omissions().get("CrPC 1898", frozenset())
+        assert set(range(266, 337)) <= crpc
+        assert {26, 27} <= crpc
+        assert set(range(206, 221)) <= crpc
+        assert len(crpc) == 148
+    finally:
+        set_omissions(None)
