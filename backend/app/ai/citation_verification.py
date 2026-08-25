@@ -276,12 +276,19 @@ def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
     # Before existence: a repealed section may still have a shell chunk, and
     # returning VERIFIED for it would put a dead provision into a live filing.
     if cov.is_omitted(section):
+        # Name the instrument where we have traced it. "Repealed" alone asks the
+        # lawyer to take our word for it; "omitted by Ordinance XXXVII of 2001"
+        # can be looked up, argued with, and — if we are wrong — disproved.
+        rec = cov.omission_record(section)
+        cite = rec.cite() if rec is not None else ""
+        head = (f"{statute} {prefix}{section} was {cite}." if cite
+                else f"{statute} {prefix}{section} has been REPEALED — the Act "
+                     f"itself declares it omitted.")
         return CitationCheck(
             raw, "statute", canonical, OMITTED,
-            f"{statute} {prefix}{section} has been REPEALED — the Act itself "
-            f"declares it omitted. It cannot be relied on, and because the "
-            f"number and its history are real this will not look wrong on the "
-            f"page. Replace it with the provision now in force.", in_ev)
+            f"{head} It cannot be relied on, and because the number and its "
+            f"history are real this will not look wrong on the page. Replace it "
+            f"with the provision now in force.", in_ev)
 
     if cov.has(section):
         return CitationCheck(

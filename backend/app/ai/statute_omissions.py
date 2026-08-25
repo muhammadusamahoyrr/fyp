@@ -48,6 +48,7 @@ import json
 import logging
 import re
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -78,50 +79,145 @@ SINGLE_OMISSION = re.compile(
 _MAX_RANGE = 200
 
 
-# HELD BACK PENDING A LEGAL DECISION — see docs/CITATION_VERIFICATION_SESSION_REPORT.md
+@dataclass(frozen=True)
+class OmissionRecord:
+    """WHY a section is dead, not merely that it is.
+
+    A bare boolean was the original data model and it could not survive contact
+    with the sources. Nine CrPC sections looked like a federal-vs-provincial
+    conflict; investigating each one found three different situations —
+    federal repeals the federal portal itself had missed, a federal ordinance,
+    and one table row misread as a repeal. A single flag cannot tell those
+    apart, and it cannot tell a lawyer the one thing they need in order to
+    check the answer: which instrument killed the section, and when.
+    """
+
+    section: int
+    status: str            # "omitted" | "held_pending"
+    instrument: str = ""   # e.g. "Ordinance XXXVII of 2001"
+    date: str = ""         # ISO-8601, e.g. "2001-08-13"
+    jurisdiction: str = "" # "federal" | "punjab" | ""
+    note: str = ""
+
+    @property
+    def is_omitted(self) -> bool:
+        return self.status == "omitted"
+
+    def cite(self) -> str:
+        """A phrase a lawyer can act on: instrument, date, and where it applies."""
+        if not self.instrument:
+            return ""
+        bits = [f"omitted by {self.instrument}"]
+        if self.date:
+            bits.append(f"dated {self.date}")
+        if self.jurisdiction and self.jurisdiction != "federal":
+            bits.append(f"({self.jurisdiction} only)")
+        return " ".join(bits)
+
+    def to_dict(self) -> dict:
+        return {"status": self.status, "instrument": self.instrument,
+                "date": self.date, "jurisdiction": self.jurisdiction,
+                "note": self.note}
+
+
+def _rec(section, status, instrument="", date="", jurisdiction="", note=""):
+    return OmissionRecord(section, status, instrument, date, jurisdiction, note)
+
+
+# CONFIRMED AGAINST A NAMED INSTRUMENT
 #
-# Spot-checking the map against the official federal consolidation at
-# pakistancode.gov.pk (last amended 2017-02-16) confirmed ss.266-336 verbatim,
-# and exposed a conflict of EDITIONS rather than a parsing error:
+# Each of these was traced to the enactment that killed it, and checked for
+# anything later reversing it. The Punjab Amendment Act X of 2024 — the most
+# recent amendment to the Code — touches only s.144, so none of these has been
+# revived.
+_CONFIRMED: dict[str, dict[int, OmissionRecord]] = {
+    "CrPC 1898": {
+        # The Code of Criminal Procedure (Amendment) Ordinance XXXVII of 2001
+        # abolished the Executive Magistracy. Punjab resolved to revive the
+        # magistracy in 2022 but it was a proposal only; nothing was enacted.
+        n: _rec(n, "omitted", "Ordinance XXXVII of 2001", "2001-08-13", "federal",
+                "Abolition of the Executive Magistracy.")
+        for n in (10, 11, 13)
+    } | {
+        # Section 16 of the Probation of Offenders Ordinance repeals ss.380,
+        # 562, 563 and 564 of the Code. FEDERAL, so this holds whichever
+        # edition governs — and notably pakistancode.gov.pk still prints all
+        # three with live headings, so the official portal is the stale one
+        # here. That is why no single source is treated as authoritative.
+        n: _rec(n, "omitted", "Probation of Offenders Ordinance XLV of 1960, s.16",
+                "1960-11-01", "federal",
+                "Replaced the Code's probation provisions.")
+        for n in (562, 563, 564)
+    },
+}
+
+# GENUINELY UNRESOLVED — held back, and not for the reason first supposed
 #
-#   bundled:  10.  [Omitted by the Ordinance XXXVII of 2001 dt. 13-8-2001.]
-#   official: 10.  District Magistrate.
+# These two are the only members of the original nine that were ever
+# Punjab-specific. Both cite a 1996 provincial notification, and neither portal
+# confirms or contradicts it. This is a DATA COMPLETENESS gap, not a
+# jurisdiction ambiguity: the question is not which edition governs but whether
+# anyone has published the current state of these two sections at all.
+_HELD_PENDING: dict[str, dict[int, OmissionRecord]] = {
+    "CrPC 1898": {
+        407: _rec(407, "held_pending",
+                  "Punjab Notification SO(J-II) 1-8/75 (P-V), Item No. 140",
+                  "1996-03-21", "punjab",
+                  "Unconfirmed by any independent source; not asserted."),
+        438: _rec(438, "held_pending",
+                  "Punjab Notification SO(J-II) 1-8/75 (P-V), Item No. 752-B",
+                  "1996-03-21", "punjab",
+                  "Also Islamabad SRO 255(I)/96 dated 1996-04-08. Unconfirmed."),
+    },
+}
+
+# PARSER ARTIFACTS — PERMANENTLY EXCLUDED, never to be re-derived
 #
-#   bundled:  407. [Omitted by Item No. 140 of Punjab Notification SO(J-II) 1-8/75]
-#   official: 407. Appeal from sentence of Magistrate of the second or third class.
+# CrPC s.14 is a live section: "Special Judicial and Executive Magistrates",
+# with operative text in the same document. The parser marked it omitted from a
+# SCHEDULE TABLE ROW:
 #
-# The bundled PDF is a PUNJAB-ANNOTATED edition folding provincial notifications
-# and the 2001 devolution ordinance into the text; the federal consolidation does
-# not. Whether a citation to s.10 is dead therefore depends on jurisdiction and
-# date, which an unqualified OMITTED verdict cannot express. Asserting it would
-# be a false accusation of the exact kind this subsystem exists to prevent.
+#     ... Section 407.  13. Power to sell property alleged ... Section 524.
+#         14. Repealed.
 #
-# These are EXCLUDED, not reclassified. Nothing here asserts they are in force
-# either — they simply fall through to whatever verdict the rest of the checker
-# reaches without an omission match, which for a section whose text we hold is
-# VERIFIED.
-_HELD_JURISDICTION: dict[str, frozenset[int]] = {
-    "CrPC 1898": frozenset({10, 11, 13, 14, 407, 438, 562, 563, 564}),
+# "14." there is a row number in a table of powers, not a section of the Code.
+# Identical failure to the Limitation Act "5A. [Repealed]" case earlier in this
+# work: a numbered line that is not a section declaration. Excluded here rather
+# than fixed in the regex, because a table row and a section heading are
+# genuinely indistinguishable by shape alone at that point in the text.
+_PARSER_ARTIFACTS: dict[str, frozenset[int]] = {
+    "CrPC 1898": frozenset({14}),
 }
 
 # HELD BACK PENDING RE-VERIFICATION
 #
-# The same spot-check found sections the OFFICIAL text marks omitted that this
-# parser does not: CrPC ss.111, 184, 532, 542, each reading "[Repealed.]" or
-# "[Omitted.]" there. They are deliberately NOT absorbed into the map. They were
-# not part of the twelve ranges the original extraction found, and adding them on
-# the strength of one federal document would repeat in reverse the mistake above
-# — asserting an omission before establishing which edition governs.
-#
-# Recorded here rather than left in a commit message so the gap stays visible.
+# Sections the OFFICIAL federal text marks omitted that this parser does not.
+# Deliberately NOT absorbed: adding them on the strength of one document would
+# repeat in reverse the mistake of trusting a single edition.
 _PENDING_VERIFICATION: dict[str, frozenset[int]] = {
     "CrPC 1898": frozenset({111, 184, 532, 542}),
 }
 
 
+def confirmed_records(statute: str) -> dict[int, OmissionRecord]:
+    """Omissions traced to a named instrument."""
+    return _CONFIRMED.get(statute, {})
+
+
+def held_records(statute: str) -> dict[int, OmissionRecord]:
+    """Claimed omissions no source confirms — never asserted to a user."""
+    return _HELD_PENDING.get(statute, {})
+
+
 def held_back(statute: str) -> frozenset[int]:
-    """Sections excluded from the omission map pending a decision."""
-    return _HELD_JURISDICTION.get(statute, frozenset())
+    """Sections kept out of the map: unresolved claims plus parser artifacts."""
+    return (frozenset(held_records(statute))
+            | _PARSER_ARTIFACTS.get(statute, frozenset()))
+
+
+def parser_artifacts(statute: str) -> frozenset[int]:
+    """Not omissions at all — misreads that must never be re-derived."""
+    return _PARSER_ARTIFACTS.get(statute, frozenset())
 
 
 def pending_verification(statute: str) -> frozenset[int]:
@@ -150,7 +246,56 @@ def parse_omissions(text: str) -> set[int]:
 
 
 _cache: dict[str, frozenset[int]] | None = None
+_records: dict[str, dict[int, OmissionRecord]] | None = None
 _lock = threading.Lock()
+
+
+def _load() -> None:
+    """Read the generated file into both views. Caller holds the lock.
+
+    Two views, one file. `_cache` is the plain set every existing caller already
+    depends on — density, is_omitted, the verifier — so enriching the data
+    cannot break them. `_records` carries the citation for the verdict text.
+    """
+    global _cache, _records
+    try:
+        raw = json.loads(_DATA.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        logger.warning("statute_omissions: %s absent — omission awareness "
+                       "disabled, coverage will read as before", _DATA)
+        _cache, _records = {}, {}
+        return
+    except Exception as exc:
+        logger.warning("statute_omissions: unreadable (%s) — disabled", exc)
+        _cache, _records = {}, {}
+        return
+
+    cache: dict[str, frozenset[int]] = {}
+    records: dict[str, dict[int, OmissionRecord]] = {}
+    for statute, entry in (raw.get("statutes") or {}).items():
+        # v2 stores {"sections": {"10": {...}}}; v1 stored a bare list. Both are
+        # accepted so an older generated file still loads rather than silently
+        # disabling omission awareness on deploy.
+        if isinstance(entry, dict):
+            secs = entry.get("sections") or {}
+            recs = {int(n): OmissionRecord(
+                        section=int(n),
+                        status=d.get("status", "omitted"),
+                        instrument=d.get("instrument", ""),
+                        date=d.get("date", ""),
+                        jurisdiction=d.get("jurisdiction", ""),
+                        note=d.get("note", ""))
+                    for n, d in secs.items()}
+        else:
+            recs = {int(n): OmissionRecord(int(n), "omitted") for n in entry}
+        records[statute] = recs
+        cache[statute] = frozenset(n for n, r in recs.items() if r.is_omitted)
+
+    _cache, _records = cache, records
+    logger.info("statute_omissions: %d statutes, %d sections, %d with a cited "
+                "instrument", len(cache), sum(len(v) for v in cache.values()),
+                sum(1 for rs in records.values() for r in rs.values()
+                    if r.instrument))
 
 
 def get_omissions() -> dict[str, frozenset[int]]:
@@ -162,30 +307,36 @@ def get_omissions() -> dict[str, frozenset[int]]:
     """
     global _cache
     with _lock:
-        if _cache is not None:
-            return _cache
-        try:
-            raw = json.loads(_DATA.read_text(encoding="utf-8"))
-            _cache = {k: frozenset(int(n) for n in v)
-                      for k, v in raw.get("statutes", {}).items()}
-            logger.info("statute_omissions: %d statutes, %d sections",
-                        len(_cache), sum(len(v) for v in _cache.values()))
-        except FileNotFoundError:
-            logger.warning("statute_omissions: %s absent — omission awareness "
-                           "disabled, coverage will read as before", _DATA)
-            _cache = {}
-        except Exception as exc:
-            logger.warning("statute_omissions: unreadable (%s) — disabled", exc)
-            _cache = {}
-        return _cache
+        if _cache is None:
+            _load()
+        return _cache or {}
+
+
+def get_records() -> dict[str, dict[int, OmissionRecord]]:
+    """Canonical statute name -> {section: why it is dead}."""
+    global _records
+    with _lock:
+        if _records is None:
+            _load()
+        return _records or {}
 
 
 def omitted_for(statute: str) -> frozenset[int]:
     return get_omissions().get(statute, frozenset())
 
 
+def record_for(statute: str, section: int) -> OmissionRecord | None:
+    """The instrument that killed one section, if we know it."""
+    return get_records().get(statute, {}).get(section)
+
+
 def set_omissions(mapping: dict[str, frozenset[int]] | None) -> None:
-    """Install a map (tests) or clear the cache with None."""
-    global _cache
+    """Install a map (tests) or clear both caches with None."""
+    global _cache, _records
     with _lock:
         _cache = mapping
+        if mapping is None:
+            _records = None
+        else:
+            _records = {k: {n: OmissionRecord(n, "omitted") for n in v}
+                        for k, v in mapping.items()}

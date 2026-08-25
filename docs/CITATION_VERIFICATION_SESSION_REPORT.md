@@ -2,7 +2,7 @@
 
 **Attorney.AI** · Muhammad Usama (SP23-BCS-069), COMSATS
 Commits `3da1650 → 11952b2 → b619818` · 25 August 2026
-Test suite: **943 → 958 → 965 → 970** passing
+Test suite: **943 → 958 → 965 → 970 → 993** passing
 
 Written for the FYP report. Every figure was measured against the live corpus at
 the time stated; none is estimated. Where something is assumed rather than
@@ -370,8 +370,8 @@ changed only in docstring text.
 
 ## 6a. Post-session finding: jurisdiction/edition mismatch in the CrPC omission map
 
-**9 sections pulled pending a legal decision · 4 sections held pending
-re-verification.** Test suite 965 → **970**.
+**Resolved: 6 restored with cited instruments · 1 permanently excluded as a
+parser artifact · 2 still genuinely open.** Test suite 970 → **993**.
 
 Assumption #1 in §5 — *"bundled statute PDFs are authoritative, not
 Gazette-checked"* — was spot-checked against the **official federal
@@ -421,44 +421,106 @@ So whether a citation to s.10 is dead depends on **jurisdiction and date** — w
 an unqualified `OMITTED` verdict cannot express. Asserting it is a false
 accusation of exactly the kind this subsystem exists to prevent.
 
-### Action taken
+### Action taken, and then resolved
 
-| | |
-|---|---|
-| **Pulled** (9) | CrPC ss. **10, 11, 13, 14, 407, 438, 562, 563, 564** |
-| **Held, not absorbed** (4) | CrPC ss. **111, 184, 532, 542** — marked `[Repealed.]` federally but not found by this parser; adding them on one document would repeat the edition mistake in reverse |
+The nine were first pulled wholesale pending a jurisdiction decision. Tracing
+each one to its instrument then showed that **jurisdiction was not the deciding
+factor after all** — the nine were three different problems wearing one label.
 
-Both lists live in `statute_omissions.py` and are applied **by the generator**,
-not by hand-editing the JSON, so re-running the build cannot silently restore
-them. The JSON records both under `_held_pending_jurisdiction` and
-`_pending_verification` with reasons.
+| Outcome | Sections | Instrument | Basis |
+|---|---|---|---|
+| **RESTORED** | 10, 11, 13 | Ordinance XXXVII of 2001, 13-08-2001 | Confirmed: the Ordinance abolished the Executive Magistracy. Punjab resolved to revive the magistracy in 2022 but it was a **proposal only**; Punjab Amendment Act X of 2024 — the most recent amendment to the Code — touches **only s.144**. |
+| **RESTORED** | 562, 563, 564 | Probation of Offenders Ordinance XLV of 1960, s.16 | Confirmed independently: s.16 repeals ss.380, 562, 563 and 564 of the Code. **Federal**, so it holds whichever edition governs. |
+| **EXCLUDED PERMANENTLY** | 14 | — | **Not an omission.** See below. |
+| **STILL HELD** | 407, 438 | Punjab Notification SO(J-II) 1-8/75, 21-03-1996 | Genuinely unconfirmed by any independent source. |
 
-**Excluded, not reclassified.** Nothing asserts these sections are in force. They
-fall through to the ordinary verdict for a section whose text the corpus holds —
-**confirmed live: all 9 now return `VERIFIED`**, which says nothing about
-currency either way. There is deliberately no "in force" register, because the
-checker has no verdict meaning *confirmed current* and inventing one would
-overclaim.
+> **A correction to my own earlier report:** I dated ss.407/438 to *1975*. Wrong —
+> `1-8/75` is the notification's **file number**; the date is **21 March 1996**.
 
-### Effect on CrPC density: negligible
+**s.14 is a live section, and was never a jurisdiction question.** The parser read
+it as repealed from a **schedule table row**:
 
-| | Before | After |
-|---|---:|---:|
-| Sections in map | 157 | **148** |
-| Sections in force | 408 | 417 |
-| Held of those | 407 | 416 |
-| **Ratio** | 0.997549 | **0.997602** |
-| Dense | ✅ | ✅ |
-| Statutes able to flag | 22 | **22** |
+```
+... Section 407.  13. Power to sell property alleged ... Section 524.
+    14. Repealed.
+```
 
-The ratio is materially unchanged — marginally *higher*, since both numerator and
-denominator rose by nine. **The headline CrPC finding stands**, and it now rests
-on 148 entries cross-checked against an authoritative source rather than 157
-taken on trust from one bundled PDF.
+`14.` there is a **row number** in a table of powers, not a section of the Code —
+while s.14 itself is *"Special Judicial and Executive Magistrates"*, with
+operative text in the same document. Identical failure to the Limitation Act
+`5A. [Repealed]` case in §4.3(b): a numbered line that is not a section
+declaration. It is excluded permanently rather than fixed in the regex, because
+at that point in the text a table row and a section heading are genuinely
+indistinguishable by shape.
 
-### Three open questions — for you, not for code
+**ss.407 and 438 were the only two of the nine that were ever Punjab-specific.**
+Which reframes what remains: this is a **data-completeness gap, not a
+jurisdiction ambiguity**. The question is no longer *which edition governs* but
+whether anyone has published the current state of those two sections at all.
 
-Reproduced verbatim; these need a legal answer, not an implementation:
+### The finding that outlived the jurisdiction question
+
+**ss.562–564 were repealed by a FEDERAL ordinance in 1960, and
+pakistancode.gov.pk still prints all three with live headings and no repeal
+marker.** The site does mark repeals elsewhere (`111. [Repealed.]`), so this is
+an omission in the official consolidation itself.
+
+So the working assumption behind the whole spot-check — that one source could
+settle it — was wrong in both directions. **No single source is complete.** The
+bundled edition was right about ss.562–564 where the federal portal was stale;
+the federal portal was right about s.14 where our parser was wrong.
+
+### Data model: from a boolean to a citation
+
+That is what forced the schema change. A bare `omitted: true` cannot distinguish
+a federal repeal from a provincial notification from a parser artifact, and it
+cannot tell a lawyer the one thing that lets them check the answer: **which
+instrument, and when.** Each entry now carries:
+
+```json
+"10": { "status": "omitted",
+        "instrument": "Ordinance XXXVII of 2001",
+        "date": "2001-08-13",
+        "jurisdiction": "federal" }
+```
+
+**Existing callers were not rewritten.** Density, `is_omitted`, and the verifier's
+branch all still read the same `frozenset[int]`, derived from the richer records
+at load time — so enriching the data could not break them. A v1 flat-list file
+still loads, so an older generated file degrades rather than silently disabling
+omission awareness. Both properties are tested.
+
+**What the lawyer now sees** — no UI file changed, because both panels already
+render the verdict's detail text:
+
+> *"CrPC 1898 s.10 was omitted by Ordinance XXXVII of 2001 dated 2001-08-13. It
+> cannot be relied on…"*
+
+instead of a bare *"has been REPEALED"*. A provincial instrument is labelled
+`(punjab only)`, which is the difference between a fact and a half-truth for a
+lawyer filing elsewhere. The 148 entries with no traced instrument keep the
+generic wording — **a missing citation never demotes the verdict**, or enriching
+the data would have quietly disabled most of the map.
+
+### Effect on CrPC density
+
+| | Original | After the pull | After resolution |
+|---|---:|---:|---:|
+| Sections in map | 157 | 148 | **154** |
+| Sections in force | 408 | 417 | 411 |
+| Held of those | 407 | 416 | 410 |
+| **Ratio** | 0.997549 | 0.997602 | **0.997567** |
+| Dense | ✅ | ✅ | ✅ |
+| Statutes able to flag | 22 | 22 | **22** |
+
+Materially unchanged throughout. **The headline CrPC finding never depended on
+the nine** — it rests on ss.266–336, confirmed verbatim against the official
+text.
+
+### Three open questions — answered
+
+Reproduced verbatim from when they were raised, with what the currency check
+settled:
 
 > 1. **Which edition governs** for your users — federal consolidation, or
 >    Punjab-annotated? Attorney.AI is Punjab-focused, so the bundled edition may
@@ -468,9 +530,21 @@ Reproduced verbatim; these need a legal answer, not an implementation:
 > 3. **Should `OMITTED` carry jurisdiction and date**, rather than being
 >    unqualified?
 
-Until (1) and (2) are answered the 9 stay out. Question (3) is the deeper one: if
-provincial and federal currency genuinely diverge, a single boolean `omitted` is
-the wrong data model regardless of which edition is chosen.
+**(1)** Punjab-applicable — federal base plus provincial amendments, since users
+file in Punjab courts. But adopting that answer does **not** validate the bundled
+PDF, and the ss.562–564 finding shows the federal portal is not a safe default
+either. Both sources are partial.
+**(2)** ss.10, 11 and 13 are omitted, confirmed, nothing later reviving them.
+s.14 was a parser artifact and is in force.
+**(3)** **Yes — implemented above.** This turned out to be the load-bearing
+question: the other two could not be answered *at all* without per-section
+instrument data.
+
+### Still open
+
+**ss.407 and 438 only.** Punjab-specific, 1996, unconfirmed either way. This is
+now a data-completeness gap rather than a jurisdiction ambiguity, and closing it
+needs a Punjab source that publishes the current text — not a decision.
 
 ---
 

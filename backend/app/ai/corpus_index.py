@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,11 @@ class StatuteCoverage:
     ceiling_outliers: frozenset[int] = frozenset()
     # Sections the Act itself declares repealed — see app/ai/statute_omissions.py
     omitted: frozenset[int] = frozenset()
+    # WHY each is dead, where it has been traced to a named instrument. Kept
+    # beside `omitted` rather than replacing it: every existing caller — density,
+    # is_omitted, the verifier's branch — reads the plain set, so enriching the
+    # data cannot break them.
+    omission_records: dict = field(default_factory=dict, compare=False)
 
     @property
     def in_range(self) -> frozenset[int]:
@@ -166,6 +171,16 @@ class StatuteCoverage:
             len(self.held_in_force) >= _DENSE_MIN_SECTIONS
             and self.ratio >= _DENSE_RATIO
         )
+
+    def omission_record(self, section: str):
+        """The instrument that killed this section, or None if untraced.
+
+        None is not a denial: most omissions are declared by the statute text
+        without naming the amending act, and those stay OMITTED with no citation
+        rather than being demoted.
+        """
+        m = _leading_num.match(str(section).strip())
+        return self.omission_records.get(int(m.group(1))) if m else None
 
     def is_omitted(self, section: str) -> bool:
         """Has the legislature deleted this section?
@@ -261,7 +276,7 @@ class CorpusIndex:
 
 def build_index() -> CorpusIndex:
     """Read every statute chunk's metadata and fold it into a coverage map."""
-    from app.ai.statute_omissions import omitted_for
+    from app.ai.statute_omissions import get_records, omitted_for
     from app.db.chroma import get_chroma
 
     client = get_chroma()
@@ -298,6 +313,7 @@ def build_index() -> CorpusIndex:
             ceiling_outliers=outliers,
             artifacts=dropped.get(statute, 0),
             omitted=omitted_for(statute),
+            omission_records=dict(get_records().get(statute, {})),
         )
 
     idx = CorpusIndex(coverage)
