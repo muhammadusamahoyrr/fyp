@@ -42,32 +42,40 @@ const DRAFTS_DATA = [
     { name: "Labour Court Complaint", cat: "Employment" },
 ];
 
+// Each entry must name the document the backend ACTUALLY builds. A tile
+// labelled for one document that generates another is worse than a missing
+// tile: the user gets a real, well-formatted PDF of the wrong instrument, and
+// nothing on screen says so.
 const DOC_TYPES_DATA = [
     { key: "Plaint", ico: "⚖️", desc: "Civil lawsuit filing", preview: "A formal legal complaint filed in court to initiate a civil lawsuit." },
     { key: "Written Statement", ico: "📝", desc: "Defendant response", preview: "Defendant's formal response to the plaint in court." },
     { key: "Legal Notice", ico: "📮", desc: "Pre-litigation notice", preview: "Formal notice sent before initiating legal proceedings." },
     { key: "Stay Application", ico: "⏸️", desc: "Halt proceedings", preview: "Application to halt court or legal proceedings temporarily." },
+    // Was one vague "Contract" tile wired to the NDA builder. A contract is not
+    // an NDA, so the two agreements the backend really generates are now named
+    // for what they are — which also restores the tenancy template, previously
+    // reachable only by picking "Settlement Draft".
+    { key: "Non-Disclosure Agreement", ico: "🛡️", desc: "Confidentiality agreement", preview: "Agreement protecting confidential information shared between parties." },
+    { key: "Rental Agreement", ico: "🏠", desc: "Tenancy agreement", preview: "Tenancy agreement between landlord and tenant setting rent, term and obligations." },
+    // No settlement template exists. Listed and disabled, like Stay Application,
+    // rather than silently substituting a rental agreement.
     { key: "Settlement Draft", ico: "🤝", desc: "Out-of-court resolution", preview: "Agreement between parties to resolve dispute out of court." },
-    { key: "Contract", ico: "📃", desc: "Binding agreement", preview: "Legally binding agreement between two or more parties." },
 ];
 
 const GEN_STEPS_LABELS = ["Extracting case data…", "Applying AI recommendations…", "Populating template…", "Formatting document…", "Generating draft…"];
 
+// null means "we cannot generate this" and the UI disables the option. Mapping
+// to the nearest available template instead would hand the user a confidently
+// produced document of a type they did not ask for.
 const DOC_TYPE_MAP = {
     "Plaint": "plaint_civil",
     "Written Statement": "written_statement",
     "Legal Notice": "legal_notice",
-    "Contract": "nda",
-    "Settlement Draft": "rental_agreement",
-    "Stay Application": null,
+    "Non-Disclosure Agreement": "nda",
+    "Rental Agreement": "rental_agreement",
+    "Stay Application": null,       // no builder exists
+    "Settlement Draft": null,       // no builder exists — was wired to rental_agreement
 };
-
-const EVIDENCE_FILES = [
-    { name: "Employment_Contract.pdf", size: "2.4 MB", date: "Feb 10", status: "Processed" },
-    { name: "Termination_Letter.pdf", size: "512 KB", date: "Feb 12", status: "Processed" },
-    { name: "Pay_Stubs_Dec25.pdf", size: "1.1 MB", date: "Feb 14", status: "Pending" },
-    { name: "Offer_Letter_2022.pdf", size: "340 KB", date: "Feb 14", status: "Pending" },
-];
 
 
 const ModDocuments = () => {
