@@ -165,10 +165,12 @@ async def main(n_examples: int, include_synthetic: bool) -> None:
     print("  " + "-" * 74)
     print("  WHAT THIS DOES NOT CHECK")
     print("  " + "-" * 74)
-    print("  Existence only. A real section cited for a proposition it does not")
-    print("  support reads as VERIFIED here — recorded in this project's own data:")
-    print("  PPC 302 (murder) was cited for a stamp-duty question and for a tenancy")
-    print("  question. Both sections exist. Both citations were nonsense.")
+    print("  Existence and repeal only. A real, in-force section cited for a")
+    print("  proposition it does not support reads as VERIFIED here — recorded in")
+    print("  this project's own data: an answer to \"how many days do I have to")
+    print("  file an appeal\" cited \"PPC Section 152 - Limitation for appeals\".")
+    print("  PPC 152 is a RIOT offence; 152 is an Article of the Limitation Act's")
+    print("  Schedule. The section exists, so this check passes it.")
     print()
 
 

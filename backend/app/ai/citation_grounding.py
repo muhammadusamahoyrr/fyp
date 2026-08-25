@@ -19,11 +19,29 @@ s.154 CrPC is precisely the FIR provision. The model produced right law from
 parametric memory that retrieval failed to supply. Flagging it would teach a
 user to distrust a correct answer.
 
-Against that, the same measurement finds unambiguous fabrication:
+Against that, the same measurement finds unambiguous misgrounding:
+
+    q: "days to file an appeal..."   cited "PPC Section 152 - Limitation for
+                                     appeals to the Court of a District Judge"
+
+PPC 152 is "Assaulting or obstructing public servant when suppressing riot".
+There is no limitation provision anywhere in the Penal Code: 152, 155 and 156
+are ARTICLES of the Limitation Act's First Schedule, reattributed to the PPC.
+The same two-numbering-spaces confusion this project hit in its own parser.
+
+CORRECTION. An earlier version of this docstring also listed:
 
     q: "current stamp duty rate..."          cited PPC 302 (murder)
     q: "tenant evicted without notice..."    cited PPC 302 (murder)
-    q: "days to file an appeal..."           cited PPC 152, 155, 156
+
+That was WRONG, and it propagated into three modules and a published report
+before anyone read the source sentences. What those answers actually say is
+"PPC Section 302 is not applicable here as the provided sections are from the
+Transfer of Property Act 1882" — the model correctly REJECTING s.302. This
+parser counted the mention as a citation because it does not read negation.
+All seven recorded s.302 mentions are of that kind. The lesson is the one this
+module already teaches about ungroundedness: a mention is not a claim, and a
+measurement that cannot tell them apart must not be quoted as an error rate.
 
 This function cannot separate those two cases, because it measures groundedness
 in the retrieved set — not correctness. Anything built on top of it must respect

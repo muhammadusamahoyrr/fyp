@@ -1,0 +1,372 @@
+{
+  "_schema": "citation-eval/1",
+  "version": "dlite_v1",
+  "built": "2026-08-25",
+  "criteria": "CRITERIA.md — pre-registered before any pair was selected",
+  "annotation": "SINGLE-ANNOTATED. One annotator. No inter-annotator agreement was measured and none is claimed.",
+  "purpose": "Go/no-go evidence for A1 embedding-based mismatch detection.",
+  "fields": {
+    "id": "stable identifier",
+    "assertion": "what the draft claims, as a lawyer would write it",
+    "statute": "canonical statute name as the corpus spells it",
+    "section": "section or article number as cited",
+    "label": "supported | misgrounded_gross | misgrounded_same_topic | fabricated | repealed | omitted",
+    "source": "logged = taken verbatim from this system's own recorded answers; synthetic = written for this set",
+    "real_heading": "the actual heading of the cited section, from the corpus",
+    "correct_section": "for misgrounded pairs, the provision that should have been cited",
+    "rule": "which CRITERIA.md rule assigned the label",
+    "known_gap": "true when the current verifier is expected to MISS this",
+    "known_gap_reason": "why"
+  },
+  "pairs": [
+    {
+      "id": "sup-01",
+      "assertion": "The information must be recorded by the officer in charge of the police station when it relates to a cognisable offence.",
+      "statute": "CrPC 1898", "section": "154", "label": "supported",
+      "source": "synthetic", "real_heading": "Information in cognisable cases"
+    },
+    {
+      "id": "sup-02",
+      "assertion": "Bail may be granted to a person accused of a non-bailable offence in the circumstances the Code allows.",
+      "statute": "CrPC 1898", "section": "497", "label": "supported",
+      "source": "synthetic", "real_heading": "When bail may be taken in case of non-bailable offence"
+    },
+    {
+      "id": "sup-03",
+      "assertion": "Whoever commits theft shall be punished with imprisonment of either description for a term which may extend to three years, or with fine, or with both.",
+      "statute": "PPC 1860", "section": "379", "label": "supported",
+      "source": "synthetic", "real_heading": "Punishment for theft"
+    },
+    {
+      "id": "sup-04",
+      "assertion": "A person aggrieved may invoke the constitutional jurisdiction of the High Court by way of writ petition.",
+      "statute": "Constitution of Pakistan 1973", "section": "199", "label": "supported",
+      "source": "synthetic", "real_heading": "Jurisdiction of High Court"
+    },
+    {
+      "id": "sup-05",
+      "assertion": "Where the appellant satisfies the Court that there was sufficient cause for not preferring the appeal within time, the delay may be condoned.",
+      "statute": "Limitation Act 1908", "section": "5", "label": "supported",
+      "source": "synthetic", "real_heading": "Extension of period in certain cases"
+    },
+    {
+      "id": "sup-06",
+      "assertion": "Oral evidence must in all cases be direct.",
+      "statute": "Qanun-e-Shahadat Order 1984", "section": "71", "label": "supported",
+      "source": "synthetic", "real_heading": "Oral evidence must be direct"
+    },
+    {
+      "id": "sup-07",
+      "assertion": "A police officer making an investigation may examine any person supposed to be acquainted with the facts of the case.",
+      "statute": "CrPC 1898", "section": "161", "label": "supported",
+      "source": "synthetic", "real_heading": "Examination of witnesses by police"
+    },
+    {
+      "id": "sup-08",
+      "assertion": "Whoever dishonestly receives or retains stolen property, knowing it to be stolen, commits an offence.",
+      "statute": "PPC 1860", "section": "411", "label": "supported",
+      "source": "logged", "real_heading": "Dishonestly receiving stolen property"
+    },
+    {
+      "id": "sup-09",
+      "assertion": "A person convicted on a trial held by a Sessions Judge may appeal to the High Court.",
+      "statute": "CrPC 1898", "section": "410", "label": "supported",
+      "source": "synthetic", "real_heading": "Appeal from sentence of Court of Session"
+    },
+    {
+      "id": "sup-10",
+      "assertion": "All citizens are equal before law and are entitled to equal protection of law.",
+      "statute": "Constitution of Pakistan 1973", "section": "25", "label": "supported",
+      "source": "synthetic", "real_heading": "Equality of citizens"
+    },
+    {
+      "id": "sup-11",
+      "assertion": "A lease of immovable property determines by efflux of the time limited thereby.",
+      "statute": "Transfer of Property Act 1882", "section": "111", "label": "supported",
+      "source": "synthetic", "real_heading": "Determination of lease"
+    },
+
+    {
+      "id": "gross-01",
+      "assertion": "The limitation period for filing an appeal to the Court of a District Judge is prescribed by this provision.",
+      "statute": "PPC 1860", "section": "152", "label": "misgrounded_gross",
+      "source": "logged",
+      "real_heading": "Assaulting or obstructing public servant when suppressing riot",
+      "correct_section": "Limitation Act 1908, First Schedule Article 152",
+      "rule": "rule 2 — same statute, different Chapter (VIII, public tranquillity), no shared domain with appeal limitation",
+      "note": "Recorded verbatim: the answer rendered 'PPC Section 152 — Limitation for appeals to the Court of a District Judge'. 152 is an ARTICLE of the Limitation Act Schedule, reattributed to the Penal Code."
+    },
+    {
+      "id": "gross-02",
+      "assertion": "This section fixes the limitation period for appeals to a High Court.",
+      "statute": "PPC 1860", "section": "155", "label": "misgrounded_gross",
+      "source": "logged",
+      "real_heading": "Liability of person for whose benefit riot is committed",
+      "correct_section": "Limitation Act 1908, First Schedule Article 155",
+      "rule": "rule 2"
+    },
+    {
+      "id": "gross-03",
+      "assertion": "This section governs limitation for appeals to a High Court except in certain cases.",
+      "statute": "PPC 1860", "section": "156", "label": "misgrounded_gross",
+      "source": "logged",
+      "real_heading": "Liability of agent of owner or occupier for whose benefit riot is committed",
+      "correct_section": "Limitation Act 1908, First Schedule Article 156",
+      "rule": "rule 2"
+    },
+    {
+      "id": "gross-04",
+      "assertion": "This provision sets out the punishment for theft under Pakistani criminal law.",
+      "statute": "CrPC 1898", "section": "15", "label": "misgrounded_gross",
+      "source": "logged",
+      "real_heading": "Benches of Magistrates",
+      "correct_section": "PPC 1860 s.379",
+      "rule": "rule 1 — different statute, procedural court-constitution vs substantive offence"
+    },
+    {
+      "id": "gross-05",
+      "assertion": "The stamp duty payable on transfer of immovable property is determined under this provision.",
+      "statute": "PPC 1860", "section": "302", "label": "misgrounded_gross",
+      "source": "synthetic",
+      "real_heading": "Punishment of qatl-i-amd",
+      "correct_section": "Stamp Act 1899",
+      "rule": "rule 2 — homicide vs fiscal duty on conveyances",
+      "note": "SYNTHETIC. Written to represent the canonical gross case. It is NOT drawn from the logs: the seven recorded s.302 mentions all read 'PPC Section 302 is not applicable here', i.e. the model correctly rejecting it. An earlier claim that this was a logged fabrication was wrong and has been corrected in citation_grounding.py."
+    },
+    {
+      "id": "gross-06",
+      "assertion": "A landlord may evict a tenant without notice under this provision.",
+      "statute": "PPC 1860", "section": "302", "label": "misgrounded_gross",
+      "source": "synthetic",
+      "real_heading": "Punishment of qatl-i-amd",
+      "correct_section": "Punjab Rented Premises Act 2009",
+      "rule": "rule 2",
+      "note": "SYNTHETIC — see gross-05."
+    },
+    {
+      "id": "gross-07",
+      "assertion": "Oral evidence in a criminal trial must be direct and cannot be hearsay.",
+      "statute": "Transfer of Property Act 1882", "section": "54", "label": "misgrounded_gross",
+      "source": "synthetic",
+      "real_heading": "\"Sale\" defined",
+      "correct_section": "Qanun-e-Shahadat Order 1984 s.71",
+      "rule": "rule 1 — property conveyancing vs law of evidence"
+    },
+
+    {
+      "id": "same-01",
+      "assertion": "This is the provision under which the punishment for theft is imposed.",
+      "statute": "PPC 1860", "section": "382", "label": "misgrounded_same_topic",
+      "source": "logged",
+      "real_heading": "Theft after preparation made for causing death, hurt or restraint in order to the committing of the theft",
+      "correct_section": "PPC 1860 s.379",
+      "rule": "rule 3 — same statute, same Chapter XVII, theft family",
+      "note": "FAILURE_CASE_001. The recorded answer rendered it flatly as 'PPC Section 382 — Theft'. s.382 is an aggravated form carrying a far heavier sentence; s.379 is the general punishment section."
+    },
+    {
+      "id": "same-02",
+      "assertion": "Theft of movable property from a person's dwelling attracts the ordinary punishment for theft under this section.",
+      "statute": "PPC 1860", "section": "380", "label": "misgrounded_same_topic",
+      "source": "logged",
+      "real_heading": "Theft in dwelling house, etc.",
+      "correct_section": "PPC 1860 s.379",
+      "rule": "rule 3 — same Chapter XVII; the error is aggravation, not subject"
+    },
+    {
+      "id": "same-03",
+      "assertion": "Whoever commits robbery shall be punished under this section.",
+      "statute": "PPC 1860", "section": "390", "label": "misgrounded_same_topic",
+      "source": "synthetic",
+      "real_heading": "Robbery",
+      "correct_section": "PPC 1860 s.392",
+      "rule": "rule 3 — s.390 DEFINES robbery, s.392 punishes it; definition/penalty confusion within one chapter"
+    },
+    {
+      "id": "same-04",
+      "assertion": "Bail in a bailable offence is granted as of right under this provision.",
+      "statute": "CrPC 1898", "section": "497", "label": "misgrounded_same_topic",
+      "source": "synthetic",
+      "real_heading": "When bail may be taken in case of non-bailable offence",
+      "correct_section": "CrPC 1898 s.496",
+      "rule": "rule 3 — adjacent bail provisions; bailable vs non-bailable is the whole distinction"
+    },
+    {
+      "id": "same-05",
+      "assertion": "This section defines the offence of criminal breach of trust by a public servant.",
+      "statute": "PPC 1860", "section": "403", "label": "misgrounded_same_topic",
+      "source": "synthetic",
+      "real_heading": "Dishonest misappropriation of property",
+      "correct_section": "PPC 1860 s.405",
+      "rule": "rule 3 — same Chapter XVII, misappropriation vs breach of trust"
+    },
+    {
+      "id": "same-06",
+      "assertion": "The punishment for causing qatl-i-amd is laid down in this provision.",
+      "statute": "PPC 1860", "section": "304", "label": "misgrounded_same_topic",
+      "source": "synthetic",
+      "real_heading": "Proof of qatl-i-amd liable to qisas, etc.",
+      "correct_section": "PPC 1860 s.302",
+      "rule": "rule 3 — same Chapter XVI; s.304 concerns PROOF, s.302 punishment"
+    },
+    {
+      "id": "same-07",
+      "assertion": "A police officer may investigate a cognizable case without the order of a Magistrate under this section.",
+      "statute": "CrPC 1898", "section": "154", "label": "misgrounded_same_topic",
+      "source": "synthetic",
+      "real_heading": "Information in cognisable cases",
+      "correct_section": "CrPC 1898 s.156",
+      "rule": "rule 3 — same Chapter XIV; recording information vs power to investigate"
+    },
+    {
+      "id": "same-08",
+      "assertion": "This provision governs criminal trespass committed by night in order to commit an offence.",
+      "statute": "PPC 1860", "section": "441", "label": "misgrounded_same_topic",
+      "source": "synthetic",
+      "real_heading": "Criminal trespass",
+      "correct_section": "PPC 1860 s.457",
+      "rule": "rule 3 — same Chapter XVII; basic definition vs aggravated night house-breaking"
+    },
+    {
+      "id": "same-09",
+      "assertion": "Time spent prosecuting bona fide in a court without jurisdiction is excluded from the limitation period under this section.",
+      "statute": "Limitation Act 1908", "section": "12", "label": "misgrounded_same_topic",
+      "source": "synthetic",
+      "real_heading": "Exclusion of time in legal proceedings",
+      "correct_section": "Limitation Act 1908 s.14",
+      "rule": "rule 3 — adjacent exclusion-of-time provisions in one statute"
+    },
+    {
+      "id": "same-10",
+      "assertion": "This provision confers original jurisdiction on the High Court to enforce fundamental rights.",
+      "statute": "Constitution of Pakistan 1973", "section": "184", "label": "misgrounded_same_topic",
+      "source": "synthetic",
+      "real_heading": "Original Jurisdiction of Supreme Court",
+      "correct_section": "Constitution of Pakistan 1973 Art.199",
+      "rule": "rule 4 — different Part, but the same subject (constitutional writ jurisdiction); tie-break to same_topic"
+    },
+
+    {
+      "id": "fab-01",
+      "assertion": "The punishment for aggravated theft by electronic means is prescribed by this provision.",
+      "statute": "PPC 1860", "section": "999", "label": "fabricated", "source": "synthetic"
+    },
+    {
+      "id": "fab-02",
+      "assertion": "This section governs the procedure for electronic filing of a first information report.",
+      "statute": "CrPC 1898", "section": "888", "label": "fabricated", "source": "synthetic"
+    },
+    {
+      "id": "fab-03",
+      "assertion": "The Court may presume the genuineness of a digitally signed instrument under this provision.",
+      "statute": "Qanun-e-Shahadat Order 1984", "section": "640", "label": "fabricated", "source": "synthetic"
+    },
+    {
+      "id": "fab-04",
+      "assertion": "This Article guarantees a right to environmental protection.",
+      "statute": "Constitution of Pakistan 1973", "section": "991", "label": "fabricated", "source": "synthetic"
+    },
+    {
+      "id": "fab-05",
+      "assertion": "Mutation of agricultural land must be attested before a Revenue Officer under this section.",
+      "statute": "Punjab Land Revenue Act 1967", "section": "900", "label": "fabricated", "source": "synthetic"
+    },
+    {
+      "id": "fab-06",
+      "assertion": "This section prescribes the procedure for registering an agreement to sell immovable property.",
+      "statute": "Transfer of Property Act 1882", "section": "700", "label": "fabricated", "source": "synthetic"
+    },
+    {
+      "id": "fab-07",
+      "assertion": "A decree may be executed by attachment of digital assets under this provision.",
+      "statute": "CPC 1908", "section": "777", "label": "fabricated", "source": "synthetic"
+    },
+    {
+      "id": "fab-08",
+      "assertion": "This section fixes the limitation period for constitutional petitions.",
+      "statute": "Limitation Act 1908", "section": "410", "label": "fabricated", "source": "synthetic",
+      "note": "410 is beyond the Act's 32 sections. It is a plausible-looking number because the Act's SCHEDULE runs to Article 183 and litigants often conflate the two."
+    },
+
+    {
+      "id": "omit-01",
+      "assertion": "The trial shall be held before a jury in accordance with this provision.",
+      "statute": "CrPC 1898", "section": "270", "label": "omitted", "source": "synthetic",
+      "rule": "inside the declared range ss.266-336 [Omitted] — jury trial, abolished"
+    },
+    {
+      "id": "omit-02",
+      "assertion": "The jury shall return its verdict as provided in this section.",
+      "statute": "CrPC 1898", "section": "300", "label": "omitted", "source": "synthetic",
+      "rule": "inside ss.266-336 [Omitted]"
+    },
+    {
+      "id": "omit-03",
+      "assertion": "Assessors shall be summoned in the manner laid down in this provision.",
+      "statute": "CrPC 1898", "section": "284", "label": "omitted", "source": "synthetic",
+      "rule": "inside ss.266-336 [Omitted]"
+    },
+    {
+      "id": "omit-04",
+      "assertion": "Commitment proceedings before the Court of Session are governed by this section.",
+      "statute": "CrPC 1898", "section": "210", "label": "omitted", "source": "synthetic",
+      "rule": "inside ss.206-220 [Omitted] — committal proceedings, removed by Law Reforms Ordinance 1972"
+    },
+    {
+      "id": "omit-05",
+      "assertion": "This section governs the suspension and removal of Justices of the Peace.",
+      "statute": "CrPC 1898", "section": "26", "label": "omitted", "source": "synthetic",
+      "rule": "ss.26-27 [Repeated] — OCR of [Repealed]; also '26 and 27. [Rep. by A.O. 1937]'"
+    },
+
+    {
+      "id": "rep-01",
+      "assertion": "The term \"Queen\" is defined for the purposes of the Penal Code by this section.",
+      "statute": "PPC 1860", "section": "13", "label": "repealed", "source": "synthetic",
+      "known_gap": true,
+      "known_gap_reason": "PPC marks omissions as footnotes ('The following was omitted by A.O. 1961, Art. 2 and Sch.') attached to the section, not as range declarations. The current parser reads only range and single-line declarations, so it will report this VERIFIED. Recorded as a measured limit, not a verifier failure.",
+      "real_heading": "Definition of \"Queen\""
+    },
+    {
+      "id": "rep-02",
+      "assertion": "This section defines the \"Government of India\" for the purposes of the Code.",
+      "statute": "PPC 1860", "section": "16", "label": "repealed", "source": "synthetic",
+      "known_gap": true,
+      "known_gap_reason": "PPC footnote-style omission — same as rep-01.",
+      "real_heading": "Definition of \"Government of India\""
+    },
+    {
+      "id": "rep-03",
+      "assertion": "Europeans and Americans may be sentenced to penal servitude under this provision.",
+      "statute": "PPC 1860", "section": "56", "label": "repealed", "source": "synthetic",
+      "known_gap": true,
+      "known_gap_reason": "PPC footnote-style omission — a colonial provision long removed, but declared in a form the parser does not read.",
+      "real_heading": "Sentence of Europeans and Americans to penal servitude"
+    },
+    {
+      "id": "rep-04",
+      "assertion": "Transportation may be awarded instead of imprisonment under this section.",
+      "statute": "PPC 1860", "section": "59", "label": "repealed", "source": "synthetic",
+      "known_gap": true,
+      "known_gap_reason": "PPC footnote-style omission.",
+      "real_heading": "Transportation instead of imprisonment"
+    },
+    {
+      "id": "rep-05",
+      "assertion": "This section prescribes the period of limitation for a suit for possession of immovable property.",
+      "statute": "Limitation Act 1908", "section": "30", "label": "repealed", "source": "synthetic",
+      "rule": "inside the Limitation Act's declared omissions (ss.30-32); parser DOES read this form"
+    },
+    {
+      "id": "rep-06",
+      "assertion": "Fraudulent transfers of immovable property are voidable under this provision.",
+      "statute": "Transfer of Property Act 1882", "section": "88", "label": "repealed", "source": "synthetic",
+      "rule": "inside the declared omission range ss.85-90"
+    },
+    {
+      "id": "rep-07",
+      "assertion": "The constitution of the district police force is regulated by this section.",
+      "statute": "Police Act 1861", "section": "55", "label": "repealed", "source": "synthetic",
+      "rule": "inside the declared omission range ss.49-60"
+    }
+  ]
+}

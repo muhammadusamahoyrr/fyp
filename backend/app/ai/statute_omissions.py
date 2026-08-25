@@ -61,8 +61,15 @@ RANGE_OMISSION = re.compile(
     r"[\[\(]?\s*(?:Omitted|Repealed|Repeated|Rep\.)",
     re.M | re.I,
 )
+# The suffix is CAPTURED, not swallowed. Written as `(\d+)[A-Z]?` it matched
+# "5A. [Repealed]" and reported section 5 as repealed — and s.5 of the
+# Limitation Act is the condonation-of-delay provision, pleaded in a large share
+# of civil appeals. Marking it dead would have told lawyers a live section was
+# repealed: a false accusation of exactly the kind this subsystem exists to
+# prevent, and harder to doubt than a missing-section flag because it sounds
+# authoritative. Lettered sections are skipped entirely — see parse_omissions.
 SINGLE_OMISSION = re.compile(
-    r"^\s*(\d+)[A-Z]?\s*[.\-,:]\s*[\[\(]?\s*(?:Omitted|Repealed|Repeated|Rep\.)",
+    r"^\s*(\d+)([A-Z])?\s*[.\-,:]\s*[\[\(]?\s*(?:Omitted|Repealed|Repeated|Rep\.)",
     re.M | re.I,
 )
 
@@ -74,8 +81,16 @@ _MAX_RANGE = 200
 def parse_omissions(text: str) -> set[int]:
     """Section numbers the text itself declares omitted or repealed."""
     out: set[int] = set()
-    for raw in SINGLE_OMISSION.findall(text or ""):
-        out.add(int(raw))
+    for num, suffix in SINGLE_OMISSION.findall(text or ""):
+        # "5A. [Repealed]" says nothing about s.5. Omitted sections are tracked
+        # as integers, which cannot represent 5A distinctly from 5, so a
+        # lettered repeal is skipped rather than approximated onto its base
+        # number. Under-reporting is the safe direction: the cost is a repealed
+        # section we fail to flag, against telling a lawyer that a provision
+        # they rely on has been deleted.
+        if suffix:
+            continue
+        out.add(int(num))
     for a, b in RANGE_OMISSION.findall(text or ""):
         lo, hi = int(a), int(b)
         if lo <= hi and (hi - lo) <= _MAX_RANGE:

@@ -235,3 +235,35 @@ def test_section_468_remains_a_known_gap():
     # The honest consequence of not shipping the fix: a real section reads as
     # absent. Recorded so the cost is visible rather than forgotten.
     assert check.status == NOT_IN_CORPUS
+
+
+# ── the suffix bug ────────────────────────────────────────────────────────────
+
+def test_a_lettered_repeal_does_not_condemn_its_base_section():
+    r"""THE FALSE-OMISSION BUG, caught by the eval fixture's ground-truth check.
+
+    The Limitation Act reads:
+
+        5. Extension of period in certain cases.
+        5A. [Repealed]
+
+    Written as `(\d+)[A-Z]?` the pattern matched "5A." and captured "5", so s.5
+    was reported repealed. Section 5 is the condonation-of-delay provision,
+    pleaded in a large share of civil appeals — telling a lawyer it had been
+    deleted is a false accusation, and a more convincing one than a
+    missing-section flag because it sounds authoritative.
+    """
+    text = ("5. Extension of period in certain cases.\n"
+            "5A. [Repealed]\n"
+            "6. Legal disability.\n")
+    assert parse_omissions(text) == set()
+
+
+def test_real_unlettered_omissions_are_still_read():
+    """The fix must not silence genuine declarations sitting beside a lettered
+    one — under-reporting is safe, but not at any price."""
+    text = ("5A. [Repealed]\n"
+            "28. [Omitted]\n"
+            "29. Savings.\n"
+            "30. [Repealed]\n31. [Repealed]\n32. [Repealed]\n")
+    assert parse_omissions(text) == {28, 30, 31, 32}
