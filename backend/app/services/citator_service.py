@@ -33,6 +33,13 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 NEUTRAL_ID_RE = re.compile(r"^(\d{4})LHC(\d{1,6})$")
 
+# This path scrapes one court, so the jurisdiction is fixed rather than derived.
+# Values match ingest_judgments.COURTS["lahore high court"]; the ranker compares
+# them literally, so a spelling that drifts from that table reads as no match.
+COURT = "LHC"
+PROVINCE = "punjab"
+AUTHORITY = "binding_provincial"
+
 # ── Citation extraction ───────────────────────────────────────────────────────
 # Two families of Pakistani reporter citations (whitespace-tolerant — PDFs
 # break citations across lines):
@@ -215,7 +222,14 @@ def build_doc(neutral_id: str, text: str, listing_meta: dict | None = None) -> d
 
     return {
         "_id": neutral_id,
-        "court": "LHC",
+        "court": COURT,
+        # Persisted, not merely passed to the embedder. rebuild_judgments_
+        # vectors.py regenerates Chroma metadata FROM these Mongo fields, so a
+        # judgment whose document omits them comes back out of any future
+        # rebuild as persuasive-everywhere — which is exactly how 200 judgments
+        # lost their jurisdiction the first time.
+        "province": PROVINCE,
+        "authority": AUTHORITY,
         "year": int(m.group(1)),
         "seq": int(m.group(2)),
         "pdf_url": PDF_URL.format(neutral_id=neutral_id),
@@ -241,7 +255,16 @@ async def store_judgment(doc: dict) -> None:
 def _embed_and_upsert(neutral_id: str, chunks: list[str], year: int, meta_doc: dict) -> None:
     """Blocking body of the embed stage: E5 inference + Chroma upsert. Runs in a
     worker thread (see embed_judgment). onnxruntime releases the GIL during
-    inference, so this genuinely overlaps with the event loop."""
+    inference, so this genuinely overlaps with the event loop.
+
+    province/authority are written here even though this path only ever ingests
+    LHC. They are what the precedent-aware ranker reads, and omitting them does
+    not leave a judgment unranked — it ranks it as persuasive everywhere, so a
+    Lahore judgment that binds in Punjab silently loses its binding weight.
+    Every judgment ingested through this path before the fields were added
+    landed that way: 200 judgments, 3,230 chunks, corrected by
+    scripts/backfill_jurisdiction.py.
+    """
     from app.ai.pipelines.retriever import _embeddings
     emb = _embeddings()
     vectors = emb.embed_documents(chunks)
@@ -252,7 +275,9 @@ def _embed_and_upsert(neutral_id: str, chunks: list[str], year: int, meta_doc: d
         documents=chunks,
         metadatas=[{
             "judgment_id": neutral_id,
-            "court": "LHC",
+            "court": COURT,
+            "province": PROVINCE,
+            "authority": AUTHORITY,
             "year": year,
             "judge": meta_doc.get("judge") or "",
             "title": meta_doc.get("title") or "",

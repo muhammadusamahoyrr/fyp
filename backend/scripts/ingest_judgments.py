@@ -76,6 +76,7 @@ COURTS: dict[str, tuple[str, str, str]] = {
 }
 
 MIN_TEXT_CHARS = 800          # below this it is a scan, not a judgment
+EMBED_BATCH = 32              # vectors per upsert; see _embed
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _NEUTRAL_LHC = re.compile(r"^(\d{4})LHC(\d{1,6})$", re.IGNORECASE)
 
@@ -316,26 +317,40 @@ def _embed(jid, chunks, court, province, authority, doc) -> None:
 
     province/authority are what the precedent-aware ranker reads; without them a
     judgment is treated as persuasive everywhere.
+
+    The upsert is split into fixed batches rather than sent as one call. A long
+    judgment carries 50+ chunks, and passing them all at once puts that many
+    vectors into a single native HNSW write — which is where the Supreme Court
+    parquet ingest segfaulted (exit 139) and left judgments_collection unable
+    to answer a count. Short calls give the process more places to survive an
+    interruption between; rebuild_judgments_vectors.py pushed 15,119 chunks
+    through the same bindings at this batch size without a fault.
+
+    Chunk ids stay globally indexed across batches, so a re-run still overwrites
+    the same rows rather than duplicating them.
     """
     from app.ai.pipelines.retriever import _embeddings
     from app.db.chroma import get_collection
 
     emb = _embeddings()
-    vectors = emb.embed_documents(chunks)
-    get_collection("judgments_collection").upsert(
-        ids=[f"{jid}:{i}" for i in range(len(chunks))],
-        embeddings=vectors,
-        documents=chunks,
-        metadatas=[{
-            "judgment_id": jid,
-            "court": court,
-            "province": province,
-            "authority": authority,
-            "year": doc.get("year") or 0,
-            "judge": doc.get("judge") or "",
-            "title": doc.get("title") or "",
-        } for _ in chunks],
-    )
+    collection = get_collection("judgments_collection")
+    meta = {
+        "judgment_id": jid,
+        "court": court,
+        "province": province,
+        "authority": authority,
+        "year": doc.get("year") or 0,
+        "judge": doc.get("judge") or "",
+        "title": doc.get("title") or "",
+    }
+    for start in range(0, len(chunks), EMBED_BATCH):
+        batch = chunks[start:start + EMBED_BATCH]
+        collection.upsert(
+            ids=[f"{jid}:{start + i}" for i in range(len(batch))],
+            embeddings=emb.embed_documents(batch),
+            documents=batch,
+            metadatas=[dict(meta) for _ in batch],
+        )
 
 
 if __name__ == "__main__":
