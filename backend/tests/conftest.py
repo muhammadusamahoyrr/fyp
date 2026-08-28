@@ -4,6 +4,8 @@ Test tiers (see pytest.ini markers):
   * default      — pure, offline, deterministic. No DB, no network, no LLM.
                    These are the ones CI runs on every push.
   * integration  — needs MongoDB.  `pytest -m "not integration"` to skip.
+                   Runs against a throwaway database, never the real one; see
+                   _isolate_test_database below.
   * llm          — calls a real provider. Non-deterministic and costs tokens,
                    so it is never part of the default run.
 """
@@ -16,6 +18,37 @@ import pytest
 
 # Allow `import app...` when pytest is invoked from anywhere.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+TEST_DB_SUFFIX = "_test"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_test_database():
+    """Point every database read and write at a throwaway database.
+
+    This suite used to connect to whatever `settings.db_name` names, which in a
+    developer checkout is the live application database. Nothing enforced that
+    a test touched only its own documents -- one broad delete_many, or a
+    teardown that quietly stops being reached, and real data is gone with no
+    backup step anywhere in between.
+
+    get_database() resolves settings.db_name on every call, so overriding it
+    here redirects the application code under test as well as the fixtures.
+    While this is in force there is no path left that reaches production.
+
+    Autouse and session-scoped on purpose: an opt-in guard protects only the
+    tests that remember to opt in, which is the property that failed here.
+    """
+    from app.core.config import settings
+
+    original = settings.db_name
+    if not original.endswith(TEST_DB_SUFFIX):
+        settings.db_name = f"{original}{TEST_DB_SUFFIX}"
+    try:
+        yield settings.db_name
+    finally:
+        settings.db_name = original
 
 
 @pytest.fixture
@@ -37,4 +70,12 @@ async def mongo():
         await get_database().command("ping")
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"MongoDB unavailable — skipping integration test ({exc})")
-    yield get_database()
+    db = get_database()
+    # Tripwire, not decoration. If the override above is ever removed or
+    # shadowed, an integration test must refuse to run rather than discover the
+    # problem by writing to the real corpus.
+    assert db.name.endswith(TEST_DB_SUFFIX), (
+        f"refusing to run an integration test against {db.name!r}: "
+        "the test-database override is not in force"
+    )
+    yield db

@@ -89,11 +89,32 @@ class TestSettlement:
         )
         from app.services import payment_service as ps
 
+        # Seed the two participants rather than borrowing whichever users
+        # happen to exist. The fixture used to skip when it found none, which
+        # meant it silently covered nothing on any database it had not been
+        # run against before -- and passed only by depending on ambient data
+        # it did not create and could not clean up.
         users = get_users_col()
-        lawyer = await users.find_one({"role": "lawyer"})
-        client = await users.find_one({"role": "client"})
-        if not lawyer or not client:
-            pytest.skip("need at least one lawyer and one client seeded")
+        seeded: list[str] = []
+
+        async def _participant(role: str) -> dict:
+            found = await users.find_one({"role": role})
+            if found:
+                return found
+            doc = {
+                "_id": f"test_{role}_" + secrets.token_hex(4),
+                "role": role,
+                "is_active": True,
+                "email": f"{role}.{secrets.token_hex(3)}@test.invalid",
+                "full_name": f"Test {role.title()}",
+                "created_at": datetime.now(timezone.utc),
+            }
+            await users.insert_one(doc)
+            seeded.append(doc["_id"])
+            return doc
+
+        lawyer = await _participant("lawyer")
+        client = await _participant("client")
 
         case_id = "testcase_" + secrets.token_hex(4)
         await get_cases_col().insert_one({
@@ -133,6 +154,8 @@ class TestSettlement:
         await get_cases_col().delete_one({"_id": case_id})
         await get_engagements_col().delete_one({"_id": eng_id})
         await get_agreements_col().delete_one({"_id": agr_id})
+        if seeded:
+            await users.delete_many({"_id": {"$in": seeded}})
 
     async def test_fee_split_is_exact(self, paid_scenario):
         fee = paid_scenario["fee"]
