@@ -12,6 +12,14 @@ class AIStructuredCase(BaseModel):
     recommended_actions: list[str] = []
     risk_level: str | None = None  # low | medium | high
 
+    # Whether the recommended actions were checked against retrieved law, and
+    # what the check actually was. Defaults are the honest ones: an analysis
+    # that has not run has not been verified. See intake_hallucination_node.
+    #   grounded | ungrounded | no_evidence_retrieved | no_actions
+    #   | unparseable | judge_failed | pipeline_failed | unverified
+    grounded: bool = False
+    grounding_status: str = "unverified"
+
 
 class IntakeDocument(BaseModel):
     id: str = Field(alias="_id")

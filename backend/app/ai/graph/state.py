@@ -91,6 +91,10 @@ class AgentState(TypedDict):
     # unsupported / unassessed. See ai/answer_citations.py.
     claim_assessments: list[dict]
     is_grounded: bool
+    # WHY the grounding verdict is what it is. `is_grounded` alone cannot
+    # distinguish "checked and it held" from "could not check" — and the second
+    # used to be reported as the first. Written by intake_hallucination_node.
+    grounding_status: str
 
     # ── Convergence controller ────────────────────────────────────────────────
     prev_relevance_score:   float

@@ -25,21 +25,49 @@ class IntakeGroundingOutput(BaseModel):
     reason: str
 
 
+def _unverified(parsed: dict | None, status: str) -> dict:
+    """The judge could not run. That is NOT a pass.
+
+    `is_grounded` was a bool asked to carry three meanings — verified grounded,
+    verified ungrounded, and never checked — and every case where the check
+    could not run resolved to the first of those. The worst of them was an empty
+    corpus result: zero retrieved chunks meant there was nothing to ground
+    against, and the node reported the judge's pass verdict anyway.
+
+    `grounding_status` names which of the three actually happened, so a consumer
+    can tell "we checked and it held" from "we could not check".
+    """
+    out: dict = {"is_grounded": False, "grounding_status": status}
+    if parsed is not None:
+        parsed["summary"] = (parsed.get("summary", "") or "") + _CAUTION
+        out["answer"] = json.dumps(parsed, ensure_ascii=False)
+    return out
+
+
 def intake_hallucination_node(state: AgentState) -> dict:
     answer = state.get("answer", "")
     chunks = state.get("reranked_chunks", [])
 
-    if not answer or not chunks:
-        return {"is_grounded": True}
+    if not answer:
+        return {"is_grounded": False, "grounding_status": "no_answer"}
 
     try:
         parsed = json.loads(answer)
     except Exception:
-        return {"is_grounded": False}
+        return {"is_grounded": False, "grounding_status": "unparseable"}
+
+    # No evidence is not grounding. Retrieval returning nothing — or failing
+    # outright, which this graph has no decision node to notice — is precisely
+    # when an analysis is least supported, so it must not be stamped grounded.
+    if not chunks:
+        return _unverified(parsed, "no_evidence_retrieved")
 
     actions = parsed.get("recommended_actions", [])
     if not actions:
-        return {"is_grounded": True}
+        # Nothing was claimed, so nothing was verified. Harmless, but still not
+        # a pass — and the caution would be noise on an analysis making no
+        # recommendations, so it is recorded without one.
+        return {"is_grounded": False, "grounding_status": "no_actions"}
 
     context = "\n\n".join(
         f"[{i}] {c.get('statute', '')} "
@@ -60,18 +88,10 @@ def intake_hallucination_node(state: AgentState) -> dict:
         ])
 
         if result.is_grounded:
-            return {"is_grounded": True}
+            return {"is_grounded": True, "grounding_status": "grounded"}
 
         # Append caution to summary; leave actions unchanged
-        parsed["summary"] = parsed.get("summary", "") + _CAUTION
-        return {
-            "is_grounded": False,
-            "answer":      json.dumps(parsed, ensure_ascii=False),
-        }
+        return _unverified(parsed, "ungrounded")
 
     except Exception:
-        parsed["summary"] = parsed.get("summary", "") + _CAUTION
-        return {
-            "is_grounded": False,
-            "answer":      json.dumps(parsed, ensure_ascii=False),
-        }
+        return _unverified(parsed, "judge_failed")

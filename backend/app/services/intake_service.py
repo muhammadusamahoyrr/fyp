@@ -99,6 +99,8 @@ async def start_intake(client_id: str) -> dict:
             "applicable_laws":      [],
             "recommended_actions":  [],
             "risk_level":           None,
+            "grounded":             False,
+            "grounding_status":     "unverified",
         },
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
@@ -432,13 +434,22 @@ async def _run_intake_ai(
 
     try:
         result = await intake_graph.ainvoke(state)
-        return json.loads(result["answer"])
+        analysis = json.loads(result["answer"])
+        # The grounding verdict was computed and then dropped on the floor here:
+        # this read only `answer`, so even a correct "not grounded" never left
+        # the graph. Carried through now, with the status that says WHICH of
+        # verified / unverified / unchecked actually happened.
+        analysis["grounded"] = bool(result.get("is_grounded"))
+        analysis["grounding_status"] = result.get("grounding_status") or "unverified"
+        return analysis
     except Exception:
         return {
             "summary":             "AI structuring unavailable — case created successfully.",
             "applicable_laws":     [],
             "recommended_actions": ["Consult a qualified Pakistani lawyer for advice."],
             "risk_level":          "medium",
+            "grounded":            False,
+            "grounding_status":    "pipeline_failed",
         }
 
 
