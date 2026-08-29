@@ -416,6 +416,23 @@ async def generate_document(
         extracted = await extract_fields(case_id, client_id, template_type)
         fields = extracted.get("fields", {})
 
+    # A document with no substance is not a document. `if not fields` above is
+    # not this check: the extraction prompt instructs the model to return "" for
+    # anything it cannot determine, so a vague description yields a dict that is
+    # TRUTHY and entirely empty. Both paths —” a failed extraction (swallowed in
+    # extract_fields, which returns {}) and a successful one over a thin
+    # description —” used to reach generate_pdf and produce a structurally
+    # complete court document with empty FACTS and RELIEF, stored as
+    # `generated`, which then satisfied submit_for_review's status gate.
+    #
+    # /documents/quick-notice already refuses this. The two drafting routes now
+    # agree.
+    if not any(str(v).strip() for v in fields.values()):
+        raise AppValidationError(
+            "Not enough detail in the case description to fill this document. "
+            "Add more detail to the case, or fill the fields in yourself and resubmit."
+        )
+
     template_enum = DocumentTemplate(template_type)
     doc_id = secrets.token_urlsafe(16)
     doc = {
