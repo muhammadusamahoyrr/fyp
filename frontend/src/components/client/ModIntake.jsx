@@ -79,6 +79,20 @@ const URGENCY_LEVELS = [
 
 const RISK_COLORS = { low: "success", medium: "warn", high: "danger", urgent: "danger" };
 
+// Why the recommended actions were not verified against retrieved law. The
+// backend distinguishes "we checked and it held" from "we could not check";
+// only `grounded` is the former, so every other status gets a visible note.
+// Written in the user's terms — they do not know what a retrieval chunk is.
+const GROUNDING_NOTE = {
+    no_evidence_retrieved: "No matching law was found for this case, so these steps could not be checked against Pakistani legislation. Confirm them with a qualified lawyer before acting.",
+    ungrounded: "Some of these steps could not be fully matched to the law sections found for your case. Please confirm them with a qualified lawyer.",
+    judge_failed: "The verification step could not run just now, so these steps have not been checked against the law. Please confirm them with a qualified lawyer.",
+    pipeline_failed: "Automated analysis was unavailable for this case. Please have a qualified lawyer review your situation.",
+    unparseable: "The analysis could not be verified. Please confirm these steps with a qualified lawyer.",
+    no_actions: "No specific steps were produced for this case.",
+    unverified: "These steps have not been verified against Pakistani law. Please confirm them with a qualified lawyer.",
+};
+
 const STitle = ({ icon, sub, children }) => {
     const t = useT();
     return (
@@ -209,6 +223,9 @@ const ModIntake = () => {
 
 <h2>Recommended Actions</h2>
 <ul>${actions}</ul>
+${aiStructured?.grounding_status && aiStructured.grounding_status !== "grounded"
+                ? `<p class="disclaimer" style="margin-top:8px">⚠️ ${GROUNDING_NOTE[aiStructured.grounding_status] || GROUNDING_NOTE.unverified}</p>`
+                : ""}
 
 ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${aiStructured.risk_level}">${aiStructured.risk_level} risk</span>` : ""}
 
@@ -243,6 +260,9 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
             ``,
             `RECOMMENDED ACTIONS`,
             `  • ${actions}`,
+            aiStructured?.grounding_status && aiStructured.grounding_status !== "grounded"
+                ? `  ! ${GROUNDING_NOTE[aiStructured.grounding_status] || GROUNDING_NOTE.unverified}`
+                : "",
             aiStructured?.risk_level ? `\nRISK LEVEL: ${aiStructured.risk_level.toUpperCase()}` : "",
             ``,
             `DISCLAIMER: This summary is AI-generated for informational purposes only and does not constitute legal advice. Consult a qualified Pakistani lawyer before taking any action.`,
@@ -1212,6 +1232,19 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                                         </div>
                                                     ))}
                                                 </div>
+                                                {/* The backend now says whether these actions were actually
+                                                    checked against retrieved law. "grounded" is the only
+                                                    status that means they were; everything else means the
+                                                    check could not run, and that must be visible here rather
+                                                    than buried in the summary paragraph. */}
+                                                {aiStructured.grounding_status && aiStructured.grounding_status !== "grounded" && (
+                                                    <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${t.border}`, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                                                        <span style={{ fontSize: 13, lineHeight: 1.5 }}>⚠️</span>
+                                                        <span style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.55 }}>
+                                                            {GROUNDING_NOTE[aiStructured.grounding_status] || GROUNDING_NOTE.unverified}
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
 
@@ -1230,8 +1263,22 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                     </>
                                 ) : (
                                     // Static fallback when AI analysis not available
+                                    // `body` carries JSX, not an HTML string. It used to be a
+                                    // template literal rendered through dangerouslySetInnerHTML,
+                                    // which meant the "Case Description" card — raw text the user
+                                    // typed — was parsed as markup. Only the "Parties" card ever
+                                    // needed real elements, so it supplies them directly and React
+                                    // escapes everything else.
                                     [
-                                        { icon: "👤", title: "Parties", body: `<strong>Role:</strong> ${role}<br/><strong>Province:</strong> ${PROVINCES.find(p => p.value === province)?.label || province}`, c: t.primary },
+                                        {
+                                            icon: "👤", title: "Parties", c: t.primary,
+                                            body: (
+                                                <>
+                                                    <strong>Role:</strong> {role}<br />
+                                                    <strong>Province:</strong> {PROVINCES.find(p => p.value === province)?.label || province}
+                                                </>
+                                            ),
+                                        },
                                         { icon: "⚖️", title: "Case Type", body: `${CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput} — Urgency: ${urgency}`, c: t.primary },
                                         { icon: "📋", title: "Case Description", body: description || voiceTranscript || "No description provided.", c: t.primary },
                                         { icon: "🎯", title: "Desired Outcome", body: "Legal assistance and representation.", c: t.primary },
@@ -1239,8 +1286,8 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                         <div key={idx} style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "16px 20px" }}>
                                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                                                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: s.c }}>{s.icon} {s.title}</div>
-                                                                                            </div>
-                                            <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.7 }} dangerouslySetInnerHTML={{ __html: s.body }} />
+                                            </div>
+                                            <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{s.body}</div>
                                         </div>
                                     ))
                                 )}

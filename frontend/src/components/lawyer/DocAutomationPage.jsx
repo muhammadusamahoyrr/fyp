@@ -39,10 +39,23 @@ const TEMPLATES = [
     { id: 14, name: "NDA / Confidentiality Agreement", cat: "Agreement/Contract", desc: "Mutual or one-way non-disclosure agreement for trade secrets, business plans, and proprietary information.", icon: "🛡️", popular: false },
 ];
 
+// The strings below are interpolated into template text that is then turned
+// into HTML (newlines -> <br>) and rendered with dangerouslySetInnerHTML. Case
+// data is user-supplied -- `client` is a display name the client chose -- so it
+// is data, not markup. Escaping at the point of derivation covers every
+// interpolation in the template map below without touching each one.
+const escapeHtml = (value) =>
+    String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
 function buildContent(tmpl, caseObj) {
-    const caseRef = caseObj?.id || "CS-2024-089";
-    const clientRef = caseObj?.client || "[Client Name]";
-    const court = caseObj?.court || "[Court Name]";
+    const caseRef = escapeHtml(caseObj?.id || "CS-2024-089");
+    const clientRef = escapeHtml(caseObj?.client || "[Client Name]");
+    const court = escapeHtml(caseObj?.court || "[Court Name]");
     const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
     const map = {
