@@ -517,6 +517,14 @@ async def generate_standalone(client_id: str, template_type: str, fields: dict) 
         "template_type": template_type,
         "title":         TEMPLATE_TITLES.get(template_enum, template_type),
         "fields":        fields,
+        # Completeness against the Code, recorded for the same reason as
+        # `verification` below. For the eleven template types that reach this
+        # function, check_pleading has no rules encoded and returns
+        # `checked: False` — and that is the point. An explicit "no statutory
+        # particulars are encoded for this document type" is a true statement
+        # about the document; an ABSENT key is silence, and the checker's own
+        # docstring says silence would read as a pass.
+        "compliance":    pleading_rules.check_pleading(template_type, fields),
         # Same citation check generate_document runs. Its absence here was not a
         # decision, it was an omission: seven routes reach this function — the
         # court-Urdu pleading, the labour demand notice, three inheritance

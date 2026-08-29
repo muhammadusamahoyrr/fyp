@@ -186,3 +186,27 @@ async def download_document(
         media_type="application/pdf",
         filename=f"{doc.get('title', 'document')}.pdf",
     )
+
+
+# Registered LAST on purpose. FastAPI matches in registration order, so this
+# bare path parameter must sit below /review-queue, /drafts and /case/{case_id}
+# or it would swallow them.
+@router.get("/{doc_id}", response_model=DocumentOut)
+async def get_document(
+    doc_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """One document record, including its compliance and verification findings.
+
+    There was no way to read a single document. `GET /case/{case_id}` covers
+    documents attached to a case, but every document produced by the standalone
+    path carries `case_id: None` and so appeared in no listing at all — which
+    meant the citation-verification record those documents already stored, and
+    the compliance record they now store, were written and never readable.
+
+    Authorization is `document_service.get_document`, unchanged: creator, admin,
+    the assigned lawyer, or the lawyer it was submitted to.
+    """
+    return await document_service.get_document(
+        doc_id, current_user["_id"], current_user.get("role", "client")
+    )
