@@ -12,6 +12,7 @@ import re
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from xml.sax.saxutils import escape as _xml_escape
 
 from app.core.claims import PARTIAL_GROUNDING_NOTICE
 from reportlab.lib import colors
@@ -94,12 +95,45 @@ def _shape_urdu(text: str) -> str:
         return text
 
 
-def P(text, style):
+def esc(value) -> str:
+    """Escape a value for interpolation INTO a markup string.
+
+    Use at every point where field data is placed inside generator-authored
+    markup, e.g. f"...at <b>{esc(f.get('incident_place'))}</b>...". The
+    surrounding string is then passed with raw=True, because the generator's own
+    tags are meant to be parsed and only the interpolated value is not.
+    """
+    return _xml_escape("" if value is None else str(value))
+
+
+def P(text, style, raw: bool = False):
     """Drop-in Paragraph that renders Urdu correctly (shaped, RTL, Urdu font).
 
     ASCII/Latin text passes straight through to reportlab's Paragraph.
+
+    ESCAPING (raw=False, the default)
+    ---------------------------------
+    reportlab's Paragraph does not take plain text — it parses a markup
+    language. Field values reached it unescaped, which meant:
+
+      * <img src="..."> inside a field OPENED THAT PATH on the server and
+        embedded the file in the generated PDF;
+      * an unclosed '<' in ordinary legal text ("the defendant paid <50% of
+        what was owed") raised paraparser ValueError and made the document
+        impossible to generate;
+      * <b>/<font> in a field were interpreted rather than printed.
+
+    So text is data by default. The ~220 call sites that pass a field value
+    directly are protected without touching them.
+
+    raw=True is for the call sites that build markup THEMSELVES. Those must
+    escape their own interpolated values with esc() — raw=True suppresses the
+    escape for the whole string, so an unescaped field inside one is exactly the
+    hole this closes. See the audit list in REMEDIATION_PLAN.md fix 5.
     """
     text = "" if text is None else str(text)
+    if not raw:
+        text = _xml_escape(text)
     if _ARABIC_RE.search(text) and "<" not in text:
         font = _ensure_urdu_font()
         if font:
@@ -184,7 +218,7 @@ def legal_notice(doc_id: str, f: dict) -> Path:
         ]
 
     story += [
-        P(f"If no response is received within <b>{f.get('response_days', '15')} days</b> of receipt of this notice, legal proceedings shall be initiated without further notice.", s["body"]),
+        P(f"If no response is received within <b>{esc(f.get('response_days', '15'))} days</b> of receipt of this notice, legal proceedings shall be initiated without further notice.", s["body"], raw=True),
         Spacer(1, 0.8 * cm),
         P("Yours faithfully,", s["body"]),
         Spacer(1, 0.6 * cm),
@@ -292,15 +326,17 @@ def nda(doc_id: str, f: dict) -> Path:
     story += [_hr()]
 
     clauses = [
-        ("1. PURPOSE", f.get("purpose", "The parties wish to explore a potential business relationship and may disclose confidential information to each other.")),
+        ("1. PURPOSE", esc(f.get("purpose", "The parties wish to explore a potential business relationship and may disclose confidential information to each other."))),
         ("2. CONFIDENTIAL INFORMATION", "Each party agrees to keep all non-public information disclosed by the other party strictly confidential and shall not disclose it to any third party."),
         ("3. OBLIGATIONS", "The receiving party shall use the confidential information solely for the stated purpose and shall protect it with the same degree of care it uses for its own confidential information."),
-        ("4. DURATION", f"This Agreement shall remain in effect for a period of <b>{f.get('duration', '2 years')}</b> from the date of signing."),
-        ("5. GOVERNING LAW", f"This Agreement shall be governed by the laws of Pakistan. Any disputes shall be resolved in the courts of <b>{f.get('jurisdiction', 'Islamabad')}</b>."),
+        ("4. DURATION", f"This Agreement shall remain in effect for a period of <b>{esc(f.get('duration', '2 years'))}</b> from the date of signing."),
+        ("5. GOVERNING LAW", f"This Agreement shall be governed by the laws of Pakistan. Any disputes shall be resolved in the courts of <b>{esc(f.get('jurisdiction', 'Islamabad'))}</b>."),
     ]
 
+    # Clause 1's body is a raw field value, so it is escaped here rather than
+    # relying on P(): clauses 4 and 5 carry generator markup and go out raw.
     for heading, text in clauses:
-        story += [P(heading, s["heading"]), P(text, s["body"]), Spacer(1, 0.2 * cm)]
+        story += [P(heading, s["heading"]), P(text, s["body"], raw=True), Spacer(1, 0.2 * cm)]
 
     sig_data = [
         ["DISCLOSING PARTY", "RECEIVING PARTY"],
@@ -413,7 +449,7 @@ def inheritance_settlement(doc_id: str, f: dict) -> Path:
     rows = [["Heir", "Count", "Share", "%", "Amount (PKR)"]]
     for r in calc.get("breakdown", []):
         rows.append([
-            P(r.get("heir", "") + (f"<br/><font size=7 color=grey>{r['note']}</font>" if r.get("note") else ""), s["body"]),
+            P(esc(r.get("heir", "")) + (f"<br/><font size=7 color=grey>{esc(r['note'])}</font>" if r.get("note") else ""), s["body"], raw=True),
             str(r.get("count", 1)),
             r.get("fraction", ""),
             f"{r.get('percentage', 0)}%",
@@ -449,7 +485,7 @@ def inheritance_settlement(doc_id: str, f: dict) -> Path:
             "Certificates Act, 2021 — typically within weeks, without court proceedings. Required: deceased's "
             "death certificate (NADRA), Family Registration Certificate (FRC), CNICs of all legal heirs, and "
             "details of assets. If any heir disputes the distribution or an heir is a minor, the matter must go "
-            "to the civil court under the Succession Act, 1925.", s["body"]),
+            "to the civil court under the Succession Act, 1925.", s["body"], raw=True),
         Spacer(1, 0.5 * cm),
         P("ACKNOWLEDGEMENT OF HEIRS", s["heading"]),
         P("We, the undersigned legal heirs, acknowledge the above distribution:", s["body"]),
@@ -487,7 +523,7 @@ def inheritance_demand(doc_id: str, f: dict) -> Path:
 
     share_line = ""
     if f.get("share_fraction"):
-        share_line = f" My share under Islamic law is <b>{f['share_fraction']}</b>"
+        share_line = f" My share under Islamic law is <b>{esc(f['share_fraction'])}</b>"
         if f.get("share_amount"):
             share_line += f" (approximately <b>PKR {int(f['share_amount']):,}</b>)"
         share_line += "."
@@ -496,11 +532,11 @@ def inheritance_demand(doc_id: str, f: dict) -> Path:
         P("SUBJECT: DEMAND FOR DISTRIBUTION OF INHERITANCE", s["heading"]),
         Spacer(1, 0.2 * cm),
         P(
-            f"I am a legal heir of the late <b>{f.get('deceased_name', '')}</b>"
-            + (f", who passed away on {f['date_of_death']}" if f.get("date_of_death") else "")
-            + f", being their <b>{f.get('relation', 'legal heir')}</b>. "
-            f"The estate of the deceased includes: {f.get('estate_description', '')}."
-            + share_line, s["body"]),
+            f"I am a legal heir of the late <b>{esc(f.get('deceased_name', ''))}</b>"
+            + (f", who passed away on {esc(f['date_of_death'])}" if f.get("date_of_death") else "")
+            + f", being their <b>{esc(f.get('relation', 'legal heir'))}</b>. "
+            f"The estate of the deceased includes: {esc(f.get('estate_description', ''))}."
+            + share_line, s["body"], raw=True),
         Spacer(1, 0.2 * cm),
         P(
             "Despite repeated requests, my lawful share has not been distributed to me. "
@@ -512,14 +548,16 @@ def inheritance_demand(doc_id: str, f: dict) -> Path:
             "deceased Muslim is governed by Islamic law, and every legal heir's share vests in them "
             "<b>immediately upon death</b>. Withholding, alienating, or refusing to hand over an heir's share "
             "is actionable. Depriving women of their inheritance is additionally a criminal offence under "
-            "section 498-A of the Pakistan Penal Code (punishable with imprisonment up to ten years).", s["body"]),
+            "section 498-A of the Pakistan Penal Code (punishable with imprisonment up to ten years).",
+            s["body"], raw=True),
         Spacer(1, 0.2 * cm),
         P("DEMAND", s["heading"]),
         P(
             f"You are called upon to distribute and hand over my lawful share within "
-            f"<b>{f.get('response_days', '15')} days</b> of receipt of this notice, failing which I shall be "
+            f"<b>{esc(f.get('response_days', '15'))} days</b> of receipt of this notice, failing which I shall be "
             "constrained to initiate civil proceedings for administration and partition of the estate, and "
-            "criminal proceedings where applicable, entirely at your risk as to costs and consequences.", s["body"]),
+            "criminal proceedings where applicable, entirely at your risk as to costs and consequences.",
+            s["body"], raw=True),
         Spacer(1, 0.8 * cm),
         P("Yours faithfully,", s["body"]),
         Spacer(1, 0.6 * cm),
@@ -534,7 +572,9 @@ def inheritance_demand(doc_id: str, f: dict) -> Path:
 # ── FIR escalation pack ───────────────────────────────────────────────────────
 
 def _complaint_header(story, s, title, addressee_lines):
-    story += [P(title, s["title"]), P(f"Date: {_today()}", s["body"]), _hr()]
+    # `title` is generator-authored and carries a <br/>; the addressee lines are
+    # field data and stay escaped.
+    story += [P(title, s["title"], raw=True), P(f"Date: {_today()}", s["body"]), _hr()]
     story += [P("To,", s["body"])]
     for line in addressee_lines:
         story += [P(line, s["body"])]
@@ -574,9 +614,10 @@ def fir_application(doc_id: str, f: dict) -> Path:
         Spacer(1, 0.2 * cm),
         P("Respected Sir/Madam,", s["body"]),
         P(
-            f"It is submitted that on <b>{f.get('incident_date', '__________')}</b>"
-            + (f" at approximately {f['incident_time']}" if f.get("incident_time") else "")
-            + f", at <b>{f.get('incident_place', '__________')}</b>, the following occurred:", s["body"]),
+            f"It is submitted that on <b>{esc(f.get('incident_date', '__________'))}</b>"
+            + (f" at approximately {esc(f['incident_time'])}" if f.get("incident_time") else "")
+            + f", at <b>{esc(f.get('incident_place', '__________'))}</b>, the following occurred:",
+            s["body"], raw=True),
         P(f.get("incident_facts", ""), s["body"]),
         Spacer(1, 0.2 * cm),
     ]
@@ -615,10 +656,10 @@ def complaint_154_3(doc_id: str, f: dict) -> Path:
         Spacer(1, 0.2 * cm),
         P("Respected Sir/Madam,", s["body"]),
         P(
-            f"On <b>{f.get('application_date', '__________')}</b> the complainant submitted a written application "
-            f"for registration of an FIR to the SHO, Police Station <b>{f.get('police_station', '__________')}</b>, "
+            f"On <b>{esc(f.get('application_date', '__________'))}</b> the complainant submitted a written application "
+            f"for registration of an FIR to the SHO, Police Station <b>{esc(f.get('police_station', '__________'))}</b>, "
             "regarding a cognizable offence. Despite the mandatory duty under section 154 CrPC, no FIR has been "
-            "registered to date.", s["body"]),
+            "registered to date.", s["body"], raw=True),
         P("Brief facts of the offence:", s["heading"]),
         P(f.get("incident_facts", ""), s["body"]),
         Spacer(1, 0.2 * cm),
@@ -643,7 +684,7 @@ def petition_22a(doc_id: str, f: dict) -> Path:
     story = []
 
     story += [
-        P(f"IN THE COURT OF THE LEARNED SESSIONS JUDGE / EX-OFFICIO JUSTICE OF PEACE,<br/>{f.get('district', '____________').upper()}", s["title"]),
+        P(f"IN THE COURT OF THE LEARNED SESSIONS JUDGE / EX-OFFICIO JUSTICE OF PEACE,<br/>{esc(f.get('district', '____________').upper())}", s["title"], raw=True),
         P("Petition under Section 22-A(6), Code of Criminal Procedure, 1898", ParagraphStyle("c", parent=s["body"], alignment=TA_CENTER)),
         _hr(),
     ]
@@ -691,10 +732,10 @@ def fia_cybercrime(doc_id: str, f: dict) -> Path:
         Spacer(1, 0.2 * cm),
         P("Respected Sir/Madam,", s["body"]),
         P(
-            f"It is submitted that since <b>{f.get('incident_date', '__________')}</b> the complainant has been "
+            f"It is submitted that since <b>{esc(f.get('incident_date', '__________'))}</b> the complainant has been "
             f"subjected to the following conduct through electronic means"
-            + (f" (platform: <b>{f['platform']}</b>)" if f.get("platform") else "")
-            + ":", s["body"]),
+            + (f" (platform: <b>{esc(f['platform'])}</b>)" if f.get("platform") else "")
+            + ":", s["body"], raw=True),
         P(f.get("incident_facts", ""), s["body"]),
         Spacer(1, 0.2 * cm),
     ]
@@ -729,7 +770,8 @@ _DRAFT_BANNER = (
 def _draft_banner(s):
     return P(f"<b>{_DRAFT_BANNER}</b>", ParagraphStyle(
         "draftbanner", parent=s["small"], textColor=colors.HexColor("#B00020"),
-        borderColor=colors.HexColor("#B00020"), borderWidth=0.8, borderPadding=6, spaceAfter=10))
+        borderColor=colors.HexColor("#B00020"), borderWidth=0.8, borderPadding=6, spaceAfter=10),
+        raw=True)
 
 
 def bail_application(doc_id: str, f: dict) -> Path:
@@ -814,9 +856,9 @@ def labour_demand(doc_id: str, f: dict) -> Path:
 
     rows = [["Item", "Amount (PKR)"]]
     for r in calc.get("breakdown", []):
-        rows.append([P(r.get("item", "") + (f"<br/><font size=7 color=grey>{r['note']}</font>" if r.get("note") else ""), s["body"]),
+        rows.append([P(esc(r.get("item", "")) + (f"<br/><font size=7 color=grey>{esc(r['note'])}</font>" if r.get("note") else ""), s["body"], raw=True),
                      f"{int(r.get('amount', 0)):,}"])
-    rows.append([P("<b>TOTAL</b>", s["body"]), f"{int(calc.get('total', 0)):,}"])
+    rows.append([P("<b>TOTAL</b>", s["body"], raw=True), f"{int(calc.get('total', 0)):,}"])
     tb = Table(rows, colWidths=[11.5 * cm, 4 * cm])
     tb.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
@@ -831,9 +873,10 @@ def labour_demand(doc_id: str, f: dict) -> Path:
     story += [
         P("DEMAND", s["heading"]),
         P(f"You are hereby called upon to pay the above sum of <b>PKR {int(calc.get('total', 0)):,}</b> "
-          f"within <b>{f.get('response_days', '15')} days</b> of receipt of this notice, failing which the "
+          f"within <b>{esc(f.get('response_days', '15'))} days</b> of receipt of this notice, failing which the "
           f"undersigned shall be constrained to initiate proceedings before the Labour Court / the authority "
-          f"under the Payment of Wages Act, 1936, entirely at your risk as to cost and consequences.", s["body"]),
+          f"under the Payment of Wages Act, 1936, entirely at your risk as to cost and consequences.",
+          s["body"], raw=True),
         Spacer(1, 0.3 * cm),
         P("LEGAL BASIS", s["heading"]),
         P(calc.get("legal_basis", ""), s["body"]),
@@ -1051,8 +1094,9 @@ def wasiyyat_nama(doc_id: str, f: dict) -> Path:
         f.get("testator_address", ""),
     ] if x)
     story += [
-        P(f"I, <b>{testator}</b>{(', ' + ident) if ident else ''}, being of sound mind and free will, "
-          f"make this Wasiyyat (will) in accordance with the Islamic law as applied in Pakistan.", s["body"]),
+        P(f"I, <b>{esc(testator)}</b>{(', ' + esc(ident)) if ident else ''}, being of sound mind and free will, "
+          f"make this Wasiyyat (will) in accordance with the Islamic law as applied in Pakistan.",
+          s["body"], raw=True),
         Spacer(1, 0.2 * cm),
         P("1. REVOCATION", s["heading"]),
         P("I revoke all wills and codicils previously made by me.", s["body"]),
@@ -1062,17 +1106,17 @@ def wasiyyat_nama(doc_id: str, f: dict) -> Path:
     # Executor / guardian / funeral
     story += [P("2. EXECUTOR (WASI)", s["heading"])]
     if f.get("executor_name"):
-        story += [P(f"I appoint <b>{f['executor_name']}</b>"
-                    + (f" ({f.get('executor_relation')})" if f.get("executor_relation") else "")
+        story += [P(f"I appoint <b>{esc(f['executor_name'])}</b>"
+                    + (f" ({esc(f.get('executor_relation'))})" if f.get("executor_relation") else "")
                     + " as the executor (wasi) of this will, to pay my funeral expenses and debts and to "
-                      "distribute my estate as set out below.", s["body"])]
+                      "distribute my estate as set out below.", s["body"], raw=True)]
     else:
         story += [P("I appoint ____________________ as the executor (wasi) of this will.", s["body"])]
     story += [Spacer(1, 0.15 * cm)]
 
     if f.get("guardian_name"):
         story += [P("3. GUARDIAN OF MINOR CHILDREN", s["heading"]),
-                  P(f"I appoint <b>{f['guardian_name']}</b> as guardian of my minor children.", s["body"]),
+                  P(f"I appoint <b>{esc(f['guardian_name'])}</b> as guardian of my minor children.", s["body"], raw=True),
                   Spacer(1, 0.15 * cm)]
     if f.get("funeral_instructions"):
         story += [P("FUNERAL INSTRUCTIONS", s["heading"]),
@@ -1469,7 +1513,7 @@ def wakalatnama_checklist(doc_id: str, f: dict) -> Path:
                                f"order — here: {stated('mark_attestation')}",
                      bool(f.get("mark_attestation"))))
     for rule, text, ok in reqs:
-        story += [P(f"{'[x]' if ok else '[ ]'} <b>{rule}</b> — {text}", s["body"])]
+        story += [P(f"{'[x]' if ok else '[ ]'} <b>{esc(rule)}</b> — {esc(text)}", s["body"], raw=True)]
 
     if truthy("pleading_only"):
         story += [P(head("MEMORANDUM OF APPEARANCE (Rule 4(5))"), s["heading"]),
