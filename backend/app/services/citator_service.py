@@ -129,14 +129,74 @@ _CASE_NO_RE = re.compile(r"^(.{3,80}?No\.?\s*[\w./-]+\s+of\s+\d{4})", re.M)
 _JUDGE_RE = re.compile(r"^\s*([A-Z][A-Z .]{4,60}),\s*(?:C\.?)?J\b", re.M)
 _DATE_RE = re.compile(r"DATE OF HEARING[:\s]*(\d{2}[.\-/]\d{2}[.\-/]\d{4})", re.I)
 
+# Party names, in the three layouts the court's PDFs actually use.
+#
+# Only the stacked form — "Versus" alone on a line between the parties — was
+# handled, and that is what the reported-judgment PDFs use. Order-sheet PDFs
+# instead put both parties on one line, or open the line with "Vs." and leave
+# the first party on the lines above. 66 of the 73 judgments that reached the
+# corpus with no title at all are one of those two shapes.
+_TITLE_STACKED = re.compile(
+    r"\n(.{3,90}?)\n\s*V(?:ERSU|S)?S?U?S?\.?\s*\n(.{3,90}?)\n", re.I)
+# "V/S" is as common as "vs" in these registries. The respondent sometimes
+# wraps onto the next line and is then captured only as far as the line ends;
+# that is deliberate. Joining the continuation would corrupt the many titles
+# whose respondent legitimately ends without punctuation.
+_TITLE_INLINE = re.compile(
+    r"^[ \t]*(\S.{2,88}?)[ \t]+V(?:ERSUS|/?S)\.?[ \t]+(\S.{2,88}?)[ \t]*$",
+    re.I | re.M)
+_TITLE_LEADING_VS = re.compile(
+    r"^[ \t]*V(?:ERSUS|S)\.?[ \t]+(\S.{2,88}?)[ \t]*$", re.I | re.M)
+# Judgment sheets name the parties parenthetically under the case number, and
+# abbreviate to a bare "v." rather than "vs" — which is why the other three
+# patterns see these as having no versus token at all. Requiring the whole
+# parenthesised line keeps the bare "v." from matching mid-sentence prose.
+# Connected appeals list several; the first is the lead case.
+_TITLE_PAREN_V = re.compile(
+    r"^[ \t]*\((\S.{2,88}?)[ \t]+v\.?[ \t]+(\S.{2,88}?)\)[ \t]*$", re.I | re.M)
+
+# Lines above a leading "Vs." that are letterhead or a case number rather than
+# the first party — without this the title comes out as "C.R.No. 10 of 2026".
+_TITLE_NOISE = re.compile(
+    r"(?i)^(form\b|order sheet|in the |judicial\b|.*bench,|"
+    r"[A-Z]\.?[A-Z]?\.?\s*(No|R|P|A)\b.*of\s*\d{4}|\d+\s*$)")
+
+
+def _join_parties(first: str, second: str) -> str | None:
+    title = re.sub(r"\s+", " ",
+                   f"{first.strip().rstrip('.,')} vs {second.strip().rstrip('.')}")
+    return title[:160] if len(title) > 8 else None
+
+
+def _parse_title(head: str) -> str | None:
+    """The case title from a first page, or None if no layout matches.
+
+    The stacked branch is tried first and returns byte-for-byte what this
+    parser returned before the other two existed. Any title already derived
+    from it must keep the value it has: re-ingesting a judgment should not
+    rewrite a title that was never wrong.
+    """
+    if m := _TITLE_STACKED.search(head):
+        return re.sub(r"\s+", " ", f"{m.group(1).strip()} vs {m.group(2).strip()}")
+    if m := _TITLE_INLINE.search(head):
+        return _join_parties(m.group(1), m.group(2))
+    if m := _TITLE_LEADING_VS.search(head):
+        prior = [ln.strip() for ln in head[:m.start()].splitlines() if ln.strip()]
+        prior = [ln for ln in prior[-2:] if not _TITLE_NOISE.match(ln)]
+        if prior:
+            return _join_parties(" ".join(prior), m.group(1))
+    if m := _TITLE_PAREN_V.search(head):
+        return _join_parties(m.group(1), m.group(2))
+    return None
+
 
 def parse_metadata(text: str) -> dict:
     head = text[:2500]
     meta: dict = {}
     if m := _CASE_NO_RE.search(head):
         meta["case_no"] = re.sub(r"\s+", " ", m.group(1)).strip()
-    if m := re.search(r"\n(.{3,90}?)\n\s*V(?:ERSU|S)?S?U?S?\.?\s*\n(.{3,90}?)\n", head, re.I):
-        meta["title"] = re.sub(r"\s+", " ", f"{m.group(1).strip()} vs {m.group(2).strip()}")
+    if title := _parse_title(head):
+        meta["title"] = title
     if m := _JUDGE_RE.search(head):
         meta["judge"] = m.group(1).title().strip()
     if m := _DATE_RE.search(head):
