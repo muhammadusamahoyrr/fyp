@@ -10,15 +10,31 @@ class PartyInput(BaseModel):
     full_name: str | None = None  # resolved server-side from the users collection
 
 
+# Bounds, for the same reason document drafting has _MAX_DRAFT_CONTENT and
+# quick-notice has max_length=3000: these values are written straight into a
+# Mongo document, and a canvas signature is base64 image data. Unbounded, the
+# 16 MB BSON ceiling was the only limit — reached by a large enough signature
+# plus body, at which point the write fails rather than being refused cleanly.
+_MAX_TITLE = 300
+_MAX_BODY = 300_000        # matches document_service._MAX_DRAFT_CONTENT
+_MAX_SIGNATURE = 200_000   # generous for a base64 PNG of a drawn signature
+
+
 class AgreementCreate(BaseModel):
-    title: str
-    body_html: str
+    title: str = Field(..., min_length=1, max_length=_MAX_TITLE)
+    body_html: str = Field(..., min_length=1, max_length=_MAX_BODY)
     party_ids: list[PartyInput]
 
 
 class SignatureSubmit(BaseModel):
     method: SignatureMethod
-    signature_data: str  # base64 image or typed name string
+    # base64 image or typed name string
+    signature_data: str = Field(..., min_length=1, max_length=_MAX_SIGNATURE)
+
+
+class AgreementDecline(BaseModel):
+    """A party refusing to sign. The reason is optional but bounded."""
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 # ── Response models ───────────────────────────────────────────────────────────

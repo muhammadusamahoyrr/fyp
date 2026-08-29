@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends, Request
 
 from app.dependencies import get_current_user
-from app.schemas.agreement import AgreementCreate, AgreementOut, SignatureSubmit
+from app.schemas.agreement import (
+    AgreementCreate,
+    AgreementDecline,
+    AgreementOut,
+    SignatureSubmit,
+)
 from app.services import agreement_service
 
 router = APIRouter(prefix="/agreements", tags=["agreements"])
@@ -47,5 +52,26 @@ async def sign_agreement(
         user_id=current_user["_id"],
         method=body.method.value,
         signature_data=body.signature_data,
+        ip_address=ip,
+    )
+
+
+@router.post("/{agreement_id}/decline", response_model=AgreementOut)
+async def decline_agreement(
+    agreement_id: str,
+    body: AgreementDecline,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Refuse to sign, ending the agreement.
+
+    The counterpart to /sign. Without it a party could only sign or ignore, and
+    `AgreementStatus.CANCELLED` was unreachable despite the UI rendering it.
+    """
+    ip = request.client.host if request.client else None
+    return await agreement_service.decline_agreement(
+        agreement_id=agreement_id,
+        user_id=current_user["_id"],
+        reason=body.reason,
         ip_address=ip,
     )

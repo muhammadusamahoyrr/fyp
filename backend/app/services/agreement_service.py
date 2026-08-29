@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 from datetime import datetime, timezone
 
@@ -14,6 +15,51 @@ ETO_CLASSIFICATION = {
     SignatureMethod.TYPED: "Basic Electronic Signature (ETO 2002)",
     SignatureMethod.IMAGE_UPLOAD: "Basic Electronic Signature (ETO 2002)",
 }
+
+# Strength order, weakest first. The agreement as a whole is only as strong as
+# its weakest signature — that is the thing a court would be asked about — so
+# the agreement-level classification is derived from this rather than being
+# overwritten by whichever party happened to sign last.
+_ETO_RANK = {
+    SignatureMethod.TYPED.value: 0,
+    SignatureMethod.IMAGE_UPLOAD.value: 0,
+    SignatureMethod.CANVAS.value: 1,
+}
+
+# An unknown method ranks BELOW every known one. If a fourth SignatureMethod is
+# ever added and this map is not updated, the derived classification degrades to
+# "unknown" instead of silently ranking as Advanced — the safe direction for a
+# value that characterises a signature's legal weight.
+_ETO_RANK_UNKNOWN = -1
+_ETO_UNKNOWN_LABEL = "Unclassified electronic signature — verify against ETO 2002"
+
+
+def _derive_eto(parties: list[dict]) -> str:
+    """Agreement-level ETO classification: the weakest signature actually made."""
+    signed = [p for p in parties if p.get("signed")]
+    if not signed:
+        return None
+
+    def rank(party: dict) -> int:
+        return _ETO_RANK.get(party.get("signature_method"), _ETO_RANK_UNKNOWN)
+
+    weakest = min(signed, key=rank)
+    method = weakest.get("signature_method")
+    if method not in _ETO_RANK:
+        return _ETO_UNKNOWN_LABEL
+    return ETO_CLASSIFICATION[SignatureMethod(method)]
+
+
+def body_digest(body_html: str) -> str:
+    """SHA-256 of the agreement body, as the record of WHAT was signed.
+
+    The audit log proved that someone signed and from which IP, but never what
+    they signed. No route edits `body_html` today, so the content is stable by
+    accident rather than by evidence — and for an ETO 2002 record, what was
+    signed is the part that matters. Stamped into every audit entry so a later
+    edit is detectable rather than merely unlikely.
+    """
+    return hashlib.sha256((body_html or "").encode("utf-8")).hexdigest()
 
 
 async def _notify(user_id: str, ntype: NotificationType, title: str, body: str, payload: dict) -> None:
@@ -56,6 +102,8 @@ async def create_agreement(
         "_id": agreement_id,
         "title": title,
         "body_html": body_html,
+        # What was signed, fixed at creation. See body_digest().
+        "body_sha256": body_digest(body_html),
         "eto_classification": None,
         "case_id": case_id,
         "engagement_id": engagement_id,
@@ -77,6 +125,7 @@ async def create_agreement(
                 "actor_id": creator_id,
                 "timestamp": datetime.now(timezone.utc),
                 "ip_address": None,
+                "body_sha256": body_digest(body_html),
             }
         ],
         "created_by": creator_id,
@@ -145,6 +194,13 @@ async def submit_signature(
 
     if agreement.get("status") == AgreementStatus.EXECUTED.value:
         raise AppValidationError("Agreement is already fully executed")
+    # CANCELLED is the other terminal state. Signing a declined agreement would
+    # push it back toward executed and leave a "signed" entry sitting after a
+    # "declined" one in the audit log — a record no one could read.
+    if agreement.get("status") == AgreementStatus.CANCELLED.value:
+        raise AppValidationError(
+            "This agreement was declined and can no longer be signed"
+        )
 
     # Check if this party already signed
     for party in agreement.get("parties", []):
@@ -157,7 +213,7 @@ async def submit_signature(
     await agreement_repo.update_party_signature(
         agreement_id,
         user_id,
-        {"method": method, "data": signature_data},
+        {"method": method, "data": signature_data, "eto": eto},
     )
     await agreement_repo.append_audit_log(
         agreement_id,
@@ -167,17 +223,26 @@ async def submit_signature(
             "timestamp": datetime.now(timezone.utc),
             "ip_address": ip_address,
             "note": eto,
+            # WHAT was signed, not merely that it was. Without this the log
+            # cannot distinguish a signature on this text from a signature on
+            # text that was later altered.
+            "body_sha256": agreement.get("body_sha256") or body_digest(agreement.get("body_html", "")),
         },
-    )
-    # Set ETO classification based on first signature method
-    await agreement_repo.update_one(
-        {"_id": agreement_id},
-        {"$set": {"eto_classification": eto}},
     )
 
     # Re-fetch to check if all parties have now signed
     updated = await agreement_repo.find_by_id(agreement_id)
     all_signed = all(p.get("signed") for p in updated.get("parties", []))
+
+    # Derive the agreement-level classification from every signature made so
+    # far. This used to `$set` the CURRENT signer's classification on each call
+    # — the comment said "first signature method", the code did last-writer-wins
+    # — so with a canvas signer and a typed signer the agreement's legal
+    # characterisation depended on who happened to sign second.
+    await agreement_repo.update_one(
+        {"_id": agreement_id},
+        {"$set": {"eto_classification": _derive_eto(updated.get("parties", []))}},
+    )
 
     signer_name = next(
         (p.get("full_name") for p in updated.get("parties", []) if p["user_id"] == user_id),
@@ -208,3 +273,74 @@ async def submit_signature(
             {"agreement_id": agreement_id},
         )
     return updated
+
+
+async def decline_agreement(
+    agreement_id: str,
+    user_id: str,
+    reason: str | None,
+    ip_address: str | None,
+) -> dict:
+    """A party refuses to sign, ending the agreement.
+
+    AgreementStatus.CANCELLED and the UI's "Rejected" label both existed, but
+    nothing ever wrote that value: the four routes were create, list, get and
+    sign. A party sent an agreement they disagreed with could only sign it or
+    leave it `pending` forever, and the counterparty was never told the deal was
+    off.
+
+    Declining is recorded like a signature — actor, time, IP, and the digest of
+    the body that was refused — because "who refused what, and when" is the same
+    question the audit log answers for signing.
+    """
+    agreement = await agreement_repo.find_by_id(agreement_id)
+    if not agreement:
+        raise NotFoundError("Agreement")
+
+    party_ids = {p["user_id"] for p in agreement.get("parties", [])}
+    if user_id not in party_ids:
+        raise ForbiddenError("You are not a party to this agreement")
+
+    status = agreement.get("status")
+    if status == AgreementStatus.EXECUTED.value:
+        raise AppValidationError(
+            "This agreement is already fully executed and cannot be declined"
+        )
+    # Declining twice is not idempotent housekeeping — it would append a second
+    # audit entry and re-notify every party about a deal that was already off.
+    if status == AgreementStatus.CANCELLED.value:
+        raise AppValidationError("This agreement has already been declined")
+
+    decliner_name = next(
+        (p.get("full_name") for p in agreement.get("parties", []) if p["user_id"] == user_id),
+        "A party",
+    )
+    title = agreement.get("title", "Agreement")
+
+    await agreement_repo.append_audit_log(
+        agreement_id,
+        {
+            "action": "declined",
+            "actor_id": user_id,
+            "timestamp": datetime.now(timezone.utc),
+            "ip_address": ip_address,
+            "reason": (reason or "").strip() or None,
+            "body_sha256": agreement.get("body_sha256") or body_digest(agreement.get("body_html", "")),
+        },
+    )
+    await agreement_repo.set_status(agreement_id, AgreementStatus.CANCELLED.value)
+
+    # In-app only: create_notification writes a notifications row and pushes it
+    # over the websocket if the party is connected. No email is sent from this
+    # path — an offline party sees it next time they open the app.
+    for uid in (p["user_id"] for p in agreement.get("parties", []) if p["user_id"] != user_id):
+        await _notify(
+            uid,
+            NotificationType.AGREEMENT_DECLINED,
+            "Agreement declined",
+            f"{decliner_name} declined \"{title}\"."
+            + (f" Reason: {reason.strip()}" if (reason or "").strip() else ""),
+            {"agreement_id": agreement_id},
+        )
+
+    return await agreement_repo.find_by_id(agreement_id)

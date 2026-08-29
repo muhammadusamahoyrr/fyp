@@ -184,6 +184,7 @@ class NotificationType(str, Enum):
     AGREEMENT_CREATED = "agreement_created"
     AGREEMENT_SIGNED = "agreement_signed"
     AGREEMENT_EXECUTED = "agreement_executed"
+    AGREEMENT_DECLINED = "agreement_declined"
     KYC_APPROVED = "kyc_approved"
     KYC_REJECTED = "kyc_rejected"
     REVIEW_RECEIVED = "review_received"

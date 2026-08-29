@@ -41,6 +41,11 @@ class AgreementRepository(BaseRepository):
                     "parties.$.signed_at": datetime.now(timezone.utc),
                     "parties.$.signature_method": signature["method"],
                     "parties.$.signature_data": signature["data"],
+                    # Each signature has its OWN ETO character: a drawn
+                    # signature and a typed name are not the same instrument.
+                    # Stored per party so the agreement-level classification can
+                    # be DERIVED rather than overwritten by whoever signed last.
+                    "parties.$.eto_classification": signature.get("eto"),
                     "updated_at": datetime.now(timezone.utc),
                 }
             },
