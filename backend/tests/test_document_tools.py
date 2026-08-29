@@ -13,7 +13,13 @@ import pytest
 
 from app.ai.tools.document_tools import build_document_tools
 
-pytestmark = pytest.mark.integration
+# NOT marked at file level. The three binding tests below need no service at
+# all, and a file-level `integration` marker deselected them from every
+# default run -- so the property this file exists to protect (one user's
+# agent must never read another user's FIR) was never actually asserted in
+# CI. The seven that touch Mongo are marked individually; the `mongo`
+# fixture already pytest.skip()s when the database is unreachable, so they
+# degrade gracefully on their own.
 
 
 @pytest.fixture
@@ -69,17 +75,20 @@ def test_read_document_does_not_expose_a_user_id_argument():
 
 # ── access control ────────────────────────────────────────────────────────────
 
+@pytest.mark.integration
 async def test_user_can_list_their_own_uploads(two_users_with_uploads):
     files = await _tools("ALICE")["list_my_documents"].ainvoke({})
     assert [f["filename"] for f in files] == ["fir.txt"]
 
 
+@pytest.mark.integration
 async def test_user_can_read_their_own_document(two_users_with_uploads):
     result = await _tools("ALICE")["read_document"].ainvoke(
         {"file_id": two_users_with_uploads["alice_file_id"]})
     assert "ALICE FIR" in result["text"]
 
 
+@pytest.mark.integration
 async def test_user_CANNOT_read_another_users_document(two_users_with_uploads):
     """The IDOR test. Alice supplies Bob's real file_id."""
     result = await _tools("ALICE")["read_document"].ainvoke(
@@ -91,16 +100,19 @@ async def test_user_CANNOT_read_another_users_document(two_users_with_uploads):
     assert "5,000,000" not in str(result)
 
 
+@pytest.mark.integration
 async def test_users_listing_is_scoped_to_themselves(two_users_with_uploads):
     bob_files = await _tools("BOB")["list_my_documents"].ainvoke({})
     assert [f["filename"] for f in bob_files] == ["secret.txt"]
 
 
+@pytest.mark.integration
 async def test_unknown_file_id_returns_an_error_not_a_crash(two_users_with_uploads):
     result = await _tools("ALICE")["read_document"].ainvoke({"file_id": "does-not-exist"})
     assert "error" in result
 
 
+@pytest.mark.integration
 async def test_user_with_no_uploads_is_told_so(mongo):
     files = await _tools("NOBODY")["list_my_documents"].ainvoke({})
     assert "error" in files[0]
@@ -110,6 +122,7 @@ async def test_user_with_no_uploads_is_told_so(mongo):
 
 # ── extraction ────────────────────────────────────────────────────────────────
 
+@pytest.mark.integration
 async def test_scanned_file_with_no_text_layer_is_reported_not_invented(mongo, tmp_path):
     """There is no OCR in the stack. An empty extraction must say so rather than
     return "" and let the model narrate an imaginary document."""
