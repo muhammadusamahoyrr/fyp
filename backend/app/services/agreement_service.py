@@ -50,6 +50,34 @@ def _derive_eto(parties: list[dict]) -> str:
     return ETO_CLASSIFICATION[SignatureMethod(method)]
 
 
+# Sentinel written into the withdrawn agreement templates by the frontend
+# (ModAgreements.jsx UNREVIEWED_MARKER). ASCII only and no em-dash on purpose:
+# it crosses a language boundary and is compared byte-for-byte.
+UNREVIEWED_TEMPLATE_MARKER = "[UNREVIEWED SAMPLE - NOT LEGAL CONTENT]"
+
+_UNREVIEWED_REFUSAL = (
+    "This agreement still contains the unreviewed-sample notice. Replace it with "
+    "the wording you actually want, or ask your lawyer to supply it, before "
+    "sending the agreement for signature."
+)
+
+
+def is_unreviewed_template(body_html: str) -> bool:
+    """True while the body is still withdrawn boilerplate rather than an agreement.
+
+    The six built-in templates shipped United States contract text -- a "[State]"
+    corporation, "$[Amount]" salaries, a non-compete over a "[Geographic Area]" --
+    as the starting body of a real, binding, e-signed instrument. The bodies are
+    withdrawn pending review by a qualified Pakistani lawyer, and this is what
+    stops the withdrawn text being signed in the meantime.
+
+    Checked at BOTH creation and signature. Creation catches it early; signature
+    is the guarantee, because it also covers agreements created before the
+    templates were withdrawn.
+    """
+    return UNREVIEWED_TEMPLATE_MARKER in (body_html or "")
+
+
 def body_digest(body_html: str) -> str:
     """SHA-256 of the agreement body, as the record of WHAT was signed.
 
@@ -96,6 +124,11 @@ async def create_agreement(
         raise AppValidationError(
             "An agreement needs at least two parties — select a counterparty to sign with you"
         )
+    # Creating an agreement IS sending it for signature here: every party is
+    # notified to sign immediately below. So withdrawn template text is refused
+    # at the door rather than allowed to sit in a pending state.
+    if is_unreviewed_template(body_html):
+        raise AppValidationError(_UNREVIEWED_REFUSAL)
 
     agreement_id = secrets.token_urlsafe(16)
     doc = {
@@ -201,6 +234,12 @@ async def submit_signature(
         raise AppValidationError(
             "This agreement was declined and can no longer be signed"
         )
+    # The actual guarantee that withdrawn boilerplate cannot become binding.
+    # The check at creation catches new agreements; this one also covers any
+    # created BEFORE the templates were withdrawn, which are exactly the
+    # agreements still sitting in `pending` with US contract text in them.
+    if is_unreviewed_template(agreement.get("body_html", "")):
+        raise AppValidationError(_UNREVIEWED_REFUSAL)
 
     # Check if this party already signed
     for party in agreement.get("parties", []):

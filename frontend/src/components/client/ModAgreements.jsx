@@ -11,17 +11,6 @@ import { createAgreement, signAgreement, listAgreements, searchLawyers } from "@
 /* ══════════════════════════════════════════════════════
    MODULE: AGREEMENTS — 5-Step Wizard
 ══════════════════════════════════════════════════════ */
-const AGMT_TEMPLATES = [
-    { name: "Service Agreement", cat: "Business", ico: "💼", desc: "Professional services contract between two parties.", popular: true },
-    { name: "Non-Disclosure (NDA)", cat: "NDA", ico: "🔒", desc: "Protect confidential information shared between parties.", popular: true },
-    { name: "Employment Contract", cat: "Employment", ico: "👔", desc: "Terms and conditions of employment.", popular: false },
-    { name: "Lease Agreement", cat: "Property", ico: "🏠", desc: "Rental or lease of property with terms and rent schedule.", popular: false },
-    { name: "Partnership Deed", cat: "Business", ico: "🤝", desc: "Formal partnership agreement defining roles and profit sharing.", popular: true },
-    { name: "Freelance Contract", cat: "Business", ico: "💻", desc: "Contract for freelance or contract-based project delivery.", popular: false },
-    { name: "Divorce Settlement", cat: "Family", ico: "⚖️", desc: "Mutual agreement on asset division and custody.", popular: false },
-    { name: "Power of Attorney", cat: "Business", ico: "📜", desc: "Authorize another person to act on your behalf.", popular: false },
-    { name: "Joint Venture Agmt.", cat: "Business", ico: "🏢", desc: "Agreement to collaborate on a joint business venture.", popular: false },
-];
 
 const AGMT_CLAUSES_INIT = [
     { title: "Definitions & Interpretation", text: "All terms used shall have their standard legal meaning unless otherwise specified.", required: true },
@@ -93,36 +82,75 @@ const Input = ({ style, ...p }) => {
 
 
 // ── TEMPLATE DATA ────────────────────────────
+// Sentinel shared with the backend (agreement_service.UNREVIEWED_TEMPLATE_MARKER).
+// ASCII only and no em-dash on purpose: it crosses a language boundary and gets
+// compared byte-for-byte.
+const UNREVIEWED_MARKER = "[UNREVIEWED SAMPLE - NOT LEGAL CONTENT]";
+
+// The bodies these templates used to carry were United States contract
+// boilerplate: incorporation in a "[State]", salaries in "$[Amount]" on a
+// bi-weekly schedule, and a non-compete over a "[Geographic Area]". They were
+// the starting text of a real, e-signed, binding agreement in a Pakistani
+// product.
+//
+// Withdrawn rather than rewritten. Drafting Pakistani contract templates is
+// legal work, and generating them would be the same failure the intake prompt
+// was already hardened against -- authoritative-looking legal text nobody
+// verified. The names and descriptions stay so the gallery still reads
+// sensibly; the bodies say what happened and what to do.
+//
+// The backend refuses to create or sign an agreement whose body still contains
+// the marker, so nothing can reach `executed` off this text.
+const unreviewedBody = (name) => `${UNREVIEWED_MARKER}
+
+${name}
+
+This template has been withdrawn pending review by a qualified Pakistani lawyer.
+
+The previous wording was drafted for United States law and was not suitable to
+sign in Pakistan. Rather than substitute wording that has not been reviewed
+either, the body has been removed.
+
+Replace this notice entirely with the agreement you actually want, or ask your
+lawyer for the wording. An agreement that still contains this notice cannot be
+sent for signature.`;
+
 const TEMPLATES = [
     {
         ico: "💼", name: "Employment Contract", cat: "Employment", popular: true,
         desc: "Standard employment agreement with terms, compensation, and responsibilities.",
-        body: `Employment Contract\n\nThis Employment Agreement ("Agreement") is entered into as of [Date], by and between:\n\n1. Parties\nEmployer: [Company Name], a [State] corporation ("Employer")\nEmployee: [Employee Name] ("Employee")\n\n2. Position and Duties\nEmployee shall serve as [Job Title] and shall perform duties as reasonably assigned by Employer.\n\n3. Compensation\nBase Salary: $[Amount] per year\nPayment Schedule: Bi-weekly\nBenefits: As per company policy\n\n4. Term\nThis Agreement commences on [Start Date] and continues until terminated.\n\n5. Confidentiality\nEmployee agrees to maintain strict confidentiality of all proprietary information during and after employment.\n\n6. Non-Compete\nFor a period of [Duration] following termination, Employee shall not engage in competing business activities within [Geographic Area].`
+        unreviewed: true,
+        body: unreviewedBody("Employment Contract"),
     },
     {
         ico: "🔒", name: "Non-Disclosure Agreement", cat: "NDA", popular: true,
         desc: "Mutual or one-way NDA for protecting confidential information.",
-        body: `Non-Disclosure Agreement\n\nThis Non-Disclosure Agreement is entered into as of [Date] between the parties listed below.\n\n1. Definition of Confidential Information\nAll non-public information disclosed by either party.\n\n2. Obligations\nEach party agrees to keep confidential information strictly confidential.\n\n3. Term\nThis agreement remains in effect for [Duration] years.`
+        unreviewed: true,
+        body: unreviewedBody("Non-Disclosure Agreement"),
     },
     {
         ico: "🏠", name: "Lease Agreement", cat: "Property", popular: true,
         desc: "Residential or commercial property lease with standard terms.",
-        body: `Lease Agreement\n\nThis Lease Agreement is entered into as of [Date].\n\n1. Parties\nLandlord: [Landlord Name]\nTenant: [Tenant Name]\n\n2. Property\nAddress: [Property Address]\n\n3. Term\nLease period: [Start Date] to [End Date]\n\n4. Rent\nMonthly rent: $[Amount] due on the 1st of each month.`
+        unreviewed: true,
+        body: unreviewedBody("Lease Agreement"),
     },
     {
         ico: "📄", name: "Service Agreement", cat: "Business", popular: true,
         desc: "Professional services agreement for contractors and clients.",
-        body: `Service Agreement\n\nThis Service Agreement is entered into as of [Date].\n\n1. Services\nService Provider agrees to perform: [Description of Services]\n\n2. Compensation\nClient agrees to pay: $[Amount]\n\n3. Timeline\nServices to be completed by: [Date]`
+        unreviewed: true,
+        body: unreviewedBody("Service Agreement"),
     },
     {
         ico: "🤝", name: "Partnership Agreement", cat: "Business", popular: false,
         desc: "Business partnership terms, profit sharing, and responsibilities.",
-        body: `Partnership Agreement\n\nThis Partnership Agreement is entered into as of [Date].\n\n1. Partners\nPartner 1: [Name]\nPartner 2: [Name]\n\n2. Purpose\n[Business Purpose]\n\n3. Profit Sharing\nProfits and losses split equally unless otherwise agreed.`
+        unreviewed: true,
+        body: unreviewedBody("Partnership Agreement"),
     },
     {
         ico: "💼", name: "Freelancer Contract", cat: "Employment", popular: false,
         desc: "Independent contractor agreement for freelance work.",
-        body: `Freelancer Contract\n\nThis Independent Contractor Agreement is entered into as of [Date].\n\n1. Contractor: [Name]\n2. Client: [Name]\n3. Project: [Description]\n4. Payment: $[Amount]\n5. Deadline: [Date]`
+        unreviewed: true,
+        body: unreviewedBody("Freelancer Contract"),
     },
 ];
 
