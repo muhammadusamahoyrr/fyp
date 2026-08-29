@@ -1,15 +1,19 @@
 import asyncio
 import json
 import logging
+import secrets
 
 from typing import Literal
 
 from fastapi import APIRouter, Depends
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from app.dependencies import get_current_user, require_lawyer
 from app.schemas.common import StatusResponse
+from app.services import provenance_service
+from app.services.document_service import _verification_record
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -400,15 +404,60 @@ async def ai_draft_stream(
     )})
 
     async def token_generator():
+        # The draft is buffered as it streams so the authorities it cites can be
+        # checked once it is complete. This path had NO safety net at all: no
+        # grounding node, no citation check, no decision engine and no
+        # provenance row — raw model output into a lawyer's editor. The prompt
+        # tells the model to write [placeholder] rather than invent a citation,
+        # and nothing enforced it.
+        buf: list[str] = []
+        failed = False
         try:
             llm = get_llm()  # inside the generator → provider errors stream as SSE
             async for chunk in llm.astream(messages):
                 if chunk.content:
+                    buf.append(chunk.content)
                     yield f"data: {json.dumps({'content': chunk.content})}\n\n"
-        except Exception as exc:
+        except Exception:
+            failed = True
             yield _stream_error("ai.stream")
-        finally:
-            yield "data: [DONE]\n\n"
+
+        drafted = "".join(buf)
+
+        # Verification runs AFTER the last token, never before one: a citation
+        # check must not delay the first word the lawyer sees. It reuses the
+        # record the document path already stores — advisory and fail-open, and
+        # it reports `ran: False` rather than a false pass when the corpus is
+        # unreachable.
+        if drafted and not failed:
+            try:
+                verdict = await _verification_record({"draft": drafted})
+                yield f"data: {json.dumps({'verification': jsonable_encoder(verdict)})}\n\n"
+            except Exception:
+                logger.exception("draft stream: verification failed")
+
+            # Make the turn visible to the audit store. Every other user-facing
+            # output routes through provenance; this one did not, so any
+            # groundedness or refusal rate computed from the store silently
+            # excluded every document a lawyer drafted.
+            try:
+                await provenance_service.record_answer(
+                    state={
+                        "query":  body.instruction,
+                        "answer": drafted,
+                        "case_type": body.case_type,
+                        "province":  body.province,
+                        "citations": [],
+                    },
+                    session_id=f"draft:{current_user['_id']}",
+                    user_id=current_user["_id"],
+                    request_id=secrets.token_urlsafe(16),
+                    turn_type=provenance_service.TURN_ANSWER,
+                )
+            except Exception:
+                logger.exception("draft stream: provenance write failed")
+
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         token_generator(),
