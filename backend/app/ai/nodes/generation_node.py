@@ -1,6 +1,7 @@
 import asyncio
 import re
 
+from app.ai.answer_citations import build_generation_evidence
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
 from app.ai.nodes._history import format_history
@@ -37,6 +38,9 @@ You are an expert Pakistani legal assistant. Using ONLY the law sections provide
 
 Rules:
 - Cite ONLY section numbers that appear in the provided context — never invent citations
+- Each source below is numbered. When a sentence states a legal proposition drawn
+  from one, append that source's marker at the end of the sentence, e.g. "... [1]".
+  Use only the numbers shown. Omit the marker when no source supports the sentence.
 - Write in plain English a non-lawyer can understand
 - On the very last line, output ONLY this JSON (nothing else after it): {"confidence": 0.85}"""
 
@@ -65,6 +69,7 @@ _SYSTEM_UR = """\
 
 اصول:
 - صرف سیاق میں دکھائی گئی دفعات کا حوالہ دیں — نئی دفعات نہ گھڑیں
+- ہر ماخذ نمبر شدہ ہے۔ جس جملے کی بنیاد کسی ماخذ پر ہو، اس کے آخر میں وہ نمبر لکھیں، مثلاً "... [1]"۔ صرف دیے گئے نمبر استعمال کریں۔
 - آسان زبان میں جواب دیں
 - آخری لائن میں صرف یہ JSON لکھیں: {"confidence": 0.85}"""
 
@@ -94,13 +99,14 @@ _CASE_LAW_RIDER_UR = """
 یاد رہے: تمام سیکشنز کے بعد، آپ کے جواب کی آخری لائن صرف یہ JSON ہونی چاہیے: {"confidence": 0.85}"""
 
 
-def _format_case_law(chunks: list[dict]) -> str:
+def _format_case_law(evidence: list[dict]) -> str:
+    """Judgments, carrying their ids from the shared evidence list."""
     lines = []
-    for c in chunks:
-        cite = c.get("citation") or _case_reference(c)
-        title = c.get("title", "")
-        snippet = (c.get("content") or "")[:400]
-        lines.append(f"- {cite} ({title})\n  {snippet}")
+    for item in evidence:
+        if item["kind"] != "judgment":
+            continue
+        snippet = (item.get("content") or "")[:400]
+        lines.append(f"[{item['id']}] {item['statute']} ({item.get('title', '')})\n  {snippet}")
     return "\n".join(lines)
 
 
@@ -140,9 +146,14 @@ def _format_tool_results(results: list[dict]) -> str:
     falling back to guessing from statute text.
     """
     lines = []
-    for r in results:
-        payload = r.get("result")
-        lines.append(f"- {r['tool']}({_compact_args(r.get('args', {}))}) →\n  {payload}")
+    for item in results:
+        if item["kind"] != "engine":
+            continue
+        call = item.get("call") or {}
+        payload = call.get("result")
+        lines.append(
+            f"[{item['id']}] {call.get('tool', 'engine')}"
+            f"({_compact_args(call.get('args', {}))}) →\n  {payload}")
     return "\n".join(lines)
 
 
@@ -173,17 +184,23 @@ in the retrieved text that contradicts it.
   to refer to where your information came from."""
 
 
-def _format_chunks(chunks: list[dict]) -> str:
+def _format_statutes(evidence: list[dict]) -> str:
+    """Statute evidence, under the ids assigned by build_generation_evidence.
+
+    The number is no longer a local enumerate() counter. It used to be, which is
+    how generation numbered [1..8] while hallucination_node independently
+    numbered [1..5] — the same marker naming different sources to the two
+    components that had to agree about it.
+    """
     lines = []
-    for i, c in enumerate(chunks[:8], 1):
-        raw_source = c.get("statute") or c.get("source_file", "Pakistani Law")
+    for item in evidence:
+        if item["kind"] != "statute":
+            continue
+        raw_source = item.get("statute") or item.get("source") or "Pakistani Law"
         # Web chunks store URLs in statute — show as "Web Source" for cleaner prompts
-        if raw_source.startswith("http"):
-            statute = "Web Source"
-        else:
-            statute = raw_source
-        section = f" Section {c['section_number']}" if c.get("section_number") else ""
-        lines.append(f"[{i}] {statute}{section}\n{c['content'][:600]}")
+        statute = "Web Source" if raw_source.startswith("http") else raw_source
+        section = f" Section {item['section']}" if item.get("section") else ""
+        lines.append(f"[{item['id']}] {statute}{section}\n{(item.get('content') or '')[:600]}")
     return "\n\n".join(lines)
 
 
@@ -201,12 +218,23 @@ async def generation_node(state: AgentState) -> dict:
     prev_conf = state.get("confidence", 0.0)
 
     llm     = get_llm()
-    context = _format_chunks(state.get("reranked_chunks", []))
     lang    = state.get("language", "en")
     intent  = state.get("followup_intent")
 
     is_urdu   = lang in ("ur", "roman_urdu")
     case_law  = state.get("case_law_chunks", [])
+
+    # ONE evidence list, built once and numbered once. Everything downstream —
+    # the prompt below, the grounding judge, and citation matching — reads these
+    # ids, so a marker cannot mean different sources to different components.
+    # The statute cap mirrors the retry rule below: 8 normally, 4 on a retry.
+    evidence = build_generation_evidence(
+        state.get("reranked_chunks", []),
+        case_law,
+        state.get("tool_results", []),
+        statute_limit=4 if attempts > 1 else 8,
+    )
+    context = _format_statutes(evidence)
 
     # Pick system prompt based on intent
     if intent == "deepen":
@@ -221,13 +249,11 @@ async def generation_node(state: AgentState) -> dict:
     # Use normalized query for generation so Urdu queries are standard script
     question = state.get("normalized_query") or state["query"]
 
-    # On generation retry: use only top-ranked chunks (stricter grounding)
-    if attempts > 1:
-        chunks_to_use = state.get("reranked_chunks", [])[:4]
-        context = _format_chunks(chunks_to_use)
-
+    # The generation retry's stricter grounding (top 4 only) is applied when the
+    # evidence list is built above, so the ids stay consistent with what is
+    # actually shown here.
     if case_law:
-        context += "\n\nRELEVANT CASE LAW (Lahore High Court judgments):\n" + _format_case_law(case_law)
+        context += "\n\nRELEVANT CASE LAW (Lahore High Court judgments):\n" + _format_case_law(evidence)
 
     # Deterministic engine output outranks retrieved text — tell the model so.
     tool_results = state.get("tool_results", [])
@@ -239,7 +265,7 @@ async def generation_node(state: AgentState) -> dict:
 
     tool_section = (
         f"\nSTATUTORY DETERMINATION (exact — state it directly, in your own voice):\n"
-        f"{_format_tool_results(tool_results)}\n"
+        f"{_format_tool_results(evidence)}\n"
         if tool_results else ""
     )
 
@@ -298,6 +324,17 @@ async def generation_node(state: AgentState) -> dict:
         "answer":              raw + DISCLAIMER,
         "citations":           citations,
         "confidence":          confidence,
+        # The same number, kept under a name that says what it is. `confidence`
+        # is still consumed internally (hallucination_node degrades it, the
+        # cache stores it), so it stays; but the user-facing path now reads the
+        # Decision Engine's calibrated figure instead, and this one is reported
+        # only as a diagnostic. See ai/answer_confidence.py.
+        "model_confidence":    confidence,
+        # The EXACT evidence this answer was generated from, id-stamped. Recorded
+        # because no downstream component could otherwise know what the model
+        # actually saw — citation matching was resolving against the full graded
+        # set and could report a source the model never read as "matched".
+        "generation_evidence": evidence,
         "generation_attempts": attempts,
         "prev_confidence":     prev_conf,
     }

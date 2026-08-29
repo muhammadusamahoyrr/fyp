@@ -39,6 +39,24 @@ def _citable_text(fields: dict) -> str:
     return "\n".join(parts)
 
 
+def _as_of_for(text: str) -> list[dict]:
+    """Per-statute as-of records for the statutes this draft actually cites.
+
+    Best-effort and silent on failure: this is disclosure, not a check, and a
+    document must never fail to generate because we could not date our own
+    corpus.
+    """
+    try:
+        from app.ai.citation_verification import parse_statute_citations
+        from app.ai.corpus_as_of import as_of_for
+
+        statutes = {c.statute for c in parse_statute_citations(text or "")}
+        return [as_of_for(s).to_dict() for s in sorted(statutes)]
+    except Exception:
+        logger.warning("corpus as-of unavailable", exc_info=True)
+        return []
+
+
 async def _verification_record(fields: dict) -> dict:
     """Existence-check every authority the draft cites, to store with the document.
 
@@ -66,7 +84,8 @@ async def _verification_record(fields: dict) -> dict:
         from app.ai.citation_verification import verify_text
         from app.ai.corpus_index import get_index
 
-        result = await verify_text(_citable_text(fields))
+        citable = _citable_text(fields)
+        result = await verify_text(citable)
         index = get_index()
         record = result.to_dict()
         record["ran"] = True
@@ -79,6 +98,13 @@ async def _verification_record(fields: dict) -> dict:
                 1 for s in index.statutes if index.coverage(s).dense),
             "sections_indexed": index.total_sections(),
         }
+        # How old our TEXT of each cited statute appears to be. A separate
+        # question from whether a citation exists (the checks above) and from
+        # whether a section was repealed (the omission map) — an as-of year says
+        # nothing about either, and neither says anything about it. Kept as its
+        # own block, from its own module, so the three cannot be read as one
+        # claim. See ai/corpus_as_of.py.
+        record["as_of"] = _as_of_for(citable)
         # Travels with the record so the client panel and the lawyer review
         # panel cannot disagree about what was promised. See app/core/claims.py.
         record["scope"] = GENERATION_SCOPE
@@ -472,6 +498,17 @@ async def generate_standalone(client_id: str, template_type: str, fields: dict) 
         "template_type": template_type,
         "title":         TEMPLATE_TITLES.get(template_enum, template_type),
         "fields":        fields,
+        # Same citation check generate_document runs. Its absence here was not a
+        # decision, it was an omission: seven routes reach this function — the
+        # court-Urdu pleading, the labour demand notice, three inheritance
+        # documents, the dispute petition and the documents route — and every
+        # one produced a filable PDF with no authority checked at all. The
+        # pleading is the output most likely to reach a court.
+        #
+        # _verification_record never raises and never blocks generation; a check
+        # that could not run is recorded as `ran: False`, which is explicitly
+        # not a pass.
+        "verification":  await _verification_record(fields),
         "file_path":     None,
         "status":        "pending",
         "created_at":    datetime.now(timezone.utc),

@@ -299,15 +299,79 @@ def _is_synthetic(meta: dict) -> bool:
     return str(meta.get("chunk_id", "")).startswith(_SYNTHETIC_QA_PREFIX)
 
 
+# Footnote apparatus indexed as though it were statutory text.
+#
+# Pakistani statute PDFs carry their amendment history as numbered footnotes at
+# the page foot. Extraction flattens the page, so a footnote block can become a
+# chunk of its own — and it inherits the section heading above it. Chunk
+# statutes_ppc_1860_0834 is labelled PPC s.376 and contains no law whatsoever:
+#
+#   376. Punishment of rape:  152 Inserted by Protection of Women (Criminal
+#   Laws Amendment) Act, 2006, S. 5.  153 Inserted by Criminal Law (Amemdment)
+#   Act, I of 1996.  ...  158 Substituted by Unknown.
+#
+# Retrieved, that hands the model a list of amending instruments labelled "the
+# law on punishment for rape". The same failure LEGAL-UQA had, from a different
+# direction: text that is not the statute, presented as the statute.
+#
+# THE RULE: at least two numbered footnote entries, AND the text before the
+# first one is under 10% of the chunk. Both halves matter. Entry count alone
+# drops real sections that merely carry footnotes — s.5 of the Limitation Act
+# opens with its operative text and trails two entries, and must survive. The
+# leading-text fraction is what separates "a section with footnotes attached"
+# from "a page of footnotes with a heading on top".
+#
+# Measured on this corpus: 55 of 10,677 chunks (0.52%). It drops both PPC
+# footnote walls and keeps PPC s.375/376's real text and the Limitation s.5
+# chunk.
+#
+# DELIBERATELY A LOWER BOUND. A footnote block that begins mid-sentence, having
+# been split across chunks, has no leading marker to measure from and survives —
+# statutes_ppc_1860_0836 is one. Under-catching is the safe direction: the cost
+# is a chunk we should have dropped, where over-catching silently deletes law.
+_FOOTNOTE_ENTRY = re.compile(
+    r"(?:^|\s)\d{1,3}\s+"
+    r"(?:Subs(?:tituted)?|Ins(?:erted)?|Added|Omitted|Amended|Rep(?:ealed)?"
+    r"|Ibid|The\s+following)\b",
+    re.IGNORECASE,
+)
+_FOOTNOTE_MIN_ENTRIES = 2
+_FOOTNOTE_MAX_LEAD_FRACTION = 0.10
+
+
+def is_footnote_dominated(text: str) -> bool:
+    """True when a chunk is amendment apparatus rather than statutory text.
+
+    Deterministic and explainable: count numbered footnote entries, then measure
+    how much of the chunk precedes the first one. No model, no scoring.
+    """
+    body = text or ""
+    entries = list(_FOOTNOTE_ENTRY.finditer(body))
+    if len(entries) < _FOOTNOTE_MIN_ENTRIES:
+        return False
+    lead_fraction = entries[0].start() / max(1, len(body))
+    return lead_fraction <= _FOOTNOTE_MAX_LEAD_FRACTION
+
+
 def _docs_to_chunks(docs: list[Document], province: str = "",
-                    allow_synthetic: bool = False) -> list[dict]:
+                    allow_synthetic: bool = False,
+                    allow_footnotes: bool = False) -> list[dict]:
     chunks = []
     dropped = 0
     synthetic = 0
+    footnotes = 0
     for doc in docs:
         meta = doc.metadata or {}
         if not allow_synthetic and _is_synthetic(meta):
             synthetic += 1
+            continue
+        # Excluded from retrieval, not deleted from the index — the same
+        # treatment LEGAL-UQA gets, for the same reason: the chunks remain
+        # useful for evaluating extraction, and an index that silently loses
+        # documents is harder to reason about than a retrieval path that
+        # filters explicitly.
+        if not allow_footnotes and is_footnote_dominated(doc.page_content):
+            footnotes += 1
             continue
         if _is_superseded_for(meta, province):
             dropped += 1
@@ -330,6 +394,11 @@ def _docs_to_chunks(docs: list[Document], province: str = "",
         logger.info(
             "retrieval: excluded %d generated QA chunk(s) — model output must "
             "not be cited as statute", synthetic,
+        )
+    if footnotes:
+        logger.info(
+            "retrieval: excluded %d footnote-apparatus chunk(s) — amendment "
+            "history must not be cited as the statute it annotates", footnotes,
         )
     return chunks
 

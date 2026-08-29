@@ -105,3 +105,11 @@ dev/null/
 # LaTeX build artifact from hyperref (main.aux/.bbl/.blg are tracked; this
 # regenerates the same way and carries no information the others don't).
 paper/main.out
+
+# Chroma backups are derived from Mongo and run to hundreds of MB — past
+# GitHub's per-file limit, and regenerable by scripts/rebuild_judgments_vectors.py
+chroma_data_backup_*/
+backend/chroma_data_backup_*/
+# Editor/tooling snapshots of source files that are themselves tracked
+*.backup-*
+*.bac

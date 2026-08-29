@@ -30,6 +30,7 @@ from app.api.v1.routes import (
     engagements,
     inheritance,
     intake,
+    labeling,
     lawyers,
     notifications,
     payments,
@@ -229,6 +230,7 @@ app.include_router(disputes.router, prefix=API_PREFIX)
 app.include_router(calculators.router, prefix=API_PREFIX)
 app.include_router(bail.router, prefix=API_PREFIX)
 app.include_router(provenance.router, prefix=API_PREFIX)
+app.include_router(labeling.router, prefix=API_PREFIX)
 
 app.include_router(chat_socket.router)
 app.include_router(notification_socket.router)

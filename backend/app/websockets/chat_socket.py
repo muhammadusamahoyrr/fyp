@@ -7,6 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
 
+from app.ai.answer_confidence import confidence_payload, unscored_payload
 from app.ai.nodes.gatekeeper_node import (
     CANNED_REFUSAL as GATEKEEPER_REFUSAL,
     heuristic_injection_match,
@@ -397,7 +398,10 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                         )
                         ws_response = {
                             "type": "final", "content": GATEKEEPER_REFUSAL,
-                            "citations": [], "confidence": 1.0,
+                            "citations": [],
+                            # A block weighs no evidence. It used to report 1.0,
+                            # a stronger claim than the self-report it replaced.
+                            **unscored_payload(),
                             "convergence_status": "off_topic",
                             "arbitration_source": "gatekeeper:heuristic",
                             "request_id": tracer.request_id,
@@ -480,7 +484,7 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                             )
                             ws_response = {
                                 "type": "final", "content": GATEKEEPER_REFUSAL,
-                                "citations": [], "confidence": 1.0,
+                                "citations": [], **unscored_payload(),
                                 "convergence_status": "off_topic",
                                 "arbitration_source": "gatekeeper:llm",
                                 "request_id": tracer.request_id,
@@ -501,7 +505,7 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                         reformatted = await _reformat(query, last_ai_content)
                         ws_response = {
                             "type": "final", "content": reformatted,
-                            "citations": [], "confidence": 1.0,
+                            "citations": [], **unscored_payload(),
                             "convergence_status": "converged",
                             "arbitration_source": "nlu:format_brief",
                         }
@@ -519,7 +523,7 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                     elif intent_name == "affirm":
                         ws_response = {
                             "type": "final", "content": _CANNED_AFFIRM,
-                            "citations": [], "confidence": 1.0,
+                            "citations": [], **unscored_payload(),
                             "convergence_status": "converged",
                             "arbitration_source": "nlu:affirm",
                         }
@@ -534,7 +538,7 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                     elif intent_name == "stop":
                         ws_response = {
                             "type": "final", "content": _CANNED_STOP,
-                            "citations": [], "confidence": 1.0,
+                            "citations": [], **unscored_payload(),
                             "convergence_status": "converged",
                             "arbitration_source": "nlu:stop",
                         }
@@ -600,7 +604,14 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                             "type":               "final",
                             "content":            result.get("answer", ""),
                             "citations":          result.get("citations", []),
-                            "confidence":         result.get("confidence", 0.0),
+                            # Per-claim support against the sources each claim
+                            # cites. A real section is not support; see
+                            # ai/answer_citations.py.
+                            "claims":             result.get("claim_assessments", []),
+                            # Calibrated confidence from the Decision Engine —
+                            # NOT the model's self-report, which rides along as
+                            # `model_confidence` for diagnostics only.
+                            **confidence_payload(result),
                             "convergence_status": convergence,
                             "arbitration_source": result.get("arbitration_source", ""),
                         }
@@ -627,7 +638,7 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                 ws_response = {
                     "type": "error",
                     "content": "AI assistant is temporarily unavailable. Please try again.",
-                    "citations": [], "confidence": 0.0,
+                    "citations": [], **unscored_payload(),
                 }
                 db_content = ws_response["content"]
                 # A fault the user saw is a turn the audit must contain. Without

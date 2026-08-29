@@ -13,6 +13,21 @@ from __future__ import annotations
 
 import re
 
+# The year this classification table is intended to reflect, following
+# court_fee._EFFECTIVE. Bail classification is NOT static: the Second Schedule
+# has been amended repeatedly, provinces have made their own amendments, and the
+# table already carries a per-offence `confidence` of "verify" for seven entries
+# whose classification is known to have moved. A reader could see that an
+# individual entry was uncertain but not how old the table as a whole was.
+_EFFECTIVE = "2024"
+
+_VERIFY = (
+    "Classification under the Second Schedule of the CrPC 1898, which has been "
+    "amended federally and provincially. The sections actually written on the FIR "
+    "govern, later additions change the position, and bail remains at the court's "
+    "discretion — confirm with a criminal lawyer."
+)
+
 _DISCLAIMER = (
     "This is general information based on the Second Schedule of the CrPC 1898 — NOT legal advice and "
     "NOT a prediction of the outcome. The exact sections in the FIR, later additions, and the court's "
@@ -160,7 +175,29 @@ OFFENCES: list[dict] = [
 
 
 def _norm(sec: str) -> str:
-    return "".join((sec or "").upper().split())
+    """Fold a section reference to a comparison key.
+
+    Hyphens are stripped as well as whitespace, so the three ways a lettered
+    section is written all collide: "489-F", "489 F" and "489F" become 489F.
+    Before this, lookup was exact-string on a table that stores the HYPHENATED
+    form ("489-F", "337-A(i)"), so check("PPC", "489F") returned found=False for
+    an offence the table plainly holds — and the corpus stores lettered sections
+    COMPACTLY ("365B", "496A"), so a section read off a retrieved chunk missed
+    every time.
+
+    Applied to both sides of every comparison (_find and search both normalise
+    the stored value too), so the fold cannot create a false match: it only
+    removes a distinction that was never meaningful.
+
+    En and em dashes are included because a section pasted from a PDF or a
+    court order frequently carries one instead of a hyphen.
+
+    NOT stripped: parentheses. "9(b)" and "9(c)" are different provisions of the
+    CNSA and must not collide, so a user writing "9b" still misses. That is a
+    known remaining gap, deliberately left rather than over-folded.
+    """
+    return "".join((sec or "").upper().split()).replace("-", "").replace(
+        "–", "").replace("—", "")
 
 
 def _slug(text: str) -> str:
@@ -295,6 +332,8 @@ def check(law: str, section: str, arrested: bool = True) -> dict:
             },
             "general_rule": general_rule(None),
             "legal_basis": _SS,
+            "effective_as_of": _EFFECTIVE,
+            "verify": _VERIFY,
             "disclaimer": _DISCLAIMER,
         }
     return {
@@ -303,6 +342,8 @@ def check(law: str, section: str, arrested: bool = True) -> dict:
         "guidance": bail_guidance(o.get("bailable"), arrested, o.get("prohibitory", False)),
         "legal_basis": f"{_SS}; punishment under {o['law']} s.{o['section']}",
         "confidence": o.get("confidence", "verify"),
+        "effective_as_of": _EFFECTIVE,
+        "verify": _VERIFY,
         "disclaimer": _DISCLAIMER,
     }
 

@@ -5,6 +5,7 @@ from langgraph.types import interrupt
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
 from app.ai.nodes._history import format_history
+from app.ai.nodes._resume import merge_user_reply
 
 _MAX_CLARIFICATION_ATTEMPTS = 2
 _MIN_FACTS_FOR_SIMPLE_PATH  = 1
@@ -131,11 +132,24 @@ async def fact_gap_node(state: AgentState) -> dict:
             "needs_clarification": False,
         }
 
-    interrupt(text)  # pause graph — chat_socket resumes with user's answer
+    # interrupt() RETURNS the user's answer on resume. This node exists to close
+    # a FACT gap, so throwing the answer away meant the gap it asked about was
+    # still open when retrieval ran — and `fact_delta: 0` then told
+    # `_retry_is_worthwhile` that nothing had been learned, correctly, because
+    # nothing had. See nodes/_resume.py.
+    reply  = interrupt(text)
+    merged = merge_user_reply(state, reply)
+
+    # fact_delta is the graph's "did this turn learn anything" signal. It gates
+    # whether another retrieval pass is worth paying for, so it has to count the
+    # facts we ACTUALLY hold now, not the count from before the user answered.
+    new_facts = merged.get("known_facts", known_facts)
+
     return {
         "clarification_question": text,
         "needs_clarification":    True,
         "clarification_attempts": attempts + 1,
         "convergence_status":     "needs_clarification",
-        "fact_delta":             0,
+        **merged,
+        "fact_delta":             len(new_facts) - len(known_facts),
     }

@@ -79,6 +79,17 @@ class AgentState(TypedDict):
     answer:      str
     citations:   list[dict]
     confidence:  float
+    # The model's own self-reported figure, preserved separately for diagnostics.
+    # `confidence` above is consumed internally (degraded by hallucination_node,
+    # stored by the cache); neither is what the UI shows — see answer_confidence.
+    model_confidence: float
+    # The EXACT id-stamped evidence generation was given. Citation matching and
+    # the grounding judge both resolve against this, so a source id cannot mean
+    # one thing in the prompt and another downstream.
+    generation_evidence: list[dict]
+    # Per-claim support verdicts from the grounding judge: supported / partial /
+    # unsupported / unassessed. See ai/answer_citations.py.
+    claim_assessments: list[dict]
     is_grounded: bool
 
     # ── Convergence controller ────────────────────────────────────────────────

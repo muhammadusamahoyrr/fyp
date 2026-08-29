@@ -38,6 +38,10 @@ def test_citable_text_survives_odd_field_shapes():
 
 # ── the record ────────────────────────────────────────────────────────────────
 
+async def _noop_async(*a, **k):
+    return None
+
+
 @pytest.mark.asyncio
 async def test_record_states_the_corpus_it_was_checked_against():
     """A verdict that cannot say what it was checked against cannot be defended
@@ -157,3 +161,59 @@ def test_review_queue_row_without_the_checks_still_serializes():
     out = ReviewQueueItem(id="old", title="NDA").model_dump()
     assert out["verification"] is None
     assert out["compliance"] is None
+
+
+# ── generate_standalone: seven routes that were producing unchecked PDFs ──────
+
+@pytest.mark.asyncio
+async def test_generate_standalone_carries_a_verification_record(monkeypatch):
+    """Seven routes reach generate_standalone — the court-Urdu pleading, the
+    labour demand notice, three inheritance documents, the dispute petition and
+    the documents route — and none of them checked a single authority. Its
+    absence was an omission, not a decision: the pleading is the output most
+    likely to reach a court.
+    """
+    captured = {}
+
+    async def fake_insert(doc):
+        captured.update(doc)
+
+    monkeypatch.setattr(document_service.doc_repo, "insert", fake_insert)
+    monkeypatch.setattr(document_service.doc_repo, "update_file_path",
+                        _noop_async)
+    monkeypatch.setattr(document_service, "generate_pdf", lambda *a, **k: "x.pdf",
+                        raising=False)
+    monkeypatch.setattr("app.services.pdf_generator.generate_pdf",
+                        lambda *a, **k: "x.pdf")
+
+    await document_service.generate_standalone(
+        "client-1", "legal_notice", {"body": "liable under PPC Section 302"})
+
+    assert "verification" in captured, "standalone PDFs must carry a citation check"
+    assert captured["verification"]["checked_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_standalone_verification_is_fail_open(monkeypatch):
+    """A citation checker must never be the reason a document cannot be
+    produced. The record says `ran: False`, which is explicitly not a pass."""
+    captured = {}
+
+    async def fake_insert(doc):
+        captured.update(doc)
+
+    async def boom(*a, **k):
+        raise RuntimeError("chroma down")
+
+    monkeypatch.setattr(document_service.doc_repo, "insert", fake_insert)
+    monkeypatch.setattr(document_service.doc_repo, "update_file_path", _noop_async)
+    monkeypatch.setattr("app.ai.citation_verification.verify_text", boom)
+    monkeypatch.setattr("app.services.pdf_generator.generate_pdf",
+                        lambda *a, **k: "x.pdf")
+
+    doc = await document_service.generate_standalone(
+        "client-1", "legal_notice", {"body": "liable under PPC Section 302"})
+
+    assert doc["status"] == "generated"
+    assert captured["verification"]["ran"] is False
+    assert captured["verification"]["needs_human_check"] is True

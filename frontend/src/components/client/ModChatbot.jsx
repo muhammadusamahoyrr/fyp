@@ -11,6 +11,41 @@ import { Badge, Tooltip } from "@/components/shared/shared.jsx";
 
 const WS_BASE = (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_WS_URL) || "ws://localhost:8000";
 
+/* Calibrated-confidence bands come from the server (ai/answer_confidence.py).
+   The client shows the BAND only — the raw calibrated figure runs far lower than
+   the model's old self-report, and a bare "24%" reads as broken to a non-lawyer
+   when it is in fact a normal, honest score. The lawyer surface shows both. */
+const CONF_LABEL = { high: "High", moderate: "Moderate", low: "Low" };
+const CONF_COLOR = { high: "#22c55e", moderate: "#f59e0b", low: "#ef4444" };
+
+/* Per-statement support verdicts from the grounding judge (answer_citations.py).
+   Worded for a non-lawyer, and worded carefully: `unassessed` must read as "we
+   did not check", never as "it passed". A statement we could not check is not a
+   statement we approved. */
+const CLAIM_UI = {
+    supported:   { icon: "✓", color: "#22c55e", text: "Backed by the source it cites" },
+    partial:     { icon: "!", color: "#f59e0b", text: "Goes further than its source says" },
+    unsupported: { icon: "✕", color: "#ef4444", text: "Its source does not establish this" },
+    unassessed:  { icon: "–", color: "#94a3b8", text: "Not checked against a source" },
+};
+const CLAIM_ORDER = ["unsupported", "partial", "unassessed", "supported"];
+
+/* Repeal currency (answer_citations.currency_for). Exactly two values reach the
+   UI — `repealed` and `unknown` — and `unknown` must never be dressed up as a
+   clean bill of health: repeal data covers 4 of 43 statutes, so silence is
+   absence of evidence, not evidence of currency. A repealed provision OVERRIDES
+   matched/supported: a source can genuinely say what the answer claims and
+   still be law that was abolished. */
+const REPEALED = "repealed";
+const CURRENCY_TEXT = {
+    repealed: "Repealed provision — do not rely on this authority",
+    unknown:  "Current status not verified",
+};
+const repealNote = (c) => {
+    const bits = [c.instrument, c.date].filter(Boolean).join(", ");
+    return bits ? `Repealed by ${bits}` : "";
+};
+
 /* ══════════════════════════════════════════════════════
    MODULE: AI CHATBOT  (WebSocket-backed)
 ══════════════════════════════════════════════════════ */
@@ -104,15 +139,26 @@ const ModChatbot = () => {
 
             } else if (msg.type === "final") {
                 setTyping(false);
+                // Keep the objects: `status` says whether the answer actually
+                // cited a source or whether it was merely consulted, and the two
+                // must not be presented as the same thing.
                 const citations = (msg.citations || [])
-                    .map(c => [c.statute, c.section ? `§${c.section}` : ""].filter(Boolean).join(" "))
-                    .filter(Boolean);
+                    .map(c => ({
+                        label: [c.statute, c.section ? `§${c.section}` : ""].filter(Boolean).join(" "),
+                        status: c.status || "retrieved",
+                        currency: c.currency || "unknown",
+                        instrument: c.instrument || "",
+                        date: c.date || "",
+                    }))
+                    .filter(c => c.label);
                 setMsgs(m => [...m, {
                     role: "ai",
                     text: msg.content || "",
                     time: now,
                     refs: citations,
+                    claims: msg.claims || [],
                     confidence: msg.confidence,
+                    confidenceBand: msg.confidence_band,
                     status: msg.convergence_status,
                     matchedLawyers: msg.suggest_lawyer ? (msg.matched_lawyers || []) : [],
                     suggestLawyer: !!msg.suggest_lawyer,
@@ -491,6 +537,104 @@ const ModChatbot = () => {
                                             )}
                                             {m.text}
                                         </div>
+                                        {/* Statement checks. Surfaced ABOVE the sources panel and
+                                            with a always-visible warning line, because the finding
+                                            that matters most — "this sentence is not backed by the
+                                            law it cites" — is worthless hidden behind a click. */}
+                                        {m.claims?.length > 0 && (() => {
+                                            const repealed = m.claims.filter(c => c.currency === REPEALED);
+                                            const flagged = m.claims.filter(
+                                                c => c.support === "unsupported" || c.support === "partial");
+                                            const sorted = [...m.claims].sort(
+                                                (a, b) => CLAIM_ORDER.indexOf(a.support) - CLAIM_ORDER.indexOf(b.support));
+                                            return (
+                                                <div style={{ marginTop: 8 }}>
+                                                    {repealed.length > 0 && (
+                                                        <div style={{
+                                                            fontSize: 12, color: "#ef4444", fontWeight: 700,
+                                                            marginBottom: 6, padding: "7px 10px", borderRadius: 8,
+                                                            background: "#ef444414", border: "1px solid #ef444455",
+                                                        }}>
+                                                            {"\u26D4"} {CURRENCY_TEXT.repealed}
+                                                            <div style={{ fontWeight: 400, fontSize: 11, marginTop: 3 }}>
+                                                                {repealed.length === 1 ? "1 statement relies" : `${repealed.length} statements rely`}
+                                                                {" "}on law that has been repealed. Speak to a lawyer before acting on this answer.
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {flagged.length > 0 && (
+                                                        <div style={{
+                                                            fontSize: 11.5, color: "#f59e0b", fontWeight: 600,
+                                                            marginBottom: 6, display: "flex", gap: 6, alignItems: "center",
+                                                        }}>
+                                                            ⚠ {flagged.length === 1
+                                                                ? "1 statement isn't fully backed by the law it cites"
+                                                                : `${flagged.length} statements aren't fully backed by the law they cite`}
+                                                        </div>
+                                                    )}
+                                                    <button
+                                                        onClick={() => setMsgs(prev => prev.map((x, xi) => xi === i ? { ...x, claimsOpen: !x.claimsOpen } : x))}
+                                                        style={{
+                                                            display: "inline-flex", alignItems: "center", gap: 6,
+                                                            padding: "5px 12px", borderRadius: 8, fontSize: 11.5, fontWeight: 700,
+                                                            border: `1px solid ${t.border}`, background: m.claimsOpen ? t.primaryGlow : "transparent",
+                                                            color: t.primary, cursor: "pointer", fontFamily: "inherit",
+                                                        }}>
+                                                        🔍 Statement checks ({m.claims.length}) {m.claimsOpen ? "▴" : "▾"}
+                                                    </button>
+                                                    {m.claimsOpen && (
+                                                        <div style={{
+                                                            marginTop: 6, padding: "10px 12px", borderRadius: 10,
+                                                            background: t.surface, border: `1px solid ${t.border}`,
+                                                            display: "flex", flexDirection: "column", gap: 9,
+                                                        }}>
+                                                            {sorted.map((c, ci) => {
+                                                                // A repealed source OVERRIDES the support verdict. The source
+                                                                // may genuinely say what the claim says and still be law that
+                                                                // no longer exists — the more important fact, and the one a
+                                                                // reader cannot spot unaided.
+                                                                const dead = c.currency === REPEALED;
+                                                                const ui = dead
+                                                                    ? { icon: "\u26D4", color: "#ef4444", text: CURRENCY_TEXT.repealed }
+                                                                    : (CLAIM_UI[c.support] || CLAIM_UI.unassessed);
+                                                                return (
+                                                                    <div key={ci} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                                                                        <span style={{
+                                                                            color: ui.color, fontWeight: 700, fontSize: 12,
+                                                                            lineHeight: "1.5", flexShrink: 0, width: 12, textAlign: "center",
+                                                                        }}>{ui.icon}</span>
+                                                                        <div style={{ minWidth: 0 }}>
+                                                                            <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.5 }}>
+                                                                                “{c.text}”
+                                                                            </div>
+                                                                            <div style={{ fontSize: 10.5, color: ui.color, marginTop: 2 }}>
+                                                                                {ui.text}
+                                                                                {dead && (c.sources || []).map(repealNote).filter(Boolean).length > 0 && (
+                                                                                    <span style={{ color: t.textFaint }}>
+                                                                                        {" \u2014 "}{(c.sources || []).map(repealNote).filter(Boolean).join("; ")}
+                                                                                    </span>
+                                                                                )}
+                                                                                {c.sources?.length > 0 && (
+                                                                                    <span style={{ color: t.textFaint }}>
+                                                                                        {" — "}{c.sources.map(sc => [sc.statute, sc.section ? `§${sc.section}` : ""].filter(Boolean).join(" ")).join("; ")}
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                            <div style={{ fontSize: 10, color: t.textFaint, borderTop: `1px solid ${t.border}`, paddingTop: 7 }}>
+                                                                These checks compare each statement against the law sections we
+                                                                retrieved. Where a provision is not marked repealed its current
+                                                                status is simply not verified — that is not a confirmation it is
+                                                                still in force. Not a substitute for a lawyer.
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
                                         {m.refs?.length > 0 && (
                                             <div style={{ marginTop: 8 }}>
                                                 <button
@@ -501,7 +645,9 @@ const ModChatbot = () => {
                                                         border: `1px solid ${t.border}`, background: m.refsOpen ? t.primaryGlow : "transparent",
                                                         color: t.primary, cursor: "pointer", fontFamily: "inherit",
                                                     }}>
-                                                    📖 Sources ({m.refs.length}) {m.refsOpen ? "▴" : "▾"}
+                                                    📖 {m.refs.some(r => r.status === "matched" || r.status === "unresolved")
+                                                        ? `Cited in this answer (${m.refs.filter(r => r.status !== "retrieved").length})`
+                                                        : `Sources consulted (${m.refs.length})`} {m.refsOpen ? "▴" : "▾"}
                                                 </button>
                                                 {m.refsOpen && (
                                                     <div style={{
@@ -509,11 +655,34 @@ const ModChatbot = () => {
                                                         background: t.surface, border: `1px solid ${t.border}`,
                                                     }}>
                                                         <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
-                                                            Cited provisions — verify before relying on them
+                                                            Verify before relying on them
                                                         </div>
-                                                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                                            {m.refs.map((r, ri) => <Badge key={ri} type="info">{r}</Badge>)}
-                                                        </div>
+                                                        {[
+                                                            ["matched", "Cited by this answer, found in our law sources"],
+                                                            ["unresolved", "Cited by this answer — we could not locate it in our sources"],
+                                                            ["retrieved", "Consulted, not cited in this answer"],
+                                                        ].map(([key, caption]) => {
+                                                            const group = m.refs.filter(r => r.status === key);
+                                                            if (!group.length) return null;
+                                                            return (
+                                                                <div key={key} style={{ marginBottom: 8 }}>
+                                                                    <div style={{ fontSize: 10, color: key === "unresolved" ? "#f59e0b" : t.textFaint, marginBottom: 4 }}>
+                                                                        {caption}
+                                                                    </div>
+                                                                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                                                        {group.map((r, ri) => (
+                                                                            // A repealed chip is red whatever its match status:
+                                                                            // being cited AND retrieved says nothing about
+                                                                            // whether the provision still exists.
+                                                                            <Badge key={ri} type={r.currency === REPEALED ? "danger" : key === "unresolved" ? "warn" : "info"}>
+                                                                                {r.currency === REPEALED ? "⛔ " : key === "matched" ? "✓ " : key === "unresolved" ? "? " : ""}{r.label}
+                                                                                {r.currency === REPEALED ? " — repealed" : ""}
+                                                                            </Badge>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
                                                     </div>
                                                 )}
                                             </div>
@@ -609,10 +778,16 @@ const ModChatbot = () => {
                                         )}
                                         <div style={{ fontSize: 10, color: t.textFaint, marginTop: 5, textAlign: m.role === "user" ? "right" : "left" }}>
                                             {m.time}
-                                            {m.confidence != null && (
-                                                <span style={{ marginLeft: 8, color: m.confidence >= 0.65 ? t.textMuted : "#f59e0b" }}>
-                                                    {Math.round(m.confidence * 100)}% confidence
-                                                </span>
+                                            {m.role === "ai" && !m.isError && !m.isClarification && m.text && (
+                                                m.confidenceBand ? (
+                                                    <span style={{ marginLeft: 8, color: CONF_COLOR[m.confidenceBand] || t.textMuted }}>
+                                                        ⬤ {CONF_LABEL[m.confidenceBand]} confidence
+                                                    </span>
+                                                ) : (
+                                                    <span style={{ marginLeft: 8, color: t.textFaint }}>
+                                                        Confidence not calibrated
+                                                    </span>
+                                                )
                                             )}
                                         </div>
                                     </div>

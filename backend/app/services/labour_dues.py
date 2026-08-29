@@ -12,6 +12,13 @@ Legal basis:
 """
 from __future__ import annotations
 
+# The year this rate basis is intended to reflect. Same convention as
+# court_fee._EFFECTIVE, and here for the same reason: the entitlements below are
+# a maintainable config, not a live feed. Gratuity, notice and overtime rest on
+# statutes that provincial legislatures amend, and a figure with no date cannot
+# be checked for staleness by anyone reading the output.
+_EFFECTIVE = "2024"
+
 # Ordinary working days x hours used to derive an hourly rate (stated assumption).
 _WORK_DAYS = 26
 _WORK_HOURS = 8
@@ -82,6 +89,13 @@ def calculate(
             "Payment of Wages Act 1936; Factories Act 1934."
         ),
         "assumptions": assumptions,
+        "effective_as_of": _EFFECTIVE,
+        "verify": (
+            "This is an estimate. Standing Orders, wage and factory legislation have been devolved "
+            "to the provinces and amended separately since 1968 — confirm the entitlement that "
+            "applies to this establishment with the provincial labour department before relying on "
+            "the figure."
+        ),
         "remedy": (
             "If the employer does not pay, a worker may file a grievance under the Standing Orders and, "
             "if unresolved, a claim before the Labour Court / the authority under the Payment of Wages Act. "

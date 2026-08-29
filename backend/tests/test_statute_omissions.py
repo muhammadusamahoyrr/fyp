@@ -107,7 +107,12 @@ def test_coverage_description_says_how_many_were_repealed():
     number looks like we simply lost them."""
     cov = _cov("Mock Act 1898", [n for n in range(1, 101) if n not in range(30, 71)],
                omitted=set(range(30, 71)))
-    assert "in force" in cov.describe()
+    # "in force" was the original wording and it overclaimed: the phrase is
+    # embedded in the VERIFIED detail a lawyer reads, and for a statute with no
+    # omission records it turned an existence check into a currency claim the
+    # data cannot support. Corpus-coverage language says only what is known.
+    assert "held in corpus" in cov.describe()
+    assert "in force" not in cov.describe()
     assert "41 repealed and excluded" in cov.describe()
 
 

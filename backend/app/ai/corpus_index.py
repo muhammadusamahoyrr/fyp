@@ -89,6 +89,50 @@ _TRIM_MIN_KEPT = _DENSE_MIN_SECTIONS  # pointless below the dense floor anyway
 
 _leading_num = re.compile(r"^(\d+)")
 
+# ── Lettered sections ─────────────────────────────────────────────────────────
+#
+# Amendments insert provisions as LETTERED sections: PPC 489-F (dishonoured
+# cheque), CrPC 22-A (Justice of Peace), PPC 365-A (kidnapping for ransom). They
+# are written three ways — "489-F", "489F", "489 F" — and stored in this corpus
+# in the compact form ("365B", "496A", "203D").
+#
+# Getting this wrong is the worst failure the citation stack can produce. The
+# parsers used to capture only the leading digits, so "PPC Section 489-F"
+# resolved to s.489 — "tampering with property mark" — and came back VERIFIED.
+# A lawyer citing the cheque-dishonour offence got a green tick for a different
+# crime. Truncating a citation to its base section is never acceptable: the base
+# and the lettered provision are different law.
+#
+# Two forms are needed and they are not interchangeable:
+#   canonical_section("489 F") -> "489-F"   what a human reads
+#   section_key("489-F")       -> "489F"    what the corpus is keyed on
+_SECTION_PARTS = re.compile(r"^\s*(\d{1,4})\s*[-–—]?\s*([A-Za-z]{1,2})?\s*$")
+
+
+def split_section(section: str) -> tuple[str, str]:
+    """(number, letter-suffix) for a section reference. Letter is '' if plain."""
+    m = _SECTION_PARTS.match(str(section or ""))
+    if not m:
+        return str(section or "").strip().upper(), ""
+    return m.group(1), (m.group(2) or "").upper()
+
+
+def canonical_section(section: str) -> str:
+    """The form shown to a human: "489-F", "302"."""
+    num, letter = split_section(section)
+    return f"{num}-{letter}" if letter else num
+
+
+def section_key(section: str) -> str:
+    """The form the corpus is keyed on: "489F", "302"."""
+    num, letter = split_section(section)
+    return f"{num}{letter}"
+
+
+def is_lettered(section: str) -> bool:
+    """Does this reference name a lettered (amendment-inserted) provision?"""
+    return bool(split_section(section)[1])
+
 
 def _ceiling(numbered: set[int]) -> tuple[int, frozenset[int]]:
     """How far the statute runs, ignoring stray high numbers.
@@ -201,8 +245,14 @@ class StatuteCoverage:
         Trimming exists to fix the density estimate, not to make sections we
         possess disappear — that would convert a cosmetic problem into a false
         accusation, which is the one direction this module must never fail in.
+
+        Matched on the compact key, so "489-F", "489F" and "489 F" all find the
+        same stored section. The lookup NEVER falls back to the base number: a
+        lettered provision we do not hold must not be answered with the section
+        that happens to share its digits.
         """
-        return str(section).strip().upper() in self.sections
+        raw = str(section).strip().upper()
+        return raw in self.sections or section_key(raw) in self.sections
 
     def describe(self, unit: str = "section") -> str:
         """Plain-language coverage, so a lawyer can see why we said what we said.
@@ -215,14 +265,30 @@ class StatuteCoverage:
         # reads as if we simply lost the other 157.
         rep = (f", {len(self.omitted_in_range)} repealed and excluded"
                if self.omitted_in_range else "")
+
+        # WORDING: "held in corpus", never "in force".
+        #
+        # This string used to read "509 of 511 sections in force" — for PPC
+        # 1860, a statute with ZERO omission records. What the data supports is
+        # that we hold 509 sections; whether they are in force is a question
+        # this index has not asked and, for 39 of 43 statutes, has no data to
+        # answer. Repeal coverage is 4 statutes and a self-declared lower bound;
+        # amendment is not modelled at all.
+        #
+        # The phrase mattered because it is embedded in the VERIFIED detail a
+        # lawyer reads, so an existence check was quietly presenting itself as a
+        # currency check. The internal property names (`held_in_force`,
+        # `in_force_total`) keep their spelling — renaming them would ripple
+        # through `dense`, `ratio` and their tests for no gain — but they mean
+        # "held in corpus" and "sections not known to be repealed".
         if self.dense:
             missing = self.in_force_total - len(self.held_in_force)
             gap = f"{missing} {unit if missing == 1 else plural} absent" \
                 if missing else "no gaps"
             return (f"{len(self.held_in_force)} of {self.in_force_total} "
-                    f"{plural} in force ({gap}{rep})")
+                    f"{plural} held in corpus ({gap}{rep})")
         return (f"only {len(self.held_in_force)} of {self.in_force_total} "
-                f"{plural} in force are held{rep} - coverage is partial")
+                f"{plural} held in corpus{rep} - coverage is partial")
 
 
 class CorpusIndex:

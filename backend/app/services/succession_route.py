@@ -113,8 +113,31 @@ class Route:
                           for c in self.citations],
             "caveats": self.caveats,
             "is_guidance_not_a_filing": True,
+            "effective_as_of": _EFFECTIVE,
+            "verify": _VERIFY,
+            "disclaimer": _DISCLAIMER,
         }
 
+
+# The year this routing basis is intended to reflect, following
+# court_fee._EFFECTIVE. This engine had NO dating and NO disclosure fields at
+# all — the only one of the eight without them — while sending a person to a
+# specific counter. The Punjab Act 2021 is recent and the NADRA/court boundary
+# is exactly the kind of rule a later amendment or notification moves.
+_EFFECTIVE = "2024"
+
+_VERIFY = (
+    "Forum routing under the Punjab Letters of Administration and Succession "
+    "Certificates Act 2021 and the Succession Act 1925. The Punjab Act is recent "
+    "and NADRA's operating instructions change — confirm the counter and the "
+    "current requirements with the NADRA centre or the court before travelling."
+)
+
+_DISCLAIMER = (
+    "Guidance on which forum to approach, not a legal opinion and not a filing. "
+    "No document is produced: s.7 of the Punjab Act leaves the forms to the "
+    "Authority."
+)
 
 _S3 = Citation(
     "Punjab Letters of Administration and Succession Certificates Act 2021", "3",

@@ -46,7 +46,13 @@
       "mcp__playwright__browser_take_screenshot",
       "mcp__playwright__browser_network_requests",
       "Bash(timeout 500 ./venv/Scripts/python.exe /tmp/stress.py)",
-      "mcp__playwright__browser_navigate"
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_resize",
+      "WebFetch(domain:erasmus-plus.ec.europa.eu)",
+      "WebFetch(domain:www.unite-codas-master.eu)",
+      "PowerShell(powershell -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\The Laptop Hut\\\\Desktop\\\\attorney-ai\\\\paper\\\\compile.ps1\")",
+      "Bash(python -)",
+      "Bash(python \"C:/Users/THELAP~1/AppData/Local/Temp/claude/C--Users-The-Laptop-Hut-Desktop-attorney-ai/5f41befc-a231-4cd4-a94b-c50902da6cac/scratchpad/compress67e.py\")"
     ]
   }
 }

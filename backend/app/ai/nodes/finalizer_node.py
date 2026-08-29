@@ -3,6 +3,7 @@ import re
 from langchain_core.messages import AIMessage
 
 from app.ai import cache
+from app.ai.answer_citations import annotate_citations_from_evidence, apply_currency
 from app.ai.graph.state import AgentState
 from app.ai.nodes.cache_node import is_personalised
 from app.utils.pii import scrub_pii as _scrub_pii
@@ -44,6 +45,21 @@ def _sanitise(text: str) -> str:
     text = _scrub_pii(text)
     text = _clean_markdown(text)
     return text
+
+
+def _sanitised_claims(claims: list[dict]) -> list[dict]:
+    """Claim text goes through the same scrubbing the answer does.
+
+    The claims were split from the PRE-sanitise answer inside hallucination_node,
+    so a CNIC or phone number masked in the answer would otherwise survive
+    verbatim in the claim quoted beside it — and the provenance record and the
+    user-facing answer are supposed to redact identically.
+
+    The verdicts are carried across unchanged rather than recomputed: re-splitting
+    the sanitised text could renumber the claims and silently attach a verdict to
+    a different sentence than the one it was made about.
+    """
+    return [{**claim, "text": _scrub_pii(claim.get("text", ""))} for claim in claims]
 
 
 async def finalizer_node(state: AgentState) -> dict:
@@ -90,6 +106,36 @@ async def finalizer_node(state: AgentState) -> dict:
     is_grounded = state.get("is_grounded", False)
     clean       = _sanitise(state["answer"])
 
+    # Label each citation by where it came from, against the FINAL answer text —
+    # after sanitising, so the list describes exactly the words the user reads.
+    #
+    # Matched against `generation_evidence`, NOT reranked_chunks: a citation may
+    # only be called "matched" against a source the model actually saw. Matching
+    # on the full graded set let a chunk that never entered the prompt be
+    # reported as the answer's source — a claim the system cannot support.
+    # A citation to anything outside that set is `unresolved`, which is correct.
+    #
+    # Skipped on a cache hit: that path has an answer but no retrieval, so every
+    # citation would match against an empty evidence set and be relabelled
+    # "unresolved". The stored list was already annotated when it was written.
+    citations = state.get("citations", [])
+    claims = _sanitised_claims(state.get("claim_assessments") or [])
+    if not state.get("cache_hit"):
+        citations = annotate_citations_from_evidence(
+            clean, state.get("generation_evidence") or [])
+
+    # Stamp repeal currency onto the citations and the claims resting on them.
+    # Deterministic, no model, no extra call — it reads the same omission map
+    # the drafting-path verifier uses. Two values only: `repealed` when the Act
+    # declares the section omitted, `unknown` otherwise. Never `in_force`:
+    # repeal data covers 4 of 43 statutes and is a lower bound, so silence is
+    # absence of evidence, not evidence of currency.
+    #
+    # Applied on the cache-hit path too. A cached answer is served precisely
+    # because it looks identical, and a provision repealed since the entry was
+    # written must not inherit that entry's silence.
+    apply_currency(citations, claims, province=state.get("province", "") or "")
+
     # Write-through: cache generic, grounded, non-personalised primary answers so
     # an identical later query skips the retrieval→generation chain. Skip cache-hit
     # passthroughs, follow-ups (deepen/format/affirm), and fact/clarification turns.
@@ -106,7 +152,13 @@ async def finalizer_node(state: AgentState) -> dict:
                 state.get("province", ""),
                 {
                     "answer":      clean,
-                    "citations":   state.get("citations", []),
+                    # The ANNOTATED list, so a cache hit serves citations that
+                    # still say which of them the answer actually cited.
+                    "citations":   citations,
+                    # Without this a cache hit would serve an answer whose every
+                    # claim reads "unassessed" — a quality cliff invisible to the
+                    # user, on a path chosen precisely because it looks identical.
+                    "claims":      claims,
                     "confidence":  state.get("confidence", 0.0),
                     "is_grounded": True,
                 },
@@ -120,6 +172,8 @@ async def finalizer_node(state: AgentState) -> dict:
 
     return {
         "answer":             clean,
+        "citations":          citations,
+        "claim_assessments":  claims,
         "convergence_status": "converged" if is_grounded else "max_attempts",
         "messages":           [AIMessage(content=clean[:500])],
     }

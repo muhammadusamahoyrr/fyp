@@ -1,0 +1,390 @@
+[
+  {
+    "question": "and Murder Reference No. 147/2023 sent by trial court, as both the matters have arisen out of one and the same judgment dated: 24.05.2023 passed by learned Additional Sessions Judge, Bhalwal/trial court. 2. Muhammad Atif (appellant) was tried in case arising out of F.I.R. No.465/2022 dated: 04.12.2022 registered under Section s: 302 , 109 PPC at Police Station: Bhalwal Saddar , District Sargodha and trial court after conclusion of the trial, vide impugned judgment d",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0439"
+    ],
+    "case_type": "criminal",
+    "province": "federal",
+    "source": "judgment_citation",
+    "judgment_id": "2026LHC3560",
+    "gold_citation": "PPC 1860 s.302",
+    "reason": "boilerplate_no_substance",
+    "stock_coverage": 0.373,
+    "max_cross_judgment_similarity": 0.087
+  },
+  {
+    "question": "ide the instant criminal appeal as well as the connected Cr.A No. 313-P/2025 titled “Sikandar Ghafar vs The State ” as both the matters are arising out of one and the same judgment dated 29.01.2025 passed by the learned Additional Sessions Judge- V, Charsadda delivered in case FIR No. 511 dated 30.10.2018 under sections 302, 2 427, 201, 202, 216, 120 -(b) and 109 PPC read with section 15 AAat police station Umarzai, District Charsadda, whereby appellants were conv",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0671"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:arshid_jamal_vs_the_state_02_appeals_allowed_302_34_364_a_201_ooc_murd",
+    "gold_citation": "PPC 1860 s.427",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.506,
+    "max_cross_judgment_similarity": 0.213
+  },
+  {
+    "question": "the instant criminal appeal as well as the connected Cr.A No. 313-P/2025 titled “Sikandar Ghafar vs The State ” as both the matters are arising out of one and the same judgment dated 29.01.2025 passed by the learned Additional Sessions Judge- V, Charsadda delivered in case FIR No. 511 dated 30.10.2018 under sections 302, 2 427, 201, 202, 216, 120 -(b) and 109 PPC read with section 15 AAat police station Umarzai, District Charsadda, whereby appellants were convicted",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0299",
+      "statutes_ppc_1860_0300",
+      "statutes_ppc_1860_0301"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:arshid_jamal_vs_the_state_02_appeals_allowed_302_34_364_a_201_ooc_murd",
+    "gold_citation": "PPC 1860 s.201",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.512,
+    "max_cross_judgment_similarity": 0.214
+  },
+  {
+    "question": "nstant criminal appeal as well as the connected Cr.A No. 313-P/2025 titled “Sikandar Ghafar vs The State ” as both the matters are arising out of one and the same judgment dated 29.01.2025 passed by the learned Additional Sessions Judge- V, Charsadda delivered in case FIR No. 511 dated 30.10.2018 under sections 302, 2 427, 201, 202, 216, 120 -(b) and 109 PPC read with section 15 AAat police station Umarzai, District Charsadda, whereby appellants were convicted and",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0302"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:arshid_jamal_vs_the_state_02_appeals_allowed_302_34_364_a_201_ooc_murd",
+    "gold_citation": "PPC 1860 s.202",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.512,
+    "max_cross_judgment_similarity": 0.205
+  },
+  {
+    "question": "tcriminal appeal as well as the connected Cr.A No. 313-P/2025 titled “Sikandar Ghafar vs The State ” as both the matters are arising out of one and the same judgment dated 29.01.2025 passed by the learned Additional Sessions Judge- V, Charsadda delivered in case FIR No. 511 dated 30.10.2018 under sections 302, 2 427, 201, 202, 216, 120 -(b) and 109 PPC read with section 15 AAat police station Umarzai, District Charsadda, whereby appellants were convicted and sente",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0323",
+      "statutes_ppc_1860_0324",
+      "statutes_ppc_1860_0325",
+      "statutes_ppc_1860_0326",
+      "statutes_ppc_1860_0327"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:arshid_jamal_vs_the_state_02_appeals_allowed_302_34_364_a_201_ooc_murd",
+    "gold_citation": "PPC 1860 s.216",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.512,
+    "max_cross_judgment_similarity": 0.203
+  },
+  {
+    "question": "ovisions of section 265-C Cr.PCwere complied with and the appellants were charge sheeted to which they plead ednot guilty and claimed trial. In order to prove its claim, the prosecution produced and examined as many as 13 witnesses. After closure of prosecution evidence, statements of the appe llants were recorded CrPC, wherein they posed innoce nce. Appellant Sikandar Ghaffar neither wished to be examined on oath as required under section 340(2)",
+    "relevant_chunks": [
+      "statutes_crpc_1898_0922",
+      "statutes_crpc_1898_0923"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:arshid_jamal_vs_the_state_02_appeals_allowed_302_34_364_a_201_ooc_murd",
+    "gold_citation": "CrPC 1898 s.342",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.581,
+    "max_cross_judgment_similarity": 0.241
+  },
+  {
+    "question": "med trial. In order to prove its claim, the prosecution produced and examined as many as 13 witnesses. After closure of prosecution evidence, statements of the appe llants were recorded under section 342 CrPC, wherein they posed innoce nce. Appellant Sikandar Ghaffar neither wished to be examined on oath as required (2) CrPC, nor wanted to produce evidence in defence while Appellant Arsh id Jamal did not want to produce evidence in defence 6 howev",
+    "relevant_chunks": [
+      "statutes_crpc_1898_0918",
+      "statutes_crpc_1898_0919",
+      "statutes_crpc_1898_0920"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:arshid_jamal_vs_the_state_02_appeals_allowed_302_34_364_a_201_ooc_murd",
+    "gold_citation": "CrPC 1898 s.340",
+    "reason": "boilerplate_trial_history",
+    "stock_coverage": 0.4,
+    "max_cross_judgment_similarity": 0.28
+  },
+  {
+    "question": "ourt. Provisions of section 265 -C CrPC were complied with and the appellant was charge sheeted, to which he pleaded not guilty and claimed trial. In order to prove its claim, the prosecution produced and examined as many as 10 witnesses. After closure of prosecution evidence, statement of the appellant was recorded CrPC, wherein he posed innocence, however, neither he wished to be examined on Oath as required under section 340 (2) Cr.PC, nor wanted",
+    "relevant_chunks": [
+      "statutes_crpc_1898_0922",
+      "statutes_crpc_1898_0923"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:cr_a_no_279_p_of_2025_1",
+    "gold_citation": "CrPC 1898 s.342",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.934,
+    "max_cross_judgment_similarity": 0.831
+  },
+  {
+    "question": "arvs Hamza & another” as well as the connected titled “Mumtaz Bahadar vs Asif & another” as all the matters are arising out of one and the same judgment dated 29.04.2024 passed by the learned Additional Sessions Judge -III/JMTC, Swabi delivered in case FIR No. 305 dated 07.03.2022 under section s 302/34 PPC at police station 2 Swabi, District Swabi whereby respondent/ accused Hamza was acquitted of the charge while the appellant wa",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0439"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:cr_a_no_413_p_of_2025",
+    "gold_citation": "PPC 1860 s.302",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.506,
+    "max_cross_judgment_similarity": 0.181
+  },
+  {
+    "question": "appellant alongwith acquitted co -accused was charge sheeted to which they pleaded not guilty a nd claimed trial. In order to prove its claim, the prosecution produced and examined as many as 12 witnesses. After closure of prosecution evidence, statement sof the appellant and acquitted co-accused Hamza were recorded CrPC, wherein they posed innocence, however, neither they wished to be examined on Oath as required under section 340 (2) CrPC, nor want",
+    "relevant_chunks": [
+      "statutes_crpc_1898_0922",
+      "statutes_crpc_1898_0923"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:cr_a_no_413_p_of_2025",
+    "gold_citation": "CrPC 1898 s.342",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.575,
+    "max_cross_judgment_similarity": 0.241
+  },
+  {
+    "question": "der to prove its claim, the prosecution produced and examined as many as 12 witnesses. After closure of prosecution evidence, statement sof the appellant and acquitted co-accused Hamza were recorded under section 342 CrPC, wherein they posed innocence, however, neither they wished to be examined on Oath as required (2) CrPC, nor wanted to produce evidence in defence. The learned trial Court, after full -fledged trial, acquitted co -accused Hamza whi",
+    "relevant_chunks": [
+      "statutes_crpc_1898_0918",
+      "statutes_crpc_1898_0919",
+      "statutes_crpc_1898_0920"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:cr_a_no_413_p_of_2025",
+    "gold_citation": "CrPC 1898 s.340",
+    "reason": "boilerplate_trial_history",
+    "stock_coverage": 0.389,
+    "max_cross_judgment_similarity": 0.28
+  },
+  {
+    "question": "ntappeal and the connected 2-Dof 2024 , titled „ Hidayat Ullah v. Qaisar Abbas etc‟ as both the matters are the outcome of one and the same judgment and order dated 03.9.2024, passed by learned Additional Sessions Judge, Paharpur, D.I.Khan, in case F.I.R No. 398 dated 17.07.2018, registered PPC of Police Station Paharpur, District D.I.Khan. 2. Through impugned judgment and order dated 03.9.2024, the appellant Qaisar Abbas",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0439"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:cr_a_no_69_d_of_2024_convic_db_allowed_qaisar_abbas_v_state",
+    "gold_citation": "PPC 1860 s.302",
+    "reason": "boilerplate_no_substance",
+    "stock_coverage": 0.308,
+    "max_cross_judgment_similarity": 0.051
+  },
+  {
+    "question": "alas well as connected Cr.R No. 74-P/2025 titled “Shehzad vs Farman Ullah alias Kot ey & another .” as both the matters are arising out of one and the same judgment dated 26.03.2025 passed by the learned Judge Special Court/Additional Sessions Judge-XXII, Peshawar delivered in case FIR No. 939 dated 21.06.2022 under 2 /324/34 PPC read with section 15 AAat police station Tehkal, Peshawar , whereby the appellant was convicted and sentenced as under",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0439"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:farman_ullah_vs_the_state_302_34_ppc_life_appeal_dismissed_consolidate",
+    "gold_citation": "PPC 1860 s.302",
+    "reason": "boilerplate_no_substance",
+    "stock_coverage": 0.395,
+    "max_cross_judgment_similarity": 0.203
+  },
+  {
+    "question": "swell as connected Cr.R No. 74-P/2025 titled “Shehzad vs Farman Ullah alias Kot ey & another .” as both the matters are arising out of one and the same judgment dated 26.03.2025 passed by the learned Judge Special Court/Additional Sessions Judge-XXII, Peshawar delivered in case FIR No. 939 dated 21.06.2022 under 2 sections 302/324/34 PPC read with section 15 AAat police station Tehkal, Peshawar , whereby the appellant was convicted and sentenced as under: - “U",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0470",
+      "statutes_ppc_1860_0471"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:farman_ullah_vs_the_state_302_34_ppc_life_appeal_dismissed_consolidate",
+    "gold_citation": "PPC 1860 s.324",
+    "reason": "boilerplate_no_substance",
+    "stock_coverage": 0.386,
+    "max_cross_judgment_similarity": 0.2
+  },
+  {
+    "question": "court . Provisions of section 265 -C CrPC were complied with and, the appellant was charge sheeted to which he pleaded not guilty and claimed trial. In order to prove its claim, the prosecution produced and examined as many as 12 witnesses. After closure of prosecution evidence, statement of appellant was recorded CrPC, wherein he posed innocence, however, neither he wished to be examined on Oath as required under section 340 (2) Cr.PC, nor wanted",
+    "relevant_chunks": [
+      "statutes_crpc_1898_0922",
+      "statutes_crpc_1898_0923"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:farman_ullah_vs_the_state_302_34_ppc_life_appeal_dismissed_consolidate",
+    "gold_citation": "CrPC 1898 s.342",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.947,
+    "max_cross_judgment_similarity": 0.831
+  },
+  {
+    "question": "ons of section 265-C CrPC were complied with and the respondent/accused was charge sheeted, to which he pleaded not guilty and claimed trial. In order to prove its claim, the prosecution produced and examined as many as 14 witnesses. After closure of prosecution evidence, statement of respondent/accused was recorded CrPC, wherein he posed innocence, however, neither he wished to be examined on Oath as required under section 340 (2) Cr.PC, nor wanted",
+    "relevant_chunks": [
+      "statutes_crpc_1898_0922",
+      "statutes_crpc_1898_0923"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:fayaz_khan_faizan_qazi_302_ppc_acquittal_appeal_allowed_and_respondent",
+    "gold_citation": "CrPC 1898 s.342",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 0.934,
+    "max_cross_judgment_similarity": 0.659
+  },
+  {
+    "question": "e the instant criminal appeal as well as the connected P/2024 titled “Ajab Khan Vs The State & others”, as both the matters are arising out of one and the same judgment dated 02.05.2024, passed by learned Additional Sessions Judge -II, Mohmand delivered in case FIR No. 53 dated 21.08.2022 under /324 /337-F(v)/148/149 PPC registered at Police Station Prang Ghar , 2 District Mohmand, whereby the appellant s were convicted and se",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0439"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:sarwar_shah_vs_the_state_302_324_337_f_v_148_149_ppc_sentenced_reduced",
+    "gold_citation": "PPC 1860 s.302",
+    "reason": "boilerplate_no_substance",
+    "stock_coverage": 0.43,
+    "max_cross_judgment_similarity": 0.188
+  },
+  {
+    "question": "he instant criminal appeal as well as the connected P/2024 titled “Ajab Khan Vs The State & others”, as both the matters are arising out of one and the same judgment dated 02.05.2024, passed by learned Additional Sessions Judge -II, Mohmand delivered in case FIR No. 53 dated 21.08.2022 under sections 302/324 /337-F(v)/148/149 PPC registered at Police Station Prang Ghar , 2 District Mohmand, whereby the appellant s were convicted and senten",
+    "relevant_chunks": [
+      "statutes_ppc_1860_0470",
+      "statutes_ppc_1860_0471"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:sarwar_shah_vs_the_state_302_324_337_f_v_148_149_ppc_sentenced_reduced",
+    "gold_citation": "PPC 1860 s.324",
+    "reason": "boilerplate_no_substance",
+    "stock_coverage": 0.45,
+    "max_cross_judgment_similarity": 0.214
+  },
+  {
+    "question": "visions of Section 265 -C Cr.P.Cwere complied with and the appellants 5 were charge sheeted to which they pleaded not guilty and claimed trial. In order to substantiate its claim , the prosecution produced and examined as many as 23 PWs. After closure of prosecution evidence, statements of accused were recorded CrPC, wherein they posed innocence, however, neither they wished to be examined on oath under section 340(2) Cr.P.C, nor wanted to prod",
+    "relevant_chunks": [
+      "statutes_crpc_1898_0922",
+      "statutes_crpc_1898_0923"
+    ],
+    "case_type": "criminal",
+    "province": "kpk",
+    "source": "judgment_citation",
+    "judgment_id": "PHC:sarwar_shah_vs_the_state_302_324_337_f_v_148_149_ppc_sentenced_reduced",
+    "gold_citation": "CrPC 1898 s.342",
+    "reason": "boilerplate_trial_history",
+    "stock_coverage": 0.416,
+    "max_cross_judgment_similarity": 0.167
+  },
+  {
+    "question": "18.10.2018, 12.10.2018, 19.12.2019, 10.7.2020, 4.12.2019, 11.2.2020, 23.5.2019, 25.7.2019, 10.9.2015, 11.2.2020, 30.9.2020, 25.1.2021, 18.2.2021, 24.2.2021, 22.5.2019, 28.6.2019, 10.2.2017, 25.6.2019, 30.1.2017, 10.2.2017, 14.2.2017, 1.7.2016, 21.10.2021, 5.12.2018, 16.10.2018, 14.12.2021, 6.11.2022, 20.10.2020, 16.1.2019, 1.4.2021, 3.2.2021, 18.9.2020, 26.1.2023, 6.2.2019, 3.11.2020, 26.2.2016, 31.1.2017, 9.5.2017, 7.4.2017, 7.6.2017, 17.7.2017, 8.5.2017, 20.6.2017, 16",
+    "relevant_chunks": [
+      "statutes_limitation_act_1908_0039",
+      "statutes_limitation_act_1908_0093"
+    ],
+    "case_type": "civil",
+    "province": "federal",
+    "source": "judgment_citation",
+    "judgment_id": "SC:c_a_1195_2015",
+    "gold_citation": "Limitation Act s.3",
+    "reason": "boilerplate_stock_coverage",
+    "stock_coverage": 1.0,
+    "max_cross_judgment_similarity": 0.013
+  },
+  {
+    "question": "L, 907-L, 1117-L, 1230-L, 1282-L, 1291-L, 1576-L, 1592-L, 1615-L, 1827 -L, 1890 -L, 1968 -L OF 2020, 27 -L, 200 -L, 204 -L, 248 -L, 271 -L, 470-L, 559-L, 598-L, 632-L, 665-L, 704-L, 705-L, 864-L, 1031-L, 1042-L, 1102- L, 1258 -L, 1754-L, 1971-L, 2173-L, 2243-L, 2296-L OF 2021 AND 1075 -L OF 2017 [Against judgment/order dated 6.5.2015, 12.11.2014, 7.5.2019, 8.7.2019, 10.5.2019, 29.4.2019, 25.6.2019, 17.10.2018, 28.6.2018, 13.11.2018, 18.10.2018, 12.10.2018, 19.12.2",
+    "relevant_chunks": [
+      "statutes_limitation_act_1908_0041",
+      "statutes_limitation_act_1908_0042",
+      "statutes_limitation_act_1908_0043",
+      "statutes_limitation_act_1908_0094",
+      "statutes_limitation_act_1908_0095",
+      "statutes_limitation_act_1908_0096",
+      "statutes_limitation_act_1908_0097",
+      "statutes_limitation_act_1908_0152",
+      "statutes_limitation_act_1908_0153",
+      "statutes_limitation_act_1908_0154",
+      "statutes_limitation_act_1908_0155",
+      "statutes_limitation_act_1908_0156",
+      "statutes_limitation_act_1908_0157",
+      "statutes_limitation_act_1908_0158",
+      "statutes_limitation_act_1908_0159",
+      "statutes_limitation_act_1908_0160",
+      "statutes_limitation_act_1908_0161",
+      "statutes_limitation_act_1908_0162",
+      "statutes_limitation_act_1908_0163",
+      "statutes_limitation_act_1908_0164",
+      "statutes_limitation_act_1908_0165",
+      "statutes_limitation_act_1908_0166",
+      "statutes_limitation_act_1908_0167",
+      "statutes_limitation_act_1908_0168",
+      "statutes_limitation_act_1908_0169",
+      "statutes_limitation_act_1908_0170",
+      "statutes_limitation_act_1908_0171",
+      "statutes_limitation_act_1908_0172",
+      "statutes_limitation_act_1908_0173",
+      "statutes_limitation_act_1908_0174",
+      "statutes_limitation_act_1908_0175",
+      "statutes_limitation_act_1908_0176",
+      "statutes_limitation_act_1908_0177",
+      "statutes_limitation_act_1908_0178",
+      "statutes_limitation_act_1908_0179",
+      "statutes_limitation_act_1908_0180",
+      "statutes_limitation_act_1908_0181",
+      "statutes_limitation_act_1908_0182",
+      "statutes_limitation_act_1908_0183",
+      "statutes_limitation_act_1908_0184",
+      "statutes_limitation_act_1908_0185",
+      "statutes_limitation_act_1908_0186",
+      "statutes_limitation_act_1908_0187",
+      "statutes_limitation_act_1908_0188",
+      "statutes_limitation_act_1908_0189",
+      "statutes_limitation_act_1908_0190",
+      "statutes_limitation_act_1908_0191",
+      "statutes_limitation_act_1908_0192",
+      "statutes_limitation_act_1908_0193",
+      "statutes_limitation_act_1908_0194",
+      "statutes_limitation_act_1908_0195",
+      "statutes_limitation_act_1908_0196",
+      "statutes_limitation_act_1908_0197",
+      "statutes_limitation_act_1908_0198",
+      "statutes_limitation_act_1908_0199",
+      "statutes_limitation_act_1908_0200",
+      "statutes_limitation_act_1908_0201",
+      "statutes_limitation_act_1908_0202",
+      "statutes_limitation_act_1908_0203",
+      "statutes_limitation_act_1908_0204",
+      "statutes_limitation_act_1908_0205"
+    ],
+    "case_type": "civil",
+    "province": "federal",
+    "source": "judgment_citation",
+    "judgment_id": "SC:c_a_1195_2015",
+    "gold_citation": "Limitation Act s.5",
+    "reason": "boilerplate_no_substance",
+    "stock_coverage": 0.328,
+    "max_cross_judgment_similarity": 0.01
+  },
+  {
+    "question": "592-L, 1615-L, 1827 -L, 1890 -L, 1968 -L OF 2020, 27 -L, 200 -L, 204 -L, 248 -L, 271 -L, 470-L, 559-L, 598-L, 632-L, 665-L, 704-L, 705-L, 864-L, 1031-L, 1042-L, 1102- L, 1258 -L, 1754-L, 1971-L, 2173-L, 2243-L, 2296-L OF 2021 AND 1075 -L OF 2017 [Against judgment/order dated 6.5.2015, 12.11.2014, 7.5.2019, 8.7.2019, 10.5.2019, 29.4.2019, 25.6.2019, 17.10.2018, 28.6.2018, 13.11.2018, 18.10.2018, 12.10.2018, 19.12.2019, 10.7.2020, 4.12.2019, 11.2.2020, 23.5.2019, 25.7",
+    "relevant_chunks": [
+      "statutes_limitation_act_1908_0030",
+      "statutes_limitation_act_1908_0092"
+    ],
+    "case_type": "civil",
+    "province": "federal",
+    "source": "judgment_citation",
+    "judgment_id": "SC:c_a_1195_2015",
+    "gold_citation": "Limitation Act s.29",
+    "reason": "boilerplate_no_substance",
+    "stock_coverage": 0.442,
+    "max_cross_judgment_similarity": 0.01
+  }
+]

@@ -176,6 +176,15 @@ _VERIFY = (
     "relevant High Court and a lawyer before filing."
 )
 
+# The one field this engine was missing. It already carried EFFECTIVE_AS_OF and
+# _VERIFY; without a disclaimer the output reads as a determination of forum
+# rather than guidance toward one.
+_DISCLAIMER = (
+    "Guidance on the available forum and route, not a legal opinion and not advice "
+    "that your matter qualifies. Eligibility under the Act, and whether a given "
+    "court is hearing cases today, must be confirmed with a lawyer."
+)
+
 _REMEDY_SUMMARY = (
     "You may have a dedicated remedy: the Protection of Overseas Pakistanis' Property "
     "Act 2024 (and provincial versions) sets up special courts for overseas Pakistanis' "
@@ -288,7 +297,16 @@ def poip_tribunal(province: str, category: str = "") -> dict | None:
         return None
     if category and category not in rec["applies_to"]:
         return None
-    return dict(rec)
+    # Fill in only what the record does not already say. These tribunal entries
+    # carry their OWN `verify` — naming what the Gazette does and does not
+    # settle for that specific province — and a generic one must never replace
+    # it. An earlier version of this used dict(rec, verify=_VERIFY) and silently
+    # overwrote the specific text with the general one.
+    out = dict(rec)
+    out.setdefault("effective_as_of", EFFECTIVE_AS_OF)
+    out.setdefault("verify", _VERIFY)
+    out.setdefault("disclaimer", _DISCLAIMER)
+    return out
 
 
 def resolve(province: str) -> dict:
@@ -309,6 +327,7 @@ def resolve(province: str) -> dict:
         "recommended_registration": OPPPA_ACTION,
         "effective_as_of": EFFECTIVE_AS_OF,
         "verify": _VERIFY,
+        "disclaimer": _DISCLAIMER,
     }
 
     # Unknown province → surface the remedy exists, but do not invent a court.

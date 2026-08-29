@@ -59,6 +59,9 @@ async def cache_lookup_node(state: AgentState) -> dict:
         "cache_confidence":   calibrate_cache(conf),
         "answer":             payload.get("answer", ""),
         "citations":          payload.get("citations", []),
+        # Absent on entries written before claim assessment existed; those
+        # answers correctly report no claims rather than fabricated verdicts.
+        "claim_assessments":  payload.get("claims", []),
         "confidence":         conf,
         "is_grounded":        payload.get("is_grounded", True),
         "arbitration_source": "cache",

@@ -7,6 +7,42 @@ import { Icon, I } from "./icons.jsx";
 import { listCases, aiResearch, rateAnswer } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 
+/* Calibrated-confidence bands from the server (ai/answer_confidence.py).
+   The lawyer surface shows the band AND the raw figure AND which evidence source
+   produced it — a research user needs the number; a client does not. */
+const CONF_LABEL = { high: "High", moderate: "Moderate", low: "Low" };
+const CONF_COLOR = { high: "#22c55e", moderate: "#f59e0b", low: "#ef4444" };
+
+/* Per-claim support verdicts (answer_citations.py). The lawyer wording states
+   the legal question precisely rather than reassuringly: "supported" means the
+   cited section establishes the proposition, nothing more. It does NOT speak to
+   whether the section is still in force — that is citation_verification's
+   OMITTED verdict, which runs on the drafting path, not here. */
+const CLAIM_UI = {
+    supported:   { icon: "✓", color: "#22c55e", label: "Supported",   note: "cited source establishes this" },
+    partial:     { icon: "◐", color: "#f59e0b", label: "Partial",     note: "claim goes beyond what the source states" },
+    unsupported: { icon: "✕", color: "#ef4444", label: "Unsupported", note: "cited source does not establish this" },
+    unassessed:  { icon: "–", color: "#94a3b8", label: "Unassessed",  note: "not checked — no resolvable source" },
+};
+const CLAIM_ORDER = ["unsupported", "partial", "unassessed", "supported"];
+
+/* Repeal currency (answer_citations.currency_for). Two values only. `unknown`
+   is NOT a clean bill of health: repeal data covers 4 of the 43 statutes in the
+   corpus and is a self-declared lower bound, amendment is not modelled at all,
+   and no statute carries an as-of date. A repealed provision OVERRIDES its
+   support verdict — a section can genuinely establish the proposition and still
+   have been abolished, which is the fact that decides whether it can be filed. */
+const REPEALED = "repealed";
+const CURRENCY_TEXT = {
+    repealed: "Repealed provision \u2014 do not rely on this authority",
+    unknown:  "Current status not verified",
+};
+const repealNote = (src) => {
+    const bits = [src.instrument, src.date].filter(Boolean).join(", ");
+    const scope = src.jurisdiction && src.jurisdiction !== "federal" ? ` (${src.jurisdiction} only)` : "";
+    return bits ? `repealed by ${bits}${scope}` : "";
+};
+
 // ============================================================
 // AI LEGAL PAGE — Full chatbot UI with case context injection
 // ============================================================
@@ -28,6 +64,12 @@ function AILegalPage() {
                 type: c.case_type || "general",
                 client: c.client_name || "Client",
                 court: c.province || "Court",
+                // Kept separate from `court`: that field carries a "Court" display
+                // fallback, which is not a province and must never reach retrieval.
+                // The stored value is already the pipeline's Province enum
+                // (punjab | sindh | kpk | balochistan | federal), so it passes
+                // through untranslated.
+                province: c.province || null,
                 nextHearing: c.hearing_dates?.find(h => !h.outcome)?.date?.split("T")[0] || "TBD",
             })));
         });
@@ -93,8 +135,14 @@ function AILegalPage() {
         });
 
         try {
+            // Province comes from the active case. Without it the pipeline resolves
+            // province to "unknown", and the retriever's filter then matches only
+            // federal-tagged chunks — hiding every provincial statute in the corpus
+            // (~1,600 Punjab sections) unless the lawyer happens to name a city in
+            // the query text. The case record already knows the jurisdiction.
             const { data, error } = await aiResearch(q, sessionIdRef.current, {
                 language: lang === "UR" ? "ur" : "en",
+                province: activeCaseObj?.province || null,
                 history: msgHistory,
             });
             if (error || !data) throw new Error(error?.detail || "request failed");
@@ -107,12 +155,25 @@ function AILegalPage() {
                         label: [c.statute, c.section ? `§${c.section}` : ""].filter(Boolean).join(" "),
                         url: c.url || (c.type === "judgment" ? c.source : ""),
                         judgment: c.type === "judgment",
+                        // matched | unresolved | retrieved — see answer_citations.py
+                        status: c.status || "retrieved",
+                        // repealed | unknown — never in_force
+                        currency: c.currency || "unknown",
+                        instrument: c.instrument || "",
+                        date: c.date || "",
+                        jurisdiction: c.jurisdiction || "",
+                        chunkId: c.chunk_id || "",
+                        province: c.province || "",
                     }))
                     .filter(c => c.label);
                 fill({
                     content: data.answer || "No response received.",
                     citations,
+                    claims: data.claims || [],
                     confidence: data.confidence,
+                    confidenceBand: data.confidence_band,
+                    modelConfidence: data.model_confidence,
+                    arbitrationSource: data.arbitration_source,
                 });
             }
         } catch {
@@ -304,24 +365,146 @@ function AILegalPage() {
                                     <div style={{ maxWidth: "75%" }}>
                                         <div style={{
                                             background: m.role === "user" ? t.grad1 : t.surface,
-                                            border: m.role === "assistant" ? `1px solid ${t.border}` : "none",
+                                            // A clarification is a QUESTION to the lawyer, not advice.
+                                            // Rendered identically to an answer it reads as one, which is
+                                            // the worst possible confusion on a legal surface.
+                                            border: m.role === "assistant" ? `1px solid ${m.clarification ? t.primary : t.border}` : "none",
                                             borderRadius: m.role === "user" ? "18px 18px 6px 18px" : "18px 18px 18px 6px",
                                             padding: "12px 16px", fontSize: 13.5, lineHeight: 1.8,
                                             color: m.role === "user" ? (t.mode === "dark" ? "#111B1F" : "#fff") : t.text,
                                             whiteSpace: "pre-wrap", minHeight: m.streaming && !m.content ? 20 : undefined,
                                         }}>
+                                            {m.clarification && (
+                                                <div style={{ fontSize: 11, color: t.primary, fontWeight: 700, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                                                    Clarification needed
+                                                </div>
+                                            )}
                                             {m.content || (m.streaming ? "" : "No response received.")}
                                             {m.streaming && <span style={{ display: "inline-block", width: 2, height: "1em", background: t.primary, marginLeft: 2, verticalAlign: "text-bottom", animation: "aiBlink 1s step-end infinite" }} />}
+                                            {/* Claim-level support. Above the citation chips on
+                                                purpose: which proposition rests on which section,
+                                                and whether that section carries it, is the research
+                                                question — the chip list only says what was cited. */}
+                                            {m.role === "assistant" && !m.streaming && m.claims?.length > 0 && (() => {
+                                                const counts = m.claims.reduce((acc, c) => {
+                                                    acc[c.support] = (acc[c.support] || 0) + 1; return acc;
+                                                }, {});
+                                                const repealed = m.claims.filter(c => c.currency === REPEALED);
+                                                const sorted = [...m.claims].sort(
+                                                    (a, b) => CLAIM_ORDER.indexOf(a.support) - CLAIM_ORDER.indexOf(b.support));
+                                                return (
+                                                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.border}` }}>
+                                                        {repealed.length > 0 && (
+                                                            <div style={{
+                                                                fontSize: 11.5, color: "#ef4444", fontWeight: 700,
+                                                                marginBottom: 7, padding: "7px 10px", borderRadius: 7,
+                                                                background: "#ef444414", border: "1px solid #ef444455",
+                                                            }}>
+                                                                {"\u26D4"} {CURRENCY_TEXT.repealed}
+                                                                <div style={{ fontWeight: 400, fontSize: 10.5, marginTop: 3, color: t.text }}>
+                                                                    {repealed.length} claim{repealed.length === 1 ? "" : "s"} rest
+                                                                    {repealed.length === 1 ? "s" : ""} on a repealed section. Do not file on this
+                                                                    without substituting the provision now in force.
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <div style={{
+                                                            fontSize: 10, color: t.textMuted, marginBottom: 6,
+                                                            textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700,
+                                                            display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
+                                                        }}>
+                                                            <span>Claim support ({m.claims.length})</span>
+                                                            {CLAIM_ORDER.filter(k => counts[k]).map(k => (
+                                                                <span key={k} style={{ color: CLAIM_UI[k].color, fontWeight: 700 }}>
+                                                                    {counts[k]} {CLAIM_UI[k].label.toLowerCase()}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                            {sorted.map((c, ci) => {
+                                                                const dead = c.currency === REPEALED;
+                                                                const ui = dead
+                                                                    ? { icon: "\u26D4", color: "#ef4444", label: "Repealed",
+                                                                        note: "do not rely on this authority" }
+                                                                    : (CLAIM_UI[c.support] || CLAIM_UI.unassessed);
+                                                                const notes = (c.sources || []).map(repealNote).filter(Boolean);
+                                                                return (
+                                                                    <div key={ci} style={{
+                                                                        borderLeft: `2px solid ${ui.color}`, paddingLeft: 9,
+                                                                    }}>
+                                                                        <div style={{ fontSize: 12, color: t.text, lineHeight: 1.55 }}>
+                                                                            “{c.text}”
+                                                                        </div>
+                                                                        <div style={{ fontSize: 10.5, marginTop: 3, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                                                                            <span style={{ color: ui.color, fontWeight: 700 }}>
+                                                                                {ui.icon} {ui.label}
+                                                                            </span>
+                                                                            <span style={{ color: t.textFaint }}>— {ui.note}</span>
+                                                                            {dead && notes.length > 0 && (
+                                                                                <span style={{ color: "#ef4444" }}>{notes.join("; ")}</span>
+                                                                            )}
+                                                                            {c.sources?.length > 0 && (
+                                                                                <span className="mono" style={{ color: t.primary }}>
+                                                                                    {c.sources.map(sc => `[${sc.id}] ${[sc.statute, sc.section ? `§${sc.section}` : ""].filter(Boolean).join(" ")}`).join("  ")}
+                                                                                </span>
+                                                                            )}
+                                                                            {c.unresolved?.length > 0 && (
+                                                                                <span style={{ color: "#f59e0b" }}>
+                                                                                    cites {c.unresolved.map(u => [u.statute, u.section ? `§${u.section}` : ""].filter(Boolean).join(" ")).join("; ")} — not in retrieved evidence
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <div style={{ fontSize: 10, color: t.textFaint, marginTop: 7 }}>
+                                                            Support is judged against the retrieved sources only. Where a
+                                                            section is not marked repealed its current status is NOT verified —
+                                                            repeal data covers 4 of 43 statutes and is a lower bound, and
+                                                            amendment is not checked at all.
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
                                             {m.role === "assistant" && !m.streaming && m.citations?.length > 0 && (
-                                                <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.border}`, display: "flex", flexWrap: "wrap", gap: 5 }}>
-                                                    {m.citations.map((c, ci) => {
-                                                        const label = typeof c === "string" ? c : c.label;
-                                                        const url = typeof c === "string" ? "" : c.url;
-                                                        const icon = (typeof c === "object" && c.judgment) ? "⚖️" : "📖";
-                                                        const chipStyle = { fontSize: 11, padding: "3px 9px", borderRadius: 7, background: t.cardHi, border: `1px solid ${t.border}`, color: url ? t.primary : t.textMuted, textDecoration: "none", fontWeight: url ? 700 : 400 };
-                                                        return url
-                                                            ? <a key={ci} href={url} target="_blank" rel="noopener noreferrer" style={chipStyle}>{icon} {label} ↗</a>
-                                                            : <span key={ci} style={chipStyle}>{icon} {label}</span>;
+                                                <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.border}` }}>
+                                                    {[
+                                                        ["matched", "Cited by this answer · found in retrieved sources", t.primary],
+                                                        ["unresolved", "Cited by this answer · NOT in retrieved sources — verify independently", "#f59e0b"],
+                                                        ["retrieved", "Retrieved but not cited in this answer", t.textFaint],
+                                                    ].map(([key, caption, tone]) => {
+                                                        const group = (m.citations || []).filter(c => (c.status || "retrieved") === key);
+                                                        if (!group.length) return null;
+                                                        return (
+                                                            <div key={key} style={{ marginBottom: 8 }}>
+                                                                <div style={{ fontSize: 10, color: tone, marginBottom: 4, fontWeight: key === "unresolved" ? 700 : 500 }}>
+                                                                    {caption}
+                                                                </div>
+                                                                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                                                                    {group.map((c, ci) => {
+                                                                        // Repeal outranks match status on the chip too: being
+                                                                        // cited AND retrieved says nothing about whether the
+                                                                        // provision still exists.
+                                                                        const chipDead = c.currency === REPEALED;
+                                                                        const icon = chipDead ? "⛔" : c.judgment ? "⚖️" : key === "matched" ? "✓" : key === "unresolved" ? "?" : "📖";
+                                                                        const chipStyle = {
+                                                                            fontSize: 11, padding: "3px 9px", borderRadius: 7,
+                                                                            background: chipDead ? "#ef444414" : t.cardHi,
+                                                                            border: `1px solid ${chipDead ? "#ef444466" : key === "unresolved" ? "#f59e0b55" : t.border}`,
+                                                                            color: chipDead ? "#ef4444" : (c.url ? t.primary : (key === "unresolved" ? "#f59e0b" : t.textMuted)),
+                                                                            textDecoration: "none", fontWeight: (chipDead || c.url) ? 700 : 400,
+                                                                        };
+                                                                        const title = chipDead
+                                                                            ? (repealNote(c) || "repealed")
+                                                                            : [c.province, c.chunkId].filter(Boolean).join(" · ");
+                                                                        return c.url
+                                                                            ? <a key={ci} href={c.url} target="_blank" rel="noopener noreferrer" style={chipStyle} title={title}>{icon} {c.label}{chipDead ? " — repealed" : ""} ↗</a>
+                                                                            : <span key={ci} style={chipStyle} title={title}>{icon} {c.label}{chipDead ? " — repealed" : ""}</span>;
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        );
                                                     })}
                                                 </div>
                                             )}
@@ -329,10 +512,16 @@ function AILegalPage() {
                                         {m.time && (
                                             <div style={{ fontSize: 10, color: t.textFaint, marginTop: 4, textAlign: m.role === "user" ? "right" : "left", display: "flex", alignItems: "center", gap: 8, justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
                                                 {m.time}
-                                                {m.confidence != null && (
-                                                    <span style={{ color: m.confidence >= 0.65 ? t.textFaint : "#f59e0b" }}>
-                                                        {Math.round(m.confidence * 100)}% confidence
-                                                    </span>
+                                                {m.role === "assistant" && !m.streaming && !m.clarification && m.content && (
+                                                    m.confidenceBand ? (
+                                                        <span style={{ color: CONF_COLOR[m.confidenceBand] || t.textFaint }}
+                                                              title={m.modelConfidence != null ? `model self-report: ${Math.round(m.modelConfidence * 100)}% (diagnostic, not calibrated)` : undefined}>
+                                                            ⬤ {CONF_LABEL[m.confidenceBand]} confidence · {Math.round(m.confidence * 100)}%
+                                                            {m.arbitrationSource ? ` (evidence: ${m.arbitrationSource})` : ""}
+                                                        </span>
+                                                    ) : (
+                                                        <span style={{ color: t.textFaint }}>Confidence not calibrated</span>
+                                                    )
                                                 )}
                                                 {m.role === "assistant" && !m.streaming && !m.clarification && m.content && (
                                                     m.rated ? <span>feedback recorded ✓</span> : (

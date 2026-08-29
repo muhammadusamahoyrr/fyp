@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.exceptions import AppValidationError
 from app.dependencies import get_current_user
@@ -18,6 +18,23 @@ router = APIRouter(prefix="/inheritance", tags=["inheritance"])
 
 
 class Heirs(BaseModel):
+    """Surviving heirs, as accepted over HTTP.
+
+    Must stay in step with inheritance.ACCEPTED_HEIRS, which is the engine's
+    authoritative vocabulary. This model had drifted three fields behind it: the
+    MFLO s.4 grandchild counts were computable by the engine and impossible to
+    supply through the API, so a predeceased child's branch could be declared
+    but never populated.
+
+    extra="forbid" for the same reason as legal_tools.HeirsInput. Under
+    Pydantic's default an unrecognised heir was dropped before the engine ever
+    saw it — so the engine-side guard could not catch it — and the caller
+    received a confident distribution computed for the heirs that survived the
+    silent drop.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     husband: int = Field(0, ge=0, le=1)
     wives: int = Field(0, ge=0, le=4)
     sons: int = Field(0, ge=0)
@@ -26,6 +43,9 @@ class Heirs(BaseModel):
     mother: int = Field(0, ge=0, le=1)
     predeceased_sons: int = Field(0, ge=0)
     predeceased_daughters: int = Field(0, ge=0)
+    grandsons_via_predeceased_son: int = Field(0, ge=0)
+    granddaughters_via_predeceased_son: int = Field(0, ge=0)
+    grandchildren_via_predeceased_daughter: int = Field(0, ge=0)
     full_brothers: int = Field(0, ge=0)
     full_sisters: int = Field(0, ge=0)
 

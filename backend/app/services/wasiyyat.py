@@ -24,6 +24,20 @@ from typing import Any
 
 from app.services import inheritance as inheritance_service
 
+# The year this rule basis is intended to reflect, following court_fee._EFFECTIVE.
+# The waterfall itself (funeral, debts, bequests capped at 1/3, then Faraid) is
+# classical and stable, but the SCOPE note above is not: it is Sunni-only, and
+# Shia law differs on bequests to an heir. Dating the basis lets a reader see
+# which statement of the rules this output rests on.
+_EFFECTIVE = "2024"
+
+_VERIFY = (
+    "Sunni (Hanafi) rules as applied in Pakistan. Shia law differs on bequests to "
+    "an heir, and a bequest above one third or in favour of an heir is valid only "
+    "with the other heirs' consent — which this calculation flags but cannot "
+    "obtain. Confirm the distribution with a lawyer before acting on it."
+)
+
 # per-bequest status codes
 VALID = "valid"
 EXCEEDS = "exceeds_one_third_needs_consent"
@@ -84,6 +98,8 @@ def compute_estate(
             "faraid": None,
             "notes": notes,
             "warnings": warnings,
+            "effective_as_of": _EFFECTIVE,
+            "verify": _VERIFY,
             "disclaimer": _DISCLAIMER,
         }
 
@@ -152,6 +168,8 @@ def compute_estate(
         "faraid": faraid,
         "notes": notes,
         "warnings": warnings,
+        "effective_as_of": _EFFECTIVE,
+        "verify": _VERIFY,
         "disclaimer": _DISCLAIMER,
     }
 

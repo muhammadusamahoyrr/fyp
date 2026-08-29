@@ -43,6 +43,59 @@ from typing import Any
 # }
 
 
+# The year this rule basis is intended to reflect, following court_fee._EFFECTIVE.
+# The Qur'anic fixed shares do not change, but the SCOPE of this engine rests on
+# statute that can: s.4 MFLO 1961 representation, and the Sunni-only reading. The
+# docstring already states the heirs NOT handled — distant kindred, grandfather
+# competing with siblings, uterine and consanguine siblings — and a caller has no
+# way to see which statement of the rules produced a given distribution.
+_EFFECTIVE = "2024"
+
+_VERIFY = (
+    "Sunni (Hanafi) shares as applied in Pakistan, including s.4 of the Muslim "
+    "Family Laws Ordinance 1961. Distant kindred, a grandfather competing with "
+    "siblings, and uterine or consanguine siblings are NOT computed here; a case "
+    "involving them needs a lawyer, not this figure."
+)
+
+
+# THE AUTHORITATIVE HEIR VOCABULARY.
+#
+# Held here, in the engine, rather than in either Pydantic model — there are two
+# of them (legal_tools.HeirsInput, 13 fields; routes.inheritance.Heirs, 10) and
+# they have already drifted apart. An engine that reads h.get("full_sisters")
+# and silently returns 0 for anything it does not recognise cannot tell a
+# missing heir from an absent one.
+#
+# Measured before this guard: {"husband": 1, "sisters": 2, "mother": 1} — a
+# plausible spelling of "full_sisters" — returned Husband 500,000 and Mother
+# 500,000 on a 1,000,000 estate, with the two sisters receiving NOTHING and a
+# note reading "Radd applied", which made the wrong answer look deliberate. The
+# correct distribution is 375,000 / 125,000 / 500,000. A silently disinherited
+# heir is the one error this engine must never make quietly, and the figures
+# reach a PDF (routes/inheritance.py:91,103,171).
+ACCEPTED_HEIRS = frozenset({
+    "husband", "wives", "sons", "daughters", "father", "mother",
+    "predeceased_sons", "predeceased_daughters",
+    "grandsons_via_predeceased_son", "granddaughters_via_predeceased_son",
+    "grandchildren_via_predeceased_daughter",
+    "full_brothers", "full_sisters",
+})
+
+
+def _reject_unknown_heirs(heirs: dict) -> None:
+    """Refuse a heir key this engine cannot compute. Never silently drop one."""
+    unknown = sorted(k for k in (heirs or {}) if k not in ACCEPTED_HEIRS)
+    if unknown:
+        raise ValueError(
+            "Unknown heir field(s): " + ", ".join(unknown) + ". "
+            "This engine computes only: " + ", ".join(sorted(ACCEPTED_HEIRS)) +
+            ". A heir it does not recognise would be dropped from the "
+            "distribution without appearing in the result, so the calculation "
+            "is refused instead."
+        )
+
+
 def _has_descendant(h: dict) -> bool:
     return (
         h.get("sons", 0) > 0
@@ -57,7 +110,12 @@ def calculate(estate_value: int, heirs: dict) -> dict[str, Any]:
 
     MFLO section 4 is applied by treating each predeceased child as alive for
     the division, then passing that branch's share to its children.
+
+    Raises ValueError on an unrecognised heir field — see _reject_unknown_heirs.
+    Both HTTP callers already translate that into a validation error
+    (routes/inheritance.py:64 and :147).
     """
+    _reject_unknown_heirs(heirs)
     h = {k: int(v or 0) for k, v in heirs.items()}
     warnings: list[str] = []
     notes: list[str] = []
@@ -277,6 +335,8 @@ def calculate(estate_value: int, heirs: dict) -> dict[str, Any]:
         "rounding_difference": estate_value - distributed,
         "notes": notes,
         "warnings": warnings,
+        "effective_as_of": _EFFECTIVE,
+        "verify": _VERIFY,
         "disclaimer": (
             "This computation follows Sunni (Hanafi) inheritance rules as applied in Pakistan, "
             "including section 4 of the Muslim Family Laws Ordinance 1961. It is general guidance, "

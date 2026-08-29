@@ -23,7 +23,7 @@ import logging
 from typing import Literal
 
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.services import bail_checker, court_fee, inheritance
 
@@ -207,6 +207,19 @@ def calculate_court_fee(
 
 class HeirsInput(BaseModel):
     """The surviving heirs. Pass 0 for anyone who did not survive the deceased."""
+
+    # extra="forbid", not Pydantic's default of silently ignoring unknown fields.
+    #
+    # THIS MODEL IS FILLED BY THE LLM. It chooses the field names, and "sisters"
+    # is a more natural word than "full_sisters". Under the default policy that
+    # extra key was dropped without a word and the engine computed a
+    # distribution for the heirs that remained: on a 1,000,000 estate,
+    # {"husband": 1, "sisters": 2, "mother": 1} returned Husband 500,000 and
+    # Mother 500,000 with both sisters receiving nothing — against a correct
+    # 375,000 / 125,000 / 500,000. Forbidding the extra turns a silent
+    # disinheritance into a tool error the model is already instructed to report
+    # rather than paper over (see generation_node._TOOL_RIDER).
+    model_config = ConfigDict(extra="forbid")
 
     husband: int = Field(0, ge=0, le=1, description="1 if the surviving spouse is a husband, else 0.")
     wives: int = Field(0, ge=0, le=4, description="Number of surviving wives (0-4). Cannot be combined with husband.")

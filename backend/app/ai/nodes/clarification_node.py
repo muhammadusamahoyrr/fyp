@@ -5,6 +5,7 @@ from langgraph.types import interrupt
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_fast_llm
 from app.ai.nodes._history import format_history
+from app.ai.nodes._resume import merge_user_reply
 
 SYSTEM_PROMPT = """\
 You are a Pakistani legal assistant. The retrieval system could not find relevant laws for this query.
@@ -33,8 +34,21 @@ async def clarification_node(state: AgentState) -> dict:
         )},
     ])
     question = response.content.strip()
-    interrupt(question)  # pause graph — chat_socket resumes with user's answer
+
+    # interrupt() RETURNS the user's answer when the run is resumed. Discarding
+    # it left province/case_type exactly as unset as they were when routing sent
+    # the turn here, so retrieval ran on the original query and fell through to
+    # its civil_collection default. See nodes/_resume.py.
+    reply   = interrupt(question)
+    merged  = merge_user_reply(state, reply)
+
     return {
         "clarification_question": question,
         "needs_clarification":    True,
+        # Marks the turn personalised so cache_node neither serves nor stores it.
+        # The answer now genuinely depends on what THIS user said in reply, and
+        # `is_personalised` reads this counter — clarification_node never set it,
+        # so these answers were previously cacheable across users.
+        "clarification_attempts": state.get("clarification_attempts", 0) + 1,
+        **merged,
     }

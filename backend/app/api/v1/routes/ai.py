@@ -104,14 +104,26 @@ class AiResearchResult(BaseModel):
     """RAG research result — two branches by `type`: a `clarification`
     (question only) or a `final` (answer/citations/confidence). All branch
     fields optional; `citations` stays a plain list of dynamic pipeline
-    objects. extra="allow" future-proofs added fields."""
+    objects. extra="allow" future-proofs added fields.
+
+    `confidence` is the Decision Engine's CALIBRATED figure and is None when the
+    turn was never scored — it is deliberately not defaulted to a number, since
+    substituting one is how the model's self-report came to be displayed as
+    calibration in the first place. `model_confidence` carries that self-report
+    for diagnostics. Both fields mirror the WebSocket contract exactly; see
+    ai/answer_confidence.py.
+    """
     model_config = ConfigDict(extra="allow")
 
     type: str
     question: str | None = None
     answer: str | None = None
     citations: list = []
+    # Per-claim support verdicts: supported | partial | unsupported | unassessed.
+    claims: list = []
     confidence: float | None = None
+    confidence_band: str | None = None
+    model_confidence: float | None = None
     convergence_status: str | None = None
 
 
@@ -199,6 +211,7 @@ async def ai_research(
     """
     from langgraph.types import Command
 
+    from app.ai.answer_confidence import confidence_payload
     from app.ai.graph.supervisor import chat_graph
     from app.ai.tracing import trace_run
     from app.websockets.chat_socket import _build_state, _extract_interrupt_question
@@ -241,7 +254,10 @@ async def ai_research(
         "type":       "final",
         "answer":     result.get("answer", ""),
         "citations":  result.get("citations", []),
-        "confidence": result.get("confidence", 0.0),
+        "claims":     result.get("claim_assessments", []),
+        # Same helper the WebSocket path uses, so the two surfaces cannot report
+        # the same pipeline differently.
+        **confidence_payload(result),
         "convergence_status": result.get("convergence_status") or "converged",
         # Surfaces "cache" when the semantic result cache short-circuited the
         # pipeline — lets the client show a cached badge and makes the cache
@@ -312,17 +328,33 @@ def _retrieve_law_context(query: str, case_type: str, province: str) -> str:
     parts: list[str] = []
 
     # Statutes (the case-type collections)
+    #
+    # Filtered through _docs_to_chunks, the same exclusion the chat pipeline
+    # applies at retrieval_node. This was the only retrieval caller in app/ that
+    # went straight from build_retriever to the prompt, so drafting alone
+    # received LEGAL-UQA generated Q&A, footnote apparatus, and statutes
+    # superseded in the user's own province. Measured over 15 drafting queries
+    # before this change: 2 of 90 chunks contaminated — one legal_uqa_qa_283
+    # into a constitutional writ draft, and Police Act 1861 s.126
+    # (superseded_by Police Order 2002, superseded_in punjab) into a PUNJAB FIR
+    # application. Documents are the output most likely to reach a court, so
+    # they should not be the one path with the weakest evidence.
+    #
+    # Filtering happens BEFORE the slice, not after: truncating first would
+    # discard clean chunks to make room for ones about to be dropped, leaving
+    # the draft with less law than the corpus actually offered.
     try:
+        from app.ai.nodes.retrieval_node import _docs_to_chunks
         from app.ai.pipelines.retriever import build_retriever
         retriever = build_retriever(case_type, province)
-        docs = retriever.invoke(query)[:6]
-        if docs:
+        chunks = _docs_to_chunks(retriever.invoke(query), province)[:6]
+        if chunks:
             lines = []
-            for d in docs:
-                statute = (d.metadata.get("statute") or d.metadata.get("source_file") or "Pakistani law").strip()
-                section = str(d.metadata.get("section_number") or "").strip()
+            for c in chunks:
+                statute = (c.get("statute") or c.get("source_file") or "Pakistani law").strip()
+                section = str(c.get("section_number") or "").strip()
                 head = f"{statute}" + (f" — Section {section}" if section else "")
-                lines.append(f"[STATUTE] {head}\n{d.page_content[:450]}")
+                lines.append(f"[STATUTE] {head}\n{(c.get('content') or '')[:450]}")
             parts.append("\n\n".join(lines))
     except Exception:
         logger.exception("draft: statute retrieval failed")

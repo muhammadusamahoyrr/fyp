@@ -40,6 +40,16 @@ one. They are returned as NOT_APPLICABLE unless the caller says otherwise.
 """
 from __future__ import annotations
 
+# The year this rule basis is intended to reflect, following court_fee._EFFECTIVE.
+# Order VI CPC particulars are among the most stable rules encoded anywhere in
+# this codebase, so this is the least urgent of the eight — but a completeness
+# check that cannot say WHEN its checklist was drawn cannot be audited later.
+#
+# The existing `advisory` field already carries the disclaimer this pattern asks
+# for, and is deliberately left under its own name: it is part of the returned
+# contract and renaming it would be a change, not an addition.
+_EFFECTIVE = "2024"
+
 from enum import Enum
 
 # The pleading types this checker understands. Anything else returns an empty
@@ -488,6 +498,7 @@ def check_pleading(template_type: str, draft: dict, context: dict | None = None)
             "reason": ("No statutory particulars are encoded for this document type. "
                        "Absence of findings here is not a finding of compliance."),
             "items": [],
+            "effective_as_of": _EFFECTIVE,
         }
 
     note = (_GUARDIANSHIP_NOTE if template_type == GUARDIANSHIP else
@@ -511,4 +522,5 @@ def check_pleading(template_type: str, draft: dict, context: dict | None = None)
         "advisory": ("This is a completeness check against the Code, not legal advice "
                      "and not a guarantee of admissibility. A lawyer should review "
                      "before filing."),
+        "effective_as_of": _EFFECTIVE,
     }

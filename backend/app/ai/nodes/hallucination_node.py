@@ -2,6 +2,12 @@ import asyncio
 
 from pydantic import BaseModel
 
+from app.ai.answer_citations import (
+    build_generation_evidence,
+    format_evidence_for_prompt,
+    parse_claim_support,
+    split_claims,
+)
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_structured_llm
 
@@ -15,9 +21,23 @@ law section repeats it.
 
 The answer may be in English or Urdu; the evidence is in English.
 
+You are also given a numbered list of CLAIMS taken from the answer. Each claim names the
+source ids it cites. For each claim, judge whether those cited sources actually SUPPORT it:
+
+  supported    the cited source states this, or it follows directly from it
+  partial      the source is on point but the claim goes further than it states
+               (a broader right, an extra condition, a stronger obligation, an added remedy)
+  unsupported  the cited source does not establish the claim, or is about a
+               different matter entirely
+
+Judge ONLY against the sources that claim cites. A section being real is not support —
+the question is whether that section's text establishes this particular claim.
+
 Return JSON with:
 - is_grounded: true if the main legal claims and citations in the answer correspond to what is shown in the evidence (minor wording differences are fine)
-- reason: one-sentence explanation in English"""
+- reason: one-sentence explanation in English
+- claim_support: one entry per claim, comma-separated, as "<claim number>:<verdict>",
+  e.g. "1:supported,2:partial,3:unsupported". Empty string if there are no claims."""
 
 _CAUTION = (
     "\n\n> **Caution:** Some claims in this response may not be fully supported by the retrieved "
@@ -28,6 +48,13 @@ _CAUTION = (
 class GroundingOutput(BaseModel):
     is_grounded: bool
     reason: str
+    # A FLAT string, not a nested list of objects. llm.py records that the 8B
+    # fast tier emits malformed tool calls when asked for a wide structured
+    # output — which is why triage runs on the main tier while the 2-field
+    # GatekeeperVerdict is fine on 8B. Keeping this schema at three flat fields
+    # stays inside what an 8B reliably emits, and moves the structure into
+    # parse_claim_support(), which is deterministic and tested offline.
+    claim_support: str = ""
 
 
 async def hallucination_node(state: AgentState) -> dict:
@@ -39,45 +66,55 @@ async def hallucination_node(state: AgentState) -> dict:
     ):
         return {"is_grounded": False, "confidence": 0.0}
 
-    llm     = get_structured_llm(GroundingOutput, fast=True)
-    context = "\n\n".join(
-        f"[{i}] {c.get('statute', '')}\n{c['content'][:300]}"
-        for i, c in enumerate(state.get("reranked_chunks", [])[:5], 1)
+    llm = get_structured_llm(GroundingOutput, fast=True)
+
+    # THE evidence generation used, under the ids it used. This node used to
+    # rebuild its own context from reranked_chunks[:5] and renumber it [1..5],
+    # while generation numbered [1..8] — so the same marker named different
+    # sources to the two components that have to agree about it. The recorded
+    # list removes the disagreement by construction.
+    #
+    # The fallback covers a state written before this field existed (a resumed
+    # checkpoint, a cached path); it reproduces the old evidence set rather than
+    # failing the turn, and case law and engine output ride along as before.
+    evidence = state.get("generation_evidence") or build_generation_evidence(
+        state.get("reranked_chunks", []), case_law, tool_results, statute_limit=5)
+    context = format_evidence_for_prompt(evidence)
+
+    # Sentences of the answer that actually cite something, tied to those ids.
+    # Deterministic — no model decides what a claim is, or which source it cites.
+    claims = split_claims(state["answer"], evidence)
+    claims_block = "\n".join(
+        f"{c['index']}. (cites {', '.join(c['source_ids']) or 'nothing resolvable'}) {c['text']}"
+        for c in claims if c["citation_status"] == "matched"
     )
-    # Include the case-law context so judgment citations in the answer are
-    # judged against what the model was actually given, not treated as invented.
-    if case_law:
-        context += "\n\n" + "\n\n".join(
-            f"[case law] {c.get('citation', '')} ({c.get('title', '')})\n{(c.get('content') or '')[:300]}"
-            for c in case_law
-        )
-    # Same reasoning for the deterministic engines: a bail conclusion or a court-fee
-    # figure comes from a computation, not from a retrieved chunk. Without this the
-    # validator would judge a *correct* engine-derived answer as ungrounded and
-    # slap a caution banner on it.
-    if tool_results:
-        context += "\n\n" + "\n\n".join(
-            f"[engine: {r['tool']}]\n{str(r.get('result'))[:600]}"
-            for r in tool_results
-        )
 
     result: GroundingOutput = await asyncio.to_thread(llm.invoke, [
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": (
             f"Answer:\n{state['answer']}\n\n"
-            f"Law sections used:\n{context}"
+            f"Law sections used:\n{context}\n\n"
+            f"Claims to assess:\n{claims_block or '(none)'}"
         )},
     ])
 
+    # Never raises: an unparseable verdict leaves every claim `unassessed`, which
+    # is the honest report. A missing verdict is not evidence of support.
+    assessed = parse_claim_support(result.claim_support, claims)
+
     if result.is_grounded:
-        return {"is_grounded": True}
+        return {"is_grounded": True, "claim_assessments": assessed}
 
     # Not grounded: degrade confidence and append caution note.
     # route_after_hallucination will retry generation if budget remains,
     # otherwise finalizer_node receives this degraded state.
     degraded_conf = max(round(state.get("confidence", 0.7) * 0.5, 2), 0.2)
     return {
-        "is_grounded": False,
-        "answer":      state["answer"] + _CAUTION,
-        "confidence":  degraded_conf,
+        "is_grounded":       False,
+        "answer":            state["answer"] + _CAUTION,
+        "confidence":        degraded_conf,
+        # Kept on the ungrounded path too: which specific claims failed is more
+        # actionable than the blanket caution banner, and this is the state the
+        # user is most likely to be reading closely.
+        "claim_assessments": assessed,
     }
