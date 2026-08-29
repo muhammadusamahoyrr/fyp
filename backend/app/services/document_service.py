@@ -3,6 +3,8 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
+import nh3
+
 from app.core.claims import GENERATION_SCOPE
 from app.core.constants import DocumentTemplate
 from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
@@ -746,10 +748,56 @@ async def list_documents(case_id: str, requester_id: str, role: str = "client") 
 
 _MAX_DRAFT_CONTENT = 300_000  # editor HTML; far beyond any real legal document
 
+# What the Drafter's contentEditable can legitimately produce, derived from its
+# 21 execCommand calls (DocAutomationPage.jsx) rather than guessed:
+#
+#   bold/italic/underline      b i u
+#   strikeThrough              s strike
+#   super/subscript            sup sub
+#   fontName / fontSize        font[face,size]
+#   justify*                   align= on the block element
+#   insert(Un)OrderedList      ul ol li
+#   formatBlock h1|h2|h3       h1 h2 h3
+#   formatBlock blockquote     blockquote
+#   insertHorizontalRule       hr
+#   typing / Enter / paste     div p br span
+#
+# `style` is deliberately NOT allowed. nh3 does not filter CSS, so a permitted
+# style attribute would still admit url(...) — a data-exfil vector sitting
+# inside an otherwise sanitised legal draft. The editor is set to
+# styleWithCSS=false so it emits these tags and attributes instead of inline
+# CSS; pasted Word styling degrades to plain formatting rather than being
+# trusted.
+_DRAFT_ALLOWED_TAGS = {
+    "p", "div", "br", "span",
+    "b", "strong", "i", "em", "u", "s", "strike", "sub", "sup", "font",
+    "ul", "ol", "li", "h1", "h2", "h3", "blockquote", "hr",
+}
+_DRAFT_ALLOWED_ATTRS = {
+    "font": {"face", "size", "color"},
+    "*": {"align"},
+}
+
+
+def _clean_draft_html(raw: str) -> str:
+    """Strip scripts, handlers and unknown markup from lawyer-authored draft HTML.
+
+    Applied on WRITE and on READ. Write protects everything stored from now on;
+    read covers any row written before this landed, so no migration is needed.
+    The draft is echoed back into a contentEditable via dangerouslySetInnerHTML,
+    so an unsanitised draft executes in whoever opens it — including a different
+    user than the one who wrote it.
+    """
+    if not raw:
+        return raw
+    return nh3.clean(raw, tags=_DRAFT_ALLOWED_TAGS, attributes=_DRAFT_ALLOWED_ATTRS)
+
 
 def _draft_out(draft: dict) -> dict:
     draft = dict(draft)
     draft["id"] = draft.pop("_id")
+    # Rows written before sanitisation existed are cleaned on the way out.
+    draft["content"] = _clean_draft_html(draft.get("content", ""))
     return draft
 
 
@@ -766,6 +814,11 @@ async def save_draft(
         raise AppValidationError("Draft is empty — nothing to save")
     if len(content) > _MAX_DRAFT_CONTENT:
         raise AppValidationError("Draft is too large to save")
+
+    # Sanitise AFTER the size check: the cap is on what the client sent, so a
+    # huge payload cannot be smuggled past it by relying on the strip to shrink
+    # it below the limit.
+    content = _clean_draft_html(content)
 
     now = datetime.now(timezone.utc)
     if draft_id:

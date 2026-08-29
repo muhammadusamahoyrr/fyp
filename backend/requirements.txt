@@ -35,6 +35,12 @@ jinja2==3.1.4
 docxtpl==0.18.0
 reportlab==4.2.5
 
+# HTML sanitisation for lawyer-authored editor drafts. Rust (ammonia) — bleach
+# is deprecated and unmaintained. Applied in document_service on write AND read;
+# without it, draft HTML round-trips unfiltered into another user's browser via
+# dangerouslySetInnerHTML in the Drafter page.
+nh3==0.3.7
+
 # NLU intent pipeline (ONNX-based embeddings — no torch dependency)
 fastembed==0.4.2
 

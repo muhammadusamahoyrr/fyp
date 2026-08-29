@@ -279,6 +279,17 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
     useEffect(() => { aiEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [aiMessages, aiLoading]);
     useEffect(() => { setWordCount((editorRef.current?.innerText || "").trim().split(/\s+/).filter(Boolean).length); }, []);
 
+    // Emit tag-based formatting (<b>, <font face>, align=) rather than inline
+    // CSS. The server sanitises draft HTML against an allowlist that permits
+    // those and drops `style` -- nh3 does not filter CSS, so a permitted style
+    // attribute would still admit url(...) inside an otherwise clean draft.
+    // Without this, browsers that default to styleWithCSS would emit
+    // <span style="font-weight:bold"> and the lawyer's formatting would be
+    // silently stripped on save.
+    useEffect(() => {
+        try { document.execCommand("styleWithCSS", false, false); } catch { /* not supported */ }
+    }, []);
+
     const exec = (cmd, val = null) => { editorRef.current?.focus(); document.execCommand(cmd, false, val); };
     const queryState = (cmd) => document.queryCommandState(cmd);
 
