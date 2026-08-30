@@ -126,6 +126,14 @@ def check_bail_eligibility(law: str, section: str, arrested: bool | None = None)
     present both and let the user pick the one that matches their situation.
     If `found` is False the offence is not in the reference list — say so plainly
     rather than guessing.
+
+    A stated `law` is BINDING: this never answers from a different statute that
+    happens to use the same section number. When `found` is False the result may
+    carry `section_found_under`, listing the Act(s) that DO have that section.
+    Report that as a question about which statute the FIR cites — "section 20 is
+    not a Penal Code offence here; it exists under PECA 2016" — and never as a
+    bail determination, because no classification has been made for the offence
+    the user actually asked about.
     """
     try:
         # arrested known → the service's normal single-route answer.

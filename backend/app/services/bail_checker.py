@@ -271,12 +271,78 @@ def _public(o: dict) -> dict:
     return {k: v for k, v in o.items() if k != "aliases"} | {"id": f"{o['law']}:{o['section']}"}
 
 
+# How a caller names a statute, folded to how the table stores it.
+#
+# The table stores "CNSA 1997", "ATA 1997", "PECA 2016" but the LLM tool
+# docstring tells the model to pass bare "CNSA", "ATA", "PECA" — so an exact
+# comparison missed every non-PPC offence. That miss was invisible because the
+# section-only fallback below caught it and returned the right answer for the
+# wrong reason, which is also how the fallback came to return the WRONG answer
+# for a mismatched statute. Normalising here is what makes it safe to restrict
+# the fallback.
+_LAW_ALIASES = {
+    "PPC":  "PPC",
+    "PAKISTAN PENAL CODE": "PPC",
+    "PENAL CODE": "PPC",
+    "CNSA": "CNSA 1997",
+    "CONTROL OF NARCOTIC SUBSTANCES ACT": "CNSA 1997",
+    "PECA": "PECA 2016",
+    "PREVENTION OF ELECTRONIC CRIMES ACT": "PECA 2016",
+    "ATA":  "ATA 1997",
+    "ANTI-TERRORISM ACT": "ATA 1997",
+    "ANTI TERRORISM ACT": "ATA 1997",
+}
+
+_YEAR_SUFFIX = re.compile(r"[,\s]+(1[89]|20)\d{2}$")
+
+
+def _norm_law(law: str) -> str:
+    """Fold a statute name to the table's canonical form. "" when unspecified.
+
+    Year-insensitive: "CNSA", "CNSA 1997" and "cnsa, 1997" are one statute. The
+    year is dropped and then re-attached from the alias table, so the canonical
+    value always matches what OFFENCES stores.
+    """
+    name = " ".join((law or "").upper().split())
+    if not name:
+        return ""
+    if name in _LAW_ALIASES:
+        return _LAW_ALIASES[name]
+    bare = _YEAR_SUFFIX.sub("", name).strip()
+    return _LAW_ALIASES.get(bare, bare)
+
+
+def sections_matching(section: str) -> list[dict]:
+    """Every offence carrying this section number, whatever the statute.
+
+    Used to turn a wrong-statute lookup into a useful correction rather than a
+    flat "not found": the section usually DOES exist, under another Act.
+    """
+    sn = _norm(section)
+    return [o for o in OFFENCES if _norm(o["section"]) == sn]
+
+
 def _find(law: str, section: str) -> dict | None:
-    ln, sn = (law or "").strip().lower(), _norm(section)
+    """Look up one offence. A stated statute is BINDING.
+
+    The section-only pass used to run unconditionally and ignored `law`
+    entirely, so it answered from whatever statute happened to carry that
+    number. check("PPC", "20") returned PECA 2016 s.20 — bailable, "a matter of
+    right" — for a query about the Penal Code, with found=True and no echo of
+    what was asked. A wrong-statute bail answer is the most directly harmful
+    output this service can produce.
+
+    The fallback is kept for the case it was actually for: no statute given at
+    all, where a bare section number is all the caller has.
+    """
+    ln, sn = _norm_law(law), _norm(section)
     for o in OFFENCES:
-        if o["law"].lower() == ln and _norm(o["section"]) == sn:
+        if _norm_law(o["law"]) == ln and _norm(o["section"]) == sn:
             return o
-    # section-only match
+    if ln:
+        # A statute was named and it does not carry this section. Saying so is
+        # the correct answer; substituting a different Act's offence is not.
+        return None
     for o in OFFENCES:
         if _norm(o["section"]) == sn:
             return o
@@ -323,12 +389,36 @@ def bail_guidance(bailable, arrested: bool, prohibitory: bool = False) -> dict:
 def check(law: str, section: str, arrested: bool = True) -> dict:
     o = _find(law, section)
     if not o:
+        # The section usually DOES exist, under a different Act — which is
+        # exactly the confusion that used to be resolved by silently answering
+        # from that other Act. Name the alternatives instead, and let the user
+        # confirm which statute the FIR actually cites. This never asserts
+        # bailability for the mismatched offence.
+        elsewhere = sections_matching(section) if _norm_law(law) else []
+        steps = ["Confirm the exact section against the Second Schedule of the CrPC 1898, or consult a lawyer."]
+        summary = "This offence is not in the reference list."
+        if elsewhere:
+            others = ", ".join(f"{x['law']} s.{x['section']}" for x in elsewhere)
+            summary = (
+                f"Section {section} is not in the reference list under "
+                f"{_norm_law(law)}. It does appear under {others}."
+            )
+            steps.insert(0, (
+                "Check which statute the FIR actually cites — the sections written on "
+                "the FIR govern, and this section number belongs to a different Act here."
+            ))
         return {
             "found": False,
             "query": {"law": law, "section": section},
+            # Named so a caller cannot mistake it for a determination about the
+            # queried offence. It is a pointer, not a classification.
+            "section_found_under": [
+                {"law": x["law"], "section": x["section"], "title": x["title"]}
+                for x in elsewhere
+            ],
             "guidance": {
-                "summary": "This offence is not in the reference list.",
-                "steps": ["Confirm the exact section against the Second Schedule of the CrPC 1898, or consult a lawyer."],
+                "summary": summary,
+                "steps": steps,
             },
             "general_rule": general_rule(None),
             "legal_basis": _SS,
