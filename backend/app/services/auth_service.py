@@ -11,6 +11,7 @@ from app.core.exceptions import (
     ServiceUnavailableError,
 )
 from app.core.security import (
+    DUMMY_PASSWORD_HASH,
     TOKENS_VALID_FROM,
     password_change_cutoff,
     create_access_token,
@@ -80,10 +81,27 @@ async def register(data: RegisterRequest) -> dict:
 
 async def login(email: str, password: str) -> dict:
     user = await user_repo.find_by_email(email)
-    if not user or not verify_password(password, user["password_hash"]):
+
+    # Same work whatever the address turns out to be. Guarding this behind
+    # `if user` skipped bcrypt entirely for an unknown address, so the response
+    # came back in microseconds instead of ~250ms and the timing said what the
+    # message no longer does. Always exactly one checkpw, against a real hash.
+    password_ok = verify_password(
+        password, user["password_hash"] if user else DUMMY_PASSWORD_HASH
+    )
+
+    # One message for all three failures: unknown address, wrong password, and
+    # deactivated account. A distinct "Account deactivated" confirmed BOTH that
+    # the address is registered and that the password supplied was correct —
+    # a stronger disclosure than plain enumeration, handed out before any
+    # authenticated session exists. forgot_password is already careful about
+    # this; login was not.
+    #
+    # A deactivated user is told nothing here on purpose. They cannot act on it
+    # anyway, and support can say so through a channel that knows who it is
+    # talking to.
+    if not user or not password_ok or not user.get("is_active"):
         raise AuthError("Invalid email or password")
-    if not user.get("is_active"):
-        raise AuthError("Account deactivated")
 
     access_token = create_access_token(user["_id"], user["role"])
     refresh_token = create_refresh_token(user["_id"])

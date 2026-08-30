@@ -25,7 +25,28 @@ def hash_password(plain: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+    """Constant-work password check. False — never an exception — on a bad hash.
+
+    `checkpw` raises ValueError on anything that is not a valid bcrypt hash, and
+    close_account deliberately stores the sentinel "!closed" so a closed account
+    has no usable login. That turned a login attempt against a closed account
+    into a 500 rather than a refusal. It matters more now that every login runs
+    this exactly once (see DUMMY_PASSWORD_HASH).
+    """
+    try:
+        return bcrypt.checkpw(plain.encode(), (hashed or "").encode())
+    except (ValueError, TypeError):
+        return False
+
+
+# A real bcrypt hash of a value nobody holds, compared against when the account
+# does not exist. Without it, an unknown address skipped bcrypt entirely and
+# returned in microseconds while a known address took ~250ms — a timing oracle
+# for "is this email registered", available to an unauthenticated caller and
+# unaffected by making the error message uniform.
+#
+# Computed once at import: one bcrypt at process start, not one per login.
+DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 
 
 # --- CNIC encryption ---

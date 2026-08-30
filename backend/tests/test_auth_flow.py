@@ -146,6 +146,83 @@ async def test_the_role_used_for_gating_comes_from_the_db_not_the_token(mongo):
 # ── login: one message for every failure ─────────────────────────────────────
 
 @pytest.mark.integration
+async def test_a_deactivated_account_is_indistinguishable_from_bad_credentials(mongo):
+    """"Account deactivated" on a CORRECT password confirmed both that the
+    address exists and that the password was right, before any session existed."""
+    from app.db.collections import get_users_col
+    from app.services import auth_service
+
+    uid, email = "AUTH-OFF", "off@x.test"
+    await get_users_col().insert_one(
+        {"_id": uid, "role": "client", "email": email,
+         "password_hash": hash_password("Str0ngPass1"), "is_active": False})
+    try:
+        with pytest.raises(AuthError) as right_password:
+            await auth_service.login(email, "Str0ngPass1")
+        with pytest.raises(AuthError) as wrong_password:
+            await auth_service.login(email, "totally-wrong")
+        with pytest.raises(AuthError) as no_such_user:
+            await auth_service.login("nobody@x.test", "whatever")
+
+        assert str(right_password.value) == str(wrong_password.value) == str(no_such_user.value)
+        assert "deactivat" not in str(right_password.value).lower()
+    finally:
+        await get_users_col().delete_one({"_id": uid})
+
+
+@pytest.mark.integration
+async def test_both_login_paths_do_the_same_bcrypt_work(mongo, monkeypatch):
+    """Uniform messages do not close the leak on their own: an unknown address
+    used to skip bcrypt entirely, returning in microseconds against ~250ms for a
+    known one. Timing is asserted by COUNTING checkpw calls rather than by the
+    clock, which would be flaky on shared CI.
+    """
+    import app.core.security as security
+    from app.db.collections import get_users_col
+    from app.services import auth_service
+
+    calls: list[int] = []
+    real = security.bcrypt.checkpw
+
+    def counting_checkpw(pw, hashed):
+        calls.append(1)
+        return real(pw, hashed)
+
+    monkeypatch.setattr(security.bcrypt, "checkpw", counting_checkpw)
+
+    uid, email = "AUTH-TIMING", "timing@x.test"
+    await get_users_col().insert_one(
+        {"_id": uid, "role": "client", "email": email,
+         "password_hash": hash_password("Str0ngPass1"), "is_active": True})
+    try:
+        calls.clear()
+        with pytest.raises(AuthError):
+            await auth_service.login("no-such-address@x.test", "whatever")
+        unknown_address = len(calls)
+
+        calls.clear()
+        with pytest.raises(AuthError):
+            await auth_service.login(email, "wrong-password")
+        known_address = len(calls)
+
+        assert unknown_address == known_address == 1, (
+            f"unknown={unknown_address} known={known_address} — the work done "
+            "must not reveal whether the address is registered")
+    finally:
+        await get_users_col().delete_one({"_id": uid})
+
+
+def test_a_malformed_stored_hash_is_refused_not_raised():
+    """close_account stores the sentinel "!closed" so a closed account has no
+    usable login. bcrypt raises ValueError on it, which turned a login attempt
+    into a 500 — and every login now runs checkpw exactly once, so this is on
+    the main path rather than an edge."""
+    assert verify_password("anything", "!closed") is False
+    assert verify_password("anything", "") is False
+    assert verify_password("anything", None) is False
+
+
+@pytest.mark.integration
 async def test_an_active_user_can_still_log_in(mongo):
     """The message fix must not have made login refuse everyone."""
     from app.db.collections import get_users_col
