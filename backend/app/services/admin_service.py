@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from app.core.constants import NotificationType
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
-from app.core.security import hash_password
+from app.core.security import TOKENS_VALID_FROM, hash_password, password_change_cutoff
 from app.db.collections import (
     get_agreements_col,
     get_cases_col,
@@ -23,8 +23,24 @@ user_repo = UserRepository()
 case_repo = CaseRepository()
 
 
+_SECRET_TOP_LEVEL = ("password_hash", "cnic_encrypted")
+
+
 def _safe_user(u: dict) -> dict:
-    return {k: v for k, v in u.items() if k not in ("password_hash", "cnic_encrypted")}
+    """Admin-facing view of a user document.
+
+    Also drops lawyer_profile.specialization_embedding — 384 floats of internal
+    matching state that user_service._sanitize already strips for exactly this
+    reason. UserProfileResponse passes lawyer_profile through as a raw dict, so
+    anything left in the sub-document reaches the client.
+    """
+    out = {k: v for k, v in u.items() if k not in _SECRET_TOP_LEVEL}
+    lp = out.get("lawyer_profile")
+    if isinstance(lp, dict) and "specialization_embedding" in lp:
+        lp = dict(lp)
+        lp.pop("specialization_embedding", None)
+        out["lawyer_profile"] = lp
+    return out
 
 
 async def list_pending_kyc() -> list[dict]:
@@ -36,7 +52,10 @@ async def list_pending_kyc() -> list[dict]:
             "is_active": True,
         }
     )
-    return [{k: v for k, v in u.items() if k not in ("password_hash", "cnic_encrypted")} for u in users]
+    # _safe_user rather than an inline copy of it — the duplicate here is how
+    # this endpoint would have kept leaking the embedding after the shared
+    # helper was fixed.
+    return [_safe_user(u) for u in users]
 
 
 async def process_kyc(lawyer_id: str, approved: bool, reason: str | None) -> None:
@@ -192,7 +211,17 @@ async def reset_user_password(user_id: str, new_password: str) -> None:
         raise NotFoundError("User")
     await user_repo.update_one(
         {"_id": user_id},
-        {"$set": {"password_hash": hash_password(new_password), "updated_at": datetime.now(timezone.utc)}},
+        {"$set": {
+            "password_hash": hash_password(new_password),
+            # The THIRD password-change path, and the one most likely to be
+            # incident response: an admin resets a password precisely when an
+            # account is suspected compromised. Without this the attacker's
+            # refresh token outlived the reset by up to 7 days.
+            # auth_service.reset_password and user_service.change_password
+            # already do this; leaving one of the three out is the trap.
+            TOKENS_VALID_FROM: password_change_cutoff(),
+            "updated_at": datetime.now(timezone.utc),
+        }},
     )
 
 
