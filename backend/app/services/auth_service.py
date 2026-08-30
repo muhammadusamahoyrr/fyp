@@ -158,7 +158,14 @@ async def reset_password(token: str, new_password: str) -> None:
     if not record:
         raise AuthError("Invalid or expired reset token")
 
+    # Motor is not tz_aware, so a datetime written as UTC-aware comes back
+    # NAIVE. Subtracting it from an aware now() raised TypeError on every single
+    # reset attempt — the endpoint 500'd instead of resetting anything, and the
+    # expiry it was trying to enforce never ran. The TTL index on this
+    # collection was the only thing actually expiring these tokens.
     created_at = record.get("created_at")
+    if created_at is not None and created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
     if created_at and (datetime.now(timezone.utc) - created_at) > timedelta(hours=1):
         await get_password_reset_col().delete_one({"token": token})
         raise AuthError("Invalid or expired reset token")
