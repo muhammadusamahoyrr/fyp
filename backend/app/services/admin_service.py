@@ -2,7 +2,7 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from app.core.constants import NotificationType
+from app.core.constants import KycStatus, NotificationType
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.core.security import TOKENS_VALID_FROM, hash_password, password_change_cutoff
 from app.db.collections import (
@@ -98,6 +98,18 @@ async def list_pending_kyc() -> list[dict]:
             "lawyer_profile.kyc_verified": False,
             "lawyer_profile.bar_number": {"$ne": None},
             "is_active": True,
+            # Rejected lawyers are NOT pending. Previously nothing distinguished
+            # them, so a rejection reappeared in this queue on every load and was
+            # re-reviewed forever with no sign a decision had been taken.
+            #
+            # A MISSING kyc_status counts as pending: documents written before
+            # this field existed are genuinely awaiting review, and excluding
+            # them would silently empty the queue on deploy.
+            "$or": [
+                {"lawyer_profile.kyc_status": KycStatus.PENDING.value},
+                {"lawyer_profile.kyc_status": {"$exists": False}},
+                {"lawyer_profile.kyc_status": None},
+            ],
         }
     )
     # _safe_user rather than an inline copy of it — the duplicate here is how
@@ -118,6 +130,7 @@ async def process_kyc(lawyer_id: str, approved: bool, reason: str | None,
             {
                 "$set": {
                     "lawyer_profile.kyc_verified": True,
+                    "lawyer_profile.kyc_status": KycStatus.APPROVED.value,
                     "lawyer_profile.kyc_rejection_reason": None,
                     "updated_at": datetime.now(timezone.utc),
                 }
@@ -142,6 +155,7 @@ async def process_kyc(lawyer_id: str, approved: bool, reason: str | None,
             {
                 "$set": {
                     "lawyer_profile.kyc_verified": False,
+                    "lawyer_profile.kyc_status": KycStatus.REJECTED.value,
                     "lawyer_profile.kyc_rejection_reason": reason or "Not specified",
                     "updated_at": datetime.now(timezone.utc),
                 }
@@ -168,8 +182,18 @@ async def get_analytics() -> dict:
     total_cases = await cases_col.count_documents({})
     total_agreements = await get_agreements_col().count_documents({})
     total_documents = await get_documents_col().count_documents({})
+    # Counts what the QUEUE shows. Using kyc_verified alone would include
+    # rejected lawyers, so the dashboard number and the review list disagreed.
     pending_kyc = await users_col.count_documents(
-        {"role": "lawyer", "lawyer_profile.kyc_verified": False}
+        {
+            "role": "lawyer",
+            "lawyer_profile.kyc_verified": False,
+            "$or": [
+                {"lawyer_profile.kyc_status": KycStatus.PENDING.value},
+                {"lawyer_profile.kyc_status": {"$exists": False}},
+                {"lawyer_profile.kyc_status": None},
+            ],
+        }
     )
 
     users_by_role: dict[str, int] = {}
@@ -236,6 +260,7 @@ async def create_user(full_name: str, email: str, role: str, password: str,
         "avatar_url": None,
         "is_active": True,
         "lawyer_profile": {"bar_number": None, "specializations": [], "kyc_verified": False,
+                           "kyc_status": KycStatus.PENDING.value,
                            "rating": 0.0, "total_reviews": 0, "availability": True, "bio": None,
                            "experience_years": 0, "hourly_rate": None} if role == "lawyer" else None,
         "created_at": datetime.now(timezone.utc),
@@ -304,10 +329,16 @@ async def delete_user(user_id: str, actor: dict | None = None) -> None:
             "You cannot delete your own admin account. Ask another admin to do it."
         )
     await _assert_not_last_admin(user_id)
-    await user_repo.update_one(
-        {"_id": user_id},
-        {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}},
-    )
+
+    # ONE deletion semantic. This used to flip `is_active` to False and nothing
+    # else: no obligation check, so an admin could strand a client's lawyer
+    # mid-engagement or a lawyer's clients; and no anonymisation, so a route
+    # named DELETE reported success while every personal detail stayed in the
+    # document. It now takes the same path as a user closing their own account
+    # — refuse while engagements or payments are open, then erase.
+    from app.services.user_service import _close_account_record
+
+    await _close_account_record(user, reason="closed_by_admin")
     await _audit(actor, "user.deleted", user_id, {"role": user.get("role")})
 
 

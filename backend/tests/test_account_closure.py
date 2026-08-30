@@ -116,9 +116,22 @@ class TestItActuallyErases:
 
     async def test_existing_sessions_are_revoked(self, acct):
         """Refresh tokens outlive the closure otherwise — a closed account would
-        stay reachable from any device already signed in."""
+        stay reachable from any device already signed in.
+
+        This used to assert that a row was inserted into refresh_blocklist. That
+        insert never revoked anything: it stored {user_id, reason}, and
+        auth_service.refresh looks tokens up BY TOKEN VALUE, so the row matched
+        nothing. The account was only unreachable because is_active went False —
+        the blocklist write was dead weight that read like a protection, and
+        this test was pinning it.
+
+        The assertion now names the mechanism that works, and which also covers
+        access tokens rather than refresh alone.
+        """
+        from app.core.security import TOKENS_VALID_FROM
+
         await us.close_account("U1", "correct")
-        assert acct["blocked"] is True
+        assert acct["update"][TOKENS_VALID_FROM] is not None
 
     async def test_a_lawyer_is_delisted(self, acct):
         acct["user"]["role"] = "lawyer"

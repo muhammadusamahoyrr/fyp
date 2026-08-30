@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
+from app.core.constants import KycStatus
 from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
 from app.core.security import (
     TOKENS_VALID_FROM,
@@ -84,6 +85,48 @@ async def update_lawyer_profile(user_id: str, updates: dict) -> dict:
     return await get_profile(user_id)
 
 
+async def resubmit_kyc(user_id: str) -> dict:
+    """A rejected lawyer asks to be reviewed again.
+
+    Rejection is terminal by design — otherwise a rejected profile reappears in
+    the admin queue on every load and is re-reviewed forever with no record that
+    a decision was taken. This is the ONLY transition back to pending, and it is
+    deliberately an explicit action rather than a side effect of editing the
+    profile: an unrelated bio change should not silently re-open a verification
+    the admin already refused.
+    """
+    user = await user_repo.find_by_id(user_id)
+    if not user or user.get("role") != "lawyer":
+        raise ForbiddenError("Only lawyers have a KYC submission")
+
+    profile = user.get("lawyer_profile") or {}
+    if profile.get("kyc_verified"):
+        raise AppValidationError("Your profile is already verified.")
+    if profile.get("kyc_status") != KycStatus.REJECTED.value:
+        raise AppValidationError(
+            "Your verification is already awaiting review — there is nothing to resubmit."
+        )
+    if not profile.get("bar_number"):
+        raise AppValidationError(
+            "Add your bar number before resubmitting, or there is nothing for an "
+            "admin to verify."
+        )
+
+    await user_repo.update_one(
+        {"_id": user_id},
+        {"$set": {
+            "lawyer_profile.kyc_status": KycStatus.PENDING.value,
+            # The previous reason is cleared: it described the submission being
+            # replaced, and leaving it would show a rejection note against a
+            # profile that is once again pending.
+            "lawyer_profile.kyc_rejection_reason": None,
+            "updated_at": datetime.now(timezone.utc),
+        }},
+    )
+    logger.info("kyc resubmitted by lawyer %s", user_id)
+    return await get_profile(user_id)
+
+
 async def get_lawyer_by_id(lawyer_id: str) -> dict:
     user = await user_repo.find_by_id(lawyer_id)
     if not user or user.get("role") != "lawyer":
@@ -160,10 +203,27 @@ async def close_account(user_id: str, password: str) -> dict:
     if not verify_password(password, user.get("password_hash", "")):
         raise ForbiddenError("Password is incorrect")
 
+    return await _close_account_record(user, reason="self_service")
+
+
+async def _close_account_record(user: dict, *, reason: str) -> dict:
+    """Obligation check + anonymisation. The ONE closure semantic.
+
+    Shared with admin_service.delete_user, which previously only flipped
+    `is_active` to False: no obligation check, so an admin could strand a
+    client's lawyer mid-engagement or a lawyer's clients, and no anonymisation,
+    so a route named DELETE reported success while every personal detail stayed
+    in the document.
+
+    `reason` distinguishes who ended it — the erasure is identical either way,
+    but "closed by an administrator" and "closed by the user" are not the same
+    fact about an account.
+    """
+    user_id = user["_id"]
     blockers = await _open_obligations(user_id, user.get("role", "client"))
     if blockers:
         raise AppValidationError(
-            "Your account cannot be closed yet because " + "; ".join(blockers) +
+            "This account cannot be closed yet because " + "; ".join(blockers) +
             ". Settle or cancel these first, then try again."
         )
 
@@ -174,6 +234,11 @@ async def close_account(user_id: str, password: str) -> dict:
         "is_active":     False,
         "is_closed":     True,
         "closed_at":     now,
+        "closed_reason": reason,
+        # Written in the SAME update as the erasure, not a follow-up one: a
+        # crash between two writes would leave an anonymised account with live
+        # sessions, which is the worst of both states.
+        TOKENS_VALID_FROM: password_change_cutoff(),
         "full_name":     "Closed account",
         "email":         f"closed+{user_id}@deleted.invalid",
         "phone":         None,
@@ -182,6 +247,15 @@ async def close_account(user_id: str, password: str) -> dict:
         # a null here would break verify_password rather than simply refuse it.
         "password_hash": "!closed",
         "updated_at":    now,
+        # Revoked in the SAME write as the erasure. As two updates, a crash
+        # between them left an anonymised account with live sessions.
+        #
+        # This replaces a row inserted into refresh_blocklist as
+        # {user_id, reason} — which refresh() never matched, because it looks
+        # tokens up BY TOKEN VALUE. That row was dead weight that read like a
+        # protection; the account was in fact only unreachable because
+        # is_active went False. The cutoff covers access tokens too.
+        TOKENS_VALID_FROM: password_change_cutoff(),
     }
     # cnic_encrypted is UNSET, not nulled. Its index is unique+sparse, and sparse
     # skips only MISSING fields — an explicit null is indexed, so the second
@@ -202,18 +276,7 @@ async def close_account(user_id: str, password: str) -> dict:
 
     await user_repo.update_one({"_id": user_id}, {"$set": updates, "$unset": unsets})
 
-    # Existing refresh tokens keep working until they expire unless they are
-    # revoked, so a closed account would stay reachable from any device already
-    # signed in.
-    try:
-        from app.db.collections import get_refresh_blocklist_col
-        await get_refresh_blocklist_col().insert_one(
-            {"user_id": user_id, "reason": "account_closed", "created_at": now}
-        )
-    except Exception:
-        logger.exception("could not blocklist tokens for closed account %s", user_id)
-
-    logger.info("account closed: %s (role=%s)", user_id, user.get("role"))
+    logger.info("account closed: %s (role=%s, reason=%s)", user_id, user.get("role"), reason)
     return {
         "closed": True,
         "closed_at": now,

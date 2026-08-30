@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from pymongo.errors import DuplicateKeyError
 
+from app.core.constants import KycStatus
 from app.core.exceptions import (
     AppValidationError,
     AuthError,
@@ -57,6 +58,7 @@ async def register(data: RegisterRequest) -> dict:
             "bar_number": None,
             "specializations": [],
             "kyc_verified": False,
+            "kyc_status": KycStatus.PENDING.value,
             "kyc_rejection_reason": None,
             "rating": 0.0,
             "total_reviews": 0,

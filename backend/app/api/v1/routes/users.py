@@ -72,6 +72,21 @@ async def update_lawyer_profile(
     return await user_service.update_lawyer_profile(current_user["_id"], updates)
 
 
+@router.post("/me/kyc/resubmit", response_model=UserProfileResponse)
+async def resubmit_kyc(
+    current_user: dict = Depends(require_lawyer),  # lawyers only
+):
+    """Ask for verification to be reviewed again after a rejection.
+
+    Rejection is terminal on its own — otherwise a rejected profile reappears in
+    the admin queue forever. This is the only way back to pending, and it is a
+    deliberate action rather than a side effect of editing the profile.
+    """
+    return await user_service.resubmit_kyc(current_user["_id"])
+
+
+# Registered after the /me/* routes so the bare path parameter cannot swallow
+# them.
 @router.get("/{user_id}", response_model=UserProfileResponse)
 async def get_user(
     user_id: str,

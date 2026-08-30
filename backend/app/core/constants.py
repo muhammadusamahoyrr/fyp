@@ -7,6 +7,23 @@ class UserRole(str, Enum):
     ADMIN = "admin"
 
 
+class KycStatus(str, Enum):
+    """Where a lawyer's verification actually stands.
+
+    `kyc_verified: bool` alone could not express this. A REJECTED lawyer has
+    kyc_verified False and so matched the pending-queue filter exactly as an
+    unreviewed one did — rejections silently looped back into the queue forever
+    and were re-reviewed with no record that a decision had already been made.
+
+    REJECTED is terminal until the lawyer takes an explicit resubmit action,
+    which is the only transition back to PENDING. `kyc_verified` stays as the
+    authoritative gate on receiving cases; this says how it got there.
+    """
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class CaseType(str, Enum):
     CIVIL = "civil"
     CRIMINAL = "criminal"
