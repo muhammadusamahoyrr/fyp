@@ -11,10 +11,13 @@ from app.core.exceptions import (
     ServiceUnavailableError,
 )
 from app.core.security import (
+    TOKENS_VALID_FROM,
+    password_change_cutoff,
     create_access_token,
     create_refresh_token,
     decode_token,
     hash_password,
+    token_predates_password_change,
     verify_password,
 )
 from app.db.collections import get_password_reset_col, get_refresh_blocklist_col
@@ -105,6 +108,11 @@ async def refresh(refresh_token: str) -> dict:
     if not user or not user.get("is_active"):
         raise AuthError("User not found")
 
+    # Issued before the last password change — the reset that ended this session
+    # may well have been performed because this token was stolen.
+    if token_predates_password_change(payload, user):
+        raise AuthError("Session ended by a password change — please sign in again")
+
     # Rotate: blocklist old token, issue fresh pair
     await get_refresh_blocklist_col().insert_one(
         {"token": refresh_token, "created_at": datetime.now(timezone.utc)}
@@ -179,6 +187,10 @@ async def reset_password(token: str, new_password: str) -> None:
         {
             "$set": {
                 "password_hash": hash_password(new_password),
+                # End every existing session. A reset is very often triggered
+                # BY a compromise, and without this the attacker's refresh
+                # token stayed valid for up to 7 days afterwards.
+                TOKENS_VALID_FROM: password_change_cutoff(),
                 "updated_at": datetime.now(timezone.utc),
             }
         },

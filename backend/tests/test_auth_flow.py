@@ -4,11 +4,20 @@
 had no test referencing it, directly or through HTTP. `dependencies.py` is where
 every route's authorization actually happens and was in the same position.
 
+Two defects found while reading it are fixed and pinned here:
+
+  * a password change did not end existing sessions. Refresh tokens live 7 days
+    and access tokens 60 minutes, so a reset performed BECAUSE of a compromise
+    left the attacker's session working afterwards. Revocation is by timestamp
+    (`tokens_valid_from`) because nothing records which tokens are outstanding —
+    the blocklist holds only tokens already revoked, so enumeration is
+    impossible;
+  * login answered "Account deactivated" on a correct password for a disabled
+    account, which confirmed both that the address was registered AND that the
+    password was right, to an unauthenticated caller.
+
 Ordered by blast radius: role gating and the deactivation path first, since
 those decide what every route in the app will let a caller do.
-
-The reset_password tests are the ones that found the tz-aware crash fixed in
-this commit — the endpoint had never completed a single reset.
 
 Token-contract and helper tests are pure. Anything asserting on stored state
 uses the `mongo` fixture and is marked integration.
@@ -21,10 +30,12 @@ import pytest
 from app.core.constants import UserRole
 from app.core.exceptions import AuthError, ForbiddenError
 from app.core.security import (
+    TOKENS_VALID_FROM,
     create_access_token,
     create_refresh_token,
     decode_token,
     hash_password,
+    token_predates_password_change,
     verify_password,
 )
 
@@ -229,6 +240,145 @@ async def test_a_reset_token_is_single_use(mongo):
 
 # ── a password change ends every session ─────────────────────────────────────
 
+@pytest.mark.integration
+async def test_a_refresh_token_issued_before_a_reset_is_rejected(mongo):
+    """THE fix. Refresh tokens live 7 days; a reset is very often triggered by a
+    compromise, and the attacker's token used to survive it."""
+    from app.db.collections import get_password_reset_col, get_users_col
+    from app.services import auth_service
+
+    uid, email = "AUTH-RESET", "reset@x.test"
+    await get_users_col().insert_one(
+        {"_id": uid, "role": "client", "email": email,
+         "password_hash": hash_password("OldPassw0rd"), "is_active": True})
+    await get_password_reset_col().insert_one(
+        {"token": "RESET-TOK", "email": email,
+         "created_at": datetime.now(timezone.utc)})
+    try:
+        # A token stolen five minutes ago, which is the real scenario. Built
+        # with an explicit past `iat` rather than by logging in, for two
+        # reasons: logging in and resetting inside the same wall-clock second
+        # lands on the boundary the design deliberately excludes (see
+        # test_a_same_second_token_survives_the_change), and rotating it first
+        # would blocklist it — so the assertion would pass even with the
+        # revocation removed, proving nothing.
+        stolen = _backdated_refresh_token(uid, minutes_ago=5)
+        assert await auth_service.refresh(stolen), "should work before the reset"
+
+        await auth_service.reset_password("RESET-TOK", "BrandNewPass1")
+
+        with pytest.raises(AuthError):
+            await auth_service.refresh(_backdated_refresh_token(uid, minutes_ago=5))
+    finally:
+        await get_users_col().delete_one({"_id": uid})
+        await get_password_reset_col().delete_many({"email": email})
+
+
+@pytest.mark.integration
+async def test_an_access_token_issued_before_a_reset_is_rejected(mongo):
+    """Access tokens live 60 minutes, so refresh-only revocation would leave the
+    attacker an hour of authenticated requests."""
+    from app.db.collections import get_users_col
+    from app.dependencies import get_current_user
+
+    uid = "AUTH-RESET-ACC"
+    await get_users_col().insert_one(
+        {"_id": uid, "role": "client", "email": "ra@x.test",
+         "password_hash": hash_password("OldPassw0rd"), "is_active": True})
+    try:
+        creds = _FakeCreds(create_access_token(uid, "client"))
+        assert await get_current_user(request=_FakeRequest(), credentials=creds)
+
+        await get_users_col().update_one(
+            {"_id": uid},
+            {"$set": {TOKENS_VALID_FROM: datetime.now(timezone.utc) + timedelta(seconds=5)}})
+
+        with pytest.raises(AuthError):
+            await get_current_user(request=_FakeRequest(), credentials=creds)
+    finally:
+        await get_users_col().delete_one({"_id": uid})
+
+
+@pytest.mark.integration
+async def test_a_self_service_password_change_also_ends_sessions(mongo):
+    """Same exposure as the reset path — a user changing their password because
+    they suspect compromise expects the same thing to happen."""
+    from app.db.collections import get_users_col
+    from app.services import auth_service, user_service
+
+    uid, email = "AUTH-CHANGE", "chg@x.test"
+    await get_users_col().insert_one(
+        {"_id": uid, "role": "client", "email": email,
+         "password_hash": hash_password("OldPassw0rd"), "is_active": True})
+    try:
+        stolen = _backdated_refresh_token(uid, minutes_ago=5)
+        await user_service.change_password(uid, "OldPassw0rd", "BrandNewPass1")
+
+        with pytest.raises(AuthError):
+            await auth_service.refresh(stolen)
+    finally:
+        await get_users_col().delete_one({"_id": uid})
+
+
+@pytest.mark.integration
+async def test_a_token_issued_after_the_reset_still_works(mongo):
+    """Revocation must not lock the legitimate user out of their new session."""
+    from app.db.collections import get_users_col
+    from app.services import auth_service, user_service
+
+    uid, email = "AUTH-AFTER", "after@x.test"
+    await get_users_col().insert_one(
+        {"_id": uid, "role": "client", "email": email,
+         "password_hash": hash_password("OldPassw0rd"), "is_active": True})
+    try:
+        await user_service.change_password(uid, "OldPassw0rd", "BrandNewPass1")
+        fresh = (await auth_service.login(email, "BrandNewPass1"))["refresh_token"]
+
+        assert await auth_service.refresh(fresh)
+    finally:
+        await get_users_col().delete_one({"_id": uid})
+
+
+def test_revocation_helper_is_inert_for_users_who_never_changed_a_password():
+    payload = decode_token(create_refresh_token("u1"))
+
+    assert token_predates_password_change(payload, {}) is False
+    assert token_predates_password_change(payload, {TOKENS_VALID_FROM: None}) is False
+
+
+def test_revocation_helper_accepts_a_naive_datetime():
+    """Motor can hand back a naive datetime; it is always stored as UTC. Treating
+    it as local time would compute the cutoff hours out."""
+    payload = decode_token(create_refresh_token("u1"))
+    future_naive = (datetime.now(timezone.utc) + timedelta(hours=1)).replace(tzinfo=None)
+
+    assert token_predates_password_change(payload, {TOKENS_VALID_FROM: future_naive}) is True
+
+
+def test_a_token_with_no_iat_fails_closed():
+    assert token_predates_password_change(
+        {}, {TOKENS_VALID_FROM: datetime.now(timezone.utc)}) is True
+
+
+def test_a_same_second_token_survives_the_change():
+    """The one gap in this revocation, recorded deliberately rather than left to
+    be rediscovered.
+
+    JWT `iat` is whole seconds and the cutoff is truncated to match, so a token
+    minted in the SAME second as the password change is honoured. The
+    alternative — comparing `<=` — would reject the token from the user's
+    immediate re-login, which is the worse failure and the far likelier event.
+    A genuinely stolen token predates the reset by minutes or hours.
+    """
+    payload = decode_token(create_refresh_token("u1"))
+    same_second = datetime.fromtimestamp(payload["iat"], tz=timezone.utc)
+
+    assert token_predates_password_change(payload, {TOKENS_VALID_FROM: same_second}) is False
+    # one second earlier is revoked, which is the boundary that matters
+    assert token_predates_password_change(
+        payload, {TOKENS_VALID_FROM: same_second + timedelta(seconds=1)}) is True
+
+
 # ── token contract ───────────────────────────────────────────────────────────
 
 def test_an_access_token_cannot_be_used_as_a_refresh_token():
@@ -283,6 +433,27 @@ async def test_a_missing_token_is_refused():
 
 
 # ── refresh rotation ─────────────────────────────────────────────────────────
+
+@pytest.mark.integration
+async def test_refresh_rotates_and_retires_the_old_token(mongo):
+    from app.db.collections import get_refresh_blocklist_col, get_users_col
+    from app.services import auth_service
+
+    uid, email = "AUTH-ROT", "rot@x.test"
+    await get_users_col().insert_one(
+        {"_id": uid, "role": "client", "email": email,
+         "password_hash": hash_password("Str0ngPass1"), "is_active": True})
+    try:
+        first = (await auth_service.login(email, "Str0ngPass1"))["refresh_token"]
+        rotated = await auth_service.refresh(first)
+
+        assert rotated["refresh_token"] != first
+        with pytest.raises(AuthError):
+            await auth_service.refresh(first)
+    finally:
+        await get_users_col().delete_one({"_id": uid})
+        await get_refresh_blocklist_col().delete_many({})
+
 
 @pytest.mark.integration
 async def test_logout_does_not_blocklist_garbage(mongo):

@@ -3,7 +3,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.constants import UserRole
 from app.core.exceptions import AuthError, ForbiddenError
-from app.core.security import decode_token
+from app.core.security import decode_token, token_predates_password_change
 from app.db.collections import get_users_col
 
 bearer = HTTPBearer(auto_error=False)
@@ -33,6 +33,13 @@ async def get_current_user(
     user = await get_users_col().find_one({"_id": user_id, "is_active": True})
     if not user:
         raise AuthError("User not found or deactivated")
+
+    # Access tokens live 60 minutes, so without this a password reset left a
+    # stolen access token working for up to an hour after the user believed
+    # they had locked the attacker out. The user document is already loaded, so
+    # this costs one dict lookup and a float compare on the hot path.
+    if token_predates_password_change(payload, user):
+        raise AuthError("Session ended by a password change — please sign in again")
 
     request.state._current_user = user
     return user

@@ -4,7 +4,12 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
-from app.core.security import hash_password, verify_password
+from app.core.security import (
+    TOKENS_VALID_FROM,
+    hash_password,
+    password_change_cutoff,
+    verify_password,
+)
 from app.repositories.user_repo import UserRepository
 from app.utils.validators import validate_password_strength
 
@@ -49,7 +54,14 @@ async def change_password(user_id: str, current_password: str, new_password: str
         raise AppValidationError("Password must be at least 8 characters with a number")
     await user_repo.update_one(
         {"_id": user_id},
-        {"$set": {"password_hash": hash_password(new_password), "updated_at": datetime.now(timezone.utc)}},
+        {"$set": {
+            "password_hash": hash_password(new_password),
+            # Same revocation as the reset path. A self-service change is just
+            # as likely to be a response to a suspected compromise, and leaving
+            # only one of the two paths revoking would be the worse trap.
+            TOKENS_VALID_FROM: password_change_cutoff(),
+            "updated_at": datetime.now(timezone.utc),
+        }},
     )
 
 
