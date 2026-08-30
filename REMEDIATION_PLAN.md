@@ -1,7 +1,9 @@
 # Remediation Plan — Intake, Drafting, Analysis, Agreements
 
 **Scope:** legal intake · document drafting · document analysis · agreement generation
-**Branch:** `feat/selective-abstention-and-audit-trail` @ `2b8186b`
+**Branch:** `feat/selective-abstention-and-audit-trail` @ `2b8186b` (baseline) → **merged to `master` @ `430791a`**
+**Shipped:** 2026-08-29. 10 commits, pushed to `github.com/muhammadusamahoyrr/fyp`, master fast-forwarded
+`977bad5..430791a`. Remote default branch is **`master`**, not `main`.
 **Baseline suite:** 1274 passed / 1 failed / 1300 collected (`pytest tests/ -m "not integration and not llm"`)
 **Status:** 18 of 19 fixes **APPLIED** (1–9, 11–19). Fix 6′ decided: flag only, no code change.
 **ONE ITEM REMAINS OPEN: [Fix 10](#fix-10--encode-rules-for-the-types-that-reach-a-court), waiting on
@@ -12,6 +14,30 @@ legal review.** Nothing in the code is blocked on engineering.
 Every defect below was **reproduced by running the code**, not inferred from reading it. Reproduction
 commands are in [Appendix A](#appendix-a--reproduction-commands). Every "shared / isolated" claim comes
 from grepping the callers, listed inline.
+
+---
+
+## START HERE NEXT SESSION
+
+**This work is done and merged.** Do not re-audit these four modules or re-apply these fixes.
+
+| | |
+|---|---|
+| **Open, blocked on a lawyer** | [Fix 10](#fix-10--encode-rules-for-the-types-that-reach-a-court) — statutory particulars for `dispute_petition`, `bail_application`, `petition_22a`, `fir_application`, `complaint_154_3`. Code shape settled; the content is legal drafting. **Do not draft it in code.** |
+| **Open, blocked on a lawyer** | [Fix 18](#fix-18--stop-shipping-us-contract-templates) full step — real Pakistani agreement template bodies. The interim withdrawal IS shipped and enforced; only the replacement wording is missing. |
+| **Known, deliberately out of scope** | `agreement_repo.set_status` is an unconditional `$set` — every guard lives in the service, so a future caller bypasses them. |
+| **Known, deliberately out of scope** | Simultaneous final signatures can both observe `all_signed=True` → duplicate `AGREEMENT_EXECUTED` in-app notifications (append-only, new `_id` each time). DB state is idempotent; the notification is not. No email/webhook/document-generation fires on that transition. |
+| **Not fixed, still latent** | `test_rate_limit_fails_open::test_healthy_storage_still_limits` passes now only because adding test files changed collection order. It was order-dependent before and still is. |
+
+**Environment:** `nh3==0.3.7` is a new backend dependency — reinstall `backend/requirements.txt` or the
+backend will not import. No new env vars, no config changes, no frontend dependencies.
+
+**Test counts:** `-m "not integration and not llm"` → 1414 passed / 44 deselected. With Mongo running,
+`-m "not llm"` → all 1458. 29 of the 44 integration tests were added by this work and skip cleanly
+without Mongo, so a green default run does **not** mean the Mongo-only guarantees were exercised.
+
+**Moved files:** `backend/test_{chat_ws,full_e2e,intake_e2e,lawyer_matching,pipeline_nodes}.py` are now
+`backend/scripts/manual_smoke/smoke_*.py`. They were never collected and contain no `test_*` functions.
 
 ---
 
@@ -61,6 +87,10 @@ The grounding gate is a boolean asked to carry three meanings. It defaults to th
 and the caller discards it either way.
 
 ### Fix 1 — Make "could not verify" distinct from "verified grounded"
+
+> **STATUS: DONE — shipped in `6828261`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` · `Isolated` · **S**
 
 `is_grounded` conflates *verified grounded*, *verified ungrounded* and *never checked*, and the
@@ -91,6 +121,10 @@ Statuses: `grounded`, `ungrounded`, `no_evidence_retrieved`, `no_actions`, `unpa
 > loop is a different edge and is untouched.
 
 ### Fix 2 — Stop discarding the verdict at the call site
+
+> **STATUS: DONE — shipped in `6828261`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` · `Isolated` · **S**
 
 Fix 1 is inert without this. `backend/app/services/intake_service.py:434`
@@ -115,6 +149,10 @@ Fix 1 is inert without this. `backend/app/services/intake_service.py:434`
 (`schemas/intake.py:59`), so the API surfaces them with no schema edit.
 
 ### Fix 3 — Render the status where the analysis is read
+
+> **STATUS: DONE — shipped in `561dfd9`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `INCOMPLETE` · `Isolated` · **S**
 
 Three render sites: review pane `ModIntake.jsx:1189-1215`, print export `ModIntake.jsx:159-164`,
@@ -122,6 +160,10 @@ sidebar `ModIntake.jsx:1292`. Where `grounding_status !== "grounded"`, show the 
 rather than letting it hide inside a paragraph of prose.
 
 ### Fix 4 — Test the node
+
+> **STATUS: DONE — shipped in `6828261`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `INCOMPLETE` · `Isolated` · **S**
 
 No `tests/` file covers either intake node, and `test_intake_e2e.py` sits at `backend/` root outside
@@ -140,6 +182,10 @@ Three generation paths with three levels of checking. One parses user text as ma
 files; one emits a court-formatted empty pleading; one streams to a lawyer's editor unchecked.
 
 ### Fix 5 — Escape field text before it reaches ReportLab
+
+> **STATUS: DONE — shipped in `0a129e6`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` · **Security** · `Isolated` · **S**
 
 **The most severe item in this plan, and a one-function fix.**
@@ -205,6 +251,10 @@ formatting into a legal PDF.
 > needs care rather than a blind find-and-replace.
 
 ### Fix 6 — Stop generating a pleading the system knows is empty
+
+> **STATUS: DONE — shipped in `27964e1`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` · `Isolated` · **S**
 
 `generate_pdf("plaint_civil", {})` returns a 2,048-byte, one-page PDF:
@@ -256,6 +306,10 @@ deliberate advisory posture (`pleading_rules.py:520`), so it is a policy call �
 particulars present" is not a lawyer exercising judgement, it is a failed extraction.
 
 ### Fix 7 — Sanitise draft content where it is written
+
+> **STATUS: DONE — shipped in `32ed137`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` · **Security** · `Shared` · **M**
 
 `save_draft` validates length and ownership but never content
@@ -287,6 +341,10 @@ Apply in `save_draft` on both the insert and update branches, and in `_draft_out
 > to use a table will lose it.
 
 ### Fix 8 — Escape case data before it becomes markup
+
+> **STATUS: DONE — shipped in `561dfd9`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` · **Security** · `Isolated` · **S**
 
 Fix 7 covers stored drafts; this covers the other half. `buildContent(tmpl, caseObj)` interpolates
@@ -299,6 +357,10 @@ whose "Case Description" entry is raw user text. The "Parties" entry genuinely n
 removes `dangerouslySetInnerHTML` from the file entirely.
 
 ### Fix 9 — Record the compliance verdict on the standalone path
+
+> **STATUS: DONE — shipped in `1d2d757`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `INCOMPLETE` · `Shared` · **S**
 
 `check_pleading` has one production call site (`document_service.py:433`). `generate_standalone` has
@@ -324,6 +386,10 @@ response models return narrow shapes that would drop the field.
 `petition_drafter.py:182`.
 
 ### Fix 10 — Encode rules for the types that reach a court
+
+> **STATUS: OPEN.** The only unshipped item in this plan. Blocked on legal
+> review, not on engineering. Everything below is the brief, not a record of work done.
+
 `INCOMPLETE` · `Isolated` · **L** · **OPEN — THE ONLY REMAINING ITEM. Blocked on legal review.**
 
 > **Not attempted, deliberately.** The code shape is settled — four existing rule sets are the template,
@@ -357,6 +423,10 @@ at `pleading_rules.py:476-492`. The four existing rule sets are the template. **
 on the particulars.**
 
 ### Fix 11 — Verify and audit the streaming draft path
+
+> **STATUS: DONE — shipped in `8f2f0cc`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` (no safety net) · `Isolated` · **M**
 
 `/ai/draft/stream` (`ai.py:378-417`) has no grounding node, no citation check, no decision engine and no
@@ -390,6 +460,10 @@ The implementation here is the most careful of the four modules. The problem is 
 its central security property never run.
 
 ### Fix 12 — Un-gate the IDOR tests
+
+> **STATUS: DONE — shipped in `da7ccb9`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` (0 of 10 run) · `Isolated` · **S**
 
 **Highest value for lowest cost in this plan.** `tests/test_document_tools.py` opens by stating its
@@ -416,6 +490,10 @@ Three need nothing but an import:
 > harmful for the three.
 
 ### Fix 13 — Collect the five orphaned root-level test files
+
+> **STATUS: DONE — shipped in `da7ccb9`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `INCOMPLETE` · `Isolated` · **S**
 
 `testpaths = tests` excludes `test_chat_ws.py`, `test_full_e2e.py`, `test_intake_e2e.py`,
@@ -440,6 +518,10 @@ Zero tests, zero downstream checks, and the output is a binding e-signed instrum
 defects are integrity problems in the signature record itself, and all three are small.
 
 ### Fix 14 — Record what was signed, not just that it was signed
+
+> **STATUS: DONE — shipped in `13e2711`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` (integrity) · `Isolated` · **S**
 
 Nothing in the agreement path hashes the body — `grep -E "sha256|content_hash|immutable"` across the
@@ -466,6 +548,10 @@ Same principle already applied to money in this codebase: snapshot the thing bei
 moment of agreement, immutably.
 
 ### Fix 15 — Fix the ETO classification race
+
+> **STATUS: DONE — shipped in `13e2711`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` · `Isolated` · **S**
 
 The comment says *"based on first signature method"*; the code sets it unconditionally on every
@@ -495,6 +581,10 @@ about.
 matching `ETO_CLASSIFICATION` (`agreement_service.py:12-16`).
 
 ### Fix 16 — Let a party decline
+
+> **STATUS: DONE — shipped in `13e2711`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `INCOMPLETE` · `Isolated` · **S**
 
 `AgreementStatus.CANCELLED` is defined (`constants.py:104`) and the UI has a label —
@@ -511,6 +601,10 @@ The repo needs no new method — `set_status` and `append_audit_log` already exi
 (`agreement_repo.py:24,49`).
 
 ### Fix 17 — Bound the agreement inputs
+
+> **STATUS: DONE — shipped in `13e2711`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `RISKY` · `Isolated` · **S**
 
 `SignatureSubmit.signature_data: str` has no `max_length` (`schemas/agreement.py:19`); neither do
@@ -522,6 +616,10 @@ The codebase already knows to do this elsewhere — `_MAX_DRAFT_CONTENT = 300_00
 fields; ~200 KB is generous for a signature image.
 
 ### Fix 18 — Stop shipping US contract templates
+
+> **STATUS: INTERIM STEP SHIPPED** in `430791a`; the replacement wording is still open.
+> Everything below describes what was done and what remains — see the note inside.
+
 `BROKEN` · `Isolated` · **M** · **INTERIM STEP DONE — full fix awaiting a lawyer**
 
 > **Status.** The six template bodies are **withdrawn**, and the backend refuses to create or sign an
@@ -552,6 +650,10 @@ While in this file, delete `AGMT_TEMPLATES` (`ModAgreements.jsx:14-24`) — nine
 Two competing template arrays in one file is how the wrong one gets edited.
 
 ### Fix 19 — Give the module its first tests
+
+> **STATUS: DONE — shipped in `13e2711`, merged to `master`.** Everything below is the
+> reasoning that produced the change, kept as a record. It is NOT a list of work to do.
+
 `BROKEN` (zero coverage) · `Isolated` · **M**
 
 Nothing under `tests/` references `agreement_service`. A name collision hides it:
@@ -571,9 +673,11 @@ New `tests/test_agreement_service.py`, named so the collision cannot recur:
 
 ---
 
-## Sequencing
+## Sequencing (as executed)
 
-### Batch 1 — ship together, no shared surface (12 fixes)
+> All three batches are settled. Batches 1 and 2 shipped; batch 3 is the open work.
+
+### Batch 1 — SHIPPED, no shared surface (12 fixes)
 
 Grepped every caller; none of these share a function with another module. **Fixes 5 and 6 lead** — the
 two most severe items, and among the smallest.
@@ -588,7 +692,7 @@ two most severe items, and among the smallest.
 | 14–17 | Agreement hash, ETO, decline route, input bounds |
 | 19 | New test file |
 
-### Batch 2 — needs sign-off, shared surface
+### Batch 2 — SHIPPED after sign-off (shared surface)
 
 | Fix | Why it needs a decision |
 |---|---|
@@ -597,7 +701,7 @@ two most severe items, and among the smallest.
 | 11 | Draft-stream verification. Changes the SSE contract; frontend consumer updates in the same change |
 | 6′ | The *optional* half of fix 6 — refusing `generated` when `compliance.satisfied == 0`. Contradicts `pleading_rules`' advisory posture, so it is policy |
 
-### Batch 3 — not engineering work
+### Batch 3 — NOT ENGINEERING WORK (open)
 
 | Fix | Who it needs |
 |---|---|
@@ -619,7 +723,7 @@ two most severe items, and among the smallest.
 | 12 | `pytest tests/test_document_tools.py -m "not integration"` | **3 passed** — was `10 deselected` |
 | 13 | `pytest --collect-only` | Above 1300 — the five orphaned files counted or gone |
 | 14–17, 19 | `pytest tests/test_agreement_service.py` | Mixed-method test passes regardless of signing order; decline sets `cancelled` |
-| all | `pytest tests/ -m "not integration and not llm"` | Baseline **1274 passed / 1 failed**. The failure is the pre-existing order-dependent `test_rate_limit_fails_open::test_healthy_storage_still_limits` (passes 4/4 in isolation), not yours |
+| all | `pytest tests/ -m "not integration and not llm"` | **1414 passed / 0 failed / 44 deselected** (was 1274 / 1 / 25). `test_rate_limit_fails_open::test_healthy_storage_still_limits` now passes, but only because collection order changed — it is still order-dependent, not fixed |
 
 ---
 
@@ -642,6 +746,20 @@ two most severe items, and among the smallest.
 ---
 
 ## Appendix A — reproduction commands
+
+> **THESE NO LONGER REPRODUCE.** They are kept as the record of how each defect was demonstrated
+> *before* the fix, and the outputs shown are the **pre-fix** behaviour. Every one of them now behaves
+> differently, which is the point — running them is a way to confirm the fixes are in place, not to
+> reproduce a bug. Expected behaviour today:
+>
+> | Command | Was (pre-fix) | Now |
+> |---|---|---|
+> | Fix 5a `<img src=…>` | `UnidentifiedImageError`, file opened | renders the tag as literal text |
+> | Fix 5b unclosed `<` | `ValueError: paraparser: syntax error` | renders `<50%` as text |
+> | Fix 6 empty pleading | court-formatted PDF with empty FACTS | `generate_pdf` still renders it (it is a pure renderer); `generate_document` now raises `AppValidationError` |
+> | Fix 6 `check_pleading` | `satisfied=0 missing=9`, ignored | unchanged verdict — but now consumed by the guard |
+> | Fix 1 intake grounding | `{'is_grounded': True}` | `{'is_grounded': False, 'grounding_status': 'no_evidence_retrieved', 'answer': …}` |
+> | Fix 12 IDOR tests | `10 deselected` | `3 passed, 7 deselected` |
 
 Run from `backend/` with `./venv/Scripts/python.exe`.
 
