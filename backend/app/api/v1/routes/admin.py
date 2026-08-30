@@ -29,7 +29,8 @@ async def process_kyc(
     body: KYCAction,
     current_user: dict = Depends(require_admin),
 ):
-    await admin_service.process_kyc(lawyer_id, body.approved, body.rejection_reason)
+    await admin_service.process_kyc(
+        lawyer_id, body.approved, body.rejection_reason, actor=current_user)
     action = "approved" if body.approved else "rejected"
     return StatusResponse(success=True, message=f"KYC {action}")
 
@@ -65,7 +66,8 @@ async def create_user(
     body: AdminUserCreate,
     current_user: dict = Depends(require_admin),
 ):
-    return await admin_service.create_user(body.full_name, str(body.email), body.role, body.password)
+    return await admin_service.create_user(
+        body.full_name, str(body.email), body.role, body.password, actor=current_user)
 
 
 @router.patch("/users/{user_id}", response_model=UserProfileResponse)
@@ -74,7 +76,8 @@ async def update_user(
     body: AdminUserUpdate,
     current_user: dict = Depends(require_admin),
 ):
-    return await admin_service.update_user(user_id, body.model_dump(exclude_none=True))
+    return await admin_service.update_user(
+        user_id, body.model_dump(exclude_none=True), actor=current_user)
 
 
 @router.post("/users/{user_id}/reset-password", response_model=StatusResponse)
@@ -83,7 +86,7 @@ async def reset_user_password(
     body: AdminPasswordReset,
     current_user: dict = Depends(require_admin),
 ):
-    await admin_service.reset_user_password(user_id, body.new_password)
+    await admin_service.reset_user_password(user_id, body.new_password, actor=current_user)
     return StatusResponse(success=True, message="Password reset successfully")
 
 
@@ -92,7 +95,7 @@ async def delete_user(
     user_id: str,
     current_user: dict = Depends(require_admin),
 ):
-    await admin_service.delete_user(user_id)
+    await admin_service.delete_user(user_id, actor=current_user)
     return StatusResponse(success=True, message="User deleted")
 
 
@@ -115,7 +118,7 @@ async def update_case_status(
     body: CaseStatusUpdate,
     current_user: dict = Depends(require_admin),
 ):
-    return await admin_service.update_case_status(case_id, body.status)
+    return await admin_service.update_case_status(case_id, body.status, actor=current_user)
 
 
 # ── Lawyer monitoring ─────────────────────────────────────────────────────────

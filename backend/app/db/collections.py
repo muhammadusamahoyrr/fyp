@@ -113,6 +113,19 @@ def get_answer_provenance_col() -> AsyncIOMotorCollection:
     return get_database()["answer_provenance"]
 
 
+# Who did what, as an admin. Every admin route resolved `current_user` and
+# forwarded it to the service exactly zero times, so nothing recorded which
+# admin approved a KYC, promoted a user, reset a password or deactivated an
+# account. agreement_service keeps an actor + IP audit log for considerably less
+# consequential actions.
+#
+# No TTL, for the same reason as answer_provenance: this is an accountability
+# record, so retention is a policy decision rather than cache eviction.
+
+def get_admin_audit_col() -> AsyncIOMotorCollection:
+    return get_database()["admin_audit"]
+
+
 # Human relevance judgements over provenance records. Kept SEPARATE from the
 # provenance collection on purpose: an audit record that gets edited is not an
 # audit record, so labels annotate it from outside rather than mutating it.

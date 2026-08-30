@@ -6,6 +6,7 @@ from app.core.constants import NotificationType
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.core.security import TOKENS_VALID_FROM, hash_password, password_change_cutoff
 from app.db.collections import (
+    get_admin_audit_col,
     get_agreements_col,
     get_cases_col,
     get_documents_col,
@@ -24,6 +25,53 @@ case_repo = CaseRepository()
 
 
 _SECRET_TOP_LEVEL = ("password_hash", "cnic_encrypted")
+
+
+async def _audit(actor: dict, action: str, target_id: str | None, detail: dict | None = None) -> None:
+    """Record which admin did what. Never raises.
+
+    An audit write must not fail the action it describes — a failed insert here
+    would otherwise turn a successful KYC approval into a 500 and leave the
+    lawyer verified but the admin believing it had not worked. The failure is
+    logged loudly instead, matching provenance_service.record_answer.
+    """
+    try:
+        await get_admin_audit_col().insert_one({
+            "_id": secrets.token_urlsafe(16),
+            "action": action,
+            "actor_id": (actor or {}).get("_id"),
+            "actor_email": (actor or {}).get("email"),
+            "target_id": target_id,
+            "detail": detail or {},
+            "timestamp": datetime.now(timezone.utc),
+        })
+    except Exception:
+        logger.exception("admin audit write failed: action=%s target=%s", action, target_id)
+
+
+def _is_self(actor: dict, target_id: str) -> bool:
+    return bool(actor) and actor.get("_id") == target_id
+
+
+async def _assert_not_last_admin(target_id: str) -> None:
+    """Refuse to remove the last admin's access.
+
+    Deactivating or demoting the only remaining admin locks everyone out of
+    every admin route, and there is no provisioning path back in:
+    auth_service.register explicitly refuses the admin role, so recovery would
+    mean editing the database by hand.
+    """
+    target = await user_repo.find_by_id(target_id)
+    if not target or target.get("role") != "admin":
+        return
+    remaining = await get_users_col().count_documents(
+        {"role": "admin", "is_active": True, "_id": {"$ne": target_id}}
+    )
+    if remaining == 0:
+        raise AppValidationError(
+            "This is the last active admin account. Promote another admin "
+            "before removing this one, or the system will have no administrator."
+        )
 
 
 def _safe_user(u: dict) -> dict:
@@ -58,7 +106,8 @@ async def list_pending_kyc() -> list[dict]:
     return [_safe_user(u) for u in users]
 
 
-async def process_kyc(lawyer_id: str, approved: bool, reason: str | None) -> None:
+async def process_kyc(lawyer_id: str, approved: bool, reason: str | None,
+                      actor: dict | None = None) -> None:
     lawyer = await user_repo.find_by_id(lawyer_id)
     if not lawyer or lawyer.get("role") != "lawyer":
         raise NotFoundError("Lawyer")
@@ -86,6 +135,7 @@ async def process_kyc(lawyer_id: str, approved: bool, reason: str | None) -> Non
             # Decision + in-app notification are already persisted; the failed
             # delivery is logged loudly by the email util.
             logger.error("KYC approval email not delivered to %s", lawyer["email"])
+        await _audit(actor, "kyc.approved", lawyer_id)
     else:
         await user_repo.update_one(
             {"_id": lawyer_id},
@@ -107,6 +157,7 @@ async def process_kyc(lawyer_id: str, approved: bool, reason: str | None) -> Non
             await send_kyc_result_email(lawyer["email"], approved=False, reason=reason)
         except Exception:
             logger.error("KYC rejection email not delivered to %s", lawyer["email"])
+        await _audit(actor, "kyc.rejected", lawyer_id, {"reason": reason or "Not specified"})
 
 
 async def get_analytics() -> dict:
@@ -166,7 +217,8 @@ async def list_users(page: int, page_size: int, role: str | None, search: str | 
     }
 
 
-async def create_user(full_name: str, email: str, role: str, password: str) -> dict:
+async def create_user(full_name: str, email: str, role: str, password: str,
+                      actor: dict | None = None) -> dict:
     if not validate_password_strength(password):
         raise AppValidationError(PASSWORD_POLICY)
     existing = await user_repo.find_by_email(email)
@@ -190,20 +242,37 @@ async def create_user(full_name: str, email: str, role: str, password: str) -> d
         "updated_at": datetime.now(timezone.utc),
     }
     await user_repo.insert(doc)
+    await _audit(actor, "user.created", user_id, {"role": role, "email": email.lower()})
     return _safe_user(doc)
 
 
-async def update_user(user_id: str, data: dict) -> dict:
+async def update_user(user_id: str, data: dict, actor: dict | None = None) -> dict:
     user = await user_repo.find_by_id(user_id)
     if not user:
         raise NotFoundError("User")
     updates = {k: v for k, v in data.items() if v is not None}
+
+    # An admin removing their OWN access is almost always a misclick, and it is
+    # unrecoverable from inside the app: register() refuses the admin role, so
+    # nobody can grant it back.
+    losing_admin = (updates.get("is_active") is False
+                    or (updates.get("role") is not None and updates["role"] != "admin"))
+    if losing_admin and _is_self(actor, user_id):
+        raise AppValidationError(
+            "You cannot remove your own admin access. Ask another admin to do it."
+        )
+    if losing_admin:
+        await _assert_not_last_admin(user_id)
+
     updates["updated_at"] = datetime.now(timezone.utc)
     await user_repo.update_one({"_id": user_id}, {"$set": updates})
+    await _audit(actor, "user.updated", user_id,
+                 {k: v for k, v in updates.items() if k != "updated_at"})
     return _safe_user(await user_repo.find_by_id(user_id))
 
 
-async def reset_user_password(user_id: str, new_password: str) -> None:
+async def reset_user_password(user_id: str, new_password: str,
+                              actor: dict | None = None) -> None:
     if not validate_password_strength(new_password):
         raise AppValidationError(PASSWORD_POLICY)
     user = await user_repo.find_by_id(user_id)
@@ -223,16 +292,23 @@ async def reset_user_password(user_id: str, new_password: str) -> None:
             "updated_at": datetime.now(timezone.utc),
         }},
     )
+    await _audit(actor, "user.password_reset", user_id)
 
 
-async def delete_user(user_id: str) -> None:
+async def delete_user(user_id: str, actor: dict | None = None) -> None:
     user = await user_repo.find_by_id(user_id)
     if not user:
         raise NotFoundError("User")
+    if _is_self(actor, user_id):
+        raise AppValidationError(
+            "You cannot delete your own admin account. Ask another admin to do it."
+        )
+    await _assert_not_last_admin(user_id)
     await user_repo.update_one(
         {"_id": user_id},
         {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}},
     )
+    await _audit(actor, "user.deleted", user_id, {"role": user.get("role")})
 
 
 # ── Case management ───────────────────────────────────────────────────────────
@@ -275,7 +351,7 @@ async def list_admin_cases(page: int, page_size: int, status: str | None, search
     }
 
 
-async def update_case_status(case_id: str, status: str) -> dict:
+async def update_case_status(case_id: str, status: str, actor: dict | None = None) -> dict:
     case = await case_repo.find_by_id(case_id)
     if not case:
         raise NotFoundError("Case")
@@ -283,6 +359,9 @@ async def update_case_status(case_id: str, status: str) -> dict:
         {"_id": case_id},
         {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
     )
+    await _audit(actor, "case.status_changed", case_id,
+                 {"from": case.get("status"), "to": status})
+
     from app.services.case_service import _public_case  # strips case_embedding vector
 
     return _public_case(await case_repo.find_by_id(case_id))
