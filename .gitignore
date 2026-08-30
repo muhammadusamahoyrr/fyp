@@ -113,3 +113,8 @@ backend/chroma_data_backup_*/
 # Editor/tooling snapshots of source files that are themselves tracked
 *.backup-*
 *.bac
+
+# Scratch notes pasted out of an assistant session. REMEDIATION_PLAN.md is the
+# tracked source of truth for outstanding work — a second, drifting copy of the
+# same backlog is how the two end up disagreeing about what is already done.
+Remaining.md
