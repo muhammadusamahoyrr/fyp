@@ -18,6 +18,8 @@ all. Two dead rows suppressed a pool of 25 lawyers.
 
 The first test here is that scenario.
 """
+import asyncio
+
 import pytest
 
 from app.core.security import hash_password
@@ -576,3 +578,58 @@ async def test_the_matcher_passes_the_case_province_through(pool, monkeypatch):
     # province (punjab), LM-SINDH is not
     assert by_id["LM-CRIM"]["match_score"] > by_id["LM-SINDH"]["match_score"]
     assert "practises in punjab" in by_id["LM-CRIM"]["match_reason"]
+
+
+# ── similarity calibration ───────────────────────────────────────────────────
+
+def test_off_topic_similarity_calibrates_to_no_relevance():
+    """Raw e5 cosine never drops below ~0.72, so a question about baking bread
+    scored 0.72-0.78 against every lawyer and the 0.60 reason threshold could
+    never fire. Below the measured noise floor now means zero, not "strong"."""
+    from app.ai.lawyer_embeddings import calibrate_similarity
+
+    # measured off-topic range on 2026-09-01: min 0.7200, p50 0.7476, max 0.7837
+    assert calibrate_similarity(0.7200) == 0.0
+    assert calibrate_similarity(0.7476) == 0.0
+    assert calibrate_similarity(0.7837) < 0.35, "off-topic must not reach 'partial'"
+
+
+def test_a_genuine_best_match_calibrates_near_the_top():
+    from app.ai.lawyer_embeddings import calibrate_similarity
+
+    # measured on-topic best: 0.8506 (bail/PPC 380), 0.8330 (khula/custody)
+    assert calibrate_similarity(0.8506) >= 0.60, "a real best match must read 'strong'"
+    assert calibrate_similarity(0.8330) >= 0.60
+    assert calibrate_similarity(0.9999) <= 1.0
+
+
+def test_calibration_is_monotonic_so_ranking_is_untouched():
+    """The transform may rescale but must never reorder: retrieval order was
+    already good (correct specialism in the top 5 on 17 of 20 probes)."""
+    from app.ai.lawyer_embeddings import calibrate_similarity
+
+    raws = [0.60, 0.72, 0.75, 0.77, 0.80, 0.83, 0.86, 0.95]
+    cal = [calibrate_similarity(r) for r in raws]
+    assert cal == sorted(cal)
+    assert all(0.0 <= c <= 1.0 for c in cal)
+
+
+def test_query_returns_both_calibrated_and_raw(monkeypatch):
+    """`raw_similarity` is kept so the calibration can be re-derived when the
+    model or corpus changes."""
+    from app.ai import lawyer_embeddings as le
+
+    class _Col:
+        def count(self): return 1
+        def query(self, **kw):
+            return {"ids": [["L1"]], "distances": [[0.15]], "metadatas": [[{}]]}
+
+    monkeypatch.setattr(le, "_get_collection", lambda: _Col())
+    monkeypatch.setattr(le, "_embeddings", lambda: type("E", (), {
+        "embed_query": lambda self, t: [0.1, 0.2]})())
+
+    out = asyncio.run(le.query_similar_lawyers("q", "punjab", 5))
+
+    assert out[0]["raw_similarity"] == 0.85
+    assert out[0]["semantic_score"] == le.calibrate_similarity(0.85)
+    assert out[0]["semantic_score"] != out[0]["raw_similarity"]

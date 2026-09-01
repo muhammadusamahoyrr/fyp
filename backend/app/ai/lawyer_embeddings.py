@@ -16,6 +16,47 @@ logger = logging.getLogger(__name__)
 
 LAWYERS_COLLECTION = "lawyers_collection"
 
+# ── Similarity calibration ───────────────────────────────────────────────────
+# Raw cosine similarity from multilingual-e5-base does not start at zero. Every
+# pair of legal-ish sentences sits high, so the raw number is dominated by a
+# near-constant offset and only the last few hundredths carry signal.
+#
+# Measured 2026-09-01 against this collection, 20 candidates per query:
+#
+#   off-topic queries (sourdough, marathons, photosynthesis, gibberish, …)
+#       n=120   min 0.7200   p50 0.7476   p95 0.7690   max 0.7837
+#   on-topic queries (bail, khula, ejectment, Article 199, 489-F, inheritance)
+#       n=120   min 0.7481   p50 0.7802   p95 0.8198   max 0.8506
+#
+# So a question about baking bread scored 0.72-0.78 against every lawyer on the
+# platform, and the reason thresholds below (0.60 / 0.35) could never fire:
+# everything read as "strong profile match", and the UI rendered that raw
+# number as "72% case compatibility".
+#
+# FLOOR is the off-topic p95 — above the noise, so an irrelevant query lands at
+# or near zero. CEILING is just above the on-topic p99, so a genuine best match
+# approaches 1.0 without saturating. The transform is monotonic, so retrieval
+# ORDER is untouched: it was already good (the correct specialism placed in the
+# top 5 on 17 of 20 province x case-type probes, against ~7 for random).
+#
+# These are properties of THIS model and THIS corpus. Re-derive them if either
+# changes: run off-topic and on-topic queries through query_similar_lawyers,
+# read `raw_similarity`, and take the off-topic p95 and on-topic p99.
+_SIM_FLOOR = 0.77
+_SIM_CEILING = 0.86
+
+
+def calibrate_similarity(raw: float) -> float:
+    """Map raw cosine similarity onto a usable 0..1 scale.
+
+    Below the noise floor is 0.0 — "no measured relevance" — not a small
+    positive number that still buys half the semantic weight.
+    """
+    if _SIM_CEILING <= _SIM_FLOOR:  # misconfigured; fail open rather than divide by zero
+        return max(0.0, min(1.0, float(raw)))
+    scaled = (float(raw) - _SIM_FLOOR) / (_SIM_CEILING - _SIM_FLOOR)
+    return round(max(0.0, min(1.0, scaled)), 4)
+
 # case_type → related terms that signal expertise even without exact label
 _RELATED_TERMS: dict[str, list[str]] = {
     "criminal":      ["penal", "defense", "fir", "bail", "crime", "police", "prosecution"],
@@ -268,10 +309,15 @@ async def query_similar_lawyers(
     for i, lawyer_id in enumerate(results["ids"][0]):
         distance = results["distances"][0][i]
         # ChromaDB cosine space: distance = 1 - cosine_similarity → similarity = 1 - distance
-        semantic_score = max(0.0, 1.0 - float(distance))
+        raw = max(0.0, 1.0 - float(distance))
         output.append({
             "lawyer_id":      lawyer_id,
-            "semantic_score": round(semantic_score, 4),
+            # Calibrated, because the raw figure is unusable as a score: see
+            # the measurements above calibrate_similarity. Ordering is
+            # unchanged — the transform is monotonic.
+            "semantic_score": calibrate_similarity(raw),
+            # Kept for debugging and for reproducing the calibration.
+            "raw_similarity": round(raw, 4),
             "metadata":       results["metadatas"][0][i],
         })
 

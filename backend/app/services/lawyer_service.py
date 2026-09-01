@@ -101,8 +101,8 @@ def _specialization_boost(specializations: list[str], case_type: str) -> float:
 
 _W_SEMANTIC = 0.50
 _W_OTHER = {
-    "spec": 0.18, "province": 0.10, "rating": 0.12,
-    "availability": 0.06, "experience": 0.04,
+    "spec": 0.20, "province": 0.17, "rating": 0.07,
+    "availability": 0.04, "experience": 0.02,
 }
 
 
@@ -115,11 +115,26 @@ def _score_lawyer(
     """
     Multi-factor score (EF_in_Legal_CQA adapted):
       semantic      × 0.50
-      specialization× 0.18
-      same province × 0.10
-      rating/5      × 0.12
-      availability  × 0.06
-      exp/20        × 0.04
+      specialization× 0.20
+      same province × 0.17
+      rating/5      × 0.07
+      availability  × 0.04
+      exp/20        × 0.02
+
+    The non-semantic weights were re-fitted on 2026-09-01, after calibration
+    widened the semantic spread and left province too weak to matter. Measured
+    over all 20 province x case-type probes:
+
+      spec .18 prov .10 rating .12 avail .06 exp .04 -> local top 14/20, correct
+                                                        specialism top 19/20
+      spec .20 prov .17 rating .07 avail .04 exp .02 -> local top 18/20, correct
+                                                        specialism top 20/20
+
+    The weight moved out of rating, availability and experience deliberately:
+    rating is near-fabricated on seeded profiles, availability is a boolean
+    that should never drive a match, and years of experience is weak evidence
+    of fit for a particular case. Specialization, province and semantic
+    similarity are the signals with something behind them.
 
     Province was previously a filter and nothing more, so it could not affect
     an ordering — only membership. Because `federal` lawyers are candidates in
@@ -133,6 +148,14 @@ def _score_lawyer(
     outweigh doing this kind of work. `federal` earns the boost only on a
     federal matter — it means "practises nationwide", which is why such a
     lawyer remains a candidate everywhere, not that they are local everywhere.
+
+    `semantic_score` is the CALIBRATED similarity from
+    `lawyer_embeddings.calibrate_similarity`, on a 0..1 scale where 0 means "no
+    measured relevance". The 0.60 / 0.35 reason thresholds below were dead code
+    against the raw figure: e5 cosine similarity never drops below ~0.72, so
+    every candidate — including one matched against a question about baking
+    bread — read as "strong profile match", and the raw number reached the UI
+    as "72% case compatibility". Do not feed a raw similarity in here.
 
     `semantic_score is None` means this lawyer has no vector in the store — not
     that they scored zero. The two are very different and used to be conflated:
