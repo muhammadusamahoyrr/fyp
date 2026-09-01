@@ -100,19 +100,39 @@ def _specialization_boost(specializations: list[str], case_type: str) -> float:
 
 
 _W_SEMANTIC = 0.50
-_W_OTHER = {"spec": 0.20, "rating": 0.15, "availability": 0.10, "experience": 0.05}
+_W_OTHER = {
+    "spec": 0.18, "province": 0.10, "rating": 0.12,
+    "availability": 0.06, "experience": 0.04,
+}
 
 
 def _score_lawyer(
-    lawyer: dict, case_type: str, semantic_score: float | None
+    lawyer: dict,
+    case_type: str,
+    semantic_score: float | None,
+    case_province: str | None = None,
 ) -> tuple[float, str]:
     """
     Multi-factor score (EF_in_Legal_CQA adapted):
       semantic      × 0.50
-      specialization× 0.20
-      rating/5      × 0.15
-      availability  × 0.10
-      exp/20        × 0.05
+      specialization× 0.18
+      same province × 0.10
+      rating/5      × 0.12
+      availability  × 0.06
+      exp/20        × 0.04
+
+    Province was previously a filter and nothing more, so it could not affect
+    an ordering — only membership. Because `federal` lawyers are candidates in
+    every province, a well-credentialled federal advocate outranked the local
+    specialist in their own province, and "matched to a lawyer in your
+    province" was not what the ranking actually did. A lawyer practising where
+    the matter will be heard now scores for it.
+
+    The weight is deliberately below specialization: a local generalist should
+    still lose to a same-province specialist, and being nearby should not
+    outweigh doing this kind of work. `federal` earns the boost only on a
+    federal matter — it means "practises nationwide", which is why such a
+    lawyer remains a candidate everywhere, not that they are local everywhere.
 
     `semantic_score is None` means this lawyer has no vector in the store — not
     that they scored zero. The two are very different and used to be conflated:
@@ -136,10 +156,16 @@ def _score_lawyer(
     exp = int(lp.get("experience_years", 0))
 
     spec_boost = _specialization_boost(specs, case_type)
+    same_province = bool(
+        case_province and lawyer.get("province") == case_province
+    )
     factors = {
-        # spec_boost is already scaled to 0.20 / 0.10, i.e. expressed in final
-        # score units against a 0.20 weight — normalise it back to 0..1 here.
-        "spec":         spec_boost / _W_OTHER["spec"],
+        # spec_boost is expressed as 0.20 / 0.10 — historic units from when the
+        # specialization weight was 0.20. Normalise it back to 0..1 against
+        # that original scale so an exact match is 1.0 and a related one 0.5,
+        # then let _W_OTHER["spec"] set what it is actually worth.
+        "spec":         spec_boost / 0.20,
+        "province":     1.0 if same_province else 0.0,
         "rating":       rating / 5.0,
         "availability": 1.0 if available else 0.0,
         "experience":   min(exp / 20.0, 1.0),
@@ -165,6 +191,8 @@ def _score_lawyer(
         reasons.append(f"specializes in {case_type}")
     elif spec_boost == 0.10:
         reasons.append("related specialization")
+    if same_province:
+        reasons.append(f"practises in {case_province}")
     if available:
         reasons.append("available now")
     if exp >= 5:
@@ -317,7 +345,9 @@ async def match_lawyers_for_case(case_id: str, top_n: int = 5) -> dict:
 
     scored: list[dict] = []
     for lawyer, semantic_score in candidates.values():
-        final_score, reason = _score_lawyer(lawyer, case_type, semantic_score)
+        final_score, reason = _score_lawyer(
+            lawyer, case_type, semantic_score, case_province=province
+        )
         scored.append({**_sanitize(lawyer), "match_score": final_score,
                        "match_reason": reason})
 

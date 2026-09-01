@@ -497,3 +497,82 @@ def test_specialization_still_outranks_a_bare_rating():
     g, _ = _score_lawyer(generalist, "criminal", None)
 
     assert s > g
+
+
+# ── province is a ranking factor, not only a filter ──────────────────────────
+
+def test_the_local_lawyer_outranks_an_equally_qualified_federal_one():
+    """Province used to be a filter and nothing more, so it could not affect an
+    ordering. Because `federal` lawyers are candidates in every province, a
+    well-credentialled federal advocate led the ranking in someone else's
+    province and "matched to a lawyer in your province" was not what the
+    ranking did."""
+    from app.services.lawyer_service import _score_lawyer
+
+    local = _lawyer("L", province="kpk", specs=["criminal"], rating=4.3, exp=11)
+    federal = _lawyer("F", province="federal", specs=["criminal"], rating=4.3, exp=11)
+
+    local_score, local_reason = _score_lawyer(local, "criminal", 0.80, case_province="kpk")
+    federal_score, _ = _score_lawyer(federal, "criminal", 0.80, case_province="kpk")
+
+    assert local_score > federal_score
+    assert "practises in kpk" in local_reason
+
+
+def test_being_local_does_not_beat_doing_this_kind_of_work():
+    """The province weight sits deliberately below specialization: a nearby
+    generalist must still lose to a same-province specialist, and proximity
+    must not outweigh relevant expertise."""
+    from app.services.lawyer_service import _score_lawyer
+
+    local_generalist = _lawyer("G", province="kpk", specs=["family"], rating=4.3, exp=11)
+    local_specialist = _lawyer("S", province="kpk", specs=["criminal"], rating=4.3, exp=11)
+
+    g, _ = _score_lawyer(local_generalist, "criminal", 0.80, case_province="kpk")
+    s, _ = _score_lawyer(local_specialist, "criminal", 0.80, case_province="kpk")
+
+    assert s > g
+
+
+def test_federal_earns_the_province_boost_only_on_a_federal_matter():
+    """`federal` means "practises nationwide" — which is why such a lawyer is a
+    candidate everywhere — not that they are local everywhere."""
+    from app.services.lawyer_service import _score_lawyer
+
+    fed = _lawyer("F", province="federal", specs=["criminal"], rating=4.3, exp=11)
+
+    on_federal, reason = _score_lawyer(fed, "criminal", 0.80, case_province="federal")
+    on_punjab, _ = _score_lawyer(fed, "criminal", 0.80, case_province="punjab")
+
+    assert on_federal > on_punjab
+    assert "practises in federal" in reason
+
+
+def test_an_unknown_case_province_simply_awards_no_boost():
+    from app.services.lawyer_service import _score_lawyer
+
+    lawyer = _lawyer("X", province="punjab", specs=["criminal"])
+    score, reason = _score_lawyer(lawyer, "criminal", 0.80, case_province=None)
+
+    assert "practises in" not in reason
+    assert 0.0 <= score <= 1.0
+
+
+async def test_the_matcher_passes_the_case_province_through(pool, monkeypatch):
+    """End to end: the boost is useless if match_lawyers_for_case forgets to
+    tell _score_lawyer which province the case is in."""
+    from app.services import lawyer_service
+
+    _fake_hits(monkeypatch, [
+        {"lawyer_id": "LM-CRIM", "semantic_score": 0.80, "metadata": {}},
+        {"lawyer_id": "LM-SINDH", "semantic_score": 0.80, "metadata": {}},
+    ])
+    _forget_spy(monkeypatch)
+
+    out = await lawyer_service.match_lawyers_for_case("LM-CASE")
+    by_id = {m["_id"]: m for m in out["matches"]}
+
+    # identical specialization and semantic score; LM-CRIM is in the case's
+    # province (punjab), LM-SINDH is not
+    assert by_id["LM-CRIM"]["match_score"] > by_id["LM-SINDH"]["match_score"]
+    assert "practises in punjab" in by_id["LM-CRIM"]["match_reason"]
