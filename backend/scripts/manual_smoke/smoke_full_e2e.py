@@ -12,19 +12,39 @@ Full end-to-end test:
   10. Poll GET /lawyers/match/{case_id} -> verify matched_lawyers populated
   11. Print pass/fail summary
 
-Run from backend/ directory with server already running on :8000:
-    python test_full_e2e.py
+Seeds the TEST database, never the configured one, and removes what it wrote
+in a `finally`. This script is where `e2e-lawyer-seed-001` came from — one of
+the two ghost vectors that suppressed the real candidate pool for 45 of 59
+cases, because the lawyer was deleted from Mongo and the vector never was.
+See _smoke_env.py.
+
+The server must be running against the SAME database, or it cannot see the
+seeded lawyer and the matching step is meaningless (the script checks):
+
+    DB_NAME=attorney_ai_test ./venv/Scripts/uvicorn.exe app.main:app --reload
+    ./venv/Scripts/python.exe scripts/manual_smoke/smoke_full_e2e.py
 """
+import argparse
 import asyncio
 import json
 import random
+import secrets
 import string
 import sys
 import time
+from pathlib import Path
 
 import httpx
 
-sys.path.insert(0, ".")
+# backend/ for `app.*`, and this directory for `_smoke_env`.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _smoke_env import (  # noqa: E402
+    assert_server_shares_database,
+    cleanup,
+    use_test_database,
+)
 
 BASE     = "http://127.0.0.1:8000/api/v1"
 TIMEOUT  = 180.0
@@ -57,11 +77,15 @@ def rand_email():
 
 # --- DB seed (direct motor connection) ---
 
-async def seed_lawyer():
+async def seed_lawyer(allow_production: bool = False):
     """Insert KYC-verified test lawyer into MongoDB + embed into ChromaDB."""
     from app.core.security import hash_password
     from app.db.mongodb    import connect_db, get_database
     from app.db.chroma     import connect_chroma
+
+    # Must precede connect_db(): get_database() resolves settings.db_name on
+    # every call, so the override has to be in place before anything reads it.
+    use_test_database(allow_production)
 
     await connect_db()
     connect_chroma()
@@ -75,7 +99,9 @@ async def seed_lawyer():
     await db["users"].insert_one({
         "_id":           LAWYER_ID,
         "email":         "e2elawyer@attorney-ai.test",
-        "password_hash": hash_password("Lawyer@1234"),
+        # Never used: this fixture never logs in. A literal here was a
+        # committed credential in a public repository.
+        "password_hash": hash_password(secrets.token_urlsafe(32)),
         "full_name":     "Adv. Zafar Iqbal",
         "role":          "lawyer",
         "province":      "punjab",
@@ -107,25 +133,60 @@ async def seed_lawyer():
 
 # --- main test ---
 
-async def main():
+async def main(allow_production: bool = False):
     t0 = time.time()
 
     # 0. Seed lawyer
     section("0 - Seed KYC-verified lawyer")
     try:
-        lawyer_id = await seed_lawyer()
+        lawyer_id = await seed_lawyer(allow_production)
         check("Lawyer seeded into MongoDB + ChromaDB", True, lawyer_id)
     except Exception as exc:
         check("Lawyer seeded into MongoDB + ChromaDB", False, str(exc))
         print("Cannot continue without DB access.")
         return
 
+    # Everything this run creates, removed in the finally below. The client and
+    # case are registered through the API, so their ids are only known later.
+    seeded_users = [lawyer_id]
+    seeded_cases: list[str] = []
+
+    try:
+        await _run_checks(seeded_users=seeded_users,
+                          seeded_cases=seeded_cases,
+                          lawyer_id=lawyer_id, t0=t0)
+    finally:
+        from app.db.mongodb import get_database
+        await cleanup(seeded_users, seeded_cases)
+        # Belt and braces for a run that died before login, where the
+        # registered client's id was never returned to us.
+        try:
+            await get_database()["users"].delete_many(
+                {"email": {"$regex": r"^e2e_.*@attorney-ai-test\.com$"}}
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[smoke] cleanup: could not remove registered clients ({exc})")
+
+
+async def _run_checks(seeded_users: list[str], seeded_cases: list[str],
+                      lawyer_id: str, t0: float):
+    from app.core.security import create_access_token
+
     async with httpx.AsyncClient(timeout=TIMEOUT, base_url=BASE) as http:
+
+        # The lawyer above was written straight to Mongo. If the server reads a
+        # different database it cannot see them, and the matching step at the
+        # end would fail for a reason that has nothing to do with matching.
+        await assert_server_shares_database(
+            http, create_access_token(lawyer_id, "lawyer")
+        )
 
         # 1. Register client
         section("1 - Register client")
         email    = rand_email()
-        password = "TestPass123!"
+        # Random per run: this client IS logged in via the API, so the
+        # value must not be a constant sitting in a public repository.
+        password = "Aa1" + secrets.token_urlsafe(24)
         r = await http.post("/auth/register", json={
             "full_name": "E2E Test Client",
             "email":     email,
@@ -144,6 +205,8 @@ async def main():
             print(r.text); return
         token   = r.json()["access_token"]
         user_id = r.json().get("user_id", "?")
+        if user_id and user_id != "?":
+            seeded_users.append(user_id)
         H = {"Authorization": f"Bearer {token}"}
         print(f"   user_id : {user_id}")
 
@@ -276,6 +339,8 @@ async def main():
 
         body    = r.json()
         case_id = body.get("case_id")
+        if case_id:
+            seeded_cases.append(case_id)
         check("case_id present in response", bool(case_id), str(case_id))
         print(f"   case_id: {case_id}")
 
@@ -384,4 +449,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--allow-production", action="store_true",
+                    help="seed the configured database instead of the test one")
+    asyncio.run(main(ap.parse_args().allow_production))
