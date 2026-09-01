@@ -67,6 +67,12 @@ DEPENDENTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 
 
 def is_fixture(user: dict) -> bool:
+    # Demo seed accounts (scripts/seed_demo_lawyers.py) are curated, verified
+    # and deliberately present. They are not fixtures and must survive this
+    # script even if a future email convention happens to match the rules
+    # below. Remove them with `seed_demo_lawyers.py --remove` instead.
+    if user.get("is_demo_seed"):
+        return False
     email = user.get("email") or ""
     return (
         not email
