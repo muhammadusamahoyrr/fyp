@@ -6,10 +6,13 @@ Inspired by:
 - FreeLawProject/Inception: structured profile text with sentence-aware chunking
 """
 import asyncio
+import logging
 from typing import Sequence
 
 from app.ai.pipelines.retriever import _embeddings
 from app.db.chroma import get_chroma
+
+logger = logging.getLogger(__name__)
 
 LAWYERS_COLLECTION = "lawyers_collection"
 
@@ -119,6 +122,31 @@ async def embed_lawyer(lawyer_id: str) -> bool:
         }],
     )
     return True
+
+
+def forget_lawyers(lawyer_ids: Sequence[str]) -> int:
+    """Remove lawyers from the vector store. Never raises.
+
+    The counterpart nobody wrote. Embeds were written on demand and removed
+    never, so a deleted lawyer's vector outlived the lawyer — and because
+    matching used to branch on whether the vector query returned *any* rows,
+    two such ghosts were enough to suppress the entire real candidate pool.
+
+    Called on KYC rejection, deactivation, account closure, and whenever a
+    query surfaces a hit that no longer resolves to a matchable lawyer.
+    Failure to forget must never fail the action that triggered it: the caller
+    is deleting an account, not maintaining an index.
+    """
+    ids = [str(i) for i in lawyer_ids if i]
+    if not ids:
+        return 0
+    try:
+        _get_collection().delete(ids=ids)
+        return len(ids)
+    except Exception:
+        logger.warning("could not remove %d lawyer(s) from %s",
+                       len(ids), LAWYERS_COLLECTION, exc_info=True)
+        return 0
 
 
 async def embed_all_lawyers() -> int:
