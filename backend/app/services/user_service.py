@@ -39,9 +39,27 @@ async def get_profile(user_id: str) -> dict:
     return _sanitize(user)
 
 
+# Fields that appear in the text `build_profile_text` embeds. Editing one of
+# these makes the stored vector wrong; editing an hourly rate does not, and a
+# re-embed there would pay a model load for nothing.
+_EMBEDDED_PROFILE_FIELDS = {"specializations", "bio", "experience_years"}
+
+
 async def update_profile(user_id: str, updates: dict) -> dict:
     updates["updated_at"] = datetime.now(timezone.utc)
     await user_repo.update_one({"_id": user_id}, {"$set": updates})
+
+    # `province` lives at the top level, not in lawyer_profile, so a lawyer
+    # setting their province comes through HERE rather than through
+    # update_lawyer_profile — and province is both a line in the embedded
+    # profile text and the filter the vector query uses. Missing this hook
+    # would leave a lawyer filtered out of their own province.
+    if "province" in updates:
+        user = await user_repo.find_by_id(user_id)
+        if user and user.get("role") == "lawyer":
+            from app.ai.lawyer_embeddings import schedule_embed
+            schedule_embed(user_id)
+
     return await get_profile(user_id)
 
 
@@ -82,6 +100,15 @@ async def update_lawyer_profile(user_id: str, updates: dict) -> dict:
     set_fields = {f"lawyer_profile.{k}": v for k, v in updates.items()}
     set_fields["updated_at"] = datetime.now(timezone.utc)
     await user_repo.update_one({"_id": user_id}, {"$set": set_fields})
+
+    # Re-index only when the edit actually changed the text that was embedded.
+    # The docstring on embed_lawyer has always claimed this happened; nothing
+    # called it, so every profile edit since launch silently left a stale vector
+    # (or, far more often, no vector at all).
+    if _EMBEDDED_PROFILE_FIELDS & set(updates):
+        from app.ai.lawyer_embeddings import schedule_embed
+        schedule_embed(user_id)
+
     return await get_profile(user_id)
 
 
@@ -275,6 +302,15 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
         })
 
     await user_repo.update_one({"_id": user_id}, {"$set": updates, "$unset": unsets})
+
+    # A closed lawyer must leave the candidate pool. The erasure above blanks
+    # the profile in Mongo but says nothing about the vector store, and until
+    # now nothing did — which is exactly how two deleted smoke-test lawyers
+    # stayed matchable long after their accounts were gone. Both closure paths
+    # (self-service and admin) come through here, so this is the one hook.
+    if isinstance(user.get("lawyer_profile"), dict):
+        from app.ai.lawyer_embeddings import forget_lawyers
+        forget_lawyers([user_id])
 
     logger.info("account closed: %s (role=%s, reason=%s)", user_id, user.get("role"), reason)
     return {

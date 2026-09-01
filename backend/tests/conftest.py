@@ -23,6 +23,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 TEST_DB_SUFFIX = "_test"
 
 
+@pytest.fixture(autouse=True)
+def _no_background_embeds(monkeypatch):
+    """Stop KYC approvals and profile edits from embedding for real.
+
+    `schedule_embed` puts a task on the running loop. Under pytest each test
+    gets its own loop, which is torn down the moment the test returns, so a
+    real embed is destroyed mid-flight ("Task was destroyed but it is
+    pending!") — after having loaded a 26-second CPU model and written to the
+    developer's ChromaDB directory, which no test asked it to do.
+
+    Autouse for the same reason as the database override above: an opt-in
+    guard only protects the tests that remember to opt in. Tests that want to
+    assert on indexing patch this again themselves, and win by fixture order.
+    """
+    try:
+        from app.ai import lawyer_embeddings
+    except Exception:  # pragma: no cover - AI extras not installed
+        return
+    monkeypatch.setattr(lawyer_embeddings, "schedule_embed", lambda _id: False)
+    monkeypatch.setattr(lawyer_embeddings, "forget_lawyers", lambda ids: 0)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_test_database():
     """Point every database read and write at a throwaway database.

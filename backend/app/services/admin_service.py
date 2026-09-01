@@ -143,6 +143,11 @@ def _matchability_gaps(lawyer: dict) -> list[str]:
 
 async def process_kyc(lawyer_id: str, approved: bool, reason: str | None,
                       actor: dict | None = None) -> None:
+    # Imported here, not at module scope: app.ai pulls in chromadb and the
+    # embedding model, and admin_service is imported by routes that never
+    # touch either.
+    from app.ai.lawyer_embeddings import forget_lawyers, schedule_embed
+
     lawyer = await user_repo.find_by_id(lawyer_id)
     if not lawyer or lawyer.get("role") != "lawyer":
         raise NotFoundError("Lawyer")
@@ -185,6 +190,11 @@ async def process_kyc(lawyer_id: str, approved: bool, reason: str | None,
             # delivery is logged loudly by the email util.
             logger.error("KYC approval email not delivered to %s", lawyer["email"])
         await _audit(actor, "kyc.approved", lawyer_id)
+        # Approval is what makes a lawyer matchable, so it is what indexes them.
+        # This used to be a manual admin endpoint nobody called, which is why
+        # the vector store held two smoke-test rows and no real lawyer at all.
+        # Scheduled after the decision is committed and cannot undo it.
+        schedule_embed(lawyer_id)
     else:
         await user_repo.update_one(
             {"_id": lawyer_id},
@@ -208,6 +218,9 @@ async def process_kyc(lawyer_id: str, approved: bool, reason: str | None,
         except Exception:
             logger.error("KYC rejection email not delivered to %s", lawyer["email"])
         await _audit(actor, "kyc.rejected", lawyer_id, {"reason": reason or "Not specified"})
+        # A rejected lawyer must leave the candidate pool. Rejection can follow
+        # an earlier approval, and nothing used to remove a vector once written.
+        forget_lawyers([lawyer_id])
 
 
 async def get_analytics() -> dict:
@@ -330,7 +343,22 @@ async def update_user(user_id: str, data: dict, actor: dict | None = None) -> di
     await _audit(actor, "user.updated", user_id,
                  {k: v for k, v in updates.items() if k != "updated_at"})
 
-    return _safe_user(await user_repo.find_by_id(user_id))
+    updated = await user_repo.find_by_id(user_id)
+    # Deactivating a lawyer, or moving them off the lawyer role, does not go
+    # through the closure path — so keep the vector store honest here too.
+    # Everything in that collection is someone a client can be shown.
+    if user.get("role") == "lawyer" or updated.get("role") == "lawyer":
+        from app.ai.lawyer_embeddings import forget_lawyers
+        lp = updated.get("lawyer_profile") or {}
+        still_matchable = (
+            updated.get("role") == "lawyer"
+            and updated.get("is_active", True)
+            and lp.get("kyc_verified")
+        )
+        if not still_matchable:
+            forget_lawyers([user_id])
+
+    return _safe_user(updated)
 
 
 async def reset_user_password(user_id: str, new_password: str,

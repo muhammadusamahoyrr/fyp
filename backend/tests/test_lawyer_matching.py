@@ -236,6 +236,139 @@ async def test_unverified_and_inactive_lawyers_are_never_ranked(
     assert "LM-CRIM" not in {r["_id"] for r in results}
 
 
+# ── the index is maintained by the app, not by an admin remembering to ───────
+
+@pytest.fixture
+def index_spy(monkeypatch):
+    """Record embed/forget calls instead of touching ChromaDB or the model."""
+    calls = {"embedded": [], "forgotten": []}
+
+    def _embed(lawyer_id):
+        calls["embedded"].append(lawyer_id)
+        return True
+
+    def _forget(ids):
+        calls["forgotten"].extend(ids)
+        return len(list(ids))
+
+    monkeypatch.setattr("app.ai.lawyer_embeddings.schedule_embed", _embed, raising=True)
+    monkeypatch.setattr("app.ai.lawyer_embeddings.forget_lawyers", _forget, raising=True)
+    return calls
+
+
+async def test_kyc_approval_embeds_the_lawyer(pool, index_spy):
+    """`embed_lawyer`'s docstring claimed this happened from the beginning.
+    Nothing called it, so the store held two smoke-test rows and no real
+    lawyer."""
+    from app.db.collections import get_users_col
+    from app.services import admin_service
+
+    await get_users_col().update_one(
+        {"_id": "LM-CRIM"}, {"$set": {"lawyer_profile.kyc_verified": False}}
+    )
+
+    await admin_service.process_kyc("LM-CRIM", True, None,
+                                    actor={"_id": "LM-ADM", "email": "a@x.test"})
+
+    assert index_spy["embedded"] == ["LM-CRIM"]
+
+
+async def test_kyc_rejection_removes_the_lawyer_from_the_index(pool, index_spy):
+    """Rejection can follow an earlier approval. Nothing used to remove a
+    vector once it had been written."""
+    from app.services import admin_service
+
+    await admin_service.process_kyc("LM-CRIM", False, "Bar number unverifiable",
+                                    actor={"_id": "LM-ADM", "email": "a@x.test"})
+
+    assert index_spy["forgotten"] == ["LM-CRIM"]
+    assert index_spy["embedded"] == []
+
+
+async def test_editing_embedded_profile_text_reindexes(pool, index_spy):
+    from app.services import user_service
+
+    await user_service.update_lawyer_profile("LM-CRIM", {"bio": "Now also does bail."})
+
+    assert index_spy["embedded"] == ["LM-CRIM"]
+
+
+async def test_editing_a_field_that_is_not_embedded_does_not_reindex(pool, index_spy):
+    """An hourly-rate change must not pay for a model load."""
+    from app.services import user_service
+
+    await user_service.update_lawyer_profile("LM-CRIM", {"hourly_rate": 5000})
+
+    assert index_spy["embedded"] == []
+
+
+async def test_setting_province_reindexes_even_though_it_is_not_in_lawyer_profile(
+    pool, index_spy
+):
+    """province lives at the TOP level, so it arrives through update_profile,
+    not update_lawyer_profile — and it is both embedded text and the vector
+    query's filter. Missing this hook filters a lawyer out of their own
+    province."""
+    from app.services import user_service
+
+    await user_service.update_profile("LM-CRIM", {"province": "sindh"})
+
+    assert index_spy["embedded"] == ["LM-CRIM"]
+
+
+async def test_a_client_changing_province_does_not_touch_the_lawyer_index(
+    pool, index_spy
+):
+    from app.services import user_service
+
+    await user_service.update_profile("LM-CLIENT", {"province": "sindh"})
+
+    assert index_spy["embedded"] == []
+
+
+async def test_closing_a_lawyer_account_removes_them_from_the_index(pool, index_spy):
+    """Both closure paths — self-service and admin delete — go through
+    _close_account_record, so this is the single hook that covers both."""
+    from app.db.collections import get_users_col
+    from app.services import user_service
+
+    user = await get_users_col().find_one({"_id": "LM-CRIM"})
+    await user_service._close_account_record(user, reason="self_service")
+
+    assert index_spy["forgotten"] == ["LM-CRIM"]
+
+
+async def test_deactivating_a_lawyer_removes_them_from_the_index(pool, index_spy):
+    """Deactivation via admin update_user does not go through closure."""
+    from app.services import admin_service
+
+    await admin_service.update_user("LM-CRIM", {"is_active": False},
+                                    actor={"_id": "LM-ADM", "email": "a@x.test"})
+
+    assert index_spy["forgotten"] == ["LM-CRIM"]
+
+
+async def test_an_unverified_lawyer_is_never_embedded(pool, monkeypatch):
+    """The gate is at the point of entry: everything in the collection is
+    someone a client can be shown."""
+    from app.ai import lawyer_embeddings
+    from app.db.collections import get_users_col
+
+    await get_users_col().update_one(
+        {"_id": "LM-CRIM"}, {"$set": {"lawyer_profile.kyc_verified": False}}
+    )
+
+    upserted = []
+    monkeypatch.setattr(
+        lawyer_embeddings, "_get_collection",
+        lambda: type("C", (), {"upsert": lambda self, **kw: upserted.append(kw)})(),
+        raising=True,
+    )
+
+    assert await lawyer_embeddings.embed_lawyer("LM-CRIM") is False
+    assert upserted == []
+
+
 # ── scoring ──────────────────────────────────────────────────────────────────
 
 def test_a_lawyer_with_no_vector_is_not_given_an_invented_score():

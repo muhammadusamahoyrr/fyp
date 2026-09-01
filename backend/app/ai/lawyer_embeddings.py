@@ -78,6 +78,10 @@ async def embed_lawyer(lawyer_id: str) -> bool:
     """
     Embed one lawyer's profile and upsert into ChromaDB lawyers_collection.
     Called after KYC approval and after any profile update.
+
+    Only KYC-verified, active lawyers are embedded. Anything in this collection
+    is a candidate a client can be shown, so verification is enforced at the
+    point of entry rather than left for the matcher to filter out later.
     """
     from app.repositories.case_repo import CaseRepository
     from app.repositories.user_repo import UserRepository
@@ -87,6 +91,9 @@ async def embed_lawyer(lawyer_id: str) -> bool:
 
     lawyer = await user_repo.find_by_id(lawyer_id)
     if not lawyer or lawyer.get("role") != "lawyer":
+        return False
+    lp_gate = lawyer.get("lawyer_profile") or {}
+    if not lp_gate.get("kyc_verified") or not lawyer.get("is_active", True):
         return False
 
     recent_cases = await case_repo.find_many(
@@ -121,6 +128,48 @@ async def embed_lawyer(lawyer_id: str) -> bool:
             "availability":     bool(lp.get("availability", False)),
         }],
     )
+    return True
+
+
+# Strong references to in-flight background embeds. asyncio only holds a weak
+# reference to a running task, so without this the garbage collector can cancel
+# one mid-flight.
+_PENDING: set[asyncio.Task] = set()
+
+
+async def _embed_quietly(lawyer_id: str) -> None:
+    try:
+        embedded = await embed_lawyer(lawyer_id)
+        if not embedded:
+            logger.info(
+                "lawyer %s not embedded: unverified, inactive, or empty profile",
+                lawyer_id,
+            )
+    except Exception:
+        logger.warning("background embed failed for lawyer %s", lawyer_id,
+                       exc_info=True)
+
+
+def schedule_embed(lawyer_id: str) -> bool:
+    """Refresh a lawyer's vector in the background. Never raises.
+
+    Background rather than inline because the first embedding in a process pays
+    a multi-second model load (`_embeddings()` is lru_cached, there is no GPU),
+    and the callers are an admin clicking Approve and a lawyer saving their
+    profile. Neither should wait on the index, and neither should fail if the
+    index does — the approval and the profile edit are already committed by the
+    time this is scheduled.
+
+    Returns whether a task was actually started, so a synchronous caller (a
+    script, a test) can tell that it needs to await `embed_lawyer` itself.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False  # no event loop — nothing to schedule onto
+    task = loop.create_task(_embed_quietly(lawyer_id))
+    _PENDING.add(task)
+    task.add_done_callback(_PENDING.discard)
     return True
 
 
