@@ -44,8 +44,17 @@ export const KYCVerification = ({ T }) => {
     const lawyer = lawyers.find(l => l.id === id);
     const { error } = await adminProcessKYC(id, st === "approved");
     if (error) {
-      setNotif({ name: lawyer.name, email: lawyer.email, action: "error" });
-      setTimeout(() => setNotif(null), 4000);
+      // The server says WHY: approval is refused when a profile has no
+      // province or no specialization, because such a lawyer is verified but
+      // can never appear in a client's search or match results. Showing
+      // "check connection" for a 422 sent the admin looking at the network.
+      setNotif({
+        name: lawyer.name,
+        email: lawyer.email,
+        action: "error",
+        reason: error.message || error.detail || "The server rejected the change.",
+      });
+      setTimeout(() => setNotif(null), 9000);
       return;
     }
     setLawyers(p => p.map(l => l.id === id ? { ...l, status: st } : l));
@@ -66,11 +75,14 @@ export const KYCVerification = ({ T }) => {
   return (
     <div style={{ position: "relative" }}>
       {notif && (
-        <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 999, background: notif.action === "approved" ? T.success : notif.action === "error" ? T.warn : T.danger, color: "#fff", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 600, boxShadow: "0 6px 24px rgba(0,0,0,0.22)", maxWidth: 340, display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 999, background: notif.action === "approved" ? T.success : notif.action === "error" ? T.warn : T.danger, color: "#fff", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 600, boxShadow: "0 6px 24px rgba(0,0,0,0.22)", maxWidth: 420, display: "flex", gap: 10, alignItems: "flex-start" }}>
           <Ic d={notif.action === "approved" ? IC.checkCircle : IC.xCircle} size={18} color="#fff" />
           <div>
             {notif.action === "error"
-              ? <div style={{ fontWeight: 700 }}>Failed to update {notif.name} — check connection</div>
+              ? <>
+                  <div style={{ fontWeight: 700 }}>Could not update {notif.name}</div>
+                  <div style={{ fontSize: 12, opacity: 0.92, marginTop: 3, lineHeight: 1.5, fontWeight: 500 }}>{notif.reason}</div>
+                </>
               : <>
                   <div style={{ fontWeight: 700 }}>Notification sent to {notif.name}</div>
                   <div style={{ fontSize: 12, opacity: 0.88, marginTop: 2 }}>Email to <strong>{notif.email}</strong>: KYC {notif.action}</div>
