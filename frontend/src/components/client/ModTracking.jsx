@@ -6,54 +6,14 @@ import { useCase } from "./CaseContext.jsx";
 import { listCases, getCaseTimeline, listAppointments, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt } from "@/lib/api.js";
 
 // ─── DATA ─────────────────────────────────────────────────────────────────────
-const CASES = [
-    {
-        id: "C-001", title: "Ahmad vs. Tech Corp Ltd.", status: "In Progress", type: "Employment Dispute",
-        filed: "Feb 10, 2026", court: "Civil Court, Lahore", judge: "Judge M. Tariq",
-        lawyer: "Ahmad Raza Khan", progress: 3, total: 5, nextHearing: "Feb 25, 9:00 AM", pct: 60
-    },
-    {
-        id: "C-002", title: "Ahmad vs. City Council", status: "In Progress", type: "Property Dispute",
-        filed: "Jan 5, 2026", court: "High Court, Lahore", judge: "Judge S. Iqbal",
-        lawyer: "Sana Mirza", progress: 1, total: 5, nextHearing: "Mar 12, 10:00 AM", pct: 20
-    },
-];
-
-const MILESTONES = [
-    { id: 1, status: "done", event: "Case Filed", date: "Feb 10", time: "10:30 AM", desc: "Case registered with court.", tag: "complete", milestoneId: "m1" },
-    { id: 2, status: "done", event: "Initial Hearing", date: "Feb 14", time: "11:00 AM", desc: "Opening arguments presented.", tag: "hearing", milestoneId: "m2" },
-    { id: 3, status: "done", event: "Discovery Documents", date: "Feb 20", time: "04:00 PM", desc: "All discovery documents submitted.", tag: "complete", milestoneId: "m3" },
-    { id: 4, status: "active", event: "Court Hearing", date: "Feb 25", time: "9:00 AM", desc: "Pre-trial conference scheduled.", tag: "hearing", milestoneId: "m4" },
-    { id: 5, status: "pending", event: "Trial Commencement", date: "Mar 10", time: "TBD", desc: "Awaiting court confirmation.", tag: "pending", milestoneId: "m5" },
-];
-
-const DOCUMENTS_INIT = [
-    { id: 1, name: "Exhibit_C_Financials.pdf", type: "PDF", date: "Feb 20, 2026", category: "Evidence", size: "2.4 MB", version: 2, seenByLawyer: true, milestoneId: "m3" },
-    { id: 2, name: "Pre-Trial_Brief_v3.docx", type: "DOCX", date: "Feb 18, 2026", category: "Legal Brief", size: "890 KB", version: 3, seenByLawyer: true, milestoneId: "m4" },
-    { id: 3, name: "Court_Order_Feb14.pdf", type: "PDF", date: "Feb 14, 2026", category: "Court Order", size: "1.1 MB", version: 1, seenByLawyer: true, milestoneId: "m2" },
-    { id: 4, name: "Contract_Scan_Original.jpg", type: "IMG", date: "Feb 10, 2026", category: "Evidence", size: "4.7 MB", version: 1, seenByLawyer: false, milestoneId: "m1" },
-    { id: 5, name: "Discovery_Request.pdf", type: "PDF", date: "Feb 08, 2026", category: "Discovery", size: "670 KB", version: 1, seenByLawyer: true, milestoneId: "m3" },
-    { id: 6, name: "Witness_List_Draft.docx", type: "DOCX", date: "Feb 07, 2026", category: "Legal Brief", size: "340 KB", version: 2, seenByLawyer: false, milestoneId: "m4" },
-];
-
-// Unified feed: all events in one array
-const UNIFIED_FEED_INIT = [
-    { id: "f1", type: "hearing", urgency: "critical", title: "Court Hearing", date: "Feb 25", dateRaw: "2026-02-25", time: "9:00 AM", desc: "Pre-trial conference — attend in person", milestoneId: "m4", done: false },
-    { id: "f2", type: "deadline", urgency: "overdue", title: "Pre-Trial Brief", date: "Feb 20", dateRaw: "2026-02-20", time: "Due", desc: "Response to opposition motion — 1 day overdue", milestoneId: "m4", done: false },
-    { id: "f3", type: "deadline", urgency: "urgent", title: "Witness List Sign-off", date: "Feb 23", dateRaw: "2026-02-23", time: "EOD", desc: "Confirm final witness list with your lawyer", milestoneId: "m4", done: false },
-    { id: "f4", type: "reminder", urgency: "normal", title: "Review Exhibit C", date: "Feb 23", dateRaw: "2026-02-23", time: "9:00 AM", desc: "Review pages 8–14 before the hearing", milestoneId: "m4", done: false },
-    { id: "f5", type: "document", urgency: "info", title: "Document Updated", date: "Feb 18", dateRaw: "2026-02-18", time: "11:00 AM", desc: "Pre-Trial Brief revised — v3 now available", milestoneId: "m4", done: true },
-    { id: "f6", type: "response", urgency: "info", title: "Lawyer Response", date: "Feb 19", dateRaw: "2026-02-19", time: "2:30 PM", desc: "Atty. Ahmad Raza replied about Exhibit C", milestoneId: "m3", done: true },
-    { id: "f7", type: "status", urgency: "info", title: "Status Updated", date: "Feb 20", dateRaw: "2026-02-20", time: "10:00 AM", desc: "Case moved to Pre-Trial Discovery phase", milestoneId: "m3", done: true },
-    { id: "f8", type: "deadline", urgency: "upcoming", title: "Trial Commencement", date: "Mar 10", dateRaw: "2026-03-10", time: "TBD", desc: "Court trial begins — confirm availability", milestoneId: "m5", done: false },
-];
-
-const MESSAGES_INIT = [
-    { id: 1, from: "lawyer", text: "The hearing on Feb 25 is critical. Please review Exhibit C pages 8–14. I need your witness list sign-off by Feb 23.", date: "Feb 18, 3:15 PM", milestoneId: "m4", milestoneName: "Court Hearing", seenByLawyer: true },
-    { id: 2, from: "client", text: "Understood. Can you clarify what Exhibit C covers? I want to prepare properly.", date: "Feb 19, 10:42 AM", status: "answered", milestoneId: "m3", milestoneName: "Discovery Documents", seenByLawyer: true },
-    { id: 3, from: "lawyer", text: "Exhibit C covers financial records for Jan–Jun 2025. Focus on the salary discrepancy on pg. 11.", date: "Feb 19, 2:30 PM", milestoneId: "m3", milestoneName: "Discovery Documents", seenByLawyer: true },
-    { id: 4, from: "client", text: "Should I attend in person or is virtual attendance allowed for the Feb 25 hearing?", date: "Feb 21, 9:00 AM", status: "pending", milestoneId: "m4", milestoneName: "Court Hearing", seenByLawyer: false },
-];
+// Nothing is hardcoded here on purpose. This block used to hold five arrays of
+// invented data — two lawsuits ("Ahmad vs. Tech Corp Ltd.", Judge M. Tariq),
+// a five-step court timeline, documents, a deadline feed and a whole fabricated
+// conversation with a lawyer about "Exhibit C pages 8-14". Some were fallbacks
+// for an empty API, but the milestones, documents and messages rendered
+// unconditionally, so every real case displayed someone else's invented
+// litigation. Every screen below now shows what the API actually returned, and
+// an honest empty state when that is nothing.
 
 // ─── API MAPPERS ──────────────────────────────────────────────────────────────
 function mapApiCase(c) {
@@ -127,6 +87,20 @@ const Card = ({ children, t, style = {}, onClick }) => (
         onMouseLeave={onClick ? e => { e.currentTarget.style.boxShadow = t.shadowCard; e.currentTarget.style.borderColor = t.border; } : undefined}>
         <DotGrid t={t} />
         <div style={{ position: "relative", zIndex: 1 }}>{children}</div>
+    </div>
+);
+
+// Says plainly that there is nothing here, rather than filling the space with
+// invented content. Same principle as the 2FA and session rows in ModProfile:
+// an empty screen a user can trust beats a populated one they cannot.
+const Empty = ({ icon = "—", title, desc, t }) => (
+    <div style={{
+        padding: "26px 20px", textAlign: "center",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+    }}>
+        <div style={{ fontSize: 22, opacity: 0.5 }}>{icon}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: t.textDim }}>{title}</div>
+        {desc && <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.6, maxWidth: 320 }}>{desc}</div>}
     </div>
 );
 
@@ -378,8 +352,10 @@ const TopHeader = ({ t, onBack, activeCaseId, cases, onCaseSwitch, unreadCount }
                 }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = t.borderHi; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: t.success, flexShrink: 0 }} />
-                    {activeCase.id} — {activeCase.title.length > 22 ? activeCase.title.slice(0, 22) + "…" : activeCase.title}
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: activeCase ? t.success : t.textFaint, flexShrink: 0 }} />
+                    {activeCase
+                        ? `${activeCase.id} — ${activeCase.title.length > 22 ? activeCase.title.slice(0, 22) + "…" : activeCase.title}`
+                        : T("No case selected", "کوئی کیس منتخب نہیں")}
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <polyline points="6 9 12 15 18 9" />
                     </svg>
@@ -558,13 +534,25 @@ function HearingUpdates({ hearings, caseTitle, court }) {
     );
 }
 
-function PageOverview({ setPage, activeCase, feed, hearings }) {
+function PageOverview({ setPage, activeCase, feed, hearings, milestones = [] }) {
     const t = useT();
     const { T } = useLang();
     const uc = urgencyConfig(t);
     const critical = feed.filter(f => !f.done && (f.urgency === "critical" || f.urgency === "overdue"));
     const upcoming = feed.filter(f => !f.done && (f.urgency === "urgent" || f.urgency === "upcoming")).slice(0, 2);
-    const activeM = MILESTONES.find(m => m.status === "active");
+    const activeM = milestones.find(m => m.status === "active");
+
+    // Every field below reads off activeCase. Before the mock CASES array was
+    // removed this was never undefined; on a real account with no cases it is,
+    // and dereferencing it threw.
+    if (!activeCase) {
+        return (
+            <Card t={t}>
+                <Empty t={t} icon="🗂" title="No cases yet"
+                    desc="Complete an intake and convert it to a case. Its timeline, documents, hearings and messages all appear here once it exists." />
+            </Card>
+        );
+    }
 
     return (
         <div>
@@ -685,7 +673,11 @@ function PageOverview({ setPage, activeCase, feed, hearings }) {
                                 <div style={{ fontSize: 11, color: t.textMuted }}>{activeM.date} · {activeM.time}</div>
                             </div>
                         )}
-                        {MILESTONES.slice(0, 4).map((m, i) => {
+                        {milestones.length === 0 && (
+                            <Empty t={t} icon="🗓" title="No milestones recorded yet"
+                                desc="The case timeline fills in as your lawyer records progress." />
+                        )}
+                        {milestones.slice(0, 4).map((m, i) => {
                             const isDone = m.status === "done", isActive = m.status === "active";
                             return (
                                 <div key={m.id} style={{ display: "flex", gap: 12, paddingBottom: i < 3 ? 14 : 0, position: "relative" }}>
@@ -744,59 +736,27 @@ function PageOverview({ setPage, activeCase, feed, hearings }) {
             {/* Bottom row */}
             <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <Card t={t} onClick={() => setPage("documents")}>
-                    <SH icon="📁" title="Documents" desc="Case files & uploads"
-                        badge={<Badge variant="primary" t={t}>{DOCUMENTS_INIT.length} Files</Badge>} t={t} />
-                    <div style={{ padding: "12px 20px" }}>
-                        {DOCUMENTS_INIT.slice(0, 3).map((d, i) => (
-                            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: i < 2 ? `1px solid ${t.border}` : "none" }}>
-                                <span style={{ fontSize: 18 }}>{d.type === "PDF" ? "📄" : d.type === "DOCX" ? "📝" : "🖼"}</span>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                        <span style={{ fontSize: 12, fontWeight: 600, color: t.text }}>{d.name}</span>
-                                        {d.version > 1 && <Badge variant="warn" t={t} sm>v{d.version}</Badge>}
-                                    </div>
-                                    <div style={{ fontSize: 10, color: t.textMuted }}>{d.category} · {d.date}</div>
-                                </div>
-                                <span style={{ fontSize: 10, color: d.seenByLawyer ? t.success : t.textFaint, fontWeight: 600, flexShrink: 0 }}>
-                                    {d.seenByLawyer ? "✓✓" : "● Unseen"}
-                                </span>
-                            </div>
-                        ))}
-                        <div style={{ padding: "10px 0", textAlign: "center" }}>
-                            <span style={{ fontSize: 12, color: t.primary, fontWeight: 700, cursor: "pointer" }}>View all documents →</span>
-                        </div>
+                    <SH icon="📁" title="Documents" desc="Case files & uploads" t={t} />
+                    {/* The preview list here used to render a fixed array of
+                        invented filenames. Documents are loaded per case in
+                        PageDocuments; rather than duplicate that fetch, this
+                        card points at it instead of inventing a preview. */}
+                    <Empty t={t} icon="📁" title="Open documents"
+                        desc="Case files and uploads for the selected case." />
+                    <div style={{ padding: "0 0 14px", textAlign: "center" }}>
+                        <span style={{ fontSize: 12, color: t.primary, fontWeight: 700, cursor: "pointer" }}>View all documents →</span>
                     </div>
                 </Card>
 
                 <Card t={t} onClick={() => setPage("communication")}>
-                    <SH icon="💬" title="Communication" desc="Messages & notes with your lawyer"
-                        badge={<Badge variant="info" t={t}>2 Pending</Badge>} t={t} />
-                    <div style={{ padding: "12px 20px" }}>
-                        {MESSAGES_INIT.slice(0, 2).map((m, i) => (
-                            <div key={m.id} style={{
-                                padding: "10px 12px", borderRadius: 10, marginBottom: 8,
-                                background: m.from === "client" ? t.primaryGlow2 : t.cardHi,
-                                border: `1px solid ${m.from === "client" ? t.primary + "44" : t.border}`
-                            }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                                    <span style={{ fontSize: 10, color: t.textFaint, fontWeight: 700 }}>
-                                        {m.from === "lawyer" ? "Atty. Ahmad Raza" : "You"} · {m.date}
-                                    </span>
-                                    {m.from === "client" && (
-                                        <span style={{ fontSize: 10, color: m.seenByLawyer ? t.success : t.textFaint, fontWeight: 600 }}>
-                                            {m.seenByLawyer ? "✓✓ Seen" : "✓ Sent"}
-                                        </span>
-                                    )}
-                                </div>
-                                {m.milestoneName && <div style={{ fontSize: 10, color: t.primary, fontWeight: 600, marginBottom: 3 }}>● {m.milestoneName}</div>}
-                                <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.5 }}>
-                                    {m.text.slice(0, 80)}{m.text.length > 80 ? "…" : ""}
-                                </div>
-                            </div>
-                        ))}
-                        <div style={{ padding: "6px 0", textAlign: "center" }}>
-                            <span style={{ fontSize: 12, color: t.primary, fontWeight: 700, cursor: "pointer" }}>Open conversation →</span>
-                        </div>
+                    <SH icon="💬" title="Communication" desc="Messages & notes with your lawyer" t={t} />
+                    {/* Previously two hardcoded messages, including a lawyer
+                        reply about "Exhibit C pages 8-14" that no user ever
+                        sent. Real messages load in PageCommunication. */}
+                    <Empty t={t} icon="💬" title="Open conversation"
+                        desc="Messages and notes exchanged with your lawyer on this case." />
+                    <div style={{ padding: "0 0 14px", textAlign: "center" }}>
+                        <span style={{ fontSize: 12, color: t.primary, fontWeight: 700, cursor: "pointer" }}>Open conversation →</span>
                     </div>
                 </Card>
             </div>
@@ -805,11 +765,11 @@ function PageOverview({ setPage, activeCase, feed, hearings }) {
 }
 
 // ─── PAGE: TIMELINE ───────────────────────────────────────────────────────────
-// Fix #5: accepts milestones prop — includes both static MILESTONES and any
+// Accepts the milestones prop: the case timeline from the API plus any
 // appointment milestones written by ModLawyers via CaseContext.
 function PageTimeline({ milestones: propMilestones }) {
     const t = useT();
-    const allMilestones = propMilestones || MILESTONES;
+    const allMilestones = propMilestones || [];
     const [tab, setTab] = useState("all");
     const [addNote, setAddNote] = useState(null);
     const [noteText, setNoteText] = useState("");
@@ -838,6 +798,11 @@ function PageTimeline({ milestones: propMilestones }) {
                         { key: "done", label: "Completed" },
                     ]} active={tab} onChange={setTab} t={t} />
                     <div style={{ padding: "20px 24px" }}>
+                        {list.length === 0 && (
+                            <Empty t={t} icon="🗓"
+                                title="No timeline entries for this case yet"
+                                desc="Milestones appear here once your lawyer records a filing, hearing or court order against the case." />
+                        )}
                         {list.map((m, i) => {
                             const isDone = m.status === "done", isActive = m.status === "active";
                             const tc = tagStyle[m.tag] || tagStyle.pending;
@@ -958,7 +923,7 @@ function _mapApiDoc(d) {
 }
 
 // ─── PAGE: DOCUMENTS ──────────────────────────────────────────────────────────
-function PageDocuments({ activeCaseId }) {
+function PageDocuments({ activeCaseId, milestones = [] }) {
     const t = useT();
     const [filter, setFilter] = useState("All");
     const [search, setSearch] = useState("");
@@ -967,13 +932,13 @@ function PageDocuments({ activeCaseId }) {
     const [apiDocs, setApiDocs] = useState(null); // null = loading
 
     useEffect(() => {
-        if (!activeCaseId || activeCaseId.startsWith("C-")) { setApiDocs([]); return; }
+        if (!activeCaseId) { setApiDocs([]); return; }
         apiListDocuments(activeCaseId).then(({ data, error }) => {
             setApiDocs(!error && Array.isArray(data) ? data.map(_mapApiDoc) : []);
         });
     }, [activeCaseId]);
 
-    const docSource = apiDocs !== null ? apiDocs : DOCUMENTS_INIT;
+    const docSource = apiDocs ?? [];   // null means still loading
     const cats = ["All", "PDF", "Plaint", "Written Statement", "Legal Notice", "NDA / Contract", "Document"];
     const filtered = docSource.filter(d =>
         (filter === "All" || d.type === filter || d.category === filter) &&
@@ -1015,7 +980,7 @@ function PageDocuments({ activeCaseId }) {
                 <div style={{ padding: 20 }}>
                     {filtered.map(doc => {
                         const d = dm(doc.type);
-                        const ms = MILESTONES.find(m => m.milestoneId === doc.milestoneId);
+                        const ms = milestones.find(m => m.milestoneId === doc.milestoneId);
                         const isExpanded = expandedId === doc.id;
                         return (
                             <div key={doc.id} style={{ borderRadius: 12, border: `1px solid ${t.border}`, marginBottom: 8, background: t.cardHi, overflow: "hidden" }}>
@@ -1165,7 +1130,7 @@ function PagePayments({ t }) {
     );
 }
 
-function PageNotifications({ feed, onMarkDone, onMarkAllDone }) {
+function PageNotifications({ feed, onMarkDone, onMarkAllDone, milestones = [] }) {
     const t = useT();
     const [tab, setTab] = useState("all");
     const [settings, setSettings] = useState({
@@ -1216,7 +1181,7 @@ function PageNotifications({ feed, onMarkDone, onMarkAllDone }) {
                     <div style={{ padding: "4px 20px 20px" }}>
                         {displayed.map(n => {
                             const u = uc[n.urgency];
-                            const ms = n.milestoneId ? MILESTONES.find(m => m.milestoneId === n.milestoneId) : null;
+                            const ms = n.milestoneId ? milestones.find(m => m.milestoneId === n.milestoneId) : null;
                             return (
                                 <div key={n.id} onClick={() => !n.done && onMarkDone(n.id)}
                                     style={{
@@ -1291,10 +1256,10 @@ function PageCommunication({ caseId, milestones: propMilestones }) {
     const endRef = useRef(null);
     useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-    const milestoneList = propMilestones || MILESTONES;
+    const milestoneList = propMilestones || [];
 
     useEffect(() => {
-        if (!caseId || caseId.startsWith("C-")) { setLoading(false); return; }
+        if (!caseId) { setLoading(false); return; }
         apiListMessages(caseId).then(({ data, error }) => {
             if (!error && data) {
                 setMsgs(data.map(m => ({
@@ -1413,8 +1378,10 @@ function PageCommunication({ caseId, milestones: propMilestones }) {
                                             background: t.inputBg, border: `1px solid ${selDoc ? t.primary : t.border}`, borderRadius: 10,
                                             padding: "8px 12px", color: selDoc ? t.text : t.textFaint, fontSize: 12, outline: "none", boxSizing: "border-box"
                                         }}>
-                                        <option value="">— Document (optional) —</option>
-                                        {DOCUMENTS_INIT.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                        <option value="">
+                                            {documents.length ? "— Document (optional) —" : "— No documents on this case —"}
+                                        </option>
+                                        {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                                     </select>
                                 </div>
                                 <div style={{ display: "flex", gap: 8 }}>
@@ -1498,7 +1465,7 @@ function PageCommunication({ caseId, milestones: propMilestones }) {
 }
 
 // ─── PAGE: REMINDERS — unified feed ──────────────────────────────────────────
-function PageReminders({ feed, setFeed }) {
+function PageReminders({ feed, setFeed, milestones = [], documents = [] }) {
     const t = useT();
     const [tab, setTab] = useState("all");
     const [form, setForm] = useState({ desc: "", date: "", time: "", milestoneId: "" });
@@ -1518,7 +1485,7 @@ function PageReminders({ feed, setFeed }) {
     const addReminder = () => {
         if (!form.desc || !form.date) return;
         const conflict = conflictOn(form.date);
-        const ms = MILESTONES.find(m => m.milestoneId === form.milestoneId);
+        const ms = milestones.find(m => m.milestoneId === form.milestoneId);
         setFeed(p => [...p, {
             id: "r" + Date.now(), type: "reminder", urgency: "normal",
             title: form.desc, date: form.date, dateRaw: form.date, time: form.time || "Any time",
@@ -1547,7 +1514,7 @@ function PageReminders({ feed, setFeed }) {
                     <div style={{ padding: "12px 20px" }}>
                         {displayed.map(f => {
                             const u = uc[f.urgency];
-                            const ms = f.milestoneId ? MILESTONES.find(m => m.milestoneId === f.milestoneId) : null;
+                            const ms = f.milestoneId ? milestones.find(m => m.milestoneId === f.milestoneId) : null;
                             const isEditing = editId === f.id;
                             return (
                                 <div key={f.id} style={{
@@ -1625,7 +1592,7 @@ function PageReminders({ feed, setFeed }) {
                                         padding: "9px 12px", color: t.text, fontSize: 12, outline: "none", boxSizing: "border-box"
                                     }}>
                                     <option value="">— No milestone —</option>
-                                    {MILESTONES.map(m => <option key={m.id} value={m.milestoneId}>{m.event}</option>)}
+                                    {milestones.map(m => <option key={m.id} value={m.milestoneId}>{m.event}</option>)}
                                 </select>
                             </div>
                             <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
@@ -1775,7 +1742,7 @@ export default function Module7({ isDark }) {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     // Icon-only inner nav on phones
     useEffect(() => { if (isMobile) setSidebarCollapsed(true); }, [isMobile]);
-    const [activeCaseId, setActiveCaseId] = useState("C-001");
+    const [activeCaseId, setActiveCaseId] = useState(null);
     const [apiCases, setApiCases] = useState([]);
     const [apiMilestones, setApiMilestones] = useState([]);
     const [apiHearings, setApiHearings] = useState([]);
@@ -1803,9 +1770,9 @@ export default function Module7({ isDark }) {
         }).catch(() => setApptLoading(false));
     }, [page]);
 
-    // Load timeline when active case changes (skip mock IDs like "C-001")
+    // Load timeline when the active case changes
     useEffect(() => {
-        if (!activeCaseId || activeCaseId.startsWith("C-")) return;
+        if (!activeCaseId) return;
         getCaseTimeline(activeCaseId).then(({ data }) => {
             if (data?.milestones?.length) {
                 setApiMilestones(data.milestones.map(mapApiMilestone));
@@ -1816,8 +1783,9 @@ export default function Module7({ isDark }) {
         });
     }, [activeCaseId]);
 
-    const displayCases = apiCases.length ? apiCases : CASES;
-    const displayMilestones = apiMilestones.length ? apiMilestones : MILESTONES;
+    // No fallbacks. An empty list renders an empty state, not invented cases.
+    const displayCases = apiCases;
+    const displayMilestones = apiMilestones;
 
     // Local reminders created inside PageReminders (notifications come from CaseContext)
     const [localReminders, setLocalReminders] = useState([]);
@@ -1841,16 +1809,16 @@ export default function Module7({ isDark }) {
     const unreadCount = feed.filter(f => !f.done).length;
 
     const pages = {
-        overview: (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} hearings={apiHearings} />,
+        overview: (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} hearings={apiHearings} milestones={allMilestones} />,
         appointments: (props) => <PageAppointments  {...props} appointments={apiAppointments} loading={apptLoading} />,
         timeline: (props) => <PageTimeline      {...props} milestones={allMilestones} />,
-        documents: (props) => <PageDocuments     {...props} activeCaseId={activeCaseId} />,
+        documents: (props) => <PageDocuments     {...props} activeCaseId={activeCaseId} milestones={allMilestones} />,
         payments: (props) => <PagePayments      {...props} />,
-        notifications: (props) => <PageNotifications {...props} feed={feed}
+        notifications: (props) => <PageNotifications {...props} feed={feed} milestones={allMilestones}
             onMarkDone={markNotificationDone}
             onMarkAllDone={markAllNotificationsDone} />,
         communication: (props) => <PageCommunication {...props} caseId={activeCaseId} milestones={allMilestones} />,
-        reminders: (props) => <PageReminders     {...props} feed={feed} setFeed={setFeed} />,
+        reminders: (props) => <PageReminders     {...props} feed={feed} setFeed={setFeed} milestones={allMilestones} />,
     };
     const PageComp = pages[page] || pages.overview;
 

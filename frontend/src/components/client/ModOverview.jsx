@@ -39,11 +39,32 @@ const ModOverview = () => {
         ? new Date(nextAppt.scheduled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
         : null;
 
+    // Only tiles backed by a real number get a bar, and the bar is derived from
+    // that number. "Pending Docs" and "Agreements" previously showed a dash
+    // above a bar filled to 45% and 80% — figures that came from nowhere and
+    // measured nothing. A tile with no data now says so and draws no bar, the
+    // same principle as the 2FA and session rows in ModProfile.
     const stats = [
-        { label: "Active Cases", val: activeCasesCount || "—", sub: activeCasesCount ? `${activeCasesCount} case${activeCasesCount !== 1 ? "s" : ""} open` : "No cases yet", color: t.primary, icon: "brief", pct: Math.min(activeCasesCount * 20, 100) || 10 },
-        { label: "Pending Docs", val: "—", sub: "Upload via case", color: t.info, icon: "file", pct: 45 },
-        { label: "Appointments", val: apptCount || "—", sub: nextApptLabel ? `Next: ${nextApptLabel}` : "None scheduled", color: t.success, icon: "cal", pct: Math.min(apptCount * 25, 100) || 10 },
-        { label: "Agreements", val: "—", sub: "Via lawyer portal", color: t.warn, icon: "pen", pct: 80 },
+        {
+            label: "Active Cases", color: t.primary, icon: "brief",
+            val: activeCasesCount || "—",
+            sub: activeCasesCount ? `${activeCasesCount} case${activeCasesCount !== 1 ? "s" : ""} open` : "No cases yet",
+            pct: activeCasesCount ? Math.min(activeCasesCount * 20, 100) : null,
+        },
+        {
+            label: "Pending Docs", color: t.info, icon: "file",
+            val: "—", sub: "Not tracked yet — open a case to upload", pct: null,
+        },
+        {
+            label: "Appointments", color: t.success, icon: "cal",
+            val: apptCount || "—",
+            sub: nextApptLabel ? `Next: ${nextApptLabel}` : "None scheduled",
+            pct: apptCount ? Math.min(apptCount * 25, 100) : null,
+        },
+        {
+            label: "Agreements", color: t.warn, icon: "pen",
+            val: "—", sub: "Not tracked yet — managed in the lawyer portal", pct: null,
+        },
     ];
 
     const recentCases = cases.slice(0, 3);
@@ -73,13 +94,16 @@ const ModOverview = () => {
                         </div>
                         <div style={{ fontSize: 15, fontWeight: 700, color: t.text, marginBottom: 4 }}>{label}</div>
                         <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 12 }}>{sub}</div>
+                        {/* No bar at all when there is no number behind it. */}
                         <div style={{ height: 5, background: t.inputBg, borderRadius: 4, overflow: "hidden" }}>
-                            <div style={{
-                                width: `${pct}%`, height: "100%",
-                                background: `linear-gradient(90deg, ${color}, ${color}99)`,
-                                borderRadius: 4,
-                                transition: "width 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)",
-                            }} />
+                            {pct !== null && (
+                                <div style={{
+                                    width: `${pct}%`, height: "100%",
+                                    background: `linear-gradient(90deg, ${color}, ${color}99)`,
+                                    borderRadius: 4,
+                                    transition: "width 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+                                }} />
+                            )}
                         </div>
                     </Card>
                 ))}
