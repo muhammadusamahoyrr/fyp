@@ -225,16 +225,66 @@ async def _semantic_candidates(
     return resolved
 
 
-async def match_lawyers_for_case(case_id: str, top_n: int = 5) -> list[dict]:
+async def _general_listing(province: str, top_n: int) -> tuple[list[dict], str] | None:
+    """Verified lawyers to browse when nothing actually matches the case.
+
+    Deliberately NOT scored. This is a different answer to a different
+    question — "who is available?" rather than "who fits this case?" — and
+    blending the two is what the previous last-resort branch did: it emitted a
+    ranked, scored list whose only distinguishing mark was the string
+    " (unverified)" appended to `match_reason`, a field the frontend maps into
+    its view model and never renders. The caveat did not reach a single user.
+    """
+    nearby = await user_repo.find_lawyers(
+        province=province, case_type=None, min_rating=0.0,
+        page=1, page_size=top_n,
+    )
+    if nearby.items:
+        return list(nearby.items), (
+            f"No lawyer on the platform lists this case type in {province} yet. "
+            f"These are verified lawyers practising in {province} — browse them "
+            f"or refine your search."
+        )
+
+    anywhere = await user_repo.find_lawyers(
+        province=None, case_type=None, min_rating=0.0,
+        page=1, page_size=top_n,
+    )
+    if anywhere.items:
+        return list(anywhere.items), (
+            f"No verified lawyer is registered in {province} yet. These are "
+            f"verified lawyers practising elsewhere in Pakistan."
+        )
+
+    return None
+
+
+async def match_lawyers_for_case(case_id: str, top_n: int = 5) -> dict:
+    """Rank lawyers for a case, or say plainly that nothing matched.
+
+    Returns {"result_kind", "notice", "matches"}. `result_kind` is:
+      matched          — real candidates, each with a match_score
+      general_listing  — nothing matched; verified lawyers to browse,
+                         match_score None so nothing can present them as ranked
+      none             — no verified lawyers at all
+
+    An unverified lawyer is never returned under any of the three. The previous
+    final fallback queried `{"role": "lawyer", "is_active": True}` with no KYC
+    filter at all, so a stranger who had merely registered could be shown to a
+    client as a scored match. KYC is the only check standing between a client
+    and someone asserting they are an advocate; an empty list is the honest
+    answer when there is nothing to show.
+    """
     case = await case_repo.find_by_id(case_id)
     if not case:
         raise NotFoundError("Case")
 
     case_type = case.get("case_type", "")
     # `or`, not a dict default: a case whose province key exists but is None
-    # would otherwise reach the province filter as None, silently widening the
-    # search to every province. Federal is the right reading of "no province
-    # stated" — the vector query already treats it as matching everywhere.
+    # would otherwise reach the province filter as None (silently widening to
+    # every province) and the notice text as the literal string "None".
+    # Federal is the right reading of "no province stated" — the vector query
+    # already treats it as matching everywhere.
     province = case.get("province") or "federal"
     query_text = (
         case.get("description")
@@ -273,33 +323,34 @@ async def match_lawyers_for_case(case_id: str, top_n: int = 5) -> list[dict]:
 
     scored.sort(key=lambda x: x["match_score"], reverse=True)
 
-    # Last-resort fallback: if the merged pool produced nothing, return any
-    # active lawyer so the UI is not permanently empty.
-    if not scored:
-        result = await user_repo.find_lawyers(
-            province=None,          # no province filter — cast the widest net
-            case_type=None,
-            min_rating=0.0,
-            availability=None,
-            page=1,
-            page_size=top_n * 4,
-        )
-        if not result.items:
-            # Final resort: any user with role=lawyer, no KYC requirement
-            all_lawyers = await user_repo.find_many(
-                {"role": "lawyer", "is_active": True},
-                limit=top_n * 4,
-            )
-            result_items = all_lawyers
-        else:
-            result_items = result.items
-        for lawyer in result_items:
-            final_score, reason = _score_lawyer(lawyer, case_type, semantic_score=None)
-            scored.append({**_sanitize(lawyer), "match_score": final_score,
-                           "match_reason": reason + " (unverified)"})
-        scored.sort(key=lambda x: x["match_score"], reverse=True)
+    if scored:
+        return {
+            "result_kind": "matched",
+            "notice": None,
+            "matches": scored[:top_n],
+        }
 
-    return scored[:top_n]
+    listing = await _general_listing(province, top_n)
+    if listing is None:
+        return {
+            "result_kind": "none",
+            "notice": ("No verified lawyers are available on the platform yet. "
+                       "Please check back shortly."),
+            "matches": [],
+        }
+
+    lawyers, notice = listing
+    return {
+        "result_kind": "general_listing",
+        "notice": notice,
+        # match_score is None, not zero and not a number: these are not ranked
+        # against the case, and a number here is what let a browse list be
+        # rendered as "97% case compatibility".
+        "matches": [
+            {**_sanitize(l), "match_score": None, "match_reason": None}
+            for l in lawyers
+        ],
+    }
 
 
 async def submit_review(

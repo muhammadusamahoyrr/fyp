@@ -75,6 +75,11 @@ const ModLawyers = () => {
     const [loadingLawyers, setLoadingLawyers] = useState(true);
     const [aiMatch, setAiMatch] = useState(null);
     const [loadingMatch, setLoadingMatch] = useState(false);
+    // A general listing is NOT a match. The API says which it returned via
+    // result_kind; these two carry that answer so the banner can render a
+    // browse list differently instead of dressing it up as a recommendation.
+    const [matchKind, setMatchKind] = useState(null);
+    const [matchNotice, setMatchNotice] = useState(null);
     const [showReviewForm, setShowReviewForm] = useState(false);
     const [reviewStars, setReviewStars] = useState(5);
     const [reviewComment, setReviewComment] = useState("");
@@ -271,6 +276,8 @@ const ModLawyers = () => {
 
         let items = [];
         let lastError = null;
+        let kind = null;
+        let notice = null;
 
         for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
             // Wait 3 s before every retry (not before the first try)
@@ -302,17 +309,30 @@ const ModLawyers = () => {
             }
 
             items = Array.isArray(data) ? data : (data?.matches || data?.items || []);
-            if (items.length > 0) break; // got results — stop polling
+            kind = data?.result_kind ?? null;
+            notice = data?.notice ?? null;
+            // "none" is a settled answer, not a slow one — there are no
+            // verified lawyers to find, so polling again cannot change it.
+            if (items.length > 0 || kind === "none") break;
             // else: background task still running, poll again
         }
+
+        setMatchKind(kind);
+        setMatchNotice(notice);
 
         if (lastError) {
             console.error("matchLawyers error:", lastError);
             toast.show(lastError, "error", 4000);
-        } else if (items.length) {
+        } else if (kind === "matched" && items.length) {
             const top = mapApiLawyer(items[0], 0);
             setAiMatch(top);
             toast.show(`AI matched you with ${top.name}`, "success", 3000);
+        } else if (notice) {
+            // A listing (or nothing at all). Deliberately does NOT set aiMatch:
+            // these lawyers were not ranked against the case and must not be
+            // presented as a recommendation.
+            setAiMatch(null);
+            toast.show(notice, "info", 5000);
         } else {
             toast.show("Lawyer matching is still processing — try again in a moment.", "info", 3500);
         }
@@ -1282,13 +1302,31 @@ const ModLawyers = () => {
                     <Ic n="zap" s={20} c={t.primary} />
                 </div>
                 <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, color: t.text, fontSize: 13 }}>AI-Recommended Match</div>
+                    {/* A listing is not a recommendation, so it does not get the
+                        recommendation heading. */}
+                    <div style={{ fontWeight: 700, color: t.text, fontSize: 13 }}>
+                        {!aiMatch && (matchKind === "general_listing" || matchKind === "none")
+                            ? "No strong match yet"
+                            : "AI-Recommended Match"}
+                    </div>
                     <div style={{ fontSize: 12, color: t.textMuted }}>
                         {aiMatch
-                            ? `${aiMatch.name} — ${aiMatch.spec} — ${Math.round((aiMatch.match_score || 0.97) * 100)}% case compatibility`
-                            : getCaseId()
-                                ? "Click to find your AI-matched lawyer"
-                                : "Complete intake form first to get your AI match"}
+                            // No `|| 0.97` fallback. A missing score used to
+                            // render as "97% case compatibility" on lawyers the
+                            // matcher had never scored against the case.
+                            ? [
+                                aiMatch.name,
+                                aiMatch.spec,
+                                aiMatch.match_score != null
+                                    ? `${Math.round(aiMatch.match_score * 100)}% case compatibility`
+                                    : null,
+                                aiMatch.match_reason || null,
+                            ].filter(Boolean).join(" — ")
+                            : matchNotice
+                                ? matchNotice
+                                : getCaseId()
+                                    ? "Click to find your AI-matched lawyer"
+                                    : "Complete intake form first to get your AI match"}
                     </div>
                 </div>
                 <BtnPrimary

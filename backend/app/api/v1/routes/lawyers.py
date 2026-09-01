@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.core.constants import CaseType, Province
 from app.dependencies import get_current_user, require_client, require_admin
-from app.schemas.lawyer import LawyerMatch, LawyerReview
+from app.schemas.lawyer import LawyerMatchResponse, LawyerReview
 from app.schemas.common import PaginatedResponse, StatusResponse
 from app.schemas.user import UserProfileResponse
 from app.services import lawyer_service
@@ -30,7 +30,7 @@ async def search_lawyers(
     )
 
 
-@router.get("/match/{case_id}", response_model=list[LawyerMatch])
+@router.get("/match/{case_id}", response_model=LawyerMatchResponse)
 async def match_lawyers(
     case_id: str,
     current_user: dict = Depends(require_client),

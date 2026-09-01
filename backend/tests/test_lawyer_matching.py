@@ -53,6 +53,12 @@ async def pool(mongo):
     """Four verified Punjab lawyers and one case, all removed afterwards."""
     from app.db.collections import get_cases_col, get_users_col
 
+    # Clear first, not only on teardown. A run killed mid-test (a dropped
+    # connection, a Ctrl-C) leaves these documents behind and every later run
+    # then dies on a duplicate _id in setup rather than on anything real.
+    await get_users_col().delete_many({"_id": {"$regex": "^LM-"}})
+    await get_cases_col().delete_many({"_id": {"$regex": "^LM-"}})
+
     await get_users_col().insert_many([
         _lawyer("LM-CRIM", province="punjab", specs=["criminal"], rating=4.5),
         _lawyer("LM-CIVIL", province="punjab", specs=["civil"], rating=4.2),
@@ -109,7 +115,7 @@ async def test_stale_vectors_do_not_suppress_the_mongo_pool(pool, monkeypatch):
     ])
     _forget_spy(monkeypatch)
 
-    results = await lawyer_service.match_lawyers_for_case("LM-CASE")
+    results = (await lawyer_service.match_lawyers_for_case("LM-CASE"))["matches"]
 
     ids = {r["_id"] for r in results}
     assert "test-lawyer-001" not in ids
@@ -150,7 +156,7 @@ async def test_semantic_and_mongo_pools_are_unioned(pool, monkeypatch):
     ])
     _forget_spy(monkeypatch)
 
-    results = await lawyer_service.match_lawyers_for_case("LM-CASE")
+    results = (await lawyer_service.match_lawyers_for_case("LM-CASE"))["matches"]
     ids = {r["_id"] for r in results}
 
     assert "LM-SINDH" in ids, "semantic-only candidate was dropped"
@@ -168,7 +174,7 @@ async def test_a_lawyer_in_both_pools_appears_once_with_their_semantic_score(
     ])
     _forget_spy(monkeypatch)
 
-    results = await lawyer_service.match_lawyers_for_case("LM-CASE")
+    results = (await lawyer_service.match_lawyers_for_case("LM-CASE"))["matches"]
 
     crim = [r for r in results if r["_id"] == "LM-CRIM"]
     assert len(crim) == 1, "duplicated across the two pools"
@@ -190,7 +196,7 @@ async def test_an_empty_vector_store_still_returns_the_mongo_pool(pool, monkeypa
     _fake_hits(monkeypatch, [])
     _forget_spy(monkeypatch)
 
-    results = await lawyer_service.match_lawyers_for_case("LM-CASE")
+    results = (await lawyer_service.match_lawyers_for_case("LM-CASE"))["matches"]
     ids = {r["_id"] for r in results}
 
     assert "LM-CRIM" in ids
@@ -208,7 +214,7 @@ async def test_a_failing_vector_search_does_not_fail_the_match(pool, monkeypatch
         "app.ai.lawyer_embeddings.query_similar_lawyers", _boom, raising=True
     )
 
-    results = await lawyer_service.match_lawyers_for_case("LM-CASE")
+    results = (await lawyer_service.match_lawyers_for_case("LM-CASE"))["matches"]
 
     assert "LM-CRIM" in {r["_id"] for r in results}
 
@@ -231,9 +237,91 @@ async def test_unverified_and_inactive_lawyers_are_never_ranked(
     ])
     _forget_spy(monkeypatch)
 
-    results = await lawyer_service.match_lawyers_for_case("LM-CASE")
+    results = (await lawyer_service.match_lawyers_for_case("LM-CASE"))["matches"]
 
     assert "LM-CRIM" not in {r["_id"] for r in results}
+
+
+# ── a listing is not a match ─────────────────────────────────────────────────
+
+async def test_a_real_match_is_labelled_matched(pool, monkeypatch):
+    from app.services import lawyer_service
+
+    _fake_hits(monkeypatch, [])
+    _forget_spy(monkeypatch)
+
+    out = await lawyer_service.match_lawyers_for_case("LM-CASE")
+
+    assert out["result_kind"] == "matched"
+    assert out["notice"] is None
+    assert all(m["match_score"] is not None for m in out["matches"])
+
+
+async def test_nothing_matching_returns_a_listing_not_a_ranked_list(pool, monkeypatch):
+    """The previous behaviour emitted these as scored matches with the caveat
+    in a `match_reason` suffix the frontend never rendered."""
+    from app.db.collections import get_cases_col
+    from app.services import lawyer_service
+
+    # no lawyer on the platform does constitutional work in Punjab
+    await get_cases_col().update_one(
+        {"_id": "LM-CASE"}, {"$set": {"case_type": "constitutional"}}
+    )
+    _fake_hits(monkeypatch, [])
+    _forget_spy(monkeypatch)
+
+    out = await lawyer_service.match_lawyers_for_case("LM-CASE")
+
+    assert out["result_kind"] == "general_listing"
+    assert out["notice"] and "punjab" in out["notice"]
+    assert out["matches"], "a listing was available but was not returned"
+    # structurally distinct: nothing here can be rendered as a ranked score
+    assert all(m["match_score"] is None for m in out["matches"])
+    assert all(m["match_reason"] is None for m in out["matches"])
+
+
+async def test_an_unverified_lawyer_is_never_surfaced_even_as_a_listing(
+    pool, monkeypatch
+):
+    """The deleted final fallback queried role=lawyer with no KYC filter at
+    all, so anyone who had merely registered could be shown to a client."""
+    from app.db.collections import get_cases_col, get_users_col
+    from app.services import lawyer_service
+
+    await get_users_col().update_many(
+        {"_id": {"$regex": "^LM-"}, "role": "lawyer"},
+        {"$set": {"lawyer_profile.kyc_verified": False}},
+    )
+    await get_cases_col().update_one(
+        {"_id": "LM-CASE"}, {"$set": {"case_type": "constitutional"}}
+    )
+    _fake_hits(monkeypatch, [])
+    _forget_spy(monkeypatch)
+
+    out = await lawyer_service.match_lawyers_for_case("LM-CASE")
+
+    assert out["matches"] == []
+    assert out["result_kind"] == "none"
+    assert "verified" in out["notice"]
+
+
+async def test_the_listing_prefers_the_case_province_before_widening(
+    pool, monkeypatch
+):
+    from app.db.collections import get_cases_col
+    from app.services import lawyer_service
+
+    await get_cases_col().update_one(
+        {"_id": "LM-CASE"},
+        {"$set": {"case_type": "constitutional", "province": "sindh"}},
+    )
+    _fake_hits(monkeypatch, [])
+    _forget_spy(monkeypatch)
+
+    out = await lawyer_service.match_lawyers_for_case("LM-CASE")
+
+    assert out["result_kind"] == "general_listing"
+    assert {m["_id"] for m in out["matches"]} == {"LM-SINDH"}
 
 
 # ── the index is maintained by the app, not by an admin remembering to ───────
