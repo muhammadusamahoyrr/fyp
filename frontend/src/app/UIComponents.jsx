@@ -29,7 +29,12 @@ export function Logo({ t, sm }) {
   );
 }
 
-export function InputField({ label, type = 'text', placeholder, t, d = 0, icon, right }) {
+// `value`/`onChange` (and any other input props) are forwarded so this can be
+// driven as a controlled field. It used to render a bare uncontrolled input,
+// which is why the password-reset page could not read what the user typed.
+// Omitting them keeps the previous uncontrolled behaviour.
+export function InputField({ label, type = 'text', placeholder, t, d = 0, icon, right,
+                             value, onChange, ...inputProps }) {
   return (
     <div style={{ animation: `fadeUp 0.4s ease ${d}s both` }}>
       {label && (
@@ -62,6 +67,8 @@ export function InputField({ label, type = 'text', placeholder, t, d = 0, icon, 
         <input
           type={type}
           placeholder={placeholder}
+          {...(onChange ? { value: value ?? '', onChange } : {})}
+          {...inputProps}
           style={{
             flex: 1, background: 'none', border: 'none', outline: 'none',
             fontSize: 13.5, color: t.text,
