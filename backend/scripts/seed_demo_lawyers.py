@@ -52,7 +52,10 @@ Idempotent: an email that already exists is skipped, never duplicated or
 overwritten. After inserting, run scripts/backfill_lawyer_embeddings.py so the
 new profiles are searchable.
 
-Shared password for every demo account: Lawyer@123
+Every demo account shares one password, supplied via DEMO_LAWYER_PASSWORD and
+never written down here. The repository is public: an earlier version of this
+file carried the literal, which would have let anyone log in as a KYC-verified
+lawyer on a deployed demo.
 """
 import argparse
 import asyncio
@@ -70,8 +73,29 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 load_dotenv(BACKEND / ".env")
 
-DEMO_PASSWORD = "Lawyer@123"
 DEMO_MARKER = "is_demo_seed"
+DEMO_PASSWORD_VAR = "DEMO_LAWYER_PASSWORD"
+
+
+def _require_password() -> str:
+    """Read the shared demo password from the environment, or refuse to run.
+
+    No default and no generated fallback. A default gets committed — this file
+    originally carried one — and a generated password has to be printed to be
+    usable, which is the same disclosure by another route. The repository is
+    public; nothing in it may contain a working credential.
+    """
+    pw = os.getenv(DEMO_PASSWORD_VAR, "")
+    if len(pw) < 8 or not any(c.isdigit() for c in pw) or not any(c.isupper() for c in pw):
+        raise SystemExit(
+            f"{DEMO_PASSWORD_VAR} is unset or too weak.\n"
+            f"  Needs at least 8 characters, one digit and one uppercase letter.\n"
+            f"  Set it for this run:\n"
+            f"    {DEMO_PASSWORD_VAR}='<password>' "
+            f"./venv/Scripts/python.exe scripts/seed_demo_lawyers.py --apply\n"
+            f"  Do not add it to a file that git tracks."
+        )
+    return pw
 
 # province -> the bar council that actually enrols there, so the numbers at
 # least follow the right shape for the province they sit in.
@@ -268,7 +292,7 @@ async def main() -> int:
 
     print(f"roster: {len(ROSTER)} demo lawyers\n")
     now = datetime.now(timezone.utc)
-    pw_hash = _hash(DEMO_PASSWORD) if args.apply else "(dry run)"
+    pw_hash = _hash(_require_password()) if args.apply else "(dry run)"
 
     inserted = skipped = 0
     for entry in ROSTER:
@@ -299,7 +323,8 @@ async def main() -> int:
         {"role": "lawyer", "lawyer_profile.kyc_verified": True, "is_active": True}
     )
     print(f"verified + active lawyers now: {total}")
-    print(f"login password for every demo account: {DEMO_PASSWORD}")
+    print(f"login password: whatever you passed in {DEMO_PASSWORD_VAR} "
+          f"(not echoed here)")
     print("NEXT: run scripts/backfill_lawyer_embeddings.py --apply to index them.")
     client.close()
     return 0

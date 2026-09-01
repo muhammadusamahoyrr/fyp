@@ -3,6 +3,7 @@ import asyncio
 import httpx
 import json
 import random
+import secrets
 import string
 
 BASE = "http://127.0.0.1:8000/api/v1"
@@ -14,7 +15,9 @@ def rand_email():
 async def main():
     async with httpx.AsyncClient(timeout=60.0) as client:
         email = rand_email()
-        password = "TestPass123!"
+        # Random per run: a constant here is a committed credential in a
+        # public repository, and this account is created by registering.
+        password = "Aa1" + secrets.token_urlsafe(24)
 
         # 1. Register
         r = await client.post(f"{BASE}/auth/register", json={

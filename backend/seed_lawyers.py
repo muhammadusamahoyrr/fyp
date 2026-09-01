@@ -3,7 +3,15 @@ Seed script — inserts 8 KYC-verified lawyer accounts + 1 admin into MongoDB.
 Run once (idempotent: skips existing emails):
 
     cd backend
-    python seed_lawyers.py
+    SEED_LAWYER_PASSWORD=... SEED_ADMIN_PASSWORD=... python seed_lawyers.py
+
+PASSWORDS COME FROM THE ENVIRONMENT AND ARE NEVER PRINTED.
+
+This script used to hash two hardcoded literals and print them as "Test
+credentials" on completion. `admin@attorney.ai` is the platform's
+only non-fixture administrator, so that put a working production admin password
+in a PUBLIC GitHub repository from 2026-05-08 until it was rotated on
+2026-09-01 — roughly 116 days. Nothing here may ever contain a password again.
 
 Requirements: motor, bcrypt, python-dotenv  (already in requirements.txt)
 """
@@ -26,6 +34,26 @@ DB_NAME     = os.getenv("DB_NAME", "attorney_ai")
 
 def _hash(plain: str) -> str:
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+
+def _require_password(env_var: str) -> str:
+    """Read a seed password from the environment, or refuse to run.
+
+    Deliberately no default and no generated fallback. A default ends up
+    committed, and a generated one has to be printed to be usable — which is
+    the same disclosure by another route. The operator supplies it and stores
+    it wherever they keep secrets.
+    """
+    pw = os.getenv(env_var, "")
+    if len(pw) < 8 or not any(c.isdigit() for c in pw) or not any(c.isupper() for c in pw):
+        raise SystemExit(
+            f"{env_var} is unset or too weak.\n"
+            f"  Needs at least 8 characters, one digit and one uppercase letter.\n"
+            f"  Set it in the environment for this run:\n"
+            f"    {env_var}='<password>' python seed_lawyers.py\n"
+            f"  Do not add it to a file that git tracks."
+        )
+    return pw
 
 
 NOW = datetime.utcnow()
@@ -165,7 +193,7 @@ async def seed():
     skipped  = 0
 
     # ── Lawyers ──────────────────────────────────────────────────────────────
-    pw_hash = _hash("Lawyer@123")
+    pw_hash = _hash(_require_password("SEED_LAWYER_PASSWORD"))
 
     for l in LAWYERS:
         existing = await col.find_one({"email": l["email"]})
@@ -212,7 +240,7 @@ async def seed():
             "_id":           secrets.token_urlsafe(16),
             "role":          "admin",
             "email":         ADMIN["email"],
-            "password_hash": _hash("Admin@1234"),
+            "password_hash": _hash(_require_password("SEED_ADMIN_PASSWORD")),
             "full_name":     ADMIN["full_name"],
             "phone":         ADMIN["phone"],
             "province":      ADMIN["province"],
@@ -226,9 +254,8 @@ async def seed():
 
     client.close()
     print(f"\nDone — {inserted} inserted, {skipped} skipped.")
-    print("\nTest credentials:")
-    print("  Lawyers : any lawyer email above  /  Lawyer@123")
-    print("  Admin   : admin@attorney.ai        /  Admin@1234")
+    print("Passwords came from SEED_LAWYER_PASSWORD / SEED_ADMIN_PASSWORD and")
+    print("are deliberately not echoed. Store them wherever you keep secrets.")
 
 
 if __name__ == "__main__":

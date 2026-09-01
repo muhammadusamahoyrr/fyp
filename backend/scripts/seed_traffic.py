@@ -45,6 +45,7 @@ import argparse
 import asyncio
 import json
 import random
+import secrets
 import string
 import sys
 
@@ -131,7 +132,10 @@ async def _auth(http: httpx.AsyncClient, api: str,
                 email: str = "", password: str = "") -> str:
     """Log in, registering a throwaway client account when none was supplied."""
     if not email:
-        email, password = f"seed_{_rand()}@example.com", "TestPass123!"
+        # Random per run: a constant here is a committed credential in a
+        # public repository, and these accounts are really registered.
+        email, password = (f"seed_{_rand()}@example.com",
+                           "Aa1" + secrets.token_urlsafe(24))
         r = await http.post(f"{api}/auth/register", json={
             "full_name": "Seed Traffic", "email": email,
             "password": password, "role": "client",
