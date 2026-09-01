@@ -35,15 +35,22 @@ async def people(mongo):
         {"_id": "SEM-CLIENT", "role": "client", "email": "sem-c@x.test",
          "full_name": "Real Name", "phone": "03001234567",
          "password_hash": hash_password("Str0ngPass1"), "is_active": True},
+        # province + specializations are approval preconditions (a lawyer
+        # without them is verified but unmatchable), so both lawyer fixtures
+        # carry them — these tests are about KYC *state*, not matchability.
         {"_id": "SEM-PENDING", "role": "lawyer", "email": "sem-p@x.test",
          "password_hash": hash_password("Str0ngPass1"), "is_active": True,
+         "province": "punjab",
          "lawyer_profile": {"bar_number": "BAR-P", "kyc_verified": False,
+                            "specializations": ["criminal"],
                             "kyc_status": KycStatus.PENDING.value,
                             "kyc_rejection_reason": None}},
         {"_id": "SEM-LEGACY", "role": "lawyer", "email": "sem-lg@x.test",
          "password_hash": hash_password("Str0ngPass1"), "is_active": True,
+         "province": "punjab",
          # written before kyc_status existed — no such key
          "lawyer_profile": {"bar_number": "BAR-L", "kyc_verified": False,
+                            "specializations": ["civil"],
                             "kyc_rejection_reason": None}},
     ])
     yield
@@ -82,6 +89,75 @@ async def test_an_approved_lawyer_leaves_the_pending_queue(people):
     await admin_service.process_kyc("SEM-PENDING", True, None, actor=_actor())
 
     assert "SEM-PENDING" not in await _queue_ids()
+
+
+# ── approval requires a matchable profile ────────────────────────────────────
+
+@pytest.mark.integration
+@pytest.mark.parametrize("strip,missing", [
+    ({"province": None}, "province"),
+    ({"lawyer_profile.specializations": []}, "specialization"),
+])
+async def test_approval_is_refused_when_the_profile_could_never_be_matched(
+    people, strip, missing
+):
+    """Approving an unmatchable profile is a silent failure.
+
+    Every filtered query keys off top-level `province` and
+    `lawyer_profile.specializations`. A lawyer approved without them is told
+    they can now receive cases and then never appears in one search. 17 of 25
+    verified lawyers had no province before this gate existed.
+    """
+    from app.core.exceptions import AppValidationError
+    from app.db.collections import get_users_col
+    from app.services import admin_service
+
+    await get_users_col().update_one({"_id": "SEM-PENDING"}, {"$set": strip})
+
+    with pytest.raises(AppValidationError) as exc:
+        await admin_service.process_kyc("SEM-PENDING", True, None, actor=_actor())
+    assert missing in str(exc.value)
+
+    # and the refusal left the lawyer exactly where they were
+    doc = await get_users_col().find_one({"_id": "SEM-PENDING"})
+    assert doc["lawyer_profile"]["kyc_verified"] is False
+    assert "SEM-PENDING" in await _queue_ids()
+
+
+@pytest.mark.integration
+async def test_nationwide_practice_is_federal_not_null(people):
+    """`None` province means unknown and is refused; `federal` is the way to
+    say nationwide, and `query_similar_lawyers` already treats it as matching
+    every province."""
+    from app.db.collections import get_users_col
+    from app.services import admin_service
+
+    await get_users_col().update_one(
+        {"_id": "SEM-PENDING"}, {"$set": {"province": "federal"}}
+    )
+
+    await admin_service.process_kyc("SEM-PENDING", True, None, actor=_actor())
+
+    doc = await get_users_col().find_one({"_id": "SEM-PENDING"})
+    assert doc["lawyer_profile"]["kyc_verified"] is True
+
+
+@pytest.mark.integration
+async def test_rejection_does_not_require_a_complete_profile(people):
+    """The gate is on approval only. An incomplete profile is precisely what an
+    admin needs to be able to reject."""
+    from app.db.collections import get_users_col
+    from app.services import admin_service
+
+    await get_users_col().update_one(
+        {"_id": "SEM-PENDING"},
+        {"$set": {"province": None, "lawyer_profile.specializations": []}},
+    )
+
+    await admin_service.process_kyc("SEM-PENDING", False, "Incomplete", actor=_actor())
+
+    doc = await get_users_col().find_one({"_id": "SEM-PENDING"})
+    assert doc["lawyer_profile"]["kyc_status"] == KycStatus.REJECTED.value
 
 
 @pytest.mark.integration

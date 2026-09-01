@@ -27,11 +27,15 @@ async def admin_and_users(mongo):
         {"_id": "AUD-CLIENT", "role": "client", "email": "aud-c@x.test",
          "password_hash": hash_password("Str0ngPass1"), "full_name": "Client",
          "is_active": True},
+        # province + a specialization are approval preconditions — without them
+        # process_kyc refuses, and these tests need approval to succeed so they
+        # can assert on the audit entry it writes.
         {"_id": "AUD-LAWYER", "role": "lawyer", "email": "aud-l@x.test",
          "password_hash": hash_password("Str0ngPass1"), "full_name": "Lawyer",
-         "is_active": True,
+         "is_active": True, "province": "punjab",
          "lawyer_profile": {"bar_number": "BAR-9", "kyc_verified": False,
-                            "kyc_rejection_reason": None, "specializations": []}},
+                            "kyc_rejection_reason": None,
+                            "specializations": ["criminal"]}},
     ])
     yield {"admin": "AUD-ADM", "client": "AUD-CLIENT", "lawyer": "AUD-LAWYER"}
     await get_users_col().delete_many(

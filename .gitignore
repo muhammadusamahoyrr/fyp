@@ -118,3 +118,7 @@ backend/chroma_data_backup_*/
 # tracked source of truth for outstanding work — a second, drifting copy of the
 # same backlog is how the two end up disagreeing about what is already done.
 Remaining.md
+
+# Purge backups hold deleted user documents verbatim (emails, password hashes).
+# Recovery artefacts, never committed.
+backend/data/purge_backups/

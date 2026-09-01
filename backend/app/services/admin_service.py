@@ -118,6 +118,29 @@ async def list_pending_kyc() -> list[dict]:
     return [_safe_user(u) for u in users]
 
 
+def _matchability_gaps(lawyer: dict) -> list[str]:
+    """What is missing before this lawyer could ever be matched to a case.
+
+    Every filtered query in the system keys off the top-level `province` and
+    `lawyer_profile.specializations`. A lawyer approved without them is verified
+    and invisible: `find_lawyers` filters them out, and their embedding carries
+    no domain signal. Before this check existed, 17 of 25 verified lawyers had
+    no province and 16 of 25 had no specialization.
+
+    A lawyer who genuinely practises nationwide is `province: "federal"` — which
+    `query_similar_lawyers` already treats as matching every province. `None`
+    means "unknown", never "everywhere", and is what this refuses.
+    """
+    gaps = []
+    if not lawyer.get("province"):
+        gaps.append(
+            "a province (use 'federal' for a nationwide practice)"
+        )
+    if not (lawyer.get("lawyer_profile") or {}).get("specializations"):
+        gaps.append("at least one specialization")
+    return gaps
+
+
 async def process_kyc(lawyer_id: str, approved: bool, reason: str | None,
                       actor: dict | None = None) -> None:
     lawyer = await user_repo.find_by_id(lawyer_id)
@@ -125,6 +148,19 @@ async def process_kyc(lawyer_id: str, approved: bool, reason: str | None,
         raise NotFoundError("Lawyer")
 
     if approved:
+        # Approving an unmatchable profile is a silent failure: the lawyer is
+        # told they can now receive cases, and then never appears in a single
+        # search or match. Refuse, and say exactly what the profile needs.
+        gaps = _matchability_gaps(lawyer)
+        if gaps:
+            raise AppValidationError(
+                "This profile cannot be approved yet — it is missing "
+                + " and ".join(gaps)
+                + ". Without these the lawyer is verified but will never appear "
+                  "in a client's search or match results. Ask them to complete "
+                  "their profile, then approve."
+            )
+
         await user_repo.update_one(
             {"_id": lawyer_id},
             {
@@ -293,6 +329,7 @@ async def update_user(user_id: str, data: dict, actor: dict | None = None) -> di
     await user_repo.update_one({"_id": user_id}, {"$set": updates})
     await _audit(actor, "user.updated", user_id,
                  {k: v for k, v in updates.items() if k != "updated_at"})
+
     return _safe_user(await user_repo.find_by_id(user_id))
 
 
