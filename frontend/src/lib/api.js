@@ -939,11 +939,219 @@ export async function quickNotice(text, template_type = 'legal_notice', fields =
 }
 
 // RAG-grounded research (LangGraph pipeline) — returns { answer, citations, confidence } or a clarification question.
-export async function aiResearch(message, session_id, { language = 'en', province = null, history = [] } = {}) {
+export async function aiResearch(message, session_id, { language = 'en', province = null, history = [], case_id = null, client_message_id = null, signal = null } = {}) {
+  // `case_id` only — never case facts. The server fetches the case, checks the
+  // caller is assigned to it, and whitelists the fields that reach the model.
+  // Sending facts from here meant the browser decided what the model believed
+  // about a matter, with nothing verifying the sender was on the case.
   return apiFetch('/ai/research', {
     method: 'POST',
-    body: JSON.stringify({ message, session_id, language, province, history }),
+    // `client_message_id` identifies the whole TURN, not just the message: the
+    // server claims it before the graph runs, so a retry replays the first
+    // answer instead of paying a provider for a second one.
+    //
+    // `history` is sent for backward compatibility and is IGNORED by the
+    // server, which rebuilds the conversation from its own stored record. The
+    // browser used to decide what the model believed had already been said —
+    // a tab could drop an assistant message or invent one — and a reopened
+    // conversation carried no history at all.
+    body: JSON.stringify({ message, session_id, language, province, history, case_id, client_message_id }),
+    // Lets the caller impose a deadline and offer a Stop. Aborting only ends
+    // the WAIT — the turn keeps running on the server until it is cancelled
+    // there, which is what `cancelResearchTurn` is for.
+    signal,
   });
+}
+
+// Stop a turn that is still running.
+//
+// This does not stop the provider call — that is in flight and cannot be
+// recalled. It discards the ANSWER: the server clears the turn's lease, so the
+// running worker's fenced completion matches nothing and stores no message.
+// The work is paid for either way; what this buys is that a user who changed
+// their mind is not handed an answer they said they no longer wanted, and the
+// conversation is usable again immediately instead of after the lease expires.
+export async function cancelResearchTurn(session_id, client_message_id) {
+  return apiFetch(`/research-conversations/${session_id}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ client_message_id }),
+  });
+}
+
+export async function cancelClientTurn(session_id, client_message_id) {
+  return apiFetch(`/conversations/${session_id}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ client_message_id }),
+  });
+}
+
+// Open the corpus document behind a citation, in a new tab.
+//
+// `path` is the `source_url` the SERVER stamped onto the citation — it is only
+// present when the document is really held, so this is never called on a link
+// that would 404. It cannot be a plain <a href>: /ai/source is bearer-
+// authenticated like every other API route, and a new tab carries no
+// Authorization header, so an anchor would open a 401 page. Same
+// fetch-then-blob route the document downloads already take, except the tab is
+// opened rather than a file saved — this is a citation being checked mid-answer.
+export async function openSourceDocument(path, label = 'source document') {
+  if (!path) return { error: 'No source document for this citation' };
+  // `path` comes back with the /api/v1 prefix the server publishes; BASE
+  // already carries it, so strip it rather than requesting /api/v1/api/v1/...
+  const rel = path.replace(/^\/api\/v1/, '');
+  const { data: res, error } = await apiFetch(rel, { returnResponse: true });
+  if (error) return { error: error.message || `Could not open ${label}` };
+  let blob;
+  try {
+    blob = await res.blob();
+  } catch {
+    return { error: `Could not open ${label}` };
+  }
+  const url = URL.createObjectURL(blob);
+  // The fetch above means this window.open no longer happens inside the click's
+  // own task, so a strict popup blocker can refuse it. Detected and reported
+  // rather than left as a chip that appears to do nothing when pressed.
+  const win = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!win) {
+    URL.revokeObjectURL(url);
+    return { error: 'Your browser blocked the new tab — allow pop-ups for this site' };
+  }
+  // Long enough for the tab to have read the object URL; revoking immediately
+  // aborts the load in Firefox and Safari.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return { data: true };
+}
+
+/* ── Persistent AI conversations ──────────────────────────────────────────
+ *
+ * Two surfaces, two endpoints, one rule: the server scopes every read and write
+ * to the authenticated caller, so none of these helpers sends a user id. A
+ * conversation that is not yours does not come back.
+ *
+ * The client surface has NO case binding — the case id used to be read off the
+ * WebSocket frame and stored with no check. Only research conversations take a
+ * `case_id`, and the server verifies it against the case record before storing.
+ */
+
+// One PAGE of conversations: { conversations, next_cursor, has_more }.
+//
+// `after` is an opaque cursor from a previous page, not an offset. The server
+// keys it on (updated_at, _id) because a conversation answered while the user
+// is scrolling moves to the top — under an offset that shifts every later row
+// and page two repeats what page one ended on.
+export async function listConversations(
+  { includeArchived = false, limit = 30, after = null, search = null } = {},
+) {
+  const params = new URLSearchParams({
+    include_archived: String(includeArchived), limit: String(limit),
+  });
+  if (after) params.set('after', after);
+  if (search) params.set('search', search);
+  return apiFetch(`/conversations?${params.toString()}`);
+}
+
+// Creates a REAL persisted conversation and returns its server-minted id.
+// "New Chat" used to be a client-side array reset with a browser-generated id,
+// so nothing existed until the first answer and a refresh lost the chat.
+export async function createConversation(title = null) {
+  return apiFetch('/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ title, case_id: null }),
+  });
+}
+
+// Full message history, with the trust metadata each answer originally showed.
+export async function getConversation(
+  session_id, { afterSeq = null, beforeSeq = null, pageSize = 50 } = {},
+) {
+  // Reads from the END by default: with no cursor the server returns the
+  // NEWEST page, because a reader opens a conversation at its end. Follow
+  // `older_cursor` while `has_older` is true to walk backwards.
+  //
+  // `afterSeq` still walks forward from a point, for a caller that wants a
+  // conversation from its beginning.
+  const params = new URLSearchParams({ page_size: String(pageSize) });
+  if (afterSeq !== null && afterSeq !== undefined) params.set('after_seq', String(afterSeq));
+  if (beforeSeq !== null && beforeSeq !== undefined) params.set('before_seq', String(beforeSeq));
+  return apiFetch(`/conversations/${encodeURIComponent(session_id)}?${params.toString()}`);
+}
+
+export async function renameConversation(session_id, title) {
+  return apiFetch(`/conversations/${encodeURIComponent(session_id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function deleteConversation(session_id) {
+  return apiFetch(`/conversations/${encodeURIComponent(session_id)}`, {
+    method: 'DELETE',
+  });
+}
+
+// Lawyer research conversations. `case_id` filters to one matter; the literal
+// string "none" selects general (unbound) research, which is how the UI
+// switches between the two.
+// One PAGE of research conversations. Same envelope as the client list.
+export async function listResearchConversations(
+  { caseId = null, includeArchived = false, limit = 30, after = null,
+    search = null } = {},
+) {
+  const params = new URLSearchParams({
+    include_archived: String(includeArchived), limit: String(limit),
+  });
+  if (caseId) params.set('case_id', caseId);
+  if (after) params.set('after', after);
+  if (search) params.set('search', search);
+  return apiFetch(`/research-conversations?${params.toString()}`);
+}
+
+export async function createResearchConversation({ title = null, caseId = null } = {}) {
+  return apiFetch('/research-conversations', {
+    method: 'POST',
+    body: JSON.stringify({ title, case_id: caseId }),
+  });
+}
+
+// Returns messages plus `pending_question` — set when the last turn ended by
+// asking for facts rather than answering.
+export async function getResearchConversation(
+  session_id, { afterSeq = null, beforeSeq = null, pageSize = 50 } = {},
+) {
+  // Same contract as the client surface — newest page first, then
+  // `older_cursor` backwards.
+  const params = new URLSearchParams({ page_size: String(pageSize) });
+  if (afterSeq !== null && afterSeq !== undefined) params.set('after_seq', String(afterSeq));
+  if (beforeSeq !== null && beforeSeq !== undefined) params.set('before_seq', String(beforeSeq));
+  return apiFetch(`/research-conversations/${encodeURIComponent(session_id)}?${params.toString()}`);
+}
+
+export async function renameResearchConversation(session_id, title) {
+  return apiFetch(`/research-conversations/${encodeURIComponent(session_id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function archiveResearchConversation(session_id, archived = true) {
+  return apiFetch(`/research-conversations/${encodeURIComponent(session_id)}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ archived }),
+  });
+}
+
+export async function deleteResearchConversation(session_id) {
+  return apiFetch(`/research-conversations/${encodeURIComponent(session_id)}`, {
+    method: 'DELETE',
+  });
+}
+
+// The audit trail for one answer, by the `request_id` the answer carried.
+// Lawyer-only, owner-scoped: a lawyer reads their own turns and nobody else's.
+// The server returns a whitelist projection — no prompt, no secret, and no
+// provider response body. See app/services/provenance_view.py.
+export async function aiProvenance(request_id) {
+  return apiFetch(`/provenance/${encodeURIComponent(request_id)}/view`);
 }
 
 // Streaming version — calls onToken(chunk) for each token, resolves when done.
@@ -1052,4 +1260,17 @@ export async function adminUpdateCaseStatus(caseId, status) {
 
 export async function adminListLawyers() {
   return apiFetch('/admin/lawyers/monitoring');
+}
+
+// What the pipeline is doing for one running research turn.
+//
+// `/ai/research` is a single long POST with no channel to report progress on,
+// so the stage is recorded on the turn and read here. It lives on the turn
+// rather than in a connection, which is why it survives a refresh: a lawyer who
+// reloads mid-answer sees the pipeline still working instead of a blank page.
+export async function researchTurnStatus(session_id, client_message_id) {
+  const params = new URLSearchParams({ client_message_id });
+  return apiFetch(
+    `/research-conversations/${encodeURIComponent(session_id)}/turn-status?${params}`,
+  );
 }

@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services import provenance_service
+from app.services import provenance_outbox, provenance_service
 from app.websockets import chat_socket
 
 SOURCE = Path(chat_socket.__file__).read_text(encoding="utf-8")
@@ -58,6 +58,9 @@ def _calls_to(tree, attr_path):
     return found
 
 
+SOURCE_LINES = SOURCE.splitlines()
+
+
 # ── static enforcement ───────────────────────────────────────────────────────
 
 def test_only_the_choke_point_sends_answer_frames():
@@ -73,6 +76,19 @@ def test_only_the_choke_point_sends_answer_frames():
         arg = ast.unparse(call.args[0]) if call.args else ""
         if '"thinking"' in arg or "'thinking'" in arg:
             continue
+        # One documented exemption, marked at the call site.
+        #
+        # A REPLAY re-sends an answer that was already produced, already
+        # audited and already stored. Routing it through _emit would write a
+        # SECOND provenance record for one turn — breaking the exactly-one
+        # property this test exists to protect. No graph runs and no provider
+        # is called, so there is nothing new to audit.
+        #
+        # The marker is required at the line itself, so adding a new exemption
+        # is a deliberate act that shows up in review rather than a name that
+        # happens to match.
+        if "choke-point-exempt" in SOURCE_LINES[call.lineno - 1]:
+            continue
         offenders.append((call.lineno, arg[:70]))
 
     assert not offenders, (
@@ -86,9 +102,15 @@ def test_only_the_choke_point_records_provenance():
     with a different turn_type than the one _emit validated."""
     emit = _function("_emit")
     emit_lines = set(range(emit.lineno, (emit.end_lineno or emit.lineno) + 1))
-    outside = [c.lineno for c in _calls_to(TREE, "record_answer")
+    # Both names: `record_answer` is the original contract and `record_outcome`
+    # the one that also reports whether the write landed. A second recording
+    # site under either name is the same bug — a turn recorded twice, or
+    # recorded with a turn_type `_emit` never validated.
+    outside = [c.lineno
+               for name in ("record_answer", "record_outcome")
+               for c in _calls_to(TREE, name)
                if c.lineno not in emit_lines]
-    assert not outside, f"record_answer called outside _emit at lines {outside}"
+    assert not outside, f"provenance recorded outside _emit at lines {outside}"
 
 
 def test_only_the_choke_point_persists_assistant_messages():
@@ -108,7 +130,7 @@ def test_the_audit_write_precedes_the_send():
     """Ordering matters: if the frame went first, a crash between send and write
     would leave the user holding an answer with no record of it."""
     emit = _function("_emit")
-    record = _calls_to(emit, "record_answer")
+    record = _calls_to(emit, "record_answer") + _calls_to(emit, "record_outcome")
     send   = _calls_to(emit, "send_json")
     assert record and send
     assert record[0].lineno < send[0].lineno
@@ -139,14 +161,17 @@ def captured(monkeypatch):
 
     async def _record(**kwargs):
         records.append(kwargs)
-        return kwargs.get("request_id")
+        return provenance_outbox.DURABLE, kwargs.get("request_id")
 
-    async def _append(*a, **k):
-        return None
-
-    monkeypatch.setattr(provenance_service, "record_answer", _record)
-    monkeypatch.setattr(chat_socket.provenance_service, "record_answer", _record)
-    monkeypatch.setattr(chat_socket.chat_repo, "append_message", _append)
+    # `record_outcome` is what `_emit` calls now: it reports whether the write
+    # landed as well as writing it. The stub returns DURABLE because these tests
+    # are about WHAT is recorded, not about the audit trail being reachable —
+    # the outbox has its own file for that.
+    monkeypatch.setattr(provenance_service, "record_outcome", _record)
+    monkeypatch.setattr(chat_socket.provenance_service, "record_outcome", _record)
+    # The message write needs no stub: `_emit` skips it when `ref` is None,
+    # which is how this file calls it. It used to stub the legacy repository,
+    # which the socket no longer touches at all.
     return records
 
 
@@ -197,15 +222,15 @@ async def test_an_unknown_turn_type_is_downgraded_not_written_through(captured):
 @pytest.mark.asyncio
 async def test_a_broken_audit_contract_surfaces_rather_than_emitting_unaudited(
         monkeypatch, captured):
-    """record_answer swallows its own failures by contract, so in practice this
-    cannot happen. If that contract were ever broken, _emit deliberately does
-    NOT catch it: the alternative is emitting an answer that no record
-    describes, which is the exact property this design exists to guarantee.
-    Losing the turn is the safer failure, and it is loud."""
+    """`record_outcome` swallows its own failures by contract — it now returns
+    LOST rather than raising, and parks what it can. If that contract were ever
+    broken, _emit deliberately does NOT catch it: the alternative is emitting an
+    answer that no record describes, which is the exact property this design
+    exists to guarantee. Losing the turn is the safer failure, and it is loud."""
     async def _boom(**kwargs):
         raise RuntimeError("mongo down")
 
-    monkeypatch.setattr(chat_socket.provenance_service, "record_answer", _boom)
+    monkeypatch.setattr(chat_socket.provenance_service, "record_outcome", _boom)
     ws = _FakeWS()
     with pytest.raises(RuntimeError):
         await _emit(ws, captured)

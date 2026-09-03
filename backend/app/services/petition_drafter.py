@@ -82,7 +82,8 @@ async def _draft_facts(intake: dict, grievance: dict, petitioner: str) -> Petiti
         f"Timeline / when it happened: {intake.get('timeline')}\n"
         f"Documents the Petitioner holds: {', '.join(intake.get('documents_held') or []) or '[none stated]'}\n"
     )
-    llm = get_structured_llm(PetitionFacts, fast=False)
+    llm = get_structured_llm(PetitionFacts, fast=False,
+                             purpose=PURPOSE_PETITION_DRAFTING)
     return await asyncio.to_thread(llm.invoke, [
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": facts_input},

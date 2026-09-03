@@ -374,7 +374,7 @@ async def extract_fields(case_id: str, client_id: str, template_type: str) -> di
     user_msg = f"Case description:\n{description[:3000]}\n\n{prompt}"
 
     try:
-        llm = get_llm()
+        llm = get_llm(purpose=PURPOSE_DOCUMENT_DRAFTING)
         response = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _EXTRACT_SYSTEM},
             {"role": "user",   "content": user_msg},
@@ -486,7 +486,7 @@ async def extract_fields_from_text(text: str, template_type: str) -> dict:
 
     user_msg = f"Case description:\n{text[:3000]}\n\n{prompt}"
     try:
-        llm = get_llm()
+        llm = get_llm(purpose=PURPOSE_DOCUMENT_DRAFTING)
         response = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _EXTRACT_SYSTEM},
             {"role": "user",   "content": user_msg},

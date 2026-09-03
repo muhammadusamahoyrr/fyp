@@ -7,8 +7,17 @@ import { useNotif } from "./theme.js";
 import { Card, Btn, Input, Sel, Label, Badge, Divider, Pills } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import { fmtDate, fmtTime, CSB, typeColor, typeIcon, DSB, PRIO } from "./data.js";
-import { listCases, addHearing as apiAddHearing, recordHearingOutcome as apiRecordOutcome, aiQueryStream, listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask, toggleTask as apiToggleTask, listEngagements, acceptEngagement, declineEngagement } from "@/lib/api.js";
+import { listCases, addHearing as apiAddHearing, recordHearingOutcome as apiRecordOutcome, aiResearch, cancelResearchTurn, openSourceDocument, listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask, toggleTask as apiToggleTask, listEngagements, acceptEngagement, declineEngagement } from "@/lib/api.js";
 import { avatarBg } from "./utils.js";
+import { newAttempt, retryAttempt, isAmbiguousFailure } from "@/lib/attempt.js";
+/* Shared with the AI Legal page and the client chatbot. This surface is why the
+   module exists: it mapped `citations` itself and dropped `url` and `source`,
+   so a judgment that linked to a court PDF on the AI Legal page was an
+   unclickable label here. */
+import {
+    CITATION_GROUPS, REPEALED, normaliseCitations, citationsInGroup,
+    citationSummary, claimWarnings, shortRequestId, copyText,
+} from "@/lib/trust.js";
 
 
 // ── Messages Tab ─────────────────────────────────────────────
@@ -100,6 +109,139 @@ function WorkspaceMessages({ caseId, c }) {
     );
 }
 
+/* A citation whose source document we hold. Owns its own failure state: one
+   source failing to open is about that chip, not about the answer. */
+function WorkspaceSourceChip({ citation, label, style }) {
+    const [failed, setFailed] = useState("");
+    return (
+        <button
+            style={{ ...style, cursor: "pointer", fontFamily: "inherit" }}
+            title={failed || "Open the source document"}
+            onClick={async () => {
+                setFailed("");
+                const res = await openSourceDocument(citation.sourceUrl, citation.label);
+                if (res.error) {
+                    setFailed(res.error);
+                    setTimeout(() => setFailed(""), 4000);
+                }
+            }}>
+            {label} {failed ? "⚠" : "↗"}
+        </button>
+    );
+}
+
+/* Compact trust footer for the workspace AI tab.
+   Deliberately the same vocabulary as the AI Legal page and the client chatbot
+   (lib/trust.js), and deliberately smaller: this panel sits inside a case file
+   next to hearings and tasks, so the findings that change what a lawyer does —
+   a repealed source, an unsupported statement, a citation we could not place —
+   are always visible, and the rest is one click away. */
+function WorkspaceTrust({ m, t }) {
+    const [open, setOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const citations = m.citations || [];
+    const claims = m.claims || [];
+    if (!citations.length && !claims.length && !m.requestId) return null;
+
+    const w = claimWarnings(claims);
+    const summary = citationSummary(citations);
+    const alerts = [
+        w.repealed && `${w.repealed} statement${w.repealed === 1 ? "" : "s"} rest${w.repealed === 1 ? "s" : ""} on a repealed section — do not file on this`,
+        w.unsupported && `${w.unsupported} statement${w.unsupported === 1 ? " is" : "s are"} not established by the source cited`,
+        summary.unresolved && `${summary.unresolved} citation${summary.unresolved === 1 ? "" : "s"} could not be located in the retrieved sources`,
+    ].filter(Boolean);
+
+    return (
+        <div style={{ marginTop: 6 }}>
+            {alerts.map((text, i) => (
+                <div key={i} style={{
+                    fontSize: 10.5, color: i === 0 && w.repealed ? "#ef4444" : "#f59e0b",
+                    background: i === 0 && w.repealed ? "#ef444410" : "transparent",
+                    borderRadius: 6, padding: i === 0 && w.repealed ? "4px 8px" : "1px 0",
+                    marginBottom: 3, fontWeight: 600,
+                }}>
+                    {i === 0 && w.repealed ? "⛔ " : "⚠ "}{text}
+                </div>
+            ))}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
+                {/* The calibrated figure, or an honest gap. Some turns never
+                    reach the Decision Engine, and there is no confidence for
+                    those — inventing one is how the old hardcoded 1.0 got in. */}
+                <span style={{ fontSize: 10, color: m.confidenceBand ? (CONF_TONE[m.confidenceBand] || t.textFaint) : t.textFaint }}>
+                    {m.confidenceBand
+                        ? `⬤ ${m.confidenceBand} confidence · ${Math.round((m.confidence || 0) * 100)}%`
+                        : "Confidence not calibrated"}
+                </span>
+                {citations.length > 0 && (
+                    <button onClick={() => setOpen(o => !o)} style={{
+                        border: `1px solid ${t.border}`, background: open ? t.primaryGlow : "transparent",
+                        color: t.primary, borderRadius: 6, cursor: "pointer", fontSize: 10, padding: "1px 7px",
+                    }}>{summary.label} {open ? "▴" : "▾"}</button>
+                )}
+                {m.requestId && (
+                    <button
+                        onClick={async () => {
+                            const ok = await copyText(m.requestId);
+                            setCopied(ok);
+                            setTimeout(() => setCopied(false), 1600);
+                        }}
+                        title={`Copy request id ${m.requestId}`}
+                        className="mono"
+                        style={{
+                            border: `1px solid ${t.border}`, background: "transparent",
+                            color: t.textFaint, borderRadius: 6, cursor: "pointer",
+                            fontSize: 10, padding: "1px 7px", fontFamily: "inherit",
+                        }}>{copied ? "copied ✓" : `id ${shortRequestId(m.requestId)}`}</button>
+                )}
+            </div>
+            {open && (
+                <div style={{ marginTop: 5, padding: "8px 10px", borderRadius: 8, background: t.cardHi, border: `1px solid ${t.border}` }}>
+                    {CITATION_GROUPS.map(({ key, lawyer: caption }) => {
+                        const group = citationsInGroup(citations, key);
+                        if (!group.length) return null;
+                        return (
+                            <div key={key} style={{ marginBottom: 6 }}>
+                                <div style={{ fontSize: 9.5, color: key === "unresolved" ? "#f59e0b" : t.textFaint, marginBottom: 3 }}>{caption}</div>
+                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                                    {group.map((x, xi) => {
+                                        const dead = x.currency === REPEALED;
+                                        const style = {
+                                            fontSize: 10, padding: "2px 7px", borderRadius: 6,
+                                            border: `1px solid ${dead ? "#ef444466" : t.border}`,
+                                            background: dead ? "#ef444414" : t.card,
+                                            color: dead ? "#ef4444" : ((x.href || x.sourceUrl) ? t.primary : t.textMuted),
+                                            textDecoration: "none",
+                                        };
+                                        const label = `${dead ? "⛔ " : ""}${x.label}${dead ? " — repealed" : ""}`;
+                                        // Openable exactly when the server said the document is
+                                        // held; never a URL guessed from a filename. A judgment
+                                        // is an external anchor; a corpus document goes through
+                                        // the authenticated fetch, because our API route wants a
+                                        // header a new tab cannot send.
+                                        if (x.href) {
+                                            return <a key={xi} href={x.href} target="_blank" rel="noopener noreferrer" style={style} title="Open the judgment">{label} ↗</a>;
+                                        }
+                                        if (x.sourceUrl) {
+                                            return <WorkspaceSourceChip key={xi} citation={x} label={label} style={style} />;
+                                        }
+                                        return <span key={xi} style={style} title={x.source || ""}>{label}</span>;
+                                    })}
+                                </div>
+                            </div>
+                        );
+                    })}
+                    <div style={{ fontSize: 9.5, color: t.textFaint, lineHeight: 1.5, marginTop: 4 }}>
+                        Where a section is not marked repealed its current status is NOT
+                        verified — repeal data covers 4 of 43 statutes and is a lower bound.
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+const CONF_TONE = { high: "#22c55e", moderate: "#f59e0b", low: "#ef4444" };
+
 // ── AI Assistant Tab ─────────────────────────────────────────
 function WorkspaceAI({ c, addNotif }) {
     const { t } = useTheme();
@@ -109,39 +251,148 @@ function WorkspaceAI({ c, addNotif }) {
     const [error, setError] = useState(null);
     const [lastQuery, setLastQuery] = useState("");
     const bottomRef = useRef(null);
+    // Stable per-case graph thread, so a follow-up continues the same
+    // conversation and a clarification can be resumed.
+    const sessionIdRef = useRef(`case-${c.id}-${Date.now()}`);
+    // The attempt in flight, so a retry can reuse its id and a Stop can name
+    // the turn it is stopping. See lib/attempt.
+    const attemptRef = useRef(null);
+    // Set by Stop, so the request that returns afterwards knows its answer is
+    // no longer wanted and does not paint it over the notice.
+    const cancelledRef = useRef(false);
     useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-    // Case context is sent as whitelisted structured data (not a free-text system
-    // prompt) — the server slots it into a vetted "case_context" template.
-    const caseContext = {
-        case_title: `${c.id} — ${c.title}`,
-        case_type: c.type,
-        court: c.court,
-        client_name: c.client,
-        next_hearing: c.nextHearing,
+    // No browser-built case context. The server fetches the case from `case_id`
+    // after checking this lawyer is assigned to it, then whitelists the fields
+    // that reach the model — so the browser can no longer decide what the model
+    // believes about a matter it may not even have access to.
+
+    /* Longer than the server's own turn timeout, so its honest explanation
+       wins whenever it can produce one. */
+    const AI_TAB_TIMEOUT_MS = 150000;
+
+    /* Stop a question this workspace no longer wants an answer to.
+
+       Two things, and both are needed: aborting the fetch ends the WAIT, while
+       the server-side cancel discards the ANSWER by clearing the turn's lease,
+       so the worker still running it loses its fenced completion and files
+       nothing. Without the second, the answer would reappear on the next load
+       of this thread — which is not what "stop" means. */
+    const stopAsk = async () => {
+        const waiting = attemptRef.current;
+        const sid = sessionIdRef.current;
+        if (!waiting || !sid) return;
+        cancelledRef.current = true;
+        try { waiting.controller?.abort(); } catch { /* already settled */ }
+        await cancelResearchTurn(sid, waiting.id);
     };
 
     const send = async (override) => {
         const q = (override || query).trim();
         if (!q || loading) return;
+        cancelledRef.current = false;
         setQuery(""); setError(null); setLastQuery(q);
         const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         if (!override) setMsgs(p => [...p, { role: "user", content: q, time: now }]);
         setLoading(true);
         const history = msgs.map(m => ({ role: m.role, content: m.content }));
-        let accumulated = "";
         const aiTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        // Optimistically add empty assistant message that we stream into
         setMsgs(p => [...p, { role: "assistant", content: "", time: aiTime, _streaming: true }]);
         try {
-            await aiQueryStream(q, { templateId: "case_context", context: caseContext, history }, (chunk) => {
-                accumulated += chunk;
-                setMsgs(p => p.map((m, i) => i === p.length - 1 && m._streaming ? { ...m, content: accumulated } : m));
-            });
-            // Mark streaming done
-            setMsgs(p => p.map((m, i) => i === p.length - 1 ? { ...m, _streaming: false } : m));
-        } catch (err) { setError(err.message || "Connection error"); setMsgs(p => p.filter(m => !m._streaming)); }
-        finally { setLoading(false); }
+            // Grounded RAG path, NOT the raw /ai/query/stream one this used to call.
+            // The suggested prompts here ask for "key legal sections" and "recent
+            // precedents", and the streaming endpoint performs no retrieval, no
+            // citation matching, no grounding and no currency check — so it
+            // answered statute questions from parametric memory with nothing to
+            // check them against. /ai/research runs the same LangGraph pipeline
+            // as the client chatbot and returns resolvable citations.
+            // This surface used to send NO turn id at all, so every retry
+            // here was a brand-new question to the server: the graph ran again
+            // and a provider was paid again for one asking. One id per ATTEMPT,
+            // reused across transmissions of it, is what makes the retry below
+            // a replay rather than a second bill.
+            let attempt = newAttempt();
+            attemptRef.current = attempt;
+
+            const ask = async (a) => {
+                const timer = setTimeout(
+                    () => a.controller?.abort(), AI_TAB_TIMEOUT_MS);
+                try {
+                    return await aiResearch(q, sessionIdRef.current, {
+                        client_message_id: a.id,
+                        province: c.province || null,
+                        history,
+                        // The DATABASE id, not the display case number. `c.id`
+                        // is the human-facing reference shown in the UI; the
+                        // server looks the case up by `_id`.
+                        case_id: c._id || null,
+                        signal: a.controller?.signal || null,
+                    });
+                } finally {
+                    clearTimeout(timer);
+                }
+            };
+
+            let { data, error: err, status } = await ask(attempt);
+
+            // Ambiguous means the server may or may not have run it. Those are
+            // the failures worth retrying and exactly the ones a fresh id would
+            // turn into a duplicate charge; a 4xx is a decision repeating
+            // cannot change.
+            if ((err || !data) && isAmbiguousFailure(status)
+                    && !cancelledRef.current) {
+                attempt = retryAttempt(attempt);
+                attemptRef.current = attempt;
+                ({ data, error: err, status } = await ask(attempt));
+            }
+
+            if (cancelledRef.current) {
+                setMsgs(p => p.map((m, i) => i === p.length - 1
+                    ? { ...m, content: "Stopped.", _notice: true, _streaming: false }
+                    : m));
+                return;
+            }
+            if (err || !data) throw new Error(err?.detail || "request failed");
+
+            if (data.type === "clarification") {
+                setMsgs(p => p.map((m, i) => i === p.length - 1
+                    ? { ...m, content: data.question, clarification: true, _streaming: false } : m));
+            } else {
+                // matched | unresolved | retrieved — a real section is not
+                // support; see ai/answer_citations.py. Keeps the source link and
+                // the repeal fields this surface used to discard.
+                const citations = normaliseCitations(data.citations);
+                setMsgs(p => p.map((m, i) => i === p.length - 1 ? {
+                    ...m,
+                    content: data.answer || "No response received.",
+                    citations,
+                    claims: data.claims || [],
+                    confidence: data.confidence,
+                    confidenceBand: data.confidence_band,
+                    // Names this turn's audit record, so an answer given inside
+                    // a case workspace can be quoted and opened like one given
+                    // on the AI Legal page.
+                    requestId: data.request_id || "",
+                    _streaming: false,
+                } : m));
+            }
+        } catch (err) {
+            // A deliberate Stop aborts the fetch and lands here. It is not a
+            // connection failure and must not be reported as one.
+            if (cancelledRef.current || err?.name === "AbortError") {
+                setMsgs(p => p.map((m, i) => i === p.length - 1
+                    ? { ...m, content: "Stopped.", _notice: true, _streaming: false }
+                    : m));
+            } else {
+                setError(err.message || "Connection error");
+                setMsgs(p => p.filter(m => !m._streaming));
+            }
+        }
+        finally {
+            // Settled either way: answered, refused, timed out or stopped.
+            attemptRef.current = null;
+            setLoading(false);
+        }
     };
 
     const hasMessages = msgs.length > 0;
@@ -189,6 +440,31 @@ function WorkspaceAI({ c, addNotif }) {
                                         borderRadius: m.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px", padding: "10px 14px",
                                         fontSize: 13, lineHeight: 1.7, color: m.role === "user" ? (t.mode === "dark" ? "#111B1F" : "#fff") : t.text, whiteSpace: "pre-wrap"
                                     }}>{m.content}</div>
+                                    {/* Trust footer. This tab ran the full pipeline and then
+                                        rendered the answer alone — citation status, claim
+                                        support and repeal warnings were all fetched, stored on
+                                        the message, and shown to nobody. An answer presented
+                                        with no provenance inside a case file is the one place
+                                        it is most likely to be acted on. */}
+                                    {m.role === "assistant" && !m._streaming && !m.clarification && !m._notice && (
+                                        <WorkspaceTrust m={m} t={t} />
+                                    )}
+                                    {/* A way out of a long wait. Stops the
+                                        waiting AND discards the answer server-
+                                        side, so it does not reappear the next
+                                        time this thread is opened. */}
+                                    {m._streaming && (
+                                        <button onClick={stopAsk} title="Stop generating"
+                                                style={{
+                                                    marginTop: 6, background: "none",
+                                                    border: `1px solid ${t.border}`,
+                                                    borderRadius: 8, padding: "2px 9px",
+                                                    fontSize: 11, cursor: "pointer",
+                                                    color: t.textMuted,
+                                                }}>
+                                            Stop
+                                        </button>
+                                    )}
                                     {m.time && <div style={{ fontSize: 10, color: t.textFaint, marginTop: 3, textAlign: m.role === "user" ? "right" : "left" }}>{m.time}</div>}
                                 </div>
                             </div>

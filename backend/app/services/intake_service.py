@@ -185,7 +185,7 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
     )
 
     try:
-        llm      = get_llm()
+        llm      = get_llm(purpose=PURPOSE_INTAKE_EXTRACTION)
         response = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _CLARIFY_SYSTEM},
             {"role": "user",   "content": user_msg},
@@ -237,7 +237,7 @@ async def _ai_classify_case_type(description: str, user_selected: str) -> tuple[
         # Low keyword signal — let the LLM decide
         try:
             from app.ai.llm import get_fast_llm
-            llm = get_fast_llm()
+            llm = get_fast_llm(purpose=PURPOSE_INTAKE_EXTRACTION)
             response = await asyncio.to_thread(llm.invoke, [
                 {"role": "system", "content": _TYPE_CLASSIFY_SYSTEM},
                 {"role": "user",   "content": description[:1200]},

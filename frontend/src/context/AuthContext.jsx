@@ -1,6 +1,7 @@
 'use client';
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { setToken, clearToken, authLogout, bootstrapAuth, broadcastLogout, getMe } from '@/lib/api';
+import { clearActiveSessions } from '@/lib/conversations.js';
 
 const AuthCtx = createContext(null);
 
@@ -53,6 +54,10 @@ export function AuthProvider({ children }) {
     clearToken();
     broadcastLogout();   // sibling tabs clear their in-memory token + redirect
     try { localStorage.removeItem('aai-role'); } catch { }
+    // Which conversation each surface was looking at. Scoping those keys by
+    // user id already stops the next account from reading them, but leaving
+    // the value behind records what someone was reading on a shared machine.
+    clearActiveSessions();
     setUser(null);
   }, []);
 

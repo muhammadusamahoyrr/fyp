@@ -250,7 +250,8 @@ async def classify_grievance(text: str) -> dict:
         return {"error": "Describe what has happened to the property."}
 
     try:
-        llm = get_structured_llm(GrievanceClassification, fast=True)
+        llm = get_structured_llm(GrievanceClassification, fast=True,
+                                 purpose=PURPOSE_DISPUTE_CLASSIFICATION)
         result: GrievanceClassification = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": text},
