@@ -34,6 +34,7 @@ from app.api.v1.routes import (
     lawyers,
     notifications,
     payments,
+    conversations,
     provenance,
     users,
     voice,
@@ -77,6 +78,35 @@ async def _causelist_scheduler():
             raise
         except Exception:
             logging.getLogger(__name__).exception("Cause-list scheduler sweep failed")
+
+
+async def _provenance_relay():
+    """Deliver provenance records whose direct write failed.
+
+    Runs on EVERY worker with no Redis lock and no singleton to configure: the
+    outbox claim is a conditional update carrying a lease, so an entry is
+    delivered by exactly one worker and a crashed worker's entry is reclaimed
+    when its lease expires. The lock lives in the same database as the work,
+    which is the one place it cannot disagree with the work.
+
+    Cheap when idle — one indexed query per interval that matches nothing.
+    """
+    import asyncio
+    import logging
+    from app.services.provenance_outbox import drain_once
+
+    interval = getattr(settings, "provenance_relay_seconds", 30)
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            await drain_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # drain_once already swallows; this is the belt for its braces. A
+            # relay that dies leaves records undelivered and looks exactly like
+            # a healthy one, so it must not be allowed to die.
+            logging.getLogger(__name__).exception("Provenance relay sweep failed")
 
 
 async def _warmup_models():
@@ -135,6 +165,15 @@ async def lifespan(app: FastAPI):
         scheduler_tasks = [
             _asyncio.create_task(_causelist_scheduler()),
         ]
+
+    # The provenance relay is NOT behind that gate.
+    #
+    # It needs no Redis and no leader election — its lease is a conditional
+    # update in the same collection as the work. Gating it on `run_schedulers`
+    # would mean a deployment with that flag off has an outbox nothing drains,
+    # which is the failure this whole mechanism exists to remove, arriving
+    # silently through a config default.
+    scheduler_tasks.append(_asyncio.create_task(_provenance_relay()))
     yield
     warmup_task.cancel()
     ws_subscriber_task.cancel()
@@ -230,6 +269,7 @@ app.include_router(disputes.router, prefix=API_PREFIX)
 app.include_router(calculators.router, prefix=API_PREFIX)
 app.include_router(bail.router, prefix=API_PREFIX)
 app.include_router(provenance.router, prefix=API_PREFIX)
+app.include_router(conversations.router, prefix=API_PREFIX)
 app.include_router(labeling.router, prefix=API_PREFIX)
 
 app.include_router(chat_socket.router)

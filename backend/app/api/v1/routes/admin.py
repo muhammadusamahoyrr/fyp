@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 
 from app.dependencies import require_admin
 from app.schemas.admin import (
@@ -128,3 +129,110 @@ async def list_lawyers_monitoring(
     current_user: dict = Depends(require_admin),
 ):
     return await admin_service.list_lawyers_monitoring()
+
+
+@router.get("/provenance/health")
+async def provenance_health(current_user: dict = Depends(require_admin)):
+    """Is every answered turn reaching the audit trail?
+
+    Counts and an age only — no request ids and no user content. A provenance
+    record holds the question a client asked and the advice they were given,
+    and a request id is the key that opens it, so neither belongs on a metrics
+    endpoint that exists to be scraped and dashboarded.
+
+    Alert on `status`: "fail" means at least one turn has no audit record at
+    all, "warn" means the backlog is older than the relay could explain, and
+    "unknown" means the collection could not be read — which is not the same as
+    healthy and must not be alerted as if it were.
+    """
+    from app.services.provenance_outbox import health
+
+    return await health()
+
+
+# ── retention and legal holds ────────────────────────────────────────────────
+#
+# Admins only, by decision: one privileged action, audited with who and why. A
+# lawyer needing a hold asks an admin — the narrower surface also avoids a
+# lawyer freezing data about their own conduct.
+
+class HoldRequest(BaseModel):
+    scope: str = Field(pattern="^(user|case)$")
+    target_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+@router.get("/retention/policy")
+async def retention_policy(current_user: dict = Depends(require_admin)):
+    """The periods, as they are actually configured.
+
+    Read from the module rather than restated here, so a policy page and the
+    code cannot drift — a documented period that no longer matches the one being
+    enforced is worse than no documentation.
+    """
+    from app.services.retention import describe
+
+    return describe()
+
+
+@router.get("/retention/plan")
+async def retention_plan(current_user: dict = Depends(require_admin)):
+    """A DRY RUN: what a sweep would remove, and what a hold is protecting.
+
+    Counts only — no session ids, no user ids, no content. This report is read
+    on a dashboard and pasted into tickets, and the one thing it must not become
+    is a listing of whose data is about to expire.
+
+    Deletes nothing, and there is no parameter here that changes that.
+    """
+    from app.services.retention import plan
+
+    return await plan()
+
+
+@router.get("/retention/holds")
+async def list_holds(
+    include_lifted: bool = Query(False),
+    current_user: dict = Depends(require_admin),
+):
+    """Standing holds, newest first. Lifted ones on request.
+
+    Lifted holds are kept rather than deleted: what was frozen, by whom, and
+    for how long is itself the kind of thing an auditor asks about.
+    """
+    from app.services.legal_holds import listing
+
+    return await listing(include_lifted=include_lifted)
+
+
+@router.post("/retention/holds")
+async def place_hold(
+    body: HoldRequest,
+    current_user: dict = Depends(require_admin),
+):
+    """Freeze a user's or a case's data. Nothing in scope expires, and the
+    user's own Delete button stops removing.
+
+    Idempotent: two admins reacting to one dispute produce one hold, enforced by
+    a partial-unique index rather than by a check that they could race.
+    """
+    from app.services.legal_holds import place
+
+    return await place(body.scope, body.target_id, reason=body.reason,
+                       placed_by=str(current_user["_id"]))
+
+
+@router.delete("/retention/holds/{scope}/{target_id}")
+async def lift_hold(
+    scope: str,
+    target_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Release a hold. The record is kept, marked lifted, with who lifted it."""
+    from app.services.legal_holds import lift
+
+    lifted = await lift(scope, target_id, lifted_by=str(current_user["_id"]))
+    return StatusResponse(
+        success=True,
+        message=("Hold lifted. This data resumes expiring on the normal "
+                 "schedule." if lifted else "No standing hold on that target."))

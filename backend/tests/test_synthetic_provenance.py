@@ -99,7 +99,10 @@ def test_the_unlabelled_queue_inherits_the_pool_filter():
 def test_synthetic_turns_are_still_written_not_dropped():
     """They are audit records and they are what warmup counts. Excluding them
     from LABELLING is not the same as refusing to record them."""
-    src = _src(ps.record_answer)
+    # `record_answer` now delegates to `record_outcome`, which performs the
+    # write and reports what became of it. The property is unchanged: nothing
+    # on the recording path skips a synthetic turn.
+    src = _src(ps.record_answer) + _src(ps.record_outcome)
     assert "insert_one" in src
     assert "is_synthetic" not in src  # no early return that skips the write
 

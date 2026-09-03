@@ -47,6 +47,11 @@ from app.utils.pii import scrub_pii
 
 logger = logging.getLogger(__name__)
 
+# Imported as a module so the two can be monkeypatched
+# independently in tests, and so the direction of the dependency
+# stays obvious: the outbox knows nothing about this service.
+from app.services import provenance_outbox as outbox
+
 SCHEMA_VERSION = "prov-v2"   # v2 adds is_synthetic
 
 # ── Synthetic traffic ─────────────────────────────────────────────────────────
@@ -211,6 +216,72 @@ def _execution_rollup(trace_summary: Optional[dict], spans: Optional[list]) -> d
     return rollup
 
 
+def _case_context_provenance(state: dict) -> dict:
+    """Whether case context was supplied, and where it was used. Never the facts."""
+    ctx = state.get("case_context")
+    used_by: list[str] = []
+    if ctx:
+        if state.get("retrieval_query_supplement"):
+            used_by.append("retrieval")
+        # Generation receives the context block whenever one exists.
+        used_by.append("generation")
+    try:
+        from app.ai.case_context import context_fingerprint
+        digest = context_fingerprint(ctx)
+    except Exception:
+        digest = None
+    return {
+        "case_context_supplied": bool(ctx),
+        "case_context_hash":     digest,
+        "case_record_version":   state.get("case_record_version"),
+        "case_context_used_by":  used_by,
+    }
+
+
+def _llm_attribution(state: dict) -> dict:
+    """Who actually wrote this answer, and every attempt made getting there.
+
+    Three fields, because they answer three different questions:
+
+      answer_llm         the call that produced the user-facing text. NOT the
+                         last successful call — that is almost always the fast
+                         grounding judge, and naming it would attribute a 20B
+                         judge as the author of a 120B model's answer.
+      llm_calls          every attempt this turn, failed primaries included, so
+                         a failover is visible rather than inferred.
+      answer_llm_origin  current_turn | cached_source | none. A cache hit did
+                         no generation, and a canned reply did none either;
+                         both must say so rather than borrow an identity.
+
+    Best-effort and never raises: an audit write must not fail because
+    telemetry is unavailable.
+    """
+    out = {"answer_llm": None, "llm_calls": [],
+           "answer_llm_origin": "none"}
+    try:
+        from app.ai.provider_health import ORIGIN_CACHED, ORIGIN_CURRENT_TURN, current_turn
+
+        turn = current_turn()
+        if turn is not None:
+            out["llm_calls"] = turn.all_events()
+            author = turn.answer_llm()
+            if author:
+                out["answer_llm"] = author
+                out["answer_llm_origin"] = ORIGIN_CURRENT_TURN
+                return out
+
+        # No generation this turn. A cache hit carries the attribution recorded
+        # when the answer was FIRST written; a legacy entry carries none, and
+        # reports unknown rather than inheriting anything.
+        if state.get("cache_hit"):
+            cached = state.get("cached_answer_llm")
+            out["answer_llm"] = cached or None
+            out["answer_llm_origin"] = ORIGIN_CACHED
+    except Exception:
+        pass
+    return out
+
+
 def build_record(
     state:         dict,
     session_id:    str,
@@ -253,6 +324,28 @@ def build_record(
         "language":  state.get("language", ""),
         "case_type": state.get("case_type", ""),
         "province":  state.get("province", ""),
+        # WHICH case this turn was bound to, when it was bound to one. The
+        # identifier only — the case facts themselves are already covered by
+        # the query/answer fields and do not need duplicating into the audit.
+        "case_id":   state.get("case_id") or None,
+        # WHETHER context was supplied, WHICH context it was, WHICH version of
+        # the record it came from, and WHERE it was actually used. The previous
+        # single `case_context_used` flag conflated "we had context" with "the
+        # context shaped the answer", which are different claims — a turn can be
+        # bound to a case and still have the context reach nothing.
+        # The facts themselves are never stored: the hash proves identity
+        # without the audit becoming a second copy of privileged material.
+        **_case_context_provenance(state),
+
+        # ── Which provider and model actually answered ────────────────────────
+        # The fallback chain hides the winner: with_fallbacks returns the
+        # successful result with no marker of who produced it, so an answer
+        # served by the third provider on a different model family was
+        # indistinguishable from one served by the first. That matters here —
+        # the corpus and citation numbers in paper/ were measured on
+        # Llama-3.3-70B and production now serves openai/gpt-oss-120b, and no
+        # record said so. Metadata only: no key, no prompt, no completion.
+        **_llm_attribution(state),
 
         # ── Which answer this record describes ────────────────────────────────
         # Digest of the FULL answer, preview scrubbed and truncated. The digest
@@ -320,19 +413,73 @@ async def record_answer(
     Persist a provenance record. Returns the request_id on success, else None.
 
     Never raises — an audit write must not fail the query it describes.
+
+    A failed direct write is no longer the end of the story: the record is
+    parked in the outbox and delivered later. `record_outcome` reports which
+    happened, for callers that need to tell the user whether the turn is
+    audited. This function keeps its original return type so the three existing
+    call sites are unaffected.
+    """
+    outcome, _ = await record_outcome(
+        state, session_id, user_id, request_id, trace_summary, spans, turn_type)
+    return request_id if outcome != outbox.LOST else None
+
+
+async def record_outcome(
+    state:         dict,
+    session_id:    str,
+    user_id:       str,
+    request_id:    str,
+    trace_summary: Optional[dict] = None,
+    spans:         Optional[list] = None,
+    turn_type:     str            = TURN_ANSWER,
+) -> tuple[str, Optional[str]]:
+    """Persist a provenance record and say what actually became of it.
+
+    Returns (outcome, request_id) where outcome is one of outbox.DURABLE,
+    outbox.QUEUED or outbox.LOST.
+
+    THE FAILURE THIS EXISTS FOR
+
+    The direct insert used to be the only attempt. It swallowed every exception
+    and returned None, and the answer went to the user regardless — so a turn
+    could be answered, billed and displayed with no audit record, and nothing
+    said so. The claim that every turn is audited was true only when the
+    database happened to be reachable.
+
+    Building the record is inside the same guard as writing it. A record that
+    cannot be BUILT cannot be parked either — there is nothing to park — so that
+    path is LOST by construction, and it is reported rather than hidden.
+
+    Never raises, for the original reason: an audit write must not fail the
+    query it describes.
     """
     try:
         record = build_record(
             state, session_id, user_id, request_id, trace_summary, spans, turn_type
         )
-        await get_answer_provenance_col().insert_one(record)
-        return request_id
     except Exception:
         logger.exception(
-            "provenance: failed to record answer (session=%s request=%s)",
-            session_id, request_id,
-        )
-        return None
+            "provenance: could not BUILD a record (session=%s request=%s); "
+            "this turn cannot be audited", session_id, request_id)
+        return outbox.LOST, None
+
+    try:
+        await get_answer_provenance_col().insert_one(record)
+        return outbox.DURABLE, request_id
+    except Exception as exc:
+        # Already recorded, by a retry of this turn or by a delivery that
+        # committed and then timed out. The unique index on request_id makes
+        # this a success, not a failure.
+        if outbox._is_duplicate_key(exc):
+            return outbox.DURABLE, request_id
+        logger.warning(
+            "provenance: direct write failed (session=%s request=%s, %s); "
+            "parking for delivery", session_id, request_id, type(exc).__name__)
+
+    if await outbox.park(request_id, record):
+        return outbox.QUEUED, request_id
+    return outbox.LOST, None
 
 
 async def get_by_request(request_id: str, user_id: str) -> Optional[dict]:
