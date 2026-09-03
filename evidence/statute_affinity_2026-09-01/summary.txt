@@ -1,0 +1,46 @@
+C:\Users\The Laptop Hut\Desktop\attorney-ai\backend\venv\Lib\site-packages\langgraph\checkpoint\base\__init__.py:18: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.
+  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+  MEASURED  1/10 (attempt  1)   51.3s  pre=20 post=6 graded=6 evid=6 punish=True 382=False
+  MEASURED  2/10 (attempt  2)   47.6s  pre=1 post=1 graded=1 evid=1 punish=True 382=False
+  MEASURED  3/10 (attempt  3)   81.7s  pre=1 post=1 graded=1 evid=1 punish=True 382=False
+  MEASURED  4/10 (attempt  4)   80.9s  pre=1 post=1 graded=1 evid=1 punish=True 382=False
+  MEASURED  5/10 (attempt  5)   30.5s  pre=24 post=6 graded=6 evid=6 punish=True 382=False
+  MEASURED  6/10 (attempt  6)   89.5s  pre=1 post=1 graded=1 evid=1 punish=True 382=False
+  MEASURED  7/10 (attempt  7)   28.3s  pre=19 post=3 graded=3 evid=3 punish=True 382=False
+  MEASURED  8/10 (attempt  8)   30.2s  pre=19 post=1 graded=1 evid=1 punish=True 382=False
+  MEASURED  9/10 (attempt  9)   89.6s  pre=1 post=1 graded=1 evid=1 punish=True 382=False
+  MEASURED 10/10 (attempt 10)   33.0s  pre=20 post=3 graded=3 evid=3 punish=True 382=False
+
+  written: ../evidence/statute_affinity_2026-09-01/trials.json
+
+  multi-statute control (must keep BOTH statutes):
+    named=None  statutes in evidence=['C.M.A.4343_2014 (SC 2015)', 'CrPC 1898', 'Irfan Ali Sher vs The State (SC 2020)', 'PPC 1860', 'titled as Mian Haroon Riaz Lucky, etc. vs The Station House Officer, etc. The petitioners inordinately — Criminal Petition No.907 of 2020 (SC 2020)']
+
+  written: ../evidence/statute_affinity_2026-09-01/trials.json
+
+==========================================================================
+MEASURED TRIALS: 10 of 10 attempts (0 provider failures; cached/unmeasured excluded)
+
+  PPC 379 rank, raw candidates (pre-affinity) : min 1 / med 10 / max 24
+  PPC 379 rank, after affinity                : min 1 / med 1 / max 6
+  PPC 379 rank, after grading                 : min 1 / med 1 / max 6
+  PPC 379 rank, generation evidence           : min 1 / med 1 / max 6
+
+  top-8 inclusion, pre-affinity   : 5/10
+  top-8 inclusion, post-affinity  : 10/10
+  reached generation evidence     : 10/10   (acceptance: >= 9/10)
+  PPC 379 in generation evidence  : 0/10
+  answer states the punishment    : 10/10
+      element imprisonment  : 10/10
+      element three_years   : 10/10
+      element fine          : 10/10
+      element or_both       : 10/10
+  FULLY ACCEPTED trials           : 0/10
+  PPC 379 a matched citation      : 10/10
+  answer mentions 382             : 0/10   (want 0)
+
+  relevance_score : min 0.3852 / med 0.4690 / max 0.5356
+  bm25_confidence : min 0.2807 / med 0.3922 / max 0.5141
+  arbitration_source distribution: {'llm': 10}
+
+  MULTI-STATUTE CONTROL: named=None (must be None), statutes in evidence=5

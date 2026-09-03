@@ -6,8 +6,10 @@ from langchain_core.documents import Document
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_fast_llm
+from app.ai.provider_health import PURPOSE_QUERY_EXPANSION
 from app.ai.pipelines.retriever import build_retriever
 from app.ai.pipelines.reranker import RRF
+from app.ai.pipelines.statute_affinity import apply_affinity
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,7 @@ async def _expand_query(query: str) -> str:
         # Fast tier: this is a keyword rewrite for BM25 recall, not legal reasoning,
         # and its output is keyword-guarded below anyway. Running it on the main
         # model was costing several seconds inside every retrieval.
-        llm    = get_fast_llm()
+        llm    = get_fast_llm(purpose=PURPOSE_QUERY_EXPANSION)
         result = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _REWRITE_PROMPT},
             {"role": "user",   "content": query},
@@ -360,6 +362,7 @@ def _docs_to_chunks(docs: list[Document], province: str = "",
     dropped = 0
     synthetic = 0
     footnotes = 0
+    reference = 0
     for doc in docs:
         meta = doc.metadata or {}
         if not allow_synthetic and _is_synthetic(meta):
@@ -376,10 +379,24 @@ def _docs_to_chunks(docs: list[Document], province: str = "",
         if _is_superseded_for(meta, province):
             dropped += 1
             continue
+        # Reference-only material (forms, warrants, specimen charges) is filtered
+        # in the retriever, but graph hop-2 fetches chunks by id straight from the
+        # collection and never sees that filter — so without this check a forms
+        # chunk re-enters through cross-reference expansion. This function is the
+        # single point every retrieval path passes through, hop-2 included.
+        if meta.get("retrieval_scope") == "reference_only":
+            reference += 1
+            continue
         chunks.append({
             "content":        doc.page_content,
             "statute":        meta.get("statute", ""),
-            "section_number": meta.get("section_number", ""),
+            # A misattributed chunk carries the section number of whatever
+            # heading happened to precede it in the PDF, not its own. Passing
+            # that on would let generation cite it — and citation matching would
+            # resolve the citation against a provision the text does not contain.
+            # Empty is the honest value: the text is real, its section is unknown.
+            "section_number": ("" if meta.get("attribution_status") == "misattributed"
+                               else meta.get("section_number", "")),
             "source_file":    meta.get("source_file", ""),
             "chunk_id":       meta.get("chunk_id", ""),
             "province":       meta.get("province", "federal"),
@@ -400,6 +417,11 @@ def _docs_to_chunks(docs: list[Document], province: str = "",
             "retrieval: excluded %d footnote-apparatus chunk(s) — amendment "
             "history must not be cited as the statute it annotates", footnotes,
         )
+    if reference:
+        logger.info(
+            "retrieval: excluded %d reference-only chunk(s) — forms and specimen "
+            "instruments quote sections without stating law", reference,
+        )
     return chunks
 
 
@@ -407,13 +429,37 @@ async def retrieval_node(state: AgentState) -> dict:
     attempts    = state.get("retrieval_attempts", 0) + 1
     known_facts = state.get("known_facts", [])
 
-    # Use normalized_query (standard Urdu) if triage produced one, else fall back to raw query
+    # Use normalized_query (standard Urdu) if triage produced one, else raw query
     base_query = state.get("normalized_query") or state["query"]
+
+    # Case-derived widening, for RETRIEVAL only. "What should I prepare?" has
+    # almost nothing to match on; the case supplies bounded terms. Applied here
+    # rather than to state["query"] so the user's words remain the ones affinity
+    # and generation see.
+    supplement = state.get("retrieval_query_supplement")
+    if supplement and supplement != base_query:
+        base_query = supplement
     # On retry: weave known facts into the query to widen recall
     if attempts > 1 and known_facts:
         base_query = f"{base_query} {' '.join(known_facts)}"
 
-    expanded = await _expand_query(base_query)
+    # Reuse the rewrite when the retry is asking the SAME question.
+    #
+    # The decision engine's "defer" verdict sends us back here, and _expand_query
+    # is a fast-tier LLM call. When known_facts did not change, base_query is
+    # byte-identical to the previous attempt, so recomputing the rewrite spends a
+    # second call to derive the same string — measured at 2.4 s and ~2k fast-tier
+    # tokens on a live theft query. That matters more than it looks: Groq meters
+    # 200,000 fast-tier tokens per DAY, and a turn already spends ~8k of them.
+    #
+    # Keyed on the exact input and carried in graph state, so it is scoped to
+    # this thread — no cross-user cache, and a changed base_query (new facts)
+    # naturally misses and re-expands.
+    if state.get("expansion_for") == base_query and state.get("expanded_query"):
+        expanded = state["expanded_query"]
+        logger.info("retrieval: reusing query expansion for identical retry query")
+    else:
+        expanded = await _expand_query(base_query)
 
     # Case law runs on the raw (un-rewritten) query — judgment prose matches lay
     # phrasing better than statute-terminology rewrites.
@@ -436,6 +482,8 @@ async def retrieval_node(state: AgentState) -> dict:
             "reranked_chunks":  [],
             "case_law_chunks":  case_law,
             "retrieval_attempts": attempts,
+            "expanded_query":     expanded,
+            "expansion_for":      base_query,
             # A crashed retriever is NOT the same as "no relevant law exists",
             # but both used to arrive at the Decision Engine as zero chunks and
             # be refused identically. Recording the difference matters twice
@@ -484,6 +532,19 @@ async def retrieval_node(state: AgentState) -> dict:
     chunks = _docs_to_chunks(merged, state.get("province", ""))
     chunks = _apply_topic_rules(chunks, base_query)
 
+    # Named-statute affinity, AFTER topic rules so it is the final word: an
+    # explicit "under the Punjab Tenancy Act" must beat the generic urban-tenancy
+    # rule that would otherwise promote the Rented Premises Act. Applied here so
+    # the preferred statute is inside the first eight the grader scores — that
+    # cut is why PPC 379 at rank 15 never reached generation.
+    #
+    # state["query"] deliberately, not base_query: base_query carries the LLM
+    # rewrite, which appends statute terminology of its own. Preference must
+    # follow the user's words, not the model's.
+    chunks, named = apply_affinity(chunks, state.get("query", ""))
+    if named:
+        logger.info("retrieval: named-statute affinity applied for %s", named)
+
     # Augment with web results when user toggled web search on
     if state.get("web_search_enabled"):
         web_chunks = await _web_search(base_query, state.get("case_type", ""))
@@ -496,4 +557,8 @@ async def retrieval_node(state: AgentState) -> dict:
         "case_law_chunks":  case_law,
         "retrieval_attempts": attempts,
         "retrieval_error":  retrieval_error,
+        # Carried so a "defer" retry asking the identical question reuses this
+        # rewrite instead of spending a second fast-tier call to recompute it.
+        "expanded_query":     expanded,
+        "expansion_for":      base_query,
     }

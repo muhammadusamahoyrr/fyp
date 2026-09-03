@@ -358,6 +358,12 @@ def build_index() -> CorpusIndex:
         for md in col.get(include=["metadatas"])["metadatas"] or []:
             statute = (md.get("statute") or "").strip()
             section = str(md.get("section_number") or "").strip().upper()
+            # A misattributed chunk's section_number belongs to whichever heading
+            # preceded it in the source PDF, not to its own text. Counting it here
+            # would report coverage of sections the corpus does not actually hold,
+            # which is the opposite of what this index exists to measure.
+            if md.get("attribution_status") == "misattributed":
+                continue
             if not statute or not section or statute in _NOT_STATUTES:
                 continue
             m = _leading_num.match(section)

@@ -24,8 +24,12 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
+from app.ai.provider_health import PURPOSE_TOOL_SELECTION
 from app.ai.tools import LEGAL_TOOLS, should_offer_tools
-from app.ai.tools.document_tools import build_document_tools
+from app.ai.tools.document_tools import (
+    build_document_tools,
+    mentions_document as _mentions_document,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,21 +45,6 @@ _MAX_ROUNDS = 3
 # full main-model request (~7s, ~3k prompt tokens) on every tool-using query.
 # So: loop again only if a precursor ran.
 _PRECURSOR_TOOLS = {"find_offence_sections", "list_my_documents"}
-
-# Document phrasing shares no vocabulary with the bail/fee/inheritance triggers,
-# so it needs its own gate.
-_DOC_RE = re.compile(
-    r"\b(my|the|this|that|uploaded?|attached?)\s+\w*\s*"
-    r"(document|documents|file|files|fir|contract|agreement|notice|deed|"
-    r"lease|paper|papers|evidence|scan|pdf)\b"
-    r"|\b(read|open|check|review|summari[sz]e|look at)\s+(my|the|it|this|that)\b"
-    r"|\bi\s+(uploaded|attached|sent)\b",
-    re.IGNORECASE,
-)
-
-
-def _mentions_document(query: str) -> bool:
-    return bool(_DOC_RE.search(query))
 
 _SYSTEM = """\
 You are the tool-selection step of a Pakistani legal assistant.
@@ -112,7 +101,7 @@ async def tool_node(state: AgentState) -> dict:
     if not (wants_tool or wants_doc):
         return {"tool_results": [], "tool_calls_made": []}
 
-    llm = get_llm().bind_tools(tools)
+    llm = get_llm(purpose=PURPOSE_TOOL_SELECTION).bind_tools(tools)
 
     facts = state.get("known_facts", [])
     facts_block = ("\nFacts already established:\n" + "\n".join(f"- {f}" for f in facts)) if facts else ""

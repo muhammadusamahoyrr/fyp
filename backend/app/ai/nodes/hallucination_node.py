@@ -1,15 +1,20 @@
 import asyncio
+import logging
 
 from pydantic import BaseModel
 
 from app.ai.answer_citations import (
     build_generation_evidence,
     format_evidence_for_prompt,
+    grounding_veto,
     parse_claim_support,
     split_claims,
 )
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_structured_llm
+from app.ai.provider_health import PURPOSE_GROUNDING_JUDGE
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM = """\
 You are a legal answer validator. Determine whether the given answer is grounded in the provided evidence.
@@ -66,7 +71,8 @@ async def hallucination_node(state: AgentState) -> dict:
     ):
         return {"is_grounded": False, "confidence": 0.0}
 
-    llm = get_structured_llm(GroundingOutput, fast=True)
+    llm = get_structured_llm(GroundingOutput, fast=True,
+                             purpose=PURPOSE_GROUNDING_JUDGE)
 
     # THE evidence generation used, under the ids it used. This node used to
     # rebuild its own context from reranked_chunks[:5] and renumber it [1..5],
@@ -102,8 +108,21 @@ async def hallucination_node(state: AgentState) -> dict:
     # is the honest report. A missing verdict is not evidence of support.
     assessed = parse_claim_support(result.claim_support, claims)
 
-    if result.is_grounded:
+    # The judge's own claim assessment gets a vote on the judge's verdict.
+    #
+    # It returns two things from one call — a boolean and a per-claim support
+    # string — and this node used the boolean and discarded the claims. So an
+    # answer could be published as grounded while its own assessment said the
+    # cited section does not support what the sentence claims. Deterministic,
+    # and only ever in the safe direction: it can withdraw a claim of
+    # groundedness, never grant one. See answer_citations.grounding_veto.
+    veto = grounding_veto(assessed)
+
+    if result.is_grounded and veto is None:
         return {"is_grounded": True, "claim_assessments": assessed}
+
+    if veto is not None and result.is_grounded:
+        logger.info("grounding: judge said grounded, claims disagree — %s", veto)
 
     # Not grounded: degrade confidence and append caution note.
     # route_after_hallucination will retry generation if budget remains,
@@ -113,6 +132,10 @@ async def hallucination_node(state: AgentState) -> dict:
         "is_grounded":       False,
         "answer":            state["answer"] + _CAUTION,
         "confidence":        degraded_conf,
+        # Why, when it was the claims rather than the judge that refused. Null
+        # on an ordinary ungrounded verdict, so the two are distinguishable in
+        # the audit trail rather than collapsing into one reason.
+        "grounding_veto":    veto,
         # Kept on the ungrounded path too: which specific claims failed is more
         # actionable than the blanket caution banner, and this is the state the
         # user is most likely to be reading closely.

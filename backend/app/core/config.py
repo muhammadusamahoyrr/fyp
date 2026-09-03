@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     # LLM
     gemini_api_key: str = ""
     groq_api_key: str = ""
+    # Second Groq account, tried when the first is rate-limited. Groq's free tier
+    # caps tokens per DAY per model (gpt-oss-20b: 200,000), and the fast tier is
+    # what the graph leans on — query expansion, the retrieval grader and the
+    # hallucination judge all run there, so a day's traffic exhausts it while the
+    # main tier still has budget. Before this, that exhaustion fell through to
+    # OpenRouter, which has no credit, and the 402 killed the whole graph run.
+    # Optional: unset simply drops out of the chain like any unconfigured key.
+    groq_api_key_2: str = ""
     openrouter_api_key: str = ""
     llm_provider: str = "groq"
 
@@ -97,6 +105,9 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     cors_origins: str = ""            # extra allowed origins, comma-separated
     run_schedulers: bool = True       # in-process schedulers; disable on all but one worker
+    # How often each worker checks the provenance outbox. Cheap when idle:
+    # one indexed query that matches nothing.
+    provenance_relay_seconds: int = 30
     # Single absolute root for all generated + uploaded files.
     upload_root: str = str(Path(__file__).resolve().parents[2] / "uploads")
 

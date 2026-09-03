@@ -9,6 +9,8 @@ from app.db.collections import (
     get_appointments_col,
     get_cases_col,
     get_chat_sessions_col,
+    get_conversation_messages_col,
+    get_conversation_turns_col,
     get_checkpoint_writes_col,
     get_checkpoints_col,
     get_documents_col,
@@ -20,6 +22,7 @@ from app.db.collections import (
     get_payment_events_col,
     get_payments_col,
     get_refresh_blocklist_col,
+    get_research_sessions_col,
     get_retrieval_labels_col,
     get_subscriptions_col,
     get_users_col,
@@ -54,6 +57,11 @@ async def create_all_indexes() -> None:
     await _agreements_indexes()
     await _notifications_indexes()
     await _chat_sessions_indexes()
+    await _research_sessions_indexes()
+    await _conversation_message_indexes()
+    await _conversation_turn_indexes()
+    await _provenance_outbox_indexes()
+    await _legal_hold_indexes()
     await _appointments_indexes()
     await _engagements_indexes()
     await _lawyer_reviews_indexes()
@@ -229,9 +237,90 @@ async def _notifications_indexes() -> None:
 
 async def _chat_sessions_indexes() -> None:
     col = get_chat_sessions_col()
+    # The unique index on session_id is created by the module whose correctness
+    # depends on it, and raises rather than degrading silently.
+    from app.services.conversation_service import SURFACE_CLIENT, ensure_indexes
+    await ensure_indexes(SURFACE_CLIENT)
     await col.create_indexes([
-        IndexModel([("session_id", ASCENDING)], unique=True),
         IndexModel([("client_id", ASCENDING)]),
+        # The conversation list: this user's, not deleted, newest first.
+        #
+        # `_id` is part of the key, not decoration. The list cursor is
+        # (updated_at, _id) because `updated_at` is not unique — two
+        # conversations touched in the same millisecond have no defined order
+        # under it alone, and a page boundary between them drops or duplicates
+        # one. Including it here lets the paginated sort be served by the index
+        # instead of an in-memory sort over the whole history.
+        IndexModel([("client_id", ASCENDING), ("deleted_at", ASCENDING),
+                    ("updated_at", DESCENDING), ("_id", DESCENDING)]),
+    ])
+
+
+async def _research_sessions_indexes() -> None:
+    col = get_research_sessions_col()
+    from app.services.conversation_service import SURFACE_RESEARCH, ensure_indexes
+    await ensure_indexes(SURFACE_RESEARCH)
+    await col.create_indexes([
+        # Every list query is (owner, not deleted, newest first). Compound and
+        # in that order so the sort is served by the index rather than run in
+        # memory over a lawyer's whole research history.
+        IndexModel([("owner_id", ASCENDING), ("deleted_at", ASCENDING),
+                    ("updated_at", DESCENDING), ("_id", DESCENDING)]),
+        # Switching between general and case-specific research filters on this.
+        IndexModel([("owner_id", ASCENDING), ("case_id", ASCENDING)], sparse=True),
+    ])
+
+
+async def _conversation_message_indexes() -> None:
+    col = get_conversation_messages_col()
+    # The uniqueness the message store's idempotency depends on is created by
+    # the module that depends on it, and raises rather than degrading silently.
+    from app.services.conversation_messages import ensure_indexes
+    await ensure_indexes()
+    await col.create_indexes([
+        IndexModel([("conversation_id", ASCENDING), ("created_at", ASCENDING)]),
+    ])
+
+
+async def _legal_hold_indexes() -> None:
+    # Created by the module that depends on them, and raising rather than
+    # degrading: without the partial-unique index two active holds can stand on
+    # one target, and forgetting the second is how data outlives a hold everyone
+    # believes was lifted.
+    from app.services.legal_holds import ensure_indexes
+    await ensure_indexes()
+
+
+async def _provenance_outbox_indexes() -> None:
+    # Created by the module that depends on them, and raising rather than
+    # degrading: without the claim index the relay full-scans on every pass,
+    # and a relay that quietly gets slower looks exactly like one that is
+    # keeping up until the backlog is hours old.
+    #
+    # Deliberately NO TTL. A delivered entry is removed at the moment of
+    # delivery; a failed one is the evidence that the audit trail has a hole
+    # and is kept until the retention policy says otherwise. See
+    # services/provenance_outbox.py.
+    from app.services.provenance_outbox import ensure_indexes
+    await ensure_indexes()
+
+
+async def _conversation_turn_indexes() -> None:
+    col = get_conversation_turns_col()
+    # The whole point of the collection. A retry of a turn already claimed must
+    # lose this insert rather than start a second graph run, so uniqueness is
+    # enforced by the database and not by a read-then-write in application code.
+    #
+    # NOT via _try_unique_partial, which logs and continues on failure: a
+    # missing index here does not degrade performance, it silently removes the
+    # idempotency guarantee. conversation_turns.ensure_indexes creates the same
+    # index on first use and raises if it cannot.
+    from app.services.conversation_turns import ensure_indexes
+    await ensure_indexes()
+    await col.create_indexes([
+        # Sweeping expired leases, and answering "is a turn running here?".
+        IndexModel([("conversation_id", ASCENDING), ("status", ASCENDING)]),
+        IndexModel([("lease_expires_at", ASCENDING)], sparse=True),
     ])
 
 

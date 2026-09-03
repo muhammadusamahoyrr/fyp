@@ -4,6 +4,7 @@ from langgraph.types import interrupt
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_fast_llm
+from app.ai.provider_health import PURPOSE_CLARIFICATION
 from app.ai.nodes._history import format_history
 from app.ai.nodes._resume import merge_user_reply
 
@@ -20,7 +21,7 @@ Ask in the same language the user used. No explanations — just the question.""
 
 
 async def clarification_node(state: AgentState) -> dict:
-    llm = get_fast_llm()
+    llm = get_fast_llm(purpose=PURPOSE_CLARIFICATION)
     history = format_history(state, max_turns=3)
     history_section = f"\nConversation history:\n{history}\n" if history else ""
 

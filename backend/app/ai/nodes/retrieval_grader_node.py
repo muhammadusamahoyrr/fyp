@@ -4,7 +4,9 @@ import logging
 from app.ai.calibration import record_score_for_drift
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_fast_llm
+from app.ai.provider_health import PURPOSE_RETRIEVAL_GRADER
 from app.ai.pipelines.similarity import similarity_scores
+from app.ai.pipelines.statute_affinity import apply_affinity
 from app.ai.scoring import score_retrieval_batch
 from app.ai.threshold_manager import record_query
 
@@ -93,12 +95,16 @@ async def retrieval_grader_node(state: AgentState) -> dict:
     prev_score = state.get("relevance_score", 0.0)
 
     if not chunks:
+        # A genuine measured zero: retrieval ran and returned nothing. That is a
+        # different fact from the cache path's untouched initialisers, and
+        # signal_origin is what tells them apart downstream.
         return {
             "reranked_chunks":      [],
             "prev_relevance_score": prev_score,
             "relevance_score":      0.0,
             "signal_variance":      0.0,
             "bm25_confidence":      0.0,
+            "signal_origin":        "measured",
         }
 
     to_grade = chunks[:_MAX_TO_GRADE]
@@ -113,7 +119,7 @@ async def retrieval_grader_node(state: AgentState) -> dict:
 
     try:
         import json
-        llm      = get_fast_llm()
+        llm      = get_fast_llm(purpose=PURPOSE_RETRIEVAL_GRADER)
         response = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _SYSTEM},
             {"role": "user",   "content": (
@@ -173,10 +179,22 @@ async def retrieval_grader_node(state: AgentState) -> dict:
     ordered = _reorder_by_topic(graded + rest,
                                state.get("normalized_query") or state.get("query", ""))
 
+    # Grading re-sorts by relevance and throws away the order retrieval_node
+    # chose, so the affinity applied there does not survive to generation on its
+    # own. Re-applying it here — after topic rules, same as in retrieval_node —
+    # makes an explicitly named statute the final ordering authority.
+    #
+    # Raw query only: _reorder_by_topic above may read the LLM rewrite, but
+    # preference must not be steerable by model-invented statute names.
+    ordered, named = apply_affinity(ordered, state.get("query", ""))
+    if named:
+        logger.info("grader: named-statute affinity re-applied for %s", named)
+
     return {
         "reranked_chunks":      ordered,
         "prev_relevance_score": prev_score,
         "relevance_score":      signals.aggregate,
         "signal_variance":      signals.variance,
         "bm25_confidence":      signals.lexical,
+        "signal_origin":        "measured",
     }

@@ -14,6 +14,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import os
+
 import pytest
 
 # Allow `import app...` when pytest is invoked from anywhere.
@@ -85,13 +87,44 @@ async def mongo():
     should still get a green unit run rather than a wall of red that hides real
     failures.
     """
+    from app.core.config import settings
     from app.db.mongodb import connect_db, get_database
 
-    try:
-        await connect_db()
-        await get_database().command("ping")
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"MongoDB unavailable — skipping integration test ({exc})")
+    # Prefer a LOCAL Mongo for tests.
+    #
+    # The configured URI points at a hosted cluster, and running the integration
+    # suite across the internet made it slow and — much worse — non-deterministic:
+    # a DNS blip or a paused connection pool turned real assertions into skips,
+    # so a green run stopped meaning the guarantees held. Runs against the
+    # remote cluster were taking 15+ minutes with 9-59 tests silently skipped.
+    #
+    # A local instance is tried first and the configured URI is the fallback, so
+    # this works for a developer with neither. `AAI_TEST_MONGO_URL` overrides
+    # both, for CI.
+    original_url = settings.mongodb_url
+    candidates = [
+        os.environ.get("AAI_TEST_MONGO_URL"),
+        "mongodb://localhost:27017",
+        original_url,
+    ]
+
+    connected = False
+    last_error = "no candidate URI"
+    for url in candidates:
+        if not url:
+            continue
+        settings.mongodb_url = url
+        try:
+            await connect_db()
+            await get_database().command("ping")
+            connected = True
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_error = f"{url.split('@')[-1][:40]}: {exc}"
+
+    if not connected:
+        settings.mongodb_url = original_url
+        pytest.skip(f"MongoDB unavailable — skipping integration test ({last_error})")
     db = get_database()
     # Tripwire, not decoration. If the override above is ever removed or
     # shadowed, an integration test must refuse to run rather than discover the
@@ -100,4 +133,51 @@ async def mongo():
         f"refusing to run an integration test against {db.name!r}: "
         "the test-database override is not in force"
     )
-    yield db
+    try:
+        yield db
+    finally:
+        settings.mongodb_url = original_url
+
+
+@pytest.fixture
+def stub_grader_llm():
+    """Stub retrieval_grader_node's LLM at its real seam: get_fast_llm().
+
+    The grader calls `get_fast_llm().invoke(...)` and parses `response.content`
+    as a JSON array that must contain exactly one grade per graded chunk — a
+    wrong-length reply is rejected and the node degrades to neutral grades. That
+    degradation path is why patching a nonexistent name still produced a green
+    test: the real provider call failed, the except branch caught it, and the
+    node carried on. So this stub returns a correctly sized array AND records
+    that it was called, so a test can assert the seam was genuinely exercised
+    rather than bypassed.
+
+    Also neutralises the two Redis writers reached via _record_observation, so a
+    unit test touches no external state.
+
+    Returns a dict; read `["calls"]` after the node runs.
+    """
+    def _install(grader_module, monkeypatch, n_grades: int, grade: float = 1.0):
+        state = {"calls": 0, "messages": None}
+
+        class _Response:
+            def __init__(self, content):
+                self.content = content
+
+        class _LLM:
+            def invoke(self, messages):
+                state["calls"] += 1
+                state["messages"] = messages
+                import json as _json
+                return _Response(_json.dumps([grade] * n_grades))
+
+        monkeypatch.setattr(grader_module, "get_fast_llm", lambda **_kw: _LLM())
+
+        async def _no_redis(*a, **k):
+            return None
+
+        monkeypatch.setattr(grader_module, "record_query", _no_redis)
+        monkeypatch.setattr(grader_module, "record_score_for_drift", _no_redis)
+        return state
+
+    return _install

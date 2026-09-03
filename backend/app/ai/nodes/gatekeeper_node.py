@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_structured_llm
+from app.ai.provider_health import PURPOSE_GATEKEEPER
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,8 @@ def llm_injection_reason(query: str) -> str | None:
     heuristic layer still catches the obvious attacks.
     """
     try:
-        llm = get_structured_llm(GatekeeperVerdict, fast=_prefer_fast())
+        llm = get_structured_llm(GatekeeperVerdict, fast=_prefer_fast(),
+                                 purpose=PURPOSE_GATEKEEPER)
         verdict: GatekeeperVerdict = llm.invoke([
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user",   "content": query},

@@ -35,8 +35,19 @@ def test_prefer_local_still_falls_back(cfg):
 
 
 def test_default_order_is_untouched(cfg):
+    """Without local-only or an ollama preference, the order IS the declared chain.
+
+    Asserted against _FALLBACK_ORDER rather than a literal list. The literal had
+    to be edited the moment a second Groq account was added to absorb rate-limit
+    overflow — a legitimate change that failed a test whose actual subject is
+    "_provider_order does not reorder or drop anything by default". Pinning the
+    literal tested the chain's membership, which belongs in llm.py, not here.
+    """
     cfg(llm_local_only=False, llm_provider="groq")
-    assert llm_mod._provider_order() == ["gemini", "groq", "openrouter"]
+    assert llm_mod._provider_order() == llm_mod._FALLBACK_ORDER
+    # Local must not appear unless explicitly asked for — that is the property
+    # this file exists to protect.
+    assert "ollama" not in llm_mod._provider_order()
 
 
 def test_ollama_model_comes_from_settings(cfg):

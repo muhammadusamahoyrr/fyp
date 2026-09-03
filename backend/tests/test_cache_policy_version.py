@@ -62,11 +62,19 @@ def test_new_entries_are_stamped_with_the_policy_version():
 
 def test_bumping_the_version_invalidates_everything_written_before(monkeypatch):
     """The property that matters: changing the constant is sufficient. No purge
-    script, no manual step, no dependence on remembering."""
+    script, no manual step, no dependence on remembering.
+
+    The "next" version is derived from the current one rather than hardcoded.
+    This test previously asserted against a literal "v3", so the day the real
+    constant was bumped to v3 the monkeypatch became a no-op and the test failed
+    while the behaviour it guards was perfectly correct. A version test must not
+    have to be edited every time the version changes.
+    """
     written = cache._build_entry({"answer": "x"}, None, {})
     assert cache._valid(written, ttl=600, current_col_versions={}) is True
 
-    monkeypatch.setattr(cache, "DECISION_POLICY_VERSION", "v3")
+    monkeypatch.setattr(cache, "DECISION_POLICY_VERSION",
+                        cache.DECISION_POLICY_VERSION + "-next")
     assert cache._valid(written, ttl=600, current_col_versions={}) is False
 
 

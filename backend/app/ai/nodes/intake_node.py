@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_structured_llm
+from app.ai.provider_health import PURPOSE_INTAKE_EXTRACTION
 
 # CITATIONS ARE RETRIEVAL-BOUND; THE REST OF THE ANALYSIS IS NOT.
 #
@@ -47,7 +48,7 @@ class IntakeOutput(BaseModel):
 
 
 def intake_node(state: AgentState) -> dict:
-    llm = get_structured_llm(IntakeOutput)
+    llm = get_structured_llm(IntakeOutput, purpose=PURPOSE_INTAKE_EXTRACTION)
 
     context = "\n".join(
         f"- {c['statute']} Section {c['section_number']}: {c['content'][:200]}"

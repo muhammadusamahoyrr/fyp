@@ -4,6 +4,7 @@ from langgraph.types import interrupt
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
+from app.ai.provider_health import PURPOSE_FACT_GAP
 from app.ai.nodes._history import format_history
 from app.ai.nodes._resume import merge_user_reply
 
@@ -111,7 +112,7 @@ async def fact_gap_node(state: AgentState) -> dict:
     history = format_history(state, max_turns=4)
     history_section = f"\nConversation history:\n{history}\n" if history else ""
 
-    llm      = get_llm()
+    llm      = get_llm(purpose=PURPOSE_FACT_GAP)
     response = await asyncio.to_thread(llm.invoke, [
         {"role": "system", "content": system},
         {"role": "user", "content": (

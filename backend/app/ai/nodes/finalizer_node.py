@@ -4,8 +4,14 @@ from langchain_core.messages import AIMessage
 
 from app.ai import cache
 from app.ai.answer_citations import annotate_citations_from_evidence, apply_currency
+from app.ai.source_links import apply_source_links
 from app.ai.graph.state import AgentState
-from app.ai.nodes.cache_node import is_personalised
+import logging
+
+from app.ai.nodes.cache_node import (
+    cache_block_reason,
+    effective_language,
+)
 from app.utils.pii import scrub_pii as _scrub_pii
 
 _REFUSE = (
@@ -26,6 +32,8 @@ _REFUSE_ERROR = (
 _LEAK_RE  = re.compile(
     r'(?im)^(System:|Human:|Assistant:|<\|im_start\||<\|im_end\||\[INST\]|<<SYS>>|Note to AI:|###\s*System).*$'
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _remove_leakage(text: str) -> str:
@@ -60,6 +68,16 @@ def _sanitised_claims(claims: list[dict]) -> list[dict]:
     a different sentence than the one it was made about.
     """
     return [{**claim, "text": _scrub_pii(claim.get("text", ""))} for claim in claims]
+
+
+def _answer_llm_for_cache():
+    """Attribution for the answer being cached. None when nothing generated it."""
+    try:
+        from app.ai.provider_health import current_turn
+        turn = current_turn()
+        return turn.answer_llm() if turn else None
+    except Exception:
+        return None
 
 
 async def finalizer_node(state: AgentState) -> dict:
@@ -136,14 +154,27 @@ async def finalizer_node(state: AgentState) -> dict:
     # written must not inherit that entry's silence.
     apply_currency(citations, claims, province=state.get("province", "") or "")
 
-    # Write-through: cache generic, grounded, non-personalised primary answers so
-    # an identical later query skips the retrieval→generation chain. Skip cache-hit
-    # passthroughs, follow-ups (deepen/format/affirm), and fact/clarification turns.
+    # Write-through: cache generic, grounded answers so an identical later query
+    # skips the retrieval→generation chain.
+    #
+    # Eligibility is `cache_block_reason` — THE SAME function the lookup node
+    # consults. It used to be a separate expression here that happened to agree
+    # with the one over there, which is not a property but a coincidence with a
+    # maintenance schedule: a rule added to one file was a rule missing from the
+    # other, and the direction that failed was always the same one — something
+    # got written that should not have been.
+    #
+    # The two conditions below are genuinely write-only and stay here: an
+    # ungrounded answer is not worth serving again, and a cache-hit passthrough
+    # would rewrite the entry it just read.
+    blocked = cache_block_reason(state)
+    if blocked:
+        logger.debug("cache: write-back declined (%s)", blocked)
     if (
         is_grounded
+        and not blocked
         and not state.get("cache_hit")
         and not state.get("followup_intent")
-        and not is_personalised(state)
     ):
         try:
             await cache.set_result(
@@ -161,14 +192,37 @@ async def finalizer_node(state: AgentState) -> dict:
                     "claims":      claims,
                     "confidence":  state.get("confidence", 0.0),
                     "is_grounded": True,
+                    # Stored so a later cache hit can report the signals that
+                    # were actually measured when this answer was produced,
+                    # instead of the 0.0 initialisers of a turn where retrieval
+                    # never ran. A hit is not evidence that the evidence was bad.
+                    "relevance_score": state.get("relevance_score", 0.0),
+                    "bm25_confidence": state.get("bm25_confidence", 0.0),
+                    "signal_variance": state.get("signal_variance", 0.0),
+                    # Who wrote this answer, recorded WHEN IT WAS WRITTEN. A
+                    # later cache hit runs no generation, so without this the
+                    # served answer has no author at all — and the previous
+                    # design filled that gap with whatever model the current
+                    # turn happened to touch last.
+                    "answer_llm": _answer_llm_for_cache(),
                 },
                 # None → invalidate on TTL + embedding/chunking version only.
                 # Collection-version busting activates once the ingest pipeline
                 # calls cache.invalidate_collection (a later enhancement).
                 collection_names=None,
+                # Same identity the lookup will use. Written by the same helper
+                # so the read and the write cannot disagree about which bucket
+                # this answer belongs in.
+                language=effective_language(state),
             )
         except Exception:
             pass  # cache is best-effort — never fail the response on a cache error
+
+    # Stamp a link onto every citation whose source document is actually held
+    # here. Deliberately AFTER the cache write: a URL is derived from what is on
+    # disk right now, so freezing one into a cache entry would outlive the file
+    # it points at. A cache hit re-enters this line and is linked afresh.
+    apply_source_links(citations)
 
     return {
         "answer":             clean,

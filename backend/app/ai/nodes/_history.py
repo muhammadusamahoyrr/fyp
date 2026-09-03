@@ -1,6 +1,22 @@
 from app.ai.graph.state import AgentState
 
 
+def has_prior_context(state: AgentState) -> bool:
+    """Would this turn's prompt carry conversation history?
+
+    Deliberately the SAME condition `format_history` uses to decide whether to
+    return anything, and deliberately in the same file. The result cache is
+    keyed on query + case type + province, so an answer shaped by history is
+    indexed under a key that cannot see it — and the moment these two
+    conditions disagree, an answer produced from one conversation becomes the
+    cached answer for everyone else's.
+
+    A parallel guess in the cache node would drift from this the first time
+    either is edited. Derivation is what makes them one decision.
+    """
+    return len(state.get("messages") or []) > 1
+
+
 def format_history(state: AgentState, max_turns: int = 5) -> str:
     """Format recent conversation history as a string for LLM context.
 

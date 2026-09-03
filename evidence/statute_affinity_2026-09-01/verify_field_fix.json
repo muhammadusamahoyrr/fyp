@@ -1,0 +1,287 @@
+{
+ "trials": [
+  {
+   "trial": 1,
+   "query": "What is the punishment for theft under the Pakistan Penal Code?",
+   "named": "PPC 1860",
+   "rank_pre_affinity": 20,
+   "rank_post_affinity": 3,
+   "n_candidates": 27,
+   "top8_statutes_pre": [
+    [
+     "CrPC 1898",
+     "260"
+    ],
+    [
+     "CrPC 1898",
+     "337"
+    ],
+    [
+     "CrPC 1898",
+     "221"
+    ],
+    [
+     "CrPC 1898",
+     "403"
+    ],
+    [
+     "CrPC 1898",
+     "234"
+    ],
+    [
+     "CrPC 1898",
+     "264"
+    ],
+    [
+     "PPC 1860",
+     "108"
+    ],
+    [
+     "CrPC 1898",
+     "337"
+    ]
+   ],
+   "top8_statutes_post": [
+    [
+     "PPC 1860",
+     "108"
+    ],
+    [
+     "PPC 1860",
+     "2"
+    ],
+    [
+     "PPC 1860",
+     "379"
+    ],
+    [
+     "PPC 1860",
+     "1"
+    ],
+    [
+     "PPC 1860",
+     "511"
+    ],
+    [
+     "PPC 1860",
+     "3"
+    ],
+    [
+     "PPC 1860",
+     "363"
+    ],
+    [
+     "PPC 1860",
+     ""
+    ]
+   ],
+   "seconds": 47.2,
+   "signal_origin": "measured",
+   "cache_hit": false,
+   "relevance_score": 0.504,
+   "bm25_confidence": 0.4839,
+   "arbitration_source": "llm",
+   "confidence": 0.85,
+   "rank_after_grading": 3,
+   "rank_generation_evidence": 3,
+   "in_generation_evidence": true,
+   "answer_len": 1762,
+   "punishment_elements": {
+    "imprisonment": true,
+    "three_years": true,
+    "fine": true,
+    "or_both": true
+   },
+   "states_punishment": true,
+   "cites_382": false,
+   "citations": [
+    [
+     "PPC 1860",
+     "379",
+     "matched"
+    ],
+    [
+     "PPC 1860",
+     "108",
+     "retrieved"
+    ],
+    [
+     "PPC 1860",
+     "2",
+     "retrieved"
+    ],
+    [
+     "PPC 1860",
+     "1",
+     "retrieved"
+    ],
+    [
+     "PPC 1860",
+     "511",
+     "retrieved"
+    ],
+    [
+     "PPC 1860",
+     "3",
+     "retrieved"
+    ]
+   ],
+   "ppc379_matched": true,
+   "ppc379_in_evidence": true,
+   "accepted": true,
+   "statutes_in_evidence": [
+    "Appellant vs Naseer Ahmed, etc. \u2014 Criminal Appeal No. 135 of 2013 (SC 2016)",
+    "PPC 1860",
+    "S.M.C.3_2017 \u2014 Criminal Appeal No. 75 of 2009 (SC 2018)",
+    "titled as Mian Haroon Riaz Lucky, etc. vs The Station House Officer, etc. The petitioners inordinately \u2014 Criminal Petition No.907 of 2020 (SC 2020)"
+   ]
+  }
+ ],
+ "multi": {
+  "trial": 0,
+  "query": "Compare the Pakistan Penal Code and the Code of Criminal Procedure on theft",
+  "named": null,
+  "rank_pre_affinity": null,
+  "rank_post_affinity": null,
+  "n_candidates": 25,
+  "top8_statutes_pre": [
+   [
+    "CrPC 1898",
+    "260"
+   ],
+   [
+    "CrPC 1898",
+    "337"
+   ],
+   [
+    "PPC 1860",
+    "511"
+   ],
+   [
+    "CrPC 1898",
+    "403"
+   ],
+   [
+    "PPC 1860",
+    "1"
+   ],
+   [
+    "CrPC 1898",
+    "264"
+   ],
+   [
+    "CrPC 1898",
+    "221"
+   ],
+   [
+    "CrPC 1898",
+    "337"
+   ]
+  ],
+  "top8_statutes_post": [
+   [
+    "CrPC 1898",
+    "260"
+   ],
+   [
+    "CrPC 1898",
+    "337"
+   ],
+   [
+    "PPC 1860",
+    "511"
+   ],
+   [
+    "CrPC 1898",
+    "403"
+   ],
+   [
+    "PPC 1860",
+    "1"
+   ],
+   [
+    "CrPC 1898",
+    "264"
+   ],
+   [
+    "CrPC 1898",
+    "221"
+   ],
+   [
+    "CrPC 1898",
+    "337"
+   ]
+  ],
+  "seconds": 39.6,
+  "signal_origin": "measured",
+  "cache_hit": false,
+  "relevance_score": 0.4087,
+  "bm25_confidence": 0.2116,
+  "arbitration_source": "llm",
+  "confidence": 0.85,
+  "rank_after_grading": null,
+  "rank_generation_evidence": null,
+  "in_generation_evidence": false,
+  "answer_len": 4007,
+  "punishment_elements": {
+   "imprisonment": true,
+   "three_years": true,
+   "fine": true,
+   "or_both": false
+  },
+  "states_punishment": false,
+  "cites_382": false,
+  "citations": [
+   [
+    "PPC 1860",
+    "511",
+    "matched"
+   ],
+   [
+    "CrPC 1898",
+    "260",
+    "matched"
+   ],
+   [
+    "PPC 1860",
+    "379",
+    "unresolved"
+   ],
+   [
+    "PPC 1860",
+    "1",
+    "retrieved"
+   ],
+   [
+    "CrPC 1898",
+    "221",
+    "retrieved"
+   ],
+   [
+    "CrPC 1898",
+    "337",
+    "retrieved"
+   ],
+   [
+    "CrPC 1898",
+    "235",
+    "retrieved"
+   ],
+   [
+    "CrPC 1898",
+    "521",
+    "retrieved"
+   ]
+  ],
+  "ppc379_matched": false,
+  "ppc379_in_evidence": false,
+  "accepted": false,
+  "statutes_in_evidence": [
+   "C.M.A.4343_2014 (SC 2015)",
+   "CrPC 1898",
+   "Irfan Ali Sher vs The State (SC 2020)",
+   "PPC 1860",
+   "titled as Mian Haroon Riaz Lucky, etc. vs The Station House Officer, etc. The petitioners inordinately \u2014 Criminal Petition No.907 of 2020 (SC 2020)"
+  ]
+ }
+}

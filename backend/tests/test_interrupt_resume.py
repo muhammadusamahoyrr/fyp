@@ -89,7 +89,7 @@ async def test_clarification_reply_reaches_the_query(monkeypatch):
     """The reply is folded into the query retrieval will actually search."""
     from app.ai.nodes import clarification_node as mod
 
-    monkeypatch.setattr(mod, "get_fast_llm", lambda: _StubLLM("Which province?"))
+    monkeypatch.setattr(mod, "get_fast_llm", lambda **_kw: _StubLLM("Which province?"))
 
     graph, config = await _run_to_interrupt(mod.clarification_node, _base_state())
     values = await _resume(graph, config, "I am in Lahore, Punjab")
@@ -107,7 +107,7 @@ async def test_clarification_reply_resolves_province(monkeypatch):
     """
     from app.ai.nodes import clarification_node as mod
 
-    monkeypatch.setattr(mod, "get_fast_llm", lambda: _StubLLM("Which province?"))
+    monkeypatch.setattr(mod, "get_fast_llm", lambda **_kw: _StubLLM("Which province?"))
 
     graph, config = await _run_to_interrupt(mod.clarification_node, _base_state())
     values = await _resume(graph, config, "Lahore")
@@ -119,7 +119,7 @@ async def test_clarification_reply_resolves_case_type(monkeypatch):
     """An unresolved case_type sends build_retriever to its civil default."""
     from app.ai.nodes import clarification_node as mod
 
-    monkeypatch.setattr(mod, "get_fast_llm", lambda: _StubLLM("What happened?"))
+    monkeypatch.setattr(mod, "get_fast_llm", lambda **_kw: _StubLLM("What happened?"))
 
     graph, config = await _run_to_interrupt(
         mod.clarification_node,
@@ -139,7 +139,7 @@ async def test_clarification_marks_turn_personalised(monkeypatch):
     from app.ai.nodes import clarification_node as mod
     from app.ai.nodes.cache_node import is_personalised
 
-    monkeypatch.setattr(mod, "get_fast_llm", lambda: _StubLLM("Which province?"))
+    monkeypatch.setattr(mod, "get_fast_llm", lambda **_kw: _StubLLM("Which province?"))
 
     graph, config = await _run_to_interrupt(mod.clarification_node, _base_state())
     values = await _resume(graph, config, "Lahore")
@@ -156,7 +156,7 @@ async def test_normalized_query_is_enriched_too(monkeypatch):
     """
     from app.ai.nodes import clarification_node as mod
 
-    monkeypatch.setattr(mod, "get_fast_llm", lambda: _StubLLM("Which province?"))
+    monkeypatch.setattr(mod, "get_fast_llm", lambda **_kw: _StubLLM("Which province?"))
 
     graph, config = await _run_to_interrupt(
         mod.clarification_node,
@@ -173,7 +173,7 @@ async def test_fact_gap_reply_becomes_a_known_fact(monkeypatch):
     """This node exists to close a fact gap; the reply is the fact."""
     from app.ai.nodes import fact_gap_node as mod
 
-    monkeypatch.setattr(mod, "get_llm", lambda: _StubLLM("Was a notice served?"))
+    monkeypatch.setattr(mod, "get_llm", lambda **_kw: _StubLLM("Was a notice served?"))
 
     graph, config = await _run_to_interrupt(
         mod.fact_gap_node,
@@ -192,7 +192,7 @@ async def test_fact_gap_reports_a_nonzero_fact_delta(monkeypatch):
     """
     from app.ai.nodes import fact_gap_node as mod
 
-    monkeypatch.setattr(mod, "get_llm", lambda: _StubLLM("Was a notice served?"))
+    monkeypatch.setattr(mod, "get_llm", lambda **_kw: _StubLLM("Was a notice served?"))
 
     graph, config = await _run_to_interrupt(
         mod.fact_gap_node,
@@ -215,7 +215,7 @@ async def test_empty_or_non_string_resume_leaves_query_intact(monkeypatch, reply
     """A resume carrying nothing is not a reason to append "None" to the query."""
     from app.ai.nodes import clarification_node as mod
 
-    monkeypatch.setattr(mod, "get_fast_llm", lambda: _StubLLM("Which province?"))
+    monkeypatch.setattr(mod, "get_fast_llm", lambda **_kw: _StubLLM("Which province?"))
 
     original = "Can my landlord evict me without notice?"
     graph, config = await _run_to_interrupt(mod.clarification_node, _base_state(query=original))

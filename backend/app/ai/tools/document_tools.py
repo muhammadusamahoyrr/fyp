@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -80,6 +81,38 @@ async def _read_file(path_str: str) -> dict:
         "truncated": truncated,
         **({"note": f"Only the first {_MAX_CHARS} characters are shown."} if truncated else {}),
     }
+
+
+# The tools that read ONE user's private files.
+#
+# Named here, beside the functions themselves, because another decision depends
+# on knowing exactly which tools are user-scoped: the result cache must refuse
+# any turn that could reach them. A second list maintained elsewhere would go
+# stale the first time a tool is added, and it would go stale silently in the
+# direction that caches a private answer.
+USER_SCOPED_TOOL_NAMES = frozenset({"list_my_documents", "read_document"})
+
+
+# Does this question ask about the user's OWN files?
+#
+# Document phrasing shares no vocabulary with the bail/fee/inheritance triggers,
+# so it needs its own gate. It lives here rather than in `tool_node` because two
+# callers need it now, and the second one — the result cache, deciding whether
+# this turn's answer may be shared with other users — runs before `tool_node`
+# does. Importing one node from another to ask would be a cycle waiting to
+# happen; the question belongs beside the tools it is about.
+_DOC_RE = re.compile(
+    r"\b(my|the|this|that|uploaded?|attached?)\s+\w*\s*"
+    r"(document|documents|file|files|fir|contract|agreement|notice|deed|"
+    r"lease|paper|papers|evidence|scan|pdf)\b"
+    r"|\b(read|open|check|review|summari[sz]e|look at)\s+(my|the|it|this|that)\b"
+    r"|\bi\s+(uploaded|attached|sent)\b",
+    re.IGNORECASE,
+)
+
+
+def mentions_document(query: str) -> bool:
+    return bool(_DOC_RE.search(query or ""))
 
 
 def build_document_tools(user_id: str, role: str = "client") -> list[BaseTool]:

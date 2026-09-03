@@ -11,6 +11,7 @@ LOW    → Keyword score check (> 0.30) → route
 
 from __future__ import annotations
 
+from app.ai.provider_health import PURPOSE_INTENT
 import asyncio
 import json
 import logging
@@ -58,7 +59,7 @@ async def _llm_classify(text: str, context: str) -> tuple[str, float]:
     """Single LLM structured call. Returns (intent, confidence)."""
     try:
         from app.ai.llm import get_fast_llm
-        llm  = get_fast_llm()
+        llm  = get_fast_llm(purpose=PURPOSE_INTENT)
         user = f"Context:\n{context}\n\nMessage: {text}" if context else f"Message: {text}"
         res  = await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _LLM_SYSTEM},

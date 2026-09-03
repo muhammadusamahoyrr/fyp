@@ -170,6 +170,12 @@ def build_graph() -> nx.DiGraph:
             meta = meta or {}
             statute = str(meta.get("statute", "")).strip()
             section = str(meta.get("section_number", "")).strip()
+            # Misattributed chunks carry a borrowed section number. Adding them
+            # would create graph nodes for provisions they do not contain, and
+            # hop-2 resolves nodes to chunk ids — so a wrong node becomes wrong
+            # evidence fetched by exact id, which is worse than no edge at all.
+            if meta.get("attribution_status") == "misattributed":
+                continue
             if not statute or not section:
                 continue
             sections[(statute, section)].append(str(meta.get("chunk_id", "")))

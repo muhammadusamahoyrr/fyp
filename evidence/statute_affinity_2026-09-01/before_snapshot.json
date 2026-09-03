@@ -1,0 +1,11 @@
+{
+ "chroma_embeddings": 63920,
+ "reference_only": 104,
+ "misattributed": 215,
+ "graph_nodes": 3514,
+ "graph_edges": 1165,
+ "graph_sha": "05f82a297dfcbac1",
+ "mongo": "unavailable: ConfigurationError",
+ "redis_result_keys": 0,
+ "redis_all_keys": 3
+}

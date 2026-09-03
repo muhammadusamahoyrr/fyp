@@ -1,0 +1,271 @@
+[
+ {
+  "case": "civil / tenancy (punjab)",
+  "question": "What should I prepare?",
+  "vague": true,
+  "widened": true,
+  "supplement": "civil Ali Landlord Tenant evicted rented shop without notice",
+  "before": [
+   "CPC 1908 s.1",
+   "CPC 1908 s.82",
+   "CPC 1908 s.82",
+   "Qanun-e-Shahadat Order 1984 s.53",
+   "CPC 1908 s.12",
+   "CPC 1908 s.14",
+   "CPC 1908 s.2",
+   "CPC 1908 s.2"
+  ],
+  "after": [
+   "Punjab Consumer Protection Act 2005 s.18",
+   "Punjab Rented Premises Act 2009 s.30",
+   "Punjab Rented Premises Act 2009 s.36",
+   "CPC 1908 s.82",
+   "Punjab Protection and Restoration of Tenancy Rights Act 1950 s.5",
+   "Qanun-e-Shahadat Order 1984 s.36",
+   "CPC 1908 s.3",
+   "Punjab Rented Premises Act 2009 s.21"
+  ],
+  "changed": 8,
+  "new": [
+   "Punjab Consumer Protection Act 2005 s.18",
+   "Punjab Rented Premises Act 2009 s.30",
+   "Punjab Rented Premises Act 2009 s.36",
+   "Punjab Protection and Restoration of Tenancy Rights Act 1950 s.5",
+   "Qanun-e-Shahadat Order 1984 s.36",
+   "CPC 1908 s.3",
+   "Punjab Rented Premises Act 2009 s.21"
+  ],
+  "dropped": [
+   "CPC 1908 s.1",
+   "Qanun-e-Shahadat Order 1984 s.53",
+   "CPC 1908 s.12",
+   "CPC 1908 s.14",
+   "CPC 1908 s.2",
+   "CPC 1908 s.2"
+  ]
+ },
+ {
+  "case": "civil / tenancy (punjab)",
+  "question": "What are the next steps?",
+  "vague": true,
+  "widened": true,
+  "supplement": "civil Ali Landlord Tenant evicted rented shop without notice",
+  "before": [
+   "CPC 1908 s.10",
+   "CPC 1908 s.9",
+   "CPC 1908 s.4",
+   "CPC 1908 s.3",
+   "Succession Act 1925 s.322",
+   "CPC 1908 s.8",
+   "CPC 1908 s.7",
+   "Succession Act 1925 s.261"
+  ],
+  "after": [
+   "Punjab Consumer Protection Act 2005 s.18",
+   "CPC 1908 s.10",
+   "CPC 1908 s.12",
+   "CPC 1908 s.7",
+   "CPC 1908 s.8",
+   "Punjab Protection and Restoration of Tenancy Rights Act 1950 s.5",
+   "Punjab Protection and Restoration of Tenancy Rights Act 1950 s.5",
+   "CPC 1908 s.2"
+  ],
+  "changed": 8,
+  "new": [
+   "Punjab Consumer Protection Act 2005 s.18",
+   "CPC 1908 s.12",
+   "Punjab Protection and Restoration of Tenancy Rights Act 1950 s.5",
+   "Punjab Protection and Restoration of Tenancy Rights Act 1950 s.5",
+   "CPC 1908 s.2"
+  ],
+  "dropped": [
+   "CPC 1908 s.9",
+   "CPC 1908 s.4",
+   "CPC 1908 s.3",
+   "Succession Act 1925 s.322",
+   "Succession Act 1925 s.261"
+  ]
+ },
+ {
+  "case": "criminal / cheque dishonour",
+  "question": "What should I prepare?",
+  "vague": true,
+  "widened": true,
+  "supplement": "criminal State Ahmed Accused issued dishonoured cheque payment debt",
+  "before": [
+   "Police Act 1861 s.9",
+   "Police Act 1861 s.1",
+   "Qanun-e-Shahadat Order 1984 s.53",
+   "CrPC 1898 s.164",
+   "CrPC 1898 s.221",
+   "Qanun-e-Shahadat Order 1984 s.",
+   "PPC 1860 s.226",
+   "PPC 1860 s.226"
+  ],
+  "after": [
+   "PPC 1860 s.489",
+   "CrPC 1898 s.345",
+   "PPC 1860 s.422",
+   "PPC 1860 s.489",
+   "Qanun-e-Shahadat Order 1984 s.44",
+   "CrPC 1898 s.196",
+   "PPC 1860 s.403",
+   "PPC 1860 s.464"
+  ],
+  "changed": 8,
+  "new": [
+   "PPC 1860 s.489",
+   "CrPC 1898 s.345",
+   "PPC 1860 s.422",
+   "PPC 1860 s.489",
+   "Qanun-e-Shahadat Order 1984 s.44",
+   "CrPC 1898 s.196",
+   "PPC 1860 s.403",
+   "PPC 1860 s.464"
+  ],
+  "dropped": [
+   "Police Act 1861 s.9",
+   "Police Act 1861 s.1",
+   "Qanun-e-Shahadat Order 1984 s.53",
+   "CrPC 1898 s.164",
+   "CrPC 1898 s.221",
+   "Qanun-e-Shahadat Order 1984 s.",
+   "PPC 1860 s.226",
+   "PPC 1860 s.226"
+  ]
+ },
+ {
+  "case": "criminal / cheque dishonour",
+  "question": "Any advice?",
+  "vague": true,
+  "widened": true,
+  "supplement": "criminal State Ahmed Accused issued dishonoured cheque payment debt",
+  "before": [
+   "Police Order 2002 s.163",
+   "Police Act 1861 s.163",
+   "Police Act 1861 s.164",
+   "Police Act 1861 s.1",
+   "CrPC 1898 s.221",
+   "Qanun-e-Shahadat Order 1984 s.9",
+   "CrPC 1898 s.221",
+   "Qanun-e-Shahadat Order 1984 s.136"
+  ],
+  "after": [
+   "PPC 1860 s.489",
+   "Police Act 1861 s.163",
+   "CrPC 1898 s.345",
+   "PPC 1860 s.422",
+   "PPC 1860 s.489",
+   "Police Order 2002 s.163",
+   "CrPC 1898 s.196",
+   "Police Act 1861 s.164"
+  ],
+  "changed": 7,
+  "new": [
+   "PPC 1860 s.489",
+   "CrPC 1898 s.345",
+   "PPC 1860 s.422",
+   "PPC 1860 s.489",
+   "CrPC 1898 s.196"
+  ],
+  "dropped": [
+   "Police Act 1861 s.1",
+   "CrPC 1898 s.221",
+   "Qanun-e-Shahadat Order 1984 s.9",
+   "CrPC 1898 s.221",
+   "Qanun-e-Shahadat Order 1984 s.136"
+  ]
+ },
+ {
+  "case": "family / custody",
+  "question": "What should I prepare?",
+  "vague": true,
+  "widened": true,
+  "supplement": "family Fatima Bilal Mother seeking custody two minor children after divorce",
+  "before": [
+   "West Pakistan Family Courts Act 1964 s.3",
+   "Parsi Marriage and Divorce Act 1936 s.35",
+   "Christian Marriage Act 1872 s.17",
+   "Christian Marriage Act 1872 s.77",
+   "Parsi Marriage and Divorce Act 1936 s.43",
+   "Punjab Protection of Women against Violence Act 2016 s.14",
+   "Claims for Maintenance (Recovery Abroad) Ordinance 1959 s.2",
+   "Special Marriage Act 1872 s.4"
+  ],
+  "after": [
+   "Divorce Act 1869 s.42",
+   "Parsi Marriage and Divorce Act 1936 s.32",
+   "Divorce Act 1869 s.41",
+   "Guardians and Wards Act 1890 s.21",
+   "Divorce Act 1869 s.42",
+   "Parsi Marriage and Divorce Act 1936 s.49",
+   "Punjab Protection of Women against Violence Act 2016 s.14",
+   "Divorce Act 1869 s.42"
+  ],
+  "changed": 8,
+  "new": [
+   "Divorce Act 1869 s.42",
+   "Parsi Marriage and Divorce Act 1936 s.32",
+   "Divorce Act 1869 s.41",
+   "Guardians and Wards Act 1890 s.21",
+   "Divorce Act 1869 s.42",
+   "Parsi Marriage and Divorce Act 1936 s.49",
+   "Divorce Act 1869 s.42"
+  ],
+  "dropped": [
+   "West Pakistan Family Courts Act 1964 s.3",
+   "Parsi Marriage and Divorce Act 1936 s.35",
+   "Christian Marriage Act 1872 s.17",
+   "Christian Marriage Act 1872 s.77",
+   "Parsi Marriage and Divorce Act 1936 s.43",
+   "Claims for Maintenance (Recovery Abroad) Ordinance 1959 s.2",
+   "Special Marriage Act 1872 s.4"
+  ]
+ },
+ {
+  "case": "family / custody",
+  "question": "What do I do next?",
+  "vague": true,
+  "widened": true,
+  "supplement": "family Fatima Bilal Mother seeking custody two minor children after divorce",
+  "before": [
+   "Family Courts Act 1964 s.3",
+   "Christian Marriage Act 1872 s.51",
+   "Special Marriage Act 1872 s.4",
+   "Special Marriage Act 1872 s.5",
+   "Special Marriage Act 1872 s.4",
+   "Divorce Act 1869 s.4",
+   "Divorce Act 1869 s.54",
+   "Parsi Marriage and Divorce Act 1936 s.13"
+  ],
+  "after": [
+   "Christian Marriage Act 1872 s.51",
+   "Christian Marriage Act 1872 s.72",
+   "Divorce Act 1869 s.42",
+   "Christian Marriage Act 1872 s.71",
+   "Parsi Marriage and Divorce Act 1936 s.32",
+   "Divorce Act 1869 s.41",
+   "Guardians and Wards Act 1890 s.21",
+   "Guardians and Wards Act 1890 s.45"
+  ],
+  "changed": 8,
+  "new": [
+   "Christian Marriage Act 1872 s.72",
+   "Divorce Act 1869 s.42",
+   "Christian Marriage Act 1872 s.71",
+   "Parsi Marriage and Divorce Act 1936 s.32",
+   "Divorce Act 1869 s.41",
+   "Guardians and Wards Act 1890 s.21",
+   "Guardians and Wards Act 1890 s.45"
+  ],
+  "dropped": [
+   "Family Courts Act 1964 s.3",
+   "Special Marriage Act 1872 s.4",
+   "Special Marriage Act 1872 s.5",
+   "Special Marriage Act 1872 s.4",
+   "Divorce Act 1869 s.4",
+   "Divorce Act 1869 s.54",
+   "Parsi Marriage and Divorce Act 1936 s.13"
+  ]
+ }
+]

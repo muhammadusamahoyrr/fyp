@@ -38,7 +38,12 @@ logger = logging.getLogger(__name__)
 
 # ── Version constants (bump on model/strategy change) ─────────────────────────
 EMBEDDING_MODEL_VERSION   = "intfloat/multilingual-e5-base/v1"
-CHUNKING_STRATEGY_VERSION = "v1"
+# v2 (2026-09-01): 215 CrPC/Police chunks tagged text_kind + attribution_status +
+# retrieval_scope; reference-only material is now excluded from statute retrieval.
+# Cached answers from v1 were produced over a different candidate set, and the
+# full-result cache records collection_names=None so collection-version
+# invalidation cannot reach them — this bump is what actually retires them.
+CHUNKING_STRATEGY_VERSION = "v2"
 
 # Bump whenever a change would make the system answer a question DIFFERENTLY:
 # the answerability rules, the harm ratio, the confidence signals, or the
@@ -53,7 +58,35 @@ CHUNKING_STRATEGY_VERSION = "v1"
 #
 # v2: expected-loss arbitration over a harm matrix, rarity-weighted lexical
 #     signal, real embedding similarity, query-side answerability gate.
-DECISION_POLICY_VERSION = "v2"
+# v3 (2026-09-01): named-statute affinity. When a query names exactly one
+# statute, that statute's chunks are ordered ahead of the rest before the
+# eight-chunk grading cut, so cached answers from v2 were produced over a
+# different evidence set for the same question. Chunking is untouched — no
+# corpus or metadata changed — so CHUNKING_STRATEGY_VERSION deliberately stays.
+# v4 (2026-09-02): unknown jurisdiction no longer narrows retrieval to federal.
+# The SAME cache key — query + case_type + province — now has different
+# retrieval semantics when province is unspecified: a v3 entry was produced from
+# federal-only evidence, a v4 entry from all jurisdictions. Serving the old
+# answer under the new policy would hand back federal-only law for a question
+# the system would now answer from provincial statute. Chunking is untouched, so
+# CHUNKING_STRATEGY_VERSION deliberately stays.
+# v5 (2026-09-02): conversation history is personalisation. `generation_node`
+# injects the recent exchange into every prompt, while the cache key holds only
+# query + case type + province — so an answer shaped by one conversation was
+# stored as THE answer to that question and served into other users'
+# conversations. Every v4 entry was written under that policy and some were
+# produced from a history the key cannot see, so they are not merely stale:
+# they may carry another conversation's context. Rejected wholesale.
+# v6 (2026-09-02): cache identity and eligibility both widened. A first-turn
+# "read my FIR" was cacheable — no history, no clarification, no case id — so
+# one user's document-derived answer was stored under those words and served to
+# the next person who typed them. Web-search and Urdu turns crossed over the
+# same way. v5 entries were written before any of those rules existed and
+# cannot be told apart from safe ones, so they are rejected wholesale rather
+# than aged out. The key gained a language component, which changes every hash
+# anyway; the version bump is what makes the invalidation deliberate rather
+# than incidental.
+DECISION_POLICY_VERSION = "v6"
 
 # TTL values (safety net — version mismatch invalidates before TTL in most cases)
 _RESULT_TTL = settings.cache_result_ttl   # default 10 min
@@ -72,8 +105,17 @@ _collection_ingestion_versions: dict[str, str] = {}   # col_name → sha256 hash
 
 # ── Key construction ──────────────────────────────────────────────────────────
 
-def _make_key(query: str, case_type: str, province: str) -> str:
-    raw = f"{query.strip().lower()}|{case_type}:{province}"
+def _make_key(query: str, case_type: str, province: str,
+              language: str = "en") -> str:
+    """The identity of a cached answer.
+
+    `language` is part of it because `generation_node` selects a different
+    system prompt for Urdu: the same normalised query produced an English
+    answer for one user and an Urdu one for the next, and whichever ran first
+    won. It is a bucket ("en"/"ur"), not the raw value — see
+    cache_node.effective_language.
+    """
+    raw = f"{query.strip().lower()}|{case_type}:{province}|{language}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -172,15 +214,20 @@ async def get_result(
     case_type:        str,
     province:         str,
     followup_intent:  Optional[str] = None,
+    language:         str = "en",
 ) -> Optional[dict]:
     """
     Return cached full-pipeline result or None on miss / invalid / skip.
     Skips for follow-up and clarification turns by rule.
+
+    Eligibility beyond that — history, private documents, web search — is
+    decided by cache_node.cache_block_reason, which BOTH this caller and the
+    finalizer's write-back consult. Do not add a second rule here.
     """
     if followup_intent in ("format", "deepen", "affirm"):
         return None
 
-    key   = _make_key(normalized_query, case_type, province)
+    key   = _make_key(normalized_query, case_type, province, language)
     entry = await _load(_RESULT_PREFIX, _result_store, key)
 
     if not entry:
@@ -199,8 +246,9 @@ async def set_result(
     province:          str,
     payload:           dict,
     collection_names:  Optional[list[str]] = None,
+    language:          str = "en",
 ) -> None:
-    key = _make_key(normalized_query, case_type, province)
+    key = _make_key(normalized_query, case_type, province, language)
     entry = _build_entry(payload, collection_names, await _current_col_versions())
     await _store(_RESULT_PREFIX, _result_store, key, entry, _RESULT_TTL)
 

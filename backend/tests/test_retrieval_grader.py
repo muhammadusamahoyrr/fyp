@@ -34,7 +34,7 @@ def _chunks(n):
 
 
 def _run(monkeypatch, payload, n=4, grades_seen=None):
-    monkeypatch.setattr(mod, "get_fast_llm", lambda: _FakeLLM(payload))
+    monkeypatch.setattr(mod, "get_fast_llm", lambda **_kw: _FakeLLM(payload))
     # Keep the test off Chroma and off the threshold/drift writers.
     monkeypatch.setattr(mod, "similarity_scores", lambda q, c, ct: [0.5] * len(c))
 

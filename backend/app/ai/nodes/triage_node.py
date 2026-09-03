@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_structured_llm
+from app.ai.provider_health import PURPOSE_TRIAGE
 from app.ai.nodes._history import format_history
 
 logger = logging.getLogger(__name__)
@@ -186,7 +187,8 @@ def _last_ai_content(state: AgentState) -> str | None:
 async def _detect_intent(query: str, last_ai: str) -> FollowupIntent:
     """LLM intent classification. Falls back to intent='new' on any error."""
     try:
-        llm = get_structured_llm(FollowupIntent, fast=_prefer_fast())
+        llm = get_structured_llm(FollowupIntent, fast=_prefer_fast(),
+                                 purpose=PURPOSE_TRIAGE)
         return await asyncio.to_thread(llm.invoke, [
             {"role": "system", "content": _INTENT_SYSTEM},
             {"role": "user",   "content": (
@@ -328,7 +330,8 @@ async def triage_node(state: AgentState) -> dict:
             return base
 
     # ── Full LLM triage ───────────────────────────────────────────────────────
-    llm = get_structured_llm(TriageOutput, fast=_prefer_fast())
+    llm = get_structured_llm(TriageOutput, fast=_prefer_fast(),
+                             purpose=PURPOSE_TRIAGE)
 
     words      = query.split()
     safe_query = (
@@ -368,10 +371,23 @@ async def triage_node(state: AgentState) -> dict:
         if result.case_type != "unknown"
         else _resolved_case_type(state)
     )
-    province = (
-        result.province
-        if result.province != "unknown"
-        else (existing_province or "unknown")
+    # Jurisdiction resolution, in precedence order.
+    #
+    # An explicit user choice WINS over the model's inference. It did not
+    # before: whatever the LLM returned for `province` overrode the province the
+    # user had selected, so a Punjab client whose question the model read as
+    # Sindh was answered from the wrong provincial code with no trace of the
+    # substitution. A stated jurisdiction is a fact, not a hypothesis.
+    #
+    # The model's value is also validated rather than trusted: it has been
+    # observed returning "National" for this field, which matches no province in
+    # the corpus and would silently behave as unknown.
+    from app.ai import jurisdiction
+
+    province, jurisdiction_basis = jurisdiction.resolve(
+        requested=existing_province,
+        requested_basis=state.get("jurisdiction_basis"),
+        inferred=result.province,
     )
 
     language = _reconcile_language(query, result.language)
@@ -419,6 +435,8 @@ async def triage_node(state: AgentState) -> dict:
         "complexity":           result.complexity,
         "urgency":              result.urgency,
         "province":             province,
+        "province_inferred":    jurisdiction_basis == "inferred_from_query",
+        "jurisdiction_basis":   jurisdiction_basis,
         "known_facts":          result.known_facts,
         "convergence_status":   "pending",
         "followup_intent":      None,

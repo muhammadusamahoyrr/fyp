@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 from app.ai.corpus_index import canonical_section, is_lettered
 
@@ -131,6 +131,7 @@ _ALIASES = {
     "QANUN-E-SHAHADAT ORDER":       "QSO",
     "MUSLIM FAMILY LAWS ORDINANCE": "MFLO",
     "PREVENTION OF ELECTRONIC CRIMES ACT": "PECA",
+    "CONSTITUTION OF PAKISTAN":     "CONSTITUTION",
 }
 
 # Display names for the short families, so a chip reads as a statute rather than
@@ -142,7 +143,29 @@ _DISPLAY = {
     "QSO":  "Qanun-e-Shahadat Order 1984",
     "PECA": "PECA 2016",
     "MFLO": "Muslim Family Laws Ordinance 1961",
+    "CONSTITUTION": "Constitution of Pakistan 1973",
 }
+
+
+def statute_alias_map() -> dict[str, str]:
+    """{FULL NAME (upper) -> family key}. The one alias registry in the app.
+
+    Exposed so named-statute detection (pipelines/statute_affinity.py) reads the
+    SAME data that citation matching does. A second table would drift: retrieval
+    would start preferring a statute whose name citation matching no longer
+    recognises, and the mismatch would surface as unresolved citations rather
+    than as an obvious bug.
+    """
+    return dict(_ALIASES)
+
+
+def statute_display_map() -> dict[str, str]:
+    """{family key -> corpus display name}, e.g. "PPC" -> "PPC 1860".
+
+    These values are exactly the `statute` metadata strings in Chroma, which is
+    what makes them usable as a retrieval predicate without another mapping.
+    """
+    return dict(_DISPLAY)
 
 _TRAILING_YEAR = re.compile(r"[\s,]*\b(1[6-9]\d{2}|20\d{2})\s*$")
 _WS = re.compile(r"\s+")
@@ -534,6 +557,81 @@ def parse_claim_support(raw: str, claims: list[dict]) -> list[dict]:
         if verdict:
             claim["support"] = verdict
     return claims
+
+
+def grounding_veto(claims: list[dict]) -> Optional[str]:
+    """Does the per-claim assessment contradict a verdict of "grounded"?
+
+    Returns the reason, or None when the verdict may stand.
+
+    THE INCONSISTENCY THIS CLOSES
+    -----------------------------
+    The judge returns two things: a single `is_grounded` boolean and a per-claim
+    support string. The node used the boolean and discarded the claims — so an
+    answer could be published as grounded while its own assessment said the
+    cited section does not support what the sentence claims. Both halves came
+    from the same model in the same call, and the one the user was shown was the
+    one nobody checked against the other.
+
+    Deterministic on purpose. This is not a second opinion about the law; it is
+    an internal-consistency check on a verdict the model already gave, and it
+    must return the same answer every time for the same assessment.
+
+    TWO RULES, AND WHY NOT MORE
+    ---------------------------
+      1. Any MATCHED claim marked `unsupported`. The judge resolved the claim to
+         a source, read the source, and said it does not carry the claim. There
+         is no reading of "grounded" that survives that.
+
+      2. Matched claims exist and NOT ONE is `supported`. A verdict of grounded
+         that cannot name a single supported claim is not a judgement, it is a
+         default — this is what an all-`partial` or all-`unassessed` assessment
+         looks like, including the case where the verdict string failed to parse.
+
+      3. The answer made citation-bearing claims and NOT ONE citation resolved.
+         The answer named sources; none of them correspond to anything in the
+         evidence the model was given. There is nothing to check the answer
+         against, and "grounded" asserts precisely that a check succeeded. This
+         is the fabricated-citation failure — an answer that reads as
+         authoritative, cites chapter and verse, and cites nothing real.
+
+    `partial` alone is deliberately NOT a veto. A sentence the cited section
+    carries in part is ordinary legal writing, and vetoing it would mark
+    accurate answers ungrounded — which trains users to ignore the warning, and
+    a caution nobody reads protects nobody.
+
+    Only `matched` claims are considered throughout: a claim whose citation
+    never resolved was never checked against anything, and absence of evidence
+    is not evidence of failure.
+    """
+    all_claims = list(claims or [])
+    matched = [c for c in all_claims if c.get("citation_status") == "matched"]
+
+    if not matched:
+        # Rule 3. The distinction is between an answer that cited NOTHING and
+        # one that cited only things that do not exist.
+        #
+        # No claims at all means the answer made no citation-bearing assertions
+        # — there is nothing to verify because nothing was claimed on a source's
+        # authority, and the judge's own verdict stands. But claims that all
+        # failed to resolve means the answer DID cite, and every citation was
+        # unverifiable. Calling that grounded asserts a check that could not
+        # have happened.
+        if all_claims:
+            return (f"none of the {len(all_claims)} cited claims resolved to a "
+                    f"source that could be checked")
+        return None
+
+    unsupported = [c for c in matched if c.get("support") == "unsupported"]
+    if unsupported:
+        return (f"{len(unsupported)} of {len(matched)} checked claims are not "
+                f"supported by the sections they cite")
+
+    if not any(c.get("support") == "supported" for c in matched):
+        return ("no checked claim was positively supported by the section it "
+                "cites")
+
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════

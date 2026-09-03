@@ -31,6 +31,38 @@ def get_chat_sessions_col() -> AsyncIOMotorCollection:
     return get_database()["chat_sessions"]
 
 
+def get_research_sessions_col() -> AsyncIOMotorCollection:
+    """Lawyer research conversations.
+
+    Separate from `chat_sessions` because the authorization rule is different:
+    a research conversation is owned AND may be bound to a case, which is a
+    second check against a different collection. See services/conversation_service.
+    """
+    return get_database()["research_sessions"]
+
+
+def get_conversation_messages_col() -> AsyncIOMotorCollection:
+    """One document per chat message, for both surfaces.
+
+    Messages used to live in an array inside the conversation. That caps a
+    conversation at whatever fits in a 16MB document, makes pagination
+    impossible, and means every read of a conversation ships its whole history.
+    See services/conversation_service.
+    """
+    return get_database()["ai_conversation_messages"]
+
+
+def get_conversation_turns_col() -> AsyncIOMotorCollection:
+    """One document per AI turn, claimed BEFORE the graph runs.
+
+    This is what makes a retry safe: the unique index on
+    (conversation_id, client_message_id) is the thing that decides whether a
+    second identical request runs a second graph turn or replays the first
+    one's answer.
+    """
+    return get_database()["ai_conversation_turns"]
+
+
 def get_refresh_blocklist_col() -> AsyncIOMotorCollection:
     return get_database()["refresh_token_blocklist"]
 

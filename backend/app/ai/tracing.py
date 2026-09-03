@@ -123,7 +123,16 @@ class TraceHandler(AsyncCallbackHandler):
             )
 
     async def on_llm_error(self, error: BaseException, *, run_id: UUID, **kw: Any) -> None:
-        span = self._close(run_id, "error", error=_truncate(error, 200))
+        # A CLASSIFICATION, not the provider's error body. The body was being
+        # truncated to 200 characters and logged verbatim, and Groq's 429 text
+        # carries the organization id well inside that window
+        # ("Rate limit reached for model `X` in organization `org_01kq...`");
+        # OpenRouter's 402 carries a user id. Neither belongs in a log line, and
+        # neither adds anything to "which provider failed over, and why".
+        from app.ai.provider_health import classify
+        kind, status = classify(error)
+        summary = f"{kind} ({status})" if status else kind
+        span = self._close(run_id, "error", error=summary)
         if span:
             # This is the line that tells you a provider failed over.
             logger.warning(

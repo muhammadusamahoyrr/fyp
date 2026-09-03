@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_structured_llm
+from app.ai.provider_health import PURPOSE_INTAKE_GROUNDING
 
 _SYSTEM = """\
 You are a legal answer validator for Pakistani intake case analysis.
@@ -77,7 +78,8 @@ def intake_hallucination_node(state: AgentState) -> dict:
     )
 
     try:
-        llm = get_structured_llm(IntakeGroundingOutput)
+        llm = get_structured_llm(IntakeGroundingOutput,
+                                 purpose=PURPOSE_INTAKE_GROUNDING)
         result: IntakeGroundingOutput = llm.invoke([
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": (
