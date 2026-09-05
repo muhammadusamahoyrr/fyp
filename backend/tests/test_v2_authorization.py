@@ -288,3 +288,47 @@ async def test_the_kyc_gate_is_still_in_force(enabled, monkeypatch):
             expected_pdf_sha256=rev["pdf_sha256"],
             lawyer_id=ENGAGED_LAWYER, idempotency_key=key())
     assert "kyc" in str(exc.value).lower()
+
+
+async def test_a_dangling_case_reference_fails_closed(enabled, monkeypatch):
+    """A document naming a case that no longer exists must not open up.
+
+    `(case or {}).get("lawyer_id")` yielded "" for a missing case, which read
+    as "no lawyer engaged yet" — the branch that deliberately allows a free
+    choice. So deleting a case, or a replication lag on the read, silently
+    converted a case-bound document into one any verified lawyer could receive.
+
+    A dangling reference is not an absence of constraint. It is a document
+    whose constraint cannot be evaluated, and that is a refusal.
+    """
+    doc_id, rev = await _submitted_document(monkeypatch)
+    await get_cases_col().delete_one({"_id": OWNER_CASE})
+
+    with pytest.raises(Exception) as exc:
+        await tx.submit(
+            document_id=doc_id, actor_id=OWNER["_id"],
+            expected_version=rev["version"],
+            expected_pdf_sha256=rev["pdf_sha256"],
+            lawyer_id=OTHER_LAWYER, idempotency_key=key())
+    assert "case" in str(exc.value).lower()
+
+    d = await get_documents_col().find_one({"_id": doc_id})
+    assert d["review_status"] != "submitted"
+
+
+async def test_a_dangling_case_blocks_even_the_engaged_lawyer(
+        enabled, monkeypatch):
+    """The constraint cannot be evaluated, so nobody passes it.
+
+    Allowing the previously-engaged lawyer through would mean trusting a
+    `submitted_to` derived from a case nobody can read.
+    """
+    doc_id, rev = await _submitted_document(monkeypatch)
+    await get_cases_col().delete_one({"_id": OWNER_CASE})
+
+    with pytest.raises(Exception):
+        await tx.submit(
+            document_id=doc_id, actor_id=OWNER["_id"],
+            expected_version=rev["version"],
+            expected_pdf_sha256=rev["pdf_sha256"],
+            lawyer_id=ENGAGED_LAWYER, idempotency_key=key())

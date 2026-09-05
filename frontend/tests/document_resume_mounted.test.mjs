@@ -83,7 +83,7 @@ function deferredGetter() {
 }
 
 /* Mount a probe that just reports what the hook hands it. */
-function mountProbe({ caseId, hasDocument = false, getDocument, storage }) {
+function mountProbe({ caseId, loadedCaseId = null, getDocument, storage }) {
     const restores = [];
     const container = dom.window.document.createElement("div");
     dom.window.document.body.appendChild(container);
@@ -92,7 +92,7 @@ function mountProbe({ caseId, hasDocument = false, getDocument, storage }) {
     function Probe(props) {
         useDocumentResume({
             caseId: props.caseId,
-            hasDocument: props.hasDocument,
+            loadedCaseId: props.loadedCaseId,
             getDocument,
             storage,
             onRestore: (state, forCase) => restores.push({ state, forCase }),
@@ -109,7 +109,7 @@ function mountProbe({ caseId, hasDocument = false, getDocument, storage }) {
         render,
         rerender: props => render(props),
         unmount: () => act(() => root.unmount()),
-        initial: () => render({ caseId, hasDocument }),
+        initial: () => render({ caseId, loadedCaseId }),
     };
 }
 
@@ -152,10 +152,10 @@ test("nothing happens until the case id arrives", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: null, getDocument: g.getDocument, storage });
-    probe.render({ caseId: null, hasDocument: false });
+    probe.render({ caseId: null, loadedCaseId: null });
     assert.deepEqual(g.calls, [], "asked before the case was known");
 
-    probe.rerender({ caseId: "case-1", hasDocument: false });
+    probe.rerender({ caseId: "case-1", loadedCaseId: null });
     assert.deepEqual(g.calls, ["doc-abc"], "did not restore once the case arrived");
 
     await act(async () => { g.resolve("doc-abc", { data: documentFor("doc-abc") }); });
@@ -169,7 +169,7 @@ test("a document already open is not overwritten", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: true });
+    probe.render({ caseId: "case-1", loadedCaseId: "case-1" });
 
     assert.deepEqual(g.calls, [], "clobbered a document already on screen");
     probe.unmount();
@@ -180,8 +180,11 @@ test("a case with nothing remembered asks for nothing", async () => {
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument,
                                storage: fakeStorage() });
     probe.initial();
-    assert.deepEqual(g.calls, []);
-    assert.deepEqual(probe.restores, []);
+    assert.deepEqual(g.calls, [], 'asked the server about a draft that does not exist');
+    // Reported as null rather than silence: the page needs to know this case
+    // has nothing, or the previous case's document stays on screen under it.
+    assert.equal(probe.restores.at(-1).state, null);
+    assert.equal(probe.restores.at(-1).forCase, 'case-1');
     probe.unmount();
 });
 
@@ -195,10 +198,10 @@ test("switching cases restores that case's own draft", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: false });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
     await act(async () => { g.resolve("doc-one", { data: documentFor("doc-one") }); });
 
-    probe.rerender({ caseId: "case-2", hasDocument: false });
+    probe.rerender({ caseId: "case-2", loadedCaseId: null });
     await act(async () => { g.resolve("doc-two", { data: documentFor("doc-two") }); });
 
     assert.deepEqual(g.calls, ["doc-one", "doc-two"]);
@@ -215,9 +218,9 @@ test("one case is asked about only once", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: false });
-    probe.rerender({ caseId: "case-1", hasDocument: false });
-    probe.rerender({ caseId: "case-1", hasDocument: false });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
+    probe.rerender({ caseId: "case-1", loadedCaseId: null });
+    probe.rerender({ caseId: "case-1", loadedCaseId: null });
 
     assert.deepEqual(g.calls, ["doc-abc"], "re-requested on every render");
     probe.unmount();
@@ -235,8 +238,8 @@ test("a late response from a case the user has left is discarded", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: false });
-    probe.rerender({ caseId: "case-2", hasDocument: false });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
+    probe.rerender({ caseId: "case-2", loadedCaseId: null });
 
     // case-2 answers first; case-1's response arrives afterwards, too late.
     await act(async () => { g.resolve("doc-two", { data: documentFor("doc-two") }); });
@@ -254,7 +257,7 @@ test("a response arriving after unmount is discarded", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: false });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
     probe.unmount();
 
     await act(async () => { g.resolve("doc-abc", { data: documentFor("doc-abc") }); });
@@ -269,7 +272,7 @@ test("a document that no longer exists is forgotten", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: false });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
     await act(async () => {
         g.resolve("doc-gone", { error: { code: "not_found" } });
     });
@@ -288,7 +291,7 @@ test("a document under review restores its status", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: false });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
     await act(async () => {
         g.resolve("doc-abc", {
             data: documentFor("doc-abc", { review_status: "submitted" }),
@@ -306,7 +309,7 @@ test("a recovery state restores its explanation", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: false });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
     await act(async () => {
         g.resolve("doc-abc", {
             data: documentFor("doc-abc", {
@@ -339,7 +342,7 @@ test("a network failure keeps the saved pointer for the next attempt", async () 
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: false });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
     await act(async () => {
         g.resolve("doc-abc", { error: { code: "network_error", message: "Failed to fetch" } });
     });
@@ -355,7 +358,7 @@ test("a server error keeps the pointer too", async () => {
     const g = deferredGetter();
 
     const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-    probe.render({ caseId: "case-1", hasDocument: false });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
     await act(async () => {
         g.resolve("doc-abc", { error: { status: 500, message: "Server error" } });
     });
@@ -374,7 +377,7 @@ test("a document confirmed gone is forgotten", async () => {
         const g = deferredGetter();
 
         const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
-        probe.render({ caseId: "case-1", hasDocument: false });
+        probe.render({ caseId: "case-1", loadedCaseId: null });
         await act(async () => { g.resolve("doc-abc", { error }); });
 
         assert.equal(storage.getItem("attorneyai.draft.case-1"), null,
@@ -390,13 +393,13 @@ test("a transient failure can be retried on a later mount", async () => {
 
     const first = deferredGetter();
     const p1 = mountProbe({ caseId: "case-1", getDocument: first.getDocument, storage });
-    p1.render({ caseId: "case-1", hasDocument: false });
+    p1.render({ caseId: "case-1", loadedCaseId: null });
     await act(async () => { first.resolve("doc-abc", { error: { status: 503 } }); });
     p1.unmount();
 
     const second = deferredGetter();
     const p2 = mountProbe({ caseId: "case-1", getDocument: second.getDocument, storage });
-    p2.render({ caseId: "case-1", hasDocument: false });
+    p2.render({ caseId: "case-1", loadedCaseId: null });
     await act(async () => {
         second.resolve("doc-abc", { data: documentFor("doc-abc") });
     });
@@ -404,4 +407,66 @@ test("a transient failure can be retried on a later mount", async () => {
     assert.equal(p2.restores.at(-1).state.docId, "doc-abc",
                  "the draft was not recoverable after a transient failure");
     p2.unmount();
+});
+
+/* ── a loaded document must not block another case's draft (issue 2) ──────── */
+
+test("switching case restores that case's draft even with one already open", async () => {
+    // THE DEFECT MY EARLIER TEST MISSED. The hook was driven with
+    // hasDocument=false throughout, so "switching cases" never reproduced the
+    // real parent state: in the app a document IS loaded by then, and
+    // `if (!caseId || hasDocument) return` refused to run for the new case.
+    // The first case's draft stayed on screen and the second case's own draft
+    // was unreachable.
+    const storage = fakeStorage();
+    rememberDraft("case-1", "doc-one", storage);
+    rememberDraft("case-2", "doc-two", storage);
+    const g = deferredGetter();
+
+    const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
+    await act(async () => { g.resolve("doc-one", { data: documentFor("doc-one") }); });
+
+    // A document is now open, and it belongs to case-1 — the real state.
+    probe.rerender({ caseId: "case-2", loadedCaseId: "case-1" });
+    assert.deepEqual(g.calls, ["doc-one", "doc-two"],
+                     "the new case's draft was never requested");
+
+    await act(async () => { g.resolve("doc-two", { data: documentFor("doc-two") }); });
+    assert.equal(probe.restores.at(-1).state.docId, "doc-two");
+    probe.unmount();
+});
+
+test("staying on the same case with its document open asks nothing", async () => {
+    // The other half: once this case's document is on screen, re-rendering
+    // must not refetch it.
+    const storage = fakeStorage();
+    rememberDraft("case-1", "doc-one", storage);
+    const g = deferredGetter();
+
+    const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
+    probe.render({ caseId: "case-1", loadedCaseId: "case-1" });
+    probe.rerender({ caseId: "case-1", loadedCaseId: "case-1" });
+
+    assert.deepEqual(g.calls, [], "refetched a document already on screen");
+    probe.unmount();
+});
+
+test("switching to a case with no draft reports it so the page can clear", async () => {
+    // Otherwise case A's document stays on screen while case B is selected —
+    // the same wrong-matter confusion, arrived at from the other direction.
+    const storage = fakeStorage();
+    rememberDraft("case-1", "doc-one", storage);
+    const g = deferredGetter();
+
+    const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
+    probe.render({ caseId: "case-1", loadedCaseId: null });
+    await act(async () => { g.resolve("doc-one", { data: documentFor("doc-one") }); });
+
+    probe.rerender({ caseId: "case-2", loadedCaseId: "case-1" });
+
+    const last = probe.restores.at(-1);
+    assert.equal(last.state, null, "no signal that case-2 has nothing to show");
+    assert.equal(last.forCase, "case-2");
+    probe.unmount();
 });

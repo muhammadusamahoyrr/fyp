@@ -298,7 +298,24 @@ async def submit(
     # picking.
     if doc.get("case_id"):
         case = await case_repo.find_by_id(doc["case_id"])
-        engaged = str((case or {}).get("lawyer_id") or "")
+        # A DANGLING REFERENCE IS NOT AN ABSENCE OF CONSTRAINT.
+        #
+        # `(case or {}).get("lawyer_id")` yielded "" for a missing case, which
+        # read as "nobody engaged yet" — the branch that deliberately allows a
+        # free choice. So a deleted case, or a read that simply did not find it,
+        # silently converted a case-bound document into one any verified lawyer
+        # could receive. The check failed open in the one situation where least
+        # is known.
+        #
+        # This is a document whose constraint cannot be evaluated, so nobody
+        # passes it, including the previously engaged lawyer: trusting them
+        # would mean trusting an engagement derived from a case nobody can read.
+        if not case:
+            raise ConflictError(
+                "This document is attached to a case that no longer exists. "
+                "It cannot be sent for review until that is resolved.")
+
+        engaged = str(case.get("lawyer_id") or "")
         if engaged and engaged != str(lawyer_id):
             raise ForbiddenError(
                 "This case is engaged with another lawyer. Documents on a case "

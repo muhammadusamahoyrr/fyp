@@ -1126,7 +1126,12 @@ async def _inspect_all_migrated(*, sample: int, batch: int) -> dict:
             "error": f"{type(exc).__name__}: {exc}",
             "examined": examined,
             "total": None,
-            "unusable": len(problems),
+            # The FULL count, not the length of the capped detail list. Capping
+            # the detail during the scan was right; reusing that length as the
+            # count afterwards understated the damage — a scan that found forty
+            # broken documents and then died would have reported twenty, in the
+            # one report whose job is to describe how bad it is.
+            "unusable": unusable,
             "problems": problems[:min(sample, READINESS_PROBLEM_CAP)],
             "problems_listed": len(problems[:min(sample, READINESS_PROBLEM_CAP)]),
             "batches": batches,

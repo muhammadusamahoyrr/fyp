@@ -67,14 +67,14 @@ export function resolveCaseId(activeCaseId, cases) {
  * Restore the remembered document for `caseId`, once per case.
  *
  * @param {object}   opts
- * @param {string?}  opts.caseId       resolved case; null until cases load
- * @param {boolean}  opts.hasDocument  a document is already open in this session
- * @param {Function} opts.getDocument  async (docId) => ({data, error})
- * @param {Function} opts.onRestore    (restoredState | null, caseId) => void
- * @param {object=}  opts.storage      injected for tests
+ * @param {string?}  opts.caseId        resolved case; null until cases load
+ * @param {string?}  opts.loadedCaseId  the case the OPEN document belongs to
+ * @param {Function} opts.getDocument   async (docId) => ({data, error})
+ * @param {Function} opts.onRestore     (restoredState | null, caseId) => void
+ * @param {object=}  opts.storage       injected for tests
  */
 export function useDocumentResume({
-    caseId, hasDocument, getDocument, onRestore, storage,
+    caseId, loadedCaseId, getDocument, onRestore, storage,
 }) {
     // PER CASE, not once ever. A single boolean would let the first attempt
     // disable every later one, so switching matters would show the previous
@@ -86,7 +86,15 @@ export function useDocumentResume({
     const token = useRef(0);
 
     useEffect(() => {
-        if (!caseId || hasDocument) return;
+        if (!caseId) return;
+        // WHICH case is loaded, not WHETHER one is.
+        //
+        // This was `hasDocument`, a boolean, so the moment any document was on
+        // screen the hook refused to run for ANY case — including one the user
+        // had just switched to. The first case's draft followed them around and
+        // the second case's own draft was unreachable. A document already open
+        // is only a reason to skip when it belongs to the case being asked for.
+        if (loadedCaseId && loadedCaseId === caseId) return;
         if (attempted.current.has(caseId)) return;
         attempted.current.add(caseId);
 
@@ -94,7 +102,13 @@ export function useDocumentResume({
         let cancelled = false;
 
         const saved = recallDraft(caseId, storage);
-        if (!saved) return;
+        if (!saved) {
+            // TOLD, not silently skipped. Without this the previous case's
+            // document stays on screen under the new case's heading — the same
+            // wrong-matter confusion reached from the other direction.
+            onRestore(null, caseId);
+            return;
+        }
 
         (async () => {
             const { data, error } = await getDocument(saved);
@@ -134,5 +148,5 @@ export function useDocumentResume({
         // are recreated on every render of the parent, and including them would
         // re-run this effect continuously.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [caseId, hasDocument]);
+    }, [caseId, loadedCaseId]);
 }

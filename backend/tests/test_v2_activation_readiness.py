@@ -502,3 +502,38 @@ def test_the_docstring_does_not_claim_the_scan_is_sampled():
     text = inspect.getdoc(mig.activation_readiness) or ""
     assert "SAMPLED, not exhaustive" not in text
     assert "every" in text.lower() or "exhaustive" in text.lower()
+
+
+async def test_a_failed_scan_reports_the_full_unusable_count(
+        mongo, _store, monkeypatch):
+    """The error path reported the CAPPED list length as the count.
+
+    Capping the detail during the scan was right; reusing `len(problems)` as
+    the count afterwards was not. A scan that found forty broken documents and
+    then died would report twenty — understating the damage in the one report
+    that exists to describe it.
+    """
+    ids = await _many_migrated(25)
+    for doc_id in ids:
+        rev = await get_document_revisions_col().find_one(
+            {"_id": mig.planned_revision_id(doc_id)})
+        store.delete_final(rev["artifact_key"])
+
+    real_inspect = mig.inspect_migrated
+    seen = {"n": 0}
+
+    async def _die_after_a_while(document_id):
+        seen["n"] += 1
+        if seen["n"] > 24:
+            raise RuntimeError("the database went away")
+        return await real_inspect(document_id)
+
+    monkeypatch.setattr(mig, "inspect_migrated", _die_after_a_while)
+
+    out = await mig.activation_readiness(sample=2, batch=50)
+    gate = out["gates"]["migrated_documents_valid"]
+
+    assert gate["passed"] is False
+    assert gate["unusable"] == 24, (
+        f"reported {gate['unusable']} unusable; the scan found 24 before dying")
+    assert gate["problems_listed"] <= 2

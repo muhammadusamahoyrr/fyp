@@ -281,3 +281,48 @@ test("previewing a row previews that row's own document", async () => {
     assert.equal(opts.revisionId, "rev-other");
     await p.unmount();
 });
+
+/* ── a standalone document is not filed under a case (issue 1) ────────────── */
+
+test("opening a caseless document does not file it under the selected case", async () => {
+    // THE DEFECT. `restored.caseId || resumeCaseId` cannot tell a deliberate
+    // null from a missing value. `restoreStateFromDocument` returns null
+    // precisely to say "this belongs to no case", and the fallback then filed a
+    // standalone draft under whichever matter happened to be on screen —
+    // re-creating, for caseless documents, the exact wrong-matter bug the
+    // caseId was added to fix.
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("myDocumentsV2", {
+        data: {
+            items: [{ id: "standalone-doc", title: "A standalone notice",
+                      review_status: "none", revision_id: "rev-alone",
+                      pdf_sha256: "f".repeat(64), version: 1,
+                      downloadable: true }],
+            has_more: false,
+        },
+    });
+    api.__respond("getDocumentV2", {
+        data: {
+            id: "standalone-doc", title: "A standalone notice",
+            review_status: "none", case_id: null, current_version: 1,
+            current_revision: { revision_id: "rev-alone",
+                                pdf_sha256: "f".repeat(64) },
+        },
+    });
+
+    const p = await mountDocuments();
+    const openBtn = [...p.container.querySelectorAll("button")]
+        .find(b => b.textContent.trim() === "Open");
+    assert.ok(openBtn, "no Open control was rendered");
+    await act(async () => {
+        openBtn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+        await new Promise(r => setTimeout(r, 40));
+    });
+
+    assert.equal(dom.window.localStorage.getItem("attorneyai.draft.case-1"), null,
+                 "a standalone document was filed as case-1's draft");
+    assert.equal(dom.window.localStorage.getItem("attorneyai.draft.no-case"),
+                 "standalone-doc");
+    await p.unmount();
+});

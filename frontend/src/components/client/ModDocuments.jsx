@@ -357,23 +357,61 @@ const ModDocuments = () => {
         setReviewStatus(restored.reviewStatus);
         setReviewRecovery(restored.reviewRecovery);
         setStep(restored.step);
-        // REMEMBERED UNDER ITS OWN CASE. Using the case on screen meant opening
-        // a case-B document while case A was showing saved B's document as A's
-        // draft, so the next refresh of A restored the wrong matter's work.
-        const owningCase = restored.caseId || resumeCaseId;
-        if (owningCase) {
-            setGenCaseId(owningCase);
-            rememberDraft(owningCase, restored.docId);
-        }
+        // REMEMBERED UNDER ITS OWN CASE — including when that case is NONE.
+        //
+        // This was `restored.caseId || resumeCaseId`, and `||` cannot tell a
+        // deliberate null from a missing value. `restoreStateFromDocument`
+        // returns null precisely to say "this document belongs to no case", and
+        // the fallback then filed a standalone draft under whichever matter
+        // happened to be selected — re-creating, for caseless documents, the
+        // exact wrong-matter bug the caseId was added to fix.
+        //
+        // A caseless document lives in its own bucket (`rememberDraft` keys it
+        // under "no-case"), so it is restored when no case is selected and never
+        // mistaken for a matter's work.
+        const owningCase = restored.caseId ?? null;
+        setGenCaseId(owningCase);
+        rememberDraft(owningCase, restored.docId);
+    };
+
+    /* Take the current document off screen.
+     *
+     * Called when the selected case has no draft of its own: leaving the
+     * previous case's document up, under the new case's heading, is the same
+     * wrong-matter confusion reached from the other direction. */
+    const clearOpenDocument = () => {
+        setDocId(null);
+        setDocTitle("");
+        setDocRevisionId(null);
+        setDocPdfSha256(null);
+        setDocVersion(null);
+        setGenDone(false);
+        setReviewSent(false);
+        setReviewStatus(null);
+        setReviewRecovery(null);
+        setViewRev(null);
+        setReviewRows(null);
+        setRawFields(null);
+        setStep(0);
     };
 
     useDocumentResume({
         caseId: resumeCaseId,
-        hasDocument: Boolean(docId),
+        // WHICH case the open document belongs to, not merely that one is open.
+        // A boolean meant the first loaded document blocked restoration for
+        // every case thereafter, so switching matters kept showing the first
+        // matter's draft.
+        loadedCaseId: docId ? genCaseId : null,
         getDocument: getDocumentV2,
         onRestore: (restored, forCase) => {
-            if (!restored) return;
-            applyRestored(restored);
+            if (restored) {
+                applyRestored(restored);
+                return;
+            }
+            // Nothing saved for this case. Clear whatever belongs to another
+            // one — but only then, so a failed restore of THIS case's draft
+            // does not wipe the screen the user is already working on.
+            if (docId && genCaseId !== forCase) clearOpenDocument();
         },
     });
 
