@@ -12,7 +12,7 @@ import FieldReview from "./FieldReview.jsx";
 import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
     from "@/lib/fieldReview.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
-import { rememberDraft } from "@/lib/documentResume.js";
+import { rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
 import { useDocumentResume, resolveCaseId } from "@/lib/useDocumentResume.js";
 import {
     extractDocumentFields, generateDocument, downloadDocumentFile,
@@ -331,7 +331,41 @@ const ModDocuments = () => {
     // and starts null. After a refresh there is no generation, so it stayed
     // null, the effect returned early every time, and nothing was ever
     // restored — the feature existed and never ran once.
-    const resumeCaseId = genCaseId || resolveCaseId(selectedCaseId, cases);
+    // THE CASE ON SCREEN, not the one a past generation happened to use.
+    //
+    // This was `genCaseId || resolveCaseId(...)`, and `genCaseId` is only ever
+    // set BY a generation — so once the client generated anything, switching
+    // to another matter could not move the resume key. The draft of the first
+    // case followed them around, and the second case's own draft was
+    // unreachable.
+    //
+    // Generation sets `genCaseId` to the same value this resolves to, so the
+    // two agree until the user deliberately switches, which is exactly when the
+    // new case should win.
+    const resumeCaseId = resolveCaseId(selectedCaseId, cases);
+
+    /* Put a restored document on screen. Shared by the refresh-resume hook,
+     * by opening a row in My Documents, and by previewing one — three callers
+     * that must not drift apart in what "opening a document" means. */
+    const applyRestored = (restored) => {
+        setDocId(restored.docId);
+        if (restored.docTitle) setDocTitle(restored.docTitle);
+        setDocRevisionId(restored.docRevisionId);
+        setDocPdfSha256(restored.docPdfSha256);
+        setGenDone(restored.genDone);
+        setReviewSent(restored.reviewSent);
+        setReviewStatus(restored.reviewStatus);
+        setReviewRecovery(restored.reviewRecovery);
+        setStep(restored.step);
+        // REMEMBERED UNDER ITS OWN CASE. Using the case on screen meant opening
+        // a case-B document while case A was showing saved B's document as A's
+        // draft, so the next refresh of A restored the wrong matter's work.
+        const owningCase = restored.caseId || resumeCaseId;
+        if (owningCase) {
+            setGenCaseId(owningCase);
+            rememberDraft(owningCase, restored.docId);
+        }
+    };
 
     useDocumentResume({
         caseId: resumeCaseId,
@@ -339,16 +373,7 @@ const ModDocuments = () => {
         getDocument: getDocumentV2,
         onRestore: (restored, forCase) => {
             if (!restored) return;
-            setGenCaseId(forCase);
-            setDocId(restored.docId);
-            if (restored.docTitle) setDocTitle(restored.docTitle);
-            setDocRevisionId(restored.docRevisionId);
-            setDocPdfSha256(restored.docPdfSha256);
-            setGenDone(restored.genDone);
-            setReviewSent(restored.reviewSent);
-            setReviewStatus(restored.reviewStatus);
-            setReviewRecovery(restored.reviewRecovery);
-            setStep(restored.step);
+            applyRestored(restored);
         },
     });
 
@@ -810,22 +835,31 @@ const ModDocuments = () => {
                             <MyDocumentsPanel
                                 t={t}
                                 onOpen={restored => {
-                                    setDocId(restored.docId);
-                                    if (restored.docTitle) setDocTitle(restored.docTitle);
-                                    setDocRevisionId(restored.docRevisionId);
-                                    setDocPdfSha256(restored.docPdfSha256);
-                                    setGenDone(restored.genDone);
-                                    setReviewSent(restored.reviewSent);
-                                    setReviewStatus(restored.reviewStatus);
-                                    setReviewRecovery(restored.reviewRecovery);
                                     setViewRev(null);
-                                    setStep(restored.step);
-                                    if (resumeCaseId) rememberDraft(resumeCaseId, restored.docId);
+                                    applyRestored(restored);
                                 }}
-                                onPreview={(id, actions) => setViewRev({
-                                    revision_id: actions.revisionId,
-                                    pdf_sha256: actions.pdfSha256,
-                                })} />
+                                onPreview={async (id, actions) => {
+                                    // OPEN IT FIRST. This used to take the row's
+                                    // document id and ignore it, then pin the
+                                    // revision — while the preview effect asked
+                                    // for whatever document was already open. The
+                                    // request therefore carried one document's id
+                                    // with another document's revision: a pair
+                                    // belonging to no document at all, saved from
+                                    // showing the wrong bytes only by the hash
+                                    // guard rejecting it.
+                                    if (id && id !== docId) {
+                                        const { data, error } = await getDocumentV2(id);
+                                        if (error || !data) return;
+                                        const restored = restoreStateFromDocument(data);
+                                        if (!restored) return;
+                                        applyRestored(restored);
+                                    }
+                                    setViewRev({
+                                        revision_id: actions.revisionId,
+                                        pdf_sha256: actions.pdfSha256,
+                                    });
+                                }} />
                         </div>
 
                         {/* Stats bar */}

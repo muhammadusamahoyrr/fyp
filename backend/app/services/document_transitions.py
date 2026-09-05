@@ -277,6 +277,33 @@ async def submit(
     if not (lawyer.get("lawyer_profile") or {}).get("kyc_verified"):
         raise AppValidationError("Lawyer is not yet KYC-verified")
 
+    # ENGAGEMENT GATE. A case's documents go to that case's lawyer.
+    #
+    # Only KYC was checked here, so the API accepted ANY verified lawyer in the
+    # system while the client UI quietly locked the choice to the engaged one. A
+    # rule that lives in the interface and not the server is a rule that holds
+    # for everyone using the product and for nobody using `curl` — and a client's
+    # case documents could be routed to a lawyer with no relationship to the
+    # matter.
+    #
+    # REFUSED, NOT REDIRECTED, and that is a deliberate departure from the
+    # legacy path, which silently substitutes `case.lawyer_id` for whoever was
+    # asked for. Silent substitution is the wrong shape here: every transition
+    # in V2 writes a receipt binding an actor to an action, and a receipt saying
+    # a client submitted to a lawyer they never named is a false record of
+    # intent in an audit trail. A caller who names the wrong lawyer is told so.
+    #
+    # No case, or a case with no lawyer engaged yet, means there is no
+    # engagement to contradict — the client picks, which is the point of
+    # picking.
+    if doc.get("case_id"):
+        case = await case_repo.find_by_id(doc["case_id"])
+        engaged = str((case or {}).get("lawyer_id") or "")
+        if engaged and engaged != str(lawyer_id):
+            raise ForbiddenError(
+                "This case is engaged with another lawyer. Documents on a case "
+                "go to the lawyer engaged on it.")
+
     now = _now()
     # If resubmitting after an approval, preserve the old approval in history.
     set_fields = {

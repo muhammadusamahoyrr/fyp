@@ -362,6 +362,57 @@ def final_exists(final_key_str: str) -> bool:
     return _final_path(final_key_str).exists()
 
 
+async def sweep_unreferenced_finals(*, referenced, older_than_seconds: int = 3600,
+                                    limit: int = 500) -> int:
+    """Delete published artifacts no revision names. Returns how many went.
+
+    THE STORE CANNOT ANSWER THIS ALONE, which is why `delete_final` puts the
+    burden on its caller: a final with no revision naming it is either wasted
+    space or a render whose row has not been written yet, and those look
+    identical on disk. So the set of referenced keys is passed IN, read from
+    Mongo by someone who can.
+
+    Two guards, and both matter:
+
+    `referenced` must be a real set. `None` is refused rather than treated as
+    "nothing is referenced" — a caller whose query failed would otherwise wipe
+    the entire store, which is the worst possible interpretation of an error.
+
+    Age is the only thing separating an orphan from a document in flight. An
+    artifact published seconds ago with no row naming it is far more likely to
+    be mid-publication than abandoned, and deleting it destroys bytes a client
+    is waiting for. Old and unreferenced is a much safer conjunction than
+    either alone.
+    """
+    if referenced is None:
+        raise ValueError(
+            "sweep_unreferenced_finals needs the set of referenced artifact "
+            "keys; None would delete every published artifact")
+
+    docs = _docs_dir()
+    if not docs.exists():
+        return 0
+
+    cutoff = time.time() - max(older_than_seconds, 0)
+    swept = 0
+    for path in docs.iterdir():
+        if swept >= limit:
+            break
+        try:
+            if not path.is_file():
+                continue
+            key = f"docs/{path.name}"
+            if key in referenced:
+                continue
+            if path.stat().st_mtime > cutoff:
+                continue          # too new to call abandoned
+            path.unlink()
+            swept += 1
+        except OSError:
+            continue              # being written, already gone, or locked
+    return swept
+
+
 def delete_final(final_key_str: str) -> None:
     """Delete an unreferenced final. Callers MUST confirm no revision references
     this key before calling — the store cannot know that on its own."""

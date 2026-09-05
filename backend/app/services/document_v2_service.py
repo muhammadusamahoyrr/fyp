@@ -32,7 +32,11 @@ from app.db.collections import get_document_revisions_col, get_documents_col
 from app.repositories import revision_repo
 from app.repositories.revision_repo import HEARTBEAT_SECONDS
 from app.services import artifact_store as store
-from app.core.exceptions import ServiceUnavailableError
+from app.core.exceptions import (
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from app.services import extraction_profile, pleading_rules, template_registry
 from app.services.document_service import (
     _unavailable_verification,
@@ -51,6 +55,38 @@ def _now() -> datetime:
 
 # ── document identity ─────────────────────────────────────────────────────────
 
+async def _require_case_access(actor_id: str, case_id: str | None) -> None:
+    """The actor must actually be on this case. Raises if not.
+
+    IN THE SERVICE, not only the route. The route is one caller; putting the
+    guard there alone leaves it to be forgotten by whoever adds the next one,
+    and a rule enforced in one layer and missing from the layer beneath is the
+    exact shape of the bug being fixed.
+
+    EITHER SIDE OF THE MATTER QUALIFIES. A case has a client and, once engaged,
+    a lawyer, and both legitimately create documents on it — `/documents/v2/mine`
+    exists for clients and lawyers alike. Checking only `client_id` would refuse
+    a lawyer drafting on their own engaged case, which is a normal thing to do.
+    This mirrors how `document_service.list_documents` decides the same question.
+
+    `case_id` of None is not a failure. Standalone drafting — a lawyer working
+    from a template, a client starting before intake — has no case to name, and
+    refusing it would break a real flow to close a hole that only exists when a
+    case IS named.
+    """
+    if not case_id:
+        return
+
+    from app.repositories.case_repo import CaseRepository
+
+    case = await CaseRepository().find_by_id(case_id)
+    if not case:
+        raise NotFoundError("Case")
+    if actor_id not in (str(case.get("client_id") or ""),
+                        str(case.get("lawyer_id") or "")):
+        raise ForbiddenError("That case does not belong to you")
+
+
 async def create_document(
     *, client_id: str, case_id: str | None, template_type: str, title: str,
     idempotency_key: str,
@@ -61,7 +97,21 @@ async def create_document(
     the existing identity rather than a duplicate. The document starts empty —
     rev_seq 0, no current revision — a valid state that lists but has nothing to
     preview until its first revision is generated.
+
+    THE CASE IS VERIFIED, not taken on trust. `case_id` arrived from the request
+    body and was written straight onto the document, so anyone could attach a
+    document to any case id they could name.
+
+    That is easy to under-rate, because the document stays owner-scoped and
+    `/mine` never shows it to the victim. The damage is one layer along:
+    `document_service.list_documents` for a LAWYER checks only that the lawyer
+    owns the case, then returns every document attached to it. A stranger could
+    therefore place a document in a victim's case listing, beside that client's
+    real filings, indistinguishable from them — in the view the lawyer trusts
+    to be the matter's file.
     """
+    await _require_case_access(client_id, case_id)
+
     existing = await get_documents_col().find_one(
         {"client_id": client_id, "create_idempotency_key": idempotency_key})
     if existing:
@@ -405,5 +455,51 @@ async def sweep() -> dict:
     # Trim embedded receipts on documents that drained their queue but still hold
     # an over-cap receipts map (materialize_pending would never revisit them).
     trimmed = await document_transitions.trim_receipts_pass()
+
+    # THE FILESYSTEM HALF, which nothing was collecting.
+    #
+    # `sweep_staging` existed and was called from nowhere, so abandoned staging
+    # files accumulated indefinitely. Worse, on the link-less publication path a
+    # crash leaves a `.claim` marker, and an uncollected claim BLOCKS
+    # republication of that key — turning one dropped connection into a
+    # permanently unpublishable artifact.
+    staging_swept = store.sweep_staging(older_than_seconds=STAGING_TTL_SECONDS)
+    finals_swept = await _sweep_unreferenced_finals()
+
     return {"materialized": materialized.get("materialized", 0),
-            **delivered, **reconciled, **trimmed}
+            **delivered, **reconciled, **trimmed,
+            "staging_swept": staging_swept, "finals_swept": finals_swept}
+
+
+# Long enough that no live render is still filling a staging file, short enough
+# that a crash's rubbish does not sit for a day. Renders are sub-second.
+STAGING_TTL_SECONDS = 3600
+# An artifact younger than this with no revision naming it is far more likely to
+# be mid-publication than orphaned.
+FINAL_ORPHAN_TTL_SECONDS = 6 * 3600
+
+
+async def _sweep_unreferenced_finals() -> int:
+    """Collect published artifacts no revision points at.
+
+    The referenced set is read HERE, from Mongo, because the store cannot know
+    it — and it is read in full before anything is deleted. A partial read would
+    look exactly like a set of orphans, so a failure anywhere in this query must
+    abandon the sweep rather than proceed with an incomplete answer.
+    """
+    referenced: set[str] = set()
+    try:
+        cursor = get_document_revisions_col().find(
+            {"artifact_key": {"$ne": None}}, {"artifact_key": 1})
+        async for row in cursor:
+            key = row.get("artifact_key")
+            if key:
+                referenced.add(key)
+    except Exception:
+        # Never pass a partial set on: every artifact missing from it would be
+        # read as unreferenced and deleted.
+        logger.exception("v2 sweep: could not read referenced artifact keys")
+        return 0
+
+    return await store.sweep_unreferenced_finals(
+        referenced=referenced, older_than_seconds=FINAL_ORPHAN_TTL_SECONDS)

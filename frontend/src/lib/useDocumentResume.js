@@ -31,6 +31,22 @@ import { useEffect, useRef } from "react";
 
 import { recallDraft, forgetDraft, restoreStateFromDocument } from "./documentResume.js";
 
+/* The document is not coming back — as opposed to not arriving right now.
+ *
+ * Only a definitive answer from the server counts. A 404 means it is deleted; a
+ * 403 means it is no longer ours. Both are facts about the document, and the
+ * saved pointer should go.
+ *
+ * A timeout, a 5xx, a refused connection, an unparseable body: those are facts
+ * about the attempt. Erasing a pointer because one request failed destroys the
+ * user's only route back to work that is sitting safely on the server.
+ */
+export function isDefinitivelyGone(error) {
+    if (!error) return false;
+    if (error.status === 404 || error.status === 403) return true;
+    return error.code === "not_found" || error.code === "forbidden";
+}
+
 /**
  * The case whose documents are on screen.
  *
@@ -85,9 +101,18 @@ export function useDocumentResume({
             if (cancelled || token.current !== mine) return;
 
             if (error || !data) {
-                // Deleted, or no longer ours. Forget it rather than retrying
-                // forever against a document that will not come.
-                forgetDraft(caseId, storage);
+                // A FAILURE TO ASK IS NOT AN ANSWER.
+                //
+                // This forgot the draft on ANY error, so a dropped connection
+                // was treated exactly like a deleted document: one bad response
+                // on a train and the in-progress draft became unreachable,
+                // permanently, because the only pointer to it had been erased.
+                //
+                // 404 and 403 ARE answers — the document is gone or is no
+                // longer ours, and retrying forever against it is the opposite
+                // mistake. Everything else is the network or the server having
+                // a bad moment, and the pointer survives for the next mount.
+                if (isDefinitivelyGone(error)) forgetDraft(caseId, storage);
                 onRestore(null, caseId);
                 return;
             }

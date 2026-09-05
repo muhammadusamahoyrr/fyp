@@ -410,3 +410,95 @@ async def test_the_exhaustive_scan_still_writes_nothing(mongo, _store):
     after = {d["_id"]: d async for d in get_documents_col().find({})}
     assert after == before
     assert await get_document_revisions_col().count_documents({}) == revs_before
+
+
+# ── argument validation and reconciliation ───────────────────────────────────
+
+@pytest.mark.parametrize("sample", [-1, -50])
+async def test_a_negative_sample_is_refused(mongo, _store, sample):
+    """`problems[:min(-1, CAP)]` is `problems[:-1]` — it silently drops one.
+
+    A negative argument did not error; it quietly hid the last failure in the
+    report an operator reads before flipping the flag.
+    """
+    with pytest.raises(ValueError):
+        await mig.activation_readiness(sample=sample)
+
+
+@pytest.mark.parametrize("batch", [0, -1])
+async def test_a_non_positive_batch_is_refused(mongo, _store, batch):
+    """Mongo treats `limit(0)` as NO limit.
+
+    The argument that exists to bound memory would have removed the bound —
+    loading the whole estate in one read on exactly the collection this is
+    meant to scan safely.
+    """
+    with pytest.raises(ValueError):
+        await mig.activation_readiness(batch=batch)
+
+
+async def test_the_problem_list_is_capped_during_the_scan(mongo, _store):
+    """Bounded memory, not just a bounded report.
+
+    Every failure was appended and only truncated on the way out, so an estate
+    where everything is broken held one record per document in memory — the
+    case where the machine is least able to spare it.
+    """
+    ids = await _many_migrated(8)
+    for doc_id in ids:
+        rev = await get_document_revisions_col().find_one(
+            {"_id": mig.planned_revision_id(doc_id)})
+        store.delete_final(rev["artifact_key"])
+
+    out = await mig.activation_readiness(sample=2, batch=3)
+    gate = out["gates"]["migrated_documents_valid"]
+    # The COUNT stays truthful even though the detail is capped.
+    assert gate["unusable"] == len(ids)
+    assert gate["problems_listed"] <= 2
+    assert len(gate["problems"]) <= mig.READINESS_PROBLEM_CAP
+
+
+async def test_a_short_scan_fails_closed(mongo, _store, monkeypatch):
+    """Examined and total were computed and never compared.
+
+    A cursor cut short by a stepdown or a timeout returns fewer documents than
+    the collection holds, and every one it managed to read is fine — so the
+    gate passed on a partial scan and reported it as a clean estate.
+    """
+    await _many_migrated(6)
+
+    real_count = mig.get_documents_col
+
+    class _Inflated:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            if name == "count_documents":
+                async def _more(*a, **k):
+                    return await self._inner.count_documents(*a, **k) + 3
+                return _more
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(mig, "get_documents_col",
+                        lambda: _Inflated(real_count()))
+    out = await mig.activation_readiness(sample=0)
+    monkeypatch.setattr(mig, "get_documents_col", real_count)
+
+    gate = out["gates"]["migrated_documents_valid"]
+    assert gate["passed"] is False, "a partial scan passed as a clean estate"
+    assert out["ready"] is False
+    assert any("examin" in b.lower() or "incomplete" in b.lower()
+               for b in out["blockers"]), out["blockers"]
+
+
+def test_the_docstring_does_not_claim_the_scan_is_sampled():
+    """It said SAMPLED long after the scan became exhaustive.
+
+    A reader would distrust a verdict that is actually sound — and the whole
+    value of this gate is that somebody believes it at the moment of the flip.
+    """
+    import inspect
+    text = inspect.getdoc(mig.activation_readiness) or ""
+    assert "SAMPLED, not exhaustive" not in text
+    assert "every" in text.lower() or "exhaustive" in text.lower()

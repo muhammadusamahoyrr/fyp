@@ -962,10 +962,25 @@ async def activation_readiness(sample: int = DEFAULT_READINESS_SAMPLE,
                                  still produce documents that validate and
                                  cannot be opened.
 
-    The inspection gate is SAMPLED, not exhaustive: an unbounded scan at the
-    decision point is how a safety check becomes the thing somebody skips.
+    The inspection gate examines EVERY migrated document, in bounded cursor
+    batches. It once sampled, and this line once said so long after the code
+    had changed — which is worse than either behaviour on its own, because a
+    reader would distrust a verdict that is actually sound, and the whole value
+    of this gate is that somebody believes it at the moment of the flip.
+
+    `sample` bounds the problem DETAIL in the report; `batch` bounds memory.
+    Neither bounds the verdict.
     """
     from app.db import v2_index_preflight
+
+    # REFUSED, not coerced. `sample=-1` slices `problems[:-1]` and silently
+    # drops the last failure; `batch=0` is NO limit in Mongo, so the argument
+    # that exists to bound memory would remove the bound. Both look like they
+    # worked.
+    if sample < 0:
+        raise ValueError("sample must be zero or greater")
+    if batch < 1:
+        raise ValueError("batch must be at least 1")
 
     gates: dict[str, dict] = {}
     blockers: list[str] = []
@@ -1070,6 +1085,7 @@ async def _inspect_all_migrated(*, sample: int, batch: int) -> dict:
     at the moment of a go/no-go decision; a default of True would be worse.
     """
     problems: list[dict] = []
+    unusable = 0
     examined = 0
     batches = 0
     cursor_id = None
@@ -1091,8 +1107,15 @@ async def _inspect_all_migrated(*, sample: int, batch: int) -> dict:
                 found = await inspect_migrated(row["_id"])
                 examined += 1
                 if found:
-                    problems.append({"document_id": row["_id"],
-                                     "problems": found})
+                    unusable += 1
+                    # CAPPED HERE, not on the way out. Appending every failure
+                    # and truncating at the end holds one record per document
+                    # on an estate where everything is broken — the case where
+                    # the machine can least spare it. The COUNT is kept
+                    # separately and stays truthful.
+                    if len(problems) < READINESS_PROBLEM_CAP:
+                        problems.append({"document_id": row["_id"],
+                                         "problems": found})
             cursor_id = rows[-1]["_id"]
             if len(rows) < batch:
                 break
@@ -1111,19 +1134,41 @@ async def _inspect_all_migrated(*, sample: int, batch: int) -> dict:
                         f"usable: the scan failed after {examined} document(s)"),
         }
 
+    listed = problems[:min(sample, READINESS_PROBLEM_CAP)]
+
+    # THE SCAN MUST HAVE SEEN EVERYTHING IT SET OUT TO SEE.
+    #
+    # `examined` and `total` were both computed and never compared. A cursor cut
+    # short — a stepdown, a timeout, a batch that came back empty early — reads
+    # fewer documents than the collection holds, and every one it managed to
+    # read is fine. So the gate passed on a partial scan and reported a clean
+    # estate, which is the single most dangerous thing this function can say.
+    incomplete = total is not None and examined != total
+
+    if incomplete:
+        blocker = (f"the scan examined {examined} of {total} migrated "
+                   "document(s); it did not finish, so the estate cannot be "
+                   "called usable")
+    elif problems:
+        blocker = (f"{unusable} of {examined} migrated document(s) are not "
+                   "usable — see inspect_migrated")
+    else:
+        blocker = None
+
     return {
-        "passed": not problems,
+        "passed": not problems and not incomplete,
         "error": None,
         # `examined` is what decided the verdict. `problems_listed` is only how
         # many are shown in detail, and it decides nothing.
         "examined": examined,
         "total": total,
-        "unusable": len(problems),
-        "problems": problems[:min(sample, READINESS_PROBLEM_CAP)],
-        "problems_listed": len(problems[:min(sample, READINESS_PROBLEM_CAP)]),
+        "complete": not incomplete,
+        # The full count, not the length of the capped list.
+        "unusable": unusable,
+        "problems": listed,
+        "problems_listed": len(listed),
         "batches": batches,
-        "blocker": (f"{len(problems)} of {examined} migrated document(s) are "
-                    "not usable — see inspect_migrated") if problems else None,
+        "blocker": blocker,
     }
 
 

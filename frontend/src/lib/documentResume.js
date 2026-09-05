@@ -102,6 +102,16 @@ export function restoreStateFromDocument(detail) {
 
     return {
         docId: detail.id,
+        // THE DOCUMENT'S OWN CASE, not the one that happens to be on screen.
+        //
+        // This was dropped, and the caller then remembered the opened document
+        // under whatever case was selected. Open a case-B document while case A
+        // is showing and the saved pointer for A names a document belonging to
+        // B — so the next refresh of case A restores the wrong matter's draft.
+        //
+        // `null` rather than undefined for a caseless document, so a caller can
+        // tell "no case" from "the field was not returned".
+        caseId: detail.case_id ?? null,
         docTitle: detail.title || "",
         docRevisionId: revisionId,
         docPdfSha256: pdfSha256,

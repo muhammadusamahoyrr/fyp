@@ -231,3 +231,53 @@ test("generation stops for review instead of drafting straight through", async (
     assert.equal(api.__calls("generateDocument").length, 0);
     await p.unmount();
 });
+
+/* ── previewing a row must preview THAT row's document (issue 3) ──────────── */
+
+test("previewing a row previews that row's own document", async () => {
+    // THE DEFECT. `onPreview={(id, actions) => setViewRev({...})}` accepted the
+    // row's document id and ignored it, and the preview effect asks for
+    // `docId` — whatever the page currently has open. So the request carried
+    // one document's id with another document's revision: a pair belonging to
+    // no document at all, saved from showing the wrong bytes only by the hash
+    // guard rejecting it. With nothing open it asked for nothing, and the
+    // Preview button silently did nothing at all.
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("myDocumentsV2", {
+        data: {
+            items: [{ id: "other-doc", title: "Another notice",
+                      review_status: "none", revision_id: "rev-other",
+                      pdf_sha256: "d".repeat(64), version: 1,
+                      downloadable: true }],
+            has_more: false,
+        },
+    });
+    api.__respond("getDocumentV2", {
+        data: {
+            id: "other-doc", title: "Another notice", review_status: "none",
+            case_id: "case-1", current_version: 1,
+            current_revision: { revision_id: "rev-other",
+                                pdf_sha256: "d".repeat(64) },
+        },
+    });
+
+    const p = await mountDocuments();
+
+    const previewBtn = [...p.container.querySelectorAll("button")]
+        .find(b => b.textContent.includes("Preview"));
+    assert.ok(previewBtn, "no Preview control was rendered");
+    await act(async () => {
+        previewBtn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+        await new Promise(r => setTimeout(r, 40));
+    });
+
+    const previews = api.__calls("fetchRevisionPreview");
+    assert.ok(previews.length > 0,
+              "Preview requested nothing — the row's document id was ignored");
+    const [docArg, opts] = previews.at(-1).args;
+    assert.equal(docArg, "other-doc",
+                 "previewed a different document from the row that was clicked");
+    assert.equal(opts.revisionId, "rev-other");
+    await p.unmount();
+});

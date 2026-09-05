@@ -326,3 +326,82 @@ test("a recovery state restores its explanation", async () => {
                  "migration_unrecoverable");
     probe.unmount();
 });
+
+/* ── a transient failure must not delete the pointer (issue 6) ────────────── */
+
+test("a network failure keeps the saved pointer for the next attempt", async () => {
+    // THE DEFECT. `if (error || !data) forgetDraft(...)` treated a dropped
+    // connection exactly like a deleted document. One bad response while the
+    // user was on a train and their in-progress draft became unreachable —
+    // permanently, because the only pointer to it had been erased.
+    const storage = fakeStorage();
+    rememberDraft("case-1", "doc-abc", storage);
+    const g = deferredGetter();
+
+    const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
+    probe.render({ caseId: "case-1", hasDocument: false });
+    await act(async () => {
+        g.resolve("doc-abc", { error: { code: "network_error", message: "Failed to fetch" } });
+    });
+
+    assert.equal(storage.getItem("attorneyai.draft.case-1"), "doc-abc",
+                 "a transient failure erased the only pointer to the draft");
+    probe.unmount();
+});
+
+test("a server error keeps the pointer too", async () => {
+    const storage = fakeStorage();
+    rememberDraft("case-1", "doc-abc", storage);
+    const g = deferredGetter();
+
+    const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
+    probe.render({ caseId: "case-1", hasDocument: false });
+    await act(async () => {
+        g.resolve("doc-abc", { error: { status: 500, message: "Server error" } });
+    });
+
+    assert.equal(storage.getItem("attorneyai.draft.case-1"), "doc-abc");
+    probe.unmount();
+});
+
+test("a document confirmed gone is forgotten", async () => {
+    // 404 and 403 are answers, not failures: the document is deleted or is no
+    // longer ours. Retrying forever against it is the other bad outcome.
+    for (const error of [{ code: "not_found", status: 404 },
+                         { code: "forbidden", status: 403 }]) {
+        const storage = fakeStorage();
+        rememberDraft("case-1", "doc-abc", storage);
+        const g = deferredGetter();
+
+        const probe = mountProbe({ caseId: "case-1", getDocument: g.getDocument, storage });
+        probe.render({ caseId: "case-1", hasDocument: false });
+        await act(async () => { g.resolve("doc-abc", { error }); });
+
+        assert.equal(storage.getItem("attorneyai.draft.case-1"), null,
+                     `a definitively gone document (${error.code}) was still remembered`);
+        probe.unmount();
+    }
+});
+
+test("a transient failure can be retried on a later mount", async () => {
+    // The point of keeping the pointer: the next mount succeeds.
+    const storage = fakeStorage();
+    rememberDraft("case-1", "doc-abc", storage);
+
+    const first = deferredGetter();
+    const p1 = mountProbe({ caseId: "case-1", getDocument: first.getDocument, storage });
+    p1.render({ caseId: "case-1", hasDocument: false });
+    await act(async () => { first.resolve("doc-abc", { error: { status: 503 } }); });
+    p1.unmount();
+
+    const second = deferredGetter();
+    const p2 = mountProbe({ caseId: "case-1", getDocument: second.getDocument, storage });
+    p2.render({ caseId: "case-1", hasDocument: false });
+    await act(async () => {
+        second.resolve("doc-abc", { data: documentFor("doc-abc") });
+    });
+
+    assert.equal(p2.restores.at(-1).state.docId, "doc-abc",
+                 "the draft was not recoverable after a transient failure");
+    p2.unmount();
+});

@@ -187,3 +187,25 @@ test("the restored hash and revision always travel together", () => {
  * rather than repaired — it could only ever confirm that some text was present,
  * which is not the property anybody cared about.
  */
+
+/* ── the document's own case travels with it (issue 4) ────────────────────── */
+
+test("a restored document carries its own case id", () => {
+    // The API returns `case_id` and this dropped it, so a document opened from
+    // My Documents was remembered under whatever case happened to be selected.
+    // Open a case-B document while case A is on screen and the pointer for A
+    // now names a document belonging to B — so the next refresh of case A
+    // restores the wrong matter's draft.
+    const s = restoreStateFromDocument({ ...GENERATED, case_id: "case-B" });
+    assert.equal(s.caseId, "case-B");
+});
+
+test("a document with no case restores a null case, not undefined", () => {
+    // Standalone drafts are real. The caller has to be able to tell "no case"
+    // from "the field was not returned" without guessing.
+    const s = restoreStateFromDocument({ ...GENERATED, case_id: null });
+    assert.equal(s.caseId, null);
+
+    const absent = restoreStateFromDocument(GENERATED);
+    assert.equal(absent.caseId, null);
+});
