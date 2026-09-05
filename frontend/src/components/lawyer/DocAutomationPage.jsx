@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
-import { listCases, aiDraftStream, saveDocDraft, listDocDrafts, deleteDocDraft, aiPleadingUrduStream, pleadingUrduPdf, downloadDocument } from "@/lib/api.js";
+import { listCases, aiDraftStream, saveDocDraft, listDocDrafts, deleteDocDraft, aiPleadingUrduStream, pleadingUrduPdf, pleadingUrduDocumentV2, publishDraftAsDocumentV2, downloadDocumentFile, idempotencyKey, errorCode } from "@/lib/api.js";
 
 // Infer the statute collection to ground drafting in, from the template.
 function templateCaseType(name = "") {
@@ -15,6 +15,7 @@ function templateCaseType(name = "") {
     return "civil";
 }
 import { useAuth } from "@/context/AuthContext.jsx";
+import MyDocuments from "./MyDocuments.jsx";
 
 // ============================================================
 // DATA
@@ -210,6 +211,11 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
                 </div>
             )}
 
+            {/* Persistent, unlike the editor's in-session "Saved" state: this
+                reads the server every time the gallery mounts, so a document
+                saved before a refresh or a navigation is still here. */}
+            <MyDocuments t={t} />
+
             {search === "" && cat === "All" && (
                 <div style={{ fontSize: 10, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Popular Templates</div>
             )}
@@ -266,6 +272,26 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
     const [urduBusy, setUrduBusy] = useState(false);
     const [urduPdfBusy, setUrduPdfBusy] = useState(false);
     const [urduMeta, setUrduMeta] = useState({ court_ur: "", title_ur: "" });
+    // One key for one pleading. Held in a ref so a re-render between a failed
+    // download and the retry cannot lose it — losing it is what turns a retry
+    // into a second document.
+    //
+    // Cleared when the TEXT changes, because a different translation is a
+    // different pleading: reusing the key there would replay the old revision
+    // and hand the lawyer a PDF of text they had already replaced.
+    const urduKeyRef = useRef(null);
+    const urduKeyedTextRef = useRef(null);
+    const [urduIssue, setUrduIssue] = useState("");
+
+    // Publishing the draft as a real document. Same key discipline as the
+    // pleading: one key per intent, dropped when the CONTENT changes, because
+    // republishing edited prose under the old key would return the old
+    // revision and tell the lawyer their edits were filed when they were not.
+    const [publishing, setPublishing] = useState(false);
+    const [published, setPublished] = useState(null);   // {docId, revisionId, ...}
+    const [publishIssue, setPublishIssue] = useState("");
+    const publishKeyRef = useRef(null);
+    const publishedHtmlRef = useRef(null);
     const editorRef = useRef(null);
     const aiEndRef = useRef(null);
     const aiInputRef = useRef(null);
@@ -310,6 +336,52 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
         setSaved(true); setTimeout(() => setSaved(false), 2500);
     };
 
+    /* Save this draft into the system as a document.
+     *
+     * "SAVE", NOT "FILE". Filing is what a court accepts, and nothing here goes
+     * near a court — implying otherwise on a legal product is the kind of wrong
+     * word a user acts on. What this does is keep a fixed, hashed copy the
+     * system can name, check citations on, and reproduce identically.
+     *
+     * The .doc export below remains, and is still the right tool for handing a
+     * file to someone who will edit it. They are not alternatives.
+     */
+    const publishAsDocument = async () => {
+        if (publishing) return;
+        const bodyHtml = editorRef.current?.innerHTML || "";
+        if (!(editorRef.current?.innerText || "").trim()) {
+            setPublishIssue("There is nothing in the draft to save.");
+            return;
+        }
+
+        setPublishing(true);
+        setPublishIssue("");
+
+        // Edited prose is a new document, not a retry of the old one.
+        if (publishedHtmlRef.current !== bodyHtml) {
+            publishKeyRef.current = null;
+            publishedHtmlRef.current = bodyHtml;
+        }
+        publishKeyRef.current = publishKeyRef.current || idempotencyKey();
+
+        const res = await publishDraftAsDocumentV2({
+            title: draft?.title || tmpl.name,
+            bodyHtml,
+            authorName: user?.full_name || "",
+        }, publishKeyRef.current);
+        setPublishing(false);
+
+        if (res.error) {
+            setPublishIssue(res.status === 404 && res.code === "feature_disabled"
+                // Not an error the lawyer caused, and not one they can act on.
+                // The export below is what they have until the flag is on.
+                ? "Saving a draft to Documents is not enabled yet — use Export."
+                : (res.error.message || "Could not save the draft."));
+            return;
+        }
+        setPublished(res);
+    };
+
     const handleExport = () => {
         // Word-compatible download: HTML body wrapped in a Word-namespaced
         // document, saved as .doc — opens with formatting in MS Word.
@@ -337,15 +409,21 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
             let reply = "";
             // RAG-grounded: the backend retrieves real Pakistani law for this template
             // and instructs the model to cite only genuine sections/precedents.
+            let verif = null;
             await aiDraftStream(
                 {
                     instruction: q,
                     document: editorRef.current?.innerText || "",
                     template: tmpl.name,
+                    // CASE-BOUND when a case is selected: the server authorises it
+                    // and derives jurisdiction from it (so a Punjab matter no
+                    // longer retrieves federal law). case_type is the fallback.
+                    case_id: caseObj?._id || null,
                     case_type: templateCaseType(tmpl.name),
                     history,
                 },
                 (token) => { reply += token; },
+                (evt) => { if (evt?.verification) verif = evt.verification; },
             );
             if (!reply) reply = "Sorry, I couldn't process that.";
             const looksLikeDoc = reply.length > 300 && (reply.includes("\n\n") || reply.includes("PRAYER") || reply.includes("Respectfully") || reply.includes("IN THE COURT") || reply.includes("PETITION") || reply.includes("AGREEMENT"));
@@ -354,6 +432,17 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                 setWordCount(reply.trim().split(/\s+/).filter(Boolean).length);
             }
             setAiMessages(prev => [...prev, { role: "assistant", text: looksLikeDoc ? "✅ Document updated. Review the changes in the editor." : reply }]);
+            // Surface the citation check the backend runs on the finished draft.
+            // It used to be computed, streamed, and silently dropped by the client.
+            if (verif) {
+                const c = verif.counts || {};
+                const note = verif.ran === false
+                    ? "⚠️ Citations were NOT checked — verify every authority before filing."
+                    : (c.not_in_corpus > 0
+                        ? `⚠️ Citation check: ${c.not_in_corpus} citation(s) not found in the corpus, ${c.verified || 0} found. Existence only — read every authority.`
+                        : `⚖️ Citation check: ${c.verified || 0} found in the corpus (existence only). A lawyer must review before filing.`);
+                setAiMessages(prev => [...prev, { role: "assistant", text: note }]);
+            }
         } catch {
             setAiMessages(prev => [...prev, { role: "assistant", text: "Connection error. Please try again." }]);
         } finally {
@@ -377,12 +466,50 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
     const downloadUrduPdf = async () => {
         if (!urduText.trim() || urduPdfBusy) return;
         setUrduPdfBusy(true);
-        const { data, error } = await pleadingUrduPdf({
-            urdu_text: urduText, title_ur: urduMeta.title_ur, court_ur: urduMeta.court_ur, english_label: tmpl.name,
-        });
+        setUrduIssue("");
+
+        const filename = ((draft?.title || tmpl.name) + "-urdu")
+            .replace(/[^\w\s-]/g, "").trim() || "pleading-urdu";
+        const payload = {
+            urdu_text: urduText, title_ur: urduMeta.title_ur,
+            court_ur: urduMeta.court_ur, english_label: tmpl.name,
+        };
+
+        // A new translation is a new intent and must get a new key.
+        if (urduKeyedTextRef.current !== urduText) {
+            urduKeyRef.current = null;
+            urduKeyedTextRef.current = urduText;
+        }
+        urduKeyRef.current = urduKeyRef.current || idempotencyKey();
+
+        const v2 = await pleadingUrduDocumentV2(payload, urduKeyRef.current);
+
+        if (!v2.error) {
+            await downloadDocumentFile(v2.docId, filename, {
+                revisionId: v2.revisionId, expectedPdfSha256: v2.pdfSha256,
+            });
+            setUrduPdfBusy(false);
+            return;
+        }
+
+        if (!(v2.status === 404 && v2.code === "feature_disabled")) {
+            // A real failure. Reported rather than swallowed: the old code
+            // returned silently on error, so a lawyer pressed Download, nothing
+            // happened, and nothing said why.
+            setUrduPdfBusy(false);
+            setUrduIssue(v2.error.message || "Could not produce the PDF.");
+            return;
+        }
+
+        // The flag is off. The legacy route still works; it just cannot be
+        // retried safely, which is why it is the fallback and not the default.
+        const { data, error } = await pleadingUrduPdf(payload);
         setUrduPdfBusy(false);
-        if (error || !data?.doc_id) return;
-        await downloadDocument(data.doc_id, ((draft?.title || tmpl.name) + "-urdu").replace(/[^\w\s-]/g, "").trim() || "pleading-urdu");
+        if (error || !data?.doc_id) {
+            setUrduIssue(error?.message || "Could not produce the PDF.");
+            return;
+        }
+        await downloadDocumentFile(data.doc_id, filename);
     };
 
     const FONT_OPTIONS = ["Default Font", "Georgia", "Times New Roman", "Courier New", "Arial"];
@@ -494,6 +621,12 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                             <Icon d={I.checkCircle} size={12} /> Draft Saved
                         </span>
                     )}
+                    {publishIssue && (
+                        <span style={{ fontSize: 11, color: t.danger, whiteSpace: "nowrap" }}>
+                            {publishIssue}
+                        </span>
+                    )}
+
                     {saveErr && (
                         <span style={{
                             fontSize: 11, color: t.danger || "#e5484d",
@@ -541,6 +674,46 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                         }}>
                         <Icon d={I.save} size={13} /> {saving ? "Saving…" : "Save Draft"}
                     </button>
+
+                    {/* Beside Export, not instead of it.
+                        Export hands someone a file they will edit. This keeps
+                        the draft as an artifact the system can name, hash and
+                        reproduce — which is what makes a citation check on it
+                        mean anything later. It does NOT file anything with a
+                        court, and the label must not suggest that it does. */}
+                    <button onClick={publishAsDocument} disabled={publishing}
+                        title="Save a fixed, hashed copy of this draft into your documents"
+                        style={{
+                            padding: "5px 13px", borderRadius: 8,
+                            border: `1px solid ${t.primary}50`,
+                            background: published ? `${t.primary}22` : t.primaryGlow2,
+                            color: t.primary, cursor: publishing ? "default" : "pointer",
+                            fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
+                            display: "flex", alignItems: "center", gap: 4,
+                            whiteSpace: "nowrap", opacity: publishing ? 0.6 : 1,
+                        }}>
+                        <Icon d={I.save} size={12} />{" "}
+                        {publishing ? "Saving…" : published ? "Saved ✓" : "Save to Documents"}
+                    </button>
+
+                    {published && (
+                        <button
+                            onClick={() => downloadDocumentFile(
+                                published.docId,
+                                `${(draft?.title || tmpl.name).replace(/[^\w\s-]/g, "").trim() || "document"}.pdf`,
+                                { revisionId: published.revisionId,
+                                  expectedPdfSha256: published.pdfSha256 })}
+                            style={{
+                                padding: "5px 13px", borderRadius: 8,
+                                border: `1px solid ${t.border}`, background: t.card,
+                                color: t.text, cursor: "pointer",
+                                fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
+                                display: "flex", alignItems: "center", gap: 4,
+                                whiteSpace: "nowrap",
+                            }}>
+                            <Icon d={I.download} size={12} /> Saved PDF
+                        </button>
+                    )}
 
                     <button onClick={handleExport} style={{
                         padding: "5px 13px", borderRadius: 8,
@@ -882,7 +1055,12 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                         </div>
 
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderTop: `1px solid ${t.border}`, gap: 10 }}>
-                            <span style={{ fontSize: 10.5, color: t.textFaint }}>Machine-assisted — verify legal terms before filing</span>
+                            {/* A failed download used to return silently: the
+                                lawyer pressed Download, nothing arrived, and
+                                nothing said why. */}
+                            <span style={{ fontSize: 10.5, color: urduIssue ? t.danger : t.textFaint, flex: 1 }}>
+                                {urduIssue || "Machine-assisted — verify legal terms before filing"}
+                            </span>
                             <div style={{ display: "flex", gap: 8 }}>
                                 <button onClick={translateToUrdu} disabled={urduBusy} style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${t.border}`, background: t.card, color: t.text, fontSize: 12, fontWeight: 700, cursor: urduBusy ? "default" : "pointer", fontFamily: "inherit" }}>↻ Retranslate</button>
                                 <button onClick={downloadUrduPdf} disabled={urduBusy || urduPdfBusy || !urduText.trim()} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: (urduBusy || urduPdfBusy || !urduText.trim()) ? t.border : "#16a34a", color: "#fff", fontSize: 12, fontWeight: 800, cursor: (urduBusy || urduPdfBusy || !urduText.trim()) ? "default" : "pointer", fontFamily: "inherit" }}>{urduPdfBusy ? "Generating…" : "⬇ Download Urdu PDF"}</button>

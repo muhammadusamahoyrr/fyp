@@ -967,3 +967,80 @@ test("a same-id retry re-arms the poll", () => {
     assert.equal(retries.length, 2,
         "the retry path does not re-arm the progress poll");
 });
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Conversation search — finding a thread by what was said in it
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+test("both surfaces search message bodies, not just titles", () => {
+    // A sidebar capped at fifty entries with a title-only filter meant a
+    // conversation from six months ago was reachable only by scrolling past
+    // everything since.
+    for (const [name, path, fn] of [
+        ["client", "components/client/ModChatbot.jsx", "searchConversations"],
+        ["lawyer", "components/lawyer/AILegalPage.jsx", "searchResearchConversations"],
+    ]) {
+        const code = src(path);
+        assert.ok(code.includes(`await ${fn}(phrase)`),
+            `${name} never searches message bodies`);
+        assert.match(code, /Found in messages/,
+            `${name} fetches message matches and never shows them`);
+    }
+});
+
+test("the message search runs under the list's generation ticket", () => {
+    // It is a second await in the same loader. Without the check, a response
+    // for a term the user has moved on from paints results over the current
+    // one — the same race the list itself already guards.
+    for (const path of ["components/client/ModChatbot.jsx",
+                        "components/lawyer/AILegalPage.jsx"]) {
+        const code = src(path);
+        const block = code.slice(code.indexOf("Message-body search"));
+        const body = block.slice(0, block.indexOf("setListCursor"));
+        assert.match(body, /if \(!listGeneration\.isCurrent\(ticket\)\) return;/,
+            `${path} lets a stale message search land`);
+    }
+});
+
+test("a one-character query does not trigger a text search", () => {
+    // One character matches most of a corpus and ranks none of it usefully,
+    // and it costs a text query per keystroke.
+    for (const path of ["components/client/ModChatbot.jsx",
+                        "components/lawyer/AILegalPage.jsx"]) {
+        const code = src(path);
+        assert.match(code, /phrase\.length >= MIN_SEARCH_CHARS/, path);
+        assert.match(code, /const MIN_SEARCH_CHARS = 2;/, path);
+    }
+});
+
+test("the search reads the term it was called with, not component state", () => {
+    // The list above was filtered by the caller's term. Reading state here
+    // would let the two searches disagree about what was asked.
+    for (const path of ["components/client/ModChatbot.jsx",
+                        "components/lawyer/AILegalPage.jsx"]) {
+        const code = src(path);
+        assert.match(code, /const phrase = \(term \|\| ""\)\.trim\(\);/, path);
+    }
+});
+
+test("unsearchable legacy history is disclosed, not hidden", () => {
+    // The thread is still there and still findable by name. Silence would have
+    // the user conclude it is gone.
+    for (const path of ["components/client/ModChatbot.jsx",
+                        "components/lawyer/AILegalPage.jsx"]) {
+        const code = src(path);
+        assert.match(code, /has_unsearchable_history/, path);
+        // Collapsed, because the sentence is wrapped across JSX lines.
+        const flat = src(path).replace(/\s+/g, " ");
+        assert.ok(flat.includes("can only be found by their title"), path);
+    }
+});
+
+test("a message hit keeps its snippet", () => {
+    // Merging hits into the title list would drop it, and the snippet is the
+    // only part that tells the user why the result came back.
+    for (const path of ["components/client/ModChatbot.jsx",
+                        "components/lawyer/AILegalPage.jsx"]) {
+        assert.match(src(path), /\{hit\.snippet\}/, path);
+    }
+});

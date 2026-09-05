@@ -1,12 +1,24 @@
 'use client';
 // Paste your ModDocuments.jsx code here
-import React, { useState, Fragment, useEffect } from "react";
+import React, { useState, Fragment, useEffect, useRef } from "react";
 import { useT, useHeaderActions } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import { useCase } from "./CaseContext.jsx";
-import { extractDocumentFields, generateDocument, downloadDocument, submitDocumentForReview, listDocuments, searchLawyers, getCaseTimeline } from "@/lib/api.js";
+import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
+import MyDocumentsPanel from "./MyDocumentsPanel.jsx";
+import { documentStatusView } from "@/lib/documentStatus.js";
+import { rememberDraft } from "@/lib/documentResume.js";
+import { useDocumentResume, resolveCaseId } from "@/lib/useDocumentResume.js";
+import {
+    extractDocumentFields, generateDocument, downloadDocumentFile,
+    fetchRevisionPreview, submitDocumentForReview, listDocuments,
+    searchLawyers, getCaseTimeline,
+    createDocumentV2, generateRevisionV2, submitDocumentV2, getDocumentV2,
+    withdrawDocumentV2, listTemplates,
+    idempotencyKey, errorCode, isRetryable,
+} from "@/lib/api.js";
 
 const STitle = ({ icon, sub, children }) => {
     const t = useT();
@@ -42,41 +54,30 @@ const DRAFTS_DATA = [
     { name: "Labour Court Complaint", cat: "Employment" },
 ];
 
-// Each entry must name the document the backend ACTUALLY builds. A tile
-// labelled for one document that generates another is worse than a missing
-// tile: the user gets a real, well-formatted PDF of the wrong instrument, and
-// nothing on screen says so.
-const DOC_TYPES_DATA = [
-    { key: "Plaint", ico: "⚖️", desc: "Civil lawsuit filing", preview: "A formal legal complaint filed in court to initiate a civil lawsuit." },
-    { key: "Written Statement", ico: "📝", desc: "Defendant response", preview: "Defendant's formal response to the plaint in court." },
-    { key: "Legal Notice", ico: "📮", desc: "Pre-litigation notice", preview: "Formal notice sent before initiating legal proceedings." },
-    { key: "Stay Application", ico: "⏸️", desc: "Halt proceedings", preview: "Application to halt court or legal proceedings temporarily." },
-    // Was one vague "Contract" tile wired to the NDA builder. A contract is not
-    // an NDA, so the two agreements the backend really generates are now named
-    // for what they are — which also restores the tenancy template, previously
-    // reachable only by picking "Settlement Draft".
-    { key: "Non-Disclosure Agreement", ico: "🛡️", desc: "Confidentiality agreement", preview: "Agreement protecting confidential information shared between parties." },
-    { key: "Rental Agreement", ico: "🏠", desc: "Tenancy agreement", preview: "Tenancy agreement between landlord and tenant setting rent, term and obligations." },
-    // No settlement template exists. Listed and disabled, like Stay Application,
-    // rather than silently substituting a rental agreement.
-    { key: "Settlement Draft", ico: "🤝", desc: "Out-of-court resolution", preview: "Agreement between parties to resolve dispute out of court." },
-];
 
 const GEN_STEPS_LABELS = ["Extracting case data…", "Applying AI recommendations…", "Populating template…", "Formatting document…", "Generating draft…"];
 
-// null means "we cannot generate this" and the UI disables the option. Mapping
-// to the nearest available template instead would hand the user a confidently
-// produced document of a type they did not ask for.
-const DOC_TYPE_MAP = {
-    "Plaint": "plaint_civil",
-    "Written Statement": "written_statement",
-    "Legal Notice": "legal_notice",
-    "Non-Disclosure Agreement": "nda",
-    "Rental Agreement": "rental_agreement",
-    "Stay Application": null,       // no builder exists
-    "Settlement Draft": null,       // no builder exists — was wired to rental_agreement
-};
 
+
+/* Catalogue entries grouped for the picker, categories in a stable order.
+ *
+ * Ordered by the server's category name rather than by a list held here: a
+ * category this file did not anticipate would otherwise vanish from the picker,
+ * which is the same class of bug as the hardcoded template lists this replaced.
+ */
+function _byCategory(items) {
+    const groups = new Map();
+    for (const spec of items) {
+        if (!groups.has(spec.category)) groups.set(spec.category, []);
+        groups.get(spec.category).push(spec);
+    }
+    return [...groups.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([category, specs]) => [
+            category,
+            specs.sort((a, b) => a.label.localeCompare(b.label)),
+        ]);
+}
 
 const ModDocuments = () => {
     const t = useT();
@@ -88,9 +89,66 @@ const ModDocuments = () => {
     const [selectedDraft, setSelectedDraft] = useState(null);
     const [selectedCaseId, setSelectedCaseId] = useState("");
     const [docId, setDocId] = useState(null);
+    // Object URL of the REAL generated PDF, rendered inline. Replaces the
+    // hardcoded plaint this screen used to show — the bytes here are the exact
+    // bytes of the downloaded document.
+    // Which revision the preview pane is showing. Null means "the current one".
+    //
+    // DELIBERATELY NOT docRevisionId. That pair is what gets SUBMITTED - it is
+    // the version and hash the server checks the submission against. Looking at
+    // an old revision must not change what a later Submit sends, or a client who
+    // glanced at v1 before submitting would submit v1's hash against v3's
+    // document and be told, correctly but incomprehensibly, that it changed.
+    const [viewRev, setViewRev] = useState(null);
+    const [previewUrl, setPreviewUrl] = useState(null);
+    // Why the preview is missing, when it is. Distinct from `previewUrl` being
+    // null, which is also the state before anything has been generated — an
+    // empty frame with no explanation reads as a broken page.
+    const [previewIssue, setPreviewIssue] = useState(null);
+    // The exact revision on screen, and the hash we read for it. Null on the
+    // legacy path, where "the current file" is all the backend can offer; set
+    // once a V2 generate returns, which is what makes the preview refuse to
+    // silently serve different bytes.
+    const [docRevisionId, setDocRevisionId] = useState(null);
+    const [docPdfSha256, setDocPdfSha256] = useState(null);
+    // The version the user is looking at. Sent back on submit, where the
+    // server matches it against the document's own — so a draft that moved
+    // in another tab is refused rather than submitted blind.
+    const [docVersion, setDocVersion] = useState(null);
+
+    // ONE KEY PER LOGICAL ACTION, held across retries of THAT action.
+    //
+    // A key minted per HTTP call makes the whole idempotency mechanism
+    // unreachable: a retry after a lost response looks like a new intent, and
+    // the server obliges by rendering a second revision or recording a second
+    // submission. Held in refs rather than state because they must not be lost
+    // to a re-render between the failure and the retry.
+    //
+    // Cleared when the intent genuinely changes — pressing Generate again after
+    // changing answers IS a new intent and must produce a NEW revision, which
+    // is exactly what a fresh key expresses.
+    const generateKeyRef = useRef(null);
+    const submitKeyRef = useRef(null);
+    // Withdrawal is its own logical action, so it gets its own key. Reusing the
+    // submit key would make the server treat a withdrawal as a replay of the
+    // submission it is undoing — the two are opposites, not the same intent.
+    const withdrawKeyRef = useRef(null);
+
+    // A V2 failure the user must see and act on, rather than a toast that
+    // vanishes. Null on the happy path.
+    const [docIssue, setDocIssue] = useState(null);
     const [selectedCat, setSelectedCat] = useState("All");
     const [searchQ, setSearchQ] = useState("");
     const [selectedType, setSelectedType] = useState(null);   // chosen doc type
+    // What the server can actually render, fetched rather than hardcoded.
+    //
+    // This screen used to hold its own opinion of what exists, in two hardcoded
+    // lists, and they disagreed with the backend: they offered a "Settlement
+    // Draft" nothing could build and a "Contract" wired to the NDA builder.
+    // The server owns this fact now, and owns it because the catalogue is
+    // derived from the builder map itself rather than written alongside it.
+    const [templates, setTemplates] = useState(null);   // null = still loading
+    const [templateIssue, setTemplateIssue] = useState(null);
     const [docTitle, setDocTitle] = useState("");
     const [caseRef, setCaseRef] = useState("");
     const [jurisdiction, setJurisdiction] = useState("Lahore High Court");
@@ -103,9 +161,11 @@ const ModDocuments = () => {
     const [compliance, setCompliance] = useState(null);
     // Existence-check of every authority the draft cites, frozen at generation.
     const [verification, setVerification] = useState(null);
+    // Which submitted keys the builder could not read. Not a compliance verdict
+    // and never shown as one: it is the shape check, and its one unambiguous
+    // finding is that a key went nowhere.
+    const [fieldShape, setFieldShape] = useState(null);
     // Step 3 — review / edit
-    const [editMode, setEditMode] = useState(false);
-    const [docContent, setDocContent] = useState(null);       // null until generated
     const [userApproved, setUserApproved] = useState(false);
     // Step 4 — lawyer submission (real pipeline: submit → lawyer reviews → notified)
     const [selLawyer, setSelLawyer] = useState(null);         // _id of the chosen lawyer
@@ -114,9 +174,14 @@ const ModDocuments = () => {
     const [genCaseId, setGenCaseId] = useState(null);         // case the document was generated for
     const [reviewNote, setReviewNote] = useState("");
     const [urgency, setUrgency] = useState("Normal");
+    const [withdrawing, setWithdrawing] = useState(false);
     const [reviewSent, setReviewSent] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-    const [reviewStatus, setReviewStatus] = useState(null);   // submitted | approved | returned | rejected
+    const [reviewStatus, setReviewStatus] = useState(null);   // submitted | approved | returned | rejected | needs_reapproval | migration_unrecoverable
+    // The API's own account of a status the migration could not fully carry
+    // over: headline, explanation and the way out. Kept as given — the wording
+    // is the migration policy's, not this component's to paraphrase.
+    const [reviewRecovery, setReviewRecovery] = useState(null);
     const [lawyerNote, setLawyerNote] = useState("");         // lawyer's note from the review
     const [revLawyerName, setRevLawyerName] = useState("");   // display name of the reviewing lawyer
     // Step 5 — final
@@ -126,21 +191,77 @@ const ModDocuments = () => {
     const STEPS = [
         { label: "Select Template", icon: "📋" },
         { label: "AI Generate Draft", icon: "✨" },
-        { label: "Review & Edit", icon: "✏️" },
+        { label: "Review", icon: "🔍" },
         { label: "Submit to Lawyer", icon: "⚖️" },
         { label: "Final & Export", icon: "📤" },
     ];
     const categories = ["All", "Civil", "Criminal", "Corporate", "Employment", "Property"];
     const catIcons = { All: "📋", Civil: "⚖️", Criminal: "🔒", Corporate: "🏢", Employment: "💼", Property: "🏠" };
     const statusColors = { Draft: "gray", "Under Review": "warn", Approved: "success", Returned: "warn", Rejected: "danger", Final: "info" };
+    // The shared view, not a ternary chain. The chain's default arm displayed
+    // every status nobody had enumerated as "Under Review" — which is how both
+    // migration recovery states came to be shown as work in progress.
+    const statusView = documentStatusView({ review_status: reviewStatus, recovery: reviewRecovery });
     const docStatus = genDone
         ? (reviewSent
-            ? (reviewStatus === "approved" ? "Final" : reviewStatus === "returned" ? "Returned" : reviewStatus === "rejected" ? "Rejected" : "Under Review")
+            ? statusView.label
             : userApproved ? "Approved" : "Draft")
         : "Draft";
     const GEN_STEPS = ["Extracting case data…", "Applying AI recommendations…", "Populating template…", "Formatting document…", "Finalising draft…"];
 
-    // Real verified lawyers for the review step
+    // The PDF for inline preview — of an EXACT revision where one is known.
+    //
+    // Two things were wrong here.
+    //
+    // REVISION SAFETY. This fetched "the current file". A regeneration between
+    // reading the document and fetching its bytes returned different bytes than
+    // the ones whose hash and verification verdict were on screen, and nothing
+    // said so. Passing the revision id and the hash we read makes that a 409 we
+    // can act on instead of a silent swap.
+    //
+    // THE LEAK. The old cleanup revoked `url`, a local set inside `.then`. When
+    // the component unmounted while the fetch was in flight, `revoked` was set,
+    // `.then` returned early, and `url` stayed null — while the object URL had
+    // ALREADY been created inside the fetch helper. Cleanup revoked nothing and
+    // the blob stayed alive for the life of the page. A URL that arrives after
+    // unmount is now revoked on arrival, because by then no cleanup function
+    // holds a reference to it.
+    useEffect(() => {
+        let live = true;
+        let url = null;
+        if (!docId) { setPreviewUrl(null); setPreviewIssue(null); return; }
+
+        fetchRevisionPreview(docId, {
+            revisionId: viewRev?.revision_id || docRevisionId,
+            expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
+        }).then((res) => {
+            if (!live) {
+                // Arrived too late to be shown. Revoke it HERE — the cleanup
+                // below has already run and cannot see this.
+                if (res?.data?.url) URL.revokeObjectURL(res.data.url);
+                return;
+            }
+            if (res?.data?.url) {
+                url = res.data.url;
+                setPreviewUrl(res.data.url);
+                setPreviewIssue(null);
+            } else {
+                setPreviewUrl(null);
+                // `revision_changed` is not a failure the user caused; it means
+                // the document moved under them, and the honest response is to
+                // say so and offer a reload rather than show a stale page.
+                setPreviewIssue(res?.code === "revision_changed"
+                    ? "This document was regenerated. Reload to see the current version."
+                    : (res?.error?.message || null));
+            }
+        });
+
+        return () => {
+            live = false;
+            if (url) URL.revokeObjectURL(url);
+        };
+    }, [docId, docRevisionId, docPdfSha256, viewRev]);
+
     useEffect(() => {
         if (step !== 3 || revLawyers.length) return;
         searchLawyers({ page_size: 50 }).then(({ data }) => {
@@ -157,12 +278,68 @@ const ModDocuments = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [step]);
 
+    // The catalogue. Read once — it changes when the server deploys, not while
+    // somebody is filling in a form.
+    useEffect(() => {
+        let live = true;
+        listTemplates().then(({ data, error }) => {
+            if (!live) return;
+            if (error) {
+                // No silent fallback to a hardcoded list. A stale list is how
+                // this screen came to offer documents nothing could render; an
+                // empty picker that says why is recoverable, a wrong one that
+                // looks right is not.
+                setTemplates([]);
+                setTemplateIssue(error.message
+                    || "Could not load the list of documents. Reload to try again.");
+                return;
+            }
+            setTemplates(Array.isArray(data) ? data : []);
+            setTemplateIssue(null);
+        });
+        return () => { live = false; };
+    }, []);
+
     // If the linked case already has a lawyer, the document goes to them
     useEffect(() => {
         const c = cases.find(x => (x._id || x.id) === genCaseId);
         setCaseLawyerId(c?.lawyer_id || null);
         if (c?.lawyer_id) setSelLawyer(c.lawyer_id);
     }, [genCaseId, cases]);
+
+    // RESUME AFTER A REFRESH.
+    //
+    // `docId` lives in React state, so a reload used to drop it and return the
+    // user to an empty Step 1 — with the document still on the server, and no
+    // way to say which one it was. Regenerating is not a neutral fallback: it is
+    // a second render, a second version, and for a document already sent, a
+    // second thing in a lawyer's queue nobody can tell from the first.
+    // THE CASE MUST BE RESOLVED FROM WHAT LOADED, not from generation state.
+    //
+    // This used to key off `genCaseId`, which is only ever set BY a generation
+    // and starts null. After a refresh there is no generation, so it stayed
+    // null, the effect returned early every time, and nothing was ever
+    // restored — the feature existed and never ran once.
+    const resumeCaseId = genCaseId || resolveCaseId(selectedCaseId, cases);
+
+    useDocumentResume({
+        caseId: resumeCaseId,
+        hasDocument: Boolean(docId),
+        getDocument: getDocumentV2,
+        onRestore: (restored, forCase) => {
+            if (!restored) return;
+            setGenCaseId(forCase);
+            setDocId(restored.docId);
+            if (restored.docTitle) setDocTitle(restored.docTitle);
+            setDocRevisionId(restored.docRevisionId);
+            setDocPdfSha256(restored.docPdfSha256);
+            setGenDone(restored.genDone);
+            setReviewSent(restored.reviewSent);
+            setReviewStatus(restored.reviewStatus);
+            setReviewRecovery(restored.reviewRecovery);
+            setStep(restored.step);
+        },
+    });
 
     // Poll the real review status while waiting for the lawyer
     useEffect(() => {
@@ -173,6 +350,7 @@ const ModDocuments = () => {
             const d = (Array.isArray(data) ? data : []).find(x => x._id === docId);
             if (d?.review_status) {
                 setReviewStatus(d.review_status);
+                setReviewRecovery(d.recovery || null);
                 setLawyerNote(d.lawyer_note || "");
             }
         };
@@ -182,18 +360,50 @@ const ModDocuments = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reviewSent, docId, genCaseId, reviewStatus]);
 
-    const submitToLawyer = async () => {
+    const submitToLawyer = async (retryKey = null) => {
         if (!docId) { toast.show("⚠️ Generate the document first (Step 2)", "warn"); return; }
         if (!selLawyer) { toast.show("⚠️ Select a lawyer first", "warn"); return; }
         setSubmitting(true);
-        const { data, error } = await submitDocumentForReview(docId, {
-            lawyer_id: selLawyer,
-            note: reviewNote.trim() || null,
-            urgency: urgency.toLowerCase(),
-        });
+        setDocIssue(null);
+
+        // The same rule as generation: one key per intent, reused by a retry.
+        submitKeyRef.current = retryKey || submitKeyRef.current || idempotencyKey();
+
+        // V2 only when this document HAS a revision and a hash — i.e. it was
+        // generated through V2. Submitting without them is what the server
+        // refuses, and refusing here would strand every legacy draft.
+        const viaV2 = docRevisionId && docPdfSha256 && docVersion != null;
+        const { data, error, status } = viaV2
+            ? await submitDocumentV2(docId, {
+                expectedVersion: docVersion,
+                expectedPdfSha256: docPdfSha256,
+                lawyerId: selLawyer,
+                urgency: urgency.toLowerCase(),
+                note: reviewNote.trim() || null,
+            }, submitKeyRef.current)
+            : await submitDocumentForReview(docId, {
+                lawyer_id: selLawyer,
+                note: reviewNote.trim() || null,
+                urgency: urgency.toLowerCase(),
+            });
         setSubmitting(false);
         if (error) {
-            toast.show("❌ " + (error.message || "Submission failed"), "danger", 4000);
+            // The document moved under the user — almost always their own
+            // regeneration in another tab. Shown as a blocking issue, not a
+            // toast, and NOT reported as submitted: a client who believes a
+            // lawyer has their document when nobody does will wait for a reply
+            // that is never coming.
+            if (status === 409) {
+                setDocIssue({
+                    message: "This document changed after you opened it. "
+                        + "Regenerate or reload before submitting.",
+                    code: errorCode(error), retryable: false,
+                });
+                return;
+            }
+            const issue = _v2Issue({ error, status });
+            if (issue.retryable) { setDocIssue(issue); return; }
+            toast.show("❌ " + issue.message, "danger", 4000);
             return;
         }
         setReviewStatus("submitted");
@@ -201,6 +411,57 @@ const ModDocuments = () => {
         setRevLawyerName(data?.lawyer_name || revLawyers.find(l => l._id === selLawyer)?.name || "your lawyer");
         setReviewSent(true);
         toast.show(`📤 Submitted — ${data?.lawyer_name || "the lawyer"} has been notified`, "success", 3500);
+    };
+
+    /* Take the document back off the lawyer's desk.
+     *
+     * ONLY WHILE IT IS STILL UNDER REVIEW. The server enforces that — a
+     * decided document cannot be un-decided — but the button is hidden once a
+     * verdict lands too, because offering an action that will certainly be
+     * refused reads as a broken screen rather than a rule.
+     *
+     * A 409 here means the lawyer decided WHILE the click was in flight. That
+     * is not an error to apologise for: the poll below will bring the verdict
+     * in a moment, so the message says what happened rather than asking the
+     * user to try again at something that can no longer succeed.
+     */
+    const withdrawFromReview = async (retryKey = null) => {
+        if (!docId || reviewStatus !== "submitted") return;
+        setWithdrawing(true);
+        setDocIssue(null);
+        withdrawKeyRef.current = retryKey || withdrawKeyRef.current || idempotencyKey();
+
+        const { error, status } = await withdrawDocumentV2(docId, withdrawKeyRef.current);
+        setWithdrawing(false);
+
+        if (error) {
+            if (status === 404 && errorCode(error) === "feature_disabled") {
+                // Legacy documents have no withdraw path at all. Say so plainly
+                // instead of implying the click failed.
+                toast.show("⚠️ This document was submitted the old way and "
+                    + "cannot be withdrawn — ask your lawyer to return it.", "warn", 5000);
+                return;
+            }
+            if (status === 409) {
+                toast.show("⚖️ Your lawyer has already responded — "
+                    + "this document can no longer be withdrawn.", "warn", 4500);
+                return;
+            }
+            const issue = _v2Issue({ error, status });
+            if (issue.retryable) { setDocIssue({ ...issue, onRetry: "withdraw" }); return; }
+            toast.show("❌ " + issue.message, "danger", 4000);
+            return;
+        }
+
+        // Back to a draft the client owns. The submit key is cleared with it:
+        // re-submitting after a withdrawal is a NEW intent, and reusing the old
+        // key would have the server replay the withdrawn submission instead.
+        withdrawKeyRef.current = null;
+        submitKeyRef.current = null;
+        setReviewSent(false);
+        setReviewStatus(null);
+        setLawyerNote("");
+        toast.show("↩️ Withdrawn — the document is yours again", "success", 3500);
     };
 
     const filteredDrafts = DRAFTS_DATA.filter(d =>
@@ -232,11 +493,17 @@ const ModDocuments = () => {
 
     const pickDraft = i => {
         setSelectedDraft(i);
-        if (selectedType) setDocTitle(DRAFTS_DATA[i].name + " — " + selectedType);
+        if (selectedType) setDocTitle(DRAFTS_DATA[i].name + " — " + selectedType.label);
     };
-    const pickType = key => {
-        setSelectedType(key);
-        if (selectedDraft !== null) setDocTitle(DRAFTS_DATA[selectedDraft].name + " — " + key);
+    // `spec` is the catalogue entry, not a label. handleGenerate needs the
+    // template_type the server keys builders by, and deriving it from a display
+    // name is exactly the mapping step that used to send "Contract" to the NDA
+    // builder.
+    const pickType = spec => {
+        setSelectedType(spec);
+        if (selectedDraft !== null) {
+            setDocTitle(DRAFTS_DATA[selectedDraft].name + " — " + spec.label);
+        }
     };
 
     // The one fact the whole draft step depends on: is there a case to draft
@@ -245,51 +512,177 @@ const ModDocuments = () => {
     const activeCaseId = selectedCaseId || (cases[0]?._id || cases[0]?.id) || "";
     const activeCase = cases.find(c => (c._id || c.id) === activeCaseId);
     const activeCaseTitle = activeCase?.title || activeCase?.case_type || "your case";
-    const unsupportedType = Boolean(selectedType && DOC_TYPE_MAP[selectedType] === null);
-    const canGenerate = Boolean(activeCaseId) && !unsupportedType;
+    // Nothing in the catalogue is unsupported: it is built FROM the builder
+    // map, so an entry cannot exist without something able to render it. The
+    // flag stays as a named constant rather than being deleted, because the
+    // readiness strip and the button both branch on it and a bare `false` at
+    // two call sites is harder to reason about than one explained name.
+    const unsupportedType = false;
+    // A document type MUST be chosen. Without this, an unset type used to fall
+    // through to a civil plaint (see backendType below), silently handing the
+    // user a real, filable plaint they never asked for.
+    const canGenerate = Boolean(activeCaseId) && Boolean(selectedType) && !unsupportedType;
 
-    const handleGenerate = async () => {
-        const templateKey = DOC_TYPE_MAP[selectedType];
-        if (selectedType && templateKey === null) {
+    const handleGenerate = async (retryKey = null) => {
+        const templateKey = selectedType?.template_type;
+        if (!selectedType) {
+            toast.show("⚠️ Choose a document type first", "warn"); return;
+        }
+        if (templateKey === null) {
             toast.show("⚠️ This document type is not yet supported by the AI", "warn"); return;
         }
         const caseId = selectedCaseId || (cases[0]?._id || cases[0]?.id);
         if (!caseId) {
             toast.show("⚠️ No case found — complete your legal intake first", "warn"); return;
         }
-        const backendType = templateKey || "plaint_civil";
+        // No fallback: an unmapped type is refused above, never coerced to a plaint.
+        const backendType = templateKey;
         setGenerating(true); setGenPct(10); setGenDone(false); setDocId(null);
+        // Clear the revision being previewed BEFORE rendering a new one.
+        //
+        // Without this the preview keeps asking for the old revision id while a
+        // new one is generated, and the moment the document id changes it would
+        // pair a new document with an old revision — a request that either
+        // 404s or, worse, renders bytes from the wrong draft under the new
+        // document's heading. A regeneration produces a NEW revision; nothing
+        // about the previous one survives it on screen.
+        setDocRevisionId(null); setDocPdfSha256(null); setDocVersion(null);
         setGenCaseId(caseId);
         // A regenerated document restarts the review pipeline
         setReviewSent(false); setReviewStatus(null); setLawyerNote(""); setUserApproved(false);
+        // A NEW intent unless this is a retry of the one that just failed.
+        // `retryKey` is passed only by the retry button, which reuses the key so
+        // a render that already happened is replayed rather than repeated.
+        generateKeyRef.current = retryKey || idempotencyKey();
+        setViewRev(null);   // a new draft is what the pane should show
+        setDocIssue(null);
+
         try {
-            // Phase 1 — AI field extraction
+            // Phase 1 — AI field extraction. Unchanged, and deliberately
+            // outside the idempotent unit: it is a read, it produces no
+            // revision, and re-running it costs nothing anyone is billed for.
             const extractRes = await extractDocumentFields(caseId, backendType);
             setGenPct(45);
             if (extractRes.error) {
                 toast.show("❌ " + (extractRes.error?.detail || "Field extraction failed"), "danger");
                 setGenerating(false); return;
             }
-            // Phase 2 — PDF generation
             const fields = extractRes.data?.fields || {};
-            const genRes = await generateDocument(caseId, backendType, fields);
-            setGenPct(90);
-            if (genRes.error) {
-                toast.show("❌ " + (genRes.error?.detail || "PDF generation failed"), "danger");
-                setGenerating(false); return;
+
+            // Phase 2 — the revision itself.
+            const viaV2 = await _generateViaV2({
+                caseId, backendType, fields, key: generateKeyRef.current,
+            });
+            if (viaV2.unavailable) {
+                // The flag is off. Legacy still renders a document; it simply
+                // carries no revision id or hash, so the preview falls back to
+                // "the current file" and the lawyer-side staleness guard has
+                // nothing to check. That is the pre-V2 behaviour, unchanged.
+                const genRes = await generateDocument(caseId, backendType, fields);
+                setGenPct(90);
+                if (genRes.error) {
+                    toast.show("❌ " + (genRes.error?.detail || "PDF generation failed"), "danger");
+                    setGenerating(false); return;
+                }
+                const legacyId = genRes.data?._id || genRes.data?.doc_id;
+                setDocId(legacyId);
+                rememberDraft(caseId, legacyId);
+                setDocRevisionId(null);
+                setDocPdfSha256(null);
+                if (genRes.data?.title) setDocTitle(genRes.data.title);
+                setCompliance(genRes.data?.compliance || null);
+                setVerification(genRes.data?.verification || null);
+                setFieldShape(null);   // the legacy path produces no shape report
+            } else if (viaV2.error) {
+                setGenerating(false);
+                setDocIssue(viaV2.issue);
+                // NOT reported as generated. A draft the user believes exists
+                // and then submits is worse than a visible failure.
+                return;
+            } else {
+                setDocId(viaV2.documentId);
+            // Remembered as soon as it exists, so a refresh at any point after
+            // this returns to THIS document rather than to an empty form.
+            // `caseId`, not `genCaseId`. `setGenCaseId(caseId)` above does not
+            // update the state this closure reads, so using the state here saved
+            // the draft under the PREVIOUS case — or under null on the first
+            // generation, where nothing would ever find it again.
+            rememberDraft(caseId, viaV2.documentId);
+                // These two are what make the preview revision-safe: the effect
+                // that loads the PDF asks for exactly this revision and refuses
+                // bytes whose hash differs.
+                setDocRevisionId(viaV2.revisionId);
+                setDocPdfSha256(viaV2.pdfSha256);
+                setDocVersion(viaV2.version);
+                setCompliance(viaV2.compliance || null);
+                setVerification(viaV2.verification || null);
+                setFieldShape(viaV2.fieldShape || null);
             }
-            const newDocId = genRes.data?._id || genRes.data?.doc_id;
-            setDocId(newDocId);
-            if (genRes.data?.title) setDocTitle(genRes.data.title);
-            setCompliance(genRes.data?.compliance || null);
-            setVerification(genRes.data?.verification || null);
+
             setGenPct(100);
+            // A new revision invalidates any submission intent formed against
+            // the previous one — otherwise a retry of the old submit would send
+            // a version the user is no longer looking at.
+            submitKeyRef.current = null;
             setTimeout(() => { setGenerating(false); setGenDone(true); toast.show("✅ Draft generated!", "success"); }, 300);
         } catch {
             toast.show("❌ Generation failed — check backend connection", "danger");
             setGenerating(false);
         }
     };
+
+    /* One revision through V2, or a signal that V2 is not available.
+     *
+     * Returns {unavailable} when the feature flag is off — that 404 is the
+     * flag saying "not here", not a failure worth showing anyone. Otherwise
+     * {revisionId, pdfSha256, version} or {error, issue}.
+     *
+     * The document identity and the revision are two calls sharing ONE key.
+     * That is safe because they are keyed independently on the server —
+     * `create` by (client, key) and `generate` by (document, key) — so a retry
+     * of the pair returns the same document AND the same revision rather than
+     * a second of either.
+     */
+    const _generateViaV2 = async ({ caseId, backendType, fields, key }) => {
+        const created = await createDocumentV2({
+            templateType: backendType,
+            title: docTitle || `${selectedType?.label || "Document"} draft`,
+            caseId,
+        }, key);
+        if (created.error) {
+            if (created.status === 404 && errorCode(created.error) === "feature_disabled") {
+                return { unavailable: true };
+            }
+            return { error: true, issue: _v2Issue(created) };
+        }
+
+        const documentId = created.data.id;
+        const rev = await generateRevisionV2(
+            documentId, { fields, templateType: backendType }, key);
+        if (rev.error) return { error: true, issue: _v2Issue(rev) };
+
+        return {
+            documentId,
+            revisionId: rev.data.revision_id,
+            pdfSha256: rev.data.pdf_sha256,
+            version: rev.data.version,
+            compliance: rev.data.compliance,
+            verification: rev.data.verification,
+            fieldShape: rev.data.field_shape,
+        };
+    };
+
+    /* What to tell the user about a V2 failure, and whether to offer a retry.
+     *
+     * 503 is the one where the outcome is genuinely unknown — the work may or
+     * may not have happened, which is precisely what the key is for, so the
+     * retry reuses it. A 409 or 422 is a decision the server made; repeating
+     * the identical request cannot change it. */
+    const _v2Issue = ({ error, status }) => ({
+        message: error?.message || "The request could not be completed.",
+        code: errorCode(error),
+        retryable: isRetryable(status, error),
+    });
 
     /* ── Header actions ── */
     const { setHeaderActions } = useHeaderActions();
@@ -334,7 +727,6 @@ const ModDocuments = () => {
         { label: "AI Generate Draft", active: step === 1 && !genDone, done: genDone },
         { label: "Draft Status: Created", active: step === 1 && genDone && !userApproved, done: userApproved },
         { label: "User Review", active: step === 2 && !userApproved, done: step > 2 || userApproved },
-        { label: "User Edit / Modify", active: step === 2 && editMode, done: step > 2 },
         { label: "Submit to Lawyer", active: step === 3 && !reviewSent, done: reviewSent },
         { label: "Lawyer Review", active: reviewSent && reviewStatus === "submitted", done: reviewSent && reviewStatus !== "submitted" && reviewStatus !== null },
         { label: "Lawyer Decision", active: false, done: ["approved", "returned", "rejected"].includes(reviewStatus) },
@@ -353,6 +745,35 @@ const ModDocuments = () => {
         ════════════════════════════════════════════════ */}
                 {step === 0 && (
                     <div>
+                        {/* EVERY DOCUMENT THIS CLIENT OWNS, on the dashboard.
+                            It was first placed inside the step-3 review pane,
+                            which is only reachable part-way through creating a
+                            NEW document — so the history of old ones was behind
+                            the flow you would use precisely because you could
+                            not find them. A mounted test caught it; nothing
+                            about the source looked wrong. */}
+                        <div style={{ marginBottom: 14 }}>
+                            <MyDocumentsPanel
+                                t={t}
+                                onOpen={restored => {
+                                    setDocId(restored.docId);
+                                    if (restored.docTitle) setDocTitle(restored.docTitle);
+                                    setDocRevisionId(restored.docRevisionId);
+                                    setDocPdfSha256(restored.docPdfSha256);
+                                    setGenDone(restored.genDone);
+                                    setReviewSent(restored.reviewSent);
+                                    setReviewStatus(restored.reviewStatus);
+                                    setReviewRecovery(restored.reviewRecovery);
+                                    setViewRev(null);
+                                    setStep(restored.step);
+                                    if (resumeCaseId) rememberDraft(resumeCaseId, restored.docId);
+                                }}
+                                onPreview={(id, actions) => setViewRev({
+                                    revision_id: actions.revisionId,
+                                    pdf_sha256: actions.pdfSha256,
+                                })} />
+                        </div>
+
                         {/* Stats bar */}
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 14 }}>
                             {[["Templates", String(DRAFTS_DATA.length), "📄", t.primary], ["Categories", String(new Set(DRAFTS_DATA.map(d => d.cat)).size), "📁", t.success]].map(([label, val, ico, col]) => (
@@ -434,7 +855,54 @@ const ModDocuments = () => {
                         <Card>
                             <STitle icon="sparkle" sub="Configure your document before AI drafting">Generation Settings</STitle>
                             <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-                                <div><Lbl>Document Title</Lbl><ThemedInput value={docTitle} onChange={e => setDocTitle(e.target.value)} placeholder={`${selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "Employment Dispute"} — ${selectedType || "Plaint"}`} /></div>
+                                <div>
+                                    <Lbl>Document Type</Lbl>
+                                    {templates === null ? (
+                                        <div style={{ fontSize: 12, color: t.textMuted, padding: "10px 0" }}>
+                                            Loading the available documents…
+                                        </div>
+                                    ) : templateIssue ? (
+                                        <div style={{ fontSize: 12, color: t.warn, padding: "10px 13px", borderRadius: 10, background: `${t.warn}12`, border: `1px solid ${t.warn}35` }}>
+                                            {templateIssue}
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <select
+                                                value={selectedType?.template_type || ""}
+                                                onChange={e => {
+                                                    const spec = templates.find(
+                                                        x => x.template_type === e.target.value);
+                                                    if (spec) pickType(spec);
+                                                }}
+                                                style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5, fontFamily: "'Inter',sans-serif" }}>
+                                                <option value="">Select a document type…</option>
+                                                {_byCategory(templates).map(([category, items]) => (
+                                                    <optgroup key={category} label={category}>
+                                                        {items.map(spec => (
+                                                            <option key={spec.template_type} value={spec.template_type}>
+                                                                {spec.label}
+                                                            </option>
+                                                        ))}
+                                                    </optgroup>
+                                                ))}
+                                            </select>
+                                            {/* The server's own description of what this
+                                                builder emits. Shown because several of
+                                                them are narrower than their name suggests
+                                                — the Vakalatnama entry is an execution
+                                                checklist and says so, and a user who picks
+                                                it expecting an appointment instrument needs
+                                                to read that BEFORE drafting, not after
+                                                filing. */}
+                                            {selectedType?.description && (
+                                                <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.6, marginTop: 7, padding: "9px 12px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
+                                                    {selectedType.description}
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                                <div><Lbl>Document Title</Lbl><ThemedInput value={docTitle} onChange={e => setDocTitle(e.target.value)} placeholder={`${selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "Employment Dispute"} — ${selectedType?.label || "Plaint"}`} /></div>
                                 {cases.length > 0 && (
                                     <div>
                                         <Lbl>Linked Case</Lbl>
@@ -498,6 +966,29 @@ const ModDocuments = () => {
                                 particulars a plaint must contain, and Order VI Rule 3
                                 makes the Appendix A forms mandatory. Advisory: it reports,
                                 it does not block. */}
+                            {/* A value that went nowhere.
+                                 *
+                                 * The document rendered with an empty line exactly
+                                 * where the user believes they supplied something,
+                                 * and until now nothing anywhere said so — the key
+                                 * was dropped in silence. Shown ABOVE compliance
+                                 * because it is a fact about what was submitted,
+                                 * which the reader needs before reading a verdict
+                                 * on what was produced from it. */}
+                            {genDone && fieldShape?.unknown?.length > 0 && (
+                                <div style={{ marginTop: 12, padding: "11px 14px", borderRadius: 12,
+                                    background: `${t.warn}12`, border: `1.5px solid ${t.warn}45` }}>
+                                    <div style={{ fontSize: 12.5, fontWeight: 700, color: t.warn, marginBottom: 4 }}>
+                                        {fieldShape.unknown.length} answer{fieldShape.unknown.length === 1 ? " was" : "s were"} not used
+                                    </div>
+                                    <div style={{ fontSize: 11, color: t.textMuted, lineHeight: 1.6 }}>
+                                        This document type does not have {fieldShape.unknown.length === 1 ? "a field" : "fields"} called{" "}
+                                        {fieldShape.unknown.join(", ")}. Whatever was entered there is
+                                        not in the draft — check the document before submitting it.
+                                    </div>
+                                </div>
+                            )}
+
                             {genDone && compliance?.checked && (
                                 <div style={{ marginTop: 13, padding: 13, borderRadius: 11,
                                     background: compliance.complete ? `${t.success}12` : `${t.warn}12`,
@@ -607,7 +1098,7 @@ const ModDocuments = () => {
                                         : !activeCaseId
                                             ? "Link a case to generate"
                                             : unsupportedType
-                                                ? `${selectedType} isn't supported yet`
+                                                ? `${selectedType?.label} isn't supported yet`
                                                 : "✨ Generate Draft"}
                                 </BtnPrimary>
                             ) : (
@@ -622,7 +1113,7 @@ const ModDocuments = () => {
                 )}
 
                 {/* ════════════════════════════════════════════════
-            STEP 3 — User Review & Edit
+            STEP 3 — User Review
         ════════════════════════════════════════════════ */}
                 {step === 2 && (
                     <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
@@ -633,62 +1124,146 @@ const ModDocuments = () => {
                                 <div style={{ width: 36, height: 36, borderRadius: 10, background: t.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>📄</div>
                                 <div style={{ flex: 1 }}>
                                     <div style={{ fontWeight: 700, color: t.text, fontSize: 14 }}>{docTitle || "Generated Document"}</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType} · {caseRef || "No ref"}</div>
+                                    <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType?.label || "—"} · {caseRef || "No ref"}</div>
                                 </div>
                                 <Badge type={statusColors[docStatus]}>{docStatus}</Badge>
-                                <button onClick={() => setEditMode(m => !m)} style={{ padding: "6px 13px", borderRadius: 10, border: `1.5px solid ${editMode ? t.primary : t.border}`, background: editMode ? t.primaryGlow : t.card, color: editMode ? t.primary : t.textMuted, fontSize: 11, fontWeight: 700, cursor: "pointer", transition: "all 0.2s" }}>
-                                    {editMode ? "✏️ Editing" : "✏️ Edit"}
+                                {/* "Change answers", not "Edit".
+                                    THE DOCUMENT IS A PDF IN AN IFRAME. The old
+                                    Edit toggle revealed a formatting toolbar
+                                    whose buttons called document.execCommand on
+                                    it — bold, italic, underline — none of which
+                                    can touch a PDF, and none of which were ever
+                                    saved or regenerated. A control that looks
+                                    like it edits and does not is worse than no
+                                    control: the user believes their changes
+                                    exist and submits a document that never
+                                    contained them.
+
+                                    Changing the answers and regenerating IS the
+                                    edit, and it is the only one this format
+                                    supports. It also maps exactly onto how the
+                                    document is versioned: a change produces a
+                                    new revision, not a mutated file. */}
+                                <button
+                                    onClick={() => goTo(1)}
+                                    title="Go back and change your answers, then regenerate"
+                                    style={{
+                                        padding: "6px 13px", borderRadius: 10,
+                                        border: `1.5px solid ${t.border}`,
+                                        background: t.card, color: t.textMuted,
+                                        fontSize: 11, fontWeight: 700, cursor: "pointer",
+                                    }}>
+                                    ✏️ Change answers
                                 </button>
                             </div>
 
-                            {/* Formatting toolbar — only in edit mode */}
-                            {editMode && (
-                                <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", borderBottom: `1px solid ${t.border}`, background: t.inputBg, flexWrap: "wrap", flexShrink: 0, borderRadius: "10px 10px 0 0", marginBottom: 0 }}>
-                                    <span style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, marginRight: 4 }}>FORMAT:</span>
-                                    {[["B", "bold"], ["I", "italic"], ["U", "underline"]].map(([label, cmd]) => (
-                                        <button key={cmd} onClick={() => { try { document.execCommand(cmd); } catch (e) { } }} style={tbBtn}>{label}</button>
-                                    ))}
-                                    <div style={{ width: 1, height: 16, background: t.border, margin: "0 4px" }} />
-                                    {[["≡L", "justifyLeft"], ["≡C", "justifyCenter"]].map(([label, cmd]) => (
-                                        <button key={cmd} onClick={() => { try { document.execCommand(cmd); } catch (e) { } }} style={tbBtn}>{label}</button>
-                                    ))}
-                                    <div style={{ width: 1, height: 16, background: t.border, margin: "0 4px" }} />
+                            {/* A V2 failure the user must act on.
+                                Not a toast: a draft that failed to generate, or
+                                a submission that did not land, is something the
+                                user will otherwise assume succeeded — and a
+                                client who believes a lawyer has their document
+                                waits for a reply nobody is going to send.
+
+                                The retry reuses the SAME key, so a request that
+                                did reach the server before the connection
+                                dropped is replayed rather than repeated. */}
+                            {docIssue && (
+                                <div style={{
+                                    marginBottom: 12, padding: "10px 14px", borderRadius: 10,
+                                    background: "#f59e0b14", border: "1px solid #f59e0b55",
+                                    color: t.text, fontSize: 12.5,
+                                    display: "flex", alignItems: "center", gap: 12,
+                                }}>
+                                    <span style={{ flex: 1 }}>⚠ {docIssue.message}</span>
+                                    {docIssue.retryable && (
+                                        <button
+                                            onClick={() => {
+                                                setDocIssue(null);
+                                                if (docIssue.onRetry === "withdraw") withdrawFromReview(withdrawKeyRef.current);
+                                                else if (docId) submitToLawyer(submitKeyRef.current);
+                                                else handleGenerate(generateKeyRef.current);
+                                            }}
+                                            style={{
+                                                background: t.primary, color: "#fff", border: "none",
+                                                borderRadius: 8, padding: "6px 14px",
+                                                fontSize: 12, fontWeight: 700, cursor: "pointer",
+                                                whiteSpace: "nowrap",
+                                            }}>
+                                            Retry
+                                        </button>
+                                    )}
                                 </div>
                             )}
 
-                            <div style={{ flex: 1, border: `1.5px solid ${editMode ? t.primary : t.border}`, borderRadius: editMode ? "0 0 12px 12px" : 12, overflow: "hidden", transition: "border-color 0.2s" }}>
-                                <div contentEditable={editMode} suppressContentEditableWarning style={{ padding: "20px 24px", fontSize: 13, lineHeight: 2.1, color: t.text, minHeight: 380, outline: "none", fontFamily: "Georgia,serif", background: editMode ? t.inputBg : t.card, cursor: editMode ? "text" : "default", overflowY: "auto" }}>
-                                    <p style={{ textAlign: "center", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>IN THE COURT OF CIVIL JUDGE, LAHORE</p>
-                                    <p style={{ textAlign: "center", fontSize: 12, color: t.textMuted, marginBottom: 16 }}>Employment Dispute — {selectedType || "Plaint"} No. ___/2026</p>
-                                    <p style={{ marginBottom: 8 }}><strong>Plaintiff:</strong> M. Usama, S/O [Father Name], CNIC [__________], R/O [Address], Rawalpindi.</p>
-                                    <p style={{ marginBottom: 14 }}><strong>Defendant:</strong> XYZ Corporation (Pvt.) Ltd., [Registered Address], Islamabad.</p>
-                                    <p style={{ marginBottom: 10 }}><strong>PLAINT UNDER ORDER VII RULE 1 CPC</strong></p>
-                                    <p style={{ marginBottom: 8 }}>1. That the plaintiff was employed with the defendant company as [Designation] since [Date], vide Employment Contract dated [__________].</p>
-                                    <p style={{ marginBottom: 8 }}>2. That on February 12, 2026, the defendant unlawfully terminated the plaintiff's services without lawful cause and without serving the required notice period.</p>
-                                    <p style={{ marginBottom: 8 }}>3. That the plaintiff is entitled to receive salary in lieu of notice period, unpaid dues, and compensation for wrongful termination.</p>
-                                    {editMode && <p style={{ marginBottom: 14, fontStyle: "italic", color: t.textMuted }}><em>[Editing enabled — click to modify any text above…]</em></p>}
-                                    <p style={{ marginBottom: 6 }}><strong>PRAYER:</strong></p>
-                                    <p>The plaintiff respectfully prays that this Honourable Court may be pleased to award PKR 500,000 as compensation together with costs of the suit.</p>
-                                </div>
+                            <div style={{ flex: 1, border: `1.5px solid ${t.border}`, borderRadius: 12, overflow: "hidden", background: "#fff", minHeight: 460 }}>
+                                {previewUrl ? (
+                                    <iframe title="Document preview" src={previewUrl} style={{ width: "100%", height: 460, border: "none", display: "block" }} />
+                                ) : (
+                                    <div style={{ padding: 40, textAlign: "center", color: t.textMuted, fontSize: 13, minHeight: 460, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                        {previewIssue
+                                            ? previewIssue
+                                            : docId ? "Loading document preview…"
+                                                : "Generate the document to preview it here."}
+                                    </div>
+                                )}
                             </div>
 
+                            {viewRev && (
+                                <div style={{ marginTop: 10, padding: "9px 12px", borderRadius: 10, background: `${t.warn}12`, border: `1px solid ${t.warn}35`, fontSize: 11.5, color: t.text, display: "flex", alignItems: "center", gap: 10 }}>
+                                    <span style={{ flex: 1 }}>
+                                        Showing an earlier version (v{viewRev.version}). Submitting still sends the latest.
+                                    </span>
+                                    <button
+                                        onClick={() => setViewRev(null)}
+                                        style={{ background: "transparent", border: `1px solid ${t.border}`, borderRadius: 8, padding: "5px 11px", fontSize: 11, fontWeight: 700, color: t.text, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "'Inter',sans-serif" }}>
+                                        Back to latest
+                                    </button>
+                                </div>
+                            )}
+
+                            <RevisionHistory
+                                docId={docId} t={t} reloadKey={docRevisionId}
+                                currentRevisionId={viewRev?.revision_id || docRevisionId}
+                                onPreview={rev => setViewRev(
+                                    rev.revision_id === docRevisionId ? null : rev)} />
+
                             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                                <BtnOutline onClick={() => { if (docId) { downloadDocument(docId, docTitle || "document"); } else { toast.show("⚠️ Generate the document first", "warn"); } }} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>📥 Download</BtnOutline>
+                                <BtnOutline onClick={() => { if (docId) { downloadDocumentFile(docId, docTitle || "document", {
+                                        revisionId: viewRev?.revision_id || docRevisionId,
+                                        expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
+                                    }); } else { toast.show("⚠️ Generate the document first", "warn"); } }} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>📥 Download</BtnOutline>
                             </div>
                         </Card>
 
                         {/* Right: review controls + workflow */}
                         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-                            {/* Compliance */}
+                            {/* Compliance — REAL records computed at generation.
+                                These replaced four hardcoded green ticks that
+                                showed "Verified" on every document regardless of
+                                content. compliance/verification are frozen on the
+                                document when it was generated. */}
                             <Card>
-                                <STitle icon="check" sub="Automated checks">Legal Compliance</STitle>
-                                {[["Legal Compliance", "success", "✓ Verified"], ["Case Details", "success", "✓ Verified"], ["Factual Info", "warn", "⚠ Review"], ["Format", "success", "✓ Passed"]].map(([lbl, type, s]) => (
-                                    <div key={lbl} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 9, background: t.inputBg, border: `1px solid ${t.border}`, marginBottom: 6 }}>
-                                        <span style={{ fontSize: 11.5, color: t.text }}>{lbl}</span>
-                                        <Badge type={type}>{s}</Badge>
-                                    </div>
-                                ))}
+                                <STitle icon="check" sub="Frozen at generation">Legal Compliance</STitle>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 9, background: t.inputBg, border: `1px solid ${t.border}`, marginBottom: 6 }}>
+                                    <span style={{ fontSize: 11.5, color: t.text }}>Statutory particulars</span>
+                                    {compliance?.checked
+                                        ? <Badge type={compliance.complete ? "success" : "warn"}>{compliance.complete ? "✓ Complete" : `${compliance.missing} missing`}</Badge>
+                                        : <Badge type="gray">Not encoded</Badge>}
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 9, background: t.inputBg, border: `1px solid ${t.border}` }}>
+                                    <span style={{ fontSize: 11.5, color: t.text }}>Citation check</span>
+                                    {verification
+                                        ? (verification.ran === false
+                                            ? <Badge type="warn">Not checked</Badge>
+                                            : (verification.counts?.not_in_corpus > 0
+                                                ? <Badge type="danger">{verification.counts.not_in_corpus} not found</Badge>
+                                                : <Badge type="success">✓ {verification.counts?.verified || 0} found</Badge>))
+                                        : <Badge type="gray">—</Badge>}
+                                </div>
+                                <div style={{ fontSize: 10, color: t.textMuted, marginTop: 8, fontStyle: "italic" }}>
+                                    Existence only — read every authority before filing. A lawyer must review this.
+                                </div>
                             </Card>
 
                             {/* User review decision */}
@@ -729,7 +1304,7 @@ const ModDocuments = () => {
                                 <div style={{ width: 38, height: 46, borderRadius: 8, background: t.card, border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{docTitle || "Employment Dispute"}</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType} · {caseRef || "No ref"}</div>
+                                    <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType?.label || "—"} · {caseRef || "No ref"}</div>
                                 </div>
                                 <Badge type="success">✓ User Approved</Badge>
                             </div>
@@ -843,11 +1418,22 @@ const ModDocuments = () => {
                                 {[
                                     { ico: "✅", label: "Document submitted", sub: "Done", done: true, active: false },
                                     { ico: "🔔", label: "Lawyer notified", sub: "Done", done: true, active: false },
-                                    { ico: "🔍", label: "Lawyer review", sub: reviewStatus === "submitted" ? "In progress — updates automatically" : "Complete", done: reviewStatus !== "submitted", active: reviewStatus === "submitted" },
                                     {
-                                        ico: reviewStatus === "approved" ? "✅" : reviewStatus === "returned" ? "↩️" : reviewStatus === "rejected" ? "❌" : "⚖️",
-                                        label: reviewStatus === "approved" ? "Approved by lawyer" : reviewStatus === "returned" ? "Returned with changes" : reviewStatus === "rejected" ? "Rejected by lawyer" : "Lawyer decision",
-                                        sub: reviewStatus === "submitted" ? "Pending" : "Recorded",
+                                        ico: statusView.isRecovery ? "⚠️" : "🔍",
+                                        label: "Lawyer review",
+                                        // NEVER "Complete" for a recovery state: the review is
+                                        // exactly what could not be carried over.
+                                        sub: statusView.isRecovery ? statusView.headline
+                                            : reviewStatus === "submitted" ? "In progress — updates automatically"
+                                            : "Complete",
+                                        done: !statusView.isRecovery && reviewStatus !== "submitted",
+                                        active: reviewStatus === "submitted",
+                                    },
+                                    {
+                                        ico: statusView.isRecovery ? "⚠️" : reviewStatus === "approved" ? "✅" : reviewStatus === "returned" ? "↩️" : reviewStatus === "rejected" ? "❌" : "⚖️",
+                                        label: statusView.isRecovery ? statusView.headline : reviewStatus === "approved" ? "Approved by lawyer" : reviewStatus === "returned" ? "Returned with changes" : reviewStatus === "rejected" ? "Rejected by lawyer" : "Lawyer decision",
+                                        sub: statusView.isRecovery ? "Could not be carried over"
+                                            : reviewStatus === "submitted" ? "Pending" : "Recorded",
                                         done: ["approved", "returned", "rejected"].includes(reviewStatus), active: false,
                                     },
                                 ].map((item, i) => (
@@ -864,9 +1450,37 @@ const ModDocuments = () => {
 
                             {/* Real status-driven actions */}
                             {reviewStatus === "submitted" && (
-                                <div style={{ marginTop: 4, padding: "12px 14px", borderRadius: 12, background: t.primaryGlow, border: `1px solid ${t.primary}30`, fontSize: 11.5, color: t.textMuted, lineHeight: 1.6 }}>
-                                    ⏳ Waiting for {revLawyerName} to review. This page checks automatically —
-                                    you'll also get a notification the moment they respond.
+                                <div style={{ marginTop: 4 }}>
+                                    <div style={{ padding: "12px 14px", borderRadius: 12, background: t.primaryGlow, border: `1px solid ${t.primary}30`, fontSize: 11.5, color: t.textMuted, lineHeight: 1.6, marginBottom: 8 }}>
+                                        ⏳ Waiting for {revLawyerName} to review. This page checks automatically —
+                                        you'll also get a notification the moment they respond.
+                                    </div>
+                                    <button
+                                        onClick={() => withdrawFromReview()}
+                                        disabled={withdrawing}
+                                        style={{ width: "100%", padding: "10px", borderRadius: 11, border: `1px solid ${t.border}`, background: "transparent", color: t.textMuted, fontSize: 12, fontWeight: 600, cursor: withdrawing ? "default" : "pointer", fontFamily: "'Inter',sans-serif", opacity: withdrawing ? 0.6 : 1 }}>
+                                        {withdrawing ? "Withdrawing…" : "↩️ Withdraw from review"}
+                                    </button>
+                                </div>
+                            )}
+                            {statusView.isRecovery && (
+                                <div style={{ marginTop: 4 }}>
+                                    <div style={{ padding: "12px 14px", borderRadius: 12, background: `${t.warn}10`, border: `1px solid ${t.warn}30`, marginBottom: 8 }}>
+                                        <div style={{ fontSize: 11, fontWeight: 700, color: t.warn, marginBottom: 4 }}>
+                                            ⚠️ {statusView.headline}
+                                        </div>
+                                        {/* The API's words. A client did nothing wrong here and
+                                            cannot be expected to know what the status means; left
+                                            to infer, they assume their work is gone. */}
+                                        <div style={{ fontSize: 12, color: t.text, lineHeight: 1.6 }}>
+                                            {statusView.explanation}
+                                        </div>
+                                    </div>
+                                    <BtnPrimary
+                                        onClick={() => { setReviewSent(false); setReviewStatus(null); setReviewRecovery(null); goTo(1); }}
+                                        style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 11, justifyContent: "center" }}>
+                                        ✏️ {statusView.actionLabel} →
+                                    </BtnPrimary>
                                 </div>
                             )}
                             {(reviewStatus === "returned" || reviewStatus === "rejected") && (
@@ -897,9 +1511,9 @@ const ModDocuments = () => {
                                 <STitle icon="file" sub="Submission overview">Details</STitle>
                                 <div style={{ padding: "9px 12px", borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}30`, marginBottom: 10 }}>
                                     <div style={{ fontSize: 12, fontWeight: 700, color: t.text, marginBottom: 1 }}>{docTitle || "Employment Dispute"}</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType} · {caseRef || "No ref"}</div>
+                                    <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType?.label || "—"} · {caseRef || "No ref"}</div>
                                 </div>
-                                {[["Lawyer", revLawyerName], ["Urgency", urgency], ["Type", selectedType], ["Status", null]].map(([k, v]) => (
+                                {[["Lawyer", revLawyerName], ["Urgency", urgency], ["Type", selectedType?.label || "—"], ["Status", null]].map(([k, v]) => (
                                     <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>{k}</span>
                                         {k === "Status" ? <Badge type={statusColors[docStatus]}>{docStatus}</Badge>
@@ -913,7 +1527,10 @@ const ModDocuments = () => {
                             <Card>
                                 <STitle icon="dl" sub="Download the generated PDF">Export</STitle>
                                 <BtnOutline
-                                    onClick={() => { if (docId) { downloadDocument(docId, docTitle || "document"); } else { toast.show("Generate the document first", "warn"); } }}
+                                    onClick={() => { if (docId) { downloadDocumentFile(docId, docTitle || "document", {
+                                        revisionId: viewRev?.revision_id || docRevisionId,
+                                        expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
+                                    }); } else { toast.show("Generate the document first", "warn"); } }}
                                     disabled={!docId}
                                     style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 11, justifyContent: "center" }}>
                                     {docId ? "📥 Download PDF" : "Generate the document first"}
@@ -948,22 +1565,13 @@ const ModDocuments = () => {
                                 <Badge type="info">Final</Badge>
                             </div>
 
-                            {/* Final doc preview (read-only) */}
-                            <div style={{ flex: 1, border: `1.5px solid ${t.success}40`, borderRadius: 12, background: t.card, padding: "20px 24px", fontSize: 13, lineHeight: 2.1, color: t.text, fontFamily: "Georgia,serif", overflowY: "auto", minHeight: 360 }}>
-                                <p style={{ textAlign: "center", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>IN THE COURT OF CIVIL JUDGE, LAHORE</p>
-                                <p style={{ textAlign: "center", fontSize: 12, color: t.textMuted, marginBottom: 16 }}>Employment Dispute — {selectedType || "Plaint"} No. ___/2026</p>
-                                <p style={{ marginBottom: 8 }}><strong>Plaintiff:</strong> M. Usama, S/O [Father Name], CNIC [__________], R/O [Address], Rawalpindi.</p>
-                                <p style={{ marginBottom: 14 }}><strong>Defendant:</strong> XYZ Corporation (Pvt.) Ltd., [Registered Address], Islamabad.</p>
-                                <p style={{ marginBottom: 10 }}><strong>PLAINT UNDER ORDER VII RULE 1 CPC</strong></p>
-                                <p style={{ marginBottom: 8 }}>1. That the plaintiff was employed with the defendant company as [Designation] since [Date], vide Employment Contract dated [__________].</p>
-                                <p style={{ marginBottom: 8 }}>2. That on February 12, 2026, the defendant unlawfully terminated the plaintiff's services without lawful cause and without serving the required notice period.</p>
-                                <p style={{ marginBottom: 8 }}>3. That the plaintiff is entitled to receive salary in lieu of notice period, unpaid dues, and compensation for wrongful termination.</p>
-                                <p style={{ marginBottom: 6 }}><strong>PRAYER:</strong></p>
-                                <p style={{ marginBottom: 20 }}>The plaintiff respectfully prays that this Honourable Court may be pleased to award PKR 500,000 as compensation together with costs of the suit.</p>
-                                <div style={{ borderTop: `1px solid ${t.border}`, paddingTop: 14, display: "flex", justifyContent: "space-between", fontSize: 11, color: t.textMuted }}>
-                                    <span>🏛 Approved by {revLawyerName || "Lawyer"}</span>
-                                    <span>📅 {new Date().toLocaleDateString("en-GB")}</span>
-                                </div>
+                            {/* Final doc preview — the REAL approved PDF, rendered inline. */}
+                            <div style={{ flex: 1, border: `1.5px solid ${t.success}40`, borderRadius: 12, background: "#fff", overflow: "hidden", minHeight: 420 }}>
+                                {previewUrl ? (
+                                    <iframe title="Approved document" src={previewUrl} style={{ width: "100%", height: 420, border: "none", display: "block" }} />
+                                ) : (
+                                    <div style={{ padding: 40, textAlign: "center", color: t.textMuted, fontSize: 13, minHeight: 420, display: "flex", alignItems: "center", justifyContent: "center" }}>Loading the approved document…</div>
+                                )}
                             </div>
 
                             {/* Export actions */}
@@ -974,7 +1582,10 @@ const ModDocuments = () => {
                                     "generate" was meaningless too. */}
                                 <div style={{ marginBottom: 8 }}>
                                     <BtnOutline
-                                        onClick={() => { if (docId) { setExported(true); downloadDocument(docId, docTitle || "document"); } else { toast.show("Generate the document first", "warn"); } }}
+                                        onClick={() => { if (docId) { setExported(true); downloadDocumentFile(docId, docTitle || "document", {
+                                        revisionId: viewRev?.revision_id || docRevisionId,
+                                        expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
+                                    }); } else { toast.show("Generate the document first", "warn"); } }}
                                         disabled={!docId}
                                         style={{ width: "100%", fontSize: 12, padding: "12px", borderRadius: 11, justifyContent: "center" }}>
                                         {docId ? "📥 Download PDF" : "Generate the document first"}
@@ -997,7 +1608,7 @@ const ModDocuments = () => {
                             {/* Document summary */}
                             <Card>
                                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 10 }}>Document Summary</div>
-                                {[["Type", selectedType || "—"], ["Template", selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Compliance", null]].map(([k, v]) => (
+                                {[["Type", selectedType?.label || "—"], ["Template", selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Compliance", null]].map(([k, v]) => (
                                     <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>{k}</span>
                                         {k === "Status" ? <Badge type="info">Final</Badge> : k === "Compliance" ? <Badge type="success">✓ Verified</Badge> : <span style={{ fontWeight: 600, color: t.text, textAlign: "right", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>}

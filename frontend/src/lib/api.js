@@ -84,11 +84,26 @@ function formatResponseError(body) {
         .join('; ');
     } else if (typeof errorObj.detail === 'string') {
       message = errorObj.detail;
+    } else if (errorObj.detail && typeof errorObj.detail === 'object'
+               && errorObj.detail.message) {
+      // A machine-readable detail: { code, message }. Reached when a route
+      // raises HTTPException with a dict and no global handler reshapes it.
+      message = String(errorObj.detail.message);
+      errorObj.code = errorObj.detail.code || null;
     } else {
       message = JSON.stringify(errorObj.detail);
     }
   } else if (errorObj.message) {
     message = String(errorObj.message);
+  } else if (errorObj.error && typeof errorObj.error === 'object') {
+    // THE ENVELOPE: { error: {code, message}, status_code }.
+    //
+    // This branch used to be `String(errorObj.error)` on an object, which
+    // renders as "[object Object]" — so every machine-readable error the V2
+    // routes were carefully designed to return arrived at the user as that
+    // string, and the `code` a caller needs to branch on was thrown away.
+    message = String(errorObj.error.message || message);
+    errorObj.code = errorObj.error.code || null;
   } else if (errorObj.error) {
     message = String(errorObj.error);
   }
@@ -147,9 +162,12 @@ async function apiFetch(path, options = {}) {
   return { data: res.ok ? body : null, error: res.ok ? null : formatResponseError(body), status: res.status };
 }
 
-// Streams a text/event-stream Response, invoking onToken(chunk) per SSE token.
-// Shared by aiQueryStream / aiDraftStream / aiPleadingUrduStream.
-async function _consumeSSE(res, onToken) {
+// Streams a text/event-stream Response, invoking onToken(chunk) per content
+// token. onEvent(obj) receives any NON-content SSE object — e.g. the final
+// `verification` record the draft stream emits after the last token. Without it
+// that record (the citation check the backend runs on every lawyer draft) was
+// computed, sent, and silently dropped here.
+async function _consumeSSE(res, onToken, onEvent) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -168,6 +186,7 @@ async function _consumeSSE(res, onToken) {
         const parsed = JSON.parse(raw);
         if (parsed.error) throw new Error(parsed.error);
         if (parsed.content) onToken(parsed.content);
+        else if (onEvent) onEvent(parsed);   // verification + any future events
       } catch (e) {
         if (!(e instanceof SyntaxError)) throw e;
       }
@@ -506,6 +525,21 @@ export async function downloadDocument(doc_id, filename = 'document.pdf') {
   const { data: res, error } = await apiFetch(`/documents/${doc_id}/download`, { returnResponse: true });
   if (error) return { error: error.message || 'Download failed' };
   return _saveBlob(res, filename);
+}
+
+// Fetch the REAL generated PDF as an object URL for INLINE preview (iframe).
+// This is what replaced the hardcoded placeholder documents both the client and
+// the lawyer used to see: the bytes rendered here are the exact bytes of the
+// downloaded PDF. The caller owns the URL and must revoke it when done/replaced.
+export async function fetchDocumentPreviewUrl(doc_id) {
+  const { data: res, error } = await apiFetch(`/documents/${doc_id}/download`, { returnResponse: true });
+  if (error) return { error: error.message || 'Preview failed' };
+  try {
+    const blob = await res.blob();
+    return { data: URL.createObjectURL(blob) };
+  } catch {
+    return { error: 'Preview failed' };
+  }
 }
 
 // Streams a Response body to a browser download. Shared by the PDF endpoints.
@@ -1167,14 +1201,17 @@ export async function aiQueryStream(message, { templateId = "chat", context = {}
 }
 
 // RAG-grounded drafting: retrieves real Pakistani law before the LLM drafts.
-export async function aiDraftStream({ instruction, document = '', template = '', case_type = 'civil', province = 'federal', history = [] }, onToken) {
+export async function aiDraftStream({ instruction, document = '', template = '', case_id = null, case_type = 'civil', province = 'federal', history = [] }, onToken, onEvent) {
+  // case_id (CASE-BOUND mode): the server authorises the case and DERIVES
+  // case_type + province from it. case_type/province below are the GENERAL-mode
+  // fallback used only when no case_id is sent.
   const { data: res, error, status } = await apiFetch('/ai/draft/stream', {
     method: 'POST',
     returnResponse: true,
-    body: JSON.stringify({ instruction, document, template, case_type, province, history }),
+    body: JSON.stringify({ instruction, document, template, case_id, case_type, province, history }),
   });
   if (error) throw new Error(error.message || `HTTP ${status}`);
-  return _consumeSSE(res, onToken);
+  return _consumeSSE(res, onToken, onEvent);
 }
 
 // ─── Court-Urdu pleading generator ────────────────────────────────────────────
@@ -1187,6 +1224,94 @@ export async function aiPleadingUrduStream({ document = '', template = '' }, onT
   });
   if (error) throw new Error(error.message || `HTTP ${status}`);
   return _consumeSSE(res, onToken);
+}
+
+/* A finished draft as a real, hashed document.
+ *
+ * Until now this page's output could only leave as a .doc export: outside the
+ * system, with no hash, no revision, and no authority ever checked. A lawyer
+ * could file it and nothing recorded what had been filed.
+ *
+ * Through V2 it gets what every other document gets — an immutable artifact
+ * with a sha256, a revision it can be named by, and the citation existence
+ * check run over its text. What it does NOT get is a statutory completeness
+ * verdict, and that is correct: the system does not know what instrument this
+ * is, so `pleading_rules` reports `checked: false` rather than inventing one.
+ *
+ * Returns { docId, revisionId, pdfSha256, verification } or { error }.
+ */
+export async function publishDraftAsDocumentV2(
+  { title, bodyHtml, authorName = '' }, key,
+) {
+  const created = await createDocumentV2({
+    templateType: 'lawyer_draft',
+    title: title || 'Lawyer draft',
+  }, key);
+  if (created.error) {
+    return { error: created.error, status: created.status,
+             code: errorCode(created.error) };
+  }
+
+  const docId = created.data.id;
+  const rev = await generateRevisionV2(docId, {
+    templateType: 'lawyer_draft',
+    fields: { title, body_html: bodyHtml, author_name: authorName },
+  }, key);
+  if (rev.error) {
+    return { error: rev.error, status: rev.status, code: errorCode(rev.error) };
+  }
+
+  return {
+    docId,
+    revisionId: rev.data.revision_id,
+    pdfSha256: rev.data.pdf_sha256,
+    verification: rev.data.verification,
+  };
+}
+
+/* A court-Urdu pleading as a real, hashed document.
+ *
+ * The legacy call below creates a document with NO idempotency key, so a second
+ * click — a slow render, an impatient lawyer, a retried request — produces a
+ * second document and a second PDF. This is the same intent expressed once:
+ * one key covers the create and the render, exactly as the client's generate
+ * does, so a retry returns the work already done instead of repeating it.
+ *
+ * Returns { docId, revisionId, pdfSha256 } or { error }. Callers fall back to
+ * pleadingUrduPdf when the flag is off — that 404 is the flag saying "not
+ * here", not a failure worth showing a lawyer mid-draft.
+ */
+export async function pleadingUrduDocumentV2(
+  { urdu_text, title_ur = '', court_ur = '', english_label = '' }, key,
+) {
+  const created = await createDocumentV2({
+    templateType: 'urdu_pleading',
+    title: title_ur || english_label || 'Court Urdu pleading',
+  }, key);
+  if (created.error) {
+    return { error: created.error, status: created.status,
+             code: errorCode(created.error) };
+  }
+
+  const docId = created.data.id;
+  // THE SAME KEY. The create and the render are one intent — "make me this
+  // pleading" — and they are two calls only because a create that also rendered
+  // would make the retry of a failed render create a second document. Keying
+  // them separately would reintroduce exactly the duplicate this replaces.
+  const rev = await generateRevisionV2(docId, {
+    templateType: 'urdu_pleading',
+    fields: { urdu_text, title_ur, court_ur, english_label },
+  }, key);
+  if (rev.error) {
+    return { error: rev.error, status: rev.status, code: errorCode(rev.error) };
+  }
+
+  return {
+    docId,
+    revisionId: rev.data.revision_id,
+    pdfSha256: rev.data.pdf_sha256,
+    verification: rev.data.verification,
+  };
 }
 
 export async function pleadingUrduPdf({ urdu_text, title_ur = '', court_ur = '', english_label = '' }) {
@@ -1273,4 +1398,320 @@ export async function researchTurnStatus(session_id, client_message_id) {
   return apiFetch(
     `/research-conversations/${encodeURIComponent(session_id)}/turn-status?${params}`,
   );
+}
+
+// Find your own conversations by what was said in them.
+//
+// A sidebar capped at fifty entries with no search meant a conversation from
+// six months ago was reachable only by scrolling past everything since.
+//
+// The path is /search/messages rather than /search because /{session_id} sits
+// on the same router: two segments cannot be shadowed by a one-segment
+// parameter, and route ORDER is a poor place to keep a distinction that
+// decides whose data is read.
+export async function searchConversations(q, { limit = 25 } = {}) {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  return apiFetch(`/conversations/search/messages?${params.toString()}`);
+}
+
+export async function searchResearchConversations(q, { limit = 25 } = {}) {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  return apiFetch(`/research-conversations/search/messages?${params.toString()}`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DOCUMENTS_V2
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The legacy calls above (/documents/generate, /{id}/submit, /{id}/review,
+// /{id}/download) carry no version, no hash and no idempotency key. A retry of
+// a lost response there generates a second document or applies a review twice,
+// and a preview fetches "the current file" rather than the revision whose hash
+// and verification verdict the reader is looking at.
+//
+// These carry all three. Every mutating call takes an Idempotency-Key, and the
+// key is minted ONCE PER INTENT rather than per transmission — a retry of the
+// same intent must reuse it, or the whole mechanism is unreachable from the UI
+// in exactly the way it was on the chat surfaces.
+
+/* A key for one intent. Mint it where the user acts, not where the request is
+   sent, and pass the SAME one to every retry of that action. */
+export function idempotencyKey() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  } catch {
+    /* fall through */
+  }
+  return `k-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/* Which of the V2 failures this is, as a stable string the UI can branch on.
+ *
+ * The server returns { error: { code, message } } precisely so a client does
+ * not have to match on prose. `error.code` survives `formatResponseError`;
+ * this is the accessor so no caller has to know that. */
+export function errorCode(error) {
+  return error?.code || null;
+}
+
+/* Is this failure worth retrying with the SAME key?
+ *
+ * 503 means the backlog could not be read — the work may or may not have
+ * happened, which is exactly what an idempotency key exists for. A 409 is a
+ * decision (the document moved, or the key was reused for different content)
+ * and repeating it changes nothing. A 422 is malformed and will stay so. */
+export function isRetryable(status, error) {
+  // Named rather than left to fall out of the status check below. Both are 409
+  // today, so both are already excluded — but a future change to how conflicts
+  // are treated must not quietly make either of these retryable. An
+  // idempotency mismatch is a client bug that retrying hides; a review limit is
+  // permanent for that document, and retrying it loops forever.
+  if (['idempotency_mismatch', 'review_limit_reached'].includes(errorCode(error))) {
+    return false;
+  }
+  return !status || status === 0 || status === 503 || status === 504;
+}
+
+function v2Headers(key) {
+  return key ? { 'Idempotency-Key': key } : {};
+}
+
+export async function createDocumentV2(
+  { templateType, title, caseId = null }, key,
+) {
+  return apiFetch('/documents/v2/', {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({ template_type: templateType, title, case_id: caseId }),
+  });
+}
+
+export async function generateRevisionV2(docId, { fields = {}, templateType = null }, key) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/generate`, {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({ fields, template_type: templateType }),
+  });
+}
+
+export async function getDocumentV2(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}`);
+}
+
+/* Every document this system can actually render.
+ *
+ * NOT a V2 call and not behind the flag: it describes the PDF builders, which
+ * both generation paths use. It exists because two screens each hardcoded their
+ * own template list, disagreeing with each other and with the backend — a tile
+ * for a document nothing can build produces either nothing or a well-formatted
+ * PDF of a different instrument, and the user files it.
+ *
+ * Every entry names its builder's real fields, so a form built from this cannot
+ * ask for a key the renderer ignores. */
+export async function listTemplates(
+  { includeSystem = false, includeLawyerAuthored = false } = {},
+) {
+  const params = new URLSearchParams();
+  if (includeSystem) params.set('include_system', 'true');
+  if (includeLawyerAuthored) params.set('include_lawyer_authored', 'true');
+  const qs = params.toString();
+  return apiFetch(`/documents/templates${qs ? `?${qs}` : ''}`);
+}
+
+export async function listRevisionsV2(docId, { limit = 50 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/revisions?${params}`);
+}
+
+/* The PDF of ONE named revision, as an object URL.
+ *
+ * `expectedPdfSha256` is the hash the caller READ, and the server compares it
+ * to the hash it holds — so a regeneration between loading the document and
+ * fetching its bytes comes back as a 409 the UI can act on, instead of
+ * different bytes rendered under the old verdict. Pass the hash from the same
+ * response the preview was opened from; passing null asks for whatever is
+ * there, which is the legacy behaviour and should be rare.
+ *
+ * Returns { url, revisionId, etag } — the caller MUST revokeObjectURL(url)
+ * when it is done, including when the component unmounted while this was in
+ * flight. See the callers: a URL created after unmount is a leak that no
+ * cleanup function has a reference to. */
+export async function previewRevisionV2(docId, revisionId, { expectedPdfSha256 = null } = {}) {
+  const params = new URLSearchParams();
+  if (expectedPdfSha256) params.set('expected_pdf_sha256', expectedPdfSha256);
+  const qs = params.toString();
+  const { data, error, status } = await apiFetch(
+    `/documents/v2/${encodeURIComponent(docId)}/revisions/`
+    + `${encodeURIComponent(revisionId)}/preview${qs ? `?${qs}` : ''}`,
+    { returnResponse: true },
+  );
+  if (error || !data) return { data: null, error, status };
+
+  const blob = await data.blob();
+  return {
+    data: {
+      url: URL.createObjectURL(blob),
+      revisionId: data.headers.get('X-Revision-Id') || revisionId,
+      version: data.headers.get('X-Revision-Version') || null,
+      // The strong ETag is the hash of exactly these bytes, so a caller can
+      // check what it received rather than trusting what it asked for.
+      etag: (data.headers.get('ETag') || '').replace(/"/g, ''),
+    },
+    error: null,
+    status,
+  };
+}
+
+export async function submitDocumentV2(
+  docId, { expectedVersion, expectedPdfSha256, lawyerId, urgency = 'normal', note = null }, key,
+) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/submit`, {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      expected_version: expectedVersion,
+      expected_pdf_sha256: expectedPdfSha256,
+      lawyer_id: lawyerId, urgency, note,
+    }),
+  });
+}
+
+export async function reviewDocumentV2(
+  docId, { action, expectedVersion, expectedPdfSha256, note = null }, key,
+) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/review`, {
+    method: 'PATCH',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      action,
+      expected_version: expectedVersion,
+      expected_pdf_sha256: expectedPdfSha256,
+      note,
+    }),
+  });
+}
+
+export async function withdrawDocumentV2(docId, key) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/withdraw`, {
+    method: 'POST',
+    headers: v2Headers(key),
+  });
+}
+
+/* The lawyer's inbox for ONE tab.
+ *
+ * `status` is one of QUEUE_FILTERS below and is sent on every call. It used not
+ * to be: the caller took the default, got only pending documents, and then
+ * filtered client-side over that one page — so the Approved, Returned and
+ * Rejected tabs were permanently empty and their counts read 0 while the work
+ * existed. An unknown status is a 422 from the server, never an empty page.
+ *
+ * The response carries `counts` on the FIRST page only (no cursor). They are a
+ * grouped scan over the lawyer's whole history, which is the unbounded work
+ * pagination exists to avoid, so a continuation returns `counts: null` — which
+ * means "unchanged", not zero, and must never be rendered as a number.
+ *
+ * `status` also comes back on the response, so a client that changed tabs
+ * mid-flight can tell a late reply belongs to a tab it is no longer showing.
+ */
+export const QUEUE_FILTERS = ['all', 'submitted', 'approved', 'returned', 'rejected'];
+
+export async function reviewQueueV2({ status = 'submitted', cursor = null, limit = 25 } = {}) {
+  const params = new URLSearchParams({ status, limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  return apiFetch(`/documents/v2/review/queue?${params.toString()}`);
+}
+
+/* Everything this caller owns, newest first, cursor-paginated.
+ *
+ * ONE ENDPOINT FOR BOTH ROLES. Ownership is `client_id`, whoever that is: a
+ * lawyer drafting for themselves owns their output exactly as a client owns
+ * theirs. It exists because nothing listed a document by its owner — a saved
+ * draft or a standalone pleading was reachable only by id, in the session that
+ * created it, so navigating away lost it for good.
+ *
+ * Each row carries `revision_id` and `pdf_sha256`, which is exactly what
+ * downloadDocumentFile needs to fetch the right bytes. `downloadable` is false
+ * for a document whose render never produced any.
+ */
+export async function myDocumentsV2({ cursor = null, limit = 25 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  return apiFetch(`/documents/v2/mine?${params.toString()}`);
+}
+
+/* A download that is safe whichever backend produced the document.
+ *
+ * THE LEGACY ROUTE 404s ON EVERY V2 DOCUMENT. `/documents/{id}/download` serves
+ * `file_path`, and a V2 document does not have one: its bytes live in the
+ * artifact store under a revision id, and `repoint_document` never writes a
+ * file path back. So the Download button on both screens failed for every
+ * document generated through V2 — the exact documents this whole pipeline
+ * exists to produce.
+ *
+ * Same shape and the same fallback rule as fetchRevisionPreview: name the
+ * revision when the caller knows it, fall through to legacy when the flag is
+ * off. `expectedPdfSha256` makes a regeneration between reading the document
+ * and saving its bytes a 409 rather than a silent swap — a downloaded file
+ * outlives the page, so getting different bytes than the verdict on screen
+ * described is worse here than in a preview, not better.
+ *
+ * Returns { error } on failure, matching downloadDocument, so callers that
+ * already handle that keep working.
+ */
+export async function downloadDocumentFile(
+  docId, filename = 'document.pdf',
+  { revisionId = null, expectedPdfSha256 = null } = {},
+) {
+  if (revisionId) {
+    const params = new URLSearchParams();
+    if (expectedPdfSha256) params.set('expected_pdf_sha256', expectedPdfSha256);
+    const qs = params.toString();
+    const { data: res, error, status } = await apiFetch(
+      `/documents/v2/${encodeURIComponent(docId)}/revisions/`
+      + `${encodeURIComponent(revisionId)}/preview${qs ? `?${qs}` : ''}`,
+      { returnResponse: true },
+    );
+    if (res) return _saveBlob(res, filename);
+    // The flag is off. Anything else is a real failure and is reported as one
+    // rather than quietly retried against a route that cannot serve this
+    // document either.
+    if (!(status === 404 && errorCode(error) === 'feature_disabled')) {
+      return { error: error?.message || 'Download failed' };
+    }
+  }
+  return downloadDocument(docId, filename);
+}
+
+/* A preview that is safe whichever backend is live.
+ *
+ * V2 when the caller knows which revision it wants, legacy otherwise, and the
+ * V2 attempt falls back when the feature flag is off — that 404 is the flag
+ * saying "not here", not an error worth surfacing. Written as one function
+ * because the alternative is every screen learning which backend it is talking
+ * to, and screens get that wrong.
+ *
+ * Always returns { data: {url, revisionId, etag} | null, error, code }. The
+ * caller MUST revoke `url`, including when it arrives after unmount.
+ */
+export async function fetchRevisionPreview(
+  docId, { revisionId = null, expectedPdfSha256 = null } = {},
+) {
+  if (revisionId) {
+    const { data, error, status } = await previewRevisionV2(
+      docId, revisionId, { expectedPdfSha256 });
+    if (data) return { data, error: null, code: null };
+    // The flag is off: fall through to the legacy path rather than showing the
+    // user an error about a feature they were never offered.
+    if (!(status === 404 && errorCode(error) === 'feature_disabled')) {
+      return { data: null, error, code: errorCode(error) };
+    }
+  }
+  const legacy = await fetchDocumentPreviewUrl(docId);
+  if (legacy?.data) {
+    return { data: { url: legacy.data, revisionId: null, etag: null },
+             error: null, code: null };
+  }
+  return { data: null, error: { message: legacy?.error || 'Preview failed' },
+           code: null };
 }

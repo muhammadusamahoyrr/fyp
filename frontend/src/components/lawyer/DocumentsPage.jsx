@@ -5,8 +5,14 @@ import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Btn, Input } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
-import { listReviewQueue, reviewDocument, downloadDocument } from "@/lib/api.js";
+import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
+import {
+    listReviewQueue, reviewDocument, downloadDocumentFile,
+    fetchRevisionPreview, reviewDocumentV2, reviewQueueV2,
+    idempotencyKey, errorCode,
+} from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
+import { createGeneration } from "@/lib/attempt.js";
 
 function StatusBadge({ status }) {
     const s = STATUS_STYLES[status] || STATUS_STYLES.Draft;
@@ -92,26 +98,9 @@ const _TMPL_MAP = {
     legal_notice: "Legal Notice", nda: "NDA", rental_agreement: "Rental Agreement",
 };
 const _CASE_TYPE_MAP = { civil: "Civil", criminal: "Criminal", family: "Family", constitutional: "Constitutional" };
-
-// Placeholder body shown when a document has no inline content (real docs are PDFs)
-const DOC_CONTENT = `IN THE COURT OF THE CIVIL JUDGE, LAHORE
-
-Employment Dispute — Plaint No. ____/2026
-
-Plaintiff: M. Usama, S/O [Father Name], CNIC [__________], R/O [Address], Rawalpindi.
-
-Defendant: XYZ Corporation (Pvt.) Ltd., [Registered Address], Islamabad.
-
-PLAINT UNDER ORDER VII RULE 1 CPC
-
-1. That the plaintiff was employed with the defendant company as [Designation] since [Date], vide Employment Contract dated [__________].
-
-2. That on February 12, 2026, the defendant unlawfully terminated the plaintiff's services without lawful cause and without serving the required notice period.
-
-3. That the plaintiff is entitled to receive salary in lieu of notice period, unpaid dues, and compensation for wrongful termination.
-
-PRAYER:
-The plaintiff respectfully prays that this Honourable Court may be pleased to award PKR 500,000 as compensation together with costs of the suit.`;
+// (The DOC_CONTENT placeholder plaint was removed: the review and final screens
+// render the REAL generated PDF inline, pinned to the submitted revision via
+// fetchRevisionPreview so the page and the decision are about the same bytes.)
 
 const STEPS = [
     { id: "inbox", label: "Document Inbox", icon: "📥" },
@@ -301,19 +290,43 @@ const ACTION_CFG = {
     "Final": { label: "Open", icon: "📁", bg: "#189888", glow: "rgba(24,152,136,0.45)" },
 };
 
-function ScreenInbox({ t, onOpen, docs, loading }) {
-    const [statusF, setStatusF] = useState("All");
+/* The tabs, and the server status each one asks for.
+ *
+ * ONE TABLE, so a label and the query behind it cannot drift apart. They did:
+ * the queue was fetched with the default status ("submitted") and the tabs then
+ * filtered client-side over that one page, so Approved / Returned / Rejected
+ * were permanently empty and their counts read 0 while the work existed.
+ */
+const QUEUE_STATUS_OF = {
+    "All": "all",
+    "Pending Review": "submitted",
+    "Approved": "approved",
+    "Returned": "returned",
+    "Rejected": "rejected",
+};
+
+const QUEUE_TABS = [
+    ["All", "all"],
+    ["Pending Review", "submitted"],
+    ["Approved", "approved"],
+    ["Returned", "returned"],
+    ["Rejected", "rejected"],
+];
+
+function ScreenInbox({
+    t, onOpen, docs, loading, hasMore, loadingMore, onLoadMore,
+    statusF, onStatusChange, counts, serverFiltered,
+}) {
     const [search, setSearch] = useState("");
 
-    const statusTabs = ["All", "Pending Review", "Approved", "Returned", "Rejected"];
-    const counts = Object.fromEntries(
-        statusTabs.map(s => [s, s === "All"
-            ? docs.length
-            : docs.filter(d => d.status === s).length])
-    );
-
+    // The status filter is applied BY THE SERVER when V2 is live: `docs` already
+    // contains only the selected tab, and re-filtering here would be a no-op at
+    // best and would hide rows at worst. The legacy queue has no status
+    // parameter — it returns everything, unpaginated — so with the flag off the
+    // filtering has to happen here, and `serverFiltered` says which world we are
+    // in rather than leaving it to be guessed from the data.
     const filtered = docs.filter(d =>
-        (statusF === "All" || d.status === statusF) &&
+        (serverFiltered || statusF === "All" || d.status === statusF) &&
         (d.title.toLowerCase().includes(search.toLowerCase()) ||
             d.client.toLowerCase().includes(search.toLowerCase()) ||
             d.caseId.toLowerCase().includes(search.toLowerCase()))
@@ -412,10 +425,10 @@ function ScreenInbox({ t, onOpen, docs, loading }) {
 
             {/* ── Filter pills ──────────────────────────────── */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
-                {statusTabs.map(tab => {
+                {QUEUE_TABS.map(([tab]) => {
                     const active = statusF === tab;
                     return (
-                        <button key={tab} onClick={() => setStatusF(tab)} style={{
+                        <button key={tab} onClick={() => onStatusChange(tab)} style={{
                             display: "inline-flex", alignItems: "center", gap: 6,
                             padding: "7px 14px", borderRadius: 999, border: "none",
                             background: active ? t.primary : "rgba(255,255,255,0.07)",
@@ -432,7 +445,7 @@ function ScreenInbox({ t, onOpen, docs, loading }) {
                                 background: active ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)",
                                 color: active ? (t.mode === "dark" ? "#0b1c22" : "#fff") : "rgba(200,220,230,0.7)",
                                 fontSize: 11, fontWeight: 700,
-                            }}>{counts[tab]}</span>
+                            }}>{_tabCount(counts, tab, docs, serverFiltered)}</span>
                         </button>
                     );
                 })}
@@ -585,6 +598,28 @@ function ScreenInbox({ t, onOpen, docs, loading }) {
                     );
                 })}
 
+                {/* MORE OF THE INBOX.
+                    Follows the cursor, not "did this page return rows" — a page
+                    can come back short after documents are filtered and still
+                    have a next one. A button rather than infinite scroll: this
+                    is a work queue, and a lawyer deciding when to take on more
+                    is the correct interaction. */}
+                {!loading && hasMore && (
+                    <div style={{ display: "flex", justifyContent: "center", padding: "14px 0 4px" }}>
+                        <button
+                            onClick={onLoadMore}
+                            disabled={loadingMore}
+                            style={{
+                                padding: "7px 18px", fontSize: 12, borderRadius: 999,
+                                background: "none", color: t.textMuted,
+                                border: `1px solid ${t.border}`,
+                                cursor: loadingMore ? "default" : "pointer",
+                            }}>
+                            {loadingMore ? "Loading…" : "Load more"}
+                        </button>
+                    </div>
+                )}
+
                 {/* Empty / Loading */}
                 {loading ? (
                     <div style={{ padding: "52px", textAlign: "center", fontSize: 13, color: t.textMuted }}>Loading documents…</div>
@@ -608,7 +643,47 @@ function ScreenInbox({ t, onOpen, docs, loading }) {
 // ═══════════════════════════════════════════════════════════════
 function ScreenReview({ doc, t, onBack, onContinue }) {
     const [mode, setMode] = useState("view");
-    const [content, setContent] = useState(doc?.content || DOC_CONTENT);
+    // The REAL generated PDF, rendered inline. This replaced DOC_CONTENT — a
+    // hardcoded employment-dispute plaint the lawyer used to review and approve
+    // regardless of the actual document.
+    const [previewUrl, setPreviewUrl] = useState(null);
+    // An OLDER revision the lawyer chose to look at. Null means "the submitted
+    // one", which is what this screen exists to decide on.
+    //
+    // The decision is never taken from this. `handleDecide` sends the SUBMITTED
+    // version and hash whatever is on screen, because approving is a statement
+    // about the artifact the client submitted, and a reviewer who could approve
+    // while reading v1 would be signing off on a document nobody filed. Browsing
+    // the history is context for that decision, not the subject of it.
+    const [viewRev, setViewRev] = useState(null);
+    // PINNED TO THE REVISION UNDER REVIEW, not to "the current file".
+    //
+    // The legacy path fetched whatever the document currently was, so a client
+    // who regenerated after submitting would have the lawyer reading the NEW
+    // bytes while deciding on the submitted ones — and the decision guard would
+    // then refuse, with no explanation of what they had actually been looking
+    // at. Naming the submitted revision keeps the page and the decision on the
+    // same object.
+    //
+    // The old cleanup also leaked: it revoked `url`, a local still null when
+    // the fetch resolved after unmount, while the object URL had already been
+    // created inside the helper. A late arrival is revoked on arrival now.
+    useEffect(() => {
+        let live = true, url = null;
+        if (!doc?.id) return;
+        fetchRevisionPreview(doc.id, {
+            revisionId: viewRev?.revision_id || doc.viewRevisionId,
+            expectedPdfSha256: viewRev?.pdf_sha256 || doc.viewPdfSha256,
+        }).then((res) => {
+            if (!live) {
+                if (res?.data?.url) URL.revokeObjectURL(res.data.url);
+                return;
+            }
+            if (res?.data?.url) { url = res.data.url; setPreviewUrl(res.data.url); }
+            else setPreviewUrl(null);
+        });
+        return () => { live = false; if (url) URL.revokeObjectURL(url); };
+    }, [doc?.id, doc?.viewRevisionId, doc?.viewPdfSha256, viewRev]);
     // These two come from the document itself, computed when it was generated
     // and frozen on the record. They replace four hardcoded rows that read
     // "Legal Compliance ✓ Verified / Case Details ✓ Verified / Factual Info
@@ -618,6 +693,9 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
     // screen could tell.
     const compliance = doc?.compliance || null;
     const verification = doc?.verification || null;
+    // Answers the client gave that the template has no field for. They are not
+    // in the document, and the client believes they are.
+    const fieldShape = doc?.fieldShape || null;
 
     return (
         <div className="rgrid" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
@@ -648,40 +726,54 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                                 background: mode === "edit" ? t.primaryGlow : "transparent", color: mode === "edit" ? t.primary : t.textMuted,
                                 fontSize: 11, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5
                             }}>
-                            {mode === "edit" ? "👁 Preview" : "✏️ Edit"}
+                            {/* "Request changes", not "Edit".
+                                A lawyer CANNOT modify a client's submitted
+                                artifact, and that is correct — the thing under
+                                review has a hash, and a reviewer who could
+                                change it is reviewing something nobody else
+                                saw. But the old label implied direct editing,
+                                so the honest word for what this panel does is
+                                the one the review action already uses: notes
+                                that go back with a return decision. */}
+                            {mode === "edit" ? "👁 Preview" : "✏️ Request changes"}
                         </button>
                     </div>
                 </div>
 
-                {/* Document content */}
-                {mode === "view" ? (
-                    <div style={{
-                        background: t.card, borderRadius: 12, border: `1px solid ${t.border}`,
-                        padding: "28px 36px", lineHeight: 1.85, color: t.text, fontSize: 13,
-                        whiteSpace: "pre-wrap", fontFamily: "Georgia,serif", flex: 1, minHeight: 400
-                    }}>
-                        {content.split("\n").map((line, i) => {
-                            const isBold = line.startsWith("Plaintiff:") || line.startsWith("Defendant:") || line.match(/^[A-Z\s]{4,}:?$/) || line.match(/^\d+\. /);
-                            return <div key={i} style={{
-                                fontWeight: isBold && line.match(/^[A-Z\s]{4,}:?$/) ? 700 : 400,
-                                textAlign: line.includes("COURT") || line.includes("Employment Dispute") || line.includes("PRAYER") || line.includes("PLAINT") ? "center" : "left",
-                                marginBottom: line === "" ? 8 : 3
-                            }}>{line}</div>;
-                        })}
+                {/* Document — the REAL generated PDF, rendered inline. */}
+                {viewRev && (
+                    <div style={{ marginBottom: 10, padding: "9px 13px", borderRadius: 10, background: "rgba(255,200,87,0.10)", border: "1px solid rgba(255,200,87,0.35)", fontSize: 11.5, color: t.textDim, display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ flex: 1 }}>
+                            Reading an earlier draft (v{viewRev.version}). Your decision still
+                            applies to the version the client submitted.
+                        </span>
+                        <button onClick={() => setViewRev(null)}
+                            style={{ background: "transparent", border: `1px solid ${t.border}`, borderRadius: 8, padding: "5px 11px", fontSize: 11, fontWeight: 700, color: t.text, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}>
+                            Back to submitted
+                        </button>
                     </div>
-                ) : (
-                    <textarea value={content} onChange={e => setContent(e.target.value)} rows={24}
-                        style={{
-                            background: t.card, borderRadius: 12, border: `1px solid ${t.primary}`,
-                            padding: "20px", lineHeight: 1.8, color: t.text, fontSize: 12,
-                            fontFamily: "JetBrains Mono,monospace", flex: 1, outline: "none", resize: "vertical",
-                            boxShadow: `0 0 0 3px rgba(64,240,220,0.1)`
-                        }} />
                 )}
+
+                <div style={{
+                    background: "#fff", borderRadius: 12, border: `1px solid ${t.border}`,
+                    overflow: "hidden", flex: 1, minHeight: 460
+                }}>
+                    {previewUrl ? (
+                        <iframe title="Document under review" src={previewUrl}
+                            style={{ width: "100%", height: 520, border: "none", display: "block" }} />
+                    ) : (
+                        <div style={{ padding: 40, textAlign: "center", color: t.textMuted, fontSize: 13, minHeight: 460, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            Loading the submitted document…
+                        </div>
+                    )}
+                </div>
 
                 {/* Export bar */}
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                    <button onClick={() => downloadDocument(doc.id, `${doc.title || "document"}.pdf`)} style={{
+                    <button onClick={() => downloadDocumentFile(doc.id, `${doc.title || "document"}.pdf`, {
+                        revisionId: doc.viewRevisionId,
+                        expectedPdfSha256: doc.viewPdfSha256,
+                    })} style={{
                         flex: 1, padding: "9px 0", borderRadius: 9,
                         border: `1px solid ${t.primary}50`, background: t.card, color: t.primary,
                         fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
@@ -692,6 +784,12 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
             {/* Right — compliance + client note */}
             <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "20px 18px", overflowY: "auto" }}>
 
+                <RevisionHistory
+                    docId={doc.id} t={t} reloadKey={doc.viewRevisionId}
+                    currentRevisionId={viewRev?.revision_id || doc.viewRevisionId}
+                    onPreview={rev => setViewRev(
+                        rev.revision_id === doc.viewRevisionId ? null : rev)} />
+
                 {/* Client note */}
                 {doc.note && (
                     <div style={{
@@ -700,6 +798,19 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                     }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: "#FFC857", marginBottom: 4 }}>📝 Client Note</div>
                         <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.6 }}>{doc.note}</div>
+                    </div>
+                )}
+
+                {fieldShape?.unknown?.length > 0 && (
+                    <div style={{ background: t.card, border: "1px solid rgba(255,200,87,0.45)", borderRadius: 12, padding: "14px 16px" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>
+                            Answers not in this document
+                        </div>
+                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6, lineHeight: 1.6 }}>
+                            The client supplied {fieldShape.unknown.join(", ")}, which this
+                            template has no field for. Those values are NOT in the draft you
+                            are reading, and the client has no reason to know that.
+                        </div>
                     </div>
                 )}
 
@@ -1044,6 +1155,35 @@ function ScreenDecision({ doc, t, onBack, onDecide, busy }) {
 function ScreenFinal({ doc, t, onBack }) {
     const { user } = useAuth();
     const lawyerName = user?.full_name || "Advocate";
+    const [previewUrl, setPreviewUrl] = useState(null);
+    // PINNED TO THE REVISION UNDER REVIEW, not to "the current file".
+    //
+    // The legacy path fetched whatever the document currently was, so a client
+    // who regenerated after submitting would have the lawyer reading the NEW
+    // bytes while deciding on the submitted ones — and the decision guard would
+    // then refuse, with no explanation of what they had actually been looking
+    // at. Naming the submitted revision keeps the page and the decision on the
+    // same object.
+    //
+    // The old cleanup also leaked: it revoked `url`, a local still null when
+    // the fetch resolved after unmount, while the object URL had already been
+    // created inside the helper. A late arrival is revoked on arrival now.
+    useEffect(() => {
+        let live = true, url = null;
+        if (!doc?.id) return;
+        fetchRevisionPreview(doc.id, {
+            revisionId: doc.viewRevisionId,
+            expectedPdfSha256: doc.viewPdfSha256,
+        }).then((res) => {
+            if (!live) {
+                if (res?.data?.url) URL.revokeObjectURL(res.data.url);
+                return;
+            }
+            if (res?.data?.url) { url = res.data.url; setPreviewUrl(res.data.url); }
+            else setPreviewUrl(null);
+        });
+        return () => { live = false; if (url) URL.revokeObjectURL(url); };
+    }, [doc?.id, doc?.viewRevisionId, doc?.viewPdfSha256]);
     return (
         <div className="rgrid" style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, overflow: "hidden" }}>
 
@@ -1072,26 +1212,24 @@ function ScreenFinal({ doc, t, onBack }) {
                     </span>
                 </div>
 
-                {/* Document */}
+                {/* Document — the REAL approved PDF, rendered inline. */}
                 <div style={{
-                    background: t.card, borderRadius: 12, border: `1px solid ${t.border}`,
-                    padding: "28px 36px", lineHeight: 1.85, color: t.text, fontSize: 13,
-                    fontFamily: "Georgia,serif", marginBottom: 16
+                    background: "#fff", borderRadius: 12, border: `1px solid ${t.border}`,
+                    overflow: "hidden", marginBottom: 16, minHeight: 420
                 }}>
-                    {(doc?.content || DOC_CONTENT).split("\n").map((line, i) => (
-                        <div key={i} style={{
-                            fontWeight: line.match(/^[A-Z\s]{4,}:?$/) ? 700 : 400,
-                            textAlign: line.includes("COURT") || line.includes("Dispute") || line.includes("PRAYER") || line.includes("PLAINT") ? "center" : "left",
-                            marginBottom: line === "" ? 8 : 3
-                        }}>{line}</div>
-                    ))}
+                    {previewUrl ? (
+                        <iframe title="Approved document" src={previewUrl}
+                            style={{ width: "100%", height: 460, border: "none", display: "block" }} />
+                    ) : (
+                        <div style={{ padding: 40, textAlign: "center", color: t.textMuted, fontSize: 13, minHeight: 420, display: "flex", alignItems: "center", justifyContent: "center" }}>Loading the approved document…</div>
+                    )}
                     {/* Footer */}
                     <div style={{
-                        marginTop: 20, paddingTop: 12, borderTop: `1px solid ${t.border}`,
+                        padding: "12px 24px", borderTop: `1px solid ${t.border}`,
                         display: "flex", justifyContent: "space-between", alignItems: "center"
                     }}>
                         <span style={{ fontSize: 11, color: t.textFaint }}>🖊 Approved by Lawyer · {lawyerName}</span>
-                        <span style={{ fontSize: 11, color: t.textFaint }}>📅 Mar 10, 2026</span>
+                        <span style={{ fontSize: 11, color: t.textFaint }}>📅 {new Date().toLocaleDateString("en-GB")}</span>
                     </div>
                 </div>
 
@@ -1201,6 +1339,31 @@ const _REVIEW_STATUS_LABEL = {
 };
 const _URGENCY_LABEL = { normal: "Normal", priority: "Priority", urgent: "Urgent" };
 
+/* What to put in a tab's badge.
+ *
+ * The server's number when there is one, because counting the rows a client
+ * happens to have loaded is wrong the moment the queue is paginated — and wrong
+ * in the direction that HIDES work: a lawyer with three pages of pending
+ * reviews would see a badge reading 25.
+ *
+ * An em dash rather than 0 while the counts are unknown. They arrive with the
+ * first page only, so a continuation carries `counts: null` meaning
+ * "unchanged"; rendering that as a number would announce an empty queue on
+ * every "load more". Zero is a claim, and it must be made only when the server
+ * has made it.
+ */
+function _tabCount(counts, tab, docs, serverFiltered) {
+    const status = Object.fromEntries(QUEUE_TABS)[tab];
+    if (counts && counts[status] != null) return counts[status];
+    // Legacy queue: unpaginated, so what is loaded IS everything, and counting
+    // it here is accurate.
+    if (!serverFiltered) {
+        return tab === "All" ? docs.length
+            : docs.filter(d => d.status === tab).length;
+    }
+    return "—";
+}
+
 function _mapQueueDoc(d) {
     return {
         id: d.id,
@@ -1219,8 +1382,45 @@ function _mapQueueDoc(d) {
         // the panels blank, which reads as "nothing to report".
         compliance: d.compliance || null,
         verification: d.verification || null,
+        // THE EXACT REVISION UNDER REVIEW.
+        //
+        // `review` guards its atomic update on (submitted_version,
+        // submitted_pdf_sha256), so these are not decoration — they are what
+        // makes a decision valid. Null on the legacy queue, which is how the
+        // screen knows which backend it is talking to without a probe.
+        submittedVersion: d.submitted_version ?? null,
+        fieldShape: d.field_shape ?? null,
+        submittedRevisionId: d.submitted_revision_id ?? null,
+        submittedPdfSha256: d.submitted_pdf_sha256 ?? null,
+
+        // THE REVISION THIS LAWYER MAY ACTUALLY READ.
+        //
+        // A decided row has no `submitted_*` at all — the decision cleared
+        // them, and the server deliberately does not substitute the document's
+        // live pointers, because after a return-and-resubmit those describe
+        // somebody else's review. What it sends instead is the revision THIS
+        // lawyer decided on.
+        //
+        // So preview and download read `viewRevisionId`, which is whichever of
+        // the two applies. Without it, opening anything from the Approved,
+        // Returned or Rejected tabs asked for a null revision and fell through
+        // to the legacy download route, which 404s on every V2 document.
+        //
+        // The DECISION still reads `submittedVersion`/`submittedPdfSha256` and
+        // must keep doing so: they are null on a decided row precisely because
+        // a decided document cannot be decided again.
+        reviewedRevisionId: d.reviewed_revision_id ?? null,
+        reviewedPdfSha256: d.reviewed_pdf_sha256 ?? null,
+        reviewedAction: d.reviewed_action ?? null,
+        queueRole: d.queue_role ?? null,
+        viewRevisionId: d.submitted_revision_id ?? d.reviewed_revision_id ?? null,
+        viewPdfSha256: d.submitted_pdf_sha256 ?? d.reviewed_pdf_sha256 ?? null,
     };
 }
+
+// How many inbox rows one page holds. Bounded so the response size does not
+// grow with how long a lawyer has been using the product.
+const QUEUE_PAGE = 25;
 
 function DocWorkflowApp() {
     const { t } = useTheme();
@@ -1230,29 +1430,206 @@ function DocWorkflowApp() {
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [toast, setToast] = useState(null);
+    // A decision refused because the document moved. Held separately from the
+    // toast because it must not time out — the lawyer has to act on it, and a
+    // message about the wrong document being approved should not vanish after
+    // three seconds.
+    const [staleWarning, setStaleWarning] = useState(null);
+    // How far through the inbox we are. Null means there is no next page —
+    // either the end, or the legacy queue, which has no cursor at all.
+    const [queueCursor, setQueueCursor] = useState(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    // WHICH TAB, held here rather than in the inbox, because it now decides
+    // what gets FETCHED. While it lived in the child it could only filter what
+    // had already been loaded — which was one page of pending documents, so
+    // three of the five tabs could never show anything at all.
+    const [statusF, setStatusF] = useState("All");
+    // The server's per-tab totals. Null until the first page answers, and null
+    // again is not zero: see _tabCount.
+    const [queueCounts, setQueueCounts] = useState(null);
+    // Is the server doing the filtering? False on the legacy queue, which has
+    // no status parameter and returns everything unpaginated.
+    const [serverFiltered, setServerFiltered] = useState(true);
+    // "Is this page still wanted?" A decision reloads the queue, and a page
+    // request already in flight when that happens must not land afterwards.
+    const queueGeneration = useRef(createGeneration()).current;
+    // A decision the server could not record right now, with the SAME key it
+    // was first attempted under.
+    const [retry, setRetry] = useState(null);
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
 
-    const load = async () => {
-        setLoading(true);
-        const { data } = await listReviewQueue();
-        setDocs((Array.isArray(data) ? data : []).map(_mapQueueDoc));
-        setLoading(false);
+    // The inbox, ONE PAGE AT A TIME.
+    //
+    // The queue it replaces returned every document ever submitted to this
+    // lawyer in a single response — no cursor, no bound. That is fine on a demo
+    // account and a cliff on a real one: the response grows without limit, and
+    // the lawyer waits for all of it to draw the first row.
+    //
+    // `after` continues from a cursor; omitting it reloads from the start,
+    // which is what a decision, a tab change or a stale-document reload wants.
+    //
+    // `tab` is passed explicitly rather than read from state, because a tab
+    // change has to fetch the NEW tab in the same tick it is selected in —
+    // reading `statusF` here would fetch the one being left.
+    const load = async (after = null, tab = statusF) => {
+        if (after) setLoadingMore(true); else setLoading(true);
+        const ticket = queueGeneration.next();
+        const wanted = QUEUE_STATUS_OF[tab] || "all";
+
+        const v2 = await reviewQueueV2({ status: wanted, cursor: after,
+                                        limit: QUEUE_PAGE });
+        let rows, cursor, counts, filteredByServer = true;
+
+        if (v2.error && v2.status === 404
+            && errorCode(v2.error) === "feature_disabled") {
+            // The flag is off. The legacy queue is unpaginated by nature and
+            // takes no status, so there is nothing to continue from and the
+            // filtering falls back to the client.
+            const legacy = await listReviewQueue();
+            rows = Array.isArray(legacy.data) ? legacy.data : [];
+            cursor = null;
+            counts = null;
+            filteredByServer = false;
+        } else if (v2.error) {
+            if (!queueGeneration.isCurrent(ticket)) return;
+            setLoading(false); setLoadingMore(false);
+            showToast("❌ " + (v2.error.message || "Could not load the queue"));
+            return;
+        } else {
+            rows = v2.data?.items || [];
+            cursor = v2.data?.next_cursor || null;
+            // Counts come with the first page only; on a continuation this is
+            // null, meaning "unchanged", and the previous value is kept.
+            counts = v2.data?.counts ?? null;
+
+            // THE TAB THIS RESPONSE ANSWERS. A generation ticket catches a
+            // response overtaken by a newer request, but not one that is still
+            // "current" by ticket while being about a tab the user has since
+            // left — two rapid tab clicks can resolve in either order. The
+            // server echoes the status it filtered on, so the check is on the
+            // response's own claim rather than on timing.
+            const answered = v2.data?.status;
+            if (answered && answered !== wanted) return;
+        }
+
+        // The user moved on — switched screens, or a decision triggered a
+        // reload that this response is now behind. Dropping it is the point:
+        // otherwise a slow first page lands on top of a fresher one.
+        if (!queueGeneration.isCurrent(ticket)) return;
+
+        const mapped = rows.map(_mapQueueDoc);
+        setServerFiltered(filteredByServer);
+        if (counts) setQueueCounts(counts);
+        setDocs(prev => {
+            const merged = after ? [...prev, ...mapped] : mapped;
+            // A document that moved between pages can legitimately appear
+            // twice; rendering it twice looks like data corruption.
+            const seen = new Set();
+            return merged.filter(d => {
+                if (seen.has(d.id)) return false;
+                seen.add(d.id);
+                return true;
+            });
+        });
+        setQueueCursor(cursor);
+        setLoading(false); setLoadingMore(false);
     };
     useEffect(() => { load().catch(() => setLoading(false)); }, []);
+
+    /* Switching tabs is a NEW query, not a filter over the old one.
+     *
+     * The cursor is reset because it names a position in the tab being left and
+     * means nothing in the one being entered. The rows are cleared for the same
+     * reason: leaving them on screen under a new heading shows a lawyer
+     * documents that are not in the tab they just chose.
+     */
+    const changeTab = (tab) => {
+        if (tab === statusF) return;
+        setStatusF(tab);
+        setQueueCursor(null);
+        setDocs([]);
+        // Bumps the generation, so a page still in flight for the previous tab
+        // is dropped when it lands.
+        load(null, tab).catch(() => setLoading(false));
+    };
 
     const openDoc = (doc) => { setActiveDoc(doc); setScreen(doc.status === "Approved" ? "final" : "review"); };
     const reset = () => { setScreen("inbox"); setActiveDoc(null); };
 
-    // The real decision: persists the status and notifies the client server-side
-    const handleDecide = async (action, note) => {
+    // The real decision: persists the status and notifies the client.
+    //
+    // ON V2 IT IS GUARDED AGAINST A STALE REVISION. The server matches the
+    // decision against (submitted_version, submitted_pdf_sha256) inside the
+    // same atomic update that applies it, so a lawyer who has been looking at a
+    // document the client regenerated underneath them matches nothing and is
+    // told so — rather than approving bytes they never read. That is the whole
+    // point of sending the expected pair, and approving the wrong revision is
+    // the most expensive mistake this screen can make: the approval is what
+    // gets filed.
+    //
+    // The key is minted ONCE per decision and reused by the retry, so pressing
+    // Approve twice — or a retry after a dropped response — records one
+    // transition. A fresh key per attempt would make the receipt machinery
+    // unreachable from here.
+    const handleDecide = async (action, note, key = null) => {
+        const idemKey = key || idempotencyKey();
         setBusy(true);
-        const { data, error } = await reviewDocument(activeDoc.id, { action, note });
+
+        const canUseV2 = activeDoc.submittedVersion != null
+            && !!activeDoc.submittedPdfSha256;
+        const { data, error, status } = canUseV2
+            ? await reviewDocumentV2(activeDoc.id, {
+                action,
+                expectedVersion: activeDoc.submittedVersion,
+                expectedPdfSha256: activeDoc.submittedPdfSha256,
+                note,
+            }, idemKey)
+            : await reviewDocument(activeDoc.id, { action, note });
         setBusy(false);
-        if (error) { showToast("❌ " + (error.message || "Failed to record decision")); return; }
+
+        if (error) {
+            const code = errorCode(error);
+            // The document moved. NEVER report this as a generic failure and
+            // never let the decision through: the lawyer must look at what is
+            // actually there now before deciding on it.
+            if (code === "review_limit_reached") {
+                // A 409, but not the usual one. Every other conflict here means
+                // "reload and try again"; this document has been reviewed as
+                // many times as it can be, and reloading cannot help. Told as a
+                // blocking banner rather than a toast, because the lawyer has
+                // to stop and tell the client rather than keep pressing.
+                setStaleWarning(
+                    (error?.message
+                        || "This document has reached its review limit.")
+                    + " Ask the client to start a new document — reloading "
+                    + "will not change this.");
+                return;
+            }
+            if (status === 409 || code === "conflict" || code === "stale_revision") {
+                setStaleWarning(
+                    "This document changed after you opened it. Reload the queue "
+                    + "and review the latest version before deciding.");
+                return;
+            }
+            if (status === 503) {
+                // The work may or may not have been recorded, which is exactly
+                // what the key is for — the retry reuses it.
+                setRetry({ action, note, key: idemKey });
+                showToast("⏳ The service is busy. Retry when ready.");
+                return;
+            }
+            // 422 and everything else: the server's own words. It sends a
+            // machine-readable message precisely so this does not have to
+            // invent one.
+            showToast("❌ " + (error.message || "Failed to record decision"));
+            return;
+        }
+
         const newLabel = _REVIEW_STATUS_LABEL[data?.review_status] ||
             (action === "approve" ? "Approved" : action === "return" ? "Returned" : "Rejected");
         setDocs(prev => prev.map(d => d.id === activeDoc.id ? { ...d, status: newLabel, lawyerNote: note || "" } : d));
         showToast(`✅ ${newLabel} — the client has been notified`);
+        setRetry(null);
         reset();
     };
 
@@ -1264,7 +1641,11 @@ function DocWorkflowApp() {
 
             <Stepper step={screen} t={t} />
 
-            {screen === "inbox" && <ScreenInbox t={t} onOpen={openDoc} docs={docs} loading={loading} />}
+            {screen === "inbox" && <ScreenInbox t={t} onOpen={openDoc} docs={docs}
+                loading={loading} hasMore={!!queueCursor} loadingMore={loadingMore}
+                onLoadMore={() => load(queueCursor)}
+                statusF={statusF} onStatusChange={changeTab}
+                counts={queueCounts} serverFiltered={serverFiltered} />}
             {screen === "review" && activeDoc && (
                 <ScreenReview doc={activeDoc} t={t}
                     onBack={() => setScreen("inbox")}
@@ -1277,6 +1658,58 @@ function DocWorkflowApp() {
             )}
             {screen === "final" && activeDoc && (
                 <ScreenFinal doc={activeDoc} t={t} onBack={reset} />
+            )}
+
+            {/* THE DOCUMENT MOVED.
+                A blocking banner, not a toast: the lawyer has to act on this,
+                and a message saying they were about to approve the wrong
+                revision must not disappear after three seconds. Reloading is
+                the only way out, by design — the point is that they look at
+                what is actually there before deciding on it. */}
+            {staleWarning && (
+                <div style={{
+                    position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)",
+                    zIndex: 10000, maxWidth: 560,
+                    background: "#7c2d12", border: "1px solid #f59e0b",
+                    borderRadius: 10, padding: "12px 18px", fontSize: 13,
+                    color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+                    display: "flex", alignItems: "center", gap: 14,
+                }}>
+                    <span style={{ flex: 1 }}>⚠ {staleWarning}</span>
+                    <button
+                        onClick={async () => { setStaleWarning(null); reset(); await load(); }}
+                        style={{
+                            background: "#fff", color: "#7c2d12", border: "none",
+                            borderRadius: 8, padding: "6px 14px", fontSize: 12,
+                            fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+                        }}>
+                        Reload queue
+                    </button>
+                </div>
+            )}
+
+            {/* A decision the server could not record. Retried with the SAME
+                key it was first attempted under, so a request that did land
+                before the connection dropped is replayed rather than repeated. */}
+            {retry && (
+                <div style={{
+                    position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)",
+                    zIndex: 9999, background: t.card, border: `1px solid ${t.border}`,
+                    borderRadius: 10, padding: "10px 16px", fontSize: 13,
+                    color: t.text, display: "flex", alignItems: "center", gap: 12,
+                }}>
+                    <span>The service was busy and your decision was not recorded.</span>
+                    <button
+                        onClick={() => handleDecide(retry.action, retry.note, retry.key)}
+                        disabled={busy}
+                        style={{
+                            background: t.primary, color: "#fff", border: "none",
+                            borderRadius: 8, padding: "6px 14px", fontSize: 12,
+                            fontWeight: 700, cursor: busy ? "default" : "pointer",
+                        }}>
+                        {busy ? "Retrying…" : "Retry"}
+                    </button>
+                </div>
             )}
 
             {toast && (
