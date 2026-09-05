@@ -259,6 +259,13 @@ def _publish_staging(staging: Path, dst: Path, key: str, data: bytes) -> None:
         _publish_without_links(staging, dst, key, data)
 
 
+# A claim is held only for the moment it takes to rename, so a contending
+# writer needs to wait a very short time. Windows also reports a name pending
+# deletion as PermissionError, which resolves itself within the same window.
+_CLAIM_ATTEMPTS = 20
+_CLAIM_BACKOFF = 0.02
+
+
 def _publish_without_links(staging: Path, dst: Path, key: str,
                            data: bytes) -> None:
     """Publish on a filesystem that cannot hard-link (FAT/exFAT, some FUSE).
@@ -279,16 +286,30 @@ def _publish_without_links(staging: Path, dst: Path, key: str,
     liveness cost, never corruption — the trade this store should make.
     """
     claim = _contain(_tmp_dir() / f"{dst.name}.claim")
-    try:
-        fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        # Another writer holds the right to publish. Whatever they put there is
-        # authoritative; ours is either identical (fine) or a violation.
+    fd = None
+    for attempt in range(_CLAIM_ATTEMPTS):
+        try:
+            fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except (FileExistsError, PermissionError):
+            # Somebody else holds the right to publish — or held it a moment
+            # ago and the name is still pending deletion, which Windows reports
+            # as PermissionError rather than FileExistsError. Both mean "not
+            # mine yet", and neither is a write-once violation.
+            if dst.exists():
+                _accept_or_refuse(dst, key, data)
+                return
+            if attempt < _CLAIM_ATTEMPTS - 1:
+                time.sleep(_CLAIM_BACKOFF)
+
+    if fd is None:
+        # Their publish may have landed while we waited.
         if dst.exists():
             _accept_or_refuse(dst, key, data)
             return
         raise ArtifactStoreError(
             f"another writer is publishing {key}; retry once it completes")
+
     try:
         os.close(fd)
         if dst.exists():
@@ -302,11 +323,39 @@ def _publish_without_links(staging: Path, dst: Path, key: str,
             pass
 
 
+def _read_settled(path: Path) -> bytes:
+    """Read a final artifact, tolerating a concurrent publisher.
+
+    On Windows a file being renamed onto is briefly unreadable — the open fails
+    with PermissionError while another thread's `os.replace` is in flight. That
+    is a moment of busyness, not a write-once violation, and letting it escape
+    turned an honest concurrent publish into a hard failure in the caller.
+
+    Bounded: a rename takes microseconds, so a file still unreadable after this
+    is genuinely inaccessible and the error is the right answer.
+    """
+    last: OSError | None = None
+    for attempt in range(_READ_ATTEMPTS):
+        try:
+            return path.read_bytes()
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            last = exc
+            if attempt < _READ_ATTEMPTS - 1:
+                time.sleep(_READ_BACKOFF)
+    raise last
+
+
+_READ_ATTEMPTS = 20
+_READ_BACKOFF = 0.02
+
+
 def _accept_or_refuse(dst: Path, key: str, data: bytes,
                       tolerate_missing: bool = False) -> str:
     """Idempotent success for identical bytes; a violation for anything else."""
     try:
-        existing = dst.read_bytes()
+        existing = _read_settled(dst)
     except FileNotFoundError:
         if tolerate_missing:
             return key

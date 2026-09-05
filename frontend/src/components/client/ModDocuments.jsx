@@ -13,7 +13,8 @@ import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
     from "@/lib/fieldReview.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
-import { useDocumentResume, resolveCaseId } from "@/lib/useDocumentResume.js";
+import { useDocumentResume, resolveCaseId, NO_CASE }
+    from "@/lib/useDocumentResume.js";
 import {
     extractDocumentFields, generateDocument, downloadDocumentFile,
     fetchRevisionPreview, submitDocumentForReview, listDocuments,
@@ -371,6 +372,17 @@ const ModDocuments = () => {
         // mistaken for a matter's work.
         const owningCase = restored.caseId ?? null;
         setGenCaseId(owningCase);
+        // THE SELECTOR FOLLOWS THE DOCUMENT.
+        //
+        // Opening a case-B document set `genCaseId` to B and left
+        // `selectedCaseId` on A, so the picker said one matter while the
+        // document on screen belonged to another — and `resumeCaseId`, derived
+        // from the selector, then pointed the resume hook back at A.
+        //
+        // `NO_CASE` rather than "" for a standalone document: an empty
+        // selection falls through to the first case in the list, which would
+        // drag the document into a matter it does not belong to.
+        setSelectedCaseId(owningCase || NO_CASE);
         rememberDraft(owningCase, restored.docId);
     };
 
@@ -380,6 +392,12 @@ const ModDocuments = () => {
      * previous case's document up, under the new case's heading, is the same
      * wrong-matter confusion reached from the other direction. */
     const clearOpenDocument = () => {
+        // `genCaseId` GOES TOO. It was left pointing at the case just cleared,
+        // and four other things read it: the assigned-lawyer lookup, the review
+        // poller, the generation target and the timeline. The document
+        // disappeared from the screen while the rest of the page carried on
+        // describing the matter it had belonged to.
+        setGenCaseId(null);
         setDocId(null);
         setDocTitle("");
         setDocRevisionId(null);
@@ -397,11 +415,14 @@ const ModDocuments = () => {
 
     useDocumentResume({
         caseId: resumeCaseId,
+        // The case list has arrived. `caseId` of null is a real value — the
+        // standalone bucket — so "not known yet" needs its own signal.
+        ready: Array.isArray(cases),
         // WHICH case the open document belongs to, not merely that one is open.
         // A boolean meant the first loaded document blocked restoration for
         // every case thereafter, so switching matters kept showing the first
         // matter's draft.
-        loadedCaseId: docId ? genCaseId : null,
+        loaded: { hasDocument: Boolean(docId), caseId: genCaseId },
         getDocument: getDocumentV2,
         onRestore: (restored, forCase) => {
             if (restored) {
@@ -605,7 +626,12 @@ const ModDocuments = () => {
         if (templateKey === null) {
             toast.show("⚠️ This document type is not yet supported by the AI", "warn"); return;
         }
-        const caseId = selectedCaseId || (cases[0]?._id || cases[0]?.id);
+        // ONE derivation of "the current case", shared with the resume hook and
+        // the selector. There were three, and they could disagree: opening a
+        // case-B document moved `genCaseId` to B while this still read the
+        // selector, so extraction pulled case A's facts into a document
+        // belonging to case B.
+        const caseId = resumeCaseId;
         if (!caseId) {
             toast.show("⚠️ No case found — complete your legal intake first", "warn"); return;
         }
@@ -677,7 +703,7 @@ const ModDocuments = () => {
      * blanks — an empty string is a value the renderer prints, where an absent
      * key lets `pleading_rules` report the field as missing, which is true. */
     const confirmFieldsAndGenerate = async (retryKey = null) => {
-        const caseId = genCaseId || selectedCaseId || (cases[0]?._id || cases[0]?.id);
+        const caseId = genCaseId ?? resumeCaseId;
         const backendType = selectedType?.template_type;
         if (!caseId || !backendType) return;
 
@@ -1034,6 +1060,10 @@ const ModDocuments = () => {
                                         <Lbl>Linked Case</Lbl>
                                         <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5, fontFamily: "'Inter',sans-serif" }}>
                                             <option value="">Select a case…</option>
+                                            {/* An explicit choice, so a
+                                                standalone draft is not dragged
+                                                into the first case in the list. */}
+                                            <option value={NO_CASE}>No case — standalone document</option>
                                             {cases.map(c => <option key={c._id || c.id} value={c._id || c.id}>{c.title || c.case_type || (c._id || c.id)}</option>)}
                                         </select>
                                     </div>

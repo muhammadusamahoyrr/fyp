@@ -209,3 +209,25 @@ test("a document with no case restores a null case, not undefined", () => {
     const absent = restoreStateFromDocument(GENERATED);
     assert.equal(absent.caseId, null);
 });
+
+/* ── the explicit no-case selection (issue 1/4) ───────────────────────────── */
+
+import { resolveCaseId, NO_CASE } from "../src/lib/useDocumentResume.js";
+
+const CASES = [{ _id: "case-1" }, { _id: "case-2" }];
+
+test("an explicit no-case selection resolves to no case", () => {
+    // "" is not good enough: it falls through to the first case in the list,
+    // which drags a standalone document into a matter it does not belong to.
+    assert.equal(resolveCaseId(NO_CASE, CASES), null);
+    assert.equal(resolveCaseId("", CASES), "case-1");
+});
+
+test("an explicit selection still wins over the first case", () => {
+    assert.equal(resolveCaseId("case-2", CASES), "case-2");
+});
+
+test("no cases at all resolves to no case", () => {
+    assert.equal(resolveCaseId("", []), null);
+    assert.equal(resolveCaseId(NO_CASE, []), null);
+});

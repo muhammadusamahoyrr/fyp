@@ -55,6 +55,11 @@ export function isDefinitivelyGone(error) {
  * selection wins; otherwise the first case is the one being looked at.
  */
 export function resolveCaseId(activeCaseId, cases) {
+    // An EXPLICIT choice of "no case", distinct from "nothing chosen yet".
+    // Without it a standalone document sets the selector to "" and the first
+    // case is silently adopted, which drags the document back into a matter it
+    // does not belong to.
+    if (activeCaseId === NO_CASE) return null;
     if (activeCaseId) return activeCaseId;
     if (Array.isArray(cases) && cases.length > 0) {
         const first = cases[0];
@@ -63,40 +68,60 @@ export function resolveCaseId(activeCaseId, cases) {
     return null;
 }
 
+/* The selector value meaning "this document belongs to no case".
+ *
+ * `null` was doing two jobs — "no case" and "we do not know yet" — and code
+ * cannot tell them apart, so a standalone draft was either never restored or
+ * restored before the case list had arrived. */
+export const NO_CASE = "__no_case__";
+
 /**
  * Restore the remembered document for `caseId`, once per case.
  *
  * @param {object}   opts
- * @param {string?}  opts.caseId        resolved case; null until cases load
- * @param {string?}  opts.loadedCaseId  the case the OPEN document belongs to
- * @param {Function} opts.getDocument   async (docId) => ({data, error})
- * @param {Function} opts.onRestore     (restoredState | null, caseId) => void
- * @param {object=}  opts.storage       injected for tests
+ * @param {string?}  opts.caseId      the case to restore; `null` means NO case
+ * @param {boolean}  opts.ready       the case list has loaded — see below
+ * @param {object}   opts.loaded      {hasDocument, caseId} of what is on screen
+ * @param {Function} opts.getDocument async (docId) => ({data, error})
+ * @param {Function} opts.onRestore   (restoredState | null, caseId) => void
+ * @param {object=}  opts.storage     injected for tests
  */
 export function useDocumentResume({
-    caseId, loadedCaseId, getDocument, onRestore, storage,
+    caseId, ready, loaded, getDocument, onRestore, storage,
 }) {
-    // PER CASE, not once ever. A single boolean would let the first attempt
-    // disable every later one, so switching matters would show the previous
-    // matter's document or nothing at all.
-    const attempted = useRef(new Set());
+    // THE LAST CASE TRIED, not the set of every case ever tried.
+    //
+    // A permanent Set meant each case was attempted once per session and never
+    // again: going A → B → A found A already recorded and returned early, so
+    // B's document stayed on screen under A's heading. Remembering only the
+    // most recent attempt still stops a re-render refetching, and lets a
+    // genuine return to a case restore it.
+    //
+    // `undefined` rather than null as the initial value, because `null` is a
+    // real case id here — it is the standalone bucket.
+    const lastAttempted = useRef(undefined);
     // Bumped on every attempt and on unmount. A response whose token is stale
     // belongs to a case the user has already left, and applying it would put
     // another case's document on their screen.
     const token = useRef(0);
 
     useEffect(() => {
-        if (!caseId) return;
-        // WHICH case is loaded, not WHETHER one is.
-        //
-        // This was `hasDocument`, a boolean, so the moment any document was on
-        // screen the hook refused to run for ANY case — including one the user
-        // had just switched to. The first case's draft followed them around and
-        // the second case's own draft was unreachable. A document already open
-        // is only a reason to skip when it belongs to the case being asked for.
-        if (loadedCaseId && loadedCaseId === caseId) return;
-        if (attempted.current.has(caseId)) return;
-        attempted.current.add(caseId);
+        // NOT BEFORE THE CASE LIST HAS ARRIVED. `caseId` of null means "no
+        // case", and on the very first render it would otherwise be
+        // indistinguishable from "we have not been told yet" — restoring a
+        // standalone draft a moment before the user's real case loads and
+        // replaces it.
+        if (!ready) return;
+
+        const open = loaded || { hasDocument: false, caseId: null };
+        // WHICH case is on screen, not WHETHER anything is. A boolean meant the
+        // first loaded document blocked restoration for every case after it, so
+        // switching matters kept showing the first matter's draft. A document
+        // already open is a reason to skip only when it belongs to the case
+        // being asked for.
+        if (open.hasDocument && open.caseId === caseId) return;
+        if (lastAttempted.current === caseId) return;
+        lastAttempted.current = caseId;
 
         const mine = ++token.current;
         let cancelled = false;
@@ -148,5 +173,5 @@ export function useDocumentResume({
         // are recreated on every render of the parent, and including them would
         // re-run this effect continuously.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [caseId, loadedCaseId]);
+    }, [caseId, ready, loaded && loaded.hasDocument, loaded && loaded.caseId]);
 }

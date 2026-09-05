@@ -326,3 +326,121 @@ test("opening a caseless document does not file it under the selected case", asy
                  "standalone-doc");
     await p.unmount();
 });
+
+/* ── the selector follows the document (issue 4) ──────────────────────────── */
+
+async function _openFromMyDocuments(p) {
+    const openBtn = [...p.container.querySelectorAll("button")]
+        .find(b => b.textContent.trim() === "Open");
+    assert.ok(openBtn, "no Open control was rendered");
+    await act(async () => {
+        openBtn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+        await new Promise(r => setTimeout(r, 40));
+    });
+}
+
+test("opening another case's document moves the case selector to it", async () => {
+    // THE DEFECT. Opening a case-2 document set `genCaseId` to case-2 and left
+    // `selectedCaseId` on case-1, so the picker named one matter while the
+    // document on screen belonged to another — and `resumeCaseId`, derived from
+    // the picker, then aimed the resume hook back at case-1.
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("myDocumentsV2", {
+        data: {
+            items: [{ id: "case2-doc", title: "A case-2 notice",
+                      review_status: "none", revision_id: "rev-c2",
+                      pdf_sha256: "a".repeat(64), version: 1,
+                      downloadable: true }],
+            has_more: false,
+        },
+    });
+    api.__respond("getDocumentV2", {
+        data: {
+            id: "case2-doc", title: "A case-2 notice", review_status: "none",
+            case_id: "case-2", current_version: 1,
+            current_revision: { revision_id: "rev-c2", pdf_sha256: "a".repeat(64) },
+        },
+    });
+
+    const p = await mountDocuments();
+    await _openFromMyDocuments(p);
+
+    // Remembered under its OWN case, and only that one.
+    assert.equal(dom.window.localStorage.getItem("attorneyai.draft.case-2"),
+                 "case2-doc");
+    assert.equal(dom.window.localStorage.getItem("attorneyai.draft.case-1"), null,
+                 "the case-2 document was also filed under case-1");
+    await p.unmount();
+});
+
+test("a standalone document selects the explicit no-case option", async () => {
+    // "" would fall through to the first case in the list and drag the
+    // document into a matter it does not belong to.
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("myDocumentsV2", {
+        data: {
+            items: [{ id: "alone-doc", title: "Standalone", review_status: "none",
+                      revision_id: "rev-a", pdf_sha256: "b".repeat(64),
+                      version: 1, downloadable: true }],
+            has_more: false,
+        },
+    });
+    api.__respond("getDocumentV2", {
+        data: {
+            id: "alone-doc", title: "Standalone", review_status: "none",
+            case_id: null, current_version: 1,
+            current_revision: { revision_id: "rev-a", pdf_sha256: "b".repeat(64) },
+        },
+    });
+
+    const p = await mountDocuments();
+    await _openFromMyDocuments(p);
+
+    assert.equal(dom.window.localStorage.getItem("attorneyai.draft.no-case"),
+                 "alone-doc");
+    for (const c of ["case-1", "case-2"]) {
+        assert.equal(dom.window.localStorage.getItem(`attorneyai.draft.${c}`), null,
+                     `a standalone document was filed under ${c}`);
+    }
+    await p.unmount();
+});
+
+test("a document opened from another case stays on screen", async () => {
+    // THE CONSEQUENCE of the selector not following the document, and the one
+    // a user would actually see.
+    //
+    // `resumeCaseId` comes from the selector. Leaving it on case-1 while the
+    // open document belongs to case-2 aims the resume hook at case-1, which
+    // has no draft — so it reports null, the parent sees `genCaseId !== forCase`
+    // and clears the screen. The document the user just opened vanishes on its
+    // own, a beat after they clicked Open.
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("myDocumentsV2", {
+        data: {
+            items: [{ id: "case2-doc", title: "A case-2 notice",
+                      review_status: "none", revision_id: "rev-c2",
+                      pdf_sha256: "a".repeat(64), version: 1,
+                      downloadable: true }],
+            has_more: false,
+        },
+    });
+    api.__respond("getDocumentV2", {
+        data: {
+            id: "case2-doc", title: "A case-2 notice", review_status: "none",
+            case_id: "case-2", current_version: 1,
+            current_revision: { revision_id: "rev-c2", pdf_sha256: "a".repeat(64) },
+        },
+    });
+
+    const p = await mountDocuments();
+    await _openFromMyDocuments(p);
+    // Let any follow-up restore attempt run to completion.
+    await act(async () => { await new Promise(r => setTimeout(r, 60)); });
+
+    assert.match(p.text(), /A case-2 notice/,
+                 "the document was cleared moments after being opened");
+    await p.unmount();
+});
