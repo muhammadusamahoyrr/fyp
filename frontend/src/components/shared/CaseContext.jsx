@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, listCases, listAppointments, openNotificationSocket } from "@/lib/api.js";
 
@@ -99,6 +99,15 @@ export const CaseProvider = ({ children }) => {
      * error is the honest pair — we finished asking, and we did not find out. */
     const [casesReady, setCasesReady] = useState(false);
     const [casesError, setCasesError] = useState(null);
+    const [casesReloading, setCasesReloading] = useState(false);
+    /* The retry in flight, if any.
+     *
+     * A ref rather than the state above, because two clicks land in the same
+     * render and would both see `casesReloading === false`. Holding the promise
+     * lets every caller await the SAME load and get the same answer, instead of
+     * the second request racing the first and the later reply winning
+     * regardless of which is fresher. */
+    const casesInFlight = useRef(null);
 
     const updateCase = (patch) =>
         setCaseData(prev => ({ ...prev, ...patch }));
@@ -206,13 +215,35 @@ export const CaseProvider = ({ children }) => {
     }, [user?._id]);
 
     /* Ask again after a failure. Returns the error, or null on success, so a
-     * caller can decide what to show without re-reading context. */
+     * caller can decide what to show without re-reading context.
+     *
+     * ONE FLIGHT AT A TIME. An impatient click on a slow network would
+     * otherwise start a second load racing the first, and whichever replied
+     * last would win — so a stale answer could overwrite a fresher one. Extra
+     * callers join the request already running.
+     *
+     * A FAILED RETRY KEEPS WHAT WE HAVE. `cases` is only replaced on success:
+     * emptying the list because a refresh failed would tell a user their
+     * matters are gone when nobody managed to look. The error is retained for
+     * the same reason. */
     const reloadCases = async () => {
-        const { data, error } = await listCases({ page_size: 50 });
-        if (data) updateCase({ cases: data.items || data || [] });
-        setCasesError(error || null);
-        setCasesReady(true);
-        return error || null;
+        if (casesInFlight.current) return casesInFlight.current;
+
+        setCasesReloading(true);
+        const flight = (async () => {
+            try {
+                const { data, error } = await listCases({ page_size: 50 });
+                if (data) updateCase({ cases: data.items || data || [] });
+                setCasesError(error || null);
+                setCasesReady(true);
+                return error || null;
+            } finally {
+                casesInFlight.current = null;
+                setCasesReloading(false);
+            }
+        })();
+        casesInFlight.current = flight;
+        return flight;
     };
 
     const refreshAppointments = async () => {
@@ -233,6 +264,7 @@ export const CaseProvider = ({ children }) => {
             refreshAppointments,
             casesReady,
             casesError,
+            casesReloading,
             reloadCases,
             unreadCount,
         }}>

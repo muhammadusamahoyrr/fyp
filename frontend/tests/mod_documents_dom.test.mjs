@@ -512,3 +512,155 @@ test("a failed case load says so rather than 'no case linked'", async () => {
     assert.doesNotMatch(p.text(), /complete your Legal Intake first/i);
     await p.unmount();
 });
+
+/* ── visible recovery from a failed case load ─────────────────────────────── */
+
+async function _gotoDraftStep(p) {
+    // Step 0 lists templates; "Select" then "Use Template" reaches the form
+    // where the readiness strip and its retry live.
+    const select = [...p.container.querySelectorAll("button")]
+        .find(b => b.textContent.trim() === "Select");
+    assert.ok(select, "no template Select control");
+    await act(async () => {
+        select.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    });
+    const use = [...p.container.querySelectorAll("button")]
+        .find(b => b.textContent.includes("Use Template"));
+    assert.ok(use, "no Use Template control");
+    await act(async () => {
+        use.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+        await new Promise(r => setTimeout(r, 30));
+    });
+}
+
+function _retryButton(p) {
+    return [...p.container.querySelectorAll("button")]
+        .find(b => /Try again|Retrying/.test(b.textContent));
+}
+
+test("a failed case load offers a visible retry", async () => {
+    // Without it the only recovery is a full page reload, which also throws
+    // away whatever document is open.
+    api.__respond("listCases", { error: { message: "Network unreachable" } });
+
+    const p = await mountDocuments();
+    await _gotoDraftStep(p);
+
+    assert.ok(_retryButton(p), "a failed case load offered no way to try again");
+    assert.match(p.text(), /could not load your cases/i);
+    assert.doesNotMatch(p.text(), /complete your Legal Intake first/i);
+    await p.unmount();
+});
+
+test("retrying recovers the cases and clears the error", async () => {
+    api.__respond("listCases", { error: { message: "Network unreachable" } });
+    const p = await mountDocuments();
+    await _gotoDraftStep(p);
+
+    api.__respond("listCases", { data: { items: CASES } });
+    await act(async () => {
+        _retryButton(p).dispatchEvent(
+            new dom.window.MouseEvent("click", { bubbles: true }));
+        await new Promise(r => setTimeout(r, 40));
+    });
+
+    assert.doesNotMatch(p.text(), /could not load your cases/i,
+                        "the error survived a successful retry");
+    assert.equal(_retryButton(p), undefined, "the retry control outlived the error");
+
+    // caseSelection recomputed immediately: the recovered cases are selectable.
+    // ("ready to draft" additionally requires a document TYPE, which this test
+    // never picks — asserting it would be testing a different control.)
+    const options = [...p.container.querySelectorAll("option")]
+        .map(o => o.getAttribute("value"));
+    assert.ok(options.includes("case-1"),
+              "the recovered cases never reached the selector");
+    await p.unmount();
+});
+
+test("a failed retry keeps the message and the button", async () => {
+    api.__respond("listCases", { error: { message: "First failure" } });
+    const p = await mountDocuments();
+    await _gotoDraftStep(p);
+
+    api.__respond("listCases", { error: { message: "Still down" } });
+    await act(async () => {
+        _retryButton(p).dispatchEvent(
+            new dom.window.MouseEvent("click", { bubbles: true }));
+        await new Promise(r => setTimeout(r, 40));
+    });
+
+    assert.match(p.text(), /could not load your cases/i);
+    assert.doesNotMatch(p.text(), /complete your Legal Intake first/i,
+                        "a failed retry claimed the user has no cases");
+    assert.ok(_retryButton(p), "the retry control vanished after a failed retry");
+    await p.unmount();
+});
+
+test("impatient clicking does not start concurrent loads", async () => {
+    api.__respond("listCases", { error: { message: "Network" } });
+    const p = await mountDocuments();
+    await _gotoDraftStep(p);
+
+    let release;
+    let calls = 0;
+    api.__respond("listCases", () => {
+        calls++;
+        return new Promise(r => { release = r; });
+    });
+
+    const btn = _retryButton(p);
+    await act(async () => {
+        for (let i = 0; i < 4; i++) {
+            btn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+        }
+    });
+    assert.equal(calls, 1, `four clicks started ${calls} loads`);
+    assert.match(p.text(), /Trying your cases again|Retrying/,
+                 "no progress was shown while the retry ran");
+
+    await act(async () => {
+        release({ data: { items: CASES } });
+        await new Promise(r => setTimeout(r, 40));
+    });
+    assert.doesNotMatch(p.text(), /could not load your cases/i);
+    await p.unmount();
+});
+
+test("cases arriving late do not destroy the document already open", async () => {
+    // The property behind "a retry preserves the open document": a case-list
+    // change must not take the draft off the screen. Exercised through the
+    // INITIAL load rather than the retry button, because opening a document
+    // moves to the preview step where that button does not exist — and a test
+    // that cannot reach its control proves nothing.
+    let releaseCases;
+    api.__respond("listCases", () => new Promise(r => { releaseCases = r; }));
+    api.__respond("myDocumentsV2", {
+        data: {
+            items: [{ id: "open-doc", title: "An open notice", review_status: "none",
+                      revision_id: "rev-o", pdf_sha256: "a".repeat(64),
+                      version: 1, downloadable: true }],
+            has_more: false,
+        },
+    });
+    api.__respond("getDocumentV2", {
+        data: {
+            id: "open-doc", title: "An open notice", review_status: "none",
+            case_id: "case-1", current_version: 1,
+            current_revision: { revision_id: "rev-o", pdf_sha256: "a".repeat(64) },
+        },
+    });
+
+    const p = await mountDocuments();
+    await _openFromMyDocuments(p);
+    assert.match(p.text(), /An open notice/);
+
+    await act(async () => {
+        releaseCases({ data: { items: CASES } });
+        await new Promise(r => setTimeout(r, 50));
+    });
+
+    assert.match(p.text(), /An open notice/,
+                 "the open document was cleared when the case list arrived");
+    await p.unmount();
+});

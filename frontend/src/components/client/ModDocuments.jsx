@@ -86,7 +86,7 @@ function _byCategory(items) {
 const ModDocuments = () => {
     const t = useT();
     const toast = useToast();
-    const { cases, casesReady, casesError, reloadCases } = useCase();
+    const { cases, casesReady, casesError, casesReloading, reloadCases } = useCase();
 
     /* ── State ── */
     const [step, setStep] = useState(0);                       // 0–4
@@ -1132,9 +1132,27 @@ const ModDocuments = () => {
                                         : selection.blockedReason === "standalone_unsupported"
                                         ? "Documents drafted here are always linked to a case. Choose one above."
                                         : casesError
-                                        ? "We could not load your cases. This does not mean they are gone — only that we could not reach them just now."
+                                        ? (casesReloading
+                                            ? "Trying your cases again…"
+                                            : "We could not load your cases. This does not mean they are gone — only that we could not reach them just now.")
                                         : "No case linked yet — complete your Legal Intake first, then come back to draft a document."}
                                 </span>
+                                {/* A WAY OUT OF THE ERROR, not just a description
+                                    of it. Without this the only recovery is a full
+                                    page reload, which also throws away whatever
+                                    document is open. `reloadCases` touches the case
+                                    list alone, so the draft on screen survives.
+                                    Disabled while in flight — the guard in
+                                    `reloadCases` already joins concurrent callers,
+                                    and the disabled state is what says so. */}
+                                {casesError && (
+                                    <button
+                                        onClick={() => reloadCases()}
+                                        disabled={casesReloading}
+                                        style={{ padding: "5px 11px", borderRadius: 9, border: `1px solid ${t.border}`, background: "transparent", color: t.text, fontSize: 11, fontWeight: 600, cursor: casesReloading ? "default" : "pointer", fontFamily: "'Inter',sans-serif", opacity: casesReloading ? 0.6 : 1, whiteSpace: "nowrap" }}>
+                                        {casesReloading ? "Retrying…" : "Try again"}
+                                    </button>
+                                )}
                                 <Badge type={canGenerate ? "success" : "warn"}>{canGenerate ? "✓ Ready" : "Not ready"}</Badge>
                             </div>
 
