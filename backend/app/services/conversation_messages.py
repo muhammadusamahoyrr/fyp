@@ -100,7 +100,7 @@ async def ensure_indexes() -> None:
     global _INDEX_READY
     if _INDEX_READY:
         return
-    from pymongo import ASCENDING, IndexModel
+    from pymongo import ASCENDING, TEXT, IndexModel
     await get_conversation_messages_col().create_indexes([
         IndexModel([("conversation_id", ASCENDING), ("turn_id", ASCENDING),
                     ("role", ASCENDING)],
@@ -108,6 +108,31 @@ async def ensure_indexes() -> None:
                    partialFilterExpression={"turn_id": {"$type": "string"}}),
         IndexModel([("conversation_id", ASCENDING), ("seq", ASCENDING)],
                    unique=True, name="conversation_seq_unique"),
+        # Every message of one user, on one surface.
+        #
+        # Supports the operations that are ABOUT a person rather than about a
+        # conversation: a retention sweep, a data-export request, and the
+        # owner-scoped filter the search below applies on top of the text
+        # index. Without it each of those reads every message in the
+        # collection — which is the shape that looks fine until the collection
+        # is a year old.
+        IndexModel([("owner_id", ASCENDING), ("surface", ASCENDING)],
+                   name="owner_surface"),
+        # Search. A text index rather than a regex scan: a regex over a year of
+        # messages reads every document in the collection and cannot rank, so
+        # the first result would be the oldest match rather than the best one.
+        #
+        # Only `content` is indexed. Titles are derived from the first question
+        # and are already searchable through it; indexing the trust metadata
+        # would let a search for "punjab" match a jurisdiction tag rather than
+        # anything the user said, which is a result they cannot account for.
+        #
+        # MongoDB permits ONE text index per collection. Adding a field to the
+        # search later is therefore a drop-and-recreate, not an addition —
+        # worth knowing before someone tries it against a live collection and
+        # finds the index build is the migration.
+        IndexModel([("content", TEXT)], name="message_content_text",
+                   default_language="english"),
     ])
     _INDEX_READY = True
 
@@ -343,6 +368,96 @@ async def tail_page(
         "older_cursor": items[0]["seq"] if (items and has_older) else None,
         "has_older": bool(has_older),
     }
+
+
+# How much of a matching message is shown, and how many matches come back.
+SNIPPET_CHARS = 180
+MAX_RESULTS = 25
+
+
+async def search(
+    surface: str,
+    owner_id: str,
+    query: str,
+    *,
+    limit: int = MAX_RESULTS,
+) -> list[dict]:
+    """Messages of THIS user, on THIS surface, matching `query`.
+
+    Returns the best-ranked matches, newest-first within equal rank, each with
+    the conversation it belongs to and a snippet.
+
+    OWNER AND SURFACE ARE IN THE FILTER, NOT APPLIED AFTERWARDS.
+
+    Every message record carries `owner_id` and `surface`, and both go into the
+    query. Filtering after the read would mean the ranking was computed over
+    other people's messages and then trimmed — the count would be wrong, the
+    order would be wrong, and the first page could come back empty while
+    matches existed. It would also put another user's text through this
+    process, which is the part that matters.
+
+    A LIMITATION, STATED: legacy messages embedded in the conversation document
+    are NOT searchable. They are not rows and a text index cannot see them, so
+    a conversation from before the message store existed will not match on its
+    own content. It can still be found by its title, which is derived from its
+    first question. Nothing is silently half-searched — see
+    `conversation_service.search`, which reports this.
+    """
+    text = (query or "").strip()
+    if not text:
+        return []
+
+    await ensure_indexes()
+    size = max(1, min(int(limit), MAX_RESULTS))
+
+    # Over-fetched, because several matches can share one conversation and the
+    # caller wants distinct conversations. Bounded, so a common word does not
+    # turn a search box into a table scan.
+    rows = await (get_conversation_messages_col()
+                  .find({"$text": {"$search": text},
+                         "owner_id": str(owner_id),
+                         "surface": surface},
+                        {"score": {"$meta": "textScore"}, "content": 1,
+                         "conversation_id": 1, "seq": 1, "role": 1,
+                         "created_at": 1})
+                  .sort([("score", {"$meta": "textScore"}), ("seq", -1)])
+                  .limit(size * 4)
+                  .to_list(length=size * 4))
+
+    return [{
+        "conversation_id": row["conversation_id"],
+        "seq": row.get("seq"),
+        "role": row.get("role"),
+        "created_at": row.get("created_at"),
+        "snippet": snippet(row.get("content"), text),
+    } for row in rows]
+
+
+def snippet(content: str, query: str) -> str:
+    """A window of the message around the first term that matched.
+
+    Centred on the match rather than taken from the start, because a match two
+    thousand characters into an answer would otherwise be shown as an opening
+    paragraph that contains none of the words searched for — which reads as the
+    search being broken.
+    """
+    body = " ".join((content or "").split())
+    if len(body) <= SNIPPET_CHARS:
+        return body
+
+    lowered = body.lower()
+    at = -1
+    for term in (query or "").lower().split():
+        found = lowered.find(term)
+        if found != -1 and (at == -1 or found < at):
+            at = found
+    if at == -1:
+        return body[:SNIPPET_CHARS].rstrip() + "\u2026"
+
+    start = max(0, at - SNIPPET_CHARS // 3)
+    end = min(len(body), start + SNIPPET_CHARS)
+    return ("\u2026" if start else "") + body[start:end].strip() + (
+        "\u2026" if end < len(body) else "")
 
 
 async def all_messages(conversation_id: str, session: dict) -> list[dict]:

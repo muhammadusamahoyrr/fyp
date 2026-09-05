@@ -6,6 +6,7 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "@/components/shared/CaseContext.jsx";
 import {
     getToken, rateAnswer, getWsTicket, openSourceDocument, cancelClientTurn,
+    searchConversations,
     listConversations, createConversation, getConversation,
     renameConversation, deleteConversation,
 } from "@/lib/api.js";
@@ -136,6 +137,17 @@ const ModChatbot = () => {
     const [listMore, setListMore] = useState(false);
     const [listLoading, setListLoading] = useState(false);
     const [search, setSearch] = useState("");
+    // Conversations matched by what was SAID in them, as opposed to by title.
+    // Kept separate from `rows` because they are a different question with a
+    // different answer shape — a title match is a row, a message match is a row
+    // plus the sentence that matched — and merging them would lose the snippet
+    // that makes the second kind worth showing.
+    // Below this, a message search matches most of a corpus and ranks
+    // none of it usefully — and costs a text query per keystroke.
+    const MIN_SEARCH_CHARS = 2;
+    const [messageHits, setMessageHits] = useState([]);
+    const [unsearchable, setUnsearchable] = useState(false);
+
     // "Is this list response still wanted?" A search typed quickly issues
     // several requests, and the slowest must not paint over the newest.
     const listGeneration = useRef(createGeneration()).current;
@@ -172,6 +184,26 @@ const ModChatbot = () => {
             setHistory(groupConversations(unique));
             return unique;
         });
+
+        // Message-body search, alongside the title search above.
+        //
+        // Two searches rather than one because they answer different questions:
+        // the list is "conversations called this", these are "conversations
+        // where I said this". Run under the SAME generation ticket, so a stale
+        // response cannot paint results for a term the user has moved on from.
+        // `term` is the phrase the caller searched for — the same one the
+        // list above was filtered by. Reading component state here instead
+        // would let the two searches disagree about what was asked.
+        const phrase = (term || "").trim();
+        if (phrase.length >= MIN_SEARCH_CHARS) {
+            const { data: found } = await searchConversations(phrase);
+            if (!listGeneration.isCurrent(ticket)) return;
+            setMessageHits(found?.results || []);
+            setUnsearchable(!!found?.has_unsearchable_history);
+        } else {
+            setMessageHits([]);
+            setUnsearchable(false);
+        }
         setListCursor(data.next_cursor || null);
         setListMore(!!data.has_more);
     }, [listGeneration]);
@@ -880,6 +912,62 @@ const ModChatbot = () => {
                             outline: "none",
                         }} />
                 </div>
+
+                {/* Found in what was SAID.
+                    A separate section from the list above, not merged into it,
+                    because it answers a different question and carries a
+                    different thing: the sentence that matched. Merging would
+                    drop the snippet, which is the only part that tells the user
+                    WHY this conversation came back. */}
+                {messageHits.length > 0 && (
+                    <div style={{ padding: "0 10px 8px" }}>
+                        <div style={{
+                            fontSize: 11, fontWeight: 600, color: t.textMuted,
+                            padding: "6px 6px 4px", textTransform: "uppercase",
+                            letterSpacing: "0.6px",
+                        }}>
+                            Found in messages
+                        </div>
+                        {messageHits.map(hit => (
+                            <div key={`hit-${hit.session_id}`}
+                                 onClick={() => openConversation(hit.session_id)}
+                                 style={{
+                                     padding: "7px 8px", borderRadius: 8,
+                                     cursor: "pointer", marginBottom: 2,
+                                 }}>
+                                <div style={{
+                                    fontSize: 12.5, color: t.text,
+                                    whiteSpace: "nowrap", overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                }}>
+                                    {hit.title}
+                                </div>
+                                <div style={{
+                                    fontSize: 11, color: t.textMuted,
+                                    marginTop: 2, lineHeight: 1.45,
+                                }}>
+                                    {hit.snippet}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Older conversations that cannot be searched by content.
+                    Said out loud rather than left to be discovered by not
+                    finding something you remember saying — the thread is still
+                    there and still findable by name. */}
+                {unsearchable && (
+                    <div style={{
+                        margin: "0 16px 8px", padding: "6px 9px",
+                        borderRadius: 8, fontSize: 11,
+                        color: t.textMuted, background: t.surface,
+                        border: `1px solid ${t.border}`,
+                    }}>
+                        Some older conversations can only be found by their
+                        title, not by what was said in them.
+                    </div>
+                )}
 
                 {/* History list */}
                 <div style={{ flex: 1, overflowY: "auto", padding: "4px 10px 8px" }}>

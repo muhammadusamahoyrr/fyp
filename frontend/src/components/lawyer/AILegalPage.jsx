@@ -5,7 +5,8 @@ import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
 import {
-    listCases, aiResearch, cancelResearchTurn, researchTurnStatus, rateAnswer, aiProvenance, openSourceDocument,
+    listCases, aiResearch, cancelResearchTurn, researchTurnStatus,
+    searchResearchConversations, rateAnswer, aiProvenance, openSourceDocument,
     listResearchConversations, createResearchConversation,
     getResearchConversation, renameResearchConversation,
     archiveResearchConversation, deleteResearchConversation,
@@ -312,6 +313,14 @@ function AILegalPage() {
     const [listMore, setListMore] = useState(false);
     const [listLoading, setListLoading] = useState(false);
     const [search, setSearch] = useState("");
+    // Below this a message search matches most of a corpus and ranks none of
+    // it usefully, and costs a text query per keystroke.
+    const MIN_SEARCH_CHARS = 2;
+    // Threads matched by what was SAID in them, kept apart from `rows` because
+    // a message match carries the sentence that matched and a title match does
+    // not — merging them would drop the only part that explains the result.
+    const [messageHits, setMessageHits] = useState([]);
+    const [unsearchable, setUnsearchable] = useState(false);
     // "Is this list response still wanted?" A search typed quickly issues
     // several requests, and the slowest must not paint over the newest.
     const listGeneration = useRef(createGeneration()).current;
@@ -414,6 +423,28 @@ function AILegalPage() {
             setHistory(groupConversations(unique));
             return unique;
         });
+
+        // Message-body search, alongside the title search above.
+        //
+        // Two searches because they answer different questions: the list is
+        // "threads called this", these are "threads where I said this". Under
+        // the SAME ticket, so a stale response cannot paint results for a term
+        // the lawyer has moved on from.
+        //
+        // The server re-checks case access on every result before returning
+        // it, because a snippet is message text — ownership of the thread is
+        // not authority to read what is in it.
+        const phrase = (term || "").trim();
+        if (phrase.length >= MIN_SEARCH_CHARS) {
+            const { data: found } = await searchResearchConversations(phrase);
+            if (!listGeneration.isCurrent(ticket)) return;
+            setMessageHits(found?.results || []);
+            setUnsearchable(!!found?.has_unsearchable_history);
+        } else {
+            setMessageHits([]);
+            setUnsearchable(false);
+        }
+
         setListCursor(data.next_cursor || null);
         setListMore(!!data.has_more);
     }, [activeCaseObj, showArchived, listGeneration]);
@@ -915,6 +946,56 @@ function AILegalPage() {
                             outline: "none",
                         }} />
                 </div>
+
+                {/* Found in what was SAID.
+                    Separate from the list above because it carries the
+                    sentence that matched, which is the only part that tells a
+                    lawyer why this thread came back. */}
+                {messageHits.length > 0 && (
+                    <div style={{ padding: "0 10px 8px" }}>
+                        <div style={{
+                            fontSize: 11, fontWeight: 600, color: t.textMuted,
+                            padding: "6px 6px 4px", textTransform: "uppercase",
+                            letterSpacing: "0.6px",
+                        }}>
+                            Found in messages
+                        </div>
+                        {messageHits.map(hit => (
+                            <div key={`hit-${hit.session_id}`}
+                                 onClick={() => openConversation(hit.session_id)}
+                                 style={{
+                                     padding: "7px 8px", borderRadius: 8,
+                                     cursor: "pointer", marginBottom: 2,
+                                 }}>
+                                <div style={{
+                                    fontSize: 12.5, color: t.text,
+                                    whiteSpace: "nowrap", overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                }}>
+                                    {hit.title}
+                                </div>
+                                <div style={{
+                                    fontSize: 11, color: t.textMuted,
+                                    marginTop: 2, lineHeight: 1.45,
+                                }}>
+                                    {hit.snippet}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {unsearchable && (
+                    <div style={{
+                        margin: "0 16px 8px", padding: "6px 9px",
+                        borderRadius: 8, fontSize: 11,
+                        color: t.textMuted, background: t.surface,
+                        border: `1px solid ${t.border}`,
+                    }}>
+                        Some older threads can only be found by their title, not
+                        by what was said in them.
+                    </div>
+                )}
 
                 {/* History list */}
                 <div style={{ flex: 1, overflowY: "auto", padding: "4px 8px 8px" }}>

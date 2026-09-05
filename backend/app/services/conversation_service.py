@@ -873,6 +873,107 @@ async def list_page(
     }
 
 
+MAX_SEARCH_RESULTS = 25
+
+
+async def search(
+    surface: str,
+    owner_id: str,
+    query: str,
+    *,
+    limit: int = MAX_SEARCH_RESULTS,
+) -> dict:
+    """Find this user's conversations by what was SAID in them.
+
+    Returns the same row shape a list returns, plus the snippet that matched,
+    so a search result and a sidebar entry render through one component.
+
+    RANKED BY THE BEST MATCH IN EACH CONVERSATION, and de-duplicated: a thread
+    that mentions a term ten times is one result, not ten. It keeps the
+    position its strongest match earned, because a conversation that discusses
+    something at length should not be pushed down the page by the repetition
+    that makes it relevant.
+
+    TOMBSTONES CANNOT MATCH. A deleted conversation has no message records —
+    they are removed, not hidden — so it cannot appear here. The `_alive_filter`
+    on the lookup below is the second line of that defence, for the tombstone
+    that still holds a title.
+
+    LEGACY MESSAGES ARE NOT SEARCHED. They live embedded in the conversation
+    document rather than as rows, and a text index cannot see them. Reported in
+    the response as `legacy_conversations_not_searched` rather than left for a
+    user to discover by not finding something they remember saying.
+    """
+    text = (query or "").strip()
+    size = max(1, min(int(limit), MAX_SEARCH_RESULTS))
+    if not text:
+        return {"query": "", "results": [],
+                "legacy_conversations_not_searched": 0}
+
+    hits = await messages.search(surface, owner_id, text, limit=size)
+
+    # Best hit per conversation, in rank order. `dict` preserves insertion
+    # order, and the hits arrive already ranked, so the first time a
+    # conversation appears is its strongest match.
+    best: dict[str, dict] = {}
+    for hit in hits:
+        best.setdefault(hit["conversation_id"], hit)
+
+    col, owner_field = _collection(surface)
+    results: list[dict] = []
+    for key, hit in best.items():
+        if len(results) >= size:
+            break
+        # The key is "<surface>:<document id>" — see ConversationRef.
+        doc_id = key.split(":", 1)[-1]
+        session = await col.find_one({
+            "_id": doc_id, owner_field: str(owner_id), "deleted_at": None,
+        })
+        if session is None:
+            # Deleted between the message read and this one, or never this
+            # user's. Either way it is not a result.
+            continue
+        results.append({
+            **summarise(session),
+            "snippet": hit["snippet"],
+            "matched_seq": hit.get("seq"),
+            "matched_role": hit.get("role"),
+        })
+
+    return {
+        "query": text,
+        "results": results,
+        # Said out loud rather than left to be discovered by not finding
+        # something you remember saying. False on any account with no
+        # pre-migration history, which is all of them after the first year.
+        "has_unsearchable_history":
+            await _has_legacy_history(surface, owner_id),
+    }
+
+
+async def _has_legacy_history(surface: str, owner_id: str) -> bool:
+    """Does this user have any conversation whose messages are embedded?
+
+    A BOOLEAN, and bounded with `limit=1`.
+
+    An exact count was the first version and it was worse twice over: it is a
+    full count on every keystroke of a search box, and the number is not
+    actionable — "four of your conversations cannot be searched" tells a user
+    nothing they can do differently. What they need is to know that a gap
+    exists, so they look for the thread by name instead of concluding it is
+    gone.
+
+    The owner clause leads, so the index on the owner field narrows to this
+    user before the embedded-array test runs at all.
+    """
+    col, owner_field = _collection(surface)
+    return await col.count_documents({
+        owner_field: str(owner_id),
+        "deleted_at": None,
+        "messages.0": {"$exists": True},
+    }, limit=1) > 0
+
+
 async def get_raw(surface: str, session_id: str, owner_id: str) -> dict:
     """The stored conversation document, for callers that need its fields.
 

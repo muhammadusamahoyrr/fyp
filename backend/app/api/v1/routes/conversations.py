@@ -571,5 +571,68 @@ async def research_turn_status(
                       "started_at": None}
 
 
+@client_router.get("/search/messages")
+async def search_conversations(
+    q: str = Query(..., min_length=1, max_length=200,
+                   description="What to look for in your own messages."),
+    limit: int = Query(25, ge=1, le=25),
+    current_user: dict = Depends(get_current_user),
+):
+    """Find your conversations by what was said in them.
+
+    A sidebar capped at fifty entries with no search meant a conversation from
+    six months ago was reachable only by scrolling past everything since. This
+    is the other way in.
+
+    Scoped to the caller in the database query, not afterwards: the ranking has
+    to be computed over this user's messages only, or the order and the counts
+    describe a corpus the caller cannot see.
+
+    The path is `/search/messages` rather than `/search` because `/{session_id}`
+    sits on this same router — a bare `/search` would be ambiguous with a
+    conversation whose id happened to be "search", and route order is a poor
+    place to keep a security-relevant distinction.
+    """
+    return await conversations.search(
+        conversations.SURFACE_CLIENT, str(current_user["_id"]), q, limit=limit)
+
+
+@research_router.get("/search/messages")
+async def search_research(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(25, ge=1, le=25),
+    current_user: dict = Depends(get_current_user),
+):
+    """Find your research threads by what was said in them.
+
+    Case access is re-checked on every result, exactly as the listing does it —
+    ownership of the thread is not enough. A lawyer taken off a matter keeps
+    the rows and loses the right to read them, and a search box that ignored
+    that would be the easiest way around the rule: type a word you remember and
+    read the snippet.
+
+    The snippet is the part that matters. It carries message text, so a result
+    that survives this filter has been authorised for its CONTENT, not merely
+    listed.
+    """
+    found = await conversations.search(
+        conversations.SURFACE_RESEARCH, str(current_user["_id"]), q,
+        limit=limit)
+
+    # One access check per DISTINCT case, not per row: a lawyer's results are
+    # mostly a handful of matters.
+    decisions: dict[str, bool] = {}
+    visible = []
+    for row in found["results"]:
+        case = row.get("case_id")
+        if case and case not in decisions:
+            decisions[case] = await _case_is_accessible(case, current_user)
+        if not case or decisions[case]:
+            visible.append(row)
+
+    found["results"] = visible
+    return found
+
+
 router.include_router(client_router)
 router.include_router(research_router)

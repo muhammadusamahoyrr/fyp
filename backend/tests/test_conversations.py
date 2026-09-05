@@ -558,10 +558,34 @@ async def test_a_deleted_session_id_cannot_be_reused(store):
 
 
 async def test_the_list_is_newest_first(store):
+    """Appending bumps `updated_at`, and the list follows it.
+
+    Both conversations are backdated to DISTINCT instants first. Created
+    back-to-back against a fast local database they otherwise share a
+    millisecond, and the order is then decided by the `_id` tiebreak — so the
+    test passed or failed at random depending on two random ids. It only looked
+    stable because it used to run against a remote database slow enough to
+    separate them.
+    """
+    from datetime import timedelta
+
     ref_a, first = await store(CLIENT, CLIENT_A["_id"])
     ref_b, second = await store(CLIENT, CLIENT_A["_id"])
+
+    col, _owner = conversations._collection(CLIENT)
+    base = conversations._now() - timedelta(hours=2)
+    await col.update_one({"_id": ref_a.doc_id}, {"$set": {"updated_at": base}})
+    await col.update_one({"_id": ref_b.doc_id},
+                         {"$set": {"updated_at": base + timedelta(minutes=1)}})
+
+    # `second` is newer, so it leads — until `first` is bumped past it.
+    rows = await conversations.list_sessions(CLIENT, CLIENT_A["_id"], limit=200)
+    ids = [r["session_id"] for r in rows]
+    assert ids.index(second) < ids.index(first)
+
     await conversations.append_message(
         ref_a, conversations.build_message("user", "bumps first"))
+
     rows = await conversations.list_sessions(CLIENT, CLIENT_A["_id"], limit=200)
     ids = [r["session_id"] for r in rows]
     assert ids.index(first) < ids.index(second)

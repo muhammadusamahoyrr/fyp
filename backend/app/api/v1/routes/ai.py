@@ -953,6 +953,11 @@ class DraftRequest(BaseModel):
     instruction: str
     document: str = ""
     template: str = ""
+    # CASE-BOUND mode: send case_id; the server authorises it and DERIVES
+    # case_type + province from the case (case_type/province below are ignored).
+    # GENERAL mode: omit case_id; case_type is required + validated, province is
+    # validated (unknown → UNSPECIFIED, never silently 'federal').
+    case_id: str | None = None
     case_type: str = "civil"        # civil | criminal | family | constitutional
     province: str = "federal"
     history: list[dict] = []
@@ -1031,10 +1036,29 @@ async def ai_draft_stream(
 ):
     """Streams a legal document draft grounded in retrieved Pakistani law."""
     from app.ai.llm import get_llm
+    from app.services.case_context import (
+        build_case_context, context_block, resolve_general)
+
+    # Resolve the drafting jurisdiction. Two modes, never a silent default.
+    case_ctx_block = ""
+    if body.case_id:
+        # CASE-BOUND: authorise the case server-side (raises 403/404), then
+        # derive case_type + province from it and hand the model only a scrubbed
+        # whitelist of the case — never the raw case document.
+        from app.services.case_service import get_case
+        case = await get_case(body.case_id, current_user["_id"],
+                              current_user.get("role", "lawyer"))
+        ctx = build_case_context(case)
+        eff_case_type = ctx["case_type"] or "civil"
+        eff_province = ctx["province"]
+        case_ctx_block = context_block(ctx)
+    else:
+        # GENERAL: validate both axes. Unknown province → UNSPECIFIED, not federal.
+        eff_case_type, eff_province = resolve_general(body.case_type, body.province)
 
     query = f"{body.template} {body.instruction}".strip()
     statute_law = await asyncio.to_thread(
-        _retrieve_law_context, query, body.case_type, body.province
+        _retrieve_law_context, query, eff_case_type, eff_province
     )
     case_law = await _retrieve_case_law_context(query)
     law = statute_law + (("\n\n" + case_law) if case_law else "")
@@ -1044,9 +1068,11 @@ async def ai_draft_stream(
     for m in body.history[-6:]:
         if m.get("role") in ("user", "assistant") and m.get("content"):
             messages.append({"role": m["role"], "content": m["content"]})
-    messages.append({"role": "user", "content": (
-        f"Current document:\n\n{body.document[:8000]}\n\n---\nInstruction: {body.instruction}"
-    )})
+    _user = f"Current document:\n\n{body.document[:8000]}\n\n"
+    if case_ctx_block:
+        _user += case_ctx_block + "\n\n"
+    _user += f"---\nInstruction: {body.instruction}"
+    messages.append({"role": "user", "content": _user})
 
     async def token_generator():
         # The draft is buffered as it streams so the authorities it cites can be
@@ -1090,8 +1116,8 @@ async def ai_draft_stream(
                     state={
                         "query":  body.instruction,
                         "answer": drafted,
-                        "case_type": body.case_type,
-                        "province":  body.province,
+                        "case_type": eff_case_type,
+                        "province":  eff_province,
                         "citations": [],
                     },
                     session_id=f"draft:{current_user['_id']}",
