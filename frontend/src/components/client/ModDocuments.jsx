@@ -13,8 +13,8 @@ import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
     from "@/lib/fieldReview.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
-import { useDocumentResume, resolveCaseId, NO_CASE }
-    from "@/lib/useDocumentResume.js";
+import { useDocumentResume, NO_CASE } from "@/lib/useDocumentResume.js";
+import { caseSelection } from "@/lib/caseSelection.js";
 import {
     extractDocumentFields, generateDocument, downloadDocumentFile,
     fetchRevisionPreview, submitDocumentForReview, listDocuments,
@@ -86,7 +86,7 @@ function _byCategory(items) {
 const ModDocuments = () => {
     const t = useT();
     const toast = useToast();
-    const { cases } = useCase();
+    const { cases, casesReady, casesError, reloadCases } = useCase();
 
     /* ── State ── */
     const [step, setStep] = useState(0);                       // 0–4
@@ -343,7 +343,23 @@ const ModDocuments = () => {
     // Generation sets `genCaseId` to the same value this resolves to, so the
     // two agree until the user deliberately switches, which is exactly when the
     // new case should win.
-    const resumeCaseId = resolveCaseId(selectedCaseId, cases);
+    /* ONE derivation, shared by the resume hook, the selector, the readiness
+     * badge and both halves of generation. There were three and they could
+     * disagree — opening a case-B document moved the internal case to B while
+     * the selector stayed on A, and generation read the selector.
+     *
+     * STANDALONE CREATION IS NOT SUPPORTED ON THIS SCREEN, and that is a
+     * deliberate choice rather than an omission. Every path here is
+     * case-driven: extraction reads the case description, and with
+     * DOCUMENTS_V2 off the legacy generator requires a case id too. Offering
+     * the option would be a control nobody could complete. Standalone
+     * documents created elsewhere are still opened and restored — see the
+     * no-case bucket in `documentResume`.
+     */
+    const selection = caseSelection({
+        selectedCaseId, cases, casesReady, allowStandaloneCreation: false,
+    });
+    const resumeCaseId = selection.activeCaseId;
 
     /* Put a restored document on screen. Shared by the refresh-resume hook,
      * by opening a row in My Documents, and by previewing one — three callers
@@ -415,9 +431,12 @@ const ModDocuments = () => {
 
     useDocumentResume({
         caseId: resumeCaseId,
-        // The case list has arrived. `caseId` of null is a real value — the
-        // standalone bucket — so "not known yet" needs its own signal.
-        ready: Array.isArray(cases),
+        // From the CONTEXT, not from `Array.isArray(cases)`. `cases` is
+        // initialised to [], so that expression was true before `listCases` had
+        // even been called — the hook then treated "still asking" as "this user
+        // has no cases" and restored a standalone draft a beat before the real
+        // case arrived.
+        ready: casesReady,
         // WHICH case the open document belongs to, not merely that one is open.
         // A boolean meant the first loaded document blocked restoration for
         // every case thereafter, so switching matters kept showing the first
@@ -604,7 +623,7 @@ const ModDocuments = () => {
     // The one fact the whole draft step depends on: is there a case to draft
     // from? handleGenerate resolves the id exactly this way, so the readiness
     // strip and the button can never disagree with what the handler will do.
-    const activeCaseId = selectedCaseId || (cases[0]?._id || cases[0]?.id) || "";
+    const activeCaseId = selection.activeCaseId || "";
     const activeCase = cases.find(c => (c._id || c.id) === activeCaseId);
     const activeCaseTitle = activeCase?.title || activeCase?.case_type || "your case";
     // Nothing in the catalogue is unsupported: it is built FROM the builder
@@ -616,7 +635,11 @@ const ModDocuments = () => {
     // A document type MUST be chosen. Without this, an unset type used to fall
     // through to a civil plaint (see backendType below), silently handing the
     // user a real, filable plaint they never asked for.
-    const canGenerate = Boolean(activeCaseId) && Boolean(selectedType) && !unsupportedType;
+    // `selection.canGenerate` already accounts for readiness, a real case and
+    // the standalone sentinel — which is a non-empty string, so a plain
+    // `Boolean(selectedCaseId)` read it as a case and reported Ready for a
+    // selection generation refuses.
+    const canGenerate = selection.canGenerate && Boolean(selectedType) && !unsupportedType;
 
     const handleGenerate = async (retryKey = null) => {
         const templateKey = selectedType?.template_type;
@@ -1059,11 +1082,16 @@ const ModDocuments = () => {
                                     <div>
                                         <Lbl>Linked Case</Lbl>
                                         <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5, fontFamily: "'Inter',sans-serif" }}>
+                                            {/* NO standalone option. Documents
+                                                drafted here are always linked to
+                                                a case; offering "no case" would
+                                                be a control that cannot complete,
+                                                because extraction reads the case
+                                                and the legacy generator requires
+                                                a case id. Standalone documents
+                                                made elsewhere are still opened
+                                                and restored. */}
                                             <option value="">Select a case…</option>
-                                            {/* An explicit choice, so a
-                                                standalone draft is not dragged
-                                                into the first case in the list. */}
-                                            <option value={NO_CASE}>No case — standalone document</option>
                                             {cases.map(c => <option key={c._id || c.id} value={c._id || c.id}>{c.title || c.case_type || (c._id || c.id)}</option>)}
                                         </select>
                                     </div>
@@ -1099,6 +1127,12 @@ const ModDocuments = () => {
                                 <span style={{ fontSize: 11.5, color: t.textMuted, flex: 1 }}>
                                     {canGenerate
                                         ? `Linked to "${activeCaseTitle}" · ready to draft`
+                                        : selection.blockedReason === "loading"
+                                        ? "Loading your cases…"
+                                        : selection.blockedReason === "standalone_unsupported"
+                                        ? "Documents drafted here are always linked to a case. Choose one above."
+                                        : casesError
+                                        ? "We could not load your cases. This does not mean they are gone — only that we could not reach them just now."
                                         : "No case linked yet — complete your Legal Intake first, then come back to draft a document."}
                                 </span>
                                 <Badge type={canGenerate ? "success" : "warn"}>{canGenerate ? "✓ Ready" : "Not ready"}</Badge>

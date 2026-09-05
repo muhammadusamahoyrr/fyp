@@ -85,6 +85,20 @@ const mapNotification = (notif) => ({
 export const CaseProvider = ({ children }) => {
     const { user } = useAuth();
     const [caseData, setCaseData] = useState(INITIAL);
+    /* HAS THE CASE LIST BEEN ANSWERED FOR, as opposed to merely being empty.
+     *
+     * `cases` starts as `[]`, so `Array.isArray(cases)` was true from the first
+     * render — before `listCases` had been called, let alone replied. Every
+     * consumer therefore read "this user has no cases" during the moment the
+     * app was still asking, and a document screen keyed off that restored a
+     * standalone draft a beat before the user's real case arrived.
+     *
+     * Settles on FAILURE too: a load that errored leaves the list exactly as
+     * unknown as a pending one, but leaving `casesReady` false forever means
+     * every consumer waits for an answer that will never come. Ready-with-an-
+     * error is the honest pair — we finished asking, and we did not find out. */
+    const [casesReady, setCasesReady] = useState(false);
+    const [casesError, setCasesError] = useState(null);
 
     const updateCase = (patch) =>
         setCaseData(prev => ({ ...prev, ...patch }));
@@ -161,6 +175,10 @@ export const CaseProvider = ({ children }) => {
             if (casesRes.data)  patch.cases         = casesRes.data.items || casesRes.data || [];
             if (apptsRes.data)  patch.appointments  = apptsRes.data.items || apptsRes.data || [];
             if (Object.keys(patch).length) updateCase(patch);
+
+            // AFTER the answer, whichever way it went.
+            setCasesError(casesRes.error || null);
+            setCasesReady(true);
         };
 
         const connectLiveNotifications = async () => {
@@ -187,6 +205,16 @@ export const CaseProvider = ({ children }) => {
         };
     }, [user?._id]);
 
+    /* Ask again after a failure. Returns the error, or null on success, so a
+     * caller can decide what to show without re-reading context. */
+    const reloadCases = async () => {
+        const { data, error } = await listCases({ page_size: 50 });
+        if (data) updateCase({ cases: data.items || data || [] });
+        setCasesError(error || null);
+        setCasesReady(true);
+        return error || null;
+    };
+
     const refreshAppointments = async () => {
         const { data } = await listAppointments({ page_size: 50 });
         if (data) updateCase({ appointments: data.items || data || [] });
@@ -203,6 +231,9 @@ export const CaseProvider = ({ children }) => {
             markAllNotificationsDone,
             addNotification,
             refreshAppointments,
+            casesReady,
+            casesError,
+            reloadCases,
             unreadCount,
         }}>
             {children}

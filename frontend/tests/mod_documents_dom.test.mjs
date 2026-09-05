@@ -103,13 +103,22 @@ async function mountDocuments() {
     return {
         container,
         text: () => container.textContent,
+        settle: async (ms = 40) => { await act(async () => {
+            await new Promise(r => setTimeout(r, ms));
+        }); },
         unmount: async () => { await act(async () => root.unmount()); },
     };
 }
 
 
 
-test.beforeEach(() => { api.__reset(); clearDrafts(); });
+test.beforeEach(() => {
+    api.__reset();
+    clearDrafts();
+    // Signed in through the stub, so the REAL CaseProvider actually fetches.
+    api.__respond("bootstrapAuth", true);
+    api.__respond("getMe", { data: { _id: "u1", role: "client" } });
+});
 
 test.after(() => {
     for (const id of liveTimers) { realClearInterval(id); realClearTimeout(id); }
@@ -442,5 +451,64 @@ test("a document opened from another case stays on screen", async () => {
 
     assert.match(p.text(), /A case-2 notice/,
                  "the document was cleared moments after being opened");
+    await p.unmount();
+});
+
+
+/* ── restoration waits for the case list to settle ────────────────────────── */
+
+test("standalone restoration does not start before case loading settles", async () => {
+    // THE DEFECT. `ready: Array.isArray(cases)` was true from the first render
+    // because `cases` is initialised to []. With `null` meaning "no case", an
+    // unsettled empty list read as "standalone", so the no-case draft was
+    // fetched a beat before the user's real case arrived — and briefly put
+    // somebody else's kind of document on screen.
+    //
+    // The real CaseProvider is mounted with its genuine initial state; only the
+    // network is stubbed.
+    let releaseCases;
+    api.__respond("listCases", () => new Promise(r => { releaseCases = r; }));
+    rememberDraft(null, "standalone-doc", dom.window.localStorage);
+    api.__respond("getDocumentV2", {
+        data: {
+            id: "standalone-doc", title: "A standalone notice",
+            review_status: "none", case_id: null, current_version: 1,
+            current_revision: { revision_id: "rev-s", pdf_sha256: "c".repeat(64) },
+        },
+    });
+
+    const p = await mountDocuments();
+
+    assert.deepEqual(api.__calls("getDocumentV2"), [],
+                     "restored a standalone draft before the case list settled");
+
+    await act(async () => { releaseCases({ data: { items: CASES } }); });
+    await p.settle();
+
+    // With real cases present, the screen is in case-1 — never standalone.
+    const asked = api.__calls("getDocumentV2").map(c => c.args[0]);
+    assert.ok(!asked.includes("standalone-doc"),
+              "a standalone draft was restored while a real case was in view");
+    await p.unmount();
+});
+
+test("a user with zero cases settles without claiming to be ready", async () => {
+    api.__respond("listCases", { data: { items: [] } });
+
+    const p = await mountDocuments();
+    await p.settle();
+    assert.doesNotMatch(p.text(), /Loading your cases/,
+                        "still reported loading after the list settled empty");
+    await p.unmount();
+});
+
+test("a failed case load says so rather than 'no case linked'", async () => {
+    // "Complete your Legal Intake first" is false and alarming for a user who
+    // has cases the app simply could not fetch.
+    api.__respond("listCases", { error: { message: "Network unreachable" } });
+
+    const p = await mountDocuments();
+    await p.settle();
+    assert.doesNotMatch(p.text(), /complete your Legal Intake first/i);
     await p.unmount();
 });
