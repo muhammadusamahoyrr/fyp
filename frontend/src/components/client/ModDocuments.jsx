@@ -8,6 +8,9 @@ import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/s
 import { useCase } from "./CaseContext.jsx";
 import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
 import MyDocumentsPanel from "./MyDocumentsPanel.jsx";
+import FieldReview from "./FieldReview.jsx";
+import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
+    from "@/lib/fieldReview.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { rememberDraft } from "@/lib/documentResume.js";
 import { useDocumentResume, resolveCaseId } from "@/lib/useDocumentResume.js";
@@ -172,6 +175,14 @@ const ModDocuments = () => {
     const [revLawyers, setRevLawyers] = useState([]);         // verified lawyers from the API
     const [caseLawyerId, setCaseLawyerId] = useState(null);   // assigned lawyer of the linked case, if any
     const [genCaseId, setGenCaseId] = useState(null);         // case the document was generated for
+    // THE EXTRACTION, BEFORE IT BECOMES A DOCUMENT.
+    //
+    // Generation used to run extraction and rendering back to back, so a model
+    // decided who the parties were and what the amounts were and those values
+    // entered a legal document without the client ever seeing them. `rawFields`
+    // is what the model returned; `reviewRows` is that, editable.
+    const [rawFields, setRawFields] = useState(null);
+    const [reviewRows, setReviewRows] = useState(null);
     const [reviewNote, setReviewNote] = useState("");
     const [urgency, setUrgency] = useState("Normal");
     const [withdrawing, setWithdrawing] = useState(false);
@@ -547,6 +558,10 @@ const ModDocuments = () => {
         // document's heading. A regeneration produces a NEW revision; nothing
         // about the previous one survives it on screen.
         setDocRevisionId(null); setDocPdfSha256(null); setDocVersion(null);
+        // A new extraction replaces the previous review outright. Keeping the
+        // old rows would show the client fields read from a run they have
+        // already abandoned.
+        setReviewRows(null); setRawFields(null);
         setGenCaseId(caseId);
         // A regenerated document restarts the review pipeline
         setReviewSent(false); setReviewStatus(null); setLawyerNote(""); setUserApproved(false);
@@ -558,9 +573,9 @@ const ModDocuments = () => {
         setDocIssue(null);
 
         try {
-            // Phase 1 — AI field extraction. Unchanged, and deliberately
-            // outside the idempotent unit: it is a read, it produces no
-            // revision, and re-running it costs nothing anyone is billed for.
+            // Phase 1 — AI field extraction. Deliberately outside the
+            // idempotent unit: it is a read, it produces no revision, and
+            // re-running it costs nothing anyone is billed for.
             const extractRes = await extractDocumentFields(caseId, backendType);
             setGenPct(45);
             if (extractRes.error) {
@@ -569,6 +584,45 @@ const ModDocuments = () => {
             }
             const fields = extractRes.data?.fields || {};
 
+            // STOP HERE AND ASK.
+            //
+            // This used to fall straight through to rendering, so a model's
+            // reading of a free-text case — the parties, the amounts, the dates
+            // — became a legal document nobody had checked. The review that
+            // follows generation looks at the finished PDF, and spotting a
+            // wrong figure in three formatted pages is a different task from
+            // seeing `demand: 500000` in a list.
+            //
+            // This is the last point where the mistake is cheap: after this it
+            // is an immutable revision, and after submission it is in a
+            // lawyer's queue.
+            setRawFields(fields);
+            setReviewRows(buildReviewRows(fields, selectedType?.fields || []));
+            setGenerating(false);
+            setGenPct(0);
+            return;
+        } catch (e) {
+            setGenerating(false);
+            toast.show("❌ " + (e?.message || "Could not read your case details"), "danger");
+            return;
+        }
+    };
+
+    /* The client has seen the fields and either accepted or corrected them.
+     *
+     * `toSubmittedFields` sends only what this template consumes and omits
+     * blanks — an empty string is a value the renderer prints, where an absent
+     * key lets `pleading_rules` report the field as missing, which is true. */
+    const confirmFieldsAndGenerate = async (retryKey = null) => {
+        const caseId = genCaseId || selectedCaseId || (cases[0]?._id || cases[0]?.id);
+        const backendType = selectedType?.template_type;
+        if (!caseId || !backendType) return;
+
+        const fields = toSubmittedFields(reviewRows || []);
+        setGenerating(true); setGenPct(55); setDocIssue(null);
+        generateKeyRef.current = retryKey || generateKeyRef.current || idempotencyKey();
+
+        try {
             // Phase 2 — the revision itself.
             const viaV2 = await _generateViaV2({
                 caseId, backendType, fields, key: generateKeyRef.current,
@@ -947,6 +1001,25 @@ const ModDocuments = () => {
                                 </span>
                                 <Badge type={canGenerate ? "success" : "warn"}>{canGenerate ? "✓ Ready" : "Not ready"}</Badge>
                             </div>
+
+                            {/* THE EXTRACTION, BEFORE IT BECOMES A DOCUMENT.
+                                Shown in place of the progress bar: this is the
+                                last point where a wrong party name or amount is
+                                a two-second fix rather than a new revision. */}
+                            {reviewRows && !genDone && (
+                                <div style={{ marginTop: 14 }}>
+                                    <FieldReview
+                                        t={t}
+                                        rows={reviewRows}
+                                        missing={missingFields(reviewRows)}
+                                        edited={hasEdits(reviewRows, rawFields)}
+                                        busy={generating}
+                                        onEdit={(name, value) =>
+                                            setReviewRows(rows => editRow(rows, name, value))}
+                                        onGenerate={() => confirmFieldsAndGenerate()}
+                                        onBack={() => { setReviewRows(null); setRawFields(null); }} />
+                                </div>
+                            )}
 
                             {/* Progress bar */}
                             {(generating || genDone) && (

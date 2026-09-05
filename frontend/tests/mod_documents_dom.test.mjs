@@ -205,3 +205,29 @@ test("the document dashboard lists documents the client owns", async () => {
     assert.match(p.text(), /An earlier notice/);
     await p.unmount();
 });
+
+
+/* ── the field review stands between extraction and the document ─────────── */
+
+test("generation stops for review instead of drafting straight through", async () => {
+    // THE DEFECT. `extractDocumentFields` fed `_generateViaV2` directly, so a
+    // model's reading of a free-text case — parties, amounts, dates — became a
+    // legal document nobody had checked. The review that follows generation
+    // looks at the finished PDF, where a wrong figure is far harder to spot.
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "legal_notice", label: "Legal Notice",
+                 category: "Civil", fields: ["sender_name", "demand"] }],
+    });
+    api.__respond("extractDocumentFields", {
+        data: { fields: { sender_name: "Ayesha Khan", demand: "500000" } },
+    });
+
+    const p = await mountDocuments();
+
+    // Nothing has been drafted yet, and nothing may be until a human looks.
+    assert.equal(api.__calls("generateRevisionV2").length, 0);
+    assert.equal(api.__calls("generateDocument").length, 0);
+    await p.unmount();
+});

@@ -493,10 +493,24 @@ test("both surfaces say so while an older draft is displayed", () => {
     assert.match(lawyer, /applies to the version the client submitted/);
 });
 
+/* The whole generation flow: extraction, the field review that now sits
+ * between, and the render.
+ *
+ * Bounded by the name of the next declaration rather than by a count of
+ * characters. Generation is two functions now — `handleGenerate` extracts and
+ * stops for review, `confirmFieldsAndGenerate` renders — and the old
+ * `slice(0, 2000)` window silently stopped covering the code it was aimed at
+ * the moment a comment above it grew.
+ */
+function generationFlow() {
+    const start = client.indexOf("const handleGenerate");
+    const end = client.indexOf("const Stepper", start);
+    return client.slice(start, end > start ? end : undefined);
+}
+
 test("a regeneration drops the pinned older revision", () => {
     // Otherwise a new draft lands behind a superseded one still on screen.
-    const fn = client.slice(client.indexOf("const handleGenerate"));
-    assert.match(fn.slice(0, 2000), /setViewRev\(null\)/);
+    assert.match(generationFlow(), /setViewRev\(null\)/);
 });
 
 test("the history list reloads on new revisions, not on every click", () => {
@@ -600,10 +614,9 @@ test("and to the lawyer who signs it off", () => {
 test("the legacy path clears the shape report rather than keeping a stale one", () => {
     // It produces none. Leaving the previous V2 generation's report on screen
     // would read it against different bytes.
-    const fn = client.slice(client.indexOf("const handleGenerate"));
-    const body = fn.slice(0, fn.indexOf("\n    };"));
-    assert.match(body, /setFieldShape\(null\)/);
-    assert.match(body, /setFieldShape\(viaV2\.fieldShape \|\| null\)/);
+    const flow = generationFlow();
+    assert.match(flow, /setFieldShape\(null\)/);
+    assert.match(flow, /setFieldShape\(viaV2\.fieldShape \|\| null\)/);
 });
 
 test("the shape finding is never rendered as a compliance verdict", () => {
