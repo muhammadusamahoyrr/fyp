@@ -122,3 +122,7 @@ Remaining.md
 # Purge backups hold deleted user documents verbatim (emails, password hashes).
 # Recovery artefacts, never committed.
 backend/data/purge_backups/
+
+# Scratch output from a one-off V2 artifact-store probe. Generated PDFs,
+# never source.
+backend/_probe_uploads/
