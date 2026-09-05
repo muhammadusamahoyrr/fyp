@@ -8,11 +8,15 @@ Arabic. Mixed markup (<b>…</b>) with Urdu inside is passed through unshaped �
 keep Urdu values markup-free.
 """
 
+import logging
 import re
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from html.parser import HTMLParser as _HTMLParser
 from xml.sax.saxutils import escape as _xml_escape
+
+logger = logging.getLogger(__name__)
 
 from app.core.claims import PARTIAL_GROUNDING_NOTICE
 from reportlab.lib import colors
@@ -1551,6 +1555,171 @@ def wakalatnama_checklist(doc_id: str, f: dict) -> Path:
     doc.build(story)
     return out
 
+def lawyer_draft(doc_id: str, f: dict) -> Path:
+    """A lawyer-authored document, rendered from the drafting page's own prose.
+
+    WHY THIS IS NOT LIKE THE OTHER BUILDERS
+
+    Every other generator here composes a known instrument from named fields, and
+    can therefore be checked against a statute. This one renders whatever the
+    lawyer wrote. It makes NO claim about the document's form, and
+    `pleading_rules` correctly reports `checked: false` for it — there are no
+    enumerated particulars to check against, because the system does not know
+    what instrument this is.
+
+    What it does give the draft is everything else the pipeline provides: an
+    immutable artifact with a sha256, a revision it can be named by, and the
+    citation existence check run over its text. Before this, a draft could only
+    leave as a .doc export - outside the system, unhashed, with no authority
+    ever checked.
+
+    THE MARKUP IS REBUILT, NEVER PASSED THROUGH
+
+    reportlab's Paragraph parses a markup language, and this is the one builder
+    whose input is markup rather than a field value. That is exactly the shape
+    of the hole `P()` documents: `<img src="...">` inside a paragraph OPENS THAT
+    PATH ON THE SERVER and embeds the file in the output.
+
+    So nothing from the draft reaches reportlab as markup. The HTML is parsed,
+    every text node is XML-escaped, and the only tags emitted are the six in
+    `_DRAFT_INLINE` - built here, from a fixed table, never forwarded. An
+    unrecognised tag contributes its text and nothing else.
+
+    `<font>` is deliberately dropped even though the draft sanitiser permits
+    face and size. A filed document should carry the document's typography, not
+    whatever the editor's dropdown was left on, and forwarding a face name into
+    reportlab's font resolver is surface this has no reason to take on.
+    """
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    out = UPLOADS_DIR / f"{doc_id}.pdf"
+    s = _styles()
+    doc = _base_doc(out)
+
+    story = [P(f.get("title") or "Legal Document", s["title"])]
+
+    byline = f.get("author_name")
+    if byline:
+        story.append(P(f"Prepared by {byline}", s["label"]))
+    story.append(P(f.get("date") or _today(), s["label"]))
+    story.append(_hr())
+
+    blocks = _draft_blocks(f.get("body_html") or "")
+    if not blocks:
+        # An empty draft is a real outcome — a lawyer pressing Save on a blank
+        # editor. Saying so beats a page containing only a title, which reads as
+        # a rendering failure.
+        story.append(P("This draft is empty.", s["body"]))
+    for kind, markup in blocks:
+        if kind == "rule":
+            story.append(_hr())
+        elif kind == "heading":
+            story.append(P(markup, s["heading"], raw=True))
+        elif kind == "bullet":
+            story.append(P(f"•&nbsp;&nbsp;{markup}", s["body"], raw=True))
+        else:
+            story.append(P(markup, s["body"], raw=True))
+
+    doc.build(story)
+    return out
+
+
+# Draft tag -> the reportlab inline tag it becomes. Anything absent from this
+# table contributes its text and nothing else. This is an ALLOWLIST and the
+# only place a tag can enter the output.
+_DRAFT_INLINE = {
+    "b": "b", "strong": "b",
+    "i": "i", "em": "i",
+    "u": "u",
+    "s": "strike", "strike": "strike",
+    "sub": "sub", "sup": "super",
+}
+_DRAFT_BLOCK = {"p", "div", "li", "h1", "h2", "h3", "blockquote", "ul", "ol"}
+
+
+class _DraftFlow(_HTMLParser):
+    """Sanitised draft HTML -> a list of (kind, reportlab markup) blocks.
+
+    Built on stdlib html.parser for the same reason `_VisibleText` in
+    document_service is: a regex over markup gets nesting wrong, and getting
+    nesting wrong here means emitting an unbalanced tag that makes the whole
+    document fail to render.
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.blocks: list[tuple[str, str]] = []
+        self._parts: list[str] = []
+        self._kind = "body"
+        self._open: list[str] = []
+
+    # -- block boundaries --
+    def _flush(self):
+        # Close anything the draft left open. reportlab raises on unbalanced
+        # markup, and a lawyer's editor emits unbalanced markup routinely.
+        text = "".join(self._parts) + "".join(
+            f"</{tag}>" for tag in reversed(self._open))
+        self._parts = ["".join(f"<{tag}>" for tag in self._open)]
+        text = text.strip()
+        if text:
+            self.blocks.append((self._kind, text))
+        self._kind = "body"
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "br":
+            self._parts.append("<br/>")
+            return
+        if tag == "hr":
+            self._flush()
+            self.blocks.append(("rule", ""))
+            return
+        if tag in _DRAFT_BLOCK:
+            self._flush()
+            if tag in ("h1", "h2", "h3"):
+                self._kind = "heading"
+            elif tag == "li":
+                self._kind = "bullet"
+            return
+        inline = _DRAFT_INLINE.get(tag)
+        if inline:
+            self._open.append(inline)
+            self._parts.append(f"<{inline}>")
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in _DRAFT_BLOCK:
+            self._flush()
+            return
+        inline = _DRAFT_INLINE.get(tag)
+        if inline and inline in self._open:
+            # Close down to it, so </b> inside <i><b> cannot cross tags.
+            while self._open:
+                open_tag = self._open.pop()
+                self._parts.append(f"</{open_tag}>")
+                if open_tag == inline:
+                    break
+
+    def handle_data(self, data):
+        # THE escape. Everything the lawyer typed is data, including the "<" in
+        # "paid <50% of what was owed" — which raised a parser error and made
+        # the document impossible to generate before P() started escaping.
+        self._parts.append(_xml_escape(data))
+
+    def close(self):
+        super().close()
+        self._flush()
+
+
+def _draft_blocks(html: str) -> list[tuple[str, str]]:
+    parser = _DraftFlow()
+    parser.feed(html or "")
+    parser.close()
+    return parser.blocks
+
+
 _GENERATORS = {
     "payment_receipt":    payment_receipt,
     "urdu_pleading":      urdu_pleading,
@@ -1573,6 +1742,7 @@ _GENERATORS = {
     "fia_cybercrime":         fia_cybercrime,
     "guardianship_petition":  guardianship_petition,
     "wakalatnama_checklist":  wakalatnama_checklist,
+    "lawyer_draft":           lawyer_draft,
 }
 
 
@@ -1581,3 +1751,66 @@ def generate_pdf(doc_id: str, template_type: str, fields: dict) -> Path:
     if not fn:
         raise ValueError(f"Unknown template type: {template_type}")
     return fn(doc_id, fields)
+
+
+def _extract_pdf_text(source, label) -> tuple[str, str]:
+    """The single extraction implementation. `source` is a path or a stream.
+
+    ONE implementation on purpose. Two readers that could disagree would make
+    every hash the migration records unfalsifiable: a mismatch between stored
+    bytes and stored text could mean corruption, or could mean the two paths
+    simply parse differently, and nothing on the record would say which.
+    """
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(source)
+        parts = []
+        for page in reader.pages:
+            try:
+                parts.append(page.extract_text() or "")
+            except Exception:                       # one bad page is not a failure
+                continue
+        text = "\n".join(parts).strip()
+        return (text, "ok") if text else ("", "empty")
+    except Exception as exc:                         # unreadable / not a PDF
+        logger.warning("extract_pdf_text failed for %s: %s", label, exc)
+        return ("", "failed")
+
+
+def extract_pdf_text_bytes(data: bytes) -> tuple[str, str]:
+    """Extract from bytes ALREADY IN HAND, without touching the filesystem.
+
+    Exists for one caller with one hard requirement: the migration must derive
+    the artifact, its hash and its text from a single byte string. Re-opening
+    the path to get the text lets the file change underneath, producing a
+    revision whose stored bytes, recorded hash and extracted body describe
+    different versions of the document — each field individually well-formed,
+    so nothing downstream can detect the inconsistency.
+
+    Same contract as `extract_pdf_text`: total, never raises, returns a status.
+    """
+    return _extract_pdf_text(BytesIO(data), "<bytes>")
+
+
+def extract_pdf_text(path) -> tuple[str, str]:
+    """Recover the text of a generated PDF, with a status — never a bare "".
+
+    Returns (text, status) where status is one of:
+        "ok"      text was extracted
+        "empty"   the PDF parsed but yielded no text (e.g. image-only)
+        "failed"  the file could not be read/parsed
+
+    Total and pure: it never raises. The caller combines this raw status with a
+    per-template extraction PROFILE (see services/extraction_profile) to decide
+    the final `extraction_status` — an Urdu-profile document may extract "ok"
+    here yet be recorded as "unsupported" for verification, because the English
+    corpus cannot match Urdu. A non-"ok" status MUST drive verification.ran to
+    false; it can never become a zero-citation "pass".
+
+    DORMANT until DOCUMENTS_V2; used by the generation pipeline in a later stage.
+
+    NOT for the migration path — see `extract_pdf_text_bytes`. Reading the file
+    again there is precisely the bug.
+    """
+    return _extract_pdf_text(str(path), path)

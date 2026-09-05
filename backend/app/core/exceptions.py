@@ -72,3 +72,17 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"error": "Internal server error", "status_code": 500},
     )
+
+
+class ReviewLimitError(HTTPException):
+    """A document has been reviewed as many times as it can be.
+
+    Its own class rather than a ConflictError with distinguishing prose, because
+    the caller's response differs completely. Every other 409 on this surface
+    means "reload and try again" and is worth retrying; this one is permanent
+    for this document, and retrying is the one thing that cannot help. A client
+    that cannot tell them apart retries forever.
+    """
+
+    def __init__(self, detail: str = "This document has reached its review limit."):
+        super().__init__(status_code=409, detail=detail)

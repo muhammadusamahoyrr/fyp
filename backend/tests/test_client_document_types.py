@@ -1,14 +1,22 @@
-"""The client's document-type tiles must name the document they actually produce.
-
-These assertions live in the backend suite because that is where the test runner
-is, and because the thing being checked is a CONTRACT BETWEEN the two: a label in
-the frontend and a builder in the backend.
+"""A document must be labelled as the document it actually produces.
 
 Both bugs this pins were live. A tile labelled "Contract" generated a
-Non-Disclosure Agreement, and one labelled "Settlement Draft" generated a
-Rental Agreement. Neither failed, errored, or warned — the user received a real,
+Non-Disclosure Agreement, and one labelled "Settlement Draft" generated a Rental
+Agreement. Neither failed, errored, or warned — the user received a real,
 correctly formatted PDF of an instrument they had not asked for, which is worse
 than an error because nothing prompts them to check.
+
+WHERE THIS CONTRACT NOW LIVES
+
+It used to be checked against two hardcoded lists in ModDocuments.jsx, because
+that is where the labels were. They are gone: the catalogue is served from
+`template_registry`, built from the builder map itself, so a label without a
+builder can no longer be written down at all.
+
+So these tests moved with the labels. The mislabelling check is now made against
+the registry — a stronger position, since it covers all twenty-one templates
+rather than the seven that screen happened to list — and what is still asserted
+about the JSX is that it holds no competing list of its own.
 """
 from __future__ import annotations
 
@@ -18,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from app.core.constants import DocumentTemplate
+from app.services import template_registry as reg
 from app.services.document_service import TEMPLATE_TITLES
 
 JSX = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "components"
@@ -31,52 +40,14 @@ def source() -> str:
     return JSX.read_text(encoding="utf-8")
 
 
-@pytest.fixture(scope="module")
-def tiles(source: str) -> list[str]:
-    block = re.search(r"const DOC_TYPES_DATA = \[(.*?)\];", source, re.S)
-    assert block, "DOC_TYPES_DATA not found"
-    return re.findall(r'key:\s*"([^"]+)"', block.group(1))
-
-
-@pytest.fixture(scope="module")
-def mapping(source: str) -> dict[str, str | None]:
-    block = re.search(r"const DOC_TYPE_MAP = \{(.*?)\};", source, re.S)
-    assert block, "DOC_TYPE_MAP not found"
-    out: dict[str, str | None] = {}
-    for key, value in re.findall(r'"([^"]+)":\s*(null|"[a-z0-9_]+")',
-                                 block.group(1)):
-        out[key] = None if value == "null" else value.strip('"')
-    return out
-
-
 # ── the contract between label and builder ────────────────────────────────────
 
-def test_every_tile_has_an_explicit_mapping(tiles, mapping):
-    """`DOC_TYPE_MAP[type] || "plaint_civil"` means an UNMAPPED tile silently
-    generates a civil plaint. The null check catches null, not undefined, so a
-    tile added without a map entry produces the wrong document with no warning.
-    """
-    for key in tiles:
-        assert key in mapping, (
-            f'tile "{key}" has no DOC_TYPE_MAP entry — it would fall through to '
-            f'the plaint_civil default and generate a civil plaint')
-
-
-def test_every_mapped_template_exists_in_the_backend(mapping):
-    valid = {t.value for t in DocumentTemplate}
-    for key, template in mapping.items():
-        if template is None:
-            continue
-        assert template in valid, f'"{key}" maps to unknown template {template!r}'
-
-
-@pytest.mark.parametrize("_", [None])
-def test_each_tile_is_labelled_as_the_document_it_generates(mapping, _):
+def test_each_entry_is_labelled_as_the_document_it_generates():
     """THE TEST THAT WOULD HAVE CAUGHT BOTH BUGS.
 
-    The backend already names every template in TEMPLATE_TITLES. If a tile's
-    label does not correspond to that name, the user is being shown one document
-    and handed another:
+    The backend already names every template in TEMPLATE_TITLES. If the
+    catalogue's label does not correspond to that name, the user is being shown
+    one document and handed another:
 
         "Contract"         -> nda              -> "Non-Disclosure Agreement"
         "Settlement Draft" -> rental_agreement -> "Rental Agreement"
@@ -87,37 +58,65 @@ def test_each_tile_is_labelled_as_the_document_it_generates(mapping, _):
     titles = {t.value: TEMPLATE_TITLES[t] for t in DocumentTemplate
               if t in TEMPLATE_TITLES}
     noise = {"the", "of", "a", "an", "and", "application", "agreement",
-             "document", "draft", "notice", "statement"}
+             "document", "draft", "notice", "statement", "to", "s", "crpc",
+             "cpc", "rule", "order", "iii", "act"}
 
     def words(text: str) -> set[str]:
         return {w for w in re.findall(r"[a-z]+", text.lower())} - noise
 
-    for key, template in mapping.items():
-        if template is None:
+    for item in reg.listing(include_system=True):
+        backend_name = titles.get(item["template_type"])
+        if not backend_name:
             continue
-        backend_name = titles.get(template, "")
-        shared = words(key) & words(backend_name)
+        shared = words(item["label"]) & words(backend_name)
         assert shared, (
-            f'tile "{key}" generates "{backend_name}" ({template}) — the label '
-            f'and the document share no significant word, so the user is being '
-            f'shown one instrument and handed another')
+            f'the catalogue calls {item["template_type"]} "{item["label"]}" '
+            f'while the backend calls it "{backend_name}" — the two share no '
+            f'significant word, so the user is shown one instrument and handed '
+            f'another')
 
 
-def test_unsupported_types_are_null_not_a_near_miss(mapping):
-    """The honest pattern: an unbuildable type maps to null and the UI disables
-    it. Substituting the nearest available template is how "Settlement Draft"
-    came to generate a tenancy agreement."""
-    assert mapping.get("Stay Application") is None
-    assert mapping.get("Settlement Draft") is None, (
-        "no settlement builder exists; mapping it to any real template hands "
-        "the user the wrong instrument")
-
-
-def test_the_agreements_the_backend_can_build_are_reachable(mapping):
+def test_the_agreements_the_backend_can_build_are_reachable():
     """Renaming the vague "Contract" tile must not strip access to the two
     agreement builders that do exist."""
-    assert mapping.get("Non-Disclosure Agreement") == "nda"
-    assert mapping.get("Rental Agreement") == "rental_agreement"
+    offered = {i["template_type"] for i in reg.listing()}
+    assert "nda" in offered
+    assert "rental_agreement" in offered
+
+
+def test_nothing_unbuildable_can_be_offered():
+    """The honest pattern used to be: an unbuildable type maps to null and the
+    UI disables it. Substituting the nearest available template is how
+    "Settlement Draft" came to generate a tenancy agreement.
+
+    That pattern is now structural rather than maintained. The catalogue is
+    built FROM the builder map, so an entry for a document nothing can render
+    cannot be written down — there is no null case left to get wrong.
+    """
+    from app.services.pdf_generator import _GENERATORS
+    for item in reg.listing(include_system=True):
+        assert item["template_type"] in _GENERATORS
+
+
+# ── the frontend keeps no competing list ─────────────────────────────────────
+
+def test_the_client_holds_no_template_list_of_its_own(source):
+    """Two lists, each claiming to know what exists, is the shape of the bug.
+
+    Whichever one a screen reads, the other is free to drift — and the one that
+    drifted offered documents nothing could build.
+    """
+    for ghost in ("DOC_TYPES_DATA", "DOC_TYPE_MAP"):
+        assert ghost not in source, (
+            f"{ghost} is back — the client is deciding again what the backend "
+            f"can build")
+
+
+def test_the_client_reads_the_catalogue(source):
+    # Deleting the hardcoded lists without reading the real one leaves a picker
+    # with nothing in it.
+    assert "listTemplates()" in source
+    assert "selectedType?.template_type" in source
 
 
 # ── no fabricated data ────────────────────────────────────────────────────────

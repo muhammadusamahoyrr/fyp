@@ -16,7 +16,7 @@ from app.schemas.document import (
     ReviewQueueItem,
     SuccessResponse,
 )
-from app.services import document_service
+from app.services import document_service, template_registry
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -186,6 +186,48 @@ async def download_document(
         media_type="application/pdf",
         filename=f"{doc.get('title', 'document')}.pdf",
     )
+
+
+class TemplateSpec(BaseModel):
+    """One entry in the drafting catalogue."""
+    template_type: str
+    label: str
+    category: str
+    description: str
+    # The top-level keys this template's builder reads. Derived from the
+    # builder source, so a form built from this cannot ask for a field the
+    # renderer ignores, nor miss one it reads.
+    fields: list[str]
+    # Of those, the ones the builder receives as an object or list. A text
+    # input here collects a string and the document renders an empty table.
+    structured_fields: list[str]
+    system_issued: bool
+    # Free prose written by a lawyer rather than a named instrument. Held back
+    # from the template picker: listing it among twenty named documents would
+    # imply the system knows what it produces, and it does not.
+    lawyer_authored: bool
+
+
+@router.get("/templates", response_model=list[TemplateSpec])
+async def list_templates(
+    include_system: bool = False,
+    include_lawyer_authored: bool = False,
+    current_user: dict = Depends(get_current_user),
+):
+    """Every document this system can actually render.
+
+    NOT gated behind DOCUMENTS_V2. It describes the PDF builders, which both the
+    legacy and V2 generation paths call, and the problem it fixes — two frontend
+    screens each hardcoding their own list, offering documents nothing could
+    render — exists today, on the legacy path, with the flag off.
+
+    Authenticated because the catalogue names the jurisdiction-specific
+    instruments this product builds, which is not something to hand to anyone
+    who asks. Nothing in it is user-specific, so no per-user filtering applies.
+    """
+    return template_registry.listing(
+        include_system=include_system,
+        include_lawyer_authored=include_lawyer_authored)
 
 
 # Registered LAST on purpose. FastAPI matches in registration order, so this

@@ -164,3 +164,42 @@ def get_admin_audit_col() -> AsyncIOMotorCollection:
 
 def get_retrieval_labels_col() -> AsyncIOMotorCollection:
     return get_database()["retrieval_labels"]
+
+
+# ── DOCUMENTS_V2 — immutable document/revision model ──────────────────────────
+# Dormant until settings.documents_v2 is flipped. The `documents` collection
+# above stays the mutable identity/pointer; the collections below carry the
+# append-only revision chain, the decision ledger, the typed notification
+# outbox, the crash-consistent transition receipts and the deletion tombstones.
+# See the drafting remediation plan (v5 §2, v5.1) for the schemas.
+
+def get_document_revisions_col() -> AsyncIOMotorCollection:
+    """Append-only, immutable-once-terminal revisions of a document."""
+    return get_database()["document_revisions"]
+
+
+def get_review_events_col() -> AsyncIOMotorCollection:
+    """Append-only ledger: one row per materialised submit/approve/return/reject/withdraw."""
+    return get_database()["review_events"]
+
+
+def get_event_outbox_col() -> AsyncIOMotorCollection:
+    """Typed generic outbox with an allowlisted destination dispatcher.
+
+    Distinct from `answer_provenance`'s outbox, whose relay is hard-wired to the
+    provenance collection. This one carries a `destination` and is dispatched by
+    an allowlist, so a notification never lands in the audit trail.
+    """
+    return get_database()["event_outbox"]
+
+
+def get_transition_receipts_col() -> AsyncIOMotorCollection:
+    """Idempotent transition results, so a retry after a lost HTTP response
+    returns the original outcome rather than a spurious 409."""
+    return get_database()["transition_receipts"]
+
+
+def get_deletion_tombstones_col() -> AsyncIOMotorCollection:
+    """Written BEFORE any destructive retention step, so an interrupted deletion
+    is resumable and an erased artifact still leaves an audit residue."""
+    return get_database()["deletion_tombstones"]

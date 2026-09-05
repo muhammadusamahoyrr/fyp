@@ -80,6 +80,15 @@ PERIODS: dict[str, int] = {
     "answer_provenance":     ACCOUNTABILITY_SECONDS,
     "provenance_outbox":     ACCOUNTABILITY_SECONDS,
     "tombstones":            ACCOUNTABILITY_SECONDS,
+    # ── DOCUMENTS_V2 stores (report-only this release; no sweep wired yet) ────
+    # A generated revision carries the user's document content → user-data
+    # period. A review event is an accountability record of who decided what →
+    # accountability period, matching answer_provenance. These register the
+    # periods so retention.describe()/plan() can account for them; the actual
+    # deletion path ships behind a separate, independently approved switch.
+    "document_revisions":    USER_DATA_SECONDS,
+    "review_events":         ACCOUNTABILITY_SECONDS,
+    "deletion_tombstones":   ACCOUNTABILITY_SECONDS,
 }
 
 

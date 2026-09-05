@@ -104,6 +104,12 @@ class DraftOut(BaseModel):
     template_icon: str | None = None
     content: str | None = None
     case_id: str | None = None
+    # Server-computed citation verification over the draft's visible text, and
+    # the hash of that text so the editor can mark the panel stale after an edit.
+    # Declared explicitly because this model is an allowlist — an undeclared key
+    # is dropped silently on serialization.
+    verification: dict[str, Any] | None = None
+    text_sha256: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

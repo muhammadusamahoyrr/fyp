@@ -47,6 +47,31 @@ def _no_background_embeds(monkeypatch):
     monkeypatch.setattr(lawyer_embeddings, "forget_lawyers", lambda ids: 0)
 
 
+def _looks_like_the_configured_uri(candidate: str | None, configured: str) -> bool:
+    """Is this candidate the application's own database?
+
+    Compared on HOST, not on the whole string. The configured URI carries
+    credentials and options that a hand-written test URI would not repeat, so an
+    exact-string check would wave through `mongodb+srv://user:pw@prod-host/?x=1`
+    against a candidate naming the same host. The host is the part that decides
+    which server is written to.
+    """
+    if not candidate:
+        return False
+
+    def host_of(uri: str) -> str:
+        without_scheme = uri.split("://", 1)[-1]
+        authority = without_scheme.split("/", 1)[0]
+        return authority.split("@")[-1].split("?")[0].lower()
+
+    configured_host = host_of(configured or "")
+    # A configured URI that is itself localhost is not a production target, and
+    # refusing it would make the suite unrunnable for a local-only developer.
+    if not configured_host or configured_host.startswith(("localhost", "127.0.0.1")):
+        return False
+    return host_of(candidate) == configured_host
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_test_database():
     """Point every database read and write at a throwaway database.
@@ -90,28 +115,38 @@ async def mongo():
     from app.core.config import settings
     from app.db.mongodb import connect_db, get_database
 
-    # Prefer a LOCAL Mongo for tests.
+    # NEVER the configured URI.
     #
-    # The configured URI points at a hosted cluster, and running the integration
-    # suite across the internet made it slow and — much worse — non-deterministic:
-    # a DNS blip or a paused connection pool turned real assertions into skips,
-    # so a green run stopped meaning the guarantees held. Runs against the
-    # remote cluster were taking 15+ minutes with 9-59 tests silently skipped.
+    # This used to fall back to `settings.mongodb_url` when a local Mongo was
+    # unreachable, and that URI points at the hosted cluster. Two things went
+    # wrong with it, and the second is the serious one.
     #
-    # A local instance is tried first and the configured URI is the fallback, so
-    # this works for a developer with neither. `AAI_TEST_MONGO_URL` overrides
-    # both, for CI.
+    # It was slow and non-deterministic: runs across the internet took 15+
+    # minutes with tests silently skipped on a DNS blip, so a green run stopped
+    # meaning the guarantees held.
+    #
+    # And it was WRONG ABOUT WHAT IT WAS TESTING. The hosted cluster does not
+    # carry the V2 unique indexes, and those indexes ARE the guarantee that
+    # concurrent generation is idempotent — the application code races and the
+    # index is what resolves the race. So the concurrency test passed locally
+    # and failed on the fallback, for a reason that had nothing to do with the
+    # code under test. A suite that quietly reaches for production to answer a
+    # question about correctness gives the wrong answer twice: it can pass when
+    # the code is broken, and fail when it is fine.
+    #
+    # So: an explicit test URI, or a local Mongo, or skip. Never the configured
+    # one, even if it is reachable and everything else has failed.
     original_url = settings.mongodb_url
-    candidates = [
-        os.environ.get("AAI_TEST_MONGO_URL"),
-        "mongodb://localhost:27017",
-        original_url,
-    ]
+    explicit = os.environ.get("AAI_TEST_MONGO_URL")
+    candidates = [explicit] if explicit else ["mongodb://localhost:27017"]
 
     connected = False
     last_error = "no candidate URI"
     for url in candidates:
-        if not url:
+        if _looks_like_the_configured_uri(url, original_url):
+            last_error = (
+                "refusing to run integration tests against the configured "
+                "database URI — set AAI_TEST_MONGO_URL to a throwaway instance")
             continue
         settings.mongodb_url = url
         try:
@@ -124,7 +159,10 @@ async def mongo():
 
     if not connected:
         settings.mongodb_url = original_url
-        pytest.skip(f"MongoDB unavailable — skipping integration test ({last_error})")
+        pytest.skip(
+            "MongoDB unavailable — start a local instance or set "
+            f"AAI_TEST_MONGO_URL ({last_error})")
+
     db = get_database()
     # Tripwire, not decoration. If the override above is ever removed or
     # shadowed, an integration test must refuse to run rather than discover the
@@ -133,10 +171,85 @@ async def mongo():
         f"refusing to run an integration test against {db.name!r}: "
         "the test-database override is not in force"
     )
+
+    await ensure_v2_indexes(db)
+
     try:
         yield db
     finally:
         settings.mongodb_url = original_url
+
+
+# Indexes that are not an optimisation but a CORRECTNESS PRIMITIVE.
+#
+# `(document_id, idempotency_key)` unique is what makes concurrent generation
+# idempotent. The application code genuinely races — two requests carrying one
+# key both read "no revision yet" and both try to insert — and the index is what
+# resolves the race, by making the second insert fail so its caller falls back to
+# reading the winner.
+#
+# Nothing in the application creates them at test time: `create_all_indexes()`
+# runs on startup, which a test never performs. So whether the concurrency test
+# passed came down to whether somebody had happened to run index creation
+# against the test database earlier. It passed on a machine where they had, and
+# failed on a fresh one, for a reason with nothing to do with the code.
+#
+# Creating them here makes the guarantee the test asserts actually present.
+# The test database builds its V2 indexes from THE SAME MANIFEST production
+# uses. It used to keep its own two lists, and they had already drifted: the
+# review-events index was created here under a name production never uses, which
+# only appeared to work because Mongo refused the duplicate and this fixture
+# swallowed "already exists". A test database that differs from production tests
+# a different system.
+
+
+async def ensure_v2_indexes(db) -> None:
+    """Create every V2 index on the TEST database, idempotently.
+
+    EXACTLY AS PRODUCTION CREATES THEM — same keys, same options, same names —
+    because they come from the same `IndexSpec` objects. An index here that were
+    laxer than production would let a test pass on a constraint production does
+    not have; one that were stricter would fail on data production accepts.
+
+    The consequence is that a fixture inserting two revisions with a null
+    idempotency key collides, which is the index doing its job and is how the
+    real system behaves.
+    """
+    from pymongo.errors import OperationFailure
+
+    from app.db.v2_index_spec import V2_INDEX_REQUIREMENTS, evaluate
+
+    # Mongo error codes, not message text. Matching on `"already exists" in
+    # str(exc)` reads a human-facing string that varies by server version and
+    # driver, and it swallows anything else that happens to contain the phrase.
+    INDEX_OPTIONS_CONFLICT = 85    # same name, different options
+    INDEX_KEY_SPECS_CONFLICT = 86  # same keys, different name
+
+    for spec in V2_INDEX_REQUIREMENTS:
+        info = await db[spec.collection].index_information()
+
+        if spec.name in info:
+            # VALIDATED, not skipped. A same-name index left over from an
+            # earlier shape — say the pre-`_id` queue index — would otherwise be
+            # accepted silently, and every plan test would then measure an index
+            # production no longer declares.
+            problem = evaluate(spec, info)
+            if problem is None:
+                continue
+            await db[spec.collection].drop_index(spec.name)
+
+        try:
+            await db[spec.collection].create_indexes([spec.model()])
+        except OperationFailure as exc:
+            # An equivalent index under a different name is fine — validation
+            # accepts those on an exact match of keys AND options, so re-check
+            # rather than assume. Anything else must NOT be swallowed: the tests
+            # that depend on this index would then pass for the wrong reason.
+            if exc.code not in (INDEX_OPTIONS_CONFLICT, INDEX_KEY_SPECS_CONFLICT):
+                raise
+            info = await db[spec.collection].index_information()
+            if evaluate(spec, info) is not None:
+                raise
 
 
 @pytest.fixture

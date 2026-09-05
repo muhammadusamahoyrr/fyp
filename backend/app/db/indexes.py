@@ -8,6 +8,11 @@ from app.db.collections import (
     get_answer_provenance_col,
     get_appointments_col,
     get_cases_col,
+    get_deletion_tombstones_col,
+    get_document_revisions_col,
+    get_event_outbox_col,
+    get_review_events_col,
+    get_transition_receipts_col,
     get_chat_sessions_col,
     get_conversation_messages_col,
     get_conversation_turns_col,
@@ -29,7 +34,42 @@ from app.db.collections import (
     get_ws_tickets_col,
 )
 
+from app.db.v2_index_spec import (
+    CODE_UNREADABLE,
+    CORRECTNESS,
+    IndexProblem,
+    V2_INDEX_REQUIREMENTS,
+    evaluate,
+    requirements_for,
+)
+
 logger = logging.getLogger(__name__)
+
+
+async def _create_from_spec(col, collection_name: str) -> None:
+    """Create this collection's V2 indexes from the single manifest.
+
+    Failures are logged, not raised, for the same reason `_try_unique_partial`
+    swallows them: a legacy deployment with pre-existing duplicates must still
+    start. `validate_v2_indexes` is what turns "logged and continued" into a
+    refusal, and only once DOCUMENTS_V2 is on.
+    """
+    for spec in requirements_for(collection_name):
+        try:
+            await col.create_indexes([spec.model()])
+        except Exception as exc:  # noqa: BLE001
+            # THE EXCEPTION CLASS, NOT ITS BODY.
+            #
+            # A DuplicateKeyError from a unique-index build quotes the colliding
+            # document — which for these indexes means a document id and an
+            # idempotency KEY, the token a caller replays to repeat a
+            # transition. A connection error quotes the host and credentials.
+            # Neither belongs in a log that is shipped, searched and retained.
+            logger.warning(
+                "index_create_failed collection=%s index=%s error_class=%s. "
+                "Dedupe the collection and recreate the index; it must be "
+                "valid before DOCUMENTS_V2 is enabled.",
+                spec.collection, spec.name, type(exc).__name__)
 
 
 async def _try_unique_partial(col, keys, name: str, status_value: str | None = None) -> None:
@@ -47,6 +87,114 @@ async def _try_unique_partial(col, keys, name: str, status_value: str | None = N
             "Could not create unique index %s (existing duplicates?). "
             "Dedupe the collection and restart to enforce it.", name,
         )
+
+
+# ── V2 INDEX VALIDATION ───────────────────────────────────────────────────────
+#
+# Every index this reads about is declared once, in `v2_index_spec`. Production
+# creation, this validation and the test fixture all consume that one structure,
+# so none of them can be checking a different system from the one that ships.
+#
+# `_try_unique_partial` logs and continues when creation fails, which is right
+# for a legacy deployment carrying pre-existing duplicates: refusing to start
+# would take down a working system over an index that was never enforced anyway.
+#
+# It is NOT right once DOCUMENTS_V2 is on. Then a missing or malformed index
+# means the guarantee silently does not hold, with nothing reporting it, and the
+# failure surfaces days later as two versions of a legal document. So the flag
+# decides which failure is worse, and the check is separate from the creation so
+# a readiness probe can run it on every poll.
+
+
+class MissingCorrectnessIndexes(RuntimeError):
+    """DOCUMENTS_V2 is on and an index its guarantees depend on is not valid."""
+
+
+async def validate_v2_indexes() -> list[IndexProblem]:
+    """Every requirement in `V2_INDEX_REQUIREMENTS` that is not satisfied.
+
+    Reads only. An empty list means every guarantee is enforced and every queue
+    query has its index.
+
+    Collections are read ONCE each rather than once per requirement, and an
+    unreadable collection is reported rather than raised — a readiness probe
+    that throws on a transient read failure reports "unhealthy" for a reason
+    that has nothing to do with the indexes.
+    """
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    problems: list[IndexProblem] = []
+
+    collections = sorted({spec.collection for spec in V2_INDEX_REQUIREMENTS})
+    info_by_collection: dict[str, dict] = {}
+    for collection in collections:
+        try:
+            info_by_collection[collection] = await db[collection].index_information()
+        except Exception as exc:  # noqa: BLE001
+            # Same rule: the class, not the message. A driver's connection
+            # error carries the host, the port and sometimes the credentials.
+            problems.append(IndexProblem(
+                CODE_UNREADABLE, collection, "*",
+                message=("index metadata could not be read "
+                         f"(error_class={type(exc).__name__}); check database "
+                         "connectivity and the application's read permissions")))
+
+    for spec in V2_INDEX_REQUIREMENTS:
+        info = info_by_collection.get(spec.collection)
+        if info is None:
+            continue   # already reported as unreadable
+        problem = evaluate(spec, info)
+        if problem is not None:
+            problems.append(problem)
+
+    return problems
+
+
+async def check_v2_correctness_indexes() -> list[str]:
+    """Backwards-compatible string view of `validate_v2_indexes`."""
+    return [str(p) for p in await validate_v2_indexes()]
+
+
+async def enforce_v2_correctness_indexes() -> list[IndexProblem]:
+    """Fail startup when V2 is on and any required index is not valid.
+
+    WHEN V2 IS OFF this reports and returns. None of the V2 write paths run, so
+    a missing V2 index cannot corrupt anything, and refusing to boot would take
+    a working legacy deployment down over an unused feature.
+
+    WHEN V2 IS ON it raises — for a query index as well as a correctness one.
+    A missing correctness index means the system is wrong; a missing queue index
+    means every lawyer's inbox is a collection scan, which at the size where
+    pagination was the point is an outage. Both are worth refusing to start over,
+    and the message says which kind so an operator knows what they are looking at.
+    """
+    from app.core.config import settings
+
+    problems = await validate_v2_indexes()
+    if not problems:
+        return []
+
+    correctness = [p for p in problems if p.kind == CORRECTNESS]
+    detail = "; ".join(str(p) for p in problems)
+
+    if not settings.documents_v2:
+        logger.warning(
+            "v2_indexes_invalid count=%d correctness=%d detail=%s. "
+            "DOCUMENTS_V2 is off, so nothing depends on them yet — they must "
+            "be correct before it is enabled.",
+            len(problems), len(correctness), detail)
+        return problems
+
+    # Every part of this message is generated from the SPECIFICATION and the
+    # problem codes — a fixed vocabulary, a collection name and an index name.
+    # No Mongo response body reaches it, so it is safe to log, to return from a
+    # readiness endpoint, and to paste into a ticket.
+    raise MissingCorrectnessIndexes(
+        "DOCUMENTS_V2 is enabled but its indexes are not in place: " + detail
+        + f". ({len(correctness)} of {len(problems)} are correctness "
+        "guarantees.) Run `python -m app.db.v2_index_preflight` for the exact "
+        "commands, or disable DOCUMENTS_V2.")
 
 
 async def create_all_indexes() -> None:
@@ -69,6 +217,7 @@ async def create_all_indexes() -> None:
     await _payments_indexes()
     await _checkpoint_indexes()
     await _provenance_indexes()
+    await _documents_v2_indexes()
 
 
 async def _provenance_indexes() -> None:
@@ -104,6 +253,61 @@ async def _provenance_indexes() -> None:
         IndexModel([("answer_verdict", ASCENDING)]),
         IndexModel([("labeled_at", DESCENDING)]),
     ])
+
+
+async def _documents_v2_indexes() -> None:
+    """DOCUMENTS_V2 collections. Safe to build unconditionally: the collections
+    are empty until the flag is flipped, so index creation is a no-op cost.
+
+    The unique keys are the correctness spine of the model:
+      * (document_id, version)         — atomic version reservation can't collide
+      * (document_id, idempotency_key) — a generation retry maps to one revision
+      * event_outbox _id               — the logical_event_id dedups delivery
+      * (document_id, event_seq)       — total order of one document's history
+      * notifications.logical_event_id — at-least-once delivery -> one notice
+    """
+    revisions = get_document_revisions_col()
+    # The two unique ones come from the manifest. They used to be spelled out
+    # here AND in the readiness check AND in the test fixture; the fixture's
+    # copy had already drifted.
+    await _create_from_spec(revisions, "document_revisions")
+    await revisions.create_indexes([
+        IndexModel([("document_id", ASCENDING), ("created_at", DESCENDING)]),
+        IndexModel([("status", ASCENDING), ("lease_expires_at", ASCENDING)]),
+    ])
+
+    # _id IS the logical_event_id, so the ledger row is idempotent on upsert.
+    # The unique (document_id, event_seq) index comes from the manifest, under
+    # the name Mongo generated for it when it was created without one — see the
+    # comment on that entry.
+    await _create_from_spec(get_review_events_col(), "review_events")
+    await get_review_events_col().create_indexes([
+        IndexModel([("document_id", ASCENDING), ("created_at", DESCENDING)]),
+    ])
+
+    await get_event_outbox_col().create_indexes([
+        # _id IS the logical_event_id (dedup). Drainer selects pending+due.
+        IndexModel([("status", ASCENDING), ("next_attempt_at", ASCENDING)]),
+        IndexModel([("destination", ASCENDING), ("status", ASCENDING)]),
+        IndexModel([("retry_until", ASCENDING)]),
+    ])
+
+    await get_transition_receipts_col().create_indexes([
+        IndexModel([("created_at", DESCENDING)]),
+    ])
+
+    await get_deletion_tombstones_col().create_indexes([
+        IndexModel([("document_id", ASCENDING)]),
+        IndexModel([("started_at", DESCENDING)]),
+    ])
+
+    # The V2 query indexes, taken from the one manifest rather than restated.
+    # Their key orders are the queries' own — see `v2_index_spec`.
+    await _create_from_spec(get_documents_col(), "documents")
+
+    # Notifications gain a dedup key for the outbox. Sparse: legacy rows have no
+    # logical_event_id and must not collide on a missing field.
+    await _create_from_spec(get_notifications_col(), "notifications")
 
 
 async def _checkpoint_indexes() -> None:

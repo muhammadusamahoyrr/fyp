@@ -77,6 +77,9 @@ class DocumentTemplate(str, Enum):
     DISPUTE_PETITION = "dispute_petition"
     GUARDIANSHIP_PETITION = "guardianship_petition"
     WAKALATNAMA_CHECKLIST = "wakalatnama_checklist"
+    # Free prose written by a lawyer on the drafting page. Unlike every other
+    # member, this names no particular instrument — see the builder.
+    LAWYER_DRAFT = "lawyer_draft"
 
 
 class DocumentReviewStatus(str, Enum):
@@ -198,6 +201,7 @@ class NotificationType(str, Enum):
     DOCUMENT_APPROVED = "document_approved"
     DOCUMENT_RETURNED = "document_returned"
     DOCUMENT_REJECTED = "document_rejected"
+    DOCUMENT_WITHDRAWN = "document_withdrawn"   # client pulled a submission back (DOCUMENTS_V2)
     AGREEMENT_CREATED = "agreement_created"
     AGREEMENT_SIGNED = "agreement_signed"
     AGREEMENT_EXECUTED = "agreement_executed"

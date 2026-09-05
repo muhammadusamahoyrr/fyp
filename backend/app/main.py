@@ -27,6 +27,7 @@ from app.api.v1.routes import (
     citator,
     disputes,
     documents,
+    documents_v2,
     engagements,
     inheritance,
     intake,
@@ -51,7 +52,10 @@ from app.core.exceptions import (
 )
 from app.core.rate_limit import RateLimitStateDefault, limiter
 from app.db.chroma import close_chroma, connect_chroma
-from app.db.indexes import create_all_indexes
+from app.db.indexes import (
+    create_all_indexes,
+    enforce_v2_correctness_indexes,
+)
 from app.db.mongodb import close_db, connect_db
 from app.websockets import chat_socket, notification_socket
 
@@ -109,6 +113,32 @@ async def _provenance_relay():
             logging.getLogger(__name__).exception("Provenance relay sweep failed")
 
 
+async def _documents_v2_relay():
+    """Drive all DOCUMENTS_V2 background work on an interval: materialise pending
+    transition events, drain the notification outbox, reconcile stuck
+    generations.
+
+    Runs on EVERY worker with no Redis lock, exactly like the provenance relay:
+    every step is lease/CAS-guarded, so concurrent workers are safe and there is
+    no leader election to get wrong. Completely harmless while DOCUMENTS_V2 is
+    off — `sweep()` returns immediately without a single read, and it re-checks
+    the flag each tick so flipping the flag needs no redeploy of this loop.
+    """
+    import asyncio
+    import logging
+    from app.services.document_v2_service import sweep
+
+    interval = 15
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            await sweep()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("DOCUMENTS_V2 relay sweep failed")
+
+
 async def _warmup_models():
     """Heavy AI warmups (Whisper STT + intent embeddings). Runs in the background
     so startup and health checks aren't blocked and a model failure can't take
@@ -145,6 +175,12 @@ async def lifespan(app: FastAPI):
 
     await connect_db()
     await create_all_indexes()
+    # Creation logs and continues on failure, which is right for a legacy
+    # deployment with pre-existing duplicates. This is the check that turns
+    # "logged and continued" into a refusal to start ONCE DOCUMENTS_V2 IS ON,
+    # because from that point the missing index is not a slow query, it is a
+    # guarantee that silently is not held.
+    await enforce_v2_correctness_indexes()
     connect_chroma()
     from app.services.notification_service import set_ws_manager
     from app.websockets.manager import notification_manager
@@ -174,6 +210,12 @@ async def lifespan(app: FastAPI):
     # which is the failure this whole mechanism exists to remove, arriving
     # silently through a config default.
     scheduler_tasks.append(_asyncio.create_task(_provenance_relay()))
+
+    # DOCUMENTS_V2 relay: ungated for the same reason as the provenance relay —
+    # its work is lease/CAS-guarded, so every worker can run it and a config
+    # default cannot silently leave the outbox undrained. It no-ops while the
+    # feature flag is off.
+    scheduler_tasks.append(_asyncio.create_task(_documents_v2_relay()))
     yield
     warmup_task.cancel()
     ws_subscriber_task.cancel()
@@ -253,6 +295,7 @@ app.include_router(cases.router, prefix=API_PREFIX)
 app.include_router(intake.router, prefix=API_PREFIX)
 app.include_router(lawyers.router, prefix=API_PREFIX)
 app.include_router(documents.router, prefix=API_PREFIX)
+app.include_router(documents_v2.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(inheritance.router, prefix=API_PREFIX)
 app.include_router(agreements.router, prefix=API_PREFIX)
 app.include_router(notifications.router, prefix=API_PREFIX)

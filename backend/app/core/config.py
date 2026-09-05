@@ -111,5 +111,18 @@ class Settings(BaseSettings):
     # Single absolute root for all generated + uploaded files.
     upload_root: str = str(Path(__file__).resolve().parents[2] / "uploads")
 
+    # ── DOCUMENTS_V2 — immutable document/revision model ──────────────────────
+    # OFF by default. When off, every drafting path is byte-for-byte the legacy
+    # path; the V2 collections, artifact store, reconciler and compat reader are
+    # all dormant. Flipped only after the Stage-4 migration lands. See the
+    # drafting remediation plan (v5 §0, v5.1) for the full contract.
+    documents_v2: bool = False
+
+    # Retention DELETION for V2 documents — a SEPARATE, independently approved
+    # switch (v5 §12 / v5.1). Off by default: retention reports counts, but
+    # nothing is destroyed until this is explicitly turned on. Deletion is
+    # tombstone-first and crash-safe (services/document_deletion.py).
+    documents_v2_deletion_enabled: bool = False
+
 
 settings = Settings()
