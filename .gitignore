@@ -126,3 +126,7 @@ backend/data/purge_backups/
 # Scratch output from a one-off V2 artifact-store probe. Generated PDFs,
 # never source.
 backend/_probe_uploads/
+
+# Unreadable pytest scratch trees from tooling runs; git cannot even list
+# them, and they are output, not source.
+backend/_pytest_codex_review_*/
