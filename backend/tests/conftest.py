@@ -11,6 +11,7 @@ Test tiers (see pytest.ini markers):
 """
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -98,6 +99,61 @@ def _isolate_test_database():
         yield settings.db_name
     finally:
         settings.db_name = original
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_upload_root(tmp_path_factory):
+    """Point every file the suite generates at a throwaway directory.
+
+    The same failure as `_isolate_test_database`, one layer down. Tests call the
+    real `generate_pdf`, which writes to `{upload_root}/docs` -- in a developer
+    checkout that is the live upload directory. One run of the V2 suites left
+    320 files there: 302 `legacy-<hex>.pdf` fixtures plus the wakalatnama and
+    guardianship samples, indistinguishable by name from real client documents
+    and growing on every run. Found while verifying the DOCUMENTS_V2 migration,
+    where a directory that should have been static had gained 305 files.
+
+    Nothing was corrupted -- the writes are all new filenames, never overwrites
+    -- but a test suite has no business writing into the directory the
+    application serves, and a census of that directory cannot be trusted while
+    it does.
+
+    THREE MODULES SNAPSHOT THE SETTING AT IMPORT, so repointing `settings`
+    alone would miss them: `pdf_generator.UPLOADS_DIR`,
+    `intake_service._EVIDENCE_DIR` and `file_handler.UPLOADS_ROOT` are all
+    module-level constants evaluated once. `artifact_store` resolves it per
+    call and needs only the setting. Each is patched to match.
+
+    Autouse and session-scoped for the reason given above: an opt-in guard
+    protects only the tests that remember to opt in, which is the property that
+    failed here.
+    """
+    from app.core.config import settings
+
+    root = tmp_path_factory.mktemp("upload_root")
+    original = settings.upload_root
+    settings.upload_root = str(root)
+
+    # (module path, attribute, value) -- patched only if the module imports.
+    patched: list[tuple[object, str, object]] = []
+    for module_path, attribute, value in (
+        ("app.services.pdf_generator", "UPLOADS_DIR", root / "docs"),
+        ("app.services.intake_service", "_EVIDENCE_DIR", root / "evidence"),
+        ("app.utils.file_handler", "UPLOADS_ROOT", root),
+    ):
+        try:
+            module = importlib.import_module(module_path)
+        except Exception:                   # optional extras may not install
+            continue
+        patched.append((module, attribute, getattr(module, attribute)))
+        setattr(module, attribute, value)
+
+    try:
+        yield root
+    finally:
+        settings.upload_root = original
+        for module, attribute, value in patched:
+            setattr(module, attribute, value)
 
 
 @pytest.fixture

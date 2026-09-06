@@ -1,10 +1,24 @@
 # DOCUMENTS_V2 — activation evidence pack
 
-**Status: NO-GO. Held at step 1 (target identification). No dry-run was run.**
+**Status as of 2026-09-06: the migration has been applied and verified.
+`DOCUMENTS_V2` is still `False` and its activation is still an open decision.**
 
-Prepared read-only. Nothing was approved, applied, rolled back, indexed or
-flipped. `DOCUMENTS_V2` remains `False`. No connection was opened to the
-production database — see §1 for why that is a finding rather than an omission.
+| Step | State |
+|---|---|
+| Estate survey | done — **19** documents, 0 blocked, 0 approvals needed |
+| Eight V2 indexes | created and verified — 0 unsatisfied requirements |
+| Backup | taken and verified usable (76.6 MiB, whole database + 19 referenced PDFs) |
+| Dry-run ×2 | identical planning fingerprint `e8cab67f…0a766bf5` |
+| Approval | `ds-20260906T031709Z-19docs-0-approval-outcomes`, 19 documents, 0 owner-approval outcomes |
+| Apply | **19/19 applied, 0 failed, 0 drifted, reconciles** |
+| Post-migration verification | done — see [`post-migration-verification.md`](./post-migration-verification.md) |
+| Citation verification | done — see [`citation-verification.md`](./citation-verification.md) |
+| `DOCUMENTS_V2` | **still `False`** — not authorised, and see the caveat in GO/NO-GO |
+
+Much of §1–§6 below was written *before* any of that, when the pack was held at
+target identification. Those sections are kept as the record of what was
+believed at the time and are marked where they have been overtaken. The
+current position is the table above and the GO/NO-GO at the end.
 
 Policy version `2026-09-04.decision-matrix-v1` · manifest schema 2 · rollback
 schema 1.
@@ -18,7 +32,9 @@ schema 1.
 | [`snapshot-runbook.md`](./snapshot-runbook.md) | How to capture a snapshot the dry-run can actually use |
 | [`capture-manifest.md`](./capture-manifest.md) | Contract for the capture manifest, and the producer that emits it |
 | [`snapshot-validation.md`](./snapshot-validation.md) | How to prove a restored snapshot is faithful before trusting it |
-| [`index-runbook.md`](./index-runbook.md) | Creating the eight missing V2 indexes |
+| [`index-runbook.md`](./index-runbook.md) | Creating the eight missing V2 indexes — **executed** |
+| [`post-migration-verification.md`](./post-migration-verification.md) | **After the apply.** All 19 documents and revisions checked against the approved plan, the backup and the bytes on disk |
+| [`citation-verification.md`](./citation-verification.md) | **The citation check that had not run.** Results for all 19, and the two parser defects it exposed |
 | [`allqueue-contract.md`](./allqueue-contract.md) | Consistency contract for the merged All queue |
 | [`purge-backups-audit.md`](./purge-backups-audit.md) | Read-only audit of `backend/data/purge_backups/` |
 | [`pack-durability.md`](./pack-durability.md) | What is safe to commit, and why none of it is committed yet |
@@ -135,10 +151,29 @@ them.
 
 ---
 
-## §2 · Dry-run — **NOT RUN**
+## §2 · Dry-run — **RUN TWICE, THEN APPLIED**
 
-Blocked by §1. Nothing to report, and no manifest to save. The determinism
-comparison is meaningless without a frozen target.
+*Overtaken. This section previously read "NOT RUN — blocked by §1".*
+
+The blocker dissolved when the estate turned out to be 19 documents rather than
+the ~13,000 a filesystem census had suggested. At that size the reduced sequence
+in [`estate-survey.md`](./estate-survey.md) is stronger than the
+capture/restore/validate ceremony: every row can be read before and after and
+compared directly.
+
+| | |
+|---|---|
+| Dry-run #1 fingerprint | `e8cab67fdf03264f6a3bdaac99d00a1f71c8c6a5ba8b7821ddc49c2f0a766bf5` |
+| Dry-run #2 fingerprint | **identical** — no difference, including metadata |
+| Approved manifest | `migration_id mig-349ef601-…`, 19 records, 0 blocked, 0 requiring owner approval |
+| Apply | `applied 19 · already_applied 0 · drifted 0 · blocked 0 · failed 0 · reconciles True (19/19)` |
+| Rollback plan | 19 entries, fingerprint `6294d893…d1f95845`, preserved off-repo |
+
+The determinism concern in §1 was real and was answered directly: both dry-runs
+ran against the live database and produced the same fingerprint, which is
+evidence the planner is deterministic *and* that the estate did not move between
+them. Neither manifest, the approval, the apply result nor the rollback plan is
+committed — they name production documents.
 
 ---
 
@@ -276,28 +311,41 @@ than a code change.
 
 ---
 
-## §6 · Zero writes — **NOT APPLICABLE**
+## §6 · Writes — **SUPERSEDED: the migration was authorised and did write**
 
-No connection was opened to production, so there is nothing to compare and
-nothing could have been written. The local `attorney_ai_test` database was not
-touched by this task either.
+*Overtaken. This section previously read "NOT APPLICABLE — no connection was
+opened to production".*
 
-This is not the proof you asked for — that proof requires the copy, and it
-requires the copy precisely because it cannot be produced against live data.
+Zero-writes is no longer the property being proved. The migration was
+explicitly authorised, and what matters now is that it wrote **only** what the
+approved plan described. That was verified directly rather than inferred:
+[`post-migration-verification.md`](./post-migration-verification.md).
+
+24 of 26 checks pass. The two that fail are environmental and evidenced as
+such — a test suite writing PDFs into the live upload directory (since fixed;
+see `tests/test_upload_isolation.py`) and a 30-day TTL index expiring 27
+notifications. **No mismatch attributable to the migration was found.**
+
+Every verification pass since the apply has run under a `read`-only credential,
+asserted before the first query, so "did not modify production" is enforced by
+the server rather than asserted in prose.
 
 ---
 
-## §7 · Durability of this pack — **currently untracked**
+## §7 · Durability of this pack — **COMMITTED**
 
-`git ls-files docs/v2-activation-evidence/` returns **0**. The whole pack exists
-only in this working tree: not on a branch, not on the remote, and lost to a
-clean checkout or a `git clean -fdx`.
+*Overtaken. This section previously read "currently untracked — nothing was
+committed".*
 
-Classification of what is safe to commit, what must never be, the `.gitignore`
-rule to add first (the validator writes its report *into* this directory), and
-the exact command: **[`pack-durability.md`](./pack-durability.md)**.
+The pack is committed on branch `docs/v2-activation-evidence` and **not
+pushed**. The `.gitignore` rules from
+[`pack-durability.md`](./pack-durability.md) went in first, so the validator's
+own report and the capture manifests cannot be committed by accident.
 
-**Nothing was committed.** `git add` was not run.
+Still deliberately outside version control, and named here so nobody looks for
+them: the approved manifest, the apply result, the rollback plan, the backup and
+the per-revision verification dumps. All of them name production documents.
+They live in the operator's home directory.
 
 ---
 
@@ -322,11 +370,45 @@ readable, **0 blocked**, and **0 requiring owner approval**. Full findings:
 
 ### Remaining
 
-1. **No backup taken.** A `mongodump` of `attorney_ai` plus the 19 referenced
-   PDFs. Seconds, not a maintenance window — but the migration writes, so a
-   backup is still warranted.
-2. **The evidence pack is untracked**, so the record of this review is not
-   durable. See [`pack-durability.md`](./pack-durability.md).
+Both items below are now **done**; they are kept to show the sequence that was
+actually followed.
+
+1. ~~**No backup taken.**~~ Taken 2026-09-06 and verified usable: the whole
+   database plus all 19 referenced PDFs, every collection decoded back off disk
+   and compared to the live source by canonical content fingerprint. Not a
+   restore rehearsal — `mongorestore` is not installed here — so it proves the
+   files hold the database's content, not that a restore tool consumed them.
+2. ~~**The evidence pack is untracked.**~~ Committed; see §7.
+
+### What is actually left
+
+1. **`DOCUMENTS_V2` is still `False`, and enabling it is not yet advisable.**
+   See the caveat below.
+2. **Rotate or delete `v2_survey`**, and remove the `dbAdmin` credential used
+   for the apply. The `v2_survey` password was disclosed in a chat transcript.
+3. **Two orphan V2 artifacts** from the 2026-09-04 probe sit unreferenced in
+   `uploads/v2/docs/`. They are not in the backup, because the backup copied
+   only *referenced* artifacts — so deleting them is irreversible. Left in place
+   pending an explicit decision.
+
+### The caveat on activation
+
+The migration is sound. The *citations* largely are not verified, which is a
+different question and the one that should gate the flag:
+
+| | |
+|---|---:|
+| Revisions with positive verification evidence | **4 of 19** |
+| Ran, but the document cites no checkable authority | 12 |
+| Ran, but a cited statute is outside the corpus | 2 |
+| Permanently unverifiable (Urdu — the English corpus cannot match it) | 1 |
+
+Enabling `DOCUMENTS_V2` today surfaces 19 documents of which 15 carry no
+positive citation evidence. That may well be acceptable — the records say so
+honestly, and `ran: false` is displayed as "not checked", not as "clean" — but
+it should be a decision taken with the number in front of you rather than
+discovered afterwards. Full detail and the limits of what an existence-checker
+can ever establish: [`citation-verification.md`](./citation-verification.md).
 
 ### The proportionality point
 
@@ -361,6 +443,26 @@ inferred from a filesystem census. **It is 19.** There are 13,386 PDFs on disk
 and 19 referenced by any row — 13,367 orphans, and every referenced file is
 present. A directory listing describes what is on disk; the migration reads
 paths recorded in rows.
+
+**The citation check had not run, for two reasons rather than one.** The
+migrated revisions all stored `verification.ran: false`. This was first reported
+as uniformly a ChromaDB connection failure. It was 18 of 19; the nineteenth is
+an Urdu pleading that `extraction_profile.verifiable()` excludes by design,
+because the English corpus cannot match it. Connecting Chroma never could have
+resolved that one.
+
+**A verification control that passed vacuously.** The first control written to
+prove the citation checker could flag a bad citation probed `section 999999` —
+a number the parser drops as implausible *before* verification. It tested the
+sanity filter, not the verifier, and would have certified a broken checker as
+working. Replaced with a plausible section inside a statute's own range that
+the corpus does not hold. Recorded because the failure mode is easy to repeat.
+
+**A test suite was writing into the live upload directory.** The post-migration
+census found the legacy artifact directory had gained 305 PDFs since the backup.
+Not migration damage — the V2 suites call the real `generate_pdf`, which writes
+to `{upload_root}/docs`. Fixed by an autouse fixture mirroring the database
+isolation already in place, and pinned by `tests/test_upload_isolation.py`.
 
 Nothing in this pack should be read as approval. No migration was run, no
 manifest was approved, and `DOCUMENTS_V2` remains `False`.
