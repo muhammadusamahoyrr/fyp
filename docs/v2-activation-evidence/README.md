@@ -12,7 +12,7 @@
 | Approval | `ds-20260906T031709Z-19docs-0-approval-outcomes`, 19 documents, 0 owner-approval outcomes |
 | Apply | **19/19 applied, 0 failed, 0 drifted, reconciles** |
 | Post-migration verification | done — see [`post-migration-verification.md`](./post-migration-verification.md) |
-| Citation verification | done — see [`citation-verification.md`](./citation-verification.md) |
+| Citation verification | done, and **persisted** to all 19 revisions — see [`citation-verification.md`](./citation-verification.md) |
 | `DOCUMENTS_V2` | **still `False`** — not authorised, and see the caveat in GO/NO-GO |
 
 Much of §1–§6 below was written *before* any of that, when the pack was held at
@@ -403,10 +403,16 @@ different question and the one that should gate the flag:
 | Ran, but a cited statute is outside the corpus | 2 |
 | Permanently unverifiable (Urdu — the English corpus cannot match it) | 1 |
 
-Enabling `DOCUMENTS_V2` today surfaces 19 documents of which 15 carry no
-positive citation evidence. That may well be acceptable — the records say so
-honestly, and `ran: false` is displayed as "not checked", not as "clean" — but
-it should be a decision taken with the number in front of you rather than
+These results are now **stored on the revisions** (2026-09-06), so the
+application will display what was actually found rather than "not checked" on
+every document. 18 of 19 records a check that ran; the 19th is the Urdu
+pleading, which is unavailable by design.
+
+Enabling `DOCUMENTS_V2` today therefore surfaces 19 documents of which 15 carry
+no positive citation evidence — 12 citing no checkable authority, 2 citing a
+statute outside the corpus, 1 unverifiable. That may well be acceptable: the
+records say so honestly, and "unavailable" is never rendered as "clean". But it
+should be a decision taken with the number in front of you rather than
 discovered afterwards. Full detail and the limits of what an existence-checker
 can ever establish: [`citation-verification.md`](./citation-verification.md).
 

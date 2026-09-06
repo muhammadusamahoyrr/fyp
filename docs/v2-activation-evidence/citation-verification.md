@@ -210,9 +210,49 @@ That the 19 documents' citations are sound. In particular:
 **Only the four verified-clean revisions carry positive verification evidence.**
 The remaining 15 should be treated as unverified pending a lawyer's review.
 
+## The results were persisted — 2026-09-06
+
+*Superseded: this section previously read "the stored records still say
+`ran: false`; updating them is a write, and was not authorised."*
+
+Authorised and written. One field, `verification`, on the 19 revisions carrying
+the migration id. Nothing else.
+
+| | |
+|---|---|
+| Written | **19** · already identical 0 · skipped 0 |
+| Gate | the same two controls as the read-only harness — nothing is written unless the checker demonstrably flags an absent section and verifies a held one |
+| Undo | every prior value dumped to `v2-verification-before-<stamp>.json` **before** the first write |
+| Concurrency | compare-and-set on `(_id, migration_id)`; a revision that moved underneath would be skipped and reported, never overwritten |
+
+Stored state, re-read independently under a `read`-only credential rather than
+trusting the writer's own read-back — **19 checks, all pass**:
+
+```
+verification.ran == True  : 18 of 19
+verification.ran == False :  1 of 19   (the Urdu pleading, by design)
+buckets as stored: clean 4 · partial 2 · FAILED 0 · no-citations 12 · unavailable 1
+```
+
+Also confirmed: every record carries `ran`, `checked_at`, `summary`, the
+disclosure `scope` and the `corpus` it was checked against; every revision still
+matches the approved plan exactly; every document still points at its planned
+revision; no extra or orphan revisions; no document gained a `verification`
+field; counts unchanged at 19 and 19.
+
+**One correction worth recording.** The first version of that confirmation
+compared each revision against the pre-migration backup and reported 19
+failures. The check was wrong, not the data: the backup was taken *before* the
+migration, when `document_revisions` held **0 rows**, so every revision is
+legitimately absent from it. The meaningful baseline is the approved plan plus
+the migration's own invariants, and against that everything holds.
+
+`checked_at` is the date of this check, not of the documents' generation. These
+are legacy PDFs checked at migration time, and the timestamp says so.
+
 ## Scope of this work
 
-No production data modified. `apply()` not re-run; no indexes created or
-dropped; no artifacts, PDFs or notifications touched; no credentials changed;
-nothing deleted. The stored `verification` records still read `ran: false` —
-updating them is a write, and was not authorised.
+`apply()` not re-run; no indexes created or dropped; no artifacts, PDFs or
+notifications touched; no credentials changed; nothing deleted; `DOCUMENTS_V2`
+still `False`. The only production write was the `verification` field described
+above.
