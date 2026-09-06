@@ -48,10 +48,18 @@ function _requestSiblingToken(ms = 150) {
   if (!bc) return Promise.resolve(null);
   return new Promise((resolve) => {
     let done = false;
-    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    let timer = null;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      const index = _tokenWaiters.indexOf(finish);
+      if (index >= 0) _tokenWaiters.splice(index, 1);
+      resolve(v);
+    };
     _tokenWaiters.push(finish);
     try { bc.postMessage({ type: 'token-request' }); } catch { finish(null); }
-    setTimeout(() => finish(null), ms);
+    timer = setTimeout(() => finish(null), ms);
   });
 }
 
@@ -201,16 +209,29 @@ let _refreshPromise = null;
 async function _tryRefresh() {
   if (_refreshPromise) return _refreshPromise;
   _refreshPromise = (async () => {
+    const tokenBeingReplaced = accessToken;
     try {
       const res = await fetch(`${BASE}/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
       });
       if (res.ok) {
         const body = await res.json();
         setToken(body.access_token);   // sets in-memory + broadcasts to siblings
         return true;
+      }
+      // Another tab may have won the server's atomic refresh claim. Accept only
+      // a different token; the stale token would only trigger another 401.
+      if (tokenBeingReplaced) {
+        const sibling = await _requestSiblingToken(250);
+        if (sibling && sibling !== tokenBeingReplaced) {
+          accessToken = sibling;
+          return true;
+        }
       }
       return false;
     } catch {

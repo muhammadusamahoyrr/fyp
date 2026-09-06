@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from app.core.constants import KycStatus
-from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
+from app.core.exceptions import AppValidationError, ConflictError, ForbiddenError, NotFoundError
 from app.core.security import (
     TOKENS_VALID_FROM,
     hash_password,
@@ -12,6 +12,7 @@ from app.core.security import (
     verify_password,
 )
 from app.repositories.user_repo import UserRepository
+from app.services import auth_sessions
 from app.utils.validators import validate_password_strength
 
 logger = logging.getLogger(__name__)
@@ -71,8 +72,8 @@ async def change_password(user_id: str, current_password: str, new_password: str
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     if not validate_password_strength(new_password):
         raise AppValidationError("Password must be at least 8 characters with a number")
-    await user_repo.update_one(
-        {"_id": user_id},
+    changed = await user_repo.update_one(
+        {"_id": user_id, "password_hash": user["password_hash"], "is_active": True},
         {"$set": {
             "password_hash": hash_password(new_password),
             # Same revocation as the reset path. A self-service change is just
@@ -82,6 +83,12 @@ async def change_password(user_id: str, current_password: str, new_password: str
             "updated_at": datetime.now(timezone.utc),
         }},
     )
+    if not changed:
+        # A concurrent password change or account closure won after the read.
+        # Do not overwrite its newer credential with this stale request.
+        raise ConflictError("Password changed in another request — please sign in again")
+    await auth_sessions.revoke_all_best_effort(
+        user_id, reason="password_change")
 
 
 async def update_lawyer_profile(user_id: str, updates: dict) -> dict:
@@ -262,10 +269,6 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
         "is_closed":     True,
         "closed_at":     now,
         "closed_reason": reason,
-        # Written in the SAME update as the erasure, not a follow-up one: a
-        # crash between two writes would leave an anonymised account with live
-        # sessions, which is the worst of both states.
-        TOKENS_VALID_FROM: password_change_cutoff(),
         "full_name":     "Closed account",
         "email":         f"closed+{user_id}@deleted.invalid",
         "phone":         None,
@@ -302,6 +305,8 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
         })
 
     await user_repo.update_one({"_id": user_id}, {"$set": updates, "$unset": unsets})
+    await auth_sessions.revoke_all_best_effort(
+        user_id, reason="account_closed")
 
     # A closed lawyer must leave the candidate pool. The erasure above blanks
     # the profile in Mongo but says nothing about the vector store, and until

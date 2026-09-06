@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { updateMe, changePassword, closeAccount, authLogout } from "@/lib/api.js";
+import { updateMe, changePassword, closeAccount } from "@/lib/api.js";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, ConfirmDialog, Tooltip, Badge } from "@/components/shared/shared.jsx";
 
@@ -245,7 +245,7 @@ const ModProfile = () => {
     const tk = useTokens();
     const t = useT();
     const toast = useToast();
-    const { user, updateUser } = useAuth();
+    const { user, updateUser, logout } = useAuth();
     const [edit, setEdit] = useState(false);
     const [pwdMode, setPwdMode] = useState(false);
     const [delConfirm, setDelConfirm] = useState(false);
@@ -330,9 +330,11 @@ const ModProfile = () => {
         if (error) {
             toast.show(error.message || "Failed to change password. Please try again.", "error");
         } else {
-            toast.show("Password changed successfully!", "success");
+            toast.show("Password changed. Please sign in again.", "success");
             setPwdMode(false);
             setPwdData({ current: "", next: "", confirm: "" });
+            await logout();
+            window.location.assign("/login");
         }
         setSaving(false);
     };
@@ -354,7 +356,10 @@ const ModProfile = () => {
             return;
         }
         toast.show("Account closed. Signing you out…", "info", 4000);
-        setTimeout(() => { authLogout(); window.location.href = "/login"; }, 1500);
+        setTimeout(async () => {
+            await logout();
+            window.location.assign("/login");
+        }, 1500);
     };
 
     return (

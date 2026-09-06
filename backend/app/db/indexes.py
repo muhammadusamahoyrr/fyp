@@ -5,6 +5,7 @@ from pymongo import ASCENDING, DESCENDING, IndexModel
 from app.core.constants import AppointmentStatus, EngagementStatus
 from app.db.collections import (
     get_agreements_col,
+    get_auth_sessions_col,
     get_answer_provenance_col,
     get_appointments_col,
     get_cases_col,
@@ -605,11 +606,25 @@ async def _auth_indexes() -> None:
     await get_refresh_blocklist_col().create_indexes([
         IndexModel([("token", ASCENDING)], unique=True),
         IndexModel([("created_at", ASCENDING)], expireAfterSeconds=7 * 24 * 3600),
+        IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
+    ])
+    await get_auth_sessions_col().create_indexes([
+        IndexModel([("user_id", ASCENDING), ("status", ASCENDING),
+                    ("last_used_at", DESCENDING)]),
+        # Session rows contain no token, only a hash of the current token id.
+        IndexModel([("current_refresh_hash", ASCENDING)], unique=True),
+        IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
     ])
     # Password reset tokens — TTL 1 hour
     await get_password_reset_col().create_indexes([
         IndexModel([("token", ASCENDING)], unique=True),
         IndexModel([("email", ASCENDING)]),
+        IndexModel(
+            [("email", ASCENDING), ("active_slot", ASCENDING)],
+            unique=True,
+            name="uniq_active_password_reset_email",
+            partialFilterExpression={"active_slot": True},
+        ),
         IndexModel([("created_at", ASCENDING)], expireAfterSeconds=3600),
     ])
     # WebSocket auth tickets — multi-worker-safe one-time-use store.

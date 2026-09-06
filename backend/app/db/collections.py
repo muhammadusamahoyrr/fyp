@@ -67,6 +67,11 @@ def get_refresh_blocklist_col() -> AsyncIOMotorCollection:
     return get_database()["refresh_token_blocklist"]
 
 
+def get_auth_sessions_col() -> AsyncIOMotorCollection:
+    """Per-login refresh-token families and device-session state."""
+    return get_database()["auth_sessions"]
+
+
 def get_password_reset_col() -> AsyncIOMotorCollection:
     return get_database()["password_reset_tokens"]
 

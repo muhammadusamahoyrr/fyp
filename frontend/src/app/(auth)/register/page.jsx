@@ -20,7 +20,6 @@ const IcUser = ({ s, c }) => <Svg size={s} color={c}><path d="M20 21v-2a4 4 0 0 
 const IcMail = ({ s, c }) => <Svg size={s} color={c}><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M22 7l-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></Svg>;
 const IcPhone = ({ s, c }) => <Svg size={s} color={c}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.27h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.82a16 16 0 0 0 5.89 5.89l1.87-1.87a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></Svg>;
 const IcLock = ({ s, c }) => <Svg size={s} color={c}><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></Svg>;
-const IcCert = ({ s, c }) => <Svg size={s} color={c}><circle cx="12" cy="8" r="6" /><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11" /></Svg>;
 const IcCheck = ({ s, c }) => <Svg size={s} color={c} strokeWidth={2.5}><polyline points="20,6 9,17 4,12" /></Svg>;
 const IcArrow = ({ s, c }) => <Svg size={s} color={c} strokeWidth={2.2}><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12,5 19,12 12,19" /></Svg>;
 const IcScale = ({ s, c }) => <Svg size={s} color={c}><path d="M12 2v20M3 6l9-4 9 4M4 10l8 4 8-4M4 18l8 4 8-4" /></Svg>;
@@ -96,7 +95,6 @@ export default function RegisterPage() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [cnic, setCnic] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [terms, setTerms] = useState(false);
@@ -312,13 +310,6 @@ export default function RegisterPage() {
                 <Input type="tel" placeholder="+92 300 000 0000" value={phone} onChange={e => setPhone(e.target.value)}
                   icon={<IcPhone s={13} c={L.textFaint} />} />
               </Field>
-
-              {isLawyer && (
-                <Field label="CNIC / Bar Council ID">
-                  <Input placeholder="BCI/PNJ/2019/12345" value={cnic} onChange={e => setCnic(e.target.value)}
-                    icon={<IcCert s={13} c={L.textFaint} />} />
-                </Field>
-              )}
 
               <Field label="Password">
                 <Input type={showPw ? 'text' : 'password'} placeholder="Min. 8 characters"

@@ -2,15 +2,18 @@ from fastapi import APIRouter, Depends, Request, Response
 
 from app.core.config import settings
 from app.core.exceptions import AuthError
+from app.core.security import decode_token
 from app.core.rate_limit import limiter
 from app.dependencies import get_current_user
 from app.schemas.auth import (
     ForgotPasswordRequest,
+    AuthSessionList,
     LoginRequest,
     RefreshResponse,
     RegisterRequest,
     ResetPasswordRequest,
     TokenResponse,
+    SessionsRevoked,
 )
 from app.schemas.common import StatusResponse
 from app.services import auth_service
@@ -22,7 +25,18 @@ class WsTicketResponse(BaseModel):
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_REFRESH_MAX_AGE = 7 * 24 * 3600
+_REFRESH_MAX_AGE = settings.refresh_token_expire_days * 24 * 3600
+
+
+def _bearer_token(request: Request) -> str | None:
+    value = request.headers.get("Authorization", "")
+    return value[7:] if value.startswith("Bearer ") else None
+
+
+def _current_session_id(request: Request) -> str | None:
+    token = _bearer_token(request)
+    payload = decode_token(token) if token else None
+    return payload.get("sid") if payload else None
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -48,7 +62,11 @@ async def register(request: Request, body: RegisterRequest):
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("5/minute")
 async def login(request: Request, body: LoginRequest, response: Response):
-    result = await auth_service.login(body.email, body.password)
+    result = await auth_service.login(
+        body.email,
+        body.password,
+        user_agent=request.headers.get("user-agent", ""),
+    )
     _set_refresh_cookie(response, result["refresh_token"])
     return TokenResponse(
         access_token=result["access_token"],
@@ -63,7 +81,7 @@ async def refresh(request: Request, response: Response):
     token = request.cookies.get("refresh_token")
     if not token:
         raise AuthError("Refresh token missing")
-    result = await auth_service.refresh(token)
+    result = await auth_service.refresh(token, _bearer_token(request))
     _set_refresh_cookie(response, result["refresh_token"])
     return RefreshResponse(access_token=result["access_token"])
 
@@ -73,16 +91,50 @@ async def refresh(request: Request, response: Response):
 async def ws_ticket(request: Request, current_user: dict = Depends(get_current_user)):
     """Exchange a valid access token for a one-time, 60-second WebSocket ticket."""
     from app.core.ws_ticket import create_ticket
-    return {"ticket": await create_ticket(current_user["_id"])}
+    return {"ticket": await create_ticket(
+        current_user["_id"], current_user, _current_session_id(request))}
 
 
 @router.post("/logout", response_model=StatusResponse)
 async def logout(request: Request, response: Response):
     token = request.cookies.get("refresh_token")
-    if token:
-        await auth_service.logout(token)
-    response.delete_cookie("refresh_token")
+    try:
+        await auth_service.logout(token, _bearer_token(request))
+    finally:
+        # Local cleanup must happen even if durable revocation is unavailable.
+        response.delete_cookie("refresh_token")
     return StatusResponse(success=True, message="Logged out")
+
+
+@router.get("/sessions", response_model=AuthSessionList)
+async def sessions(request: Request, current_user: dict = Depends(get_current_user)):
+    from app.services import auth_sessions
+    return {"items": await auth_sessions.list_active(
+        current_user["_id"], _current_session_id(request))}
+
+
+@router.post("/sessions/revoke-all", response_model=SessionsRevoked)
+async def revoke_all_sessions(
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+):
+    revoked = await auth_service.logout_all(current_user["_id"])
+    response.delete_cookie("refresh_token")
+    return {"revoked": revoked}
+
+
+@router.delete("/sessions/{session_id}", response_model=StatusResponse)
+async def revoke_session(
+    session_id: str,
+    request: Request,
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+):
+    from app.services import auth_sessions
+    await auth_sessions.revoke_owned(session_id, current_user["_id"])
+    if session_id == _current_session_id(request):
+        response.delete_cookie("refresh_token")
+    return StatusResponse(success=True, message="Session revoked")
 
 
 @router.post("/forgot-password", response_model=StatusResponse)

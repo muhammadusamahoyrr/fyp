@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import secrets
-import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -17,6 +16,7 @@ from app.ai.nodes.gatekeeper_node import (
     llm_injection_reason,
 )
 from app.core.security import decode_token
+from app.core.live_auth import ActiveSessionGate
 from app.db.collections import get_users_col
 from app.services import conversation_limits
 from app.services import conversation_service as conversations
@@ -362,7 +362,7 @@ _CONTROL_ACTIONS = ("cancel", "resume")
 _AUTH_RECHECK_SECONDS = 30
 
 
-class _AuthGate:
+class _AuthGate(ActiveSessionGate):
     """Is this connection's account still active?
 
     A socket is authenticated once, at connect, and then stays open for as long
@@ -376,24 +376,15 @@ class _AuthGate:
     check, which is exactly how the oversize-refusal path escaped it.
     """
 
-    def __init__(self, user_id):
-        self._user_id = user_id
-        self._checked_at = time.monotonic()   # the connect-time check counts
-        self._active = True
-
-    async def allows(self) -> bool:
-        if not self._active:
-            return False
-        now = time.monotonic()
-        if now - self._checked_at < _AUTH_RECHECK_SECONDS:
-            return True
-        self._checked_at = now
-        self._active = bool(await get_users_col().find_one(
-            {"_id": self._user_id, "is_active": True}))
-        if not self._active:
-            logger.info("chat_socket: account %s is no longer active; closing",
-                        self._user_id)
-        return self._active
+    def __init__(self, user_id, initial_user, session_id=None):
+        super().__init__(
+            user_id,
+            initial_user,
+            required_role="client",
+            session_id=session_id,
+            recheck_seconds=_AUTH_RECHECK_SECONDS,
+            users_getter=get_users_col,
+        )
 
 
 def _cancel(task) -> None:
@@ -718,14 +709,17 @@ def _extract_interrupt_question(snapshot) -> str | None:
 @router.websocket("/ws/chat/{session_id}")
 async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = ""):
     from app.core.ws_ticket import consume_ticket
-    user_id = await consume_ticket(ticket)
-    if not user_id:
+    identity = await consume_ticket(ticket)
+    if not identity:
         await websocket.close(code=4001)
         return
+    user_id = str(identity)
+    auth_session_id = getattr(identity, "session_id", None)
 
     # Verify user is active at connection time
-    user = await get_users_col().find_one({"_id": user_id, "is_active": True})
-    if not user:
+    user = await get_users_col().find_one(
+        {"_id": user_id, "is_active": True, "role": "client"})
+    if not user or user.get("role") != "client":
         await websocket.close(code=4003)
         return
 
@@ -754,7 +748,7 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
     from app.ai.intent import classify as intent_classify
     from app.ai.tracing import TraceHandler
 
-    auth_gate = _AuthGate(user_id)
+    auth_gate = _AuthGate(user_id, user, auth_session_id)
     graph_config = {"configurable": {"thread_id": session_id}}
     last_ai_content: str | None = await _extract_last_ai(ref)
 

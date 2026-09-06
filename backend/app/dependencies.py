@@ -3,8 +3,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.constants import UserRole
 from app.core.exceptions import AuthError, ForbiddenError
-from app.core.security import decode_token, token_predates_password_change
-from app.db.collections import get_users_col
+from app.core.security import (
+    decode_token,
+    token_lookup_keys,
+    token_predates_password_change,
+)
+from app.db.collections import get_refresh_blocklist_col, get_users_col
+from app.services import auth_sessions
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -26,6 +31,11 @@ async def get_current_user(
     if not payload or payload.get("type") != "access":
         raise AuthError("Invalid or expired token")
 
+    if await get_refresh_blocklist_col().find_one(
+        {"token": {"$in": token_lookup_keys(token)}}
+    ):
+        raise AuthError("Token revoked")
+
     user_id = payload.get("sub")
     if not user_id:
         raise AuthError("Invalid token payload")
@@ -41,7 +51,12 @@ async def get_current_user(
     if token_predates_password_change(payload, user):
         raise AuthError("Session ended by a password change — please sign in again")
 
+    session_id = payload.get("sid")
+    if session_id and not await auth_sessions.is_active(session_id, user_id):
+        raise AuthError("Session revoked or expired")
+
     request.state._current_user = user
+    request.state._auth_payload = payload
     return user
 
 

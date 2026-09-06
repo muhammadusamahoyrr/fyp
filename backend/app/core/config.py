@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -123,6 +124,35 @@ class Settings(BaseSettings):
     # nothing is destroyed until this is explicitly turned on. Deletion is
     # tombstone-first and crash-safe (services/document_deletion.py).
     documents_v2_deletion_enabled: bool = False
+
+    @field_validator("secret_key")
+    @classmethod
+    def validate_jwt_secret(cls, value: str) -> str:
+        if len(value) < 32 or value.lower().startswith("change-this"):
+            raise ValueError("SECRET_KEY must be a non-placeholder value of at least 32 characters")
+        return value
+
+    @field_validator("algorithm")
+    @classmethod
+    def validate_jwt_algorithm(cls, value: str) -> str:
+        # This application uses one symmetric key. Refusing algorithm drift is
+        # safer than accepting an arbitrary value from deployment config.
+        if value != "HS256":
+            raise ValueError("ALGORITHM must be HS256")
+        return value
+
+    @field_validator("access_token_expire_minutes", "refresh_token_expire_days")
+    @classmethod
+    def validate_token_lifetime(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("token lifetimes must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def validate_production_transport(self):
+        if self.app_env.lower() == "production" and not self.frontend_url.startswith("https://"):
+            raise ValueError("FRONTEND_URL must use HTTPS in production")
+        return self
 
 
 settings = Settings()
