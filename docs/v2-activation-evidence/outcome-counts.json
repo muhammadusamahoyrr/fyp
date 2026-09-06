@@ -1,0 +1,652 @@
+{
+  "generated_at": "2026-09-06T02:59:15.369228+00:00",
+  "status": "COUNTS_OBTAINED_MIGRATION_NOT_RUN",
+  "held_at_step": 1,
+  "dry_run_executed": false,
+  "manifest_approved": false,
+  "documents_v2_flag": {
+    "repo_configured_default": false,
+    "source": "backend/app/core/config.py:119",
+    "scope": "the default compiled into this checkout. Production's effective value depends on its environment and was not observed.",
+    "changed_by_this_work": false
+  },
+  "target": {
+    "deployment": "hosted Atlas (mongodb+srv, *.mongodb.net)",
+    "database": "attorney_ai",
+    "is_copy_of_real_data": false,
+    "is_live_database": true,
+    "verified_copy_available": false,
+    "connection_opened": false,
+    "reason_not_connected": "No verified copy exists. Step 2's determinism check and step 6's zero-write proof are both unsound against a live database, because concurrent user traffic is indistinguishable from the effect being measured.",
+    "copy_candidates_inspected": [
+      {
+        "path": "evidence/statute_affinity_2026-09-01/before_snapshot.json",
+        "what": "260-byte counts snapshot; its mongo key reads 'unavailable: ConfigurationError'",
+        "usable": false
+      },
+      {
+        "path": "backend/data/purge_backups/fixture_purge_*.json",
+        "what": "purge record for 24 fixture accounts; contains 1 legacy-shaped document",
+        "usable": false
+      },
+      {
+        "path": "backend/data/purge_backups/attorney_ai_test_accounts_*.json",
+        "what": "2.5 KB of test accounts",
+        "usable": false
+      },
+      {
+        "path": "backend/chroma_data_backup_*",
+        "what": "Chroma vector store directories, not Mongo",
+        "usable": false
+      },
+      {
+        "path": "backend/models/backup",
+        "what": "model files",
+        "usable": false
+      }
+    ],
+    "scan_note": "The first artefact scan timed out and a narrower one was substituted, which missed evidence/. The full scan was re-run and every candidate is inventoried above. Conclusion unchanged: no usable copy exists."
+  },
+  "policy_version": "2026-09-04.decision-matrix-v1",
+  "manifest_schema_version": 2,
+  "rollback_schema_version": 1,
+  "counts_available": true,
+  "counts_blocked_by": null,
+  "owner_decisions": [
+    {
+      "outcome": "approved_no_file",
+      "requires_owner_approval": true,
+      "hardcoded_in": "document_migration.classify()",
+      "owner_action": "accept or reject the behaviour; approve() records consent, it does not select",
+      "writes": {
+        "make_revision": true,
+        "point_current": false,
+        "reviewable": false,
+        "cycle_action": null,
+        "new_review_status": "needs_reapproval"
+      },
+      "affected_count": 0,
+      "recommendation": "accept"
+    },
+    {
+      "outcome": "approved_no_reviewer",
+      "requires_owner_approval": true,
+      "hardcoded_in": "document_migration.classify()",
+      "owner_action": "accept or reject the behaviour; approve() records consent, it does not select",
+      "writes": {
+        "make_revision": true,
+        "point_current": true,
+        "reviewable": false,
+        "cycle_action": null,
+        "new_review_status": "needs_reapproval"
+      },
+      "affected_count": 0,
+      "recommendation": "accept"
+    },
+    {
+      "outcome": "submitted_no_file",
+      "requires_owner_approval": true,
+      "hardcoded_in": "document_migration.classify()",
+      "owner_action": "accept or reject the behaviour; approve() records consent, it does not select",
+      "writes": {
+        "make_revision": true,
+        "point_current": false,
+        "reviewable": false,
+        "cycle_action": null,
+        "new_review_status": "migration_unrecoverable"
+      },
+      "affected_count": 0,
+      "recommendation": "accept"
+    },
+    {
+      "outcome": "submitted_no_reviewer",
+      "requires_owner_approval": true,
+      "hardcoded_in": "document_migration.classify()",
+      "owner_action": "accept or reject the behaviour; approve() records consent, it does not select",
+      "writes": {
+        "make_revision": true,
+        "point_current": true,
+        "reviewable": false,
+        "cycle_action": null,
+        "new_review_status": "migration_unrecoverable"
+      },
+      "affected_count": 0,
+      "recommendation": "accept"
+    }
+  ],
+  "other_outcomes": [
+    {
+      "outcome": "decided_bound_unverified",
+      "new_review_status": null,
+      "requires_owner_approval": false,
+      "affected_count": 0
+    },
+    {
+      "outcome": "draft_no_file",
+      "new_review_status": null,
+      "requires_owner_approval": false,
+      "affected_count": 0
+    },
+    {
+      "outcome": "draft_with_file",
+      "new_review_status": null,
+      "requires_owner_approval": false,
+      "affected_count": 17
+    },
+    {
+      "outcome": "negative_decision_no_file",
+      "new_review_status": null,
+      "requires_owner_approval": false,
+      "affected_count": 0
+    },
+    {
+      "outcome": "negative_decision_no_reviewer",
+      "new_review_status": null,
+      "requires_owner_approval": false,
+      "affected_count": 0
+    },
+    {
+      "outcome": "submitted_reviewable",
+      "new_review_status": null,
+      "requires_owner_approval": false,
+      "affected_count": 2
+    }
+  ],
+  "blocking_codes": [
+    "already_migrated",
+    "duplicate_planned_revision_id",
+    "missing_client_id",
+    "missing_template_type",
+    "planned_revision_id_collision",
+    "source_file_unreadable",
+    "unsupported_legacy_review_status"
+  ],
+  "blocked_records": {
+    "counts_by_code": {},
+    "note": "Any blocked record is a NO-GO on its own; apply() refuses a manifest containing one.",
+    "blocked_documents": 0
+  },
+  "index_preflight": {
+    "executed": true,
+    "method": "read-only, via the v2_survey credential, 2026-09-06",
+    "correction": "the pack previously recorded v2_owner_documents as EXPECTED MALFORMED (same name, previous keys). It does not exist at all, and neither do the other seven V2 requirements. There is nothing to drop and no drop-create window.",
+    "documents_collection_indexes_present": [
+      "_id_",
+      "case_id_1",
+      "client_id_1",
+      "created_at_-1"
+    ],
+    "requirements_missing": {
+      "correctness": [
+        "document_revisions.uniq_revision_document_version",
+        "document_revisions.uniq_revision_document_idempotency",
+        "review_events.document_id_1_event_seq_1",
+        "notifications.uniq_notification_logical_event"
+      ],
+      "query": [
+        "documents.v2_queue_pending",
+        "documents.v2_queue_cycles",
+        "documents.v2_queue_cycles_any",
+        "documents.v2_owner_documents"
+      ]
+    },
+    "duplicate_risk_checked": true,
+    "duplicate_risk": {
+      "document_revisions": "0 rows -> both unique indexes safe",
+      "review_events": "collection absent -> index creation will implicitly create it, empty",
+      "notifications": "594 rows, 0 carrying logical_event_id. The index is SPARSE, so it indexes nothing today and builds cleanly. A first check reported WOULD FAIL by grouping all 594 rows including those missing the field, manufacturing a duplicate out of nulls -- corrected."
+    },
+    "credential_needed_to_create": "dbAdmin on attorney_ai; v2_survey is read-only by design",
+    "created": true,
+    "created_at": "2026-09-06",
+    "created_by": "operator, scoped to the eight V2_INDEX_REQUIREMENTS only (not create_all_indexes, which touches 31 unrelated indexes)",
+    "post_create_verification": {
+      "method": "read-only re-evaluation via the v2_survey credential and the same evaluate() the preflight uses",
+      "unsatisfied_requirements": 0,
+      "correctness_problems": 0,
+      "query_problems": 0,
+      "v2_owner_documents_keys": [
+        [
+          "client_id",
+          1
+        ],
+        [
+          "schema_version",
+          1
+        ],
+        [
+          "created_at",
+          -1
+        ],
+        [
+          "_id",
+          1
+        ]
+      ],
+      "side_effect": "review_events did not exist and was implicitly created by its index; it is empty",
+      "documents_indexes": [
+        "_id_",
+        "case_id_1",
+        "client_id_1",
+        "created_at_-1",
+        "v2_owner_documents",
+        "v2_queue_cycles",
+        "v2_queue_cycles_any",
+        "v2_queue_pending"
+      ]
+    }
+  },
+  "all_queue_contract": {
+    "recommended": "live_keyset_with_documented_movement",
+    "current_implementation_satisfies": true,
+    "caveat": "_id is random, so documents created mid-scroll are missed about half the time until reload. Permitted under the contract, but needs a UI affordance rather than a code change.",
+    "implemented": false
+  },
+  "zero_write_proof": {
+    "applicable": false,
+    "reason": "no connection was opened to production"
+  },
+  "blockers": [
+    "no backup taken yet (mongodump of 19 documents plus 19 referenced PDFs)",
+    "evidence pack untracked, so the record of this review is not durable"
+  ],
+  "snapshot": {
+    "exists": false,
+    "captured": false,
+    "validated": false,
+    "runbook": "docs/v2-activation-evidence/snapshot-runbook.md",
+    "validation_procedure": "docs/v2-activation-evidence/snapshot-validation.md",
+    "validator": "backend/scripts/validate_v2_snapshot.py",
+    "correction": "An earlier version of this pack said a mongodump alone was a sufficient snapshot. It is not. document_migration.read_source() reads and hashes the bytes at document.file_path, which holds an ABSOLUTE production path. A Mongo-only restore makes every document classify *_no_file, producing a manifest that reports the whole estate as unrecoverable while appearing healthy.",
+    "required_mongo_collections": {
+      "fatal_if_absent": [
+        "documents",
+        "document_revisions"
+      ],
+      "expected": [
+        "cases",
+        "users",
+        "review_events",
+        "transition_receipts"
+      ]
+    },
+    "required_artifact_directories": [
+      "${UPLOAD_ROOT}/docs"
+    ],
+    "upload_root_default": "<repo>/backend/uploads  (app/core/config.py:112)",
+    "capture_boundary": {
+      "must_be_frozen": true,
+      "accepted_methods": [
+        "quiesced",
+        "atomic_snapshot"
+      ],
+      "rejected_methods": [
+        "ordered live capture (files first, then Mongo)"
+      ],
+      "why_ordering_is_not_a_boundary": "Ordering controls WHICH DIRECTION the two stores disagree. It does not control WHETHER they disagree, and establishing that they do not is the validator's job. A row updated between the two captures carries the new file_path and the old bytes, which surfaces later as a source_lost_in_restore that originated in the capture. Discounting a suspect document by hand from recorded window bounds is the operator overriding the check, not verifying it.",
+      "enforced_in_code": "load_capture_manifest refuses any capture_method outside the accepted list; test_ordered_live_capture_is_refused covers it."
+    },
+    "path_mapping": {
+      "preferred": "mirror the production UPLOAD_ROOT path on the validation host",
+      "alternative": "rewrite file_path on the restored copy only, transformation recorded",
+      "never": "rewrite file_path in production"
+    },
+    "capture_manifest_required": true,
+    "capture_manifest_contract": "docs/v2-activation-evidence/capture-manifest.md",
+    "capture_side_implemented": false
+  },
+  "snapshot_validation_tool": {
+    "path": "backend/scripts/validate_v2_snapshot.py",
+    "report_schema_version": 4,
+    "executed_against_real_data": false,
+    "tests": "backend/tests/test_validate_v2_snapshot.py",
+    "tests_passing": 461,
+    "mutations_applied": 66,
+    "mutations_caught": 65,
+    "requires_capture_manifest": true,
+    "verdicts": {
+      "snapshot_fidelity_ok": "is anything demonstrably wrong with the copy?",
+      "fully_assessable": "could every document actually be checked?",
+      "migration_data_issues": "facts about the estate; never fails the run",
+      "index_readiness": "index definitions only; NOT document_migration.activation_readiness()",
+      "dry_run_safe": "all of the above, with no degraded mode in play",
+      "approval_ready": "same as dry_run_safe"
+    },
+    "exit_codes": {
+      "0": "faithful, fully assessed, no degraded mode",
+      "2": "failed -- fidelity broken or something unassessable",
+      "3": "refused -- target or inputs did not meet the contract",
+      "4": "ran, report unwritable",
+      "5": "degraded -- nothing found wrong but checks were weakened",
+      "6": "unexpected error, reported by exception class only"
+    },
+    "degraded_modes_cannot_return_zero": [
+      "--no-hash",
+      "--no-fingerprint",
+      "--allow-unauthenticated",
+      "--no-manifest-mode"
+    ],
+    "unassessable_sources": {
+      "capture": "evidence never existed -- e.g. unreadable_source, which has no captured hash, so no restored state can be confirmed",
+      "degraded_mode": "a flag switched the check off"
+    },
+    "fatal_fidelity_codes": [
+      "file_path_mismatch",
+      "source_lost_in_restore",
+      "source_content_mismatch",
+      "source_size_mismatch",
+      "weak_match",
+      "source_appeared_after_restore",
+      "file_path_lost",
+      "file_path_appeared",
+      "omitted_document",
+      "unexpected_document",
+      "document_count_mismatch",
+      "fingerprint_mismatch"
+    ],
+    "migration_data_issue_codes": [
+      "source_missing_in_production",
+      "source_unreadable_in_production",
+      "duplicate_legacy_path",
+      "stored_path_traversal"
+    ],
+    "isolation": {
+      "read_only_credential_required": true,
+      "accepted_roles": [
+        "read",
+        "readAnyDatabase",
+        "clusterMonitor"
+      ],
+      "unknown_roles": "fail closed",
+      "name_and_host_checks": "guardrails, not proof; labelled as such in the report",
+      "allow_host": "at most one value, no wildcards, no lists, no local host, no hosted-cluster host; does not relax the credential check",
+      "allow_host_with_allow_unauthenticated": "refused"
+    },
+    "error_handling": "connect, collections, fingerprint, artifact and report failures return a controlled exit carrying only the exception class name; URIs, credentials, document titles and raw driver errors are never printed",
+    "stability": {
+      "modes": [
+        "canonical_content_fingerprint",
+        "count_stability"
+      ],
+      "claims_zero_writes": false,
+      "caveat_present": true
+    },
+    "documents_v2_enabled_field": "removed -- the validation host cannot observe production's flag and must not assert it",
+    "known_limitations": [
+      "never run against real data",
+      "the capture-manifest producer is not implemented",
+      "a single unreadable_source in production blocks approval_ready with no mechanism for recording an owner's acceptance of the exception",
+      "artifact observations and the manifest are held in memory",
+      "fingerprinting reads whole collections twice; the scan reads every file",
+      "weak_match is fatal, which may be too strict for a deliberately flattened restore",
+      "a legitimately read-only custom Mongo role is refused along with write-capable ones",
+      "path_token is a 16-hex prefix -- a redaction, not a collision-resistant identifier",
+      "the stability check only detects changes made between its two reads"
+    ],
+    "renamed_fields": {
+      "approval_ready": "snapshot_approval_ready",
+      "activation_readiness": "index_readiness"
+    },
+    "mutation_evidence": "docs/v2-activation-evidence/mutation-evidence.json"
+  },
+  "purge_backups_audit": {
+    "report": "docs/v2-activation-evidence/purge-backups-audit.md",
+    "read_only": true,
+    "anything_deleted": false,
+    "pii_reproduced": false,
+    "directory": "backend/data/purge_backups",
+    "file_count": 2,
+    "dates": [
+      "2026-09-01"
+    ],
+    "written_by": "backend/scripts/purge_test_fixtures.py:189",
+    "second_file_writer": "not found in the repository",
+    "user_records": 27,
+    "records_with_password_hash": 23,
+    "encryption_at_rest": false,
+    "access_control": false,
+    "retention_policy": false,
+    "deletion_path": false,
+    "restore_path": false,
+    "gitignored": ".gitignore:124",
+    "tracked_in_git": false,
+    "proposed_retention_days": 90,
+    "blocks_migration": false,
+    "user_records_breakdown": {
+      "fixture_purge": 24,
+      "test_accounts": 3
+    }
+  },
+  "pack_durability": {
+    "report": "docs/v2-activation-evidence/pack-durability.md",
+    "tracked_files_in_pack": 0,
+    "committed": false,
+    "git_add_run": false,
+    "safe_to_commit": [
+      "docs/v2-activation-evidence/*.md",
+      "docs/v2-activation-evidence/outcome-counts.json",
+      "backend/scripts/validate_v2_snapshot.py",
+      "backend/tests/test_validate_v2_snapshot.py"
+    ],
+    "never_commit": [
+      "backend/data/purge_backups/**",
+      "docs/v2-activation-evidence/snapshot-validation.json",
+      "capture-manifest*.json",
+      "any URI carrying credentials",
+      "any mongodump output"
+    ],
+    "gitignore_rule_to_add_first": [
+      "docs/v2-activation-evidence/*.json",
+      "!docs/v2-activation-evidence/outcome-counts.json"
+    ],
+    "gitignore_rule_added": true,
+    "gitignore_lines": ".gitignore:131-135"
+  },
+  "capture_manifest_contract": {
+    "schema": "v2-capture-manifest",
+    "schema_version": 1,
+    "implemented_producer": false,
+    "consumer": "backend/scripts/validate_v2_snapshot.py",
+    "required_fields": [
+      "capture_id",
+      "database",
+      "production_upload_root",
+      "capture_method",
+      "writes_quiesced",
+      "capture_started_at",
+      "capture_finished_at",
+      "document_count",
+      "database_fingerprint",
+      "documents"
+    ],
+    "fingerprint_algorithm": "sha256-canonical-json-v1",
+    "source_states": {
+      "readable": "path recorded, bytes read; sha256 and size required",
+      "absent_path": "no file_path on the row",
+      "missing_source": "path recorded, FileNotFoundError",
+      "unreadable_source": "path recorded, any other OSError"
+    },
+    "refuses": [
+      "capture_method outside quiesced/atomic_snapshot",
+      "document_count disagreeing with the entries present, or a non-integer",
+      "duplicate document_id",
+      "readable entry with no 64-hex sha256 or no non-negative integer size",
+      "non-readable entry carrying a sha256 or size",
+      "unknown source_state",
+      "database_fingerprint naming anything other than exactly documents and document_revisions",
+      "a digest that is not a 64-character hex SHA-256 (null, boolean, number, list, wrong length, non-hex)",
+      "two collection names equivalent after trimming and case-folding",
+      "absent_path carrying a path_token",
+      "any other state without a 16-hex path_token",
+      "a timestamp that is malformed, naive, or not UTC",
+      "capture_finished_at earlier than capture_started_at",
+      "a zero-length window when capture_method is quiesced"
+    ],
+    "normalisation": {
+      "digests": "lowercased",
+      "path_tokens": "lowercased",
+      "timestamps": "parsed as timezone-aware UTC; Z and +00:00 both accepted"
+    },
+    "path_token_enforcement": "compared against the restored row's own file_path before anything else about that document; a mismatch is a fatal file_path_mismatch reported alone, because a hash checked against the wrong path proves nothing"
+  },
+  "null_counts_scope": "Only counts drawn from production data are null: every affected_count, blocked_records.counts_by_code, and the observed index state. Schema versions, test counts and index key directions are real values and do not come from the estate.",
+  "open_owner_decision": null,
+  "capture_producer": {
+    "path": "backend/scripts/capture_v2_snapshot_manifest.py",
+    "implemented": true,
+    "executed_against_production": false,
+    "capture_taken": false,
+    "shared_contract": "backend/app/db/v2_capture_contract.py",
+    "manifest_schema_version": 2,
+    "accepted_capture_methods": [
+      "quiesced",
+      "atomic_snapshot"
+    ],
+    "cannot_prove_quiescence": "No database client can observe whether application writes were stopped. The producer fingerprints Mongo before and after the artifact scan and stats every file before and after hashing it, refusing if anything moved. Those are tripwires that catch a boundary never held or broken mid-run; they do not establish one and are not a substitute for stopping writes. Every manifest carries producer_cannot_prove_quiescence: true so this travels with the artefact.",
+    "boundary_evidence_required": [
+      "method (must equal capture_method)",
+      "operator",
+      "attestation (>= 20 characters)",
+      "deployment_id",
+      "snapshot_id (atomic_snapshot only, required)",
+      "externally_verified (must be true for atomic_snapshot)",
+      "producer_cannot_prove_quiescence (must be true)",
+      "capture_started_at / capture_finished_at (UTC ISO-8601)"
+    ],
+    "arming": {
+      "production_refused_by_default": true,
+      "acknowledgement_flag": "--acknowledge-production-read",
+      "refused_target_is_never_connected_to": true,
+      "read_only_credential_verified_before_scanning": true,
+      "unauthenticated_capture_supported": false
+    },
+    "artifact_handling": {
+      "hashing": "streaming SHA-256, 1 MiB chunks",
+      "missing_vs_unreadable": "same discrimination as read_source()",
+      "detects": [
+        "path traversal",
+        "symlink",
+        "escape from UPLOAD_ROOT",
+        "duplicate document ids",
+        "file changed during capture",
+        "database changed during capture"
+      ],
+      "repairs_or_rewrites_paths": false
+    },
+    "output_safety": {
+      "atomic_exclusive_write": "stage, fsync, os.link; O_CREAT|O_EXCL fallback",
+      "overwrite": "refused",
+      "written_in_binary": "text mode translates newlines on Windows, which would break the detached checksum",
+      "detached_checksum": "<manifest>.sha256",
+      "default_output": "~/v2-capture/ -- inside the repository is refused",
+      "permissions": "0o600 where the platform honours it; Windows ACLs do not",
+      "staging_cleaned_on_failure": true,
+      "prints": "counts and the capture id only; no paths, titles, credentials or raw exceptions"
+    },
+    "exit_codes": {
+      "0": "manifest and checksum written",
+      "2": "refused",
+      "3": "boundary not held",
+      "4": "unexpected error, redacted"
+    },
+    "artifact_passes": 2,
+    "two_pass_rationale": "A single pass structurally cannot notice a file rewritten AFTER it was hashed -- that file's own before/after stat pair had already closed. Both passes are compared on path_token, source_state, size, sha256 and path_flags; any difference is BOUNDARY_BROKEN.",
+    "publication": {
+      "invariant": "a final manifest never exists without a valid checksum",
+      "order": [
+        "preflight both finals",
+        "stage both, fsynced and owner-only",
+        "publish the checksum FIRST",
+        "publish the manifest LAST as the completion marker"
+      ],
+      "crash_between_publications": "leaves an orphan checksum -- detectable, harmless and obviously incomplete. The reverse order would leave a manifest whose integrity nobody could confirm, which looks exactly like a good one.",
+      "overwrite": "refused for either file, before anything is staged",
+      "cleanup": "on a HANDLED failure only files this invocation created are removed; a pre-existing file is never touched",
+      "abrupt_termination": "cannot clean up at all, which is why the ordering rather than the cleanup carries the guarantee"
+    },
+    "output_protection": {
+      "posix": "directory 0700, files 0600, verified by stat",
+      "windows": "icacls /inheritance:r plus a single owner grant, verified by reading the ACL back and refusing if any other principal retains access",
+      "failure": "refused, non-zero exit, nothing written",
+      "recorded_as": "producer.protection_verified, required true by the contract",
+      "why_not_chmod_on_windows": "Windows ignores chmod beyond the read-only bit, so a POSIX mode check there would pass while the directory stayed readable by everyone"
+    },
+    "windows_acl_identity": "process token SID via advapi32 (whoami /user fallback); granted as *SID and verified from icacls /save SDDL. %USERNAME% is never used and domains are never stripped.",
+    "windows_acl_policy": "this token SID plus the three principals that cannot be excluded on Windows (SYSTEM S-1-5-18, Administrators S-1-5-32-544, OWNER RIGHTS S-1-3-4). Everyone/Users/Authenticated Users and any other account are refused. An ACL lacking this account is also refused: not-unexpected is not the same as ours.",
+    "output_directory_policy": "a new directory is created and protected; a pre-existing one is VERIFIED ONLY and refused if not private. The tool never rewrites the ACL of a directory it did not create.",
+    "database_readings": 3,
+    "publication_durability_windows": "crash-consistent; Windows exposes no directory fsync, so ordering survives a process crash but not power loss"
+  },
+  "shared_contract": {
+    "path": "backend/app/db/v2_capture_contract.py",
+    "why": "The producer and the validator must agree about hashing, canonical serialisation, path tokens, source states and every validation rule. Separate copies that drift make the validator report tooling differences in the language of data loss -- a _stable() differing by one character makes every fingerprint mismatch.",
+    "drift_tests": "backend/tests/test_v2_capture_contract.py",
+    "manifest_schema_version_1": "refused, not upgraded -- it predates boundary evidence and the fields were never collected"
+  },
+  "mutation_testing": {
+    "harness": "backend/scripts/v2_mutation_evidence.py",
+    "evidence": "docs/v2-activation-evidence/mutation-evidence.json",
+    "isolation": "every mutation was applied to a throwaway copy of the tree; the repository was read and never written, so an interrupted run cannot leave a modified source file",
+    "applied": 69,
+    "caught": 68,
+    "not_caught": [],
+    "skipped": [],
+    "timed_out": [],
+    "equivalent": [
+      {
+        "mutation": "producer: the directory is not fsynced after the checksum",
+        "reason": "PLATFORM-CONDITIONAL. _sync_directory() returns immediately when os.name == 'nt', because Windows exposes no directory fsync, so removing a call to it cannot change observable behaviour on this machine. On POSIX the call is NOT equivalent and this mutation is expected to be caught there -- which this run cannot demonstrate. Recorded as equivalent for Windows only, and as unverified elsewhere."
+      }
+    ],
+    "suite_timeout_seconds": 300,
+    "deselected_during_sweep": "real_protection -- environment checks that spawn icacls; run once separately against the unmutated tree"
+  },
+  "contract_drift_testing": {
+    "mechanism": "explicit expected-import matrix, no dynamic skips",
+    "rule": "a declared name must be present AND be the contract's object; an undeclared name must be absent; a wrapped name must be present and NOT the contract's object",
+    "why": "the previous version asked hasattr and skipped on a miss, so a name dropped from an import list turned a real check into a green skip",
+    "coverage_check": "a separate test fails if a public contract name is neither imported by a script nor explicitly exempted"
+  },
+  "test_environment_independence": {
+    "repository_root": "producer tests monkeypatch REPOSITORY_ROOT to a temporary fake repository; one side-effect-free test asserts the real constant points at the actual repo",
+    "basetemp": "verified passing with --basetemp both inside and outside the repo",
+    "remaining_skips": [
+      "SKIPPED [1] tests\\test_capture_v2_snapshot_manifest.py:727: POSIX modes; Windows uses ACLs"
+    ]
+  },
+  "counts_source": "read-only production survey, 2026-09-06, via v2_estate_survey.py. NOT a dry-run: live counts drift and this authorises nothing.",
+  "estate_survey": {
+    "report": "docs/v2-activation-evidence/estate-survey.json",
+    "narrative": "docs/v2-activation-evidence/estate-survey.md",
+    "legacy_documents": 19,
+    "v2_documents": 0,
+    "document_revisions": 0,
+    "review_status": {
+      "None": 17,
+      "submitted": 2
+    },
+    "source_states": {
+      "readable": 19
+    },
+    "outcomes": {
+      "draft_with_file": 17,
+      "submitted_reviewable": 2
+    },
+    "blocked_documents": 0,
+    "requires_owner_approval": {},
+    "approval_affected_documents": 0,
+    "files_on_disk": 13386,
+    "files_referenced_by_rows": 19,
+    "referenced_but_missing": 0,
+    "orphan_files_on_disk": 13367,
+    "correction": "An earlier report gave the estate as ~13,000 documents, inferred from a filesystem census. It is 19. A directory listing describes what is on disk; the migration reads paths recorded in rows, and here the two differ by three orders of magnitude."
+  },
+  "blockers_resolved": {
+    "four owner-policy decisions": "0 documents affected; nothing to approve",
+    "blocked-record count": "0 blocked documents, 0 blocking conditions",
+    "read-only credential": "created as Atlas user v2_survey (read on attorney_ai). ROTATE OR DELETE: its password was disclosed in a chat transcript.",
+    "document_revisions empty and static": "confirmed empty (0 rows)",
+    "eight missing V2 indexes": "created 2026-09-06 and verified read-only: 0 unsatisfied requirements. Duplicate risk was checked sparse-aware beforehand and was clear."
+  },
+  "proportionality_note": "The capture/validate/manifest apparatus was built for an estate of unknown size. At 19 documents with 0 blocked and 0 approvals required, the strongest verification is also the simplest: read all 19 rows before and after and compare directly. See estate-survey.md for the reduced sequence."
+}

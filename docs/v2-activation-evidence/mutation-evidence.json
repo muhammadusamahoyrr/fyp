@@ -1,0 +1,813 @@
+{
+  "tool": "v2_mutation_evidence",
+  "generated_at": "2026-09-06T01:39:34.323685+00:00",
+  "isolation": "every mutation was applied to a throwaway copy of the tree; the repository was read and never written, so an interrupted run cannot leave a modified source file",
+  "baseline": "458 passed, 4 deselected in 22.50s",
+  "suites": [
+    "backend/tests/test_validate_v2_snapshot.py",
+    "backend/tests/test_v2_capture_contract.py",
+    "backend/tests/test_capture_v2_snapshot_manifest.py"
+  ],
+  "mutations_applied": 69,
+  "mutations_caught": 68,
+  "mutations_not_caught": [],
+  "mutations_equivalent": [
+    {
+      "mutation": "producer: the directory is not fsynced after the checksum",
+      "reason": "PLATFORM-CONDITIONAL. _sync_directory() returns immediately when os.name == 'nt', because Windows exposes no directory fsync, so removing a call to it cannot change observable behaviour on this machine. On POSIX the call is NOT equivalent and this mutation is expected to be caught there -- which this run cannot demonstrate. Recorded as equivalent for Windows only, and as unverified elsewhere."
+    }
+  ],
+  "mutations_timed_out": [],
+  "suite_timeout_seconds": 300,
+  "deselected_during_sweep": "real_protection -- environment checks that spawn icacls; run once separately against the unmutated tree",
+  "mutations_skipped": [],
+  "source_paths": {
+    "contract": "backend/app/db/v2_capture_contract.py",
+    "validator": "backend/scripts/validate_v2_snapshot.py",
+    "producer": "backend/scripts/capture_v2_snapshot_manifest.py"
+  },
+  "source_sha256": {
+    "contract": "2874de72b42761b80c2e81b45ebef01fcf383470cd6ea6365f3ad234d40037ae",
+    "validator": "e2fc17e1caaecdcab9046d52019f9020acb7c1b2deece38017564f8660fcc1f6",
+    "producer": "5de5b1baeb56878a551997c65588220f289c8f6daa56bb76a4f89e5b0d507775"
+  },
+  "test_sha256": {
+    "backend/tests/test_validate_v2_snapshot.py": "64ab90579e5bdfd469f2c7c8ef1054c1177e7d9496b95a30fa8d3ab259fc7ebd",
+    "backend/tests/test_v2_capture_contract.py": "7ee3b7d78afec00aab444ca73ba848d1086ec34a82554da088dceef6a5c0d188",
+    "backend/tests/test_capture_v2_snapshot_manifest.py": "ef25d23467265b704247bafe5c175051d392e656d59b47d58d5e880345cf874e",
+    "backend/tests/v2_fakes.py": "917b62f5a04d0a1bd2d9daa44623b36cf3278ffd688edfedd3c16ddef96953ac"
+  },
+  "results": [
+    {
+      "mutation": "contract: ordered live capture accepted again",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 23.25s",
+      "caught_by": [
+        "test_ordered_live_capture_is_refused"
+      ]
+    },
+    {
+      "mutation": "contract: schema version 1 accepted again",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 38.05s",
+      "caught_by": [
+        "test_version_one_manifests_are_refused_with_a_reason"
+      ]
+    },
+    {
+      "mutation": "contract: boundary evidence no longer required",
+      "file": "contract",
+      "status": "caught",
+      "summary": "28 failed, 430 passed, 4 deselected in 23.89s",
+      "caught_by": [
+        "test_a_manifest_without_boundary_evidence_is_refused",
+        "test_a_quiesced_capture_may_not_claim_a_snapshot_id",
+        "test_a_token_attestation_is_refused",
+        "test_a_token_attestation_is_refused_by_the_self_check",
+        "test_an_atomic_snapshot_must_be_externally_verified",
+        "test_an_atomic_snapshot_must_name_its_snapshot_id",
+        "test_boundary_method_must_agree_with_capture_method",
+        "test_externally_verified_must_be_a_boolean",
+        "test_quiesced_without_the_quiesce_flag_is_refused",
+        "test_the_producer_must_admit_it_cannot_prove_quiescence",
+        "test_unattributed_boundary_evidence_is_refused"
+      ]
+    },
+    {
+      "mutation": "contract: a token attestation accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "7 failed, 451 passed, 4 deselected in 25.85s",
+      "caught_by": [
+        "test_a_token_attestation_is_refused",
+        "test_a_token_attestation_is_refused_by_the_self_check"
+      ]
+    },
+    {
+      "mutation": "contract: producer need not admit it cannot prove quiescence",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 27.86s",
+      "caught_by": [
+        "test_the_producer_must_admit_it_cannot_prove_quiescence"
+      ]
+    },
+    {
+      "mutation": "contract: atomic snapshot need not name a snapshot_id",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 19.56s",
+      "caught_by": [
+        "test_an_atomic_snapshot_must_name_its_snapshot_id"
+      ]
+    },
+    {
+      "mutation": "contract: atomic snapshot need not be externally verified",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 18.94s",
+      "caught_by": [
+        "test_an_atomic_snapshot_must_be_externally_verified"
+      ]
+    },
+    {
+      "mutation": "contract: a write-capable capture accepted as approval-grade",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 18.83s",
+      "caught_by": [
+        "test_a_capture_taken_on_a_writable_connection_is_refused"
+      ]
+    },
+    {
+      "mutation": "contract: unverified output protection accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 18.90s",
+      "caught_by": [
+        "test_the_contract_refuses_a_manifest_without_verified_protection"
+      ]
+    },
+    {
+      "mutation": "contract: unknown path flags accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 20.75s",
+      "caught_by": [
+        "test_an_unknown_path_flag_is_refused"
+      ]
+    },
+    {
+      "mutation": "contract: fingerprint no longer requires the two collections",
+      "file": "contract",
+      "status": "caught",
+      "summary": "2 failed, 456 passed, 4 deselected in 23.50s",
+      "caught_by": [
+        "test_fingerprint_missing_a_required_collection_is_refused",
+        "test_manifest_loading_applies_fingerprint_validation"
+      ]
+    },
+    {
+      "mutation": "contract: an extra fingerprint collection accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 30.21s",
+      "caught_by": [
+        "test_fingerprint_with_an_extra_collection_is_refused"
+      ]
+    },
+    {
+      "mutation": "contract: digests no longer checked for shape",
+      "file": "contract",
+      "status": "caught",
+      "summary": "11 failed, 447 passed, 4 deselected in 34.94s",
+      "caught_by": [
+        "test_malformed_digests_are_refused"
+      ]
+    },
+    {
+      "mutation": "contract: duplicate-equivalent collection names accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 35.48s",
+      "caught_by": [
+        "test_duplicate_equivalent_collection_names_are_refused"
+      ]
+    },
+    {
+      "mutation": "contract: a recorded path no longer needs a token",
+      "file": "contract",
+      "status": "caught",
+      "summary": "24 failed, 434 passed, 4 deselected in 33.66s",
+      "caught_by": [
+        "test_a_recorded_path_requires_a_16_hex_token"
+      ]
+    },
+    {
+      "mutation": "contract: absent_path may carry a token",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 21.22s",
+      "caught_by": [
+        "test_absent_path_must_carry_a_null_token"
+      ]
+    },
+    {
+      "mutation": "contract: non-UTC capture timestamps accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 33.21s",
+      "caught_by": [
+        "test_non_utc_capture_timestamps_are_refused"
+      ]
+    },
+    {
+      "mutation": "contract: naive capture timestamps accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 25.44s",
+      "caught_by": [
+        "test_naive_capture_timestamps_are_refused"
+      ]
+    },
+    {
+      "mutation": "contract: reversed capture intervals accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 20.34s",
+      "caught_by": [
+        "test_reversed_capture_interval_is_refused"
+      ]
+    },
+    {
+      "mutation": "contract: a zero-length quiesce window accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 27.27s",
+      "caught_by": [
+        "test_a_zero_length_quiesce_window_is_refused"
+      ]
+    },
+    {
+      "mutation": "contract: unreadable-at-stat collapsed into missing",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 30.96s",
+      "caught_by": [
+        "test_a_stat_failure_is_unreadable_not_missing"
+      ]
+    },
+    {
+      "mutation": "contract: unreadable-at-read collapsed into missing",
+      "file": "contract",
+      "status": "caught",
+      "summary": "2 failed, 456 passed, 4 deselected in 32.15s",
+      "caught_by": [
+        "test_a_read_failure_is_unreadable_not_missing",
+        "test_an_unreadable_path_is_kept_distinct_from_missing"
+      ]
+    },
+    {
+      "mutation": "contract: a final-component symlink no longer flagged",
+      "file": "contract",
+      "status": "caught",
+      "summary": "4 failed, 454 passed, 4 deselected in 59.23s",
+      "caught_by": [
+        "test_a_dangling_symlink_is_missing_not_unreadable",
+        "test_a_final_component_symlink_escaping_the_root_is_flagged",
+        "test_a_symlink_escaping_the_upload_root_is_flagged",
+        "test_a_symlink_resolving_inside_the_root_is_not_an_escape"
+      ]
+    },
+    {
+      "mutation": "contract: a parent-directory symlink no longer flagged",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 26.97s",
+      "caught_by": [
+        "test_a_parent_directory_symlink_escaping_the_root_is_flagged"
+      ]
+    },
+    {
+      "mutation": "contract: a file changing mid-hash no longer refused",
+      "file": "contract",
+      "status": "caught",
+      "summary": "2 failed, 456 passed, 4 deselected in 20.70s",
+      "caught_by": [
+        "test_a_file_change_mid_hash_is_refused",
+        "test_a_file_growing_between_the_two_stats_raises"
+      ]
+    },
+    {
+      "mutation": "contract: traversal no longer flagged",
+      "file": "contract",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 21.27s",
+      "caught_by": [
+        "test_a_traversal_in_a_stored_path_is_flagged_not_fixed"
+      ]
+    },
+    {
+      "mutation": "contract: files outside the upload root no longer flagged",
+      "file": "contract",
+      "status": "caught",
+      "summary": "4 failed, 454 passed, 4 deselected in 20.02s",
+      "caught_by": [
+        "test_a_file_outside_the_upload_root_is_flagged",
+        "test_a_final_component_symlink_escaping_the_root_is_flagged",
+        "test_a_parent_directory_symlink_escaping_the_root_is_flagged",
+        "test_a_symlink_escaping_the_upload_root_is_flagged"
+      ]
+    },
+    {
+      "mutation": "contract: a write-capable role accepted",
+      "file": "contract",
+      "status": "caught",
+      "summary": "5 failed, 453 passed, 4 deselected in 37.22s",
+      "caught_by": [
+        "test_a_write_capable_credential_is_refused_before_scanning",
+        "test_allow_unauthenticated_does_not_launder_a_writable_credential",
+        "test_allow_unauthenticated_does_not_launder_a_writable_credential_via_main",
+        "test_main_post_connect_refusal_still_closes_the_client",
+        "test_write_capable_credential_is_refused"
+      ]
+    },
+    {
+      "mutation": "producer: production no longer refused by default",
+      "file": "producer",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 22.84s",
+      "caught_by": [
+        "test_production_is_refused_unless_armed"
+      ]
+    },
+    {
+      "mutation": "producer: the credential is checked after scanning, not before",
+      "file": "producer",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 24.36s",
+      "caught_by": [
+        "test_a_write_capable_credential_is_refused_before_scanning",
+        "test_an_unauthenticated_target_is_refused",
+        "test_the_credential_verdict_is_recorded_in_the_manifest"
+      ]
+    },
+    {
+      "mutation": "producer: a database change mid-scan no longer refused",
+      "file": "producer",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 21.53s",
+      "caught_by": [
+        "test_a_database_change_mid_scan_is_refused"
+      ]
+    },
+    {
+      "mutation": "producer: the second artifact pass is removed",
+      "file": "producer",
+      "status": "caught",
+      "summary": "6 failed, 452 passed, 4 deselected in 21.45s",
+      "caught_by": [
+        "test_a_file_rewritten_after_its_own_hash_is_caught_by_the_second_pass",
+        "test_a_replaced_file_of_the_same_size_is_caught",
+        "test_a_symlink_retargeted_between_the_two_passes_is_caught",
+        "test_readable_becoming_unreadable_between_passes_is_caught",
+        "test_source_state_transitions_between_passes_are_caught"
+      ]
+    },
+    {
+      "mutation": "producer: the second pass no longer compares content",
+      "file": "producer",
+      "status": "caught",
+      "summary": "4 failed, 454 passed, 4 deselected in 21.00s",
+      "caught_by": [
+        "test_a_file_rewritten_after_its_own_hash_is_caught_by_the_second_pass",
+        "test_a_replaced_file_of_the_same_size_is_caught",
+        "test_a_symlink_retargeted_between_the_two_passes_is_caught",
+        "test_compare_scans_checks_every_recorded_field"
+      ]
+    },
+    {
+      "mutation": "producer: scan differences no longer break the boundary",
+      "file": "producer",
+      "status": "caught",
+      "summary": "6 failed, 452 passed, 4 deselected in 20.58s",
+      "caught_by": [
+        "test_a_file_rewritten_after_its_own_hash_is_caught_by_the_second_pass",
+        "test_a_replaced_file_of_the_same_size_is_caught",
+        "test_a_symlink_retargeted_between_the_two_passes_is_caught",
+        "test_readable_becoming_unreadable_between_passes_is_caught",
+        "test_source_state_transitions_between_passes_are_caught"
+      ]
+    },
+    {
+      "mutation": "producer: duplicate document ids accepted",
+      "file": "producer",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 23.08s",
+      "caught_by": [
+        "test_duplicate_document_ids_are_refused"
+      ]
+    },
+    {
+      "mutation": "producer: an existing final is overwritten",
+      "file": "producer",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 22.16s",
+      "caught_by": [
+        "test_both_finals_are_preflighted_before_either_is_staged"
+      ]
+    },
+    {
+      "mutation": "producer: output inside the repository allowed",
+      "file": "producer",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 23.11s",
+      "caught_by": [
+        "test_writing_inside_the_repository_is_refused"
+      ]
+    },
+    {
+      "mutation": "producer: the manifest is published before its checksum",
+      "file": "producer",
+      "status": "caught",
+      "summary": "21 failed, 437 passed, 4 deselected in 24.81s",
+      "caught_by": [
+        "test_a_crash_between_the_two_publications_leaves_an_orphan_checksum",
+        "test_a_new_directory_is_created_and_protected",
+        "test_a_non_production_rehearsal_needs_no_acknowledgement",
+        "test_a_stable_estate_passes_both_tripwires",
+        "test_a_stable_estate_survives_all_three_database_readings",
+        "test_a_stable_estate_survives_both_passes",
+        "test_a_successful_publication_leaves_exactly_two_files",
+        "test_a_verified_atomic_capture_is_accepted",
+        "test_an_abrupt_crash_at_any_step_preserves_the_invariant",
+        "test_an_existing_private_directory_is_accepted_without_rewriting",
+        "test_arming_is_recorded_in_the_manifest",
+        "test_arming_the_run_lets_it_proceed",
+        "test_no_title_reaches_stdout_on_a_successful_run",
+        "test_protection_verified_is_recorded",
+        "test_the_credential_verdict_is_recorded_in_the_manifest",
+        "test_the_manifest_admits_it_cannot_prove_quiescence",
+        "test_the_manifest_and_a_detached_checksum_are_written",
+        "test_the_manifest_itself_carries_no_titles",
+        "test_the_producer_never_rewrites_a_stored_path"
+      ]
+    },
+    {
+      "mutation": "producer: a handled failure no longer cleans up",
+      "file": "producer",
+      "status": "caught",
+      "summary": "10 failed, 448 passed, 4 deselected in 24.52s",
+      "caught_by": [
+        "test_a_handled_failure_at_any_step_leaves_nothing_behind",
+        "test_a_protection_failure_on_the_files_leaves_nothing",
+        "test_a_protection_failure_refuses_and_writes_nothing",
+        "test_cleanup_never_removes_a_file_this_run_did_not_create"
+      ]
+    },
+    {
+      "mutation": "producer: cleanup deletes files it did not create",
+      "file": "producer",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 56.24s",
+      "caught_by": [
+        "test_cleanup_never_removes_a_file_this_run_did_not_create"
+      ]
+    },
+    {
+      "mutation": "producer: the manifest is written in text mode",
+      "file": "producer",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 18.54s",
+      "caught_by": [
+        "test_a_successful_publication_leaves_exactly_two_files",
+        "test_an_abrupt_crash_at_any_step_preserves_the_invariant",
+        "test_the_manifest_and_a_detached_checksum_are_written"
+      ]
+    },
+    {
+      "mutation": "producer: a protection failure is ignored",
+      "file": "producer",
+      "status": "caught",
+      "summary": "2 failed, 456 passed, 4 deselected in 18.54s",
+      "caught_by": [
+        "test_a_protection_failure_on_the_files_leaves_nothing",
+        "test_a_protection_failure_refuses_and_writes_nothing"
+      ]
+    },
+    {
+      "mutation": "producer: the self-check against the contract is skipped",
+      "file": "producer",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 22.98s",
+      "caught_by": [
+        "test_a_token_attestation_is_refused_by_the_self_check"
+      ]
+    },
+    {
+      "mutation": "producer: driver errors are printed raw",
+      "file": "producer",
+      "status": "caught",
+      "summary": "2 failed, 456 passed, 4 deselected in 20.70s",
+      "caught_by": [
+        "test_a_connect_failure_is_redacted",
+        "test_a_scan_failure_is_redacted"
+      ]
+    },
+    {
+      "mutation": "producer: ACL identity falls back to %USERNAME%",
+      "file": "producer",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 21.92s",
+      "caught_by": [
+        "test_the_acl_grant_names_the_token_sid_not_the_username",
+        "test_the_acl_grant_uses_the_is_dir_flag_it_was_given"
+      ]
+    },
+    {
+      "mutation": "producer: ACL verification strips domains again",
+      "file": "producer",
+      "status": "caught",
+      "summary": "4 failed, 454 passed, 4 deselected in 21.88s",
+      "caught_by": [
+        "test_a_domain_qualified_lookalike_is_not_treated_as_the_same_account",
+        "test_sddl_parsing_ignores_the_sacl",
+        "test_sddl_parsing_normalises_aliases_to_sids",
+        "test_the_acl_grant_names_the_token_sid_not_the_username"
+      ]
+    },
+    {
+      "mutation": "producer: broad principals accepted on the ACL",
+      "file": "producer",
+      "status": "caught",
+      "summary": "6 failed, 452 passed, 4 deselected in 20.77s",
+      "caught_by": [
+        "test_a_sid_differing_only_in_the_last_component_is_refused",
+        "test_any_other_principal_is_refused"
+      ]
+    },
+    {
+      "mutation": "producer: an existing output directory has its ACL rewritten",
+      "file": "producer",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 22.30s",
+      "caught_by": [
+        "test_a_protection_failure_refuses_and_writes_nothing",
+        "test_an_existing_private_directory_is_accepted_without_rewriting",
+        "test_an_existing_unprotected_directory_is_refused_not_rewritten"
+      ]
+    },
+    {
+      "mutation": "producer: the database is not re-read after the second artifact pass",
+      "file": "producer",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 20.21s",
+      "caught_by": [
+        "test_a_non_file_field_changing_during_scan_two_is_refused"
+      ]
+    },
+    {
+      "mutation": "producer: the directory is not fsynced after the checksum",
+      "file": "producer",
+      "status": "equivalent",
+      "summary": "458 passed, 4 deselected in 18.32s",
+      "reason": "PLATFORM-CONDITIONAL. _sync_directory() returns immediately when os.name == 'nt', because Windows exposes no directory fsync, so removing a call to it cannot change observable behaviour on this machine. On POSIX the call is NOT equivalent and this mutation is expected to be caught there -- which this run cannot demonstrate. Recorded as equivalent for Windows only, and as unverified elsewhere.",
+      "caught_by": []
+    },
+    {
+      "mutation": "validator: degraded modes no longer block dry_run_safe",
+      "file": "validator",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 16.68s",
+      "caught_by": [
+        "test_allow_unauthenticated_cannot_pass",
+        "test_no_fingerprint_hides_a_same_count_modification_and_cannot_pass",
+        "test_no_hash_hides_a_same_size_corruption_and_cannot_pass"
+      ]
+    },
+    {
+      "mutation": "validator: a degraded run returns exit 0",
+      "file": "validator",
+      "status": "caught",
+      "summary": "11 failed, 447 passed, 4 deselected in 16.46s",
+      "caught_by": [
+        "test_allow_unauthenticated_cannot_pass",
+        "test_every_degraded_flag_is_named_with_its_consequence",
+        "test_no_combination_of_diagnostic_flags_can_return_zero",
+        "test_no_fingerprint_hides_a_same_count_modification_and_cannot_pass",
+        "test_no_hash_hides_a_same_size_corruption_and_cannot_pass"
+      ]
+    },
+    {
+      "mutation": "validator: --no-hash is no longer a degraded mode",
+      "file": "validator",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 16.62s",
+      "caught_by": [
+        "test_every_degraded_flag_is_named_with_its_consequence",
+        "test_no_combination_of_diagnostic_flags_can_return_zero",
+        "test_no_hash_hides_a_same_size_corruption_and_cannot_pass"
+      ]
+    },
+    {
+      "mutation": "validator: --no-fingerprint is no longer a degraded mode",
+      "file": "validator",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 16.44s",
+      "caught_by": [
+        "test_every_degraded_flag_is_named_with_its_consequence",
+        "test_no_combination_of_diagnostic_flags_can_return_zero",
+        "test_no_fingerprint_hides_a_same_count_modification_and_cannot_pass"
+      ]
+    },
+    {
+      "mutation": "validator: --allow-unauthenticated is no longer a degraded mode",
+      "file": "validator",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 21.76s",
+      "caught_by": [
+        "test_allow_unauthenticated_cannot_pass",
+        "test_every_degraded_flag_is_named_with_its_consequence",
+        "test_no_combination_of_diagnostic_flags_can_return_zero"
+      ]
+    },
+    {
+      "mutation": "validator: unreadable-at-capture no longer recorded",
+      "file": "validator",
+      "status": "caught",
+      "summary": "6 failed, 452 passed, 4 deselected in 25.62s",
+      "caught_by": [
+        "test_unreadable_at_capture_is_never_assessable",
+        "test_unreadable_source_cannot_return_exit_zero"
+      ]
+    },
+    {
+      "mutation": "validator: capture-side gaps no longer block the verdict",
+      "file": "validator",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 22.99s",
+      "caught_by": [
+        "test_unreadable_source_cannot_return_exit_zero"
+      ]
+    },
+    {
+      "mutation": "validator: path_token no longer compared with the restored row",
+      "file": "validator",
+      "status": "caught",
+      "summary": "3 failed, 455 passed, 4 deselected in 16.79s",
+      "caught_by": [
+        "test_hashes_cannot_be_reassigned_between_paths",
+        "test_path_token_is_checked_before_the_source_state",
+        "test_path_token_mismatch_is_fatal"
+      ]
+    },
+    {
+      "mutation": "validator: --allow-unauthenticated launders a writable credential",
+      "file": "validator",
+      "status": "caught",
+      "summary": "2 failed, 456 passed, 4 deselected in 16.55s",
+      "caught_by": [
+        "test_allow_unauthenticated_does_not_launder_a_writable_credential",
+        "test_allow_unauthenticated_does_not_launder_a_writable_credential_via_main"
+      ]
+    },
+    {
+      "mutation": "validator: the index result is called activation_readiness again",
+      "file": "validator",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 16.68s",
+      "caught_by": [
+        "test_the_index_result_is_not_called_activation_readiness"
+      ]
+    },
+    {
+      "mutation": "validator: approval_ready keeps its old ambiguous name",
+      "file": "validator",
+      "status": "caught",
+      "summary": "29 failed, 429 passed, 4 deselected in 16.87s",
+      "caught_by": [
+        "test_a_capture_gap_is_not_reported_as_a_degraded_mode",
+        "test_a_degraded_run_that_also_fails_reports_failure_not_degradation",
+        "test_a_fully_checked_clean_snapshot_is_the_only_way_to_exit_zero",
+        "test_allow_unauthenticated_cannot_pass",
+        "test_capture_duration_reaches_the_report",
+        "test_every_degraded_flag_is_named_with_its_consequence",
+        "test_expect_documents_agreeing_with_the_manifest_passes",
+        "test_include_paths_is_opt_in_and_visible",
+        "test_main_document_count_mismatch_fails",
+        "test_main_fail_on_lost_source - Ke...",
+        "test_main_leaks_neither_credentials_nor_titles",
+        "test_main_no_manifest_mode_runs_but_cannot_pass",
+        "test_main_writes_a_complete_report",
+        "test_no_combination_of_diagnostic_flags_can_return_zero",
+        "test_no_fingerprint_hides_a_same_count_modification_and_cannot_pass",
+        "test_no_hash_hides_a_same_size_corruption_and_cannot_pass",
+        "test_report_does_not_assert_the_production_flag_state",
+        "test_report_write_failure_is_reported_not_swallowed",
+        "test_stability_block_never_claims_zero_writes",
+        "test_the_index_result_is_not_called_activation_readiness",
+        "test_the_same_corruption_is_caught_when_hashing_is_on",
+        "test_the_same_modification_is_caught_when_fingerprinting_is_on",
+        "test_unreadable_source_cannot_return_exit_zero"
+      ]
+    },
+    {
+      "mutation": "validator: the capture manifest becomes optional again",
+      "file": "validator",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 17.14s",
+      "caught_by": [
+        "test_main_refuses_without_a_capture_manifest"
+      ]
+    },
+    {
+      "mutation": "validator: --no-manifest-mode alongside a manifest accepted",
+      "file": "validator",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 22.61s",
+      "caught_by": [
+        "test_no_manifest_mode_with_a_manifest_is_refused"
+      ]
+    },
+    {
+      "mutation": "validator: stability claims to prove zero writes",
+      "file": "validator",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 19.71s",
+      "caught_by": [
+        "test_stability_block_never_claims_zero_writes"
+      ]
+    },
+    {
+      "mutation": "validator: real file paths always carried into the report",
+      "file": "validator",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 16.56s",
+      "caught_by": [
+        "test_main_leaks_neither_credentials_nor_titles"
+      ]
+    },
+    {
+      "mutation": "validator: duplicate legacy paths counted as a fidelity failure",
+      "file": "validator",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 16.50s",
+      "caught_by": [
+        "test_duplicate_legacy_paths_are_a_data_issue_not_a_fidelity_failure"
+      ]
+    },
+    {
+      "mutation": "validator: faithful copy of a missing source called a failure",
+      "file": "validator",
+      "status": "caught",
+      "summary": "1 failed, 457 passed, 4 deselected in 23.31s",
+      "caught_by": [
+        "test_missing_in_production_and_missing_after_restore_is_faithful"
+      ]
+    },
+    {
+      "mutation": "drift: the validator grows its own path_token",
+      "file": "validator",
+      "status": "caught",
+      "summary": "51 failed, 407 passed, 4 deselected in 18.87s",
+      "caught_by": [
+        "test_a_capture_gap_is_not_reported_as_a_degraded_mode",
+        "test_a_degraded_run_that_also_fails_reports_failure_not_degradation",
+        "test_a_fully_checked_clean_snapshot_is_the_only_way_to_exit_zero",
+        "test_a_producer_manifest_compares_clean_against_the_same_estate",
+        "test_all_four_source_states_are_accepted",
+        "test_allow_unauthenticated_cannot_pass",
+        "test_allow_unauthenticated_does_not_launder_a_writable_credential_via_main",
+        "test_artifact_scan_failure_is_controlled",
+        "test_capture_duration_reaches_the_report",
+        "test_collection_listing_failure_is_controlled",
+        "test_connect_failure_is_controlled_and_redacted",
+        "test_every_degraded_flag_is_named_with_its_consequence",
+        "test_expect_documents_agreeing_with_the_manifest_passes",
+        "test_fingerprint_failure_is_controlled",
+        "test_include_paths_is_opt_in_and_visible",
+        "test_main_document_count_mismatch_fails",
+        "test_main_fail_on_lost_source - as...",
+        "test_main_leaks_neither_credentials_nor_titles",
+        "test_main_post_connect_node_refusal_closes_the_client",
+        "test_main_post_connect_refusal_still_closes_the_client",
+        "test_main_refuses_expect_documents_contradicting_the_manifest",
+        "test_main_writes_a_complete_report",
+        "test_neither_script_hand_rolls_a_path_token",
+        "test_neither_script_redefines_contract_logic",
+        "test_no_combination_of_diagnostic_flags_can_return_zero",
+        "test_no_fingerprint_hides_a_same_count_modification_and_cannot_pass",
+        "test_no_hash_hides_a_same_size_corruption_and_cannot_pass",
+        "test_ping_failure_is_controlled_and_closes_the_client",
+        "test_readable_entry_without_a_hash_is_refused",
+        "test_readable_entry_without_a_valid_size_is_refused",
+        "test_report_does_not_assert_the_production_flag_state",
+        "test_report_write_failure_is_reported_not_swallowed",
+        "test_shared_names_match_the_expected_import_matrix",
+        "test_stability_block_never_claims_zero_writes",
+        "test_the_index_result_is_not_called_activation_readiness",
+        "test_the_same_corruption_is_caught_when_hashing_is_on",
+        "test_the_same_modification_is_caught_when_fingerprinting_is_on",
+        "test_unreadable_entry_carrying_a_hash_is_refused",
+        "test_unreadable_source_cannot_return_exit_zero",
+        "test_uppercase_path_tokens_are_normalised"
+      ]
+    },
+    {
+      "mutation": "drift: the producer grows its own capture methods",
+      "file": "producer",
+      "status": "caught",
+      "summary": "5 failed, 453 passed, 4 deselected in 17.32s",
+      "caught_by": [
+        "test_a_verified_atomic_capture_is_accepted",
+        "test_atomic_snapshot_requires_a_snapshot_id",
+        "test_atomic_snapshot_requires_external_verification",
+        "test_neither_script_restates_the_capture_methods",
+        "test_shared_names_match_the_expected_import_matrix"
+      ]
+    }
+  ],
+  "note": "Each entry reverts one hardened behaviour and requires the suite to fail. A behaviour whose revert leaves the suite green is not covered, whatever line coverage reports. Verify the hashes against the current files before trusting this."
+}

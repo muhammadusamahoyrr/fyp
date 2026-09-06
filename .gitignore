@@ -123,6 +123,19 @@ Remaining.md
 # Recovery artefacts, never committed.
 backend/data/purge_backups/
 
+# Snapshot-validation reports carry document ids, and with --include-paths the
+# real file paths, which embed user-chosen document titles. The runbook writes
+# them outside the repo, but a defaulted --report lands here, so deny every
+# JSON in the evidence pack and re-admit the one file that is verifiably free
+# of production data. Order matters: the negation only works after the deny.
+docs/v2-activation-evidence/*.json
+!docs/v2-activation-evidence/outcome-counts.json
+!docs/v2-activation-evidence/mutation-evidence.json
+!docs/v2-activation-evidence/estate-survey.json
+
+# Capture manifests describe production's estate document by document.
+capture-manifest*.json
+
 # Scratch output from a one-off V2 artifact-store probe. Generated PDFs,
 # never source.
 backend/_probe_uploads/
