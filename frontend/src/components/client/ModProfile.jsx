@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
+import SessionsPanel from "@/components/shared/SessionsPanel.jsx";
 import { updateMe, changePassword, closeAccount } from "@/lib/api.js";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, ConfirmDialog, Tooltip, Badge } from "@/components/shared/shared.jsx";
@@ -246,6 +247,7 @@ const ModProfile = () => {
     const t = useT();
     const toast = useToast();
     const { user, updateUser, logout } = useAuth();
+    const [sessionsOpen, setSessionsOpen] = useState(false);
     const [edit, setEdit] = useState(false);
     const [pwdMode, setPwdMode] = useState(false);
     const [delConfirm, setDelConfirm] = useState(false);
@@ -740,7 +742,19 @@ const ModProfile = () => {
                                         {"Not available"}
                                     </button>
                                 </SecurityRow>
-                                <SecurityRow icon="monitor" label="Active Sessions" desc="Session management is not available yet" onClick={() => toast.show("Session management coming soon", "info")} />
+                                {/* Was a placeholder that toasted "coming soon". The endpoints
+                                    existed the whole time; only the UI was missing. */}
+                                <SecurityRow
+                                    icon="monitor"
+                                    label="Active Sessions"
+                                    desc="See every device signed in, and end any you do not recognise"
+                                    onClick={() => setSessionsOpen(v => !v)}
+                                />
+                                {sessionsOpen && (
+                                    <div style={{ padding: "14px 16px", background: t.cardSurface, border: `1px solid ${t.cardBorder}`, borderRadius: 14 }}>
+                                        <SessionsPanel t={t} onSignedOut={logout} />
+                                    </div>
+                                )}
                                 <div style={{ marginTop: 8 }}>
                                     <SectionLabel>Danger Zone</SectionLabel>
                                     <SecurityRow icon="trash" label="Delete Account" desc="Permanently delete your account and all associated data" danger onClick={() => setDelConfirm(true)} />

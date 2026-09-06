@@ -5,6 +5,7 @@ import { Card, Btn, Label, Input, Divider } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
+import SessionsPanel from "@/components/shared/SessionsPanel.jsx";
 import { changePassword, mySubscription, billingPlans, subscribePlan, cancelSubscription, mockPay } from "@/lib/api.js";
 
 function SettingsPage() {
@@ -105,6 +106,14 @@ function SettingsPage() {
                             {saving ? "Updating…" : "Update Password"}
                         </Btn>
                     </div>
+                </Card>
+
+                <Card className="fade-up s2" style={{ padding: 18 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                        <Icon d={I.shield} size={14} style={{ color: t.primary }} />
+                        <div className="serif" style={{ fontSize: 14, fontWeight: 600, color: t.text }}>Active Sessions</div>
+                    </div>
+                    <SessionsPanel t={t} onSignedOut={logout} />
                 </Card>
 
                 <Card className="fade-up s2" style={{ padding: 18 }}>

@@ -850,8 +850,46 @@ export async function signAgreement(agreement_id, method, signature_data) {
   });
 }
 
+// The counterpart to signAgreement. Without it a party could only sign or
+// ignore: the backend has supported refusal since AgreementStatus.CANCELLED
+// existed, and the UI rendered a "Rejected" filter for a state nothing could
+// reach. A legal product that lets someone commit but not refuse is one-sided.
+//
+// `reason` is optional and bounded at 2000 chars server-side (AgreementDecline).
+export async function declineAgreement(agreement_id, reason = null) {
+  const trimmed = typeof reason === 'string' ? reason.trim() : '';
+  return apiFetch(`/agreements/${agreement_id}/decline`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: trimmed || null }),
+  });
+}
+
 export async function getAgreement(agreement_id) {
   return apiFetch(`/agreements/${agreement_id}`);
+}
+
+// ─── Active sessions ──────────────────────────────────────────────────────────
+//
+// The backend has listed and revoked sessions all along and nothing called it,
+// so "sign out everywhere" — the control that matters after a device is lost or
+// a password is exposed — existed and was unreachable from the UI.
+
+export async function listSessions() {
+  return apiFetch('/auth/sessions');
+}
+
+export async function revokeSession(session_id) {
+  return apiFetch(`/auth/sessions/${encodeURIComponent(session_id)}`, {
+    method: 'DELETE',
+  });
+}
+
+// Ends every session including this one, and the server clears the refresh
+// cookie. The caller is responsible for sending the user back to the login
+// screen — see SessionsPanel, which does not try to keep the page usable
+// afterwards.
+export async function revokeAllSessions() {
+  return apiFetch('/auth/sessions/revoke-all', { method: 'POST' });
 }
 
 // ─── Lawyer Profile ───────────────────────────────────────────────────────────
