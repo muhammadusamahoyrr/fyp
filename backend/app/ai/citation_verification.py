@@ -80,6 +80,27 @@ _ABBREV = {
     "CONSTITUTION OF PAKISTAN": "Constitution of Pakistan 1973",
 }
 
+# STATUTES LAWYERS CITE CONSTANTLY THAT THIS CORPUS DOES NOT HOLD.
+#
+# Mapped so the citation is SEEN. "sections 20 and 24 PECA" parsed to nothing,
+# so a complaint resting entirely on the Prevention of Electronic Crimes Act
+# was reported as citing no authority at all — the silent-omission failure this
+# module exists to prevent, and the one its own docstring calls the most
+# dangerous kind, because absence from the report reads as approval.
+#
+# None of these can ever produce a flag. `_statute_verdict` returns UNVERIFIABLE
+# when the index holds no coverage for a statute, which is the honest verdict:
+# we cannot speak to a provision of an Act we do not have. If the corpus later
+# ingests one of them the index wins — see `_canon_statute`, which consults this
+# map only after the corpus has had its say.
+_UNHELD_ABBREV = {
+    "PECA": "Prevention of Electronic Crimes Act 2016",
+    "ETO": "Electronic Transactions Ordinance 2002",
+    "ATA": "Anti-Terrorism Act 1997",
+    "CNSA": "Control of Narcotic Substances Act 1997",
+    "NAO": "National Accountability Ordinance 1999",
+}
+
 # Years that are part of a statute's NAME, never a section number. Without this
 # guard "PPC 1860 s.302" yields a phantom citation "PPC 1860 s.1860" — a bug an
 # earlier version of the grounding parser actually shipped.
@@ -101,7 +122,13 @@ _STATUTE_YEARS = {"1860", "1898", "1908", "1984", "2016", "1872", "1870",
 # 1973 "Article" IS the unit and the corpus indexes all 280. Everywhere else an
 # Article belongs to a Schedule we do not hold, and the only honest verdict is
 # that we cannot check it.
-_MARKER = r"(Sections?|Sec\.?|ss?\.|§|Articles?|Art\.?)"
+# `u/s` is the ordinary shorthand in Pakistani pleadings — "u/s 302 PPC" is how
+# the charge is written on the face of an FIR — and it matched no pattern at
+# all, so every citation written that way was invisible to the checker while the
+# summary still reported everything as checked.
+_MARKER_ALT = r"Sections?|Sec\.?|ss?\.|u/ss?\.?|§|Articles?|Art\.?"
+_MARKER = rf"({_MARKER_ALT})"
+_MARKER_INNER = rf"(?:{_MARKER_ALT})"
 
 # LETTERED SECTIONS. Amendments insert provisions as 489-F / 22-A / 365-A, and
 # lawyers write them hyphenated, compact or spaced. All three must be captured
@@ -117,11 +144,37 @@ _MARKER = r"(Sections?|Sec\.?|ss?\.|§|Articles?|Art\.?)"
 # Code" — which parses as the base s.22 — and that residual ambiguity is called
 # out in _statute_verdict, which refuses to treat a bare base number as proof of
 # anything for a lettered citation.
-_SECTION_NUM = (
-    r"(\d{1,4}(?:\s*[-–—]\s*[A-Za-z]{1,2}(?![A-Za-z])"
+_SECTION_NUM_INNER = (
+    r"\d{1,4}(?:\s*[-–—]\s*[A-Za-z]{1,2}(?![A-Za-z])"
     r"|[A-Za-z]{1,2}(?![A-Za-z])"
-    r"|\s+[A-Z](?![A-Za-z])(?!\s+[a-z]))?)"
+    r"|\s+[A-Z](?![A-Za-z])(?!\s+[a-z]))?"
 )
+_SECTION_NUM = rf"({_SECTION_NUM_INNER})"
+
+# LISTS OF SECTIONS ARE ONE CITATION EACH, NOT ONE CITATION.
+#
+# "sections 302 and 324 of the PPC 1860" is two provisions. The patterns below
+# used to anchor a single number directly against the statute name, so a list
+# matched nothing at all — and "section 302 and section 324 of the PPC 1860"
+# matched only the LAST member, reporting "1 verified, 0 problems" for a draft
+# carrying an unchecked provision. Silently dropping one member of a list is
+# worse than dropping all of them, because the output looks complete.
+#
+# The whole run is captured as ONE group and split afterwards by
+# `_SPLIT_SECTION`. A repeated capture group cannot be used here: Python keeps
+# only its final match, which is precisely how the earlier members disappeared.
+#
+# The separator admits only a comma, "and", or "&" — optionally followed by a
+# repeated marker, for "section 302 and section 324". Nothing else may sit
+# between members, so "Section 5 and 10 years imprisonment" cannot manufacture a
+# phantom citation to s.10: the statute anchor that follows the list will not
+# match across the intervening prose.
+_SECTION_SEP = r"(?:\s*(?:,|,?\s*and|&)\s*)"
+_SECTION_LIST = (
+    rf"({_SECTION_NUM_INNER}"
+    rf"(?:{_SECTION_SEP}(?:{_MARKER_INNER}\s*)?{_SECTION_NUM_INNER})*)"
+)
+_SPLIT_SECTION = re.compile(_SECTION_NUM)
 
 # The one statute whose provisions are Articles rather than sections.
 _ARTICLE_STATUTES = {"Constitution of Pakistan 1973"}
@@ -171,14 +224,14 @@ def _unit(marker: str) -> str:
 _FAMILY_FIRST = re.compile(
     rf"\b(PPC|CrPC|Cr\.P\.C|CPC|QSO|MFLO|Constitution)\b[\s,]*"
     rf"(?:1860|1898|1908|1984|1961|1973)?[\s,]*"
-    rf"{_MARKER}\s*{_SECTION_NUM}\b",
+    rf"{_MARKER}\s*{_SECTION_LIST}\b",
     re.I,
 )
 
 # "Section 302 PPC", "section 154 of the Code of Criminal Procedure",
 # "Article 199 of the Constitution of Pakistan"
 _SECTION_FIRST = re.compile(
-    rf"\b{_MARKER}\s*{_SECTION_NUM}"
+    rf"\b{_MARKER}\s*{_SECTION_LIST}"
     rf"(?:\s*\([0-9a-z]+\))?"                       # tolerate s.497(2)
     rf"[\s,]*(?:of\s+the\s+|of\s+)?"
     rf"(PPC|CrPC|Cr\.P\.C|CPC|QSO|MFLO|Pakistan Penal Code|"
@@ -193,8 +246,16 @@ _SECTION_FIRST = re.compile(
 # the report, while the summary still says everything checked out. A citation the
 # checker cannot see is the most dangerous kind, because its absence from the
 # output reads as approval. These resolve to UNVERIFIABLE, never to a flag.
+#
+# THE MARKER IS CASE-INSENSITIVE; THE STATUTE NAME IS NOT. This pattern carries
+# no re.I because its name group relies on [A-Z] to require Capitalised Words —
+# under re.I it would match lowercase prose like "of the act" and invent
+# citations. But without any tolerance it only matched a capitalised "Section",
+# so every lowercase "section 20 of the Prevention of Electronic Crimes Act
+# 2016" was dropped entirely and the draft read as citing nothing. The flag is
+# therefore scoped to the marker alone.
 _NAMED_ACT = re.compile(
-    rf"\b{_MARKER}\s*{_SECTION_NUM}"
+    rf"\b(?i:{_MARKER})\s*{_SECTION_LIST}"
     rf"(?:\s*\([0-9a-z]+\))?[\s,]*of\s+the\s+"
     rf"([A-Z][A-Za-z'()\-]*(?:\s+(?:of|the|and|against|for|to)\s+[A-Za-z'()\-]+|"
     rf"\s+[A-Z(][A-Za-z'()\-]*)*\s+"
@@ -238,7 +299,31 @@ def _canon_statute(name: str, index: CorpusIndex) -> str | None:
     key = re.sub(r"\s+", " ", (name or "").strip()).upper().rstrip(".")
     if key in _ABBREV:
         return _ABBREV[key]
-    return index.canonical(name)
+    canon = index.canonical(name)
+    if canon:
+        return canon
+    # Last: a well-known statute we do not hold. Named in full so the report
+    # says which Act could not be checked, rather than echoing an acronym.
+    return _UNHELD_ABBREV.get(key)
+
+
+# "sections 20 and 24 PECA", "u/s 9 ATA", "section 3 of the ETO 2002" — an
+# acronym for a statute the corpus does not hold. The named-act pattern above
+# cannot see these: there is no "... Act 2016" spelled out for it to match.
+# Resolves to UNVERIFIABLE, never to a flag.
+_UNHELD_FIRST = re.compile(
+    rf"\b{_MARKER}\s*{_SECTION_LIST}"
+    rf"(?:\s*\([0-9a-z]+\))?[\s,]*(?:of\s+the\s+|of\s+)?"
+    rf"({'|'.join(_UNHELD_ABBREV)})\b",
+    re.I,
+)
+
+# The mirror form: "PECA sections 20 and 24", "ATA 1997 s.7".
+_UNHELD_FAMILY = re.compile(
+    rf"\b({'|'.join(_UNHELD_ABBREV)})\b[\s,]*(?:\d{{4}})?[\s,]*"
+    rf"{_MARKER}\s*{_SECTION_LIST}\b",
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -276,7 +361,11 @@ def parse_statute_citations(text: str, index: CorpusIndex | None = None
             return
         # An unrecognised statute keeps its own name and is reported as
         # UNVERIFIABLE. Dropping it here would hide it from the report entirely.
-        canon = _canon_statute(fam, idx) or re.sub(r"\s+", " ", (fam or "").strip())
+        # "Registration Act, 1908" and "Registration Act 1908" are one statute.
+        # Left as written they become two citations to the same provision, and
+        # the report double-counts an authority nobody cited twice.
+        fam = re.sub(r",\s*(?=\d{4}\b)", " ", re.sub(r"\s+", " ", (fam or "").strip()))
+        canon = _canon_statute(fam, idx) or fam
         if not canon:
             return
         unit = _unit(marker)
@@ -290,10 +379,21 @@ def parse_statute_citations(text: str, index: CorpusIndex | None = None
         seen.add(key)
         out.append(ParsedCitation(canon, sec, raw.strip(), unit))
 
+    def add_list(fam: str, sections: str, raw: str, marker: str) -> None:
+        """Every member of a section list, as its own citation.
+
+        The patterns capture the whole run ("302, 324 and 337") in one group,
+        because a repeated capture group keeps only its last match — which is
+        how earlier members used to vanish while the report still looked
+        complete. Splitting here is what makes each one independently checked.
+        """
+        for part in _SPLIT_SECTION.finditer(sections or ""):
+            add(fam, part.group(1), raw, marker)
+
     for m in _FAMILY_FIRST.finditer(text or ""):
-        add(m.group(1), m.group(3), m.group(0), m.group(2))
+        add_list(m.group(1), m.group(3), m.group(0), m.group(2))
     for m in _SECTION_FIRST.finditer(text or ""):
-        add(m.group(3), m.group(2), m.group(0), m.group(1))
+        add_list(m.group(3), m.group(2), m.group(0), m.group(1))
 
     # Named statutes the corpus knows, e.g. "Section 12 of the Punjab Tenancy
     # Act 1887". Built from the index so a re-ingest widens coverage for free.
@@ -302,17 +402,24 @@ def parse_statute_citations(text: str, index: CorpusIndex | None = None
         if len(short) < 12:                       # too short to match safely
             continue
         pat = re.compile(
-            rf"\b{_MARKER}\s*{_SECTION_NUM}"
+            rf"\b{_MARKER}\s*{_SECTION_LIST}"
             rf"(?:\s*\([0-9a-z]+\))?[\s,]*(?:of\s+the\s+|of\s+)?"
             rf"{re.escape(short)}(?:\s+(?:of\s+)?\d{{4}})?\b",
             re.I,
         )
         for m in pat.finditer(text or ""):
-            add(statute, m.group(2), m.group(0), m.group(1))
+            add_list(statute, m.group(2), m.group(0), m.group(1))
+
+    # Acronyms for statutes the corpus does not hold. Seen, so they can be
+    # reported UNVERIFIABLE instead of vanishing.
+    for m in _UNHELD_FIRST.finditer(text or ""):
+        add_list(m.group(3), m.group(2), m.group(0), m.group(1))
+    for m in _UNHELD_FAMILY.finditer(text or ""):
+        add_list(m.group(1), m.group(3), m.group(0), m.group(2))
 
     # Last: anything shaped like a named act, whether or not we hold it.
     for m in _NAMED_ACT.finditer(text or ""):
-        add(m.group(3), m.group(2), m.group(0), m.group(1))
+        add_list(m.group(3), m.group(2), m.group(0), m.group(1))
 
     # Order/Rule citations — a separate space, reported rather than dropped.
     for m in _ORDER_RULE.finditer(text or ""):
