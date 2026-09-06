@@ -538,3 +538,87 @@ def test_single_section_parsing_is_unchanged(index):
     still parse exactly as before."""
     (cite,) = parse_statute_citations("under section 302 of the PPC 1860", index)
     assert (cite.statute, cite.section, cite.unit) == ("PPC 1860", "302", "section")
+
+
+# ── regression: the "or" list, found by the template citation survey ─────────
+#
+# A third shape, found by asking what the GENERATORS actually print rather than
+# what someone thought to feed the parser. `wakalatnama_checklist` printed "an
+# application under section 144 or section 152 of the Code" and both sections
+# were lost — the separator admitted "and" but not "or", and "of the Code" is an
+# anaphoric reference a checker cannot resolve.
+#
+# The template now names the statute in full; the parser now reads "or". Both
+# halves were needed: either alone still loses the citation.
+
+@pytest.mark.parametrize("text,expected", [
+    ("an application under section 144 or section 152 of the CPC 1908",
+     {"144", "152"}),
+    ("under sections 144 or 152 of the CPC 1908", {"144", "152"}),
+    ("under section 302, 324 or 337 of the PPC 1860", {"302", "324", "337"}),
+])
+def test_an_alternative_list_keeps_every_member(text, expected, index):
+    """Pleadings coordinate alternatives as readily as conjunctions. "or" is a
+    closed conjunction, not a licence to read prose between numbers."""
+    assert {c.section for c in parse_statute_citations(text, index)} == expected
+
+
+def test_or_does_not_widen_the_separator_into_prose(index):
+    """The guard that keeps "or" safe: a statute anchor must still follow the
+    list, so intervening words cannot manufacture a member."""
+    assert parse_statute_citations(
+        "Section 5 or 10 years imprisonment under the PPC 1860", index) == []
+
+
+def test_an_anaphoric_statute_reference_is_not_resolved(index):
+    """"of the Code" means the Code named earlier in the document. That is good
+    drafting and unreadable here — the checker has no anaphora, and guessing
+    would attribute a section to whichever statute happened to be nearby.
+
+    Pinned so nobody "fixes" it by guessing. The correct fix is the one applied
+    to wakalatnama_checklist: name the statute in full at the citation.
+    """
+    assert parse_statute_citations(
+        "an application under section 144 or section 152 of the Code", index) == []
+
+
+# ── regression: the gloss list that started the template audit ───────────────
+
+def test_a_gloss_between_section_numbers_breaks_the_list(index):
+    """THE ORIGINAL DEFECT, pinned as a known limitation rather than fixed.
+
+    "sections 20 — offences against dignity, 21 — ..., and 24 — ..." is what
+    fia_cybercrime used to print, and it parses to nothing. Teaching the parser
+    to read a gloss between list members would be an arms race against our own
+    drafting: the next flourish becomes the next blind spot.
+
+    The fix is on the producing side — `citation_format.cite_with_glosses` puts
+    the glosses after the citation — and `test_template_citation_binding.py`
+    proves no template prints the broken shape any more. This test records that
+    the prose form remains unreadable, so a future reader knows it is a decision
+    and not an oversight.
+    """
+    prose = ("sections 20 — offences against dignity, 21 — offences "
+             "against modesty, and 24 — cyberstalking, of the PPC 1860")
+    assert len(parse_statute_citations(prose, index)) < 3
+
+
+def test_the_canonical_gloss_form_is_fully_readable(index):
+    """The replacement must carry every member — otherwise the fix trades one
+    silent loss for another."""
+    from app.services.citation_format import cite_with_glosses
+
+    canonical = cite_with_glosses("PPC 1860", [
+        ("302", "murder"), ("324", "attempt to murder"), ("337", "hurt")])
+    assert {c.section for c in parse_statute_citations(canonical, index)} == \
+        {"302", "324", "337"}
+
+
+def test_glosses_survive_in_the_output_they_are_just_moved(index):
+    """The reader must not lose the explanation. It moves after the citation,
+    it does not disappear."""
+    from app.services.citation_format import cite_with_glosses
+
+    out = cite_with_glosses("PPC 1860", [("302", "murder")])
+    assert "murder" in out
+    assert out.startswith("section 302 of the PPC 1860")

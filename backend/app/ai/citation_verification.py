@@ -164,12 +164,17 @@ _SECTION_NUM = rf"({_SECTION_NUM_INNER})"
 # `_SPLIT_SECTION`. A repeated capture group cannot be used here: Python keeps
 # only its final match, which is precisely how the earlier members disappeared.
 #
-# The separator admits only a comma, "and", or "&" — optionally followed by a
-# repeated marker, for "section 302 and section 324". Nothing else may sit
+# The separator admits only a comma, "and", "or", or "&" — optionally followed
+# by a repeated marker, for "section 302 and section 324". Nothing else may sit
 # between members, so "Section 5 and 10 years imprisonment" cannot manufacture a
 # phantom citation to s.10: the statute anchor that follows the list will not
 # match across the intervening prose.
-_SECTION_SEP = r"(?:\s*(?:,|,?\s*and|&)\s*)"
+#
+# "or" is here because pleadings coordinate alternatives as readily as
+# conjunctions — "an application under section 144 or section 152" is one
+# citation list, and dropping it lost both members. It is a closed set of
+# conjunctions, not a licence to read prose between numbers.
+_SECTION_SEP = r"(?:\s*(?:,|,?\s*(?:and|or)|&)\s*)"
 _SECTION_LIST = (
     rf"({_SECTION_NUM_INNER}"
     rf"(?:{_SECTION_SEP}(?:{_MARKER_INNER}\s*)?{_SECTION_NUM_INNER})*)"
