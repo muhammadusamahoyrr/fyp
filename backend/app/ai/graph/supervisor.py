@@ -156,18 +156,26 @@ def build_intake_graph():
             └── retrieval_grader_node
                     ├── relevance < 0.4 AND attempts < 2 → retrieval_node (retry once)
                     └── ok ──► intake_node
-                                   └── intake_hallucination_node → END
+                                   └── intake_hallucination_node
+                                           └── intake_finalizer_node → END
+
+    intake_node stamps the evidence with ids; the hallucination node binds the
+    cited laws to those ids deterministically and judges the claims in one model
+    call; the finalizer stamps currency, links sources, and derives the legacy
+    display strings. See ai/intake_evidence.py.
 
     Used only by convert_to_case(). Does not use the full chat convergence loop.
     """
     from app.ai.nodes.intake_node import intake_node
     from app.ai.nodes.intake_hallucination_node import intake_hallucination_node
+    from app.ai.nodes.intake_finalizer_node import intake_finalizer_node
 
     builder = StateGraph(AgentState)
     builder.add_node("retrieval_node",           retrieval_node)
     builder.add_node("retrieval_grader_node",    retrieval_grader_node)
     builder.add_node("intake_node",              intake_node)
     builder.add_node("intake_hallucination_node", intake_hallucination_node)
+    builder.add_node("intake_finalizer_node",    intake_finalizer_node)
 
     builder.set_entry_point("retrieval_node")
     builder.add_edge("retrieval_node", "retrieval_grader_node")
@@ -177,7 +185,8 @@ def build_intake_graph():
         {"retrieval_node": "retrieval_node", "intake_node": "intake_node"},
     )
     builder.add_edge("intake_node",              "intake_hallucination_node")
-    builder.add_edge("intake_hallucination_node", END)
+    builder.add_edge("intake_hallucination_node", "intake_finalizer_node")
+    builder.add_edge("intake_finalizer_node",     END)
 
     return builder.compile()
 

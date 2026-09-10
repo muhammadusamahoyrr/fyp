@@ -486,6 +486,9 @@ async def _convert_claimed_intake(
         case_id=case_id,
         language=language,
         urgency=effective_urgency,
+        # Carried for the audit record only. The provenance store names the
+        # user whose turn it was, and an intake conversion has one.
+        client_id=client_id,
     )
     await intake_repo.save_ai_structured_case(token, ai_data)
 
@@ -551,6 +554,7 @@ async def _run_intake_ai(
     case_id: str,
     language: str = "en",
     urgency: str = "medium",
+    client_id: str = "",
 ) -> dict:
     from app.ai.graph.supervisor import intake_graph
 
@@ -595,6 +599,10 @@ async def _run_intake_ai(
         "arbitration_confidence": 0.0,
         "answer":                 "",
         "citations":              [],
+        "generation_evidence":    [],
+        "claim_assessments":      [],
+        "case_law_chunks":        [],
+        "tool_results":           [],
         "confidence":             0.0,
         "is_grounded":            False,
         "prev_relevance_score":   0.0,
@@ -608,6 +616,12 @@ async def _run_intake_ai(
         "messages":               [],
     }
 
+    # Minted BEFORE the graph runs, and stored on the analysis. A provenance
+    # write may land in the outbox rather than the collection, so without an id
+    # fixed in advance the analysis and its audit record cannot be joined until
+    # delivery happens to complete.
+    request_id = secrets.token_urlsafe(16)
+
     try:
         result = await intake_graph.ainvoke(state)
         analysis = json.loads(result["answer"])
@@ -617,8 +631,27 @@ async def _run_intake_ai(
         # verified / unverified / unchecked actually happened.
         analysis["grounded"] = bool(result.get("is_grounded"))
         analysis["grounding_status"] = result.get("grounding_status") or "unverified"
+
+        # The evidence the analysis was actually built on. `reranked_chunks`
+        # reached this function and were dropped on the floor: nothing recorded
+        # WHICH sections produced the analysis, so no later reader could check
+        # it against them or re-fetch them.
+        analysis["law_citations"] = result.get("citations") or []
+        analysis["claim_assessments"] = result.get("claim_assessments") or []
+        analysis["binding_mode"] = result.get("binding_mode") or "none"
+        analysis["citation_binding"] = result.get("citation_binding") or {}
+        analysis["grounding_veto"] = result.get("grounding_veto")
+        analysis["evidence_chunk_ids"] = [
+            e.get("chunk_id", "") for e in (result.get("generation_evidence") or [])
+            if e.get("chunk_id")
+        ]
+        analysis["provenance_request_id"] = request_id
+
+        await _record_intake_provenance(
+            result, analysis, session_id, client_id, request_id)
         return analysis
     except Exception:
+        logger.exception("Intake analysis pipeline failed for session %s", session_id)
         return {
             "summary":             "AI structuring unavailable — case created successfully.",
             "applicable_laws":     [],
@@ -626,7 +659,56 @@ async def _run_intake_ai(
             "risk_level":          "medium",
             "grounded":            False,
             "grounding_status":    "pipeline_failed",
+            "law_citations":       [],
+            "claim_assessments":   [],
+            "binding_mode":        "none",
+            "evidence_chunk_ids":  [],
+            "provenance_request_id": request_id,
         }
+
+
+async def _record_intake_provenance(
+    result: dict,
+    analysis: dict,
+    session_id: str,
+    client_id: str,
+    request_id: str,
+) -> None:
+    """Put the intake turn in the audit store, through the EXISTING path.
+
+    `provenance_service.build_record` is pure over state, so there is no reason
+    for intake to have a provenance path of its own — the drafting endpoint
+    already reuses it the same way, with a synthetic state and a prefixed
+    session id.
+
+    The answer handed over is the RENDERED analysis, not the raw JSON document.
+    `_citation_grounding` measures citations by parsing the answer text, and
+    pointing it at `{"summary": ...}` would have it measure the punctuation of a
+    serialisation format rather than the law the analysis names.
+
+    Never raises. An audit write must not fail the conversion it describes —
+    the same contract `record_answer` itself keeps.
+    """
+    try:
+        from app.services import provenance_service
+
+        rendered = "\n".join([
+            analysis.get("summary", "") or "",
+            *(analysis.get("applicable_laws") or []),
+            *(analysis.get("recommended_actions") or []),
+        ]).strip()
+
+        await provenance_service.record_answer(
+            state={**result, "answer": rendered},
+            session_id=f"intake:{session_id}",
+            user_id=client_id,
+            request_id=request_id,
+            turn_type=provenance_service.TURN_ANSWER,
+        )
+    except Exception:
+        logger.exception(
+            "intake: provenance write failed for session %s (request %s)",
+            session_id, request_id)
 
 
 _EVIDENCE_DIR = Path(settings.upload_root) / "evidence"
