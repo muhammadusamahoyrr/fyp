@@ -350,3 +350,81 @@ def stub_grader_llm():
         return state
 
     return _install
+
+
+# ── Application indexes on the test database ─────────────────────────────────
+#
+# `ensure_v2_indexes` above covers the DOCUMENTS_V2 collections only. Everything
+# else `create_all_indexes()` declares — the unique constraints on payment
+# events, case numbers, pending appointments, pending engagements, reviews,
+# emails, bar numbers — was absent from the test database entirely, because
+# `create_all_indexes()` runs at application startup and a test never performs
+# one. So a guarantee enforced in production by an index was enforced in tests
+# by nothing, and a test asserting a duplicate is refused would let the
+# duplicate through and pass.
+
+_APP_INDEXES_BUILT: set[str] = set()
+
+
+async def ensure_app_indexes(db) -> None:
+    """Create every application index on the TEST database, from production.
+
+    Calls `create_all_indexes()` itself rather than restating what it builds.
+    A second list would be a copy of production that nothing keeps in step, and
+    the moment the two drifted the tests would be proving a constraint the
+    application does not actually have — which is the failure this exists to
+    remove, reintroduced one layer up.
+
+    `_try_unique_partial` LOGS AND CONTINUES when a unique index cannot be
+    created, which is right for a production deployment carrying legacy
+    duplicates: refusing to start would be worse than running unenforced. In a
+    test it is the exact hazard being fixed — a silently absent constraint that
+    every later assertion then passes without. So the warning is captured and
+    promoted to a hard failure here, and nowhere else.
+
+    Built once per database per session: the operation is idempotent but not
+    free, and the test database persists across tests within a run.
+    """
+    if db.name in _APP_INDEXES_BUILT:
+        return
+
+    import logging
+
+    from app.db import indexes as _indexes
+
+    captured: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record)
+
+    handler = _Capture()
+    _indexes.logger.addHandler(handler)
+    try:
+        await _indexes.create_all_indexes()
+    finally:
+        _indexes.logger.removeHandler(handler)
+
+    skipped = [r.getMessage() for r in captured
+               if "Could not create" in r.getMessage()]
+    if skipped:
+        raise RuntimeError(
+            "index creation was skipped on the test database, so the "
+            "constraints below are NOT in force and any test relying on them "
+            "would pass without them:\n  " + "\n  ".join(skipped)
+        )
+
+    _APP_INDEXES_BUILT.add(db.name)
+
+
+@pytest.fixture
+async def app_indexes(mongo):
+    """Opt in to the real application indexes for this test.
+
+    Opt-in rather than autouse, deliberately and for now: switching the whole
+    suite onto production constraints at once changes what every existing
+    integration test is allowed to write, and that belongs in its own change
+    with its own measurement — not smuggled in beside new tests.
+    """
+    await ensure_app_indexes(mongo)
+    return mongo

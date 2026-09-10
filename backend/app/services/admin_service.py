@@ -348,8 +348,13 @@ async def update_user(user_id: str, data: dict, actor: dict | None = None) -> di
     # through the closure path — so keep the vector store honest here too.
     # Everything in that collection is someone a client can be shown.
     if user.get("role") == "lawyer" or updated.get("role") == "lawyer":
-        from app.ai.lawyer_embeddings import forget_lawyers
+        from app.ai.lawyer_embeddings import forget_lawyers, schedule_embed
         lp = updated.get("lawyer_profile") or {}
+        was_matchable = (
+            user.get("role") == "lawyer"
+            and user.get("is_active", True)
+            and (user.get("lawyer_profile") or {}).get("kyc_verified")
+        )
         still_matchable = (
             updated.get("role") == "lawyer"
             and updated.get("is_active", True)
@@ -357,6 +362,14 @@ async def update_user(user_id: str, data: dict, actor: dict | None = None) -> di
         )
         if not still_matchable:
             forget_lawyers([user_id])
+        elif not was_matchable:
+            # The other half of the same rule, and it was missing. Deactivating
+            # a lawyer dropped their vector; REACTIVATING them put nothing back,
+            # so they returned verified, active and searchable in MongoDB while
+            # permanently absent from semantic matching — until they happened to
+            # edit their bio or an admin remembered the manual embed endpoint.
+            # A membership rule that only ever removes is not a membership rule.
+            schedule_embed(user_id)
 
     return _safe_user(updated)
 

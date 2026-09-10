@@ -84,12 +84,6 @@ class CaseRepository(BaseRepository):
             {"$set": {"tasks.$.done": done, "tasks.$.completed_at": completed_at}},
         )
 
-    async def set_embedding(self, case_id: str, vector: list[float]) -> bool:
-        return await self.update_one(
-            {"_id": case_id},
-            {"$set": {"case_embedding": vector, "updated_at": datetime.now(timezone.utc)}},
-        )
-
     async def set_matched_lawyers(self, case_id: str, matches: list[dict]) -> bool:
         return await self.update_one(
             {"_id": case_id},

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.core.constants import CaseType, Province
 from app.dependencies import get_current_user, require_client, require_admin
-from app.schemas.lawyer import LawyerMatchResponse, LawyerReview
+from app.schemas.lawyer import LawyerMatchResponse, LawyerReview, LawyerReviewPage
 from app.schemas.common import PaginatedResponse, StatusResponse
 from app.schemas.user import UserProfileResponse
 from app.services import lawyer_service
@@ -18,8 +18,21 @@ async def search_lawyers(
     availability: bool | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
+    # Free-text over name, province and specializations. Length-capped: it
+    # becomes an escaped regex, and an unbounded needle is unbounded work.
+    q: str | None = Query(None, max_length=100),
+    bar_number: str | None = Query(None, max_length=64),
+    # A key, never a field name: the server owns what each key sorts by, so no
+    # caller can sort the directory on an arbitrary document path.
+    sort: str | None = Query(None, pattern="^(rating|fee|experience|name)_(asc|desc)$"),
     current_user: dict = Depends(get_current_user),
 ):
+    """Browse the directory. Filtering, sorting and paging all happen server-side.
+
+    They used to happen in the browser over the first page only, which made
+    every one of them a statement about 20 lawyers dressed as a statement about
+    the directory.
+    """
     return await lawyer_service.search_lawyers(
         province=province.value if province else None,
         case_type=case_type.value if case_type else None,
@@ -27,12 +40,21 @@ async def search_lawyers(
         availability=availability,
         page=page,
         page_size=page_size,
+        q=q,
+        bar_number=bar_number,
+        sort=sort,
     )
 
 
 @router.get("/match/{case_id}", response_model=LawyerMatchResponse)
 async def match_lawyers(
     case_id: str,
+    # LAWYER_MATCHING_PLAN.md has always documented `top_n` on this endpoint and
+    # `match_lawyers_for_case` has always taken it; only the route omitted it,
+    # so the published API and the design note disagreed. Bounded, because
+    # `pool_size` is derived from it (top_n * 4) and an unbounded value would
+    # let a caller size the candidate pool — and therefore the work — freely.
+    top_n: int = Query(5, ge=1, le=20),
     current_user: dict = Depends(require_client),
 ):
     from app.repositories.case_repo import CaseRepository
@@ -43,7 +65,24 @@ async def match_lawyers(
         raise NotFoundError("Case")
     if case.get("client_id") != str(current_user["_id"]):
         raise ForbiddenError("You can only match lawyers for your own cases")
-    return await lawyer_service.match_lawyers_for_case(case_id)
+    return await lawyer_service.match_lawyers_for_case(case_id, top_n=top_n)
+
+
+@router.get("/{lawyer_id}/reviews", response_model=LawyerReviewPage)
+async def list_lawyer_reviews(
+    lawyer_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+    current_user: dict = Depends(get_current_user),
+):
+    """Reviews behind a lawyer's rating.
+
+    The rating and the review COUNT were already reachable through the profile;
+    the reviews themselves had no read endpoint, so a client saw "4.6 (5)" with
+    nothing behind it. Any signed-in user may read them — they are what a client
+    weighs before hiring — but the payload carries no reviewer id or email.
+    """
+    return await lawyer_service.list_reviews(lawyer_id, page=page, page_size=page_size)
 
 
 @router.post("/{lawyer_id}/review", response_model=StatusResponse, status_code=status.HTTP_201_CREATED)

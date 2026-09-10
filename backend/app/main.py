@@ -84,6 +84,40 @@ async def _causelist_scheduler():
             logging.getLogger(__name__).exception("Cause-list scheduler sweep failed")
 
 
+async def _lawyer_index_reconciler():
+    """Reconcile `lawyers_collection` against MongoDB on an interval (default 6h).
+
+    Every write to that index is fire-and-forget, because none of the actions
+    that trigger one — approving KYC, editing a profile, accepting a case —
+    should fail because an index is unavailable. That is the right trade, and
+    its cost is drift: a lawyer approved while Chroma was down is never indexed,
+    and nothing in the request path can ever notice. This is the thing that
+    notices.
+
+    Gated and locked exactly like the cause-list sweep: every worker runs the
+    loop, a Redis period-lock makes each sweep single-fire, and the TTL sits
+    well under the interval so a dead worker's claim frees itself. Sleeps FIRST
+    so a restart loop cannot turn into a re-embedding storm on a box with no GPU.
+    """
+    import asyncio
+    import logging
+    from app.core.redis_client import acquire_period_lock
+
+    interval = settings.lawyer_reconcile_hours * 3600
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            if await acquire_period_lock("lock:scheduler:lawyer_index",
+                                         ttl_seconds=55 * 60):
+                from app.ai.lawyer_embeddings import reconcile_index
+                await reconcile_index()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Lawyer index reconciliation sweep failed")
+
+
 async def _provenance_relay():
     """Deliver provenance records whose direct write failed.
 
@@ -200,6 +234,10 @@ async def lifespan(app: FastAPI):
     if redis_enabled() or settings.run_schedulers:
         scheduler_tasks = [
             _asyncio.create_task(_causelist_scheduler()),
+            # Behind the same gate as the cause-list sweep: it holds a Redis
+            # period-lock, and unlike the outbox relays its work is not
+            # lease-guarded, so it must not run on every worker at once.
+            _asyncio.create_task(_lawyer_index_reconciler()),
         ]
 
     # The provenance relay is NOT behind that gate.

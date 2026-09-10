@@ -488,6 +488,13 @@ export async function submitReview(lawyer_id, stars, comment) {
   });
 }
 
+export async function getLawyerReviews(lawyer_id, { page = 1, page_size = 10 } = {}) {
+  const p = new URLSearchParams();
+  p.set('page', page);
+  p.set('page_size', page_size);
+  return apiFetch(`/lawyers/${lawyer_id}/reviews?${p}`);
+}
+
 // ── Appointments ─────────────────────────────────────────────────────────────
 
 export async function bookAppointment({ lawyer_id, case_id, scheduled_at, duration_minutes, mode, notes }) {

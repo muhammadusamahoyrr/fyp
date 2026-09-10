@@ -8,7 +8,7 @@ import { useCase } from "./CaseContext.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
-import { searchLawyers, matchLawyers, submitReview, bookAppointment, getLawyerAvailability, listCases, listEngagements, requestEngagement, cancelEngagement } from "@/lib/api.js";
+import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getLawyerAvailability, listCases, listEngagements, requestEngagement, cancelEngagement } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { readIntakeValue } from "@/lib/intakeStorage.js";
 
@@ -30,6 +30,9 @@ const CITY_TO_PROVINCE = {
     quetta: "balochistan",
     punjab: "punjab", sindh: "sindh", kpk: "kpk", balochistan: "balochistan", federal: "federal",
 };
+// Directory page size.
+const PAGE_SIZE = 20;
+
 const SPEC_TO_CASE_TYPE = {
     "employment law": "civil", "civil rights": "civil", "contract": "civil", "property": "civil",
     "criminal defense": "criminal", "criminal": "criminal",
@@ -67,13 +70,11 @@ const ModLawyers = () => {
     const [filters, setFilters] = useState({
         specialization: "All",
         city: "All",
-        experience: [0, 20],
-        price: [0, 15000],
         rating: 0,
         availability: "All",
     });
     const [reviewSort, setReviewSort] = useState("date");
-    const [locationInput, setLocationInput] = useState("");
+
     const [searchMode, setSearchMode] = useState("name");
     const [apiLawyers, setApiLawyers] = useState([]);
     const [loadingLawyers, setLoadingLawyers] = useState(true);
@@ -159,15 +160,40 @@ const ModLawyers = () => {
             rating: lp.rating || 0,
             avail: !!lp.availability,
             reviews: lp.total_reviews || 0,
-            bar: lp.bar_number || `BAR-API-${String(idx + 1).padStart(3, "0")}`,
+            // null, never a generated placeholder. This field is displayed as a
+            // BAR COUNCIL REGISTRATION NUMBER for a real, KYC-verified advocate,
+            // and it used to fall back to `BAR-API-001`, `BAR-API-002`, … —
+            // numbered by position in the current page, so the same lawyer got a
+            // different "registration number" depending on how the list was
+            // sorted. Inventing a professional registration number is not a
+            // display placeholder, it is a false credential. The UI shows "Not
+            // provided" instead.
+            bar: lp.bar_number || null,
             bio: lp.bio || null,
             lat: lp.lat ?? null,
             lng: lp.lng ?? null,
-            distance: null,
-            hours: "Mon–Fri: 9am–5pm",
-            address: lp.address || `${provinceLabel}, Pakistan`,
+            // "exact" = geocoded from an address the lawyer entered.
+            // "approximate" = a province centre plus an offset the backend
+            // invented, up to ~44 km out. The two arrive in the SAME lat/lng
+            // fields, so without this flag the UI cannot tell an office from a
+            // fabricated point — and it was offering turn-by-turn directions to
+            // both. Anything that sends a client somewhere must check it.
+            precision: lp.location_precision ?? (lp.lat != null ? "exact" : "none"),
+            // No `distance` field at all. Nothing in the product collects the
+            // client's location, so there is no distance to compute; it used to
+            // be a hardcoded null that the UI rendered literally as "null km".
+            // Office hours are not collected from lawyers anywhere in the
+            // product. This was the constant string "Mon–Fri: 9am–5pm" shown on
+            // every profile as though it were that lawyer's own schedule, which
+            // a client could rely on to turn up at a closed office.
+            hours: lp.office_hours || null,
+            address: lp.address || null,
             credentials: specs,
-            reviewList: [],
+            // No `reviewList` here. Review text comes from its own endpoint
+            // (`getLawyerReviews`) into the `reviews` state, which stays null
+            // until a response arrives — so the profile can tell "not loaded"
+            // apart from "none" instead of showing a lawyer with five reviews
+            // as having none.
             match_score: raw.match_score,
             match_reason: raw.match_reason,
         };
@@ -178,28 +204,50 @@ const ModLawyers = () => {
 
     const [backendUp, setBackendUp] = useState(false);
 
-    // Initial load — no filters
-    useEffect(() => {
-        searchLawyers({ page_size: 20 }).then(({ data, error }) => {
-            if (!error && data) {
-                const items = Array.isArray(data) ? data : (data.items || []);
-                if (items.length) setApiLawyers(items.map((l, i) => mapApiLawyer(l, i)));
-                setBackendUp(true);
-            }
-            setLoadingLawyers(false);
-        }).catch(() => setLoadingLawyers(false));
-    }, []);
+    // ── The directory: one fetch, and the SERVER does the narrowing ─────────
+    //
+    // There were two effects here — a mount load and a filter reload — and both
+    // asked for `page_size: 20` and nothing else. Everything a client typed or
+    // dragged was then applied in the browser to those 20 rows: the search box,
+    // the price and experience sliders, and all seven sort options. Each of
+    // them answered a question about one page while appearing to answer it
+    // about the directory, and the 21st lawyer was unreachable by any
+    // combination of controls.
+    //
+    // Sorting was the clearest case. Sorting a page is not sorting a list: the
+    // cheapest lawyer on the platform is very unlikely to be among the 20 you
+    // happen to hold, so "Price: Low to High" showed the cheapest of a
+    // rating-ordered sample and called it the cheapest.
+    const [page, setPage] = useState(1);
+    const [pageInfo, setPageInfo] = useState({ total: 0, pages: 1 });
 
-    // Re-fetch from server when user changes filterable params (debounced 400 ms)
-    useEffect(() => {
-        const allDefault = filters.city === "All" && filters.specialization === "All"
-            && filters.rating === 0 && filters.availability === "All";
-        if (allDefault) return; // initial state — covered by the mount effect above
+    // UI sort label -> the server's sort key. The server owns what each key
+    // orders by, so the client cannot ask it to sort on an arbitrary field.
+    const SORT_KEYS = {
+        "Rating: High to Low": "rating_desc",
+        "Rating: Low to High": "rating_asc",
+        "Price: Low to High": "fee_asc",
+        "Price: High to Low": "fee_desc",
+        "Experience: High": "experience_desc",
+        "A–Z": "name_asc",
+        "Z–A": "name_desc",
+    };
 
+    // The debounce is for TYPING and slider drags, so it must not delay the
+    // first load. Folding the mount fetch into this effect without this made
+    // every visitor wait 300 ms for a directory that could have been requested
+    // immediately — a regression paid by every user to save requests only a
+    // user mid-keystroke generates.
+    const hasLoadedOnce = React.useRef(false);
+
+    useEffect(() => {
         let cancelled = false;
         setLoadingLawyers(true);
+        const delay = hasLoadedOnce.current ? 300 : 0;
         const timer = setTimeout(async () => {
-            const params = { page: 1, page_size: 20 };
+            hasLoadedOnce.current = true;
+            const params = { page, page_size: PAGE_SIZE, sort: SORT_KEYS[sortBy] };
+
             if (filters.city !== "All") {
                 const prov = CITY_TO_PROVINCE[filters.city.toLowerCase()];
                 if (prov) params.province = prov;
@@ -212,18 +260,42 @@ const ModLawyers = () => {
             if (filters.availability === "Available") params.availability = true;
             else if (filters.availability === "Busy") params.availability = false;
 
-            const { data, error } = await searchLawyers(params);
-            if (!cancelled) {
-                if (!error && data) {
-                    const items = Array.isArray(data) ? data : (data.items || []);
-                    setApiLawyers(items.map((l, i) => mapApiLawyer(l, i)));
-                }
-                setLoadingLawyers(false);
+            // "Top Rated" is a rating floor, so it is a server filter too —
+            // client-side it only ever promoted the best of the loaded page.
+            if (filter === "Available") params.availability = true;
+            else if (filter === "Top Rated") params.min_rating = Math.max(params.min_rating ?? 0, 4.8);
+
+            if (query.trim()) {
+                if (searchMode === "bar") params.bar_number = query.trim();
+                else params.q = query.trim();
             }
-        }, 400);
+
+            const { data, error } = await searchLawyers(params);
+            if (cancelled) return;
+            if (!error && data) {
+                const items = Array.isArray(data) ? data : (data.items || []);
+                setApiLawyers(items.map((l, i) => mapApiLawyer(l, i)));
+                setPageInfo({
+                    total: data.total ?? items.length,
+                    pages: data.pages ?? 1,
+                });
+                setBackendUp(true);
+            }
+            setLoadingLawyers(false);
+        }, delay);
         return () => { cancelled = true; clearTimeout(timer); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filters.city, filters.specialization, filters.rating, filters.availability]);
+    }, [page, sortBy, query, searchMode, filter,
+        filters.city, filters.specialization, filters.rating, filters.availability]);
+
+    // Any change to what is being asked for returns to page 1. Without this a
+    // client on page 3 who then searches sees page 3 of the new result set —
+    // usually empty — and concludes there are no matches.
+    useEffect(() => {
+        setPage(1);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sortBy, query, searchMode, filter,
+        filters.city, filters.specialization, filters.rating, filters.availability]);
 
     // Reset review form whenever the selected lawyer changes
     useEffect(() => {
@@ -231,6 +303,35 @@ const ModLawyers = () => {
         setReviewComment("");
         setReviewStars(5);
     }, [selectedLawyer]);
+
+    // Load the reviews behind the rating.
+    //
+    // The rating and the count came back with the profile, so the UI could show
+    // "4.6 (5)" with nothing behind it — there was no read endpoint for the
+    // review text at all. `reviews` stays null until a response arrives, which
+    // is what lets the profile distinguish "not loaded" from "none", rather
+    // than telling a client that a lawyer with five reviews has none.
+    const [reviews, setReviews] = useState(null);
+    useEffect(() => {
+        const id = selectedLawyer?._id;
+        if (!id) { setReviews(null); return; }
+        let cancelled = false;
+        setReviews(null);
+        getLawyerReviews(id).then(({ data, error }) => {
+            if (cancelled) return;
+            // On error `reviews` stays null, so the profile says the text is
+            // unavailable rather than claiming there are none.
+            if (!error && data) {
+                setReviews((data.items || []).map(r => ({
+                    user: r.reviewer,
+                    rating: r.stars,
+                    text: r.comment || "",
+                    date: r.created_at ? String(r.created_at).slice(0, 10) : "",
+                })));
+            }
+        });
+        return () => { cancelled = true; };
+    }, [selectedLawyer?._id]);
 
     // Fetch booked slots when date or lawyer changes inside the booking modal
     useEffect(() => {
@@ -369,43 +470,50 @@ const ModLawyers = () => {
         { solid: "#D4537E", light: "#FBEAF0", text: "#72243E" },  // pink
     ];
 
-    const specializations = ["All", ...new Set(lawyers.map(l => l.spec))];
-    const cities = ["All", ...new Set(lawyers.map(l => l.city))];
-    const sortOptions = ["Rating: High to Low", "Rating: Low to High", "Price: Low to High", "Price: High to Low", "Experience: High", "A–Z", "Z–A", "Distance: Nearest"];
+    // Fixed option lists, NOT derived from the rows on screen.
+    //
+    // These were built from `lawyers`, which is now one page of the directory —
+    // so the specialization and province a client can filter by would be only
+    // those the current page happens to contain, and choosing one could never
+    // reveal anyone outside it. They are closed sets on the server (CaseType and
+    // Province), so they are closed sets here.
+    const specializations = ["All", "Criminal", "Civil", "Family", "Constitutional"];
+    const cities = ["All", "Punjab", "Sindh", "KPK", "Balochistan", "Federal"];
+    // No "Distance: Nearest". Nothing in the product collects the client's
+    // location, so there is no distance to sort by — the option compared
+    // `null - null` for every pair, silently returned the list untouched, and
+    // presented that as a proximity ranking.
+    const sortOptions = ["Rating: High to Low", "Rating: Low to High", "Price: Low to High", "Price: High to Low", "Experience: High", "A–Z", "Z–A"];
+
+    // Shown wherever the backend genuinely has no value for a field. Saying so
+    // is the honest option; the alternative is inventing one, which is how a
+    // generated `BAR-API-001` came to be displayed as a bar council number.
+    const UNAVAILABLE = "Not provided";
 
     const getAccent = (l) => {
-        const idx = lawyers.findIndex(x => x.bar === l.bar || x._id === l._id);
+        // Keyed on _id alone. `bar` is null whenever a lawyer has not supplied a
+        // registration number, and `null === null` matched the first such lawyer
+        // for every other one, giving them all the same accent colour.
+        const idx = lawyers.findIndex(x => x._id === l._id);
         return accentPalette[Math.max(idx, 0) % accentPalette.length];
     };
 
-    const applySort = (arr) => {
-        const s = [...arr];
-        if (sortBy === "Rating: High to Low") return s.sort((a, b) => b.rating - a.rating);
-        if (sortBy === "Rating: Low to High") return s.sort((a, b) => a.rating - b.rating);
-        if (sortBy === "Price: Low to High") return s.sort((a, b) => a.fee - b.fee);
-        if (sortBy === "Price: High to Low") return s.sort((a, b) => b.fee - a.fee);
-        if (sortBy === "Experience: High") return s.sort((a, b) => b.exp - a.exp);
-        if (sortBy === "A–Z") return s.sort((a, b) => a.name.localeCompare(b.name));
-        if (sortBy === "Z–A") return s.sort((a, b) => b.name.localeCompare(a.name));
-        if (sortBy === "Distance: Nearest") return s.sort((a, b) => a.distance - b.distance);
-        return s;
-    };
+    // The page the SERVER returned, already filtered and already sorted.
+    //
+    // This used to re-run every filter and the sort over `lawyers` — and while
+    // the server now applies all of them, re-applying locally would not be
+    // merely redundant, it would be wrong. The rows here are one page of a
+    // larger ordered result, so sorting them again reorders within the page
+    // (page 2 of a price sort would be re-sorted as though it were the whole
+    // list), and filtering them again can only ever remove rows the server has
+    // already decided belong — leaving a page that looks short for no visible
+    // reason while the count beneath it says otherwise.
+    const filtered = lawyers;
 
-    const filtered = useMemo(() => applySort(lawyers.filter(l => {
-        const matchFilter = filter === "All" || (filter === "Available" && l.avail) || (filter === "Top Rated" && l.rating >= 4.8);
-        const matchQuery = searchMode === "bar"
-            ? l.bar.toLowerCase().includes(query.toLowerCase())
-            : (l.name + l.spec + l.city).toLowerCase().includes(query.toLowerCase());
-        const matchSpec = filters.specialization === "All" || l.spec === filters.specialization;
-        const matchCity = filters.city === "All" || l.city === filters.city;
-        const matchExp = l.exp >= filters.experience[0] && l.exp <= filters.experience[1];
-        const matchFee = l.fee == null || (l.fee >= filters.price[0] && l.fee <= filters.price[1]);
-        const matchRating = l.rating >= filters.rating;
-        const matchAvail = filters.availability === "All" || (filters.availability === "Available" && l.avail) || (filters.availability === "Busy" && !l.avail);
-        return matchFilter && matchQuery && matchSpec && matchCity && matchExp && matchFee && matchRating && matchAvail;
-    })), [lawyers, filter, query, searchMode, filters, sortBy]);
-
-    const sortedReviews = (list) => [...list].sort((a, b) =>
+    // `list` is null when review text was never loaded (there is no endpoint for
+    // it yet) and [] when there genuinely are none. Guarded because the caller
+    // used to spread it unconditionally, which throws on null.
+    const sortedReviews = (list) => [...(list || [])].sort((a, b) =>
         reviewSort === "date" ? new Date(b.date) - new Date(a.date) : b.rating - a.rating
     );
 
@@ -756,7 +864,7 @@ const ModLawyers = () => {
                     {/* Working hours info */}
                     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, marginBottom: 18 }}>
                         <Ic n="clock" s={13} c={t.textMuted} />
-                        <span style={{ fontSize: 12, color: t.textMuted }}>{apptLawyer.hours}</span>
+                        <span style={{ fontSize: 12, color: t.textMuted }}>{apptLawyer.hours || "Office hours not provided"}</span>
                     </div>
 
                     {/* Actions */}
@@ -801,7 +909,7 @@ const ModLawyers = () => {
                                         <Badge type={l.avail ? "success" : "gray"}>{l.avail ? "Available" : "Busy"}</Badge>
                                     </div>
                                     <div style={{ fontSize: 13, color: ac.solid, fontWeight: 600, marginTop: 2 }}>{l.spec}</div>
-                                    <div style={{ fontSize: 12, color: t.textMuted, marginTop: 2 }}>Bar No: {l.bar}</div>
+                                    <div style={{ fontSize: 12, color: t.textMuted, marginTop: 2 }}>Bar No: {l.bar || UNAVAILABLE}</div>
                                     <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
                                         <StarRow rating={l.rating} color={ac.solid} size={13} />
                                         <span style={{ fontSize: 12, color: t.textMuted, marginLeft: 4 }}>{l.rating} · {l.reviews} reviews</span>
@@ -867,7 +975,7 @@ const ModLawyers = () => {
                             <div style={{ fontWeight: 700, color: t.text, fontSize: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
                                 <Ic n="clock" s={15} c={t.primary} /> Office Info
                             </div>
-                            {[["Working Hours", l.hours], ["Office Address", l.address], ["Consultation Fee", `${fmtFee(l.fee)} / hour`]].map(([k, v]) => (
+                            {[["Working Hours", l.hours || UNAVAILABLE], ["Office Address", l.address || UNAVAILABLE], ["Consultation Fee", l.fee ? `${fmtFee(l.fee)} / hour` : UNAVAILABLE]].map(([k, v]) => (
                                 <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
                                     <span style={{ fontSize: 12, color: t.textMuted, flexShrink: 0 }}>{k}</span>
                                     <span style={{ fontSize: 13, color: t.text, fontWeight: 600, textAlign: "right" }}>{v}</span>
@@ -885,36 +993,50 @@ const ModLawyers = () => {
                             />
                             <div style={{ padding: "10px 14px", borderTop: `1px solid ${t.border}` }}>
                                 <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 8 }}>
-                                    <strong style={{ color: t.text }}>{l.address}</strong>
+                                    <strong style={{ color: t.text }}>{l.address || UNAVAILABLE}</strong>
                                     {l.city && l.address !== l.city && (
                                         <span> · {l.city}</span>
                                     )}
                                 </div>
-                                <div style={{ display: "flex", gap: 10 }}>
-                                    <BtnOutline style={{ flex: 1, fontSize: 12, padding: "9px" }}
-                                        onClick={() => {
-                                            const q = l.lat && l.lng
-                                                ? `${l.lat},${l.lng}`
-                                                : encodeURIComponent(l.address);
-                                            window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
-                                        }}>
-                                        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                                            <Ic n="map" s={13} c={t.primary} /> View on Map
-                                        </span>
-                                    </BtnOutline>
-                                    <BtnPrimary style={{ flex: 1, fontSize: 12, padding: "9px" }}
-                                        onClick={() => {
-                                            const dest = l.lat && l.lng
-                                                ? `${l.lat},${l.lng}`
-                                                : encodeURIComponent(l.address);
-                                            window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}`, "_blank");
-                                        }}>
-                                        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                                            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z" /></svg>
-                                            Get Directions
-                                        </span>
-                                    </BtnPrimary>
-                                </div>
+                                {/* Navigation is offered ONLY for a real address.
+                                    Both buttons used to fall back to the pin, and the pin is a
+                                    province centre plus an invented offset of up to ~44 km
+                                    whenever the lawyer never entered an address — so "Get
+                                    Directions" routed a client to a fabricated destination, with
+                                    nothing on screen suggesting it was not their lawyer's office.
+                                    The address fallback was no better: `l.address` is null for
+                                    such a lawyer, and `encodeURIComponent(null)` is the string
+                                    "null", which was being sent to Google Maps as a search term. */}
+                                {l.precision === "exact" ? (
+                                    <div style={{ display: "flex", gap: 10 }}>
+                                        <BtnOutline style={{ flex: 1, fontSize: 12, padding: "9px" }}
+                                            onClick={() => {
+                                                const q = `${l.lat},${l.lng}`;
+                                                window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
+                                            }}>
+                                            <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                                                <Ic n="map" s={13} c={t.primary} /> View on Map
+                                            </span>
+                                        </BtnOutline>
+                                        <BtnPrimary style={{ flex: 1, fontSize: 12, padding: "9px" }}
+                                            onClick={() => {
+                                                const dest = `${l.lat},${l.lng}`;
+                                                window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}`, "_blank");
+                                            }}>
+                                            <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                                                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z" /></svg>
+                                                Get Directions
+                                            </span>
+                                        </BtnPrimary>
+                                    </div>
+                                ) : (
+                                    <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.6 }}>
+                                        This lawyer has not published an office address, so the pin
+                                        above shows {l.city ? <strong style={{ color: t.text }}>{l.city}</strong> : "their province"} only
+                                        and directions are not available. Ask them for the address
+                                        when you book.
+                                    </div>
+                                )}
                             </div>
                         </Card>
                         <Card>
@@ -924,12 +1046,34 @@ const ModLawyers = () => {
                                     <span style={{ fontSize: 13, color: t.primary, fontWeight: 700 }}>{l.rating}</span>
                                     <span style={{ fontSize: 12, color: t.textMuted }}>({l.reviews})</span>
                                 </div>
-                                <select value={reviewSort} onChange={e => setReviewSort(e.target.value)} style={{ background: t.inputBg, border: `1px solid ${t.border}`, color: t.text, borderRadius: 8, padding: "5px 10px", fontSize: 12, outline: "none" }}>
-                                    <option value="date">By Date</option>
-                                    <option value="rating">By Rating</option>
-                                </select>
+                                {/* The sort control only makes sense once there
+                                    is something to sort. */}
+                                {reviews?.length ? (
+                                    <select value={reviewSort} onChange={e => setReviewSort(e.target.value)} style={{ background: t.inputBg, border: `1px solid ${t.border}`, color: t.text, borderRadius: 8, padding: "5px 10px", fontSize: 12, outline: "none" }}>
+                                        <option value="date">By Date</option>
+                                        <option value="rating">By Rating</option>
+                                    </select>
+                                ) : null}
                             </div>
-                            {sortedReviews(l.reviewList).map((r, i) => (
+                            {/* Three distinct states, deliberately not collapsed
+                                into one. `null` is "still loading, or the
+                                request failed" — NOT "there are none". Telling a
+                                client that a lawyer with five reviews has none,
+                                because a fetch was in flight or errored,
+                                misrepresents that lawyer; the count beside the
+                                rating would also visibly contradict it. */}
+                            {reviews === null ? (
+                                <div style={{ fontSize: 12, color: t.textMuted, padding: "10px 0" }}>
+                                    {l.reviews > 0
+                                        ? `Loading ${l.reviews} review${l.reviews === 1 ? "" : "s"}…`
+                                        : "Loading reviews…"}
+                                </div>
+                            ) : reviews.length === 0 ? (
+                                <div style={{ fontSize: 12, color: t.textMuted, padding: "10px 0" }}>
+                                    No reviews yet.
+                                </div>
+                            ) : null}
+                            {sortedReviews(reviews).map((r, i) => (
                                 <div key={i} style={{ background: t.inputBg, borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                                         <span style={{ fontWeight: 700, fontSize: 13, color: t.text }}>{r.user}</span>
@@ -999,13 +1143,21 @@ const ModLawyers = () => {
                     </button>
                     <span style={{ fontSize: 16, fontWeight: 700, color: t.text }}>Lawyers Near You</span>
                 </div>
+                {/* The location input and its "Find Nearby" button are gone.
+                    Nothing in the product geocodes the client, and the button
+                    carried no onClick at all — typing an address and pressing it
+                    did nothing, while the screen still promised proximity
+                    search. The pins below are province-centre approximations,
+                    which the notice says plainly rather than implying a
+                    surveyed office location. */}
                 <Card style={{ marginBottom: 16 }}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                        <div style={{ flex: 1, position: "relative" }}>
-                            <ThemedInput value={locationInput} onChange={e => setLocationInput(e.target.value)} placeholder="Enter your location (e.g. F-7 Islamabad)..." style={{ paddingLeft: 40 }} />
-                            <div style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)" }}><Ic n="map" s={15} c={t.textMuted} /></div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                        <Ic n="map" s={15} c={t.textMuted} />
+                        <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.6 }}>
+                            Pins show each lawyer&apos;s <strong style={{ color: t.text }}>province</strong>, not their
+                            office address. Distances are not calculated. Open a
+                            profile for the address the lawyer has provided.
                         </div>
-                        <BtnPrimary style={{ fontSize: 13, padding: "11px 20px", flexShrink: 0 }}>Find Nearby</BtnPrimary>
                     </div>
                 </Card>
                 <Card style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
@@ -1016,7 +1168,7 @@ const ModLawyers = () => {
                     />
                 </Card>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {[...filtered].sort((a, b) => a.distance - b.distance).map((l) => {
+                    {filtered.map((l) => {
                         const ac = getAccent(l);
                         return (
                             <Card key={l._id || l.bar} style={{ display: "flex", alignItems: "center", gap: 14, cursor: "pointer", transition: "all 0.2s" }}
@@ -1031,10 +1183,12 @@ const ModLawyers = () => {
                                     <div style={{ fontSize: 12, color: t.textMuted }}>{l.spec} · {l.city}</div>
                                 </div>
                                 <div style={{ textAlign: "right" }}>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.primary }}>{l.distance} km</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>away</div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.primary }}>{l.city}</div>
+                                    <div style={{ fontSize: 11, color: t.textMuted }}>province</div>
                                 </div>
-                                <BtnOutline style={{ fontSize: 12, padding: "7px 14px", flexShrink: 0 }} onClick={e => { e.stopPropagation(); setSelectedLawyer(l); setActiveView("profile"); }}>Directions</BtnOutline>
+                                {/* Labelled for what it does. It was "Directions" and opened the
+                                    profile — it has never navigated anywhere. */}
+                                <BtnOutline style={{ fontSize: 12, padding: "7px 14px", flexShrink: 0 }} onClick={e => { e.stopPropagation(); setSelectedLawyer(l); setActiveView("profile"); }}>View Profile</BtnOutline>
                             </Card>
                         );
                     })}
@@ -1192,21 +1346,7 @@ const ModLawyers = () => {
                         </div>
                     </div>
 
-                    <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
-                        <div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                                <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
-                                <span style={{ fontSize: 10, color: t.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px" }}>Experience</span>
-                            </div>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                {[{ label: "Any", min: 0 }, { label: "1–3 yrs", min: 1 }, { label: "3–5 yrs", min: 3 }, { label: "5–10 yrs", min: 5 }, { label: "10+ yrs", min: 10 }].map(({ label, min }) => {
-                                    const isActive = filters.experience[0] === min;
-                                    return (
-                                        <button key={label} onClick={() => setFilters(f => ({ ...f, experience: [min, 20] }))} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500, border: `1.5px solid ${isActive ? t.primary : t.border}`, background: isActive ? t.primaryGlow : "transparent", color: isActive ? t.primary : t.textMuted, cursor: "pointer", transition: "all 0.15s" }}>{label}</button>
-                                    );
-                                })}
-                            </div>
-                        </div>
+                    <div style={{ marginBottom: 20 }}>
                         <div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
                                 <svg width={12} height={12} viewBox="0 0 24 24" fill={t.warn} stroke={t.warn} strokeWidth="1"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
@@ -1226,35 +1366,12 @@ const ModLawyers = () => {
                         </div>
                     </div>
 
-                    <div style={{ marginBottom: 20 }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
-                                <span style={{ fontSize: 10, color: t.textMuted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px" }}>Fee Range / hr</span>
-                            </div>
-                            <div style={{ background: t.primaryGlow, border: `1px solid ${t.primary}40`, borderRadius: 20, padding: "3px 14px", fontSize: 12, color: t.primary, fontWeight: 700 }}>
-                                {filters.price[0] === 0 && filters.price[1] >= 15000 ? "Any budget" : filters.price[1] >= 15000 ? `₨${filters.price[0].toLocaleString()}+` : `₨${filters.price[0].toLocaleString()} – ₨${filters.price[1].toLocaleString()}`}
-                            </div>
-                        </div>
-                        <div style={{ position: "relative", height: 20, margin: "0 8px" }}>
-                            <div style={{ position: "absolute", top: "50%", left: 0, right: 0, height: 4, background: t.border, borderRadius: 2, transform: "translateY(-50%)" }} />
-                            <div style={{ position: "absolute", top: "50%", height: 4, borderRadius: 2, background: t.primary, transform: "translateY(-50%)", left: `${(filters.price[0] / 15000) * 100}%`, right: `${100 - (filters.price[1] / 15000) * 100}%` }} />
-                            <input type="range" min={0} max={15000} step={500} value={filters.price[0]} onChange={e => { const v = parseInt(e.target.value); if (v < filters.price[1]) setFilters(f => ({ ...f, price: [v, f.price[1]] })); }} style={{ position: "absolute", width: "100%", height: "100%", opacity: 0, cursor: "pointer", zIndex: 2 }} />
-                            <input type="range" min={0} max={15000} step={500} value={filters.price[1]} onChange={e => { const v = parseInt(e.target.value); if (v > filters.price[0]) setFilters(f => ({ ...f, price: [f.price[0], v] })); }} style={{ position: "absolute", width: "100%", height: "100%", opacity: 0, cursor: "pointer", zIndex: 2 }} />
-                            <div style={{ position: "absolute", top: "50%", left: `${(filters.price[0] / 15000) * 100}%`, width: 16, height: 16, borderRadius: "50%", background: t.primary, border: `2px solid ${t.card}`, transform: "translate(-50%, -50%)", boxShadow: `0 0 8px ${t.primary}60`, pointerEvents: "none", zIndex: 3 }} />
-                            <div style={{ position: "absolute", top: "50%", left: `${(filters.price[1] / 15000) * 100}%`, width: 16, height: 16, borderRadius: "50%", background: t.primary, border: `2px solid ${t.card}`, transform: "translate(-50%, -50%)", boxShadow: `0 0 8px ${t.primary}60`, pointerEvents: "none", zIndex: 3 }} />
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-                            {["₨1k", "₨2k", "₨4k", "₨6k", "₨8k", "₨10k", "₨15k+"].map(v => <span key={v} style={{ fontSize: 9, color: t.textMuted }}>{v}</span>)}
-                        </div>
-                    </div>
-
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 14, borderTop: `1px solid ${t.border}` }}>
                         <div style={{ fontSize: 12, color: t.textMuted }}>
                             <span style={{ color: t.primary, fontWeight: 700 }}>{filtered.length}</span> lawyers match
                         </div>
                         <div style={{ display: "flex", gap: 10 }}>
-                            <button onClick={() => setFilters({ specialization: "All", city: "All", experience: [0, 20], price: [0, 15000], rating: 0, availability: "All" })} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: t.textMuted, background: "none", border: `1.5px solid ${t.border}`, cursor: "pointer", padding: "9px 18px", borderRadius: 10, transition: "all 0.15s" }}
+                            <button onClick={() => setFilters({ specialization: "All", city: "All", rating: 0, availability: "All" })} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: t.textMuted, background: "none", border: `1.5px solid ${t.border}`, cursor: "pointer", padding: "9px 18px", borderRadius: 10, transition: "all 0.15s" }}
                                 onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}
                                 onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}>
                                 <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 .49-4.5" /></svg>
@@ -1324,8 +1441,17 @@ const ModLawyers = () => {
                             ? [
                                 aiMatch.name,
                                 aiMatch.spec,
+                                // "match score", not "case compatibility".
+                                // match_score is a weighted blend of five
+                                // factors — semantic fit is only half of it,
+                                // the rest is specialization, province, rating,
+                                // availability and experience. A lawyer with no
+                                // measured relevance to the case still scores
+                                // ~0.48 on the other factors alone, and calling
+                                // that "48% case compatibility" claims a
+                                // measurement of fit the number does not carry.
                                 aiMatch.match_score != null
-                                    ? `${Math.round(aiMatch.match_score * 100)}% case compatibility`
+                                    ? `${Math.round(aiMatch.match_score * 100)}% match score`
                                     : null,
                                 aiMatch.match_reason || null,
                             ].filter(Boolean).join(" — ")
@@ -1348,9 +1474,14 @@ const ModLawyers = () => {
                 </BtnPrimary>
             </div>
 
-            {/* Results count */}
+            {/* Results count.
+                Reports the page AND the total, because `filtered.length` alone
+                is the size of one page — it read "Showing 20 lawyers" whether
+                the directory held 20 or 2000. */}
             <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 12 }}>
-                Showing <span style={{ color: t.primary, fontWeight: 700 }}>{filtered.length}</span> lawyers
+                Showing <span style={{ color: t.primary, fontWeight: 700 }}>{filtered.length}</span>
+                {" "}of <span style={{ color: t.primary, fontWeight: 700 }}>{pageInfo.total}</span> lawyers
+                {pageInfo.pages > 1 && <> · page {page} of {pageInfo.pages}</>}
             </div>
 
             {/* ── LAWYER CARDS (redesigned) ─────────────────────────── */}
@@ -1378,7 +1509,7 @@ const ModLawyers = () => {
 
                             <div style={{ padding: "16px 18px 18px" }}>
 
-                                {/* Header row: avatar + name + distance badge */}
+                                {/* Header row: avatar + name + province badge */}
                                 <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 12 }}>
                                     <div style={{
                                         width: 52, height: 52, borderRadius: 15,
@@ -1392,7 +1523,7 @@ const ModLawyers = () => {
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ fontWeight: 800, color: t.text, fontSize: 14, lineHeight: 1.2 }}>{l.name}</div>
                                         <div style={{ fontSize: 12, color: ac.solid, fontWeight: 600, marginTop: 2 }}>{l.spec}</div>
-                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>{l.bar}</div>
+                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>{l.bar || UNAVAILABLE}</div>
                                     </div>
                                     {/* Distance pill */}
                                     <div style={{
@@ -1403,7 +1534,7 @@ const ModLawyers = () => {
                                         <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
                                         </svg>
-                                        {l.distance}km
+                                        {l.city}
                                     </div>
                                 </div>
 
@@ -1479,10 +1610,34 @@ const ModLawyers = () => {
                     <div style={{ gridColumn: "1/-1", textAlign: "center", padding: "48px 0", color: t.textMuted }}>
                         <Ic n="search" s={32} c={t.border} />
                         <div style={{ marginTop: 12, fontSize: 14 }}>No lawyers match your search criteria.</div>
-                        <button onClick={() => { setQuery(""); setFilter("All"); setFilters({ specialization: "All", city: "All", experience: [0, 20], price: [0, 15000], rating: 0, availability: "All" }); }} style={{ marginTop: 10, background: "none", border: "none", color: t.primary, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Clear all filters</button>
+                        <button onClick={() => { setQuery(""); setFilter("All"); setFilters({ specialization: "All", city: "All", rating: 0, availability: "All" }); }} style={{ marginTop: 10, background: "none", border: "none", color: t.primary, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Clear all filters</button>
                     </div>
                 )}
             </div>
+
+            {/* ── Pagination ─────────────────────────────────────────
+                The control that makes the rest of the directory reachable at
+                all. Everything past the first page existed in the database and
+                had no route to the screen. */}
+            {pageInfo.pages > 1 && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 24 }}>
+                    <BtnOutline
+                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                        disabled={page <= 1 || loadingLawyers}
+                        style={{ opacity: page <= 1 ? 0.45 : 1, cursor: page <= 1 ? "not-allowed" : "pointer" }}>
+                        ← Previous
+                    </BtnOutline>
+                    <span style={{ fontSize: 13, color: t.textMuted }}>
+                        Page <span style={{ color: t.text, fontWeight: 700 }}>{page}</span> of {pageInfo.pages}
+                    </span>
+                    <BtnOutline
+                        onClick={() => setPage(p => Math.min(pageInfo.pages, p + 1))}
+                        disabled={page >= pageInfo.pages || loadingLawyers}
+                        style={{ opacity: page >= pageInfo.pages ? 0.45 : 1, cursor: page >= pageInfo.pages ? "not-allowed" : "pointer" }}>
+                        Next →
+                    </BtnOutline>
+                </div>
+            )}
         </div>
     );
 };

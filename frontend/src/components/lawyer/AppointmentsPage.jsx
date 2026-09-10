@@ -10,6 +10,7 @@ import {
     confirmAppointment as apiConfirm,
     cancelAppointment as apiCancel,
     completeAppointment as apiComplete,
+    markNoShow as apiNoShow,
 } from "@/lib/api.js";
 
 // ============================================================
@@ -34,7 +35,20 @@ const STATUS_STYLES = {
     Pending: { bg: "rgba(232,184,75,0.18)", color: "#e8b84b", border: "rgba(232,184,75,0.55)", dot: "#e8b84b" },
     Completed: { bg: "rgba(62,201,154,0.18)", color: "#3ec99a", border: "rgba(62,201,154,0.55)", dot: "#3ec99a" },
     Cancelled: { bg: "rgba(232,82,106,0.18)", color: "#e8526a", border: "rgba(232,82,106,0.55)", dot: "#e8526a" },
+    // Distinct from Cancelled on purpose. A cancellation is an appointment that
+    // was called off; a no-show is one the client failed to attend. Without its
+    // own entry the badge falls through to `STATUS_STYLES.Upcoming` below and a
+    // no-show would render in the teal reserved for a live upcoming booking.
+    "No Show": { bg: "rgba(158,142,205,0.18)", color: "#9e8ecd", border: "rgba(158,142,205,0.55)", dot: "#9e8ecd" },
 };
+
+// Statuses that mean the appointment did not take place. Grouped because the
+// "today" and calendar views must exclude both: a no-show is no more a session
+// on the day's schedule than a cancellation is. They were already excluded when
+// `no_show` was mislabelled "Cancelled"; naming the set keeps that true now that
+// the two are distinct.
+const DID_NOT_HAPPEN = new Set(["Cancelled", "No Show"]);
+
 
 function StatusBadge({ status }) {
     const s = STATUS_STYLES[status] || STATUS_STYLES.Upcoming;
@@ -322,7 +336,11 @@ function AppointmentsPage() {
     const [loading, setLoading] = useState(true);
     const [scheduleModal, setScheduleModal] = useState(undefined); // undefined=closed, null=new, apt=reschedule
     const [joinModal, setJoinModal] = useState(null);
-    const tabs = ["All", "Upcoming", "Pending", "Completed", "Cancelled"];
+    // "No Show" earns a tab because it is now its own status. The tab filter is
+    // an exact match on the display status, so without one a no-show would be
+    // reachable under "All" and nowhere else — it would simply disappear from
+    // every filtered view the moment it was marked.
+    const tabs = ["All", "Upcoming", "Pending", "Completed", "Cancelled", "No Show"];
 
     const filtered = appointments.filter(a =>
         (statusF === "All" || a.status === statusF) &&
@@ -335,7 +353,7 @@ function AppointmentsPage() {
         .sort((x, y) => x.at - y.at)[0];
     const bookedToday = new Set(
         appointments
-            .filter(a => a.at && _isToday(a.at) && a.status !== "Cancelled")
+            .filter(a => a.at && _isToday(a.at) && !DID_NOT_HAPPEN.has(a.status))
             .map(a => `${String(a.at.getHours()).padStart(2, "0")}:${String(a.at.getMinutes()).padStart(2, "0")}`)
     );
 
@@ -349,7 +367,12 @@ function AppointmentsPage() {
         time: new Date(a.scheduled_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
         duration: `${a.duration_minutes} min`,
         type: a.mode === "video" ? "Video Call" : a.mode === "phone" ? "Phone Call" : "In-Person",
-        status: ({ confirmed: "Upcoming", pending: "Pending", completed: "Completed", cancelled: "Cancelled", no_show: "Cancelled" })[a.status] || "Pending",
+        // `no_show` is NOT "Cancelled". It was mapped that way, which told the
+        // lawyer their own client had cancelled when in fact the client did not
+        // turn up — a different fact, and the only one of the two that is the
+        // client's fault. The client's own view (ModTracking) has always shown
+        // "No Show" correctly, so the two sides of one appointment disagreed.
+        status: ({ confirmed: "Upcoming", pending: "Pending", completed: "Completed", cancelled: "Cancelled", no_show: "No Show" })[a.status] || "Pending",
         caseId: a.case_id,
     });
 
@@ -410,6 +433,28 @@ function AppointmentsPage() {
         toast.show(msg, "success", 3000);
         addNotif({ type: "appointment", title: "Appointment Completed", body: msg, time: "Just now" });
     };
+    const handleNoShow = async (id) => {
+        // Uses the existing PATCH /appointments/{id}/no-show. The endpoint, the
+        // API client function and the NO_SHOW status all already existed; the
+        // lawyer — the only person who can record a no-show — simply had no way
+        // to reach them.
+        const apt = appointments.find(a => a.id === id);
+        const { error } = await apiNoShow(id);
+        if (error) {
+            // The server allows this only on a CONFIRMED appointment, so a
+            // stale card (one already completed or cancelled in another tab)
+            // lands here. Say what the server said and leave the row alone.
+            const errMsg = error.message || "Could not mark as no-show";
+            toast.show(errMsg, "danger", 4000);
+            addNotif({ type: "appointment", title: "Failed", body: errMsg, time: "Just now" });
+            return;
+        }
+        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "No Show" } : a));
+        const msg = `${apt?.client || "The client"} did not attend`;
+        toast.show(msg, "warn", 3000);
+        addNotif({ type: "appointment", title: "Marked as No Show", body: msg, time: "Just now" });
+    };
+
     const confirmSchedule = (raw) => {
         // Native pickers give ISO values — store the display strings the list renders.
         const form = { ...raw, date: fromISODate(raw.date), time: fromISOTime(raw.time) };
@@ -432,7 +477,7 @@ function AppointmentsPage() {
     };
 
     const statCounts = {
-        today: appointments.filter(a => a.at && _isToday(a.at) && a.status !== "Cancelled").length,
+        today: appointments.filter(a => a.at && _isToday(a.at) && !DID_NOT_HAPPEN.has(a.status)).length,
         upcoming: appointments.filter(a => a.status === "Upcoming").length,
         pending: appointments.filter(a => a.status === "Pending").length,
         completed: appointments.filter(a => a.status === "Completed").length,
@@ -702,6 +747,15 @@ function AppointmentsPage() {
                                                     <Btn variant="success" size="sm" onClick={() => handleComplete(apt.id)}>
                                                         <Icon d={I.check} size={12} /> Done
                                                     </Btn>
+                                                    {/* Offered on Upcoming only, because that is the display
+                                                        status for `confirmed` and the server accepts a
+                                                        no-show on nothing else. No extra "is it past?"
+                                                        rule: the server does not have one, and inventing a
+                                                        client-side clock rule would refuse actions the API
+                                                        would have allowed. */}
+                                                    <Btn variant="secondary" size="sm" onClick={() => handleNoShow(apt.id)}>
+                                                        No Show
+                                                    </Btn>
                                                     <Btn variant="accent" size="sm" onClick={() => setScheduleModal(apt)}>
                                                         <Icon d={I.clock} size={12} /> Reschedule
                                                     </Btn>
@@ -808,7 +862,7 @@ function AppointmentsPage() {
                                                     <td style={{ padding: "6px 8px", fontSize: 11, color: t.textFaint, borderRight: `1px solid ${t.border}`, borderBottom: `1px solid ${t.border}`, fontWeight: 500, textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{hr}</td>
                                                     {CAL_DAYS.map((_, di) => {
                                                         const evs = appointments.filter(a =>
-                                                            a.at && a.status !== "Cancelled" &&
+                                                            a.at && !DID_NOT_HAPPEN.has(a.status) &&
                                                             a.at.toDateString() === _weekDates[di].toDateString() &&
                                                             a.at.getHours() === parseInt(hr)
                                                         );

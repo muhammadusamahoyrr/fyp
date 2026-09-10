@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone
@@ -23,27 +22,18 @@ def _gen_case_number() -> str:
 def _public_case(case: dict | None) -> dict | None:
     """Strip internal-only fields before a case leaves the API.
 
-    ``case_embedding`` is a ~384-dim matching vector — never for the client,
-    and heavy to ship (esp. in the wholesale-cached /cases list). The response
-    models use ``extra="allow"`` for pass-through, so this MUST be removed here
-    or it would leak straight back out."""
+    ``case_embedding`` is no longer written — nothing ever read it, so both the
+    field and the embedding that produced it are gone (see the removal note on
+    ``create_case``). This strip stays for the cases ALREADY carrying one: the
+    response models use ``extra="allow"`` for pass-through, so without it a
+    legacy document would ship its vector straight back out, and it is heavy in
+    the wholesale-cached /cases list. Safe to delete once the field has been
+    unset from the collection."""
     if not case:
         return case
     case = dict(case)
     case.pop("case_embedding", None)
     return case
-
-
-async def _embed_case(case_id: str, description: str) -> None:
-    try:
-        from app.ai.pipelines.retriever import _embeddings
-        emb = _embeddings()
-        vector = await asyncio.to_thread(emb.embed_query, f"query: {description[:512]}")
-        await case_repo.set_embedding(case_id, vector)
-    except Exception:
-        # Non-critical — matching falls back to MongoDB scoring — but log it so
-        # a persistent embedding failure is visible, not silently swallowed.
-        logger.exception("Case embedding failed for %s", case_id)
 
 
 async def create_case(client_id: str, data: dict) -> dict:
@@ -61,7 +51,6 @@ async def create_case(client_id: str, data: dict) -> dict:
         "description": data["description"],
         "milestones": [],
         "hearing_dates": [],
-        "case_embedding": None,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
@@ -94,10 +83,16 @@ async def create_case(client_id: str, data: dict) -> dict:
                 raise AppValidationError("Could not generate a unique case number — please try again")
             continue
 
-    # Schedule embedding for lawyer matching (non-blocking)
-    description = data.get("description", "")
-    if description:
-        asyncio.create_task(_embed_case(case_id, description))
+    # No case embedding is computed here any more.
+    #
+    # `_embed_case` ran a CPU-bound e5 inference on every case creation — on a
+    # machine with no GPU — to store a 384-dim vector of the client's own
+    # description on the case. Nothing ever read it: `match_lawyers_for_case`
+    # embeds the description fresh at query time through
+    # `query_similar_lawyers`, and the 384 dimensions date the field to the
+    # pre-Chroma design (matching runs on 768-dim e5). So it cost work at
+    # creation and retained a derived representation of the client's account of
+    # their problem, indefinitely, for no feature.
 
     return _public_case(doc)
 

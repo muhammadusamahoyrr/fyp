@@ -177,6 +177,21 @@ async def accept_engagement(engagement_id: str, lawyer_id: str, terms: dict) -> 
         await engagement_repo.set_status(engagement_id, EngagementStatus.CANCELLED.value)
         raise ConflictError("This case is no longer available — it was assigned or removed")
 
+    # Taking on a case changes what this lawyer's profile MEANS.
+    # `build_profile_text` folds in their five most recent cases — the
+    # EF_in_Legal_CQA idea that an expert is described by their past work, not
+    # only their bio — but nothing ever re-ran it when that work changed. The
+    # design note lists "lawyer closes a case" as the trigger; there is no
+    # close-case action in this system, and `embed_lawyer` reads cases by
+    # `lawyer_id` with no status filter, so ASSIGNMENT is the moment the text
+    # actually changes. Until now case history reached the vector only by the
+    # accident of an unrelated bio edit.
+    #
+    # Scheduled, not awaited: the claim above is already committed, and a lawyer
+    # accepting a case must not wait on (or be failed by) a model load.
+    from app.ai.lawyer_embeddings import schedule_embed
+    schedule_embed(lawyer_id)
+
     fee_amount = terms.get("fee_amount")
     fee_type = terms.get("fee_type")
     await engagement_repo.set_status(

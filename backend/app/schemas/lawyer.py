@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -10,13 +11,46 @@ class LawyerReview(BaseModel):
     comment: str | None = None
 
 
+class LawyerReviewItem(BaseModel):
+    """One review as it appears on a public lawyer profile.
+
+    Carries no `client_id` and no email. `reviewer` is a display name only —
+    first name plus a surname initial — because a client's presence on this list
+    implies they had a legal matter with this lawyer, and that is not something
+    to publish a full name against. See `lawyer_service._reviewer_display_name`.
+    """
+    id: str
+    stars: int
+    comment: str | None = None
+    created_at: datetime | None = None
+    reviewer: str
+
+
+class LawyerReviewPage(BaseModel):
+    items: list[LawyerReviewItem] = []
+    total: int = 0
+    page: int = 1
+    page_size: int = 10
+    pages: int = 0
+
+
 class LawyerMatch(UserProfileResponse):
     """A matched lawyer for /lawyers/match/{case_id}.
 
-    Reuses the whitelisted UserProfileResponse (which strips password_hash,
-    cnic_encrypted AND the specialization_embedding vector, and passes
-    lawyer_profile through as a dict) so a client-facing search can never leak
-    internal fields — then adds the two scoring fields the matcher attaches.
+    Reuses UserProfileResponse, then adds the two scoring fields the matcher
+    attaches.
+
+    Its top-level field list IS a whitelist, so password_hash and
+    cnic_encrypted cannot pass. `lawyer_profile` is NOT: it is declared as a
+    plain dict and passed through whole, so anything inside that sub-document
+    reaches the client. This docstring used to claim the model also stripped
+    `lawyer_profile.specialization_embedding`, which it never did and could not
+    — that field lives inside the dict. The strip is the service layer's job,
+    and the copy in `lawyer_service` was the one that had not been given it, so
+    the vector reached clients from both /lawyers and /lawyers/match while three
+    docstrings said otherwise. `lawyer_service._sanitize` now delegates to the
+    single shared helper. Nothing writes that field any more either, but
+    documents predating its removal still carry it.
 
     Both scoring fields are None on a general listing: those lawyers were not
     ranked against the case and must not be presented as though they were.

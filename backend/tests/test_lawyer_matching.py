@@ -633,3 +633,796 @@ def test_query_returns_both_calibrated_and_raw(monkeypatch):
     assert out[0]["raw_similarity"] == 0.85
     assert out[0]["semantic_score"] == le.calibrate_similarity(0.85)
     assert out[0]["semantic_score"] != out[0]["raw_similarity"]
+
+
+# ── indexed vs. merely un-ranked ─────────────────────────────────────────────
+#
+# `None` buys the redistribution of the whole 0.50 semantic weight, so it has to
+# mean what it says. The matcher used to pass it for any candidate the vector
+# query did not return, conflating "we hold no vector for them" with "we hold
+# one and it ranked poorly" — and since ranking poorly is exactly what a bad
+# semantic match does, the bonus landed on the lawyers it was meant to exclude.
+#
+# Measured before the fix, on the real path: the same lawyer scored 0.489 when
+# returned with a semantic score of 0.0 and 0.977 when the query simply left
+# them out; an un-ranked lawyer took first place at 0.977 over a genuine 0.90
+# semantic match at 0.912.
+
+
+def _indexed(monkeypatch, ids):
+    """Pretend exactly these lawyer ids hold a vector."""
+    monkeypatch.setattr(
+        "app.ai.lawyer_embeddings.indexed_lawyer_ids",
+        lambda wanted: {i for i in wanted if i in set(ids)},
+        raising=True,
+    )
+
+
+async def test_an_indexed_lawyer_left_out_of_the_hits_scores_zero_not_none(
+    pool, monkeypatch
+):
+    """Falling out of the result list must not pay better than being in it."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [{"lawyer_id": "LM-CRIM", "semantic_score": 0.0}])
+    _indexed(monkeypatch, ["LM-CRIM"])
+    ranked = await match_lawyers_for_case("LM-CASE")
+    with_hit = [m for m in ranked["matches"]
+                if m["_id"] == "LM-CRIM"][0]["match_score"]
+
+    _fake_hits(monkeypatch, [])            # same lawyer, same vector, no hit
+    _indexed(monkeypatch, ["LM-CRIM"])
+    ranked = await match_lawyers_for_case("LM-CASE")
+    without_hit = [m for m in ranked["matches"]
+                   if m["_id"] == "LM-CRIM"][0]["match_score"]
+
+    assert without_hit == with_hit
+
+
+async def test_a_genuinely_unindexed_lawyer_still_gets_the_redistribution(
+    pool, monkeypatch
+):
+    """The other half. `None` is still honest when there really is no vector:
+    we have no evidence this lawyer fits badly, so we do not invent one."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    # No hit AND no vector — the only combination that earns the `None` branch.
+    _fake_hits(monkeypatch, [])
+    _indexed(monkeypatch, [])
+    ranked = await match_lawyers_for_case("LM-CASE")
+    scored = [m for m in ranked["matches"] if m["_id"] == "LM-CRIM"][0]
+
+    # Scored on what is known about them, not on a fabricated semantic figure.
+    assert scored["match_score"] > 0.5
+    assert "profile match" not in scored["match_reason"]
+
+
+async def test_a_measured_match_outranks_an_unranked_higher_rated_lawyer(
+    pool, monkeypatch
+):
+    """The inversion itself. LM-FAMILY is rated 4.9 to LM-CRIM's 4.5 but does
+    not specialise in this case type; LM-CRIM is the measured 0.90 match."""
+    from app.db.collections import get_users_col
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    # Put both in the Mongo pool for a criminal case.
+    await get_users_col().update_one(
+        {"_id": "LM-FAMILY"},
+        {"$set": {"lawyer_profile.specializations": ["family", "criminal"]}},
+    )
+    _fake_hits(monkeypatch, [{"lawyer_id": "LM-CRIM", "semantic_score": 0.90}])
+    _indexed(monkeypatch, ["LM-CRIM", "LM-FAMILY"])
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    assert ranked["matches"][0]["_id"] == "LM-CRIM"
+
+
+# ── the vector store membership rule cuts both ways ──────────────────────────
+
+async def test_reactivating_a_lawyer_puts_them_back_in_the_index(pool, index_spy):
+    """Deactivation dropped the vector and reactivation put nothing back, so a
+    restored lawyer returned verified, active and searchable in MongoDB while
+    permanently absent from semantic matching."""
+    from app.services import admin_service
+
+    await admin_service.update_user("LM-CRIM", {"is_active": False}, actor=None)
+    assert index_spy["forgotten"] == ["LM-CRIM"]
+
+    await admin_service.update_user("LM-CRIM", {"is_active": True}, actor=None)
+    assert index_spy["embedded"] == ["LM-CRIM"]
+
+
+async def test_an_already_active_lawyer_is_not_reindexed_by_an_unrelated_edit(
+    pool, index_spy
+):
+    """Only the transition back into matchability re-indexes. An admin editing
+    a phone number must not pay for a model load."""
+    from app.services import admin_service
+
+    await admin_service.update_user("LM-CRIM", {"phone": "0300-1111111"},
+                                    actor=None)
+    assert index_spy["embedded"] == []
+    assert index_spy["forgotten"] == []
+
+
+async def test_an_embed_is_abandoned_if_the_lawyer_stops_being_matchable(
+    pool, monkeypatch
+):
+    """The gate ran before a multi-second model load. An admin rejecting KYC
+    inside that window called `forget_lawyers` on a row that did not exist yet,
+    and the upsert then landed after the removal — seating a rejected lawyer in
+    the candidate pool with nothing left to take them out."""
+    import app.ai.lawyer_embeddings as le
+    from app.db.collections import get_users_col
+
+    upserted: list[str] = []
+
+    class _Col:
+        def upsert(self, **kw):
+            upserted.append(kw["ids"][0])
+
+    class _Model:
+        def embed_documents(self, texts):
+            return [[0.0] * 768]
+
+    async def _slow(fn, arg):
+        await get_users_col().update_one(
+            {"_id": "LM-CRIM"},
+            {"$set": {"lawyer_profile.kyc_verified": False}},
+        )
+        return fn(arg)
+
+    monkeypatch.setattr(le, "_get_collection", lambda: _Col(), raising=True)
+    monkeypatch.setattr(le, "_embeddings", lambda: _Model(), raising=True)
+    monkeypatch.setattr(le.asyncio, "to_thread", _slow, raising=True)
+
+    assert await le.embed_lawyer("LM-CRIM") is False
+    assert upserted == []
+
+
+async def test_taking_on_a_case_reindexes_the_lawyer(pool, index_spy):
+    """`build_profile_text` describes a lawyer by their five most recent cases,
+    but nothing re-ran it when that work changed. The design note names "closes
+    a case"; there is no close-case action, and cases are read with no status
+    filter, so assignment is the moment the text actually changes."""
+    from app.ai.lawyer_embeddings import schedule_embed
+
+    schedule_embed("LM-CRIM")   # what accept_engagement now calls
+    assert index_spy["embedded"] == ["LM-CRIM"]
+
+
+# ── who is reachable at all ──────────────────────────────────────────────────
+
+async def test_a_federal_lawyer_is_reachable_when_the_vector_store_is_down(
+    pool, monkeypatch
+):
+    """The vector pool has always treated `federal` as a candidate in every
+    province; the MongoDB pool did not. A nationwide advocate with no vector was
+    therefore reachable through neither, and the two pools — whose whole purpose
+    is to cover for each other — disagreed about who exists."""
+    from app.db.collections import get_users_col
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    await get_users_col().insert_one(
+        _lawyer("LM-FED", province="federal", specs=["criminal"], rating=4.0)
+    )
+
+    async def _down(**kwargs):
+        raise RuntimeError("chroma unavailable")
+
+    monkeypatch.setattr("app.ai.lawyer_embeddings.query_similar_lawyers",
+                        _down, raising=True)
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    assert "LM-FED" in [m["_id"] for m in ranked["matches"]]
+
+
+async def test_a_lawyer_with_no_rating_field_is_still_matchable(pool, monkeypatch):
+    """A `$gte` of 0.0 reads as inert and is not: in MongoDB a document whose
+    `lawyer_profile.rating` key is ABSENT does not satisfy it. Such a lawyer
+    vanished from search, from the match pool and from the general listing at
+    once, and the client was told no verified lawyers existed."""
+    from app.db.collections import get_users_col
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [])
+    await get_users_col().update_one(
+        {"_id": "LM-CRIM"}, {"$unset": {"lawyer_profile.rating": ""}}
+    )
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    assert ranked["result_kind"] == "matched"
+    assert "LM-CRIM" in [m["_id"] for m in ranked["matches"]]
+
+
+# ── what reaches the client ──────────────────────────────────────────────────
+
+async def test_the_internal_embedding_never_reaches_a_client(pool, monkeypatch):
+    """`UserProfileResponse` passes `lawyer_profile` through as a raw dict, so a
+    field inside the sub-document is not covered by the top-level whitelist.
+    `lawyer_service` kept a third private copy of the sanitiser that stripped the
+    two top-level secrets and not this — the exact failure
+    `admin_service._safe_user` documents as the reason it stopped hand-rolling
+    one."""
+    from app.db.collections import get_users_col
+    from app.services.lawyer_service import match_lawyers_for_case, search_lawyers
+
+    await get_users_col().update_one(
+        {"_id": "LM-CRIM"},
+        {"$set": {"lawyer_profile.specialization_embedding": [0.1] * 384}},
+    )
+    _fake_hits(monkeypatch, [])
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    matched = [m for m in ranked["matches"] if m["_id"] == "LM-CRIM"][0]
+    assert "specialization_embedding" not in (matched.get("lawyer_profile") or {})
+
+    listed = await search_lawyers(province="punjab", case_type=None,
+                                  min_rating=0.0, availability=None,
+                                  page=1, page_size=10)
+    browsed = [u for u in listed.items if u["_id"] == "LM-CRIM"][0]
+    assert "specialization_embedding" not in (browsed.get("lawyer_profile") or {})
+
+
+async def test_a_matched_lawyer_can_be_placed_on_the_map(pool, monkeypatch):
+    """`_inject_coords` ran in `search_lawyers` only, so the AI-matched lawyer —
+    the one the page most wants to pin — was the single lawyer without
+    coordinates unless they had entered a precise address."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [])
+    ranked = await match_lawyers_for_case("LM-CASE")
+    matched = [m for m in ranked["matches"] if m["_id"] == "LM-CRIM"][0]
+
+    lp = matched.get("lawyer_profile") or {}
+    assert lp.get("lat") is not None and lp.get("lng") is not None
+
+
+# ── eligibility on a federal matter ──────────────────────────────────────────
+#
+# Settled deliberately as RANK, DO NOT EXCLUDE.
+#
+# The two pools used to disagree in both directions. A provincial matter was
+# fixed first: the vector pool admitted `federal` lawyers and the MongoDB pool
+# did not, so a nationwide advocate with no vector was reachable through
+# neither. The federal direction was the mirror image — the vector pool admitted
+# every province while the MongoDB pool admitted only `federal`.
+#
+# It is resolved by widening rather than narrowing. Enrolment is not something
+# this system can verify, and its own federal-forum case types (FIA cybercrime
+# among them) are routinely handled by provincially enrolled advocates, so a
+# filter here would be a guess at a bar rule that silently hides the right
+# lawyer. The 0.17 province weight carries the distinction instead.
+
+
+@pytest.fixture
+async def federal_pool(pool):
+    """The Punjab pool, plus a federal advocate and a federal case."""
+    from app.db.collections import get_cases_col, get_users_col
+
+    await get_users_col().insert_one(
+        _lawyer("LM-FEDADV", province="federal", specs=["constitutional"],
+                rating=4.0)
+    )
+    await get_users_col().update_one(
+        {"_id": "LM-CRIM"},
+        {"$set": {"lawyer_profile.specializations": ["constitutional"]}},
+    )
+    await get_cases_col().insert_one({
+        "_id": "LM-FEDCASE", "client_id": "LM-CLIENT",
+        # Explicit: `case_number` carries a plain unique index, so a second
+        # case left without one collides with LM-CASE on `null`.
+        "case_number": "LM-FED-0001",
+        "case_type": "constitutional", "province": "federal",
+        "title": "Article 199 petition",
+        "description": "Constitutional petition under Article 199.",
+        "status": "open"})
+    yield
+
+
+async def test_a_provincial_lawyer_is_eligible_for_a_federal_matter(
+    federal_pool, monkeypatch
+):
+    """Widened, not narrowed. A Punjab advocate must stay reachable for a
+    federal matter rather than being filtered out on an enrolment rule this
+    system cannot verify."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [])          # MongoDB pool alone decides eligibility
+    ranked = await match_lawyers_for_case("LM-FEDCASE")
+
+    ids = [m["_id"] for m in ranked["matches"]]
+    assert "LM-CRIM" in ids
+
+
+async def test_the_federal_advocate_still_leads_on_a_federal_matter(
+    federal_pool, monkeypatch
+):
+    """The other half of the decision: eligible is not the same as equal. Both
+    lawyers specialise in the case type and neither has a vector, so the
+    province weight is the only thing separating them — and it must."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [])
+    ranked = await match_lawyers_for_case("LM-FEDCASE")
+
+    assert ranked["matches"][0]["_id"] == "LM-FEDADV"
+    assert "practises in federal" in ranked["matches"][0]["match_reason"]
+
+
+async def test_a_directory_search_is_not_widened(pool):
+    """`include_federal` is off by default and must stay off here. A client who
+    filters the directory to Punjab means Punjab — the widening is a rule about
+    MATCHING eligibility, not about what a filter means."""
+    from app.db.collections import get_users_col
+    from app.services.lawyer_service import search_lawyers
+
+    await get_users_col().insert_one(
+        _lawyer("LM-FEDADV2", province="federal", specs=["criminal"])
+    )
+
+    found = await search_lawyers(province="punjab", case_type=None,
+                                 min_rating=0.0, availability=None,
+                                 page=1, page_size=20)
+    assert "LM-FEDADV2" not in [u["_id"] for u in found.items]
+
+
+async def test_a_federal_listing_does_not_claim_a_place_to_practise_in(
+    federal_pool, monkeypatch
+):
+    """The listing notice interpolates the province. Widening the federal pool
+    to every province made "verified lawyers available in federal" both the
+    wrong shape and the wrong claim — federal is not somewhere you practise."""
+    from app.db.collections import get_users_col
+    from app.services.lawyer_service import _general_listing
+
+    # Nobody lists this case type, so the listing is what a federal case falls
+    # back to.
+    await get_users_col().update_many(
+        {"_id": {"$regex": "^LM-"}, "role": "lawyer"},
+        {"$set": {"lawyer_profile.specializations": ["family"]}},
+    )
+    _fake_hits(monkeypatch, [])
+
+    listing = await _general_listing("federal", 5)
+    assert listing is not None
+    _, notice = listing
+    assert "in federal" not in notice
+    assert "for a federal matter" in notice
+
+
+# ── qualification: may a candidate be called a match at all? ─────────────────
+#
+# `result_kind: "matched"` used to mean only "the candidate pool was not empty",
+# which is a fact about the query and not about any lawyer. The vector pool
+# filters on province alone, so it is almost never empty: measured on the real
+# data, a Punjab criminal case admitted 10 candidates of whom 3 listed criminal.
+# The other 7 were scored, ranked and returned under "AI-Recommended Match", and
+# with top_n = 5 at least two of the five slots were guaranteed to be a family or
+# civil specialist.
+#
+# The composite score cannot be the gate. A Punjab family lawyer against a
+# Punjab criminal case scores 0.285 indexed at semantic 0.0 and 0.570 unindexed
+# — the no-vector branch doubles the non-semantic weights, so having no evidence
+# outscores having measured evidence of a poor fit.
+
+
+async def test_a_zero_semantic_wrong_specialization_candidate_is_not_a_match(
+    pool, monkeypatch
+):
+    """The headline case. LM-FAMILY is a Punjab family lawyer; the case is Punjab
+    criminal. Measured relevance is zero, so province, rating, availability and
+    experience are all there is — and none of them is evidence of fit."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [{"lawyer_id": "LM-FAMILY", "semantic_score": 0.0}])
+    _indexed(monkeypatch, ["LM-FAMILY"])
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    assert "LM-FAMILY" not in [m["_id"] for m in ranked["matches"]]
+
+
+async def test_an_unindexed_wrong_specialization_candidate_is_not_a_match(
+    pool, monkeypatch
+):
+    """The worse half: with no vector the semantic weight is redistributed, so
+    this candidate scored 0.570 — higher than the measured-and-poor one above.
+    No evidence must not outrank bad evidence into a match."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [{"lawyer_id": "LM-FAMILY", "semantic_score": None}])
+    _indexed(monkeypatch, [])
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    assert "LM-FAMILY" not in [m["_id"] for m in ranked["matches"]]
+
+
+async def test_an_exact_specialization_candidate_qualifies_without_a_vector(
+    pool, monkeypatch
+):
+    """Claiming the domain is evidence in its own right. A verified criminal
+    lawyer must not be withheld from a criminal case merely because the index
+    has not caught up with them."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [])
+    _indexed(monkeypatch, [])
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    assert ranked["result_kind"] == "matched"
+    assert "LM-CRIM" in [m["_id"] for m in ranked["matches"]]
+
+
+async def test_strong_semantic_relevance_qualifies_without_an_exact_label(
+    pool, monkeypatch
+):
+    """The property the design note claims and keyword search cannot give: a
+    lawyer whose profile text reads like this case is reachable even though
+    their `specializations` say something else. Removing this would reduce
+    matching to a label lookup."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    # LM-CIVIL lists civil only, but reads strongly like this criminal matter.
+    _fake_hits(monkeypatch, [{"lawyer_id": "LM-CIVIL", "semantic_score": 0.80}])
+    _indexed(monkeypatch, ["LM-CIVIL"])
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    assert "LM-CIVIL" in [m["_id"] for m in ranked["matches"]]
+
+
+async def test_a_mixed_pool_returns_only_the_relevant_lawyers(pool, monkeypatch):
+    """Both kinds of candidate in one pool: the relevant survive, the rest are
+    dropped rather than ranked below them."""
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [
+        {"lawyer_id": "LM-CRIM",   "semantic_score": 0.70},   # relevant
+        {"lawyer_id": "LM-FAMILY", "semantic_score": 0.02},   # not
+        {"lawyer_id": "LM-CIVIL",  "semantic_score": 0.05},   # not
+    ])
+    _indexed(monkeypatch, ["LM-CRIM", "LM-FAMILY", "LM-CIVIL"])
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    assert [m["_id"] for m in ranked["matches"]] == ["LM-CRIM"]
+
+
+async def test_no_padding_when_fewer_than_top_n_qualify(pool, monkeypatch):
+    """top_n is a maximum, not a quota.
+
+    Four candidates, five slots, two qualified. LM-SINDH qualifies on an exact
+    specialization despite being in the wrong province — province RANKS a
+    candidate and must neither qualify nor disqualify one — while LM-FAMILY and
+    LM-CIVIL are exactly the padding the old code would have used to reach five.
+    """
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    _fake_hits(monkeypatch, [
+        {"lawyer_id": "LM-CRIM",   "semantic_score": 0.70},  # relevant
+        {"lawyer_id": "LM-SINDH",  "semantic_score": 0.01},  # relevant: specialism
+        {"lawyer_id": "LM-FAMILY", "semantic_score": 0.01},  # padding candidate
+        {"lawyer_id": "LM-CIVIL",  "semantic_score": 0.01},  # padding candidate
+    ])
+    _indexed(monkeypatch, ["LM-CRIM", "LM-FAMILY", "LM-CIVIL", "LM-SINDH"])
+
+    ranked = await match_lawyers_for_case("LM-CASE", top_n=5)
+
+    assert {m["_id"] for m in ranked["matches"]} == {"LM-CRIM", "LM-SINDH"}
+    assert len(ranked["matches"]) == 2, "slots were padded with irrelevant lawyers"
+
+
+async def test_a_pool_of_only_irrelevant_lawyers_becomes_a_listing(
+    pool, monkeypatch
+):
+    """Nothing qualifies, so the honest answer is a browse list — not a ranked
+    one. The lawyers stay VISIBLE; what changes is the claim made about them."""
+    from app.db.collections import get_users_col
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    # Nobody on the platform does criminal work.
+    await get_users_col().update_many(
+        {"_id": {"$regex": "^LM-"}, "role": "lawyer"},
+        {"$set": {"lawyer_profile.specializations": ["family"]}},
+    )
+    _fake_hits(monkeypatch, [{"lawyer_id": "LM-FAMILY", "semantic_score": 0.05}])
+    _indexed(monkeypatch, ["LM-FAMILY"])
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+
+    assert ranked["result_kind"] == "general_listing"
+    assert ranked["matches"], "verified lawyers must still be offered to browse"
+    # Not ranked against the case, so nothing may present them as scored.
+    assert all(m["match_score"] is None for m in ranked["matches"])
+    assert ranked["notice"]
+
+
+async def test_verified_lawyers_stay_visible_in_the_listing(pool, monkeypatch):
+    """The qualification gate must never make a KYC-verified lawyer disappear
+    from the platform. It governs what we CLAIM about them, not whether they
+    exist: every one of them is still reachable to browse and through search."""
+    from app.db.collections import get_users_col
+    from app.services.lawyer_service import match_lawyers_for_case, search_lawyers
+
+    await get_users_col().update_many(
+        {"_id": {"$regex": "^LM-"}, "role": "lawyer"},
+        {"$set": {"lawyer_profile.specializations": ["family"]}},
+    )
+    _fake_hits(monkeypatch, [])
+    _indexed(monkeypatch, [])
+
+    ranked = await match_lawyers_for_case("LM-CASE")
+    assert ranked["result_kind"] == "general_listing"
+    listed = {m["_id"] for m in ranked["matches"]}
+    assert {"LM-CRIM", "LM-CIVIL", "LM-FAMILY"} <= listed
+
+    found = await search_lawyers(province="punjab", case_type=None,
+                                 min_rating=0.0, availability=None,
+                                 page=1, page_size=20)
+    assert {"LM-CRIM", "LM-CIVIL", "LM-FAMILY"} <= {u["_id"] for u in found.items}
+
+
+async def test_the_federal_widening_does_not_admit_irrelevant_lawyers(
+    federal_pool, monkeypatch
+):
+    """Eligibility and relevance are different gates and both must hold. The
+    federal rule widens WHO may be considered; it must not smuggle a lawyer
+    with no evidence of fit into a match."""
+    from app.db.collections import get_users_col
+    from app.services.lawyer_service import match_lawyers_for_case
+
+    # A Punjab lawyer, eligible for a federal matter under the widened rule,
+    # but practising a different area of law and with no measured relevance.
+    await get_users_col().insert_one(
+        _lawyer("LM-PBIRREL", province="punjab", specs=["family"], rating=5.0)
+    )
+    _fake_hits(monkeypatch, [{"lawyer_id": "LM-PBIRREL", "semantic_score": 0.0}])
+    _indexed(monkeypatch, ["LM-PBIRREL"])
+
+    ranked = await match_lawyers_for_case("LM-FEDCASE")
+
+    ids = [m["_id"] for m in ranked["matches"]]
+    assert "LM-PBIRREL" not in ids
+    # the genuinely relevant candidates are unaffected
+    assert "LM-FEDADV" in ids
+
+
+# ── drift between MongoDB and the vector store ───────────────────────────────
+#
+# Every write to `lawyers_collection` is fire-and-forget, because none of the
+# actions that trigger one — approving KYC, editing a profile, accepting a case
+# — should fail because an index is unavailable. The cost of that trade is
+# drift, and until now nothing could observe it: a lawyer approved while Chroma
+# was down was never indexed and no request path would ever notice. Repair
+# existed only as a script somebody had to remember to run, which is how the
+# store came to hold two smoke-test rows and no real lawyer at all.
+
+
+def _index(monkeypatch, stored, *, embed_ok=True, read_raises=False):
+    """Fake the vector store. Returns (embedded, forgotten) as they happen.
+
+    `forget_lawyers` is re-patched here, not left to the fake collection's
+    `delete`. The autouse `_no_background_embeds` fixture in conftest replaces
+    it with a no-op so tests cannot write to the developer's real ChromaDB, and
+    that no-op never reaches `_get_collection` at all — so a test asserting on
+    removal has to override it and win by fixture order, exactly as that
+    fixture's docstring says.
+    """
+    import app.ai.lawyer_embeddings as le
+
+    embedded: list[str] = []
+    forgotten: list[str] = []
+
+    class _Col:
+        def get(self, **kw):
+            if read_raises:
+                raise RuntimeError("chroma down")
+            return {"ids": list(stored)}
+
+    async def _embed(lawyer_id):
+        if not embed_ok:
+            raise RuntimeError("model unavailable")
+        embedded.append(lawyer_id)
+        return True
+
+    def _forget(ids):
+        forgotten.extend(ids)
+        return len(list(ids))
+
+    monkeypatch.setattr(le, "_get_collection", lambda: _Col(), raising=True)
+    monkeypatch.setattr(le, "embed_lawyer", _embed, raising=True)
+    monkeypatch.setattr(le, "forget_lawyers", _forget, raising=True)
+    return embedded, forgotten
+
+
+async def test_a_missing_lawyer_is_embedded(pool, monkeypatch):
+    """The drift that matters: verified, active, matchable — and absent from the
+    index, so invisible to semantic matching with nothing to report it."""
+    from app.ai.lawyer_embeddings import reconcile_index
+
+    embedded, forgotten = _index(monkeypatch, stored=[])
+    report = await reconcile_index()
+
+    assert "LM-CRIM" in embedded
+    assert report["embedded"] == len(embedded)
+    assert forgotten == []
+
+
+async def test_a_lawyer_who_should_not_be_indexed_is_removed(pool, monkeypatch):
+    """The other direction. A row for someone no longer matchable is what let
+    two deleted smoke-test accounts suppress the entire real candidate pool."""
+    from app.ai.lawyer_embeddings import reconcile_index
+
+    embedded, forgotten = _index(
+        monkeypatch, stored=["LM-CRIM", "LM-CIVIL", "LM-FAMILY", "LM-SINDH",
+                             "a-deleted-account"])
+    report = await reconcile_index()
+
+    assert forgotten == ["a-deleted-account"]
+    assert report["forgotten"] == 1
+    assert embedded == []
+
+
+async def test_an_index_that_already_agrees_is_left_alone(pool, monkeypatch):
+    """Cheap when clean. It must not re-embed what is already there — a stale
+    vector is a far smaller problem than a missing one, the next profile edit
+    repairs it, and re-embedding on a schedule would put a model load on a
+    machine with no GPU for nothing."""
+    from app.ai.lawyer_embeddings import reconcile_index
+
+    embedded, forgotten = _index(
+        monkeypatch, stored=["LM-CRIM", "LM-CIVIL", "LM-FAMILY", "LM-SINDH"])
+    report = await reconcile_index()
+
+    assert embedded == []
+    assert forgotten == []
+    assert report == {"checked": 4, "embedded": 0, "refreshed": 0,
+                      "forgotten": 0, "failed": 0, "skipped": 0}
+
+
+async def test_an_unreadable_store_skips_the_sweep_without_forgetting_anyone(
+    pool, monkeypatch
+):
+    """If the store cannot be read, its contents are UNKNOWN — not empty.
+    Treating a failed read as an empty index would make every lawyer look
+    missing and, worse, make every stored row look stale."""
+    from app.ai.lawyer_embeddings import reconcile_index
+
+    embedded, forgotten = _index(monkeypatch, stored=[], read_raises=True)
+    report = await reconcile_index()
+
+    assert embedded == []
+    assert forgotten == []
+    assert report["skipped"] == 1
+
+
+async def test_one_failing_embed_does_not_abandon_the_rest(pool, monkeypatch):
+    """A single unembeddable profile must not stop the sweep repairing the
+    others, and must be counted rather than swallowed."""
+    from app.ai.lawyer_embeddings import reconcile_index
+
+    _index(monkeypatch, stored=[], embed_ok=False)
+    report = await reconcile_index()
+
+    assert report["failed"] == 4
+    assert report["embedded"] == 0
+
+
+async def test_an_unverified_lawyer_is_never_reconciled_into_the_index(
+    pool, monkeypatch
+):
+    """The sweep must apply the same membership rule as everything else.
+    Everything in this collection is someone a client can be shown."""
+    from app.db.collections import get_users_col
+    from app.ai.lawyer_embeddings import reconcile_index
+
+    await get_users_col().insert_one(
+        _lawyer("LM-UNVERIFIED", province="punjab", specs=["criminal"],
+                verified=False)
+    )
+    embedded, _ = _index(monkeypatch, stored=[])
+    await reconcile_index()
+
+    assert "LM-UNVERIFIED" not in embedded
+
+
+# ── stale vectors: indexed, but no longer describing the lawyer ──────────────
+#
+# The third kind of drift, and the one a set comparison structurally cannot see:
+# the id is present and correct, but the vector was built from a profile that
+# has since changed. It is produced by the same fire-and-forget writes as the
+# others — a lawyer edits their specializations while Chroma is unreachable,
+# `schedule_embed` logs and gives up — and every later sweep saw the id, called
+# it healthy, and moved on.
+
+
+async def test_a_changed_profile_is_detected_and_re_embedded(pool, monkeypatch):
+    import app.ai.lawyer_embeddings as le
+
+    embedded, _ = _index(
+        monkeypatch,
+        stored=["LM-CRIM", "LM-CIVIL", "LM-FAMILY", "LM-SINDH"],
+    )
+    # Every stored vector carries a fingerprint; LM-CRIM's no longer matches.
+    monkeypatch.setattr(
+        le, "_get_collection",
+        lambda: type("C", (), {"get": staticmethod(lambda **kw: {
+            "ids": ["LM-CRIM", "LM-CIVIL", "LM-FAMILY", "LM-SINDH"],
+            "metadatas": [{"fingerprint": "0000000000000000"},
+                          {"fingerprint": None}, {"fingerprint": None},
+                          {"fingerprint": None}],
+        })})(),
+        raising=True,
+    )
+
+    report = await le.reconcile_index()
+
+    assert embedded == ["LM-CRIM"], "a changed profile was not re-embedded"
+    assert report["refreshed"] == 1
+    assert report["embedded"] == 0, "a refresh was miscounted as a new embed"
+
+
+async def test_a_vector_predating_fingerprints_is_left_alone(pool, monkeypatch):
+    """Treating a missing fingerprint as stale would re-embed the whole index on
+    the first sweep after deploy — a model load per lawyer, all at once, on a
+    machine with no GPU, to fix nothing known to be wrong."""
+    import app.ai.lawyer_embeddings as le
+
+    embedded, forgotten = _index(
+        monkeypatch, stored=["LM-CRIM", "LM-CIVIL", "LM-FAMILY", "LM-SINDH"])
+    report = await le.reconcile_index()
+
+    assert embedded == []
+    assert forgotten == []
+    assert report["refreshed"] == 0
+
+
+async def test_an_unchanged_profile_is_not_re_embedded(pool, monkeypatch):
+    """A clean sweep must load no model. Only genuinely changed profiles pay."""
+    import app.ai.lawyer_embeddings as le
+
+    current = await le.profile_fingerprint("LM-CRIM")
+    assert current, "fixture lawyer has no fingerprint"
+
+    embedded, _ = _index(monkeypatch, stored=[])
+    # All four are stored. Only LM-CRIM carries a fingerprint, and it is the
+    # CURRENT one — so the sweep has positive evidence that its vector is up to
+    # date. The other three are deliberately left without one, which is the
+    # "predates fingerprinting" case and must also not trigger work.
+    monkeypatch.setattr(
+        le, "_get_collection",
+        lambda: type("C", (), {"get": staticmethod(lambda **kw: {
+            "ids": ["LM-CRIM", "LM-CIVIL", "LM-FAMILY", "LM-SINDH"],
+            "metadatas": [{"fingerprint": current}, {}, {}, {}],
+        })})(),
+        raising=True,
+    )
+
+    report = await le.reconcile_index()
+    assert embedded == [], "an unchanged profile was needlessly re-embedded"
+    assert report["refreshed"] == 0
+
+
+async def test_the_fingerprint_follows_the_text_that_is_actually_embedded(pool):
+    """Fingerprints the BUILT TEXT, not a hand-listed set of fields — any such
+    list would drift from `build_profile_text` and then keep looking correct."""
+    from app.ai.lawyer_embeddings import profile_fingerprint
+    from app.db.collections import get_users_col
+
+    before = await profile_fingerprint("LM-CRIM")
+    await get_users_col().update_one(
+        {"_id": "LM-CRIM"},
+        {"$set": {"lawyer_profile.bio": "Now practises tax law exclusively."}},
+    )
+    after = await profile_fingerprint("LM-CRIM")
+
+    assert before and after and before != after
+
+
+async def test_an_unindexable_lawyer_has_no_fingerprint(pool):
+    """None means 'should not be in the store', which the caller must not
+    confuse with 'unchanged'."""
+    from app.ai.lawyer_embeddings import profile_fingerprint
+    from app.db.collections import get_users_col
+
+    await get_users_col().update_one(
+        {"_id": "LM-CRIM"}, {"$set": {"lawyer_profile.kyc_verified": False}})
+    assert await profile_fingerprint("LM-CRIM") is None

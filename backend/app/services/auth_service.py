@@ -115,7 +115,6 @@ async def register(data: RegisterRequest) -> dict:
             "total_reviews": 0,
             "availability": True,
             "bio": None,
-            "specialization_embedding": None,
         } if data.role.value == "lawyer" else None,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),

@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     # Cause-list scheduler
     causelist_check_hours: int = 6
 
+    # Lawyer vector-index reconciliation sweep. Declared HERE, not read straight
+    # off the environment: settings is a pydantic model, so `getattr(settings,
+    # "lawyer_reconcile_hours", 6)` on an undeclared name silently returns the
+    # default forever and the operator's env var is ignored with no error. The
+    # sweep is cheap when the index already agrees, so 6h is a fine default.
+    lawyer_reconcile_hours: int = 6
+
     # Citator ingest streaming (Redis Streams; requires Redis 5.0+, and the
     # XAUTOCLAIM-based recovery of dead consumers needs 6.2+). Consumer-group
     # names are fixed in code (parse/embed); these only tune throughput/recovery.

@@ -347,6 +347,20 @@ async def _users_indexes() -> None:
         IndexModel([("lawyer_profile.kyc_verified", ASCENDING)]),
         IndexModel([("lawyer_profile.specializations", ASCENDING)]),
         IndexModel([("is_active", ASCENDING)]),
+        # `find_lawyers` — every lawyer search, both match pools and the general
+        # listing — filters on all four of these and then sorts by rating. With
+        # only the single-field indexes above, Mongo could use one of them and
+        # then sort the remainder in memory on every request. Key order is
+        # equality fields first, sort key last, which is what lets the index
+        # satisfy the sort instead of just the filter.
+        IndexModel([
+            ("role", ASCENDING),
+            ("is_active", ASCENDING),
+            ("lawyer_profile.kyc_verified", ASCENDING),
+            ("province", ASCENDING),
+            ("lawyer_profile.specializations", ASCENDING),
+            ("lawyer_profile.rating", DESCENDING),
+        ], name="lawyer_match_pool"),
     ])
 
     # One bar number, one lawyer. Until now nothing stopped two accounts

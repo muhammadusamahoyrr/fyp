@@ -28,6 +28,41 @@ const API_STUB = pathToFileURL(
 
 const COMPONENTS = pathToFileURL(path.join(SRC, "components")).href;
 
+/* Minimal stand-ins for the Next.js runtime modules a page-level component
+ * imports. Deliberately tiny and inert: a test that wants to assert on routing
+ * reads `__nav` off globalThis rather than these growing behaviour.
+ *
+ * `next/dynamic` returns the loader's component synchronously-ish rather than
+ * the real lazy wrapper, so a dynamically imported child (the Leaflet map)
+ * renders as its fallback instead of exploding on `window` during import. */
+const NEXT_STUB_PREFIX = "attorney-ai-next-stub:";
+const NEXT_STUBS = {
+    "next/navigation": `
+        const nav = (globalThis.__nav ||= { pushed: [], replaced: [], params: new Map() });
+        export function useRouter() {
+            return {
+                push: (u) => nav.pushed.push(u),
+                replace: (u) => nav.replaced.push(u),
+                back: () => nav.pushed.push("(back)"),
+                prefetch: () => {},
+            };
+        }
+        export function useSearchParams() {
+            return { get: (k) => (nav.params.get(k) ?? null),
+                     toString: () => "" };
+        }
+        export function usePathname() { return nav.pathname || "/"; }
+    `,
+    "next/dynamic": `
+        export default function dynamic(_loader, options = {}) {
+            const Loading = options.loading;
+            const Stub = (props) => (Loading ? Loading(props) : null);
+            Stub.displayName = "DynamicStub";
+            return Stub;
+        }
+    `,
+};
+
 export async function resolve(specifier, context, nextResolve) {
     // The stub applies to COMPONENTS ONLY, decided by who is importing.
     //
@@ -41,6 +76,16 @@ export async function resolve(specifier, context, nextResolve) {
     // default resolver looks for a file that was never written.
     if (specifier.endsWith("api-stub.mjs")) {
         return { url: API_STUB, shortCircuit: true };
+    }
+
+    // `next/navigation` and `next/dynamic` are framework runtime, not component
+    // code. The real modules resolve fine from node_modules and then throw
+    // outside a Next render — `useSearchParams` in particular expects an app
+    // router context a bare jsdom mount cannot provide. Stubbing them is what
+    // lets a page-level component be mounted at all; the component under test
+    // is still the unmodified real one.
+    if (NEXT_STUBS[specifier]) {
+        return { url: `${NEXT_STUB_PREFIX}${specifier}`, shortCircuit: true };
     }
 
     const fromComponent = (context.parentURL || "").startsWith(COMPONENTS);
@@ -105,6 +150,11 @@ async function synthesiseApiStub() {
 export async function load(url, context, nextLoad) {
     if (url === API_STUB) {
         return { format: "module", source: await synthesiseApiStub(),
+                 shortCircuit: true };
+    }
+    if (url.startsWith(NEXT_STUB_PREFIX)) {
+        return { format: "module",
+                 source: NEXT_STUBS[url.slice(NEXT_STUB_PREFIX.length)],
                  shortCircuit: true };
     }
     if (url.endsWith(".jsx")) {
