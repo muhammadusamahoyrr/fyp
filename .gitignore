@@ -143,3 +143,8 @@ backend/_probe_uploads/
 # Unreadable pytest scratch trees from tooling runs; git cannot even list
 # them, and they are output, not source.
 backend/_pytest_codex_review_*/
+
+# Dedupe journals hold the FULL deleted document — a real client's own account
+# of their legal problem, their id and their province. The journal exists so a
+# mistaken run can be reconstructed locally; it must never reach the repository.
+backend/scripts/_intake_id_dedupe_journal.json

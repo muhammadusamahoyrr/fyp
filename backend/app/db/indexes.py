@@ -83,7 +83,9 @@ async def _create_from_spec(col, collection_name: str) -> None:
                 spec.collection, spec.name, type(exc).__name__)
 
 
-async def _try_unique_partial(col, keys, name: str, status_value=None) -> None:
+async def _try_unique_partial(
+    col, keys, name: str, status_value=None, filter_expression: dict | None = None,
+) -> None:
     """Create a unique index. When `status_value` is given it's a partial-unique
     index scoped to that `status`; when omitted it's a plain unique index. If
     legacy duplicates already exist, log and skip rather than crash startup — the
@@ -97,7 +99,10 @@ async def _try_unique_partial(col, keys, name: str, status_value=None) -> None:
     believing they were about to take the case.
     """
     kwargs: dict = {"unique": True, "name": name}
-    if status_value is not None:
+    if filter_expression is not None:
+        # An explicit partial filter, for guards that are not scoped by status.
+        kwargs["partialFilterExpression"] = filter_expression
+    elif status_value is not None:
         statuses = (
             [status_value] if isinstance(status_value, str) else list(status_value)
         )
@@ -466,7 +471,31 @@ async def _cases_indexes() -> None:
         IndexModel([("case_type", ASCENDING)]),
         IndexModel([("province", ASCENDING)]),
         IndexModel([("created_at", DESCENDING)]),
+        # Also the lookup `convert_to_case` does on every resumed conversion.
+        # There was no index on `intake_id` at all, so finding the case an
+        # intake already produced was a collection scan.
+        IndexModel([("intake_id", ASCENDING)]),
     ])
+    # ONE case per intake, enforced by the database.
+    #
+    # `convert_to_case` takes an atomic claim and pins the case to the intake
+    # the moment it exists, which closes the window that produced duplicates.
+    # It cannot close the last one: a hard kill between the insert and the pin
+    # leaves a case the retry cannot find. This index is what makes a second
+    # case structurally impossible rather than merely unlikely.
+    #
+    # `$type: "string"` rather than `$ne: null` because partial filters do not
+    # support `$ne` — and it is the right test anyway. Cases created outside
+    # intake carry `intake_id: None`, and every one of them would collide with
+    # every other under a naive unique index.
+    #
+    # If duplicates predate this, creation is logged and skipped rather than
+    # raised: this runs in the startup lifespan, and a legacy row must not stop
+    # the application booting. Run `scripts/_intake_id_census.py` to find them.
+    await _try_unique_partial(
+        col, [("intake_id", ASCENDING)], "uniq_case_per_intake",
+        filter_expression={"intake_id": {"$exists": True, "$type": "string"}},
+    )
 
 
 async def _intakes_indexes() -> None:
