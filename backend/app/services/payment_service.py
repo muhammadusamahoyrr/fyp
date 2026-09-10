@@ -16,6 +16,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.config import settings
 from app.core.constants import (
+    ENGAGEMENT_RETAINED_STATUSES,
     AgreementStatus,
     EngagementStatus,
     NotificationType,
@@ -96,9 +97,15 @@ async def _require_executed_engagement_letter(case_id: str, lawyer_id: str) -> N
     when the letter never gets written, and that silent gap must not become a
     billing loophole.
     """
+    # Ended engagements still count. The letter's own terms say fees for work
+    # already performed remain payable, so scoping this to `accepted` would have
+    # made completing or terminating an engagement a way to escape the bill for
+    # work that was actually done — and would equally have stranded a lawyer who
+    # finished the matter before invoicing. What must not change is WHICH
+    # engagements qualify at all: the client has to have accepted the terms.
     eng = await get_engagements_col().find_one(
         {"case_id": case_id, "lawyer_id": lawyer_id,
-         "status": EngagementStatus.ACCEPTED.value},
+         "status": {"$in": list(ENGAGEMENT_RETAINED_STATUSES)}},
         sort=[("created_at", -1)],
     )
     if not eng:

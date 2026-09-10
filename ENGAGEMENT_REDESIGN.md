@@ -1,7 +1,26 @@
 # Next feature — two-step engagement flow
 
-**Status:** QUEUED · **Opened:** 2026-08-24 · **Position:** next in queue after
-annotator/labelling work resumes.
+**Status:** BUILT 2026-09-10 on `feat/engagement-redesign` · **Opened:** 2026-08-24
+
+Scope items 1, 2, 3 and 5 are implemented; item 4 was already delivered by the
+lawyer-directory work that landed just before this branch (`hourly_rate` passes
+through `_sanitize`, is sortable via `fee_asc`/`fee_desc`, and renders as
+"Fee/hr" on the card, the hire modal and the detail panel). Everything under
+"What must not regress" has a test naming it.
+
+Two things the build changed about the plan, both recorded because they are
+decisions rather than details:
+
+* **The claim guard had to widen, not just move.** `find_pending_for_case` and
+  the `uniq_pending_engagement` index both named the single status `requested`.
+  Left alone, an outstanding proposal would have read as "nothing pending" and
+  a second lawyer could be asked in parallel — the redesign would have opened a
+  race while closing a consent gap.
+* **Completion is a handshake; termination is not.** Termination is the exit
+  this document exists to create, so making it need the other party's agreement
+  would rebuild the trap. Completion is a claim about shared reality, so it
+  proposes and confirms — with a one-sided path that requires a written reason
+  and is recorded as one-sided, for a counterparty who has stopped responding.
 
 > **Build this as ONE change.** It resolves audit findings #1, #2 and most of #5
 > together. Building them as three patches produces three half-fixes that each

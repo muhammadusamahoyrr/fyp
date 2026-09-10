@@ -1,8 +1,13 @@
 import logging
 
 from pymongo import ASCENDING, DESCENDING, IndexModel
+from pymongo.errors import OperationFailure
 
-from app.core.constants import AppointmentStatus, EngagementStatus
+from app.core.constants import (
+    ENGAGEMENT_OPEN_STATUSES,
+    AppointmentStatus,
+    EngagementStatus,
+)
 from app.db.collections import (
     get_agreements_col,
     get_auth_sessions_col,
@@ -46,6 +51,11 @@ from app.db.v2_index_spec import (
 
 logger = logging.getLogger(__name__)
 
+# MongoDB server error codes for "an index of this name already exists,
+# but not with these options".
+_INDEX_OPTIONS_CONFLICT = 85
+_INDEX_KEY_SPECS_CONFLICT = 86
+
 
 async def _create_from_spec(col, collection_name: str) -> None:
     """Create this collection's V2 indexes from the single manifest.
@@ -73,17 +83,60 @@ async def _create_from_spec(col, collection_name: str) -> None:
                 spec.collection, spec.name, type(exc).__name__)
 
 
-async def _try_unique_partial(col, keys, name: str, status_value: str | None = None) -> None:
+async def _try_unique_partial(col, keys, name: str, status_value=None) -> None:
     """Create a unique index. When `status_value` is given it's a partial-unique
     index scoped to that `status`; when omitted it's a plain unique index. If
     legacy duplicates already exist, log and skip rather than crash startup — the
-    operator can dedupe and restart to enforce it."""
+    operator can dedupe and restart to enforce it.
+
+    `status_value` may be one status or several. Several matters for engagements:
+    the guard has to cover every state in which a negotiation is still open, and
+    that stopped being a single value the moment `terms_proposed` existed. A
+    filter naming only `requested` would let a client hold a proposal from one
+    lawyer and a fresh request to another at the same time — two lawyers each
+    believing they were about to take the case.
+    """
     kwargs: dict = {"unique": True, "name": name}
     if status_value is not None:
-        kwargs["partialFilterExpression"] = {"status": status_value}
+        statuses = (
+            [status_value] if isinstance(status_value, str) else list(status_value)
+        )
+        # $in needs MongoDB 6.0+ in a partial filter; equality is used for the
+        # single-status case so those indexes keep working anywhere.
+        kwargs["partialFilterExpression"] = (
+            {"status": statuses[0]} if len(statuses) == 1
+            else {"status": {"$in": statuses}}
+        )
     try:
         await col.create_indexes([IndexModel(keys, **kwargs)])
-    except Exception:
+        return
+    except OperationFailure as exc:
+        # An index of this NAME already exists with different options. That is a
+        # definition change, not a data problem, and it is the dangerous case:
+        # MongoDB refuses the create and leaves the OLD index in place, so a
+        # deployment that widened a guard would keep enforcing the narrow one
+        # with nothing but a log line saying "existing duplicates?" — a message
+        # that sends the operator looking for the wrong thing entirely.
+        #
+        # Dropping and recreating is safe here because these indexes are
+        # constraints, not query plans: the window between them is measured in
+        # milliseconds, and the alternative is a constraint that silently does
+        # not hold for as long as the deployment lives.
+        if exc.code not in (_INDEX_OPTIONS_CONFLICT, _INDEX_KEY_SPECS_CONFLICT):
+            raise
+        try:
+            await col.drop_index(name)
+            await col.create_indexes([IndexModel(keys, **kwargs)])
+            logger.info("Redefined unique index %s", name)
+            return
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not redefine unique index %s — the previous definition "
+                "is still in force. Check for rows that violate the new one, "
+                "then drop and recreate it.", name,
+            )
+            return
+    except Exception:  # noqa: BLE001
         logger.warning(
             "Could not create unique index %s (existing duplicates?). "
             "Dedupe the collection and restart to enforce it.", name,
@@ -572,11 +625,14 @@ async def _engagements_indexes() -> None:
         IndexModel([("status", ASCENDING)]),
         IndexModel([("created_at", DESCENDING)]),
     ])
-    # Atomic guard: at most one open (REQUESTED) engagement per case.
-    # Closes the duplicate-pending-request race.
+    # Atomic guard: at most one OPEN engagement per case, where open means the
+    # negotiation is still live — requested or terms_proposed. Closes the
+    # duplicate-pending-request race, and now also the window the two-step flow
+    # opened: a proposal sitting with one lawyer must block a fresh request to
+    # another, or both are told the case is theirs to take.
     await _try_unique_partial(
         col, [("case_id", ASCENDING)],
-        "uniq_pending_engagement", EngagementStatus.REQUESTED.value,
+        "uniq_pending_engagement", ENGAGEMENT_OPEN_STATUSES,
     )
 
 

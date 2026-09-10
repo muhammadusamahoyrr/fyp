@@ -11,14 +11,40 @@ class EngagementRequest(BaseModel):
     message: str | None = Field(default=None, max_length=2000)
 
 
-class EngagementAccept(BaseModel):
-    fee_amount: float | None = Field(default=None, ge=0)
-    fee_type: EngagementFeeType | None = None
+class EngagementTerms(BaseModel):
+    """What a lawyer proposes. The fee is required at the schema level.
+
+    It was optional when proposing and accepting were the same call, which is
+    how an engagement could exist with no agreed price at all — and then the
+    letter said "as mutually agreed" about a number nobody had named.
+    """
+
+    fee_amount: float = Field(ge=0)
+    fee_type: EngagementFeeType
     scope_note: str | None = Field(default=None, max_length=2000)
+
 
 
 class EngagementDecline(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
+
+
+class EngagementComplete(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
+    # Skips the confirmation handshake. Requires a note — enforced in the
+    # service, where the rule can explain itself to the caller.
+    one_sided: bool = False
+
+
+class EngagementTerminate(BaseModel):
+    """Ending an active engagement. The reason is not optional.
+
+    It is the only record of why a representation ended, it is shown to the
+    other party, and for a legal product it is the difference between an audit
+    trail and a case that silently changed hands.
+    """
+
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 # ── Response model ────────────────────────────────────────────────────────────
@@ -50,7 +76,21 @@ class EngagementOut(BaseModel):
     fee_type: str | None = None
     scope_note: str | None = None
     decline_reason: str | None = None
+    declined_by: str | None = None
     agreement_id: str | None = None
+    # Two-step flow + exits. All optional: an engagement only ever holds the
+    # fields for the transitions it has actually been through.
+    terms_proposed_at: datetime | None = None
+    accepted_at: datetime | None = None
+    completion_proposed_by: str | None = None
+    completion_proposed_at: datetime | None = None
+    completion_note: str | None = None
+    completed_at: datetime | None = None
+    completed_by: str | None = None
+    completion_kind: str | None = None
+    terminated_at: datetime | None = None
+    terminated_by: str | None = None
+    termination_reason: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     responded_at: datetime | None = None

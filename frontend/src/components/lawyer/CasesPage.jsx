@@ -7,7 +7,7 @@ import { useNotif } from "./theme.js";
 import { Card, Btn, Input, Sel, Label, Badge, Divider, Pills } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import { fmtDate, fmtTime, CSB, typeColor, typeIcon, DSB, PRIO } from "./data.js";
-import { listCases, addHearing as apiAddHearing, recordHearingOutcome as apiRecordOutcome, aiResearch, cancelResearchTurn, openSourceDocument, listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask, toggleTask as apiToggleTask, listEngagements, acceptEngagement, declineEngagement } from "@/lib/api.js";
+import { listCases, addHearing as apiAddHearing, recordHearingOutcome as apiRecordOutcome, aiResearch, cancelResearchTurn, openSourceDocument, listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask, toggleTask as apiToggleTask, listEngagements, proposeEngagementTerms, declineEngagement, completeEngagement, terminateEngagement } from "@/lib/api.js";
 import { avatarBg } from "./utils.js";
 import { newAttempt, retryAttempt, isAmbiguousFailure } from "@/lib/attempt.js";
 /* Shared with the AI Legal page and the client chatbot. This surface is why the
@@ -1437,7 +1437,14 @@ function EngagementInbox({ requests, onChanged }) {
     const [toast, setToast] = useState(null);
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
-    if (!requests.length) return null;
+    // The list now arrives unfiltered, so the card decides what it acts on.
+    // Anything already resolved — declined, cancelled, completed, terminated —
+    // has no action left and would only be noise in an inbox.
+    const ACTIONABLE = ["requested", "terms_proposed", "accepted"];
+    const rows = requests.filter(r => ACTIONABLE.includes(r.status));
+    const awaitingMe = rows.filter(r => r.status === "requested").length;
+
+    if (!rows.length) return null;
 
     const openAccept = (req) => {
         setAccepting(req);
@@ -1446,22 +1453,57 @@ function EngagementInbox({ requests, onChanged }) {
         setScopeNote("");
     };
 
+    // Sends TERMS, and takes nothing. The case is not yours until the client
+    // accepts these — which is the point: they have to see the price before
+    // they are in a relationship they cannot leave.
     const submitAccept = async () => {
         const amount = feeAmount === "" ? null : Number(feeAmount);
-        if (amount !== null && (!Number.isFinite(amount) || amount < 0)) {
-            showToast("⚠️ Fee must be a valid amount");
+        if (amount === null || !Number.isFinite(amount) || amount < 0) {
+            showToast("⚠️ Enter the fee you are proposing — the client has to see a price");
             return;
         }
         setBusy(true);
-        const { error } = await acceptEngagement(accepting.id, {
+        const { error } = await proposeEngagementTerms(accepting.id, {
             fee_amount: amount,
-            fee_type: amount !== null ? feeType : null,
+            fee_type: feeType,
             scope_note: scopeNote.trim() || null,
         });
         setBusy(false);
-        if (error) { showToast("❌ " + (error.message || "Failed to accept")); return; }
+        if (error) { showToast("❌ " + (error.message || "Failed to send terms")); return; }
         setAccepting(null);
-        showToast("✅ Case accepted — the client has been notified");
+        showToast("✅ Terms sent — the case is yours once the client accepts them");
+        onChanged();
+    };
+
+    // ── Exits from an active engagement ───────────────────────────
+    // `accepted` used to be absorbing for the lawyer too: decline returned 422
+    // and there was no withdraw. A lawyer who had to step back from a matter
+    // could not, which is its own professional problem.
+    const handleComplete = async (req) => {
+        const note = window.prompt("Optional: a note about how the matter concluded");
+        if (note === null) return;
+        setBusy(true);
+        const { data, error } = await completeEngagement(req.id, { note: note.trim() || null });
+        setBusy(false);
+        if (error) { showToast("❌ " + (error.message || "Could not complete")); return; }
+        showToast(data?.status === "completed"
+            ? "✅ Engagement completed"
+            : "Completion proposed — the client needs to confirm");
+        onChanged();
+    };
+
+    const handleTerminate = async (req) => {
+        const reason = window.prompt(
+            "Ending this engagement releases the case back to the client.\n\n" +
+            "Give a reason (required — it is recorded and shown to them):"
+        );
+        if (reason === null) return;
+        if (!reason.trim()) { showToast("⚠️ A reason is required"); return; }
+        setBusy(true);
+        const { error } = await terminateEngagement(req.id, reason.trim());
+        setBusy(false);
+        if (error) { showToast("❌ " + (error.message || "Could not end the engagement")); return; }
+        showToast("Engagement ended — the client has been notified");
         onChanged();
     };
 
@@ -1480,15 +1522,15 @@ function EngagementInbox({ requests, onChanged }) {
         <Card style={{ padding: 18, border: `1px solid ${T.primary}50`, background: T.primaryGlow2 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>
-                    📥 Client Requests
+                    📥 Client Requests &amp; Engagements
                 </div>
                 <span style={{ fontSize: 11, fontWeight: 700, color: T.primary, background: `${T.primary}20`, borderRadius: 20, padding: "2px 10px" }}>
-                    {requests.length} pending
+                    {awaitingMe} awaiting you
                 </span>
-                <span style={{ fontSize: 11, color: T.textMuted }}>Clients asking you to take their case — accept to add it to your workspace</span>
+                <span style={{ fontSize: 11, color: T.textMuted }}>Clients asking you to take their case — send your terms; the case is yours once they accept</span>
             </div>
 
-            {requests.map(req => (
+            {rows.map(req => (
                 <div key={req.id} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 10 }}>
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1510,8 +1552,29 @@ function EngagementInbox({ requests, onChanged }) {
                             )}
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
-                            <Btn variant="accent" size="sm" disabled={busy} onClick={() => openAccept(req)}>✓ Accept Case</Btn>
-                            <Btn variant="ghost" size="sm" disabled={busy} onClick={() => handleDecline(req)}>Decline</Btn>
+                            {req.status === "terms_proposed" ? (
+                                <>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: T.primary, textAlign: "center" }}>
+                                        Terms sent{req.fee_amount ? ` · PKR ${Number(req.fee_amount).toLocaleString()}` : ""}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: T.textMuted, textAlign: "center", maxWidth: 150, lineHeight: 1.5 }}>
+                                        Waiting for the client. The case is not yours until they accept.
+                                    </div>
+                                    <Btn variant="ghost" size="sm" disabled={busy} onClick={() => handleDecline(req)}>Withdraw terms</Btn>
+                                </>
+                            ) : req.status === "accepted" ? (
+                                <>
+                                    <Btn variant="ghost" size="sm" disabled={busy} onClick={() => handleComplete(req)}>
+                                        {req.completion_proposed_by === "client" ? "Confirm complete" : "Mark complete"}
+                                    </Btn>
+                                    <Btn variant="ghost" size="sm" disabled={busy} onClick={() => handleTerminate(req)}>End engagement</Btn>
+                                </>
+                            ) : (
+                                <>
+                                    <Btn variant="accent" size="sm" disabled={busy} onClick={() => openAccept(req)}>✓ Send Terms</Btn>
+                                    <Btn variant="ghost" size="sm" disabled={busy} onClick={() => handleDecline(req)}>Decline</Btn>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1519,21 +1582,25 @@ function EngagementInbox({ requests, onChanged }) {
 
             {accepting && (
                 <Modal
-                    title="Accept This Case"
-                    subtitle={`${accepting.case_title} — set your terms; the client will see them in the acceptance notice`}
+                    title="Send Your Terms"
+                    subtitle={`${accepting.case_title} — the client reviews these and decides. The case becomes yours when they accept.`}
                     onClose={() => setAccepting(null)}
                     width={480}
                 >
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                        <div style={{ fontSize: 12, color: T.textMuted, background: T.primaryGlow2, border: `1px solid ${T.primary}30`, borderRadius: 10, padding: "10px 12px", lineHeight: 1.6 }}>
+                            Nothing is assigned yet. The client sees this fee before agreeing to it, and
+                            the engagement letter is generated from these terms once they accept.
+                        </div>
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            <FieldInput label="Fee (PKR, optional)" type="number" value={feeAmount} onChange={setFeeAmount} placeholder="e.g. 50000" />
+                            <FieldInput label="Fee (PKR)" type="number" value={feeAmount} onChange={setFeeAmount} placeholder="e.g. 50000" />
                             <Select label="Fee Type" value={feeType} onChange={setFeeType} options={FEE_TYPE_OPTIONS} />
                         </div>
                         <Textarea label="Scope Note (optional)" rows={3} value={scopeNote} onChange={setScopeNote}
                             placeholder="What the engagement covers — e.g. representation through trial, drafting, hearings…" />
                         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
                             <Btn variant="ghost" onClick={() => setAccepting(null)}>Cancel</Btn>
-                            <Btn variant="accent" disabled={busy} onClick={submitAccept}>{busy ? "Accepting…" : "Accept & Notify Client"}</Btn>
+                            <Btn variant="accent" disabled={busy} onClick={submitAccept}>{busy ? "Sending…" : "Send Terms to Client"}</Btn>
                         </div>
                     </div>
                 </Modal>
@@ -1696,8 +1763,12 @@ function CasesPage() {
             setLoading(false);
         }).catch(() => setLoading(false));
     };
+    // Every engagement, not just `requested`. Filtering server-side to one
+    // status was fine when a lawyer's only action was accept-or-decline; now
+    // they also have terms outstanding and engagements to end, and neither is
+    // visible from a list that stops at the first step.
     const loadRequests = () => {
-        listEngagements({ status: "requested" }).then(({ data }) => {
+        listEngagements().then(({ data }) => {
             if (Array.isArray(data)) setRequests(data);
         }).catch(() => {});
     };
@@ -1707,7 +1778,8 @@ function CasesPage() {
         loadRequests();
     }, []);
 
-    // Accepting a request assigns the case — refresh both lists
+    // Terms change what the request list shows; acceptance (by the client)
+    // is what assigns the case, so both lists still need refreshing.
     const handleRequestsChanged = () => {
         loadRequests();
         loadCases();

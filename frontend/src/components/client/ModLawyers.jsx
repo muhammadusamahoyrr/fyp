@@ -8,7 +8,7 @@ import { useCase } from "./CaseContext.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
-import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getLawyerAvailability, listCases, listEngagements, requestEngagement, cancelEngagement } from "@/lib/api.js";
+import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getLawyerAvailability, listCases, listEngagements, requestEngagement, cancelEngagement, acceptEngagementTerms, declineEngagementTerms, completeEngagement, terminateEngagement } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { readIntakeValue } from "@/lib/intakeStorage.js";
 
@@ -722,6 +722,78 @@ const ModLawyers = () => {
         }
     };
 
+    // ── Responding to proposed terms ──────────────────────────────
+    // This is the decision the client never used to get: the lawyer set a fee
+    // and took the case in the same action, so the price arrived attached to a
+    // relationship that had already started and could not be ended.
+    const [engBusy, setEngBusy] = useState(null);
+
+    const acceptTerms = async (e) => {
+        setEngBusy(e.id);
+        const { error } = await acceptEngagementTerms(e.id);
+        setEngBusy(null);
+        if (error) {
+            toast.show(error.message || "Could not accept the terms.", "error", 4000);
+            return;
+        }
+        toast.show(`${e.lawyer_name || "Your lawyer"} is now engaged. The engagement letter is ready to sign on the Agreements page.`, "success", 5000);
+        refreshEngagements();
+    };
+
+    const declineTerms = async (e) => {
+        const reason = window.prompt("Optional: tell the lawyer why these terms don't work (leave blank to skip)");
+        if (reason === null) return;
+        setEngBusy(e.id);
+        const { error } = await declineEngagementTerms(e.id, reason.trim() || null);
+        setEngBusy(null);
+        if (error) {
+            toast.show(error.message || "Could not decline the terms.", "error", 3500);
+            return;
+        }
+        toast.show("Terms declined. Your case is open again — you can approach another lawyer.", "success", 4000);
+        refreshEngagements();
+    };
+
+    const endEngagement = async (e) => {
+        const reason = window.prompt(
+            "Ending this engagement releases your case so you can engage someone else.\n\n" +
+            "Give a reason (required — it is recorded and shown to your lawyer):"
+        );
+        if (reason === null) return;
+        if (!reason.trim()) {
+            toast.show("A reason is required to end an engagement.", "warn", 3500);
+            return;
+        }
+        setEngBusy(e.id);
+        const { error } = await terminateEngagement(e.id, reason.trim());
+        setEngBusy(null);
+        if (error) {
+            toast.show(error.message || "Could not end the engagement.", "error", 4000);
+            return;
+        }
+        toast.show("Engagement ended. Your case is open again.", "success", 4000);
+        refreshEngagements();
+    };
+
+    const markComplete = async (e) => {
+        const note = window.prompt("Optional: add a note about how the matter concluded");
+        if (note === null) return;
+        setEngBusy(e.id);
+        const { data, error } = await completeEngagement(e.id, { note: note.trim() || null });
+        setEngBusy(null);
+        if (error) {
+            toast.show(error.message || "Could not mark this complete.", "error", 4000);
+            return;
+        }
+        toast.show(
+            data?.status === "completed"
+                ? "Engagement completed."
+                : "Completion proposed — your lawyer needs to confirm it.",
+            "success", 4000,
+        );
+        refreshEngagements();
+    };
+
     // ── HIRE MODAL ────────────────────────────────────────────────
     const HireModal = () => {
         if (!hireLawyer || typeof document === "undefined") return null;
@@ -1198,10 +1270,28 @@ const ModLawyers = () => {
     }
 
     // ── LIST VIEW (default) ───────────────────────────────────────
-    const visibleEngagements = myEngagements.filter(e => e.status === "requested" || e.status === "accepted");
+    // `terms_proposed` is the one a client must not miss — it is the only
+    // screen where they see a price before agreeing to it.
+    const VISIBLE_ENG = ["requested", "terms_proposed", "accepted"];
+    const visibleEngagements = myEngagements.filter(e => VISIBLE_ENG.includes(e.status));
+    const FEE_SUFFIX = { hourly: "/hr", per_hearing: "/hearing" };
+    const feeLabel = (e) =>
+        e.fee_amount
+            ? `PKR ${Number(e.fee_amount).toLocaleString()}${FEE_SUFFIX[e.fee_type] || ""}`
+            : "";
+
+    const engBtn = (t) => ({
+        fontSize: 11, fontWeight: 600, color: t.textMuted, background: "none",
+        border: `1px solid ${t.border}`, borderRadius: 8, padding: "4px 10px",
+        cursor: "pointer", flexShrink: 0,
+    });
+
     const ENG_BADGE = {
-        requested: { label: "Pending", color: "#EF9F27" },
-        accepted: { label: "Accepted", color: "#1D9E75" },
+        requested:      { label: "Pending",       color: "#EF9F27" },
+        terms_proposed: { label: "Terms received", color: "#3B82F6" },
+        accepted:       { label: "Engaged",       color: "#1D9E75" },
+        completed:      { label: "Completed",     color: "#6B7280" },
+        terminated:     { label: "Ended",         color: "#9CA3AF" },
     };
     return (
         <div style={{ position: "relative" }}>
@@ -1403,16 +1493,57 @@ const ModLawyers = () => {
                                     </div>
                                     <div style={{ fontSize: 11, color: t.textMuted }}>
                                         {e.status === "accepted"
-                                            ? `Accepted${e.fee_amount ? ` — PKR ${Number(e.fee_amount).toLocaleString()}${e.fee_type === "hourly" ? "/hr" : e.fee_type === "per_hearing" ? "/hearing" : ""}` : ""}. Track progress on the Tracking page.`
-                                            : "Waiting for the lawyer to respond…"}
+                                            ? `Engaged${feeLabel(e) ? ` — ${feeLabel(e)}` : ""}. Track progress on the Tracking page.`
+                                            : e.status === "terms_proposed"
+                                                ? `${e.lawyer_name || "The lawyer"} proposed ${feeLabel(e) || "terms"}. Nothing is agreed until you accept.`
+                                                : "Waiting for the lawyer to respond…"}
                                     </div>
+                                    {e.status === "terms_proposed" && e.scope_note && (
+                                        <div style={{ fontSize: 11, color: t.textDim, marginTop: 4, fontStyle: "italic" }}>
+                                            Scope: {e.scope_note}
+                                        </div>
+                                    )}
+                                    {e.status === "accepted" && e.completion_proposed_by && (
+                                        <div style={{ fontSize: 11, color: t.primary, marginTop: 4 }}>
+                                            {e.completion_proposed_by === "lawyer"
+                                                ? "Your lawyer says the work is finished — confirm to close this engagement."
+                                                : "You proposed completion; waiting for your lawyer to confirm."}
+                                        </div>
+                                    )}
                                 </div>
                                 <span style={{ fontSize: 11, fontWeight: 700, color: badge.color, background: `${badge.color}18`, borderRadius: 20, padding: "3px 10px", flexShrink: 0 }}>{badge.label}</span>
+
                                 {e.status === "requested" && (
-                                    <button onClick={() => withdrawRequest(e.id)}
-                                        style={{ fontSize: 11, fontWeight: 600, color: t.textMuted, background: "none", border: `1px solid ${t.border}`, borderRadius: 8, padding: "4px 10px", cursor: "pointer", flexShrink: 0 }}>
+                                    <button onClick={() => withdrawRequest(e.id)} disabled={engBusy === e.id}
+                                        style={engBtn(t)}>
                                         Withdraw
                                     </button>
+                                )}
+
+                                {e.status === "terms_proposed" && (
+                                    <>
+                                        <button onClick={() => declineTerms(e)} disabled={engBusy === e.id}
+                                            style={engBtn(t)}>
+                                            Decline
+                                        </button>
+                                        <button onClick={() => acceptTerms(e)} disabled={engBusy === e.id}
+                                            style={{ ...engBtn(t), color: "#fff", background: t.primary, border: `1px solid ${t.primary}` }}>
+                                            {engBusy === e.id ? "Accepting…" : "Accept terms"}
+                                        </button>
+                                    </>
+                                )}
+
+                                {e.status === "accepted" && (
+                                    <>
+                                        <button onClick={() => markComplete(e)} disabled={engBusy === e.id}
+                                            style={engBtn(t)}>
+                                            {e.completion_proposed_by === "lawyer" ? "Confirm complete" : "Mark complete"}
+                                        </button>
+                                        <button onClick={() => endEngagement(e)} disabled={engBusy === e.id}
+                                            style={{ ...engBtn(t), color: "#B91C1C", borderColor: "#FCA5A5" }}>
+                                            End engagement
+                                        </button>
+                                    </>
                                 )}
                             </div>
                         );

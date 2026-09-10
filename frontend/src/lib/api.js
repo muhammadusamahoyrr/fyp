@@ -791,8 +791,16 @@ export async function getLawyerAvailability(lawyer_id, date) {
 }
 
 // ─── Engagements (hire a lawyer) ─────────────────────────────────────────────
-// Client requests → lawyer accepts/declines → case is linked. The only path
-// that assigns a lawyer to a case.
+//
+//   client requests → lawyer proposes terms → CLIENT accepts → case is linked
+//                                           ↘ client declines
+//   accepted → complete (handshake) | terminate (either party, with a reason)
+//
+// Client acceptance is the only path that assigns a lawyer to a case. It used
+// to be the lawyer's `accept` call, which set the fee and took the case at
+// once — so the client saw the price for the first time from inside a
+// relationship they could not leave. `acceptEngagement` is gone rather than
+// deprecated; keeping it would keep that gap open.
 
 export async function requestEngagement({ case_id, lawyer_id, message }) {
   return apiFetch('/engagements', {
@@ -806,14 +814,45 @@ export async function listEngagements({ status } = {}) {
   return apiFetch(`/engagements${qs}`);
 }
 
-export async function acceptEngagement(engagement_id, { fee_amount, fee_type, scope_note } = {}) {
-  return apiFetch(`/engagements/${engagement_id}/accept`, {
+// Lawyer: answer a request with a price. Claims nothing.
+export async function proposeEngagementTerms(engagement_id, { fee_amount, fee_type, scope_note } = {}) {
+  return apiFetch(`/engagements/${engagement_id}/propose-terms`, {
     method: 'PATCH',
     body: JSON.stringify({
-      fee_amount: fee_amount ?? null,
-      fee_type: fee_type || null,
+      fee_amount,
+      fee_type,
       scope_note: scope_note || null,
     }),
+  });
+}
+
+// Client: agree to the proposed terms. THIS assigns the lawyer.
+export async function acceptEngagementTerms(engagement_id) {
+  return apiFetch(`/engagements/${engagement_id}/accept-terms`, { method: 'PATCH' });
+}
+
+// Client: refuse the proposed terms; the case goes back on the market.
+export async function declineEngagementTerms(engagement_id, reason) {
+  return apiFetch(`/engagements/${engagement_id}/decline-terms`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason: reason || null }),
+  });
+}
+
+// Either party. Without `one_sided` the first call proposes and the second
+// (from the other party) confirms.
+export async function completeEngagement(engagement_id, { note, one_sided } = {}) {
+  return apiFetch(`/engagements/${engagement_id}/complete`, {
+    method: 'PATCH',
+    body: JSON.stringify({ note: note || null, one_sided: !!one_sided }),
+  });
+}
+
+// Either party, no confirmation, reason required.
+export async function terminateEngagement(engagement_id, reason) {
+  return apiFetch(`/engagements/${engagement_id}/terminate`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
   });
 }
 

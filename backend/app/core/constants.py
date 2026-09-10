@@ -104,10 +104,50 @@ class AgreementStatus(str, Enum):
 
 
 class EngagementStatus(str, Enum):
+    """The lifecycle of one client-lawyer engagement.
+
+        requested ──lawyer proposes terms──► terms_proposed
+                                                  │
+                          client accepts ◄────────┴────────► client declines
+                                  │                                │
+                                  ▼                                ▼
+                              accepted                         declined
+                             │        │
+                    complete │        │ terminate
+                             ▼        ▼
+                        completed   terminated
+
+    `terms_proposed` is the state this enum existed without, and its absence was
+    the whole defect: the lawyer set a fee and claimed the case in a single
+    call, so the client first learned the price from a relationship they were
+    already in and could not leave. Nothing is claimed until `accepted`, and
+    `accepted` is now a state with exits rather than an absorbing one.
+    """
+
     REQUESTED = "requested"
+    TERMS_PROPOSED = "terms_proposed"
     ACCEPTED = "accepted"
     DECLINED = "declined"
     CANCELLED = "cancelled"
+    COMPLETED = "completed"
+    TERMINATED = "terminated"
+
+
+# An engagement that is still being negotiated: a lawyer has been asked, and
+# neither side has walked away. One per case — see `uniq_pending_engagement`.
+ENGAGEMENT_OPEN_STATUSES = (
+    EngagementStatus.REQUESTED.value,
+    EngagementStatus.TERMS_PROPOSED.value,
+)
+
+# An engagement that became a real working relationship. Membership here is what
+# proves a client actually retained a lawyer, so it gates reviews and billing —
+# an engagement that has since ended still happened, and still counts.
+ENGAGEMENT_RETAINED_STATUSES = (
+    EngagementStatus.ACCEPTED.value,
+    EngagementStatus.COMPLETED.value,
+    EngagementStatus.TERMINATED.value,
+)
 
 
 class EngagementFeeType(str, Enum):
@@ -192,9 +232,16 @@ class NotificationType(str, Enum):
     CASE_MESSAGE = "case_message"
     LAWYER_ASSIGNED = "lawyer_assigned"
     ENGAGEMENT_REQUESTED = "engagement_requested"
+    # The client-facing half of the two-step flow. Terms arriving is the moment
+    # a client first sees a price, so it is the one notification in this group
+    # they must not miss.
+    ENGAGEMENT_TERMS_PROPOSED = "engagement_terms_proposed"
     ENGAGEMENT_ACCEPTED = "engagement_accepted"
     ENGAGEMENT_DECLINED = "engagement_declined"
     ENGAGEMENT_CANCELLED = "engagement_cancelled"
+    ENGAGEMENT_COMPLETION_PROPOSED = "engagement_completion_proposed"
+    ENGAGEMENT_COMPLETED = "engagement_completed"
+    ENGAGEMENT_TERMINATED = "engagement_terminated"
     HEARING_SCHEDULED = "hearing_scheduled"
     DOCUMENT_READY = "document_ready"
     DOCUMENT_SUBMITTED = "document_submitted"

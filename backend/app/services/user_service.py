@@ -196,15 +196,24 @@ _CLOSURE_BLOCKERS_LAWYER = "you have {n} client engagement(s) still open"
 
 async def _open_obligations(user_id: str, role: str) -> list[str]:
     """Reasons this account cannot be closed yet. Empty list = clear to close."""
-    from app.core.constants import EngagementStatus, PaymentStatus
+    from app.core.constants import (
+        ENGAGEMENT_OPEN_STATUSES,
+        EngagementStatus,
+        PaymentStatus,
+    )
     from app.db.collections import get_engagements_col, get_payments_col
 
     reasons: list[str] = []
 
     field = "lawyer_id" if role == "lawyer" else "client_id"
+    # Every state in which someone is still waiting on this account: the two
+    # open negotiation states plus a live engagement. `terms_proposed` was the
+    # one this list could not name before it existed, and leaving it out would
+    # let a lawyer close their account with terms outstanding — stranding the
+    # client exactly as this check exists to prevent.
     open_engagements = await get_engagements_col().count_documents({
         field: user_id,
-        "status": {"$in": [EngagementStatus.REQUESTED.value,
+        "status": {"$in": [*ENGAGEMENT_OPEN_STATUSES,
                            EngagementStatus.ACCEPTED.value]},
     })
     if open_engagements:

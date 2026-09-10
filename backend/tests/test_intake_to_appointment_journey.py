@@ -193,8 +193,15 @@ async def test_engagement_assigns_the_lawyer_to_that_same_case(journey_parties, 
                     "message": "Please take my maintenance case."})
     assert requested["status"] == EngagementStatus.REQUESTED.value
 
-    accepted = await engagement_service.accept_engagement(
+    proposed = await engagement_service.propose_terms(
         requested["id"], lawyer_id, {"fee_amount": 50000, "fee_type": "fixed"})
+    assert proposed["status"] == EngagementStatus.TERMS_PROPOSED.value
+
+    # Nothing is claimed yet — the whole point of the two-step flow.
+    mid = await case_service.get_case(case_id, client_id, "client")
+    assert mid["lawyer_id"] is None
+
+    accepted = await engagement_service.accept_terms(requested["id"], client_id)
     assert accepted["status"] == EngagementStatus.ACCEPTED.value
 
     case = await case_service.get_case(case_id, client_id, "client")
@@ -211,8 +218,9 @@ async def test_the_appointment_lands_on_the_engaged_case(journey_parties, offlin
 
     requested = await engagement_service.request_engagement(
         client_id, {"case_id": case_id, "lawyer_id": lawyer_id, "message": None})
-    await engagement_service.accept_engagement(
+    await engagement_service.propose_terms(
         requested["id"], lawyer_id, {"fee_amount": 50000, "fee_type": "fixed"})
+    await engagement_service.accept_terms(requested["id"], client_id)
 
     when = datetime.now(timezone.utc) + timedelta(days=3)
     when = when.replace(hour=11, minute=0, second=0, microsecond=0)
