@@ -65,6 +65,24 @@ async def create_case(client_id: str, data: dict) -> dict:
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
+
+    # Optional intake-derived fields, copied only when the caller supplied
+    # them. This used to be a closed literal, so `user_selected_type` and
+    # `type_was_corrected` — which intake conversion has always passed, and
+    # whose whole purpose is auditing an AI reclassification — were built and
+    # then dropped on the floor here. Anything not in this list is still
+    # ignored, so a caller cannot inject arbitrary keys onto a case.
+    for field in (
+        "user_selected_type",
+        "type_was_corrected",
+        "party_role",
+        "desired_outcome",
+        "urgency",
+        "has_evidence",
+        "evidence_count",
+    ):
+        if field in data:
+            doc[field] = data[field]
     # Retry on case_number collision (unique index — extremely rare but handled)
     for attempt in range(5):
         doc["case_number"] = _gen_case_number()
@@ -138,9 +156,25 @@ async def update_case(
 
     # Defense-in-depth: the schema already excludes them, but never allow
     # assignment/status writes through the generic PATCH.
-    updates = {k: v for k, v in updates.items() if k in {"title", "description"}}
+    updates = {k: v for k, v in updates.items() if k in {"title", "description", "case_type"}}
     if not updates:
         return _public_case(case)
+
+    # A category change is a client overriding the pipeline's verified
+    # classification, so it is recorded rather than silently applied. Without
+    # this the AI's answer would be overwritten in place and the case would
+    # claim a classification the pipeline never made.
+    new_type = updates.get("case_type")
+    if new_type is not None and new_type != case.get("case_type"):
+        updates["case_type_source"]     = "client"
+        updates["case_type_changed_by"] = requester_id
+        updates["case_type_changed_at"] = datetime.now(timezone.utc)
+        # Only on the FIRST override. `ai_case_type` means "what the pipeline
+        # decided", so a second change must not record the first change as the
+        # machine's answer — checked against the stored case, not against this
+        # update, which never contains the key.
+        if "ai_case_type" not in case:
+            updates["ai_case_type"] = case.get("case_type")
 
     updates["updated_at"] = datetime.now(timezone.utc)
     await case_repo.update_one({"_id": case_id}, {"$set": updates})

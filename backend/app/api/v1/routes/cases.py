@@ -56,7 +56,10 @@ async def update_case(
     body: CaseUpdate,
     current_user: dict = Depends(get_current_user),
 ):
-    updates = body.model_dump(exclude_none=True)
+    # mode="json" so `case_type` arrives as the plain string the rest of the
+    # code compares and stores, not as a CaseType member that only behaves like
+    # one because the enum happens to subclass str.
+    updates = body.model_dump(mode="json", exclude_none=True)
     return await case_service.update_case(
         case_id, updates, current_user["_id"], current_user["role"]
     )

@@ -6,8 +6,10 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "./CaseContext.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge, Tooltip } from "@/components/shared/shared.jsx";
-import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence } from "@/lib/api.js";
+import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence, updateCase } from "@/lib/api.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
+import { useAuth } from "@/context/AuthContext.jsx";
+import { readIntakeValue, writeIntakeValue, clearIntakeValue } from "@/lib/intakeStorage.js";
 
 // Encode Float32 PCM as 16-bit mono WAV (no ffmpeg on backend)
 function _pcmToWav(samples, sampleRate) {
@@ -114,6 +116,15 @@ const ModIntake = () => {
     const { T }  = useLang();
     const isMobile = useIsMobile();
     const { completeIntake, addNotification } = useCase();
+    const { user } = useAuth();
+    const userId = user?._id || user?.id || null;
+
+    // Every remembered intake value is keyed by the signed-in user. See
+    // intakeStorage.js for why a shared key left the NEXT account unable to
+    // start an intake at all.
+    const scopedGet    = (name)        => readIntakeValue(name, userId);
+    const scopedSet    = (name, value) => writeIntakeValue(name, userId, value);
+    const scopedRemove = (name)        => clearIntakeValue(name, userId);
     const [step, setStep] = useState(1);
 
     // ── Core intake fields ─────────────────────────────────────────
@@ -128,6 +139,10 @@ const ModIntake = () => {
     const [intakeSubmitting, setIntakeSubmitting] = useState(false);
     const [converting, setConverting] = useState(false);
     const [caseId, setCaseId] = useState(null);
+    // The category the CASE currently holds, as opposed to the one selected in
+    // the UI. Keeping them apart is what lets the final step tell an actual
+    // change from a confirmation and skip a pointless write.
+    const [convertedCaseType, setConvertedCaseType] = useState(null);
 
     // ── AI output ─────────────────────────────────────────────────
     const [aiStructured, setAiStructured] = useState(null);
@@ -291,20 +306,31 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
         window.location.href = `mailto:?subject=${subject}&body=${body}`;
     };
 
-    const canGoToStep = (target) => {
-        if (target <= step) return true;
-        if (target === 2) return !!role && !!province;
-        if (target >= 3) return !!role && !!province;
-        return false;
+    // What each step forward actually requires. Steps 3+ used to need only
+    // role + province, the same as step 2, so the stepper let a client jump
+    // straight from the first screen to the last and reach a "Case Intake
+    // Complete" screen with no description, no analysis and no case in the
+    // database — the Case ID simply read "Pending".
+    //
+    // Going BACK is always allowed; only moving ahead of your own progress is
+    // gated.
+    const stepBlocker = (target) => {
+        if (target <= step) return null;
+        if (!role) return "Please select your role first";
+        if (!province) return "Please select your province";
+        if (target >= 3 && !(description.trim() || voiceTranscript.trim()))
+            return "Please describe your legal issue before continuing";
+        if (target >= 4 && !caseId)
+            return "Your case is still being prepared — finish step 3 first";
+        return null;
     };
 
+    const canGoToStep = (target) => stepBlocker(target) === null;
+
     const tryGoToStep = (target) => {
-        if (canGoToStep(target)) {
-            setStep(target);
-        } else {
-            if (!role) toast.show("Please select your role first", "warn", 2500);
-            else if (!province) toast.show("Please select your province", "warn", 2500);
-        }
+        const blocker = stepBlocker(target);
+        if (blocker) toast.show(blocker, "warn", 2500);
+        else setStep(target);
     };
 
     useEffect(() => {
@@ -318,22 +344,49 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
         }
     }, [step]);
 
-    // Start or resume intake session on mount
+    // Start or resume intake session on mount.
+    //
+    // Waits for the user id: the storage key contains it, so reading before
+    // sign-in resolves would miss a resumable token and mint a second session.
     useEffect(() => {
-        const saved = typeof window !== "undefined" && localStorage.getItem("aai-intake-token");
+        if (!userId) return;
+        const saved = scopedGet("aai-intake-token");
         if (saved) {
             setIntakeToken(saved);
+            // Restore what the server already knows about this session, so a
+            // refresh lands the client back where they were instead of on a
+            // blank step 1 with a token pointing at a half-filled intake.
+            intakeGet(saved).then(({ data, error }) => {
+                if (error || !data) {
+                    // The token is unusable — expired, or belonging to nobody
+                    // this account can see. Drop it and start clean rather
+                    // than leaving the page wedged against it.
+                    scopedRemove("aai-intake-token");
+                    setIntakeToken(null);
+                    return;
+                }
+                if (data.case_id) {
+                    setCaseId(data.case_id);
+                    scopedSet("aai-case-id", data.case_id);
+                }
+                if (data.ai_structured_case?.summary &&
+                    data.ai_structured_case.summary !== "pending") {
+                    setAiStructured(data.ai_structured_case);
+                }
+                if (data.completed) setStep(s => (s < 4 ? 4 : s));
+            });
         } else {
             intakeStart().then(({ data, error }) => {
                 if (data?.session_token) {
                     setIntakeToken(data.session_token);
-                    localStorage.setItem("aai-intake-token", data.session_token);
+                    scopedSet("aai-intake-token", data.session_token);
                 } else if (error) {
                     console.warn("Intake start failed:", error);
                 }
             });
         }
-    }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userId]);
 
     // Trigger clarify fetch whenever step 3 is reached via tab navigation
     // (handleStep2Continue sets clarifyLoading=true before its own fetch, so this
@@ -355,7 +408,14 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
         if (!role)     { toast.show("Please select your role first", "warn", 2500); return; }
         if (!province) { toast.show("Please select your province", "warn", 2500); return; }
         if (intakeToken) {
-            const { error } = await intakeSaveStep(intakeToken, 1, { province });
+            // party_role goes with it. The Plaintiff/Defendant choice drove the
+            // whole first screen and then lived only in React state — it was
+            // never sent anywhere, so nothing downstream could tell which side
+            // of the dispute the client was on.
+            const { error } = await intakeSaveStep(intakeToken, 1, {
+                province,
+                party_role: role.toLowerCase(),
+            });
             if (error) toast.show("Could not save — check your connection and try again.", "error", 3000);
         }
         setStep(2);
@@ -480,8 +540,9 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
 
         if (converted?.case_id) {
             setCaseId(converted.case_id);
-            localStorage.setItem("aai-case-id", converted.case_id);
-            localStorage.removeItem("aai-intake-token");
+            setConvertedCaseType(converted.ai_case_type || null);
+            scopedSet("aai-case-id", converted.case_id);
+            scopedRemove("aai-intake-token");
             setIntakeToken(null);
 
             // If AI corrected the case type, update UI and notify user
@@ -509,6 +570,21 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
     // ── Final submit (Step 5) ──────────────────────────────────────
     const handleSubmit = async () => {
         setIntakeSubmitting(true);
+
+        // Persist the category the client confirmed on this screen. Step 5
+        // invites them to "Confirm or change" the AI's classification, and the
+        // change used to stop at React state: the case in MongoDB kept the old
+        // category forever while every screen here showed the new one.
+        if (caseId && caseTypeInput && caseTypeInput !== convertedCaseType) {
+            const { error } = await updateCase(caseId, { case_type: caseTypeInput });
+            if (error) {
+                toast.show("Could not save your category change — please try again.", "error", 4000);
+                setIntakeSubmitting(false);
+                return;   // do not claim success for a write that failed
+            }
+            setConvertedCaseType(caseTypeInput);
+        }
+
         completeIntake({
             role,
             caseType:    caseTypeInput,

@@ -1,16 +1,28 @@
 import asyncio
 import json
+import logging
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.core.config import settings
-from app.core.exceptions import AppValidationError, NotFoundError
+from pydantic import ValidationError as PydanticValidationError
+
+from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.repositories.intake_repo import IntakeRepository
 from app.repositories.case_repo import CaseRepository
 from app.services.case_service import create_case
+from app.schemas.intake import (
+    IntakeStep1,
+    IntakeStep2,
+    IntakeStep3,
+    IntakeStep4,
+    IntakeStep5,
+)
 from app.utils.file_handler import detect_mime, ext_for_mime
+
+logger = logging.getLogger(__name__)
 
 intake_repo = IntakeRepository()
 case_repo   = CaseRepository()
@@ -23,6 +35,17 @@ STEP_REQUIRED_FIELDS = {
     3: ["incident_description"],
     4: [],
     5: ["desired_outcome"],
+}
+
+# The step contract. Validation used to be STEP_REQUIRED_FIELDS alone — a
+# non-empty check on a couple of names — while five Pydantic models describing
+# these exact payloads sat in schemas/intake.py imported by nothing.
+STEP_SCHEMAS = {
+    1: IntakeStep1,
+    2: IntakeStep2,
+    3: IntakeStep3,
+    4: IntakeStep4,
+    5: IntakeStep5,
 }
 
 # Domain-specific missing-fact templates (mirrors fact_gap_node.py)
@@ -116,8 +139,8 @@ async def save_step(token: str, step: int, data: dict, client_id: str) -> dict:
     if intake.get("completed"):
         raise AppValidationError("Intake already completed")
 
-    _validate_step(step, data)
-    await intake_repo.update_step(token, step, data)
+    cleaned = _validate_step(step, data)
+    await intake_repo.update_step(token, step, cleaned)
 
     updated = await intake_repo.find_by_token(token)
     return {
@@ -137,7 +160,14 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
     Call 2 (answer=Q1_answer): save answer, get Q2 or done.
     Returns: { question, done, round }
     """
+    # Imported beside get_llm, in the function, matching how every other AI
+    # dependency enters this module. It was missing entirely: the name was used
+    # at the call site below and bound nowhere, so evaluating the argument
+    # raised NameError before get_llm ran — and the `except Exception` around
+    # it reported that as "the provider failed, let the user through". Every
+    # intake since silently received zero clarifying questions.
     from app.ai.llm import get_llm
+    from app.ai.provider_health import PURPOSE_INTAKE_EXTRACTION
 
     intake = await intake_repo.find_by_token(token)
     if not intake or intake.get("client_id") != client_id:
@@ -192,7 +222,13 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
         ])
         text = response.content.strip()
     except Exception:
-        # LLM failed — let user proceed rather than trapping them in a loop
+        # LLM failed — let user proceed rather than trapping them in a loop.
+        #
+        # Logged, not just swallowed. A bare `except Exception` here treated a
+        # NameError in this very function as a provider outage and degraded
+        # silently for the entire life of the feature. Letting the client
+        # through is still right; doing it without a trace is not.
+        logger.exception("Intake clarification failed — proceeding without a question")
         await intake_repo.save_clarification_qa(token, qa_list)
         return {"question": None, "done": True, "round": answered_rounds}
 
@@ -237,6 +273,7 @@ async def _ai_classify_case_type(description: str, user_selected: str) -> tuple[
         # Low keyword signal — let the LLM decide
         try:
             from app.ai.llm import get_fast_llm
+            from app.ai.provider_health import PURPOSE_INTAKE_EXTRACTION
             llm = get_fast_llm(purpose=PURPOSE_INTAKE_EXTRACTION)
             response = await asyncio.to_thread(llm.invoke, [
                 {"role": "system", "content": _TYPE_CLASSIFY_SYSTEM},
@@ -246,7 +283,10 @@ async def _ai_classify_case_type(description: str, user_selected: str) -> tuple[
             if ai_type not in _VALID_CASE_TYPES:
                 ai_type = user_selected  # LLM gave unexpected output — trust user
         except Exception:
-            ai_type = user_selected  # LLM failed — trust user
+            # Same reasoning as get_clarification: falling back to the user's
+            # own pick is the right behaviour, but it must leave evidence.
+            logger.exception("Intake case-type classification failed — trusting the user's pick")
+            ai_type = user_selected
 
     was_corrected = ai_type != user_selected
     return ai_type, was_corrected
@@ -254,25 +294,98 @@ async def _ai_classify_case_type(description: str, user_selected: str) -> tuple[
 
 # ─── Convert + P1 (embedding) + P5 (auto-match) ──────────────────────────────
 
+# How long one conversion may hold its claim before another request may take it
+# over. Sized for the slow path, not the happy one: the analysis runs an LLM,
+# and on a CPU-only deployment that is minutes. Too short and a retry re-pays
+# for an analysis still in flight; too long and a worker that died mid-convert
+# locks the client out of their own intake.
+_CONVERSION_CLAIM_TTL = timedelta(minutes=10)
+
+
+def _conversion_result(token: str, intake: dict) -> dict:
+    """The /convert payload, rebuilt from a converted intake.
+
+    Lets a repeat call answer with what the first call decided. Intakes
+    converted before the classification was stored fall back to what step 2
+    holds, so an old record replays a truthful payload rather than a null one.
+    """
+    return {
+        "session_token":      token,
+        "current_step":       5,
+        "completed":          True,
+        "case_id":            intake.get("case_id"),
+        "ai_case_type":       intake.get("ai_case_type"),
+        "user_case_type":     intake.get("user_case_type")
+                              or (intake.get("step2") or {}).get("case_type"),
+        "type_was_corrected": bool(intake.get("type_was_corrected")),
+    }
+
+
 async def convert_to_case(
     token: str,
     client_id: str,
     language: str = "en",
     urgency: str | None = None,
 ) -> dict:
+    """Turn a finished intake into a case. Safe to call more than once.
+
+    One intake yields at most one case. The old flow read `completed`, then ran
+    a classification, a case insert and a full AI analysis before writing
+    `completed` back — a check-then-act window seconds to minutes wide. Two
+    convert calls in that window (a double submit, a client retry after a
+    timeout, two open tabs) both passed the check and both opened a case: the
+    client saw one, the other was billed for, matched to lawyers, and left
+    behind with no intake pointing at it.
+
+    The guard is now an atomic claim taken before any work, and the case is
+    pinned to the intake the moment it is created.
+    """
     intake = await intake_repo.find_by_token(token)
     if not intake or intake.get("client_id") != client_id:
         raise NotFoundError("Intake session")
+
+    # A second convert REPLAYS the first one's answer rather than failing. The
+    # caller whose response was lost to a dropped connection has no way to tell
+    # "already converted" from "never converted", and a 422 pushed it into
+    # exactly the retry loop this guard exists to stop.
     if intake.get("completed"):
-        raise AppValidationError("Intake already converted to a case")
+        return _conversion_result(token, intake)
 
     missing = [i for i in range(1, 6) if intake.get(f"step{i}") is None]
     if missing:
         raise AppValidationError(f"Steps not completed: {missing}")
 
-    step1 = intake.get("step1", {})
-    step2 = intake.get("step2", {})
-    step3 = intake.get("step3", {})
+    if not await intake_repo.claim_conversion(token, _CONVERSION_CLAIM_TTL):
+        # Someone else holds the claim. Re-read: if they finished while we were
+        # asking, the client gets the case; otherwise say so plainly, and do
+        # not start a second conversion beside theirs.
+        current = await intake_repo.find_by_token(token) or intake
+        if current.get("completed"):
+            return _conversion_result(token, current)
+        raise ConflictError("This intake is already being converted — please wait")
+
+    try:
+        return await _convert_claimed_intake(token, client_id, intake, language, urgency)
+    except Exception:
+        # Release on the way out so the client can retry. `case_id` is left
+        # pinned on purpose: the retry resumes on the case that already exists.
+        await intake_repo.release_conversion(token)
+        raise
+
+
+async def _convert_claimed_intake(
+    token: str,
+    client_id: str,
+    intake: dict,
+    language: str,
+    urgency: str | None,
+) -> dict:
+    """The conversion itself. Only ever runs under a held claim."""
+    step1 = intake.get("step1") or {}
+    step2 = intake.get("step2") or {}
+    step3 = intake.get("step3") or {}
+    step4 = intake.get("step4") or {}
+    step5 = intake.get("step5") or {}
 
     # Classify on the base description ONLY — before Q&A is appended.
     # Appending clarification Q&A first would pollute keyword scores because the
@@ -285,23 +398,80 @@ async def convert_to_case(
     # Enrich description with clarification Q&A for AI analysis (after classification)
     qa_list  = intake.get("clarification_qa") or []
     answered = [qa for qa in qa_list if qa.get("a")]
+    sections = [base_description]
     if answered:
-        qa_text     = "\n".join(f"Q: {qa['q']}\nA: {qa['a']}" for qa in answered)
-        description = f"{base_description}\n\nAdditional context from intake:\n{qa_text}"
-    else:
-        description = base_description
+        qa_text = "\n".join(f"Q: {qa['q']}\nA: {qa['a']}" for qa in answered)
+        sections.append(f"Additional context from intake:\n{qa_text}")
+
+    # Steps 4 and 5 were collected, stored, and then read by nothing: the
+    # analysis ran on step 3 alone. What the client wants out of the matter,
+    # what they can prove, and which side of it they are on are exactly the
+    # facts that shape a recommendation, so they belong in front of the model.
+    desired_outcome = (step5.get("desired_outcome") or "").strip()
+    if desired_outcome:
+        sections.append(f"Desired outcome:\n{desired_outcome}")
+
+    evidence_note  = (step4.get("evidence_description") or "").strip()
+    evidence_count = len(intake.get("evidence_files") or [])
+    evidence_bits  = []
+    if step4.get("has_evidence"):
+        evidence_bits.append("The client says they hold supporting evidence.")
+    if evidence_count:
+        evidence_bits.append(f"{evidence_count} file(s) were uploaded during intake.")
+    if evidence_note:
+        evidence_bits.append(evidence_note)
+    if evidence_bits:
+        sections.append("Evidence:\n" + " ".join(evidence_bits))
+
+    opposing_party = (step4.get("opposing_party") or "").strip()
+    if opposing_party:
+        sections.append(f"Opposing party:\n{opposing_party}")
+
+    party_role = step1.get("party_role")
+    if party_role:
+        sections.append(f"The client is the {party_role} in this matter.")
+
+    notes = (step5.get("additional_notes") or "").strip()
+    if notes:
+        sections.append(f"Additional notes:\n{notes}")
+
+    description = "\n\n".join(s for s in sections if s)
 
     case_data = {
         "case_type":            ai_case_type,          # AI-verified, not raw user pick
         "user_selected_type":   user_case_type,        # keep original for audit
         "type_was_corrected":   type_corrected,
         "province":             step1.get("province"),
-        "title":                description[:80],
+        # The TITLE stays the client's own account of the incident. The
+        # enriched description above is analysis input; a case titled "The
+        # client is the plaintiff in this matter" would read as generated.
+        "title":                (base_description[:80] or description[:80]),
         "description":          description,
         "intake_id":            intake["_id"],
+        # Carried onto the case so downstream work — matching, drafting, the
+        # lawyer's own view — can see which side the client is on and what they
+        # asked for, instead of trying to re-derive it from prose.
+        "party_role":           party_role,
+        "desired_outcome":      desired_outcome or None,
+        "urgency":              urgency or step2.get("urgency", "medium"),
+        "has_evidence":         bool(step4.get("has_evidence")) or evidence_count > 0,
+        "evidence_count":       evidence_count,
     }
-    case = await create_case(client_id, case_data)
-    case_id = case["_id"]
+    # Resume onto the case a previous failed attempt already opened, if there
+    # is one. Creating a second case here is what turns a retry into duplicate
+    # legal records for one dispute.
+    pinned_id = intake.get("case_id")
+    pinned    = await case_repo.find_by_id(pinned_id) if pinned_id else None
+    if pinned:
+        case_id = pinned_id
+        await case_repo.update_one({"_id": case_id}, {"$set": case_data})
+    else:
+        case = await create_case(client_id, case_data)
+        case_id = case["_id"]
+        # Written before the AI work below, not after it: everything from here
+        # to mark_completed can fail, and a case the intake does not know about
+        # is a case the next attempt will duplicate.
+        await intake_repo.attach_case(token, case_id)
     # Embedding is scheduled inside create_case
 
     # Use frontend-provided urgency if given; fall back to what the user stored in step 2
@@ -332,7 +502,13 @@ async def convert_to_case(
     # P5 — auto-match top 5 lawyers (non-blocking, best-effort)
     asyncio.create_task(_auto_match_lawyers(case_id))
 
-    await intake_repo.mark_completed(token, case_id)
+    await intake_repo.mark_completed(
+        token,
+        case_id,
+        ai_case_type=ai_case_type,
+        user_case_type=user_case_type,
+        type_was_corrected=type_corrected,
+    )
     return {
         "session_token":      token,
         "current_step":       5,
@@ -519,8 +695,34 @@ async def get_intake(token: str, client_id: str) -> dict:
     }
 
 
-def _validate_step(step: int, data: dict) -> None:
+def _validate_step(step: int, data: dict) -> dict:
+    """Check the payload against its step model and return the cleaned data.
+
+    Returns what gets STORED, not what arrived: the model coerces types, drops
+    nothing silently (unknown keys are an error, not a shrug), and normalises
+    the party role's casing. The required-field check runs first so its
+    messages — which the UI already surfaces — keep their existing wording.
+    """
     required = STEP_REQUIRED_FIELDS.get(step, [])
     missing  = [f for f in required if not str(data.get(f, "")).strip()]
     if missing:
         raise AppValidationError(f"Missing required fields for step {step}: {missing}")
+
+    model = STEP_SCHEMAS.get(step)
+    if model is None:
+        return data
+    try:
+        parsed = model(**data)
+    except PydanticValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(p) for p in e['loc']) or 'body'}: {e['msg']}"
+            for e in exc.errors()
+        )
+        raise AppValidationError(f"Invalid data for step {step} — {problems}") from exc
+    # mode="json" so enum members land in Mongo as the plain strings every
+    # reader already expects — Province/CaseType subclass str, so this would
+    # round-trip either way, but only by accident of their base class.
+    #
+    # exclude_unset keeps a step's stored shape to what the client actually
+    # sent, so re-saving one step never backfills defaults over another's data.
+    return parsed.model_dump(mode="json", exclude_unset=True)

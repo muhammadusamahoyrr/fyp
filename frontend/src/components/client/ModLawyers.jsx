@@ -9,6 +9,8 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import { searchLawyers, matchLawyers, submitReview, bookAppointment, getLawyerAvailability, listCases, listEngagements, requestEngagement, cancelEngagement } from "@/lib/api.js";
+import { useAuth } from "@/context/AuthContext.jsx";
+import { readIntakeValue } from "@/lib/intakeStorage.js";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), {
     ssr: false,
@@ -45,6 +47,8 @@ const ModLawyers = () => {
     const router = useNextRouter();
     const { selectLawyer, confirmAppointment, addNotification, caseType } = useCase();
     const toast = useToast();
+    const { user } = useAuth();
+    const lawyerUserId = user?._id || user?.id || null;
     const [query, setQuery] = useState("");
     const [filter, setFilter] = useState("All");
     const [activeView, setActiveView] = useState("list");
@@ -259,8 +263,11 @@ const ModLawyers = () => {
         return new Date(`${apptDate}T${timeStr}:00`) <= new Date();
     };
 
+    // Reads the same user-scoped key ModIntake writes. It used to read a
+    // shared `aai-case-id`, which on a browser that had signed in as someone
+    // else meant matching lawyers against a case this account cannot open.
     const getCaseId = () =>
-        searchParams?.get("case_id") || localStorage.getItem("aai-case-id") || null;
+        searchParams?.get("case_id") || readIntakeValue("aai-case-id", lawyerUserId) || null;
 
     const MAX_POLL_ATTEMPTS = 5;
     const POLL_INTERVAL_MS = 3000;
@@ -343,7 +350,7 @@ const ModLawyers = () => {
     // Auto-trigger match when arriving from intake, but only once backend is confirmed reachable.
     useEffect(() => {
         if (!backendUp) return;
-        const caseId = searchParams?.get("case_id") || localStorage.getItem("aai-case-id");
+        const caseId = getCaseId();
         if (caseId && !aiMatch) {
             handleAiMatch();
         }
