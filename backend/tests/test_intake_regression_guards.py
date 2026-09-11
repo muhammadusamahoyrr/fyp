@@ -222,10 +222,14 @@ def converted(monkeypatch):
 
     class CaseRepo:
         async def find_by_id(self, cid): return None
+        # No case exists for this intake yet — the ordinary first conversion.
+        async def find_by_intake(self, intake_id): return None
         async def update_one(self, f, u): return True
 
-    async def fake_create_case(client_id, data):
+    async def fake_create_case(client_id, data, status="open"):
+        # Mirrors the real signature; intake passes status=draft.
         seen["case_data"] = data
+        seen["case_status"] = status
         return {"_id": "case-x"}
 
     async def fake_classify(desc, user_sel):
@@ -300,3 +304,14 @@ async def test_the_case_title_stays_the_clients_own_words(converted):
     await intake_service.convert_to_case(TOKEN, CLIENT)
     await asyncio.sleep(0)
     assert converted["case_data"]["title"].startswith("My landlord locked my shop")
+
+
+async def test_conversion_creates_the_case_as_a_draft(converted):
+    """The case must exist for the analysis, but not as a live case.
+
+    Creating it OPEN is what made the "review and confirm before saving" screen
+    describe a save that had already happened.
+    """
+    await intake_service.convert_to_case(TOKEN, CLIENT)
+    await asyncio.sleep(0)
+    assert converted["case_status"] == "draft"

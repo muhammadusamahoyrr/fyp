@@ -87,6 +87,10 @@ async def request_engagement(client_id: str, data: dict) -> dict:
         raise ConflictError("This case already has a lawyer assigned")
     if case.get("status") in (CaseStatus.CLOSED.value, CaseStatus.DISMISSED.value):
         raise AppValidationError("Cannot request a lawyer for a closed case")
+    # A draft is the client's own unconfirmed work. Sending it to a lawyer
+    # would put a real person's time against a case that does not exist yet.
+    from app.services.case_service import assert_not_draft
+    assert_not_draft(case, "be sent to a lawyer")
 
     pending = await engagement_repo.find_pending_for_case(case["_id"])
     if pending:

@@ -383,6 +383,12 @@ export async function updateCase(caseId, updates) {
   });
 }
 
+// Promote the client's draft case to open. The end of the intake.
+// Idempotent: a second press returns the same already-open case.
+export async function confirmCase(caseId) {
+  return apiFetch(`/cases/${caseId}/confirm`, { method: 'PATCH' });
+}
+
 export async function getCaseTimeline(caseId) {
   return apiFetch(`/cases/${caseId}/timeline`);
 }

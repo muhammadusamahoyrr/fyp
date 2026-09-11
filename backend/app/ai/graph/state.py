@@ -145,6 +145,21 @@ class AgentState(TypedDict):
     # distinguish "checked and it held" from "could not check" — and the second
     # used to be reported as the first. Written by intake_hallucination_node.
     grounding_status: str
+    # HOW the intake citations were tied to their evidence: "id" when the model
+    # named the evidence ids, "textual" when it did not and they were parsed out
+    # chat-style, "none" when there was nothing to bind. Counts per outcome sit
+    # in `citation_binding`.
+    #
+    # DECLARED HERE BECAUSE LANGGRAPH DROPS WHAT IS NOT. A node may return any
+    # key it likes; only keys in this schema survive into the merged state. Both
+    # of these were returned by intake_hallucination_node and silently discarded
+    # on the way out of the graph, so the service always read `None` and the
+    # analysis always recorded "none" — the drop to a weaker binding route, the
+    # one signal that exists to make that degradation visible, could never be
+    # observed. Unit tests on the node could not catch it: they read the node's
+    # own return value, which is where the field still existed.
+    binding_mode: str
+    citation_binding: dict
 
     # ── Convergence controller ────────────────────────────────────────────────
     prev_relevance_score:   float

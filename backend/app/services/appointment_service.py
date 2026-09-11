@@ -65,6 +65,11 @@ async def book_appointment(
             raise NotFoundError("Case")
         if case.get("client_id") != client_id:
             raise ForbiddenError("Case does not belong to you")
+        # Same rule as engagements: a consultation booked against an
+        # unconfirmed case commits a lawyer's diary to something the client has
+        # not yet said they want.
+        from app.services.case_service import assert_not_draft
+        assert_not_draft(case, "have appointments booked against it")
 
     now = datetime.now(timezone.utc)
     end_at = scheduled_at + timedelta(minutes=duration_minutes)

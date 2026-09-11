@@ -65,6 +65,21 @@ async def update_case(
     )
 
 
+@router.patch("/{case_id}/confirm", response_model=CaseOut)
+async def confirm_case(
+    case_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Promote the client's draft case to open.
+
+    The end of the intake. Until this call the case exists only so the analysis
+    had something real to run against — it cannot be sent to a lawyer, matched,
+    or booked against. Safe to call twice: a second press returns the same
+    already-open case rather than an error.
+    """
+    return await case_service.confirm_case(case_id, current_user["_id"])
+
+
 @router.get("/{case_id}/timeline", response_model=TimelineResponse)
 async def get_timeline(
     case_id: str,

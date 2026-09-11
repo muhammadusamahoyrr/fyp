@@ -6,10 +6,11 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "./CaseContext.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge, Tooltip } from "@/components/shared/shared.jsx";
-import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence, updateCase } from "@/lib/api.js";
+import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence, updateCase, confirmCase } from "@/lib/api.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { readIntakeValue, writeIntakeValue, clearIntakeValue } from "@/lib/intakeStorage.js";
+import { escapeHtml } from "@/lib/escapeHtml.js";
 
 // Encode Float32 PCM as 16-bit mono WAV (no ffmpeg on backend)
 function _pcmToWav(samples, sampleRate) {
@@ -92,6 +93,17 @@ const GROUNDING_NOTE = {
     pipeline_failed: "Automated analysis was unavailable for this case. Please have a qualified lawyer review your situation.",
     unparseable: "The analysis could not be verified. Please confirm these steps with a qualified lawyer.",
     no_actions: "No specific steps were produced for this case.",
+    // A statute was named that does NOT appear in the law found for this case.
+    // The generic "not verified" note below would badly undersell that: it
+    // reads as a missing check, when what happened is that a citation may be
+    // invented. This is the one status a reader most needs stated plainly.
+    citations_unverified: "One or more laws cited here could not be matched to any legislation found for your case, and may not exist as stated. Do not rely on these citations — have a qualified lawyer check them.",
+    // The verifier passed the analysis but its own per-step assessment
+    // contradicted that, so the pass was withdrawn.
+    claims_disagree: "The verification of these steps was inconsistent, so they are being treated as unverified. Please confirm them with a qualified lawyer.",
+    // Nothing in the analysis rested on a law section that could be resolved,
+    // so there was nothing to check it against.
+    no_bound_citations: "These steps could not be tied to any specific law section, so they have not been checked. Please confirm them with a qualified lawyer.",
     unverified: "These steps have not been verified against Pakistani law. Please confirm them with a qualified lawyer.",
 };
 
@@ -138,6 +150,10 @@ const ModIntake = () => {
     const [intakeToken, setIntakeToken] = useState(null);
     const [intakeSubmitting, setIntakeSubmitting] = useState(false);
     const [converting, setConverting] = useState(false);
+    const [confirming, setConfirming] = useState(false);
+    // Whether the draft has been promoted. Drives the final screen, which
+    // must not claim a case is ready while it is still a draft.
+    const [caseConfirmed, setCaseConfirmed] = useState(false);
     const [caseId, setCaseId] = useState(null);
     // The category the CASE currently holds, as opposed to the one selected in
     // the UI. Keeping them apart is what lets the final step tell an actual
@@ -180,16 +196,28 @@ const ModIntake = () => {
     const progress = (completedSteps / steps.length) * 100;
 
     // ── Export helpers ─────────────────────────────────────────────
+    //
+    // EVERY value below goes through esc(). The print view is built as a string
+    // and handed to document.write(), so an unescaped value is markup: a
+    // description containing an <img onerror> tag executed in a popup that
+    // shares this origin — able to read the intake token out of localStorage
+    // and call the API as the signed-in client.
+    //
+    // The client's own description is the obvious source, but not the only one:
+    // the AI summary, the law list and each citation's note are model output
+    // derived from retrieved corpus text, and none of it is trusted markup.
+    const esc = escapeHtml;
+
     const _buildPrintHTML = () => {
         const caseTypeLabel = CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput;
         const provinceLabel = PROVINCES.find(p => p.value === province)?.label || province;
         const date = new Date().toLocaleDateString("en-PK", { year: "numeric", month: "long", day: "numeric" });
 
         const laws = aiStructured?.applicable_laws?.length
-            ? aiStructured.applicable_laws.map((l, i) => `<li>${i + 1}. ${l}</li>`).join("")
+            ? aiStructured.applicable_laws.map((l, i) => `<li>${i + 1}. ${esc(l)}</li>`).join("")
             : "<li>Not available</li>";
         const actions = aiStructured?.recommended_actions?.length
-            ? aiStructured.recommended_actions.map((a, i) => `<li>${i + 1}. ${a}</li>`).join("")
+            ? aiStructured.recommended_actions.map((a, i) => `<li>${i + 1}. ${esc(a)}</li>`).join("")
             : "<li>Not available</li>";
 
         return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
@@ -216,22 +244,22 @@ const ModIntake = () => {
 <div class="header">
   <div><div class="brand">Attorney.AI</div><h1>Legal Case Summary</h1></div>
   <div class="meta">
-    <div>Case ID: ${caseId ? `…${caseId.slice(-8)}` : "Pending"}</div>
-    <div>Date: ${date}</div>
+    <div>Case ID: ${caseId ? `…${esc(caseId.slice(-8))}` : "Pending"}</div>
+    <div>Date: ${esc(date)}</div>
     <div>Status: Ready</div>
   </div>
 </div>
 
 <h2>Case Details</h2>
 <div class="grid">
-  <div class="field"><div class="field-label">Case Type</div><div class="field-value">${caseTypeLabel}</div></div>
-  <div class="field"><div class="field-label">Province</div><div class="field-value">${provinceLabel}</div></div>
-  <div class="field"><div class="field-label">Your Role</div><div class="field-value">${role || "Not specified"}</div></div>
-  <div class="field"><div class="field-label">Urgency</div><div class="field-value">${urgency}</div></div>
+  <div class="field"><div class="field-label">Case Type</div><div class="field-value">${esc(caseTypeLabel)}</div></div>
+  <div class="field"><div class="field-label">Province</div><div class="field-value">${esc(provinceLabel)}</div></div>
+  <div class="field"><div class="field-label">Your Role</div><div class="field-value">${esc(role || "Not specified")}</div></div>
+  <div class="field"><div class="field-label">Urgency</div><div class="field-value">${esc(urgency)}</div></div>
 </div>
 
 <h2>Case Summary</h2>
-<div class="summary">${aiStructured?.summary || description || "Not available"}</div>
+<div class="summary">${esc(aiStructured?.summary || description || "Not available")}</div>
 
 <h2>Applicable Laws</h2>
 <ul>${laws}</ul>
@@ -239,10 +267,10 @@ const ModIntake = () => {
 <h2>Recommended Actions</h2>
 <ul>${actions}</ul>
 ${aiStructured?.grounding_status && aiStructured.grounding_status !== "grounded"
-                ? `<p class="disclaimer" style="margin-top:8px">⚠️ ${GROUNDING_NOTE[aiStructured.grounding_status] || GROUNDING_NOTE.unverified}</p>`
+                ? `<p class="disclaimer" style="margin-top:8px">⚠️ ${esc(GROUNDING_NOTE[aiStructured.grounding_status] || GROUNDING_NOTE.unverified)}</p>`
                 : ""}
 
-${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${aiStructured.risk_level}">${aiStructured.risk_level} risk</span>` : ""}
+${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${esc(aiStructured.risk_level)}">${esc(aiStructured.risk_level)} risk</span>` : ""}
 
 <div class="disclaimer">
   <strong>Disclaimer:</strong> This case summary is generated by an AI system for general informational purposes only and does not constitute legal advice. Please consult a qualified Pakistani lawyer before taking any legal action.
@@ -322,6 +350,11 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
             return "Please describe your legal issue before continuing";
         if (target >= 4 && !caseId)
             return "Your case is still being prepared — finish step 3 first";
+        // Step 5 sits AFTER the confirmation, and the confirm button is the
+        // only thing that promotes the draft. Reaching it by clicking the
+        // stepper would show a "complete" screen for a case still in draft.
+        if (target >= 5 && !caseConfirmed)
+            return "Confirm your case on this screen first";
         return null;
     };
 
@@ -343,6 +376,58 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
             return () => clearTimeout(timer);
         }
     }, [step]);
+
+    // Put the form back the way the client left it.
+    //
+    // The token was the ONLY thing a refresh restored, so the browser held a
+    // session pointing at a half-filled intake and showed every field blank.
+    // The answers were on the server the whole time; nothing asked for them.
+    //
+    // Only fills fields that are still empty. A restore that overwrote what the
+    // client is currently typing would be a worse bug than the one it fixes —
+    // this effect can run after the user has already started.
+    const restoreFromServer = (data) => {
+        const steps = data?.steps || {};
+        const s1 = steps["1"] || {};
+        const s2 = steps["2"] || {};
+        const s3 = steps["3"] || {};
+        const s4 = steps["4"] || {};
+        const s5 = steps["5"] || {};
+
+        if (s1.party_role) setRole(r => r || (s1.party_role === "plaintiff" ? "Plaintiff" : "Defendant"));
+        if (s1.province) setProvince(p => p || s1.province);
+        if (s2.case_type) setCaseTypeInput(c => c || s2.case_type);
+        if (s2.urgency) setUrgency(u => (u === "medium" ? s2.urgency : u));
+        if (s3.incident_description) setDescription(d => d || s3.incident_description);
+        if (typeof s4.has_evidence === "boolean") setHasEvidence(h => h || s4.has_evidence);
+        if (s4.evidence_description) setEvidenceDesc(e => e || s4.evidence_description);
+        if (s5.desired_outcome) setDesiredOutcome(o => o || s5.desired_outcome);
+
+        // Uploaded files, so the ✕ and the list describe what the SERVER holds
+        // rather than what this page happens to remember having sent.
+        if (Array.isArray(data?.evidence_files) && data.evidence_files.length) {
+            setEvidenceFiles(prev => (prev.length ? prev : data.evidence_files));
+        }
+
+        // Clarification is an ordered Q&A list; rounds are positions in it.
+        const qa = Array.isArray(data?.clarification_qa) ? data.clarification_qa : [];
+        if (qa.length) {
+            const setQ = [setClarifyQ1, setClarifyQ2, setClarifyQ3, setClarifyQ4];
+            const setA = [setClarifyA1, setClarifyA2, setClarifyA3, setClarifyA4];
+            qa.slice(0, 4).forEach((entry, i) => {
+                if (entry?.q) setQ[i](v => v || entry.q);
+                if (entry?.a) setA[i](v => v || entry.a);
+            });
+            // The round to resume on is the first unanswered question, or done.
+            const firstOpen = qa.findIndex(e => !e?.a);
+            if (firstOpen === -1) {
+                setClarifyDone(true);
+                setClarifyRound(5);
+            } else {
+                setClarifyRound(r => r || Math.min(firstOpen + 1, 4));
+            }
+        }
+    };
 
     // Start or resume intake session on mount.
     //
@@ -368,11 +453,18 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                 if (data.case_id) {
                     setCaseId(data.case_id);
                     scopedSet("aai-case-id", data.case_id);
+                    // The CASE says whether it was confirmed; the intake only
+                    // says a case was produced. Without this a refresh would
+                    // offer to confirm an already-open case.
+                    if (data.case_status && data.case_status !== "draft") {
+                        setCaseConfirmed(true);
+                    }
                 }
                 if (data.ai_structured_case?.summary &&
                     data.ai_structured_case.summary !== "pending") {
                     setAiStructured(data.ai_structured_case);
                 }
+                restoreFromServer(data);
                 if (data.completed) setStep(s => (s < 4 ? 4 : s));
             });
         } else {
@@ -416,7 +508,14 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                 province,
                 party_role: role.toLowerCase(),
             });
-            if (error) toast.show("Could not save — check your connection and try again.", "error", 3000);
+            // STOP. This used to warn and advance anyway, so a client whose save
+            // failed carried on through the whole questionnaire while the server
+            // held none of it — and the loss only surfaced at conversion, as a
+            // "steps not completed" error about a step they had filled in.
+            if (error) {
+                toast.show("Could not save — check your connection and try again.", "error", 3500);
+                return;
+            }
         }
         setStep(2);
     };
@@ -439,7 +538,14 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                 incident_date: null,
                 incident_location: null,
             });
-            if (r2.error || r3.error) toast.show("Could not save — check your connection and try again.", "error", 3000);
+            // Same rule as step 1: the description is the single most important
+            // thing the client types, and advancing without it stored means the
+            // AI analysis later runs on nothing.
+            if (r2.error || r3.error) {
+                toast.show("Could not save — check your connection and try again.", "error", 3500);
+                setClarifyLoading(false);
+                return;
+            }
         }
         setStep(3);
         // P2 — fetch Q1 immediately after entering step 3
@@ -567,6 +673,36 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
         setStep(4);
     };
 
+    // ── Step 4: confirm the draft ──────────────────────────────────
+    //
+    // This button used to show "✅ Case saved!" and advance the screen. It
+    // called nothing: the case had been created and made live back at step 3,
+    // so the subtitle inviting the client to "review and confirm before saving"
+    // described a save that had already happened and a confirmation with
+    // nothing to confirm.
+    //
+    // The case is now created as a DRAFT, and this is the call that makes it
+    // real. Until it lands the case cannot be sent to a lawyer, matched, or
+    // booked against.
+    const handleConfirmCase = async () => {
+        if (!caseId) {
+            // No case to confirm — the conversion never completed. Advancing
+            // would show a "complete" screen for something that does not exist.
+            toast.show("Your case is not ready yet — go back and finish step 3.", "warn", 3500);
+            return;
+        }
+        setConfirming(true);
+        const { error } = await confirmCase(caseId);
+        setConfirming(false);
+        if (error) {
+            toast.show(error.message || "Could not confirm your case. Please try again.", "error", 4000);
+            return;   // do NOT advance; the case is still a draft
+        }
+        setCaseConfirmed(true);
+        toast.show("Case confirmed — you can now choose a lawyer.", "success", 3000);
+        setStep(5);
+    };
+
     // ── Final submit (Step 5) ──────────────────────────────────────
     const handleSubmit = async () => {
         setIntakeSubmitting(true);
@@ -601,8 +737,21 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
             time: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
             desc: `Case structured — ${role} · ${CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput} · ${province}`,
         });
-        toast.show("Case submitted for attorney review!", "success", 3000);
-        setTimeout(() => toast.show("You'll hear from us within 2 hours", "info", 2000), 3000);
+        // WHAT ACTUALLY HAPPENED, not what sounds finished.
+        //
+        // This said "Case submitted for attorney review!" followed by "You'll
+        // hear from us within 2 hours". Conversion creates an OPEN case. It
+        // assigns no lawyer, notifies no lawyer, and starts no clock — there is
+        // nobody reviewing it and no two-hour commitment behind it. A client who
+        // believed that would wait instead of choosing a lawyer, which is the
+        // one action that actually moves their matter forward.
+        toast.show("Your case has been created.", "success", 3000);
+        setTimeout(
+            () => toast.show(
+                "Next: choose a lawyer to send it to — nobody is reviewing it yet.",
+                "info", 4500),
+            3000,
+        );
         setIntakeSubmitting(false);
     };
 
@@ -833,9 +982,17 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                         {/* Top nav bar */}
                         <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
                             <BtnOutline onClick={() => setStep(1)} style={{ fontSize: 13, padding: "8px 16px", border: "none" }}>← Back</BtnOutline>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 20, border: `1.5px solid ${t.warn}40`, background: `${t.warn}15`, color: t.warn, fontSize: 12, fontWeight: 700 }}>
-                                📁 Case AIQ-2026-0042
-                            </div>
+                            {/* The REAL case reference, or nothing.
+                                This was a hardcoded file number, shown to every
+                                client on every intake, on a screen where no case
+                                exists yet. A fabricated reference on a legal
+                                record is not decoration: a client could quote it
+                                to a court or to a lawyer. */}
+                            {caseId && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 20, border: `1.5px solid ${t.warn}40`, background: `${t.warn}15`, color: t.warn, fontSize: 12, fontWeight: 700 }}>
+                                    📁 Case …{caseId.slice(-8)}
+                                </div>
+                            )}
                             <div style={{ flex: 1 }}></div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <span style={{ fontSize: 12, fontWeight: 600, color: t.textMuted, whiteSpace: "nowrap" }}>{T("Urgency", "فوری نوعیت")}</span>
@@ -1253,7 +1410,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                     <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
                         <BtnOutline onClick={() => setStep(3)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
                         <div style={{ flex: 1 }} />
-                        <BtnPrimary onClick={() => { toast.show("✅ Case saved!", "success"); setStep(5); }} style={{ fontSize: 13, padding: "8px 18px" }}>{T("Confirm & Save Case →", "تصدیق کریں اور کیس محفوظ کریں ←")}</BtnPrimary>
+                        <BtnPrimary disabled={confirming} onClick={handleConfirmCase} style={{ fontSize: 13, padding: "8px 18px", opacity: confirming ? 0.7 : 1 }}>{confirming ? T("Confirming…", "تصدیق ہو رہی ہے…") : T("Confirm & Save Case →", "تصدیق کریں اور کیس محفوظ کریں ←")}</BtnPrimary>
                     </div>
                     <div>
                         <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI-Generated <em>Case Summary</em></div>
@@ -1488,7 +1645,11 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                             <Card style={{ padding: 20, border: `1px solid ${t.primary}50`, background: t.primaryGlow, textAlign: "center" }}>
                                 <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
                                 <div style={{ fontFamily: "'Fraunces',serif", fontSize: 18, fontWeight: 600, color: t.primary, marginBottom: 6 }}>{T("Case Intake Complete", "کیس کی درخواست مکمل")}</div>
-                                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>{T("Your case is structured and ready for review", "آپ کا کیس ترتیب پا چکا ہے اور جائزے کے لیے تیار ہے")}</div>
+                                {/* "ready for review" implies somebody is about to review it. Nothing
+     is: conversion creates an open case and stops. The next move is the
+     client's, and saying so is the difference between them choosing a
+     lawyer today and waiting for a call that was never scheduled. */}
+                                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>{T("Your case is structured. Choose a lawyer to send it to — it has not been sent to anyone yet.", "آپ کا کیس ترتیب پا چکا ہے۔ اسے بھیجنے کے لیے وکیل منتخب کریں — ابھی یہ کسی کو نہیں بھیجا گیا۔")}</div>
                                 <div style={{ textAlign: "left" }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>Case ID</span>

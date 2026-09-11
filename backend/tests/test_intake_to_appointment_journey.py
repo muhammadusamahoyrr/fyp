@@ -1,6 +1,6 @@
 """The whole client journey, in one pass, against a real database.
 
-    intake → case → matching → engagement → appointment
+    intake → case (DRAFT) → client confirms → matching → engagement → appointment
 
 Every stage of this had tests. The SEAM between the stages had none, and every
 defect found in the September audit lived in a seam: data that step 1 collected
@@ -119,6 +119,18 @@ async def _walk_intake(client_id: str) -> dict:
     return {"token": token, **converted}
 
 
+async def _confirm(case_id: str, client_id: str) -> None:
+    """The step the client takes before anyone else may act on the case.
+
+    Conversion now produces a DRAFT: it exists so the analysis had a real
+    `case_id` to run against, and it cannot be matched, engaged or booked
+    against until the client confirms it. Every stage below this point is
+    downstream of that confirmation, which is why it belongs in the journey
+    rather than in a fixture — it IS one of the handoffs being tested.
+    """
+    await case_service.confirm_case(case_id, client_id)
+
+
 # ── the journey, one stage at a time ────────────────────────────────────────
 
 async def test_intake_produces_a_case_the_client_can_open(journey_parties, offline_ai):
@@ -128,8 +140,13 @@ async def test_intake_produces_a_case_the_client_can_open(journey_parties, offli
     assert result["case_id"]
 
     case = await case_service.get_case(result["case_id"], client_id, "client")
-    assert case["status"] == CaseStatus.OPEN.value
+    # A draft until the client confirms — the case exists for the analysis.
+    assert case["status"] == CaseStatus.DRAFT.value
     assert case["province"] == "punjab"
+
+    await _confirm(result["case_id"], client_id)
+    confirmed = await case_service.get_case(result["case_id"], client_id, "client")
+    assert confirmed["status"] == CaseStatus.OPEN.value
 
 
 async def test_the_case_carries_what_the_intake_collected(journey_parties, offline_ai):
@@ -175,6 +192,7 @@ async def test_a_category_change_survives_into_matching(journey_parties, offline
 async def test_matching_runs_on_the_created_case(journey_parties, offline_ai):
     client_id = journey_parties["client_id"]
     result = await _walk_intake(client_id)
+    await _confirm(result["case_id"], client_id)
 
     matched = await lawyer_service.match_lawyers_for_case(result["case_id"], top_n=5)
 
@@ -187,6 +205,7 @@ async def test_engagement_assigns_the_lawyer_to_that_same_case(journey_parties, 
     lawyer_id = journey_parties["lawyer_id"]
     result = await _walk_intake(client_id)
     case_id = result["case_id"]
+    await _confirm(case_id, client_id)
 
     requested = await engagement_service.request_engagement(
         client_id, {"case_id": case_id, "lawyer_id": lawyer_id,
@@ -215,6 +234,7 @@ async def test_the_appointment_lands_on_the_engaged_case(journey_parties, offlin
     lawyer_id = journey_parties["lawyer_id"]
     result = await _walk_intake(client_id)
     case_id = result["case_id"]
+    await _confirm(case_id, client_id)
 
     requested = await engagement_service.request_engagement(
         client_id, {"case_id": case_id, "lawyer_id": lawyer_id, "message": None})
@@ -267,3 +287,25 @@ async def test_invalid_step_data_never_reaches_the_case(journey_parties, offline
     with pytest.raises(AppValidationError):
         await intake_service.save_step(
             token, 2, {"case_type": "banana", "urgency": "high"}, client_id)
+
+
+async def test_the_journey_cannot_skip_the_confirmation(journey_parties, offline_ai):
+    """The seam the draft status creates.
+
+    Every stage after conversion is downstream of the client saying yes. A
+    journey that reached a lawyer without it would put a real person's time
+    against a case its owner had not agreed to file.
+    """
+    from app.core.exceptions import AppValidationError
+
+    client_id = journey_parties["client_id"]
+    lawyer_id = journey_parties["lawyer_id"]
+    result = await _walk_intake(client_id)
+
+    with pytest.raises(AppValidationError):
+        await engagement_service.request_engagement(
+            client_id, {"case_id": result["case_id"], "lawyer_id": lawyer_id,
+                        "message": "Take it now"})
+
+    with pytest.raises(AppValidationError):
+        await lawyer_service.match_lawyers_for_case(result["case_id"], top_n=5)

@@ -91,12 +91,43 @@ class IntakeResponse(BaseModel):
     type_was_corrected: bool = False
 
 
+class IntakeEvidenceFile(BaseModel):
+    """An uploaded file, as the CLIENT may see it.
+
+    Deliberately not the stored shape: `evidence_files` entries also carry
+    `path`, the absolute location on the server's disk. That is infrastructure
+    detail with no use to a browser, and handing it out tells an attacker the
+    upload root and the naming scheme for free.
+    """
+
+    file_id: str
+    filename: str
+    content_type: str | None = None
+    size: int | None = None
+
+
 class IntakeDetailResponse(BaseModel):
     session_token: str
     current_step: int
     completed: bool
     case_id: str | None
+    # `draft` until the client confirms, then `open`. Returned so a refresh can
+    # tell a case that is waiting for confirmation from one that is live —
+    # without it the UI would offer to confirm an already-open case, or claim a
+    # draft was ready.
+    case_status: str | None = None
     ai_structured_case: dict | None = None
+    # ── What the client already filled in ────────────────────────────────────
+    #
+    # This response used to carry the token, the step number, and nothing the
+    # client had typed. So a refresh restored a token pointing at a half-filled
+    # intake and a form with every field blank: the data was on the server, the
+    # browser had no way to ask for it, and the client retyped their account of
+    # their own legal problem — or, worse, continued from step 3 with steps 1
+    # and 2 apparently empty.
+    steps: dict[str, Any] = {}
+    clarification_qa: list[dict] = []
+    evidence_files: list[IntakeEvidenceFile] = []
 
 
 class IntakeClarifyRequest(BaseModel):

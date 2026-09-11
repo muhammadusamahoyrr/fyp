@@ -87,6 +87,15 @@ class FakeCaseRepo:
     async def find_by_id(self, case_id: str):
         return self.cases.get(case_id)
 
+    async def find_by_intake(self, intake_id: str):
+        """The crash-recovery lookup. Modelled because the service calls it.
+
+        A case whose creation was never pinned to its intake is findable only
+        this way; without it, `uniq_case_per_intake` locks the client out.
+        """
+        return next((c for c in self.cases.values()
+                     if c.get("intake_id") == intake_id), None)
+
     async def update_one(self, filter: dict, update: dict) -> bool:
         case = self.cases.get(filter["_id"])
         if case is None:
@@ -119,18 +128,24 @@ def wired(monkeypatch):
     """Patch the module's collaborators; hand back the fakes and a call log."""
     intakes = FakeIntakeRepo(_intake_doc())
     cases = FakeCaseRepo()
-    log = {"created": [], "analysed": 0, "matched": []}
+    log = {"created": [], "analysed": 0, "matched": [], "statuses": []}
 
     monkeypatch.setattr(intake_service, "intake_repo", intakes)
     monkeypatch.setattr(intake_service, "case_repo", cases)
 
-    async def fake_create_case(client_id, data):
+    async def fake_create_case(client_id, data, status="open"):
+        # `status` mirrors the real signature: intake creates a DRAFT, and a
+        # double that refused the argument would fail every conversion rather
+        # than test one.
+        #
         # Every await here is a real scheduling point, the same as a Mongo
         # round trip — this is where a concurrent request gets its turn.
         await asyncio.sleep(0)
         case_id = f"case-{len(log['created']) + 1}"
-        cases.cases[case_id] = {"_id": case_id, "client_id": client_id, **data}
+        cases.cases[case_id] = {"_id": case_id, "client_id": client_id,
+                                "status": status, **data}
         log["created"].append(case_id)
+        log["statuses"].append(status)
         return {"_id": case_id}
 
     async def fake_classify(description, user_selected):

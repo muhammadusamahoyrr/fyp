@@ -9,6 +9,7 @@ from pathlib import Path
 from app.core.config import settings
 from pydantic import ValidationError as PydanticValidationError
 
+from app.core.constants import CaseStatus
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.repositories.intake_repo import IntakeRepository
 from app.repositories.case_repo import CaseRepository
@@ -192,6 +193,24 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
     # Save the answer to the last unanswered question
     if answer and qa_list and qa_list[-1].get("a") is None:
         qa_list[-1]["a"] = answer.strip()
+
+    # A QUESTION ALREADY OUTSTANDING IS THE ANSWER TO THIS CALL.
+    #
+    # Idempotency, and it is the natural kind rather than a bolted-on token: if
+    # the last question has no answer and this call supplied none, the client is
+    # asking what to answer — and that is a question that already exists.
+    #
+    # Without this a retry after a dropped response generated ANOTHER question
+    # and appended it, so the client saw a different question than the one they
+    # were about to answer, the list grew a round they never completed, and an
+    # LLM call was spent to make things worse. A double-submitted button did the
+    # same thing.
+    if qa_list and qa_list[-1].get("a") is None and not answer:
+        outstanding = qa_list[-1].get("q") or ""
+        if outstanding:
+            answered = sum(1 for qa in qa_list if qa.get("a"))
+            return {"question": outstanding, "done": False,
+                    "round": min(answered + 1, _MAX_CLARIFY_ROUNDS)}
 
     # Already done 2 rounds → force proceed
     answered_rounds = sum(1 for qa in qa_list if qa.get("a"))
@@ -460,13 +479,44 @@ async def _convert_claimed_intake(
     # Resume onto the case a previous failed attempt already opened, if there
     # is one. Creating a second case here is what turns a retry into duplicate
     # legal records for one dispute.
+    #
+    # TWO places to look, and the second one is the crash path.
+    #
+    # `intake.case_id` covers an attempt that failed AFTER pinning the case. It
+    # does NOT cover a process killed between the case insert and that pin: the
+    # case exists, the intake has no idea, and `uniq_case_per_intake` then
+    # refuses every retry. Before this lookup that surfaced as
+    # "Could not generate a unique case number — please try again", five times
+    # over, for ever — a client permanently unable to convert their own intake,
+    # told to retry the one thing that could never work.
+    #
+    # Searching by `intake_id` finds the orphan and adopts it, which is what the
+    # index is for: it guarantees there is at most one, so whatever comes back
+    # IS this intake's case.
     pinned_id = intake.get("case_id")
     pinned    = await case_repo.find_by_id(pinned_id) if pinned_id else None
+    if not pinned:
+        pinned = await case_repo.find_by_intake(intake["_id"])
+        if pinned:
+            logger.warning(
+                "intake %s had an unpinned case %s — adopting it rather than "
+                "creating a second", token, pinned["_id"])
+
     if pinned:
-        case_id = pinned_id
+        case_id = pinned["_id"]
         await case_repo.update_one({"_id": case_id}, {"$set": case_data})
+        # Re-pin: the crash path arrives here with the intake still not knowing
+        # about its own case, and leaving it that way would need this recovery
+        # to run again on every future attempt.
+        if intake.get("case_id") != case_id:
+            await intake_repo.attach_case(token, case_id)
     else:
-        case = await create_case(client_id, case_data)
+        # DRAFT, not open. The analysis below needs a real `case_id` — it is
+        # bound to one and provenance records it — so the case has to exist
+        # before the client has confirmed anything. Creating it OPEN meant the
+        # client was invited to "review and confirm" a case that was already
+        # live, and the confirm button had nothing left to do.
+        case = await create_case(client_id, case_data, status=CaseStatus.DRAFT.value)
         case_id = case["_id"]
         # Written before the AI work below, not after it: everything from here
         # to mark_completed can fail, and a case the intake does not know about
@@ -502,8 +552,9 @@ async def _convert_claimed_intake(
             }}
         )
 
-    # P5 — auto-match top 5 lawyers (non-blocking, best-effort)
-    asyncio.create_task(_auto_match_lawyers(case_id))
+    # Matching does NOT run here any more. A draft cannot be matched — it is
+    # not a case anyone should be ranked against — so this moved to the moment
+    # the client confirms. See case_service.confirm_case.
 
     await intake_repo.mark_completed(
         token,
@@ -764,16 +815,64 @@ async def upload_evidence(token: str, client_id: str, file) -> dict:
     }
 
 
+def _public_evidence(files: list[dict] | None) -> list[dict]:
+    """Evidence metadata a browser may see.
+
+    `path` is dropped. It is the absolute location on the server's disk, of no
+    use to the client, and handing it out discloses the upload root and the
+    file-naming scheme to anyone who asks for their own intake.
+    """
+    return [
+        {
+            "file_id":      f.get("file_id", ""),
+            "filename":     f.get("filename", ""),
+            "content_type": f.get("content_type"),
+            "size":         f.get("size"),
+        }
+        for f in (files or [])
+        if f.get("file_id")
+    ]
+
+
 async def get_intake(token: str, client_id: str) -> dict:
+    """Everything needed to put the client back where they were.
+
+    The response used to be the token, the step number and the AI analysis. A
+    refresh therefore restored a session pointing at a half-filled intake and a
+    form with every field blank — the answers were on the server and the browser
+    had no way to ask for them, so the client retyped their own account of their
+    legal problem, or carried on from step 3 with the earlier steps apparently
+    empty.
+    """
     intake = await intake_repo.find_by_token(token)
     if not intake or intake.get("client_id") != client_id:
         raise NotFoundError("Intake session")
+
+    # Keyed "1".."5" rather than a list: the client reads specific steps back,
+    # and a positional array makes a missing middle step ambiguous.
+    steps = {
+        str(i): intake.get(f"step{i}")
+        for i in range(1, 6)
+        if intake.get(f"step{i}") is not None
+    }
+
+    # Read from the CASE, not from the intake: the intake records that a case
+    # was produced, the case itself records whether the client confirmed it.
+    case_status = None
+    if intake.get("case_id"):
+        case = await case_repo.find_by_id(intake["case_id"])
+        case_status = (case or {}).get("status")
+
     return {
         "session_token":     token,
         "current_step":      intake.get("current_step", 1),
         "completed":         intake.get("completed", False),
         "case_id":           intake.get("case_id"),
+        "case_status":       case_status,
         "ai_structured_case": intake.get("ai_structured_case"),
+        "steps":             steps,
+        "clarification_qa":  list(intake.get("clarification_qa") or []),
+        "evidence_files":    _public_evidence(intake.get("evidence_files")),
     }
 
 

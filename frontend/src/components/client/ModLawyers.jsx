@@ -111,15 +111,21 @@ const ModLawyers = () => {
         refreshEngagements();
     }, []);
 
-    // Cases you can still hire a lawyer for: no lawyer yet, not closed,
-    // and no request already pending on them.
+    // Cases you can still hire a lawyer for: CONFIRMED, no lawyer yet, not
+    // closed, and no request already pending on them.
+    //
+    // `draft` is excluded because the server refuses it — a draft is a case the
+    // client has not confirmed at the end of intake, and sending one to a
+    // lawyer is rejected. Offering it here would put a case in the picker whose
+    // only possible outcome is an error the client cannot act on from this
+    // screen; the action they actually need is on the intake page.
     const pendingByCase = useMemo(() => {
         const m = {};
         myEngagements.filter(e => e.status === "requested").forEach(e => { m[e.case_id] = e; });
         return m;
     }, [myEngagements]);
     const hireableCases = useMemo(() =>
-        myCases.filter(c => !c.lawyer_id && !["closed", "dismissed"].includes(c.status) && !pendingByCase[c._id]),
+        myCases.filter(c => !c.lawyer_id && !["draft", "closed", "dismissed"].includes(c.status) && !pendingByCase[c._id]),
         [myCases, pendingByCase]);
 
     // Engagement state for one lawyer: "requested" | "accepted" | null
@@ -676,9 +682,11 @@ const ModLawyers = () => {
         }
         if (!hireableCases.length) {
             toast.show(
-                myCases.length
-                    ? "All your cases already have a lawyer or a pending request."
-                    : "Create a case first (via Intake) — then you can request a lawyer for it.",
+                myCases.some(c => c.status === "draft")
+                    ? "Finish confirming your case at the end of the intake — a draft cannot be sent to a lawyer yet."
+                    : myCases.length
+                        ? "All your cases already have a lawyer or a pending request."
+                        : "Create a case first (via Intake) — then you can request a lawyer for it.",
                 "info", 4500
             );
             return;

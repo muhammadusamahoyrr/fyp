@@ -485,6 +485,12 @@ async def match_lawyers_for_case(case_id: str, top_n: int = 5) -> dict:
     if not case:
         raise NotFoundError("Case")
 
+    # A draft has not been confirmed by the client, so it is not a case anyone
+    # should be ranked against — and a match computed now would be shown beside
+    # a case that may never exist.
+    from app.services.case_service import assert_not_draft
+    assert_not_draft(case, "be matched to lawyers")
+
     case_type = case.get("case_type", "")
     # `or`, not a dict default: a case whose province key exists but is None
     # would otherwise reach the province filter as None (silently widening to

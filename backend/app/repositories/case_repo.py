@@ -29,6 +29,21 @@ class CaseRepository(BaseRepository):
     async def find_by_id(self, case_id: str) -> dict | None:
         return await self.find_one({"_id": case_id})
 
+    async def find_by_intake(self, intake_id: str) -> dict | None:
+        """The case this intake already produced, if any.
+
+        Recovery lookup, not a convenience. A process killed between the case
+        insert and the write that pins it to the intake leaves a real case the
+        intake has no record of. `uniq_case_per_intake` then refuses every
+        retry — correctly, one intake gets one case — so without a way to FIND
+        that case the client is locked out of their own conversion for good.
+
+        Indexed: see `_cases_indexes`.
+        """
+        if not intake_id:
+            return None
+        return await self.find_one({"intake_id": intake_id})
+
     async def add_milestone(self, case_id: str, milestone: dict) -> bool:
         return await self.update_one(
             {"_id": case_id},

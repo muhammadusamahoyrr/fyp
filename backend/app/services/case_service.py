@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone
@@ -5,7 +6,12 @@ from datetime import datetime, timezone
 from pymongo.errors import DuplicateKeyError
 
 from app.core.constants import CaseStatus
-from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
+from app.core.exceptions import (
+    AppValidationError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+)
 from app.repositories.case_repo import CaseRepository
 from app.repositories.user_repo import UserRepository
 
@@ -36,7 +42,33 @@ def _public_case(case: dict | None) -> dict | None:
     return case
 
 
-async def create_case(client_id: str, data: dict) -> dict:
+def _is_intake_collision(exc: DuplicateKeyError) -> bool:
+    """Did this duplicate come from `uniq_case_per_intake`?
+
+    Read off the index NAME where the driver reports it, and fall back to the
+    key pattern. Matching on the error message text would break the first time
+    MongoDB rephrased it, and the consequence of guessing wrong here is a
+    misleading instruction to a client who cannot act on it either way.
+    """
+    details = getattr(exc, "details", None) or {}
+    if "uniq_case_per_intake" in str(details.get("errmsg", "")):
+        return True
+    return "intake_id" in (details.get("keyPattern") or {})
+
+
+async def create_case(client_id: str, data: dict,
+                      status: str = CaseStatus.OPEN.value) -> dict:
+    """Open a case. `status` lets intake create it as a DRAFT.
+
+    Intake needs a real `case_id` before the client has confirmed anything —
+    the analysis pipeline is bound to one, and provenance records it — so the
+    case has to exist early. It previously existed as OPEN, which meant the
+    client was told to "review and confirm" a case that was already live, and
+    the confirm button had nothing left to do.
+
+    A draft is a case that exists for the analysis and for nothing else. See
+    `assert_not_draft` for the boundary.
+    """
     case_id = secrets.token_urlsafe(16)
     doc = {
         "_id": case_id,
@@ -46,7 +78,7 @@ async def create_case(client_id: str, data: dict) -> dict:
         "intake_id": data.get("intake_id"),
         "case_type": data["case_type"],
         "province": data["province"],
-        "status": CaseStatus.OPEN.value,
+        "status": status,
         "title": data["title"],
         "description": data["description"],
         "milestones": [],
@@ -72,13 +104,26 @@ async def create_case(client_id: str, data: dict) -> dict:
     ):
         if field in data:
             doc[field] = data[field]
-    # Retry on case_number collision (unique index — extremely rare but handled)
+    # Retry on case_number collision (unique index — extremely rare but handled).
+    #
+    # The retry is for `case_number` ONLY. `uniq_case_per_intake` can also raise
+    # DuplicateKeyError here, and a new case number does nothing about that — so
+    # a caller hitting it burned five attempts and was told "could not generate a
+    # unique case number, please try again", which is both false and an
+    # instruction to repeat something that cannot succeed. The two collisions
+    # mean opposite things: one is bad luck, the other is "this intake already
+    # has a case, go and find it".
     for attempt in range(5):
         doc["case_number"] = _gen_case_number()
         try:
             await case_repo.insert(doc)
             break
-        except DuplicateKeyError:
+        except DuplicateKeyError as exc:
+            if _is_intake_collision(exc):
+                raise ConflictError(
+                    "This intake has already produced a case. Reload the page to "
+                    "continue with it."
+                ) from exc
             if attempt == 4:
                 raise AppValidationError("Could not generate a unique case number — please try again")
             continue
@@ -95,6 +140,116 @@ async def create_case(client_id: str, data: dict) -> dict:
     # their problem, indefinitely, for no feature.
 
     return _public_case(doc)
+
+
+
+# ── Draft cases ──────────────────────────────────────────────────────────────
+#
+# A draft exists so the intake analysis has a real `case_id` to run against and
+# to record in provenance. It is NOT a case anyone else may act on: no lawyer
+# may be asked for it, no match may be computed from it, nothing may be booked
+# against it. Those are three separate call sites, so the rule lives in one
+# function rather than as three copies that drift.
+
+
+def is_draft(case: dict | None) -> bool:
+    return bool(case) and case.get("status") == CaseStatus.DRAFT.value
+
+
+def assert_not_draft(case: dict | None, action: str) -> None:
+    """Refuse an action on a case the client has not confirmed yet.
+
+    The message names what the client has to do, because they CAN fix this —
+    unlike most 422s, the remedy is one button away on a screen they were just
+    looking at.
+    """
+    if is_draft(case):
+        raise AppValidationError(
+            f"This case is still a draft, so it cannot {action} yet. "
+            "Confirm it at the end of the intake first."
+        )
+
+
+async def confirm_case(case_id: str, client_id: str) -> dict:
+    """Promote a draft to open. The client's confirmation, made real.
+
+    ATOMIC AND IDEMPOTENT, in that order.
+
+    Atomic because the conditional update is what decides: two clicks race
+    here, and only the one that finds the case still `draft` performs the
+    transition. Idempotent because the loser — and every later retry — must not
+    be an error: the client pressed a button twice, and the outcome they asked
+    for has happened.
+
+    Scoped to the owner in the same filter as the status, so an authorization
+    check cannot pass while the write lands on someone else's case.
+    """
+    case = await case_repo.find_by_id(case_id)
+    if not case:
+        raise NotFoundError("Case")
+    if case.get("client_id") != client_id:
+        raise ForbiddenError("Case does not belong to you")
+
+    if case.get("status") == CaseStatus.OPEN.value:
+        # Already confirmed. A second press is not a failure.
+        return _public_case(case)
+
+    if not is_draft(case):
+        # Closed, dismissed, in progress — a draft is the ONLY thing that may
+        # become open this way, and naming the current state says why.
+        raise AppValidationError(
+            f"Only a draft case can be confirmed — this one is "
+            f"'{case.get('status')}'."
+        )
+
+    now = datetime.now(timezone.utc)
+    promoted = await case_repo.update_one(
+        {"_id": case_id, "client_id": client_id,
+         "status": CaseStatus.DRAFT.value},
+        {"$set": {"status": CaseStatus.OPEN.value,
+                  "confirmed_at": now, "updated_at": now}},
+    )
+    if not promoted:
+        # Lost the race to a concurrent press. Whatever it achieved is the
+        # answer; re-reading is how this stays idempotent rather than raising
+        # on the client's own second click.
+        return _public_case(await case_repo.find_by_id(case_id))
+
+    # Matching runs HERE, not at conversion. A draft must not be matched, so
+    # the moment it stops being a draft is the moment ranking lawyers against it
+    # becomes meaningful. Scheduled, not awaited, for the reason it always was:
+    # the client must not wait on (or be failed by) a model load.
+    #
+    # Only the caller that actually performed the transition reaches this line,
+    # so a double-click cannot schedule it twice.
+    asyncio.create_task(_match_after_confirmation(case_id))
+
+    logger.info("case %s confirmed by client %s", case_id, client_id)
+    return _public_case(await case_repo.find_by_id(case_id))
+
+
+async def _match_after_confirmation(case_id: str) -> None:
+    """Cache the top lawyer matches on a freshly confirmed case. Best-effort."""
+    try:
+        from app.services.lawyer_service import match_lawyers_for_case
+
+        result = await match_lawyers_for_case(case_id, top_n=5)
+        slim = [
+            {
+                "_id":             m.get("_id"),
+                "full_name":       m.get("full_name", ""),
+                "province":        m.get("province", ""),
+                "match_score":     m.get("match_score", 0.0),
+                "match_reason":    m.get("match_reason", ""),
+                "rating":          (m.get("lawyer_profile") or {}).get("rating", 0.0),
+                "specializations": (m.get("lawyer_profile") or {}).get("specializations", []),
+                "availability":    (m.get("lawyer_profile") or {}).get("availability", False),
+            }
+            for m in result.get("matches", [])
+        ]
+        await case_repo.set_matched_lawyers(case_id, slim)
+    except Exception:
+        logger.exception("post-confirmation matching failed for case %s", case_id)
 
 
 async def get_case(case_id: str, requester_id: str, requester_role: str) -> dict:
