@@ -72,6 +72,64 @@ class ThresholdVerdict:
                 "reason": self.reason, "failures": list(self.failures)}
 
 
+def metrics_from_aggregates(aggregates: dict) -> dict:
+    """Translate a report's aggregate block into the names gated here.
+
+    This mapping is the whole reason the gate was inert: `evaluate` was being
+    handed `{}` at both call sites, so it had nothing to compare even once
+    thresholds were frozen. Freezing values would have produced a gate that
+    passed everything — the worst kind, because it looks configured.
+
+    A metric the run did not produce maps to None, and `evaluate` treats None as
+    a failure rather than skipping it.
+    """
+    cer = aggregates.get("character_error_rate") or {}
+    wer = aggregates.get("word_error_rate") or {}
+    tokens = aggregates.get("critical_token_exact_match") or {}
+    return {
+        "character_error_rate": cer.get("rate"),
+        "word_error_rate": wer.get("rate"),
+        "critical_token_exact_match_rate": tokens.get("rate"),
+        "output_length_ratio": aggregates.get("output_length_ratio_mean"),
+        "processing_failure_rate": aggregates.get("processing_failure_rate"),
+        "p95_seconds_per_page": aggregates.get(
+            "seconds_per_processed_page_p95"),
+    }
+
+
+def evaluate_slices(by_slice: dict, thresholds: dict | None = None) -> dict:
+    """A verdict per configured slice.
+
+    Thresholds are per `(language, capture)` because a single global number is
+    dominated by whichever slice is largest — and the slice that matters most
+    here, Urdu photographs, is the one a global average hides best.
+
+    A slice that is configured but absent from the run is reported as
+    `not measured`, never skipped: a benchmark that quietly stopped covering
+    Urdu would otherwise keep passing.
+    """
+    config = thresholds if thresholds is not None else THRESHOLD_SCHEMA
+    configured = {
+        name: spec for name, spec in (config.get("slices") or {}).items()
+        if spec is not None
+    }
+    if not configured:
+        return {}
+
+    out: dict = {}
+    for name, spec in configured.items():
+        aggregates = by_slice.get(name)
+        if aggregates is None:
+            out[name] = ThresholdVerdict(
+                evaluated=False, passed=None,
+                reason=f"slice {name!r} is configured but was not measured",
+            ).as_dict()
+            continue
+        merged = {**config, "metrics": spec.get("metrics", config.get("metrics"))}
+        out[name] = evaluate(metrics_from_aggregates(aggregates), merged).as_dict()
+    return out
+
+
 def evaluate(metrics: dict, thresholds: dict | None = None) -> ThresholdVerdict:
     """Compare measured metrics against frozen thresholds, or refuse.
 

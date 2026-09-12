@@ -150,29 +150,73 @@ def word_error_rate(reference: str, hypothesis: str,
     return ErrorRate(edits / len(ref), edits, len(ref))
 
 
+#: Characters that CONTINUE a legal identifier. A match is only real when the
+#: token is not glued to one of these on either side.
+#:
+#: This is the fix for the defect that made the metric flattering: plain
+#: substring matching scored `379` as found inside `1379`, and `PPC 302` as
+#: found inside `PPC 302-B`. Both are different provisions, and a benchmark that
+#: cannot tell them apart reports perfect critical-token accuracy for an engine
+#: that misread the one thing that mattered.
+_EXTENDER = r"[0-9A-Za-z\-/]"
+
+#: `302` must not match inside `302.1` either — a decimal subsection is a
+#: different provision. Bare sentence-ending periods are unaffected because the
+#: guard requires a DIGIT after the dot.
+_DECIMAL_SUBSECTION = r"\.\d"
+
+
+def _occurrences(value: str, haystack: str) -> int:
+    """How many times `value` appears as a whole identifier."""
+    if not value:
+        return 0
+    pattern = (
+        rf"(?<!{_EXTENDER})"
+        + re.escape(value)
+        + rf"(?!{_EXTENDER}|{_DECIMAL_SUBSECTION})"
+    )
+    return len(re.findall(pattern, haystack))
+
+
 def critical_token_matches(tokens: list[dict], hypothesis: str,
                            policy: str = "standard") -> dict:
-    """Exact-substring presence of each declared critical token.
+    """Whole-identifier presence of each declared critical token.
 
     Deterministic by construction: no fuzzy matching, no nearest-neighbour, no
     confidence. A section number is either reproduced or it is not, and a
     threshold here would be a way of scoring 'PPC 3O2' as a hit.
 
-    Token VALUES are not returned — only ids, kinds and a boolean — because this
-    output lands in a report and the values are document content.
+    REPEATED OCCURRENCES are counted rather than collapsed. A fixture may
+    declare `min_occurrences` when a provision has to appear more than once — a
+    judgment that cites a section in its heading and again in its order is not
+    correctly read when only the heading survives. The default is 1, so a token
+    that says nothing about repetition behaves as "present at least once".
+
+    Token VALUES are not returned — only indices, kinds and counts — because
+    this output lands in a report and the values are document content.
     """
     hyp = normalise(hypothesis, policy)
     results = []
     matched = 0
+
     for index, token in enumerate(tokens or []):
         value = normalise(str(token.get("value") or ""), policy)
-        found = bool(value) and value in hyp
-        matched += found
+        try:
+            required = max(1, int(token.get("min_occurrences") or 1))
+        except (TypeError, ValueError):
+            required = 1
+
+        found = _occurrences(value, hyp)
+        ok = found >= required
+        matched += ok
         results.append({
             "index": index,
             "kind": str(token.get("kind") or "other"),
-            "matched": found,
+            "matched": ok,
+            "occurrences": found,
+            "required_occurrences": required,
         })
+
     total = len(results)
     return {
         "total": total,

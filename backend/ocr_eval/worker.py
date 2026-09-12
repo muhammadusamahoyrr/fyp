@@ -38,25 +38,80 @@ _OTHER = "other"
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".tif", ".tiff", ".bmp"}
 
 
-def _fail(category: str, detail: str, pages: int = 0) -> dict:
-    return {"ok": False, "text": "", "pages": pages,
-            "failure_category": category, "failure_detail": detail}
+#: A page is rasterised before it is recognised, and a PDF declares its own page
+#: dimensions — so a small file can demand an enormous bitmap. At 300 dpi a
+#: letter page is ~8.4 MP and 24 MB of RGB; this cap refuses the pathological
+#: page rather than the whole document, and the refusal is counted.
+MAX_PAGE_PIXELS = 40_000_000
 
 
-def _render_pdf_pages(path: Path, dpi: int, max_pages: int) -> list:
-    """PDF -> list of PIL images via pypdfium2."""
+def _page_accounting(total: int | None = None, processed: int = 0,
+                     failed: int = 0, skipped: int = 0) -> dict:
+    """The page counters every result carries, whatever happened.
+
+    Reported SEPARATELY because they answer different questions and the old
+    result conflated them: it returned the PDF's total page count while having
+    OCR'd only `max_pages` of them, and still said `ok: True`. Seconds-per-page
+    was then divided by pages that were never processed, and a capped run looked
+    like a complete one.
+    """
+    return {
+        "pages_total": total,
+        "pages_processed": processed,
+        "pages_failed": failed,
+        "pages_skipped": skipped,
+        # True whenever the output does not represent the whole document.
+        "partial": bool(skipped or failed) or (
+            total is not None and processed < total),
+    }
+
+
+def _fail(category: str, detail: str, **pages) -> dict:
+    return {"ok": False, "text": "",
+            "failure_category": category, "failure_detail": detail,
+            **_page_accounting(**pages)}
+
+
+def _iter_pdf_pages(path: Path, dpi: int, max_pages: int):
+    """Yield (index, image, render_seconds) ONE PAGE AT A TIME.
+
+    The previous version rendered every selected page into a list before any
+    recognition began, so peak memory was the whole document: 50 pages at 300
+    dpi is ~1.2 GB of uncompressed RGB from a 10 MB upload. Rendering lazily and
+    closing each bitmap as soon as it has been recognised keeps the footprint to
+    roughly one page, which is what makes the memory figure meaningful as well
+    as smaller.
+
+    Yields a page count first so the caller knows the total before iterating.
+    """
     import pypdfium2 as pdfium
 
     pdf = pdfium.PdfDocument(str(path))
     try:
-        count = len(pdf)
+        total = len(pdf)
+        yield total  # first yield is the page count, not a page
         scale = dpi / 72.0
-        images = []
-        for index in range(min(count, max_pages)):
+        for index in range(min(total, max_pages)):
+            started = time.perf_counter()
             page = pdf[index]
+            width, height = page.get_size()
+            pixels = int(width * scale) * int(height * scale)
+            if pixels > MAX_PAGE_PIXELS:
+                yield (index, None, time.perf_counter() - started)
+                continue
             bitmap = page.render(scale=scale)
-            images.append(bitmap.to_pil())
-        return images, count
+            image = bitmap.to_pil()
+            elapsed = time.perf_counter() - started
+            try:
+                yield (index, image, elapsed)
+            finally:
+                # Released here rather than by the garbage collector: the buffer
+                # is native, and holding two pages at once doubles the peak this
+                # generator exists to bound.
+                try:
+                    image.close()
+                except Exception:
+                    pass
     finally:
         try:
             pdf.close()
@@ -97,6 +152,13 @@ def _tesseract_image_to_text(image, lang: str, psm: int, oem: int,
 
 
 def _run_tesseract(path: Path, cfg: dict) -> dict:
+    """Recognise a fixture page by page, accounting for every one of them.
+
+    Render and recognition time are measured SEPARATELY. They are different
+    costs with different fixes — a slow render is a dpi or page-size problem, a
+    slow recognition is an engine or language problem — and a single
+    seconds-per-page number cannot tell an operator which they have.
+    """
     lang = str(cfg.get("lang") or "eng")
     dpi = int(cfg.get("dpi") or 300)
     psm = int(cfg.get("psm") or 3)
@@ -105,33 +167,86 @@ def _run_tesseract(path: Path, cfg: dict) -> dict:
     per_page_timeout = float(cfg.get("per_page_timeout_seconds") or 120)
 
     suffix = path.suffix.lower()
+    texts: list[str] = []
+    processed = failed = 0
+    render_seconds = ocr_seconds = 0.0
+    total: int | None = None
+
     try:
         if suffix == ".pdf":
-            images, page_count = _render_pdf_pages(path, dpi, max_pages)
+            pages = _iter_pdf_pages(path, dpi, max_pages)
+            total = next(pages)          # the count, yielded first
         elif suffix in _IMAGE_SUFFIXES:
             from PIL import Image
-            images, page_count = [Image.open(str(path))], 1
+
+            def _single():
+                started = time.perf_counter()
+                with Image.open(str(path)) as image:
+                    yield (0, image.copy(), time.perf_counter() - started)
+
+            pages, total = _single(), 1
         else:
-            return _fail(_UNREADABLE_INPUT, f"unsupported fixture suffix {suffix!r}")
+            return _fail(_UNREADABLE_INPUT,
+                         f"unsupported fixture suffix {suffix!r}")
     except Exception as exc:
         return _fail(_DECODE_ERROR, f"{exc.__class__.__name__}: {exc}"[:300])
 
-    texts = []
-    for image in images:
-        try:
-            texts.append(_tesseract_image_to_text(
-                image, lang, psm, oem, per_page_timeout))
-        except subprocess.TimeoutExpired:
-            return _fail(_TIMEOUT, "tesseract exceeded the per-page timeout",
-                         pages=page_count)
-        except FileNotFoundError as exc:
-            return _fail(_ENGINE_ERROR, str(exc), pages=page_count)
-        except Exception as exc:
-            return _fail(_ENGINE_ERROR,
-                         f"{exc.__class__.__name__}: {exc}"[:300], pages=page_count)
+    try:
+        for index, image, render_time in pages:
+            render_seconds += render_time
 
-    return {"ok": True, "text": "\n".join(texts), "pages": page_count,
-            "failure_category": None, "failure_detail": None}
+            if image is None:
+                # Refused by the pixel cap. Counted as failed rather than
+                # skipped: skipped means "we chose not to look", and this page
+                # was one we could not process.
+                failed += 1
+                continue
+
+            started = time.perf_counter()
+            try:
+                texts.append(_tesseract_image_to_text(
+                    image, lang, psm, oem, per_page_timeout))
+                processed += 1
+            except subprocess.TimeoutExpired:
+                # One page timing out is a page failure, not a run failure:
+                # abandoning the document would discard pages already read and
+                # report nothing about the rest.
+                failed += 1
+            except FileNotFoundError as exc:
+                return _fail(_ENGINE_ERROR, str(exc), total=total,
+                             processed=processed, failed=failed,
+                             skipped=_skipped(total, max_pages))
+            except Exception:
+                failed += 1
+            finally:
+                ocr_seconds += time.perf_counter() - started
+    except Exception as exc:
+        return _fail(_DECODE_ERROR, f"{exc.__class__.__name__}: {exc}"[:300],
+                     total=total, processed=processed, failed=failed)
+
+    accounting = _page_accounting(
+        total=total, processed=processed, failed=failed,
+        skipped=_skipped(total, max_pages))
+
+    return {
+        # `ok` means the run completed, NOT that the document was fully read.
+        # `partial` carries that, and the harness reads it rather than inferring
+        # completeness from `ok` — which is exactly the conflation being fixed.
+        "ok": processed > 0 or failed == 0,
+        "text": "\n".join(texts),
+        "failure_category": None if processed or not failed else _ENGINE_ERROR,
+        "failure_detail": None,
+        "render_seconds": render_seconds,
+        "ocr_seconds": ocr_seconds,
+        **accounting,
+    }
+
+
+def _skipped(total: int | None, max_pages: int) -> int:
+    """Pages never attempted because the cap was reached."""
+    if total is None:
+        return 0
+    return max(0, total - min(total, max_pages))
 
 
 def _run_passthrough(path: Path, cfg: dict) -> dict:
@@ -150,12 +265,16 @@ def _run_passthrough(path: Path, cfg: dict) -> dict:
         time.sleep(delay)
     try:
         text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        return _fail(_DECODE_ERROR, exc.__class__.__name__)
-    except OSError as exc:
-        return _fail(_MISSING_FILE, exc.__class__.__name__)
-    return {"ok": True, "text": text, "pages": 1,
-            "failure_category": None, "failure_detail": None}
+    except UnicodeDecodeError:
+        return _fail(_DECODE_ERROR, "not valid utf-8")
+    except OSError:
+        return _fail(_MISSING_FILE, "could not be opened")
+    return {
+        "ok": True, "text": text,
+        "failure_category": None, "failure_detail": None,
+        "render_seconds": 0.0, "ocr_seconds": 0.0,
+        **_page_accounting(total=1, processed=1),
+    }
 
 
 ENGINES = {
