@@ -156,3 +156,14 @@ backend/scripts/_intake_id_dedupe_journal.json
 backend/ocr_eval/fixtures/*
 !backend/ocr_eval/fixtures/.gitignore
 !backend/ocr_eval/fixtures/README.md
+
+# Ad-hoc pytest scratch: `--basetemp=backend/.test-tmp/<name>` runs and their
+# junit XML. Not produced by anything in this repo's config, and not referenced
+# by it — it appears when someone points pytest here by hand.
+#
+# Ignored rather than deleted because the `real_protection` tests (see the
+# marker in pytest.ini) deliberately apply owner-only ACLs and leave them, so
+# the directories deny delete-child and even Get-Acl to the current user.
+# Clearing them needs an ownership change with elevation, which is not
+# something a working-tree cleanup should do on its own.
+backend/.test-tmp/
