@@ -92,7 +92,6 @@ def _offline(monkeypatch):
 
     monkeypatch.setattr(intake_service, "_ai_classify_case_type", classify)
     monkeypatch.setattr(intake_service, "_run_intake_ai", run_ai)
-    monkeypatch.setattr(intake_service, "_auto_match_lawyers", no_match)
     try:
         from app.ai import lawyer_embeddings
         monkeypatch.setattr(lawyer_embeddings, "schedule_embed", lambda _id: False)

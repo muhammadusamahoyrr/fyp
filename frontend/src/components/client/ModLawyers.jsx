@@ -10,6 +10,7 @@ import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getLawyerAvailability, listCases, listEngagements, requestEngagement, cancelEngagement, acceptEngagementTerms, declineEngagementTerms, completeEngagement, terminateEngagement } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
+import { hireableCases as hireable, isDraftCase } from "@/lib/caseStatus.js";
 import { readIntakeValue } from "@/lib/intakeStorage.js";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), {
@@ -124,8 +125,8 @@ const ModLawyers = () => {
         myEngagements.filter(e => e.status === "requested").forEach(e => { m[e.case_id] = e; });
         return m;
     }, [myEngagements]);
-    const hireableCases = useMemo(() =>
-        myCases.filter(c => !c.lawyer_id && !["draft", "closed", "dismissed"].includes(c.status) && !pendingByCase[c._id]),
+    const hireableCases = useMemo(
+        () => hireable(myCases, pendingByCase),
         [myCases, pendingByCase]);
 
     // Engagement state for one lawyer: "requested" | "accepted" | null
@@ -682,7 +683,7 @@ const ModLawyers = () => {
         }
         if (!hireableCases.length) {
             toast.show(
-                myCases.some(c => c.status === "draft")
+                myCases.some(isDraftCase)
                     ? "Finish confirming your case at the end of the intake — a draft cannot be sent to a lawyer yet."
                     : myCases.length
                         ? "All your cases already have a lawyer or a pending request."

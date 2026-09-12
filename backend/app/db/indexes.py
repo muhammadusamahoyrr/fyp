@@ -467,6 +467,7 @@ async def _cases_indexes() -> None:
         IndexModel([("case_number", ASCENDING)], unique=True),
         IndexModel([("client_id", ASCENDING)]),
         IndexModel([("lawyer_id", ASCENDING)]),
+        IndexModel([("client_id", ASCENDING), ("status", ASCENDING)]),
         IndexModel([("status", ASCENDING)]),
         IndexModel([("case_type", ASCENDING)]),
         IndexModel([("province", ASCENDING)]),
@@ -504,6 +505,14 @@ async def _intakes_indexes() -> None:
         IndexModel([("session_token", ASCENDING)], unique=True),
         IndexModel([("client_id", ASCENDING)]),
         IndexModel([("completed", ASCENDING)]),
+        # "Which intake should this client resume?" — their own, newest first.
+        # The plain `client_id` index would make the sort an in-memory pass over
+        # every intake they have ever started.
+        IndexModel([("client_id", ASCENDING), ("updated_at", DESCENDING)]),
+        IndexModel([("client_id", ASCENDING), ("completed", ASCENDING),
+                    ("updated_at", DESCENDING)]),
+        IndexModel([("client_id", ASCENDING), ("completed", ASCENDING),
+                    ("case_id", ASCENDING), ("updated_at", DESCENDING)]),
     ])
 
 

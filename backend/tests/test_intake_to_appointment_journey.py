@@ -91,7 +91,6 @@ def offline_ai(monkeypatch):
 
     monkeypatch.setattr(intake_service, "_ai_classify_case_type", fake_classify)
     monkeypatch.setattr(intake_service, "_run_intake_ai", fake_run_ai)
-    monkeypatch.setattr(intake_service, "_auto_match_lawyers", no_match)
 
 
 async def _walk_intake(client_id: str) -> dict:

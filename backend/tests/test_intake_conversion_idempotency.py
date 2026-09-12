@@ -47,35 +47,52 @@ class FakeIntakeRepo:
     async def find_by_token(self, token: str):
         return dict(self.doc) if self.doc.get("session_token") == token else None
 
-    async def claim_conversion(self, token: str, stale_after: timedelta) -> bool:
+    async def claim_conversion(self, token: str, stale_after: timedelta, owner: str) -> int | None:
         now = datetime.now(timezone.utc)
         if self.doc.get("completed"):
-            return False
+            return None
         held = self.doc.get("conversion_claimed_at")
         if held is not None and held >= now - stale_after:
-            return False
+            return None
+        self.doc["conversion_claim_owner"] = owner
         self.doc["conversion_claimed_at"] = now
+        self.doc["conversion_claim_expires_at"] = now + stale_after
+        self.doc["conversion_epoch"] = int(self.doc.get("conversion_epoch") or 0) + 1
         self.claims_granted += 1
-        return True
+        return self.doc["conversion_epoch"]
 
-    async def release_conversion(self, token: str) -> bool:
-        if self.doc.get("completed"):
+    async def renew_conversion(self, token: str, owner: str, ttl: timedelta) -> bool:
+        if self.doc.get("conversion_claim_owner") != owner:
             return False
-        self.doc.pop("conversion_claimed_at", None)
+        self.doc["conversion_claim_expires_at"] = datetime.now(timezone.utc) + ttl
         return True
 
-    async def attach_case(self, token: str, case_id: str) -> bool:
+    async def release_conversion(self, token: str, owner: str) -> bool:
+        if self.doc.get("completed") or self.doc.get("conversion_claim_owner") != owner:
+            return False
+        self.doc.pop("conversion_claim_owner", None)
+        self.doc.pop("conversion_claimed_at", None)
+        self.doc.pop("conversion_claim_expires_at", None)
+        return True
+
+    async def attach_case(self, token: str, case_id: str, owner: str) -> bool:
+        if self.doc.get("conversion_claim_owner") != owner:
+            return False
         self.doc["case_id"] = case_id
         return True
 
-    async def mark_completed(self, token, case_id, **kw) -> bool:
+    async def mark_completed(self, token, case_id, owner, **kw) -> bool:
+        if self.doc.get("conversion_claim_owner") != owner:
+            return False
         self.doc.update(completed=True, case_id=case_id, **{
             k: v for k, v in kw.items() if v is not None
         })
         self.doc.pop("conversion_claimed_at", None)
         return True
 
-    async def save_ai_structured_case(self, token: str, ai_data: dict) -> bool:
+    async def save_ai_structured_case(self, token: str, ai_data: dict, owner: str) -> bool:
+        if self.doc.get("conversion_claim_owner") != owner:
+            return False
         self.doc["ai_structured_case"] = ai_data
         return True
 
@@ -163,7 +180,6 @@ def wired(monkeypatch):
     monkeypatch.setattr(intake_service, "create_case", fake_create_case)
     monkeypatch.setattr(intake_service, "_ai_classify_case_type", fake_classify)
     monkeypatch.setattr(intake_service, "_run_intake_ai", fake_run_ai)
-    monkeypatch.setattr(intake_service, "_auto_match_lawyers", fake_match)
 
     return intakes, cases, log
 

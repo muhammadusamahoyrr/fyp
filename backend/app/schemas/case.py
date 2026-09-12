@@ -51,6 +51,13 @@ class CaseUpdate(BaseModel):
     case_type: CaseType | None = None
 
 
+class CaseConfirm(BaseModel):
+    """The client's final, authoritative category selection."""
+
+    model_config = ConfigDict(extra="forbid")
+    case_type: CaseType | None = None
+
+
 class MessageAdd(BaseModel):
     text: str
 

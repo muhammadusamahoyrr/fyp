@@ -54,10 +54,16 @@ async def seeded(mongo):
         "created_at": now, "updated_at": now,
     })
 
-    yield {"token": token, "client_id": client_id}
+    yield {"token": token, "client_id": client_id, "tag": tag}
 
+    # Teardown runs even when a test fails part-way. Cases used to be cleaned up
+    # at the END OF THE TEST BODY, so a failing assertion leaked the row — and
+    # because the case_number was a hardcoded constant, the leak then collided
+    # with `case_number_1` on every later run. One failure poisoned the suite.
+    from app.db.collections import get_cases_col
     await get_users_col().delete_many({"_id": client_id})
     await get_intakes_col().delete_many({"session_token": token})
+    await get_cases_col().delete_many({"client_id": client_id})
 
 
 def _as(user_id: str):
@@ -200,7 +206,7 @@ async def test_the_detail_response_reports_the_case_status(seeded, mongo):
 
     case_id = f"HT-CASE-{seeded['client_id']}"
     await get_cases_col().insert_one({
-        "_id": case_id, "case_number": "ATT-2026-HTTP", "client_id": seeded["client_id"],
+        "_id": case_id, "case_number": f"ATT-2026-HTTP-{seeded['tag']}", "client_id": seeded["client_id"],
         "lawyer_id": None, "case_type": "family", "province": "punjab",
         "status": "draft", "title": "t", "description": "d",
         "milestones": [], "hearing_dates": [],
@@ -221,7 +227,6 @@ async def test_the_detail_response_reports_the_case_status(seeded, mongo):
         after = await http.get(f"/intake/{seeded['token']}")
         assert after.json()["case_status"] == "open"
 
-    await get_cases_col().delete_many({"_id": case_id})
 
 
 async def test_confirming_twice_over_http_is_not_an_error(seeded, mongo):
@@ -229,7 +234,7 @@ async def test_confirming_twice_over_http_is_not_an_error(seeded, mongo):
 
     case_id = f"HT-IDEM-{seeded['client_id']}"
     await get_cases_col().insert_one({
-        "_id": case_id, "case_number": "ATT-2026-IDEM", "client_id": seeded["client_id"],
+        "_id": case_id, "case_number": f"ATT-2026-IDEM-{seeded['tag']}", "client_id": seeded["client_id"],
         "lawyer_id": None, "case_type": "family", "province": "punjab",
         "status": "draft", "title": "t", "description": "d",
         "milestones": [], "hearing_dates": [],
@@ -244,7 +249,6 @@ async def test_confirming_twice_over_http_is_not_an_error(seeded, mongo):
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["status"] == "open"
-    await get_cases_col().delete_many({"_id": case_id})
 
 
 async def test_a_stranger_cannot_confirm_over_http(seeded, mongo):
@@ -252,7 +256,7 @@ async def test_a_stranger_cannot_confirm_over_http(seeded, mongo):
 
     case_id = f"HT-FORB-{seeded['client_id']}"
     await get_cases_col().insert_one({
-        "_id": case_id, "case_number": "ATT-2026-FORB", "client_id": seeded["client_id"],
+        "_id": case_id, "case_number": f"ATT-2026-FORB-{seeded['tag']}", "client_id": seeded["client_id"],
         "lawyer_id": None, "case_type": "family", "province": "punjab",
         "status": "draft", "title": "t", "description": "d",
         "milestones": [], "hearing_dates": [],
@@ -266,4 +270,137 @@ async def test_a_stranger_cannot_confirm_over_http(seeded, mongo):
     assert r.status_code == 403
     stored = await get_cases_col().find_one({"_id": case_id})
     assert stored["status"] == "draft"
-    await get_cases_col().delete_many({"_id": case_id})
+
+
+# ── the evidence routes, over HTTP ─────────────────────────────────────────
+
+async def test_evidence_upload_download_and_delete_over_http(seeded, mongo):
+    """The service layer was tested; the ROUTES were not.
+
+    A working service behind a route that returns the wrong status, loses the
+    filename, or is not reachable at all is not a working feature.
+    """
+    pdf = b"%PDF-1.4\n" + b"0" * 500
+
+    async with _as(seeded["client_id"]) as http:
+        up = await http.post(
+            f"/intake/{seeded['token']}/evidence",
+            files={"file": ("proof.pdf", pdf, "application/pdf")})
+        assert up.status_code == 200, up.text
+        file_id = up.json()["file_id"]
+
+        got = await http.get(f"/intake/{seeded['token']}/evidence/{file_id}")
+        assert got.status_code == 200
+        assert got.content == pdf
+        assert "proof.pdf" in got.headers.get("content-disposition", "")
+
+        listed = await http.get(f"/intake/{seeded['token']}")
+        # The fixture seeds one file already, so the upload ADDS to the list.
+        assert "proof.pdf" in [f["filename"] for f in listed.json()["evidence_files"]]
+
+        gone = await http.delete(f"/intake/{seeded['token']}/evidence/{file_id}")
+        assert gone.status_code == 200
+        assert gone.json()["deleted"] is True
+
+        after = await http.get(f"/intake/{seeded['token']}")
+        assert "proof.pdf" not in [f["filename"] for f in after.json()["evidence_files"]]
+
+        missing = await http.get(f"/intake/{seeded['token']}/evidence/{file_id}")
+        assert missing.status_code == 404
+
+
+async def test_a_stranger_cannot_download_or_delete_evidence(seeded, mongo):
+    pdf = b"%PDF-1.4\n" + b"0" * 100
+
+    async with _as(seeded["client_id"]) as http:
+        up = await http.post(
+            f"/intake/{seeded['token']}/evidence",
+            files={"file": ("mine.pdf", pdf, "application/pdf")})
+        file_id = up.json()["file_id"]
+
+    async with _as("HT-STRANGER") as http:
+        assert (await http.get(
+            f"/intake/{seeded['token']}/evidence/{file_id}")).status_code == 404
+        assert (await http.delete(
+            f"/intake/{seeded['token']}/evidence/{file_id}")).status_code == 404
+
+
+async def test_an_oversized_upload_is_refused_over_http(seeded, mongo):
+    from app.services.intake_service import _MAX_EVIDENCE_SIZE
+
+    big = b"%PDF-1.4\n" + b"0" * (_MAX_EVIDENCE_SIZE + 1024)
+    async with _as(seeded["client_id"]) as http:
+        r = await http.post(f"/intake/{seeded['token']}/evidence",
+                            files={"file": ("big.pdf", big, "application/pdf")})
+    assert r.status_code == 422
+    assert "too large" in r.text.lower()
+
+
+# ── GET /intake/resumable ──────────────────────────────────────────────────
+
+async def test_resumable_is_not_swallowed_by_the_token_route(seeded):
+    """THE ROUTE-ORDER TRAP.
+
+    FastAPI matches in declaration order. `/{token}` is declared in this router
+    too, so a `/resumable` added after it would never be reached — the literal
+    would be captured as a session token and answered 404 for an intake called
+    "resumable". Asserted as a STATUS, because both routes return JSON and only
+    the code distinguishes them.
+    """
+    async with _as(seeded["client_id"]) as http:
+        r = await http.get("/intake/resumable")
+    assert r.status_code == 200, (
+        "GET /intake/resumable was captured by /{token} — declare it first")
+
+
+async def test_resumable_returns_the_clients_unfinished_intake(seeded):
+    async with _as(seeded["client_id"]) as http:
+        r = await http.get("/intake/resumable")
+    body = r.json()
+    assert body is not None
+    assert body["session_token"] == seeded["token"]
+    assert body["steps"]["3"]["incident_description"].startswith("My husband")
+
+
+async def test_resumable_returns_null_for_a_client_with_nothing(seeded):
+    async with _as("HT-EMPTY-CLIENT") as http:
+        r = await http.get("/intake/resumable")
+    assert r.status_code == 200
+    assert r.json() is None
+
+
+async def test_resumable_never_returns_another_clients_intake(seeded):
+    async with _as("HT-STRANGER") as http:
+        r = await http.get("/intake/resumable")
+    assert r.json() is None
+
+
+async def test_resumable_finds_a_draft_awaiting_confirmation(seeded, mongo):
+    """The orphaning case, end to end over HTTP."""
+    from app.db.collections import get_cases_col, get_intakes_col
+
+    case_id = f"HT-RESUME-{seeded['tag']}"
+    now = datetime.now(timezone.utc)
+    await get_cases_col().insert_one({
+        "_id": case_id, "case_number": f"ATT-2026-RS-{seeded['tag']}",
+        "client_id": seeded["client_id"], "lawyer_id": None,
+        "case_type": "family", "province": "punjab", "status": "draft",
+        "title": "t", "description": "d", "milestones": [], "hearing_dates": [],
+        "created_at": now, "updated_at": now,
+    })
+    await get_intakes_col().update_one(
+        {"session_token": seeded["token"]},
+        {"$set": {"completed": True, "case_id": case_id}})
+
+    async with _as(seeded["client_id"]) as http:
+        found = await http.get("/intake/resumable")
+        assert found.json()["case_id"] == case_id
+        assert found.json()["case_status"] == "draft"
+
+        # …and it can be confirmed, which is what makes it not-orphaned.
+        done = await http.patch(f"/cases/{case_id}/confirm")
+        assert done.status_code == 200
+        assert done.json()["status"] == "open"
+
+        after = await http.get("/intake/resumable")
+        assert after.json() is None, "a confirmed case was still offered to resume"

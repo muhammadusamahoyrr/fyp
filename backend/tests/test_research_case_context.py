@@ -21,7 +21,7 @@ import asyncio
 import pytest
 
 import app.api.v1.routes.ai as ai_routes
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
 
 LAWYER_A = {"_id": "lawyer-A", "role": "lawyer"}
 LAWYER_B = {"_id": "lawyer-B", "role": "lawyer"}
@@ -164,6 +164,19 @@ def test_assigned_lawyer_may_use_the_case(wire):
     state = wire["states"][0]
     assert state["case_id"] == "case-1"
     assert state["case_context"]["title"] == "Ali v. Landlord"
+
+
+def test_a_draft_case_is_refused_before_research_spend(wire, monkeypatch):
+    from app.services import case_service
+
+    async def draft(cid):
+        return {**CASE, "status": "draft"} if cid == "case-1" else None
+
+    monkeypatch.setattr(case_service.case_repo, "find_by_id", draft)
+    with pytest.raises(AppValidationError):
+        call(Body(case_id="case-1"), LAWYER_A)
+    assert wire["states"] == []
+    assert wire["records"] == []
 
 
 def test_a_different_lawyer_is_refused(wire):

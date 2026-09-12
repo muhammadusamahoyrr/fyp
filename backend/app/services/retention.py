@@ -4,7 +4,8 @@ APPROVED PERIODS (2026-09-03)
 
     All user-visible data          12 months
       conversation_messages, chat_sessions, research_sessions,
-      conversation_turns, LangGraph checkpoints
+      conversation_turns, LangGraph checkpoints, intake sessions and
+      their evidence uploads
 
     Accountability records         7 years
       answer_provenance, undelivered provenance_outbox entries,
@@ -53,6 +54,7 @@ from app.db.collections import (
     get_chat_sessions_col,
     get_conversation_messages_col,
     get_conversation_turns_col,
+    get_intakes_col,
     get_research_sessions_col,
 )
 from app.services import legal_holds
@@ -80,6 +82,10 @@ PERIODS: dict[str, int] = {
     "answer_provenance":     ACCOUNTABILITY_SECONDS,
     "provenance_outbox":     ACCOUNTABILITY_SECONDS,
     "tombstones":            ACCOUNTABILITY_SECONDS,
+    # Intake answers and uploaded evidence are user-visible case-preparation
+    # data. They follow the same approved 12-month inactivity period. Deletion
+    # remains disabled; plan() reports rows and files only.
+    "intakes":               USER_DATA_SECONDS,
     # ── DOCUMENTS_V2 stores (report-only this release; no sweep wired yet) ────
     # A generated revision carries the user's document content → user-data
     # period. A review event is an accountability record of who decided what →
@@ -139,10 +145,34 @@ async def plan(now: Optional[datetime] = None) -> dict:
         "active_holds": {"users": len(held.get(legal_holds.SCOPE_USER, ())),
                          "cases": len(held.get(legal_holds.SCOPE_CASE, ()))},
         "conversations": conversations,
+        "intakes": await _plan_intakes(moment, held),
         "accountability": await _plan_accountability(moment),
         "deletion_enabled": False,
         "note": ("Dry run. Nothing was deleted and nothing in this module can "
                  "delete anything."),
+    }
+
+
+async def _plan_intakes(moment: datetime, held: dict) -> dict:
+    """Count expired intake rows and their evidence files; never delete them."""
+    eligible = protected = evidence_files = 0
+    limit = MAX_PER_RUN * 4
+    query = {"updated_at": {"$lt": cutoff("intakes", moment)}}
+    projection = {"client_id": 1, "case_id": 1, "evidence_files.file_id": 1}
+    async for row in get_intakes_col().find(query, projection).limit(limit):
+        if legal_holds.covers(
+            held, owner_id=row.get("client_id"), case_id=row.get("case_id")
+        ):
+            protected += 1
+            continue
+        eligible += 1
+        evidence_files += len(row.get("evidence_files") or [])
+    return {
+        "intakes_eligible": eligible,
+        "intakes_held": protected,
+        "evidence_files_that_would_go": evidence_files,
+        "capped_at": limit if eligible + protected >= limit else None,
+        "deletion_implemented": False,
     }
 
 

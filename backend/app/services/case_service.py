@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone
@@ -39,6 +38,8 @@ def _public_case(case: dict | None) -> dict | None:
         return case
     case = dict(case)
     case.pop("case_embedding", None)
+    case.pop("intake_conversion_owner", None)
+    case.pop("intake_conversion_epoch", None)
     return case
 
 
@@ -101,6 +102,8 @@ async def create_case(client_id: str, data: dict,
         "urgency",
         "has_evidence",
         "evidence_count",
+        "intake_conversion_owner",
+        "intake_conversion_epoch",
     ):
         if field in data:
             doc[field] = data[field]
@@ -170,7 +173,11 @@ def assert_not_draft(case: dict | None, action: str) -> None:
         )
 
 
-async def confirm_case(case_id: str, client_id: str) -> dict:
+async def confirm_case(
+    case_id: str,
+    client_id: str,
+    case_type: str | None = None,
+) -> dict:
     """Promote a draft to open. The client's confirmation, made real.
 
     ATOMIC AND IDEMPOTENT, in that order.
@@ -191,7 +198,12 @@ async def confirm_case(case_id: str, client_id: str) -> dict:
         raise ForbiddenError("Case does not belong to you")
 
     if case.get("status") == CaseStatus.OPEN.value:
-        # Already confirmed. A second press is not a failure.
+        # A same-payload retry is idempotent. A different category is a new
+        # edit and must not be smuggled through a replayed confirmation.
+        if case_type is not None and case_type != case.get("case_type"):
+            raise ConflictError(
+                "This case is already confirmed with a different category."
+            )
         return _public_case(case)
 
     if not is_draft(case):
@@ -203,53 +215,56 @@ async def confirm_case(case_id: str, client_id: str) -> dict:
         )
 
     now = datetime.now(timezone.utc)
+    updates = {
+        "status": CaseStatus.OPEN.value,
+        "confirmed_at": now,
+        "updated_at": now,
+    }
+    if case_type is not None:
+        updates.update({
+            "case_type": case_type,
+            "case_type_source": "client",
+            "case_type_changed_by": client_id,
+            "case_type_changed_at": now,
+        })
+
     promoted = await case_repo.update_one(
         {"_id": case_id, "client_id": client_id,
          "status": CaseStatus.DRAFT.value},
-        {"$set": {"status": CaseStatus.OPEN.value,
-                  "confirmed_at": now, "updated_at": now}},
+        {"$set": updates},
     )
     if not promoted:
         # Lost the race to a concurrent press. Whatever it achieved is the
-        # answer; re-reading is how this stays idempotent rather than raising
-        # on the client's own second click.
-        return _public_case(await case_repo.find_by_id(case_id))
+        # answer only when it achieved the SAME requested state. Two tabs can
+        # submit different category choices at once; silently returning the
+        # winner to the loser would tell both callers their own choice was
+        # accepted. Re-read and apply the same payload check as the ordinary
+        # already-open replay path.
+        current = await case_repo.find_by_id(case_id)
+        if not current:
+            raise NotFoundError("Case")
+        if case_type is not None and case_type != current.get("case_type"):
+            raise ConflictError(
+                "This case was concurrently confirmed with a different category."
+            )
+        return _public_case(current)
 
-    # Matching runs HERE, not at conversion. A draft must not be matched, so
-    # the moment it stops being a draft is the moment ranking lawyers against it
-    # becomes meaningful. Scheduled, not awaited, for the reason it always was:
-    # the client must not wait on (or be failed by) a model load.
+    # MATCHING IS NOT RUN HERE, and `matched_lawyers` is no longer written.
     #
-    # Only the caller that actually performed the transition reaches this line,
-    # so a double-click cannot schedule it twice.
-    asyncio.create_task(_match_after_confirmation(case_id))
-
+    # Confirmation used to schedule a full semantic match — an embedding pass and
+    # a vector query, CPU-bound on a deployment with no GPU — and cache the
+    # result on the case. Nothing ever read that field. Every surface that shows
+    # matched lawyers calls `lawyer_service.match_lawyers_for_case` for itself:
+    # `/lawyers/match` (ModLawyers) and the chat socket, each from its own
+    # request. So the cost was paid on every confirmation to populate a column
+    # with no reader, and it was about to be paid again on every category change
+    # to keep that column correct.
+    #
+    # Matching is a QUERY, answered when someone asks. The same reasoning that
+    # removed `case_embedding` from `create_case`: derived data with no reader is
+    # cost and staleness, not a feature.
     logger.info("case %s confirmed by client %s", case_id, client_id)
     return _public_case(await case_repo.find_by_id(case_id))
-
-
-async def _match_after_confirmation(case_id: str) -> None:
-    """Cache the top lawyer matches on a freshly confirmed case. Best-effort."""
-    try:
-        from app.services.lawyer_service import match_lawyers_for_case
-
-        result = await match_lawyers_for_case(case_id, top_n=5)
-        slim = [
-            {
-                "_id":             m.get("_id"),
-                "full_name":       m.get("full_name", ""),
-                "province":        m.get("province", ""),
-                "match_score":     m.get("match_score", 0.0),
-                "match_reason":    m.get("match_reason", ""),
-                "rating":          (m.get("lawyer_profile") or {}).get("rating", 0.0),
-                "specializations": (m.get("lawyer_profile") or {}).get("specializations", []),
-                "availability":    (m.get("lawyer_profile") or {}).get("availability", False),
-            }
-            for m in result.get("matches", [])
-        ]
-        await case_repo.set_matched_lawyers(case_id, slim)
-    except Exception:
-        logger.exception("post-confirmation matching failed for case %s", case_id)
 
 
 async def get_case(case_id: str, requester_id: str, requester_role: str) -> dict:
@@ -327,6 +342,14 @@ async def update_case(
             updates["ai_case_type"] = case.get("case_type")
 
     updates["updated_at"] = datetime.now(timezone.utc)
+
+    # No cached matches to invalidate any more.
+    #
+    # A category change used to leave `matched_lawyers` holding results computed
+    # for the category the client had just rejected, so this cleared and rebuilt
+    # it. Nothing read that field, so both the staleness and the rebuild were
+    # work in service of a column with no reader — matching is computed live on
+    # request, where it always sees the current category by construction.
     await case_repo.update_one({"_id": case_id}, {"$set": updates})
     return _public_case(await case_repo.find_by_id(case_id))
 

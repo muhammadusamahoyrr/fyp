@@ -450,6 +450,8 @@ async def ai_research(
     if body.case_id:
         case_context, case_province, case_record = await _authorised_case_context(
             body.case_id, current_user)
+        from app.services.case_service import assert_not_draft
+        assert_not_draft(case_record, "be used for legal research")
 
     # Refuse an oversized question BEFORE the graph runs. Checking after would
     # mean a provider was paid for an answer that then could not be stored.
@@ -1045,9 +1047,14 @@ async def ai_draft_stream(
         # CASE-BOUND: authorise the case server-side (raises 403/404), then
         # derive case_type + province from it and hand the model only a scrubbed
         # whitelist of the case — never the raw case document.
-        from app.services.case_service import get_case
+        from app.services.case_service import assert_not_draft, get_case
         case = await get_case(body.case_id, current_user["_id"],
                               current_user.get("role", "lawyer"))
+        # `get_case` answers "may you see it", not "is it a real case". A draft
+        # is the client's own unconfirmed intake, so ownership passes — and
+        # drafting against one produces a document bound to a case that may
+        # never exist. Matching, engagement and booking already refuse it.
+        assert_not_draft(case, "be used for drafting")
         ctx = build_case_context(case)
         eff_case_type = ctx["case_type"] or "civil"
         eff_province = ctx["province"]

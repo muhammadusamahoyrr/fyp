@@ -12,6 +12,7 @@ from app.repositories.case_repo import CaseRepository
 from app.repositories.document_repo import DocumentRepository
 from app.repositories.draft_repo import DraftRepository
 from app.services import pleading_rules
+from app.services.case_service import assert_not_draft
 
 logger = logging.getLogger(__name__)
 
@@ -394,6 +395,7 @@ async def extract_fields(case_id: str, client_id: str, template_type: str) -> di
         raise NotFoundError("Case")
     if case.get("client_id") != client_id:
         raise ForbiddenError()
+    assert_not_draft(case, "be used for document drafting")
 
     template_enum = DocumentTemplate(template_type)
     prompt = _EXTRACT_PROMPTS.get(template_type)
@@ -445,6 +447,7 @@ async def generate_document(
         raise NotFoundError("Case")
     if case.get("client_id") != client_id:
         raise ForbiddenError()
+    assert_not_draft(case, "be used for document drafting")
 
     # Auto-extract if caller passed empty fields
     if not fields:

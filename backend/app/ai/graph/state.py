@@ -21,6 +21,11 @@ class AgentState(TypedDict):
     # re-supplied on every turn so it cannot age out of a history window.
     case_context: dict | None
     case_record_version: str | None
+    # Text extracted server-side from this intake's own uploads. It is kept
+    # separate from the user's query so it cannot steer classification or
+    # retrieval as if the client typed it.
+    intake_evidence_text: str
+    intake_evidence_status: list[dict]
     # A bounded, case-derived widening of the RETRIEVAL query only. The user's
     # `query` is never replaced: named-statute affinity reads the raw query and
     # generation answers it, so overwriting it would silently change both.

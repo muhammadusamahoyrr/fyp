@@ -4,6 +4,7 @@ import { useT } from "./theme.js";
 import Ic from "./Ic.jsx";
 import { Card, Badge } from "@/components/shared/shared.jsx";
 import { useCase } from "@/components/shared/CaseContext.jsx";
+import { activeCases } from "@/lib/caseStatus.js";
 
 const STATUS_BADGE = {
     active: "success",
@@ -32,7 +33,10 @@ const ModOverview = () => {
     const t = useT();
     const { cases, appointments } = useCase();
 
-    const activeCasesCount = cases.length;
+    // NOT cases.length. A draft is a case the client has not confirmed at the
+    // end of the intake, and counting one toward "N cases open" labels it with
+    // the single status it is not.
+    const activeCasesCount = activeCases(cases).length;
     const apptCount = appointments.length;
     const nextAppt = appointments[0];
     const nextApptLabel = nextAppt

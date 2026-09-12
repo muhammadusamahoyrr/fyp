@@ -300,6 +300,16 @@ export async function intakeConvert(sessionToken, { language = "en", urgency = n
   });
 }
 
+// The intake this client should be put back into, or null.
+//
+// Asked when the browser holds no token: sign-out clears it, clearing site data
+// clears it, and a second device never had it. After conversion that token was
+// the only route to a draft case awaiting confirmation, so losing it left a
+// case its owner could never confirm.
+export async function getResumableIntake() {
+  return apiFetch('/intake/resumable');
+}
+
 export async function intakeGet(sessionToken) {
   return apiFetch(`/intake/${sessionToken}`);
 }
@@ -385,8 +395,11 @@ export async function updateCase(caseId, updates) {
 
 // Promote the client's draft case to open. The end of the intake.
 // Idempotent: a second press returns the same already-open case.
-export async function confirmCase(caseId) {
-  return apiFetch(`/cases/${caseId}/confirm`, { method: 'PATCH' });
+export async function confirmCase(caseId, caseType = null) {
+  return apiFetch(`/cases/${caseId}/confirm`, {
+    method: 'PATCH',
+    body: JSON.stringify({ case_type: caseType }),
+  });
 }
 
 export async function getCaseTimeline(caseId) {
@@ -871,6 +884,22 @@ export async function declineEngagement(engagement_id, reason) {
 
 export async function cancelEngagement(engagement_id) {
   return apiFetch(`/engagements/${engagement_id}/cancel`, { method: 'PATCH' });
+}
+
+// Read back an uploaded evidence file, saving it the way every other download
+// in this file does. Served through the API, not a static path, so the
+// ownership check cannot be bypassed by guessing a filename.
+export async function downloadIntakeEvidence(sessionToken, fileId, filename = 'evidence') {
+  const { data: res, error } = await apiFetch(
+    `/intake/${sessionToken}/evidence/${fileId}`, { returnResponse: true });
+  if (error) return { error: error.message || 'Download failed' };
+  return _saveBlob(res, filename);
+}
+
+// Remove an uploaded file — record AND bytes. The ✕ used to filter a React
+// array and leave the file on the server for ever.
+export async function deleteIntakeEvidence(sessionToken, fileId) {
+  return apiFetch(`/intake/${sessionToken}/evidence/${fileId}`, { method: 'DELETE' });
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────

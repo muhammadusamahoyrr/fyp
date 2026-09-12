@@ -214,11 +214,12 @@ def converted(monkeypatch):
     )
 
     class Repo(FakeIntakeRepo):
-        async def claim_conversion(self, token, ttl): return True
-        async def release_conversion(self, token): return True
-        async def attach_case(self, token, case_id): self.doc["case_id"] = case_id; return True
-        async def mark_completed(self, token, case_id, **kw): self.doc["completed"] = True; return True
-        async def save_ai_structured_case(self, token, data): return True
+        async def claim_conversion(self, token, ttl, owner): self.owner = owner; return 1
+        async def renew_conversion(self, token, owner, ttl): return owner == self.owner
+        async def release_conversion(self, token, owner): return owner == self.owner
+        async def attach_case(self, token, case_id, owner): self.doc["case_id"] = case_id; return True
+        async def mark_completed(self, token, case_id, owner, **kw): self.doc["completed"] = True; return True
+        async def save_ai_structured_case(self, token, data, owner): return True
 
     class CaseRepo:
         async def find_by_id(self, cid): return None
@@ -248,7 +249,6 @@ def converted(monkeypatch):
     monkeypatch.setattr(intake_service, "create_case", fake_create_case)
     monkeypatch.setattr(intake_service, "_ai_classify_case_type", fake_classify)
     monkeypatch.setattr(intake_service, "_run_intake_ai", fake_run_ai)
-    monkeypatch.setattr(intake_service, "_auto_match_lawyers", fake_match)
     return seen
 
 

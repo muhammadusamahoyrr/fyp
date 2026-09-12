@@ -31,6 +31,7 @@ these.
 | `answer_provenance` | Question, answer, evidence, model attribution, timings | **Retained**, and said so | No |
 | `provenance_outbox` (`failed` only) | A full provenance record that could not be delivered | Not touched | No |
 | LangGraph checkpoints | Graph state per thread, including question text and case context | **Retained**, and said so | No |
+| Intake sessions / evidence uploads | Intake answers, AI analysis, uploaded files | Retained | No; 12-month last-activity period is registered and dry-run reporting is implemented |
 | Corpus / Chroma | No user content | n/a | n/a |
 
 The session id survives a delete deliberately: it is the LangGraph thread key,
@@ -83,6 +84,7 @@ the number.
 | `provenance_outbox` (`failed`) | **7 years**, same as provenance | It *is* a provenance record that never arrived. Any shorter period silently discards the evidence that the audit trail has a hole — the exact records most worth keeping. |
 | LangGraph checkpoints | **12 months** (approved; 90 days was proposed) | Working state for resuming an interrupted turn. Nothing needs a six-month-old checkpoint, and it holds question text and case context. |
 | Tombstoned conversations | **7 years**, id only | Already stripped of title and question text. Only the session id survives, and it must, so the thread key is never reused. |
+| Intake sessions and evidence files | **12 months** from last activity | They are user-visible case-preparation data. Evidence bytes must be deleted with their intake row, subject to user/case legal holds; independent TTL deletion is therefore prohibited. |
 
 **Deliberate consequence, stated so nobody is surprised:** after 12 months a
 client's conversation disappears from their sidebar while the provenance record

@@ -148,3 +148,11 @@ backend/_pytest_codex_review_*/
 # of their legal problem, their id and their province. The journal exists so a
 # mistaken run can be reconstructed locally; it must never reach the repository.
 backend/scripts/_intake_id_dedupe_journal.json
+
+# OCR evaluation fixtures: real (de-identified) legal documents and their
+# hand-verified transcripts. The manifest pins each file by SHA-256, so a run
+# can prove which bytes it used without the bytes ever being committed.
+# A nested allow-list lives in backend/ocr_eval/fixtures/.gitignore.
+backend/ocr_eval/fixtures/*
+!backend/ocr_eval/fixtures/.gitignore
+!backend/ocr_eval/fixtures/README.md

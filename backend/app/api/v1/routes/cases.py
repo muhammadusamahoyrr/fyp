@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.dependencies import get_current_user, require_lawyer
 from app.schemas.case import (
+    CaseConfirm,
     CaseCreate,
     CaseOut,
     CaseUpdate,
@@ -68,6 +69,7 @@ async def update_case(
 @router.patch("/{case_id}/confirm", response_model=CaseOut)
 async def confirm_case(
     case_id: str,
+    body: CaseConfirm = CaseConfirm(),
     current_user: dict = Depends(get_current_user),
 ):
     """Promote the client's draft case to open.
@@ -77,7 +79,11 @@ async def confirm_case(
     or booked against. Safe to call twice: a second press returns the same
     already-open case rather than an error.
     """
-    return await case_service.confirm_case(case_id, current_user["_id"])
+    return await case_service.confirm_case(
+        case_id,
+        current_user["_id"],
+        body.case_type.value if body.case_type is not None else None,
+    )
 
 
 @router.get("/{case_id}/timeline", response_model=TimelineResponse)

@@ -86,6 +86,17 @@ async def _require_case_access(actor_id: str, case_id: str | None) -> None:
                         str(case.get("lawyer_id") or "")):
         raise ForbiddenError("That case does not belong to you")
 
+    # OWNERSHIP IS NOT THE ONLY QUESTION. A draft is the client's own case, so
+    # the check above passes — but a draft exists so the intake analysis has a
+    # real id to run against, and for nothing else. Binding a legal document to
+    # one produces a filing that names a case its owner has not confirmed, and
+    # that the engagement and matching paths already refuse to touch.
+    #
+    # Standalone drafting (case_id None) returned above, so this only ever
+    # refuses a document being pinned to an unconfirmed case.
+    from app.services.case_service import assert_not_draft
+    assert_not_draft(case, "have documents created against it")
+
 
 async def create_document(
     *, client_id: str, case_id: str | None, template_type: str, title: str,

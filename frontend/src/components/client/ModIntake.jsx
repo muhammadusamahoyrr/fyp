@@ -6,11 +6,24 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "./CaseContext.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge, Tooltip } from "@/components/shared/shared.jsx";
-import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence, updateCase, confirmCase } from "@/lib/api.js";
+import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence, confirmCase, deleteIntakeEvidence, downloadIntakeEvidence, getResumableIntake } from "@/lib/api.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { readIntakeValue, writeIntakeValue, clearIntakeValue } from "@/lib/intakeStorage.js";
 import { escapeHtml } from "@/lib/escapeHtml.js";
+import { extractionLabel, incompleteFiles, TONE_OK, TONE_WARN, TONE_BAD, TONE_NEUTRAL } from "@/lib/extractionStatus.js";
+
+/* One colour per tone, so a new state cannot arrive looking like a reassurance
+ * simply because nobody added it to a ternary. */
+const EXTRACTION_TONE_COLOUR = {
+    [TONE_OK]: null,          // falls back to the muted body colour
+    [TONE_WARN]: "#b45309",
+    [TONE_BAD]: "#b91c1c",
+    [TONE_NEUTRAL]: null,
+};
+const EXTRACTION_TONE_ICON = {
+    [TONE_OK]: "✓", [TONE_WARN]: "⚠", [TONE_BAD]: "✕", [TONE_NEUTRAL]: "•",
+};
 
 // Encode Float32 PCM as 16-bit mono WAV (no ffmpeg on backend)
 function _pcmToWav(samples, sampleRate) {
@@ -148,9 +161,11 @@ const ModIntake = () => {
 
     // ── Backend session ────────────────────────────────────────────
     const [intakeToken, setIntakeToken] = useState(null);
+    const [intakeBootError, setIntakeBootError] = useState("");
+    const [intakeBooting, setIntakeBooting] = useState(false);
+    const intakeBootInFlight = useRef(null);
     const [intakeSubmitting, setIntakeSubmitting] = useState(false);
     const [converting, setConverting] = useState(false);
-    const [confirming, setConfirming] = useState(false);
     // Whether the draft has been promoted. Drives the final screen, which
     // must not claim a case is ready while it is still a draft.
     const [caseConfirmed, setCaseConfirmed] = useState(false);
@@ -194,6 +209,43 @@ const ModIntake = () => {
     ];
     const completedSteps = Math.max(0, step - 1);
     const progress = (completedSteps / steps.length) * 100;
+
+    // ── Evidence removal, on the SERVER ────────────────────────────
+    //
+    // The ✕ used to do `setEvidenceFiles(prev => prev.filter(...))` and nothing
+    // else. The row vanished, the file stayed on disk and on the intake for
+    // ever, the per-intake quota still counted it, and the AI analysis still
+    // described it as uploaded. The client had every reason to believe it was
+    // gone.
+    const [removingFile, setRemovingFile] = useState(null);
+
+    const removeEvidence = async (ef) => {
+        // A row that never reached the server (a failed upload) has nothing to
+        // delete; drop it locally.
+        if (!intakeToken || ef.error || !ef.file_id) {
+            setEvidenceFiles(prev => prev.filter(x => x.file_id !== ef.file_id));
+            return;
+        }
+        setRemovingFile(ef.file_id);
+        const { error } = await deleteIntakeEvidence(intakeToken, ef.file_id);
+        setRemovingFile(null);
+        if (error) {
+            toast.show(error.message || "Could not remove that file. Please try again.", "error", 3500);
+            return;   // keep the row: the file is still there
+        }
+        setEvidenceFiles(prev => prev.filter(x => x.file_id !== ef.file_id));
+        toast.show("File removed.", "success", 2000);
+    };
+
+    const downloadEvidence = async (ef) => {
+        if (!intakeToken || !ef.file_id) return;
+        const result = await downloadIntakeEvidence(
+            intakeToken, ef.file_id, ef.filename
+        );
+        if (result?.error) {
+            toast.show(result.error || "Could not download that file.", "error", 3500);
+        }
+    };
 
     // ── Export helpers ─────────────────────────────────────────────
     //
@@ -343,6 +395,13 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
     // Going BACK is always allowed; only moving ahead of your own progress is
     // gated.
     const stepBlocker = (target) => {
+        // A CONVERTED intake cannot be edited. `save_step` refuses a completed
+        // intake, so walking back to the questionnaire ends in "Intake already
+        // completed" — an error about a screen the stepper invited them onto.
+        // Once a case exists, the earlier steps are history.
+        if (caseId && target < 4) {
+            return "This case has already been analysed — its details can no longer be edited here";
+        }
         if (target <= step) return null;
         if (!role) return "Please select your role first";
         if (!province) return "Please select your province";
@@ -350,11 +409,9 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
             return "Please describe your legal issue before continuing";
         if (target >= 4 && !caseId)
             return "Your case is still being prepared — finish step 3 first";
-        // Step 5 sits AFTER the confirmation, and the confirm button is the
-        // only thing that promotes the draft. Reaching it by clicking the
-        // stepper would show a "complete" screen for a case still in draft.
-        if (target >= 5 && !caseConfirmed)
-            return "Confirm your case on this screen first";
+        // Step 5 is the confirmation screen. Reaching it is safe: the case
+        // remains a draft until its final button atomically saves the chosen
+        // category and promotes it to open.
         return null;
     };
 
@@ -433,50 +490,114 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
     //
     // Waits for the user id: the storage key contains it, so reading before
     // sign-in resolves would miss a resumable token and mint a second session.
+    // Everything needed to put the client back into an intake, from one
+    // response. Shared by the token path and the server-resume path below, so
+    // the two cannot drift into restoring different things.
+    const adoptIntake = (data) => {
+        // Case data wins over historical step 2 input. The AI may have
+        // corrected it, or the client may have confirmed an override later.
+        if (data.case_type) {
+            setCaseTypeInput(data.case_type);
+            setConvertedCaseType(data.case_type);
+        } else if (data.ai_case_type) {
+            setConvertedCaseType(data.ai_case_type);
+        }
+        if (data.case_id) {
+            setCaseId(data.case_id);
+            scopedSet("aai-case-id", data.case_id);
+            // The CASE says whether it was confirmed; the intake only says a
+            // case was produced. Without this a refresh would offer to confirm
+            // an already-open case.
+            if (data.case_status && data.case_status !== "draft") {
+                setCaseConfirmed(true);
+            }
+        }
+        if (data.ai_structured_case?.summary &&
+            data.ai_structured_case.summary !== "pending") {
+            setAiStructured(data.ai_structured_case);
+        }
+        restoreFromServer(data);
+
+        // WHERE they were, not just WHAT they typed.
+        //
+        // `current_step` was returned by the API and read by nothing, so a
+        // refresh mid-intake restored every answer and then showed step 1 — the
+        // client had to click forward through screens they had already
+        // completed, re-reading their own answers to work out where they were.
+        //
+        // Capped at 3 for an unfinished intake: step 4 is the analysis screen
+        // and needs a case, which only conversion produces.
+        if (data.completed) {
+            setStep(s => (s < 4 ? 4 : s));
+        } else {
+            const at = Number(data.current_step) || 1;
+            setStep(s => (s > 1 ? s : Math.min(Math.max(at, 1), 3)));
+        }
+    };
+
+    // ASK THE SERVER, then start fresh only if it has nothing.
+    //
+    // Resuming used to depend entirely on the token in this browser's storage.
+    // Sign-out clears it, clearing site data clears it, and a second device
+    // never had it — and after conversion that token is the only route to a
+    // draft case awaiting confirmation. So signing out between converting and
+    // confirming left a real case its owner could never confirm and this screen
+    // could never find. The server knows which intakes are unfinished.
+    const resumeOrStart = async () => {
+        if (intakeBootInFlight.current) return intakeBootInFlight.current;
+        const work = (async () => {
+            setIntakeBooting(true);
+            setIntakeBootError("");
+            const { data: resumable, error: resumeError } = await getResumableIntake();
+            if (resumeError) {
+                // Unknown is not empty. Starting here would create another
+                // intake precisely when the server failed to tell us whether
+                // one already exists.
+                setIntakeBootError("Could not check your saved intake. Try again when your connection is stable.");
+                return;
+            }
+            if (resumable?.session_token) {
+                setIntakeToken(resumable.session_token);
+                scopedSet("aai-intake-token", resumable.session_token);
+                adoptIntake(resumable);
+                return;
+            }
+            const { data: started, error } = await intakeStart();
+            if (started?.session_token) {
+                setIntakeToken(started.session_token);
+                scopedSet("aai-intake-token", started.session_token);
+            } else if (error) {
+                setIntakeBootError("Could not start an intake. Please try again.");
+            }
+        })().finally(() => {
+            setIntakeBooting(false);
+            intakeBootInFlight.current = null;
+        });
+        intakeBootInFlight.current = work;
+        return work;
+    };
+
     useEffect(() => {
         if (!userId) return;
         const saved = scopedGet("aai-intake-token");
-        if (saved) {
-            setIntakeToken(saved);
-            // Restore what the server already knows about this session, so a
-            // refresh lands the client back where they were instead of on a
-            // blank step 1 with a token pointing at a half-filled intake.
-            intakeGet(saved).then(({ data, error }) => {
-                if (error || !data) {
-                    // The token is unusable — expired, or belonging to nobody
-                    // this account can see. Drop it and start clean rather
-                    // than leaving the page wedged against it.
-                    scopedRemove("aai-intake-token");
-                    setIntakeToken(null);
-                    return;
-                }
-                if (data.case_id) {
-                    setCaseId(data.case_id);
-                    scopedSet("aai-case-id", data.case_id);
-                    // The CASE says whether it was confirmed; the intake only
-                    // says a case was produced. Without this a refresh would
-                    // offer to confirm an already-open case.
-                    if (data.case_status && data.case_status !== "draft") {
-                        setCaseConfirmed(true);
-                    }
-                }
-                if (data.ai_structured_case?.summary &&
-                    data.ai_structured_case.summary !== "pending") {
-                    setAiStructured(data.ai_structured_case);
-                }
-                restoreFromServer(data);
-                if (data.completed) setStep(s => (s < 4 ? 4 : s));
-            });
-        } else {
-            intakeStart().then(({ data, error }) => {
-                if (data?.session_token) {
-                    setIntakeToken(data.session_token);
-                    scopedSet("aai-intake-token", data.session_token);
-                } else if (error) {
-                    console.warn("Intake start failed:", error);
-                }
-            });
+        if (!saved) {
+            resumeOrStart();
+            return;
         }
+        setIntakeToken(saved);
+        intakeGet(saved).then(({ data, error }) => {
+            if (error || !data) {
+                // The token is unusable — expired, or belonging to nobody this
+                // account can see. Drop it and ASK THE SERVER rather than
+                // starting fresh: an unusable token in storage is exactly the
+                // situation where an unfinished intake is most likely to exist.
+                scopedRemove("aai-intake-token");
+                setIntakeToken(null);
+                resumeOrStart();
+                return;
+            }
+            adoptIntake(data);
+        });
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [userId]);
 
@@ -612,7 +733,19 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
         // convert_to_case reads clarification_qa and appends Q&A to the description itself.
         const lastAnswer = clarifyA4.trim() || clarifyA3.trim() || clarifyA2.trim();
         if (intakeToken && lastAnswer) {
-            await intakeClarify(intakeToken, lastAnswer);
+            // The result was discarded. `convert_to_case` folds the stored Q&A
+            // into the text it analyses, so a failure here meant the analysis
+            // ran without the client's final answer — and nothing said so. They
+            // had just typed it, so its absence is invisible to them.
+            const { error: clarifyErr } = await intakeClarify(intakeToken, lastAnswer);
+            if (clarifyErr) {
+                toast.show(
+                    "Could not save your last answer — check your connection and try again.",
+                    "error", 4000,
+                );
+                setConverting(false);
+                return;   // do NOT analyse without it
+            }
         }
         const r4 = await intakeSaveStep(intakeToken, 4, {
             has_evidence: hasEvidence,
@@ -648,8 +781,18 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
             setCaseId(converted.case_id);
             setConvertedCaseType(converted.ai_case_type || null);
             scopedSet("aai-case-id", converted.case_id);
-            scopedRemove("aai-intake-token");
-            setIntakeToken(null);
+            // THE TOKEN STAYS until the client confirms.
+            //
+            // It used to be cleared here, at conversion. That was safe while
+            // conversion was the last step — but confirmation now happens
+            // afterwards, on the next screen, and the token is the only thing
+            // that can reopen the intake. Clearing it here meant a refresh
+            // between the two started a brand-new intake and left the draft
+            // unreachable AND unconfirmable: a case the client owns, that
+            // nothing in the UI can ever promote, for the life of the account.
+            //
+            // `scopedRemove` moved to handleSubmit, where the intake is
+            // genuinely finished.
 
             // If AI corrected the case type, update UI and notify user
             if (converted.type_was_corrected && converted.ai_case_type) {
@@ -684,22 +827,16 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
     // The case is now created as a DRAFT, and this is the call that makes it
     // real. Until it lands the case cannot be sent to a lawyer, matched, or
     // booked against.
-    const handleConfirmCase = async () => {
+    const handleContinueToCategory = () => {
         if (!caseId) {
             // No case to confirm — the conversion never completed. Advancing
             // would show a "complete" screen for something that does not exist.
             toast.show("Your case is not ready yet — go back and finish step 3.", "warn", 3500);
             return;
         }
-        setConfirming(true);
-        const { error } = await confirmCase(caseId);
-        setConfirming(false);
-        if (error) {
-            toast.show(error.message || "Could not confirm your case. Please try again.", "error", 4000);
-            return;   // do NOT advance; the case is still a draft
-        }
-        setCaseConfirmed(true);
-        toast.show("Case confirmed — you can now choose a lawyer.", "success", 3000);
+        // The next screen is where the client confirms the authoritative
+        // category. Opening the case here allowed matching to observe the old
+        // AI category before the client's final choice was persisted.
         setStep(5);
     };
 
@@ -707,19 +844,24 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
     const handleSubmit = async () => {
         setIntakeSubmitting(true);
 
-        // Persist the category the client confirmed on this screen. Step 5
-        // invites them to "Confirm or change" the AI's classification, and the
-        // change used to stop at React state: the case in MongoDB kept the old
-        // category forever while every screen here showed the new one.
-        if (caseId && caseTypeInput && caseTypeInput !== convertedCaseType) {
-            const { error } = await updateCase(caseId, { case_type: caseTypeInput });
-            if (error) {
-                toast.show("Could not save your category change — please try again.", "error", 4000);
-                setIntakeSubmitting(false);
-                return;   // do not claim success for a write that failed
-            }
-            setConvertedCaseType(caseTypeInput);
+        if (!caseId || !caseTypeInput) {
+            toast.show("Choose a case category before confirming.", "warn", 3000);
+            setIntakeSubmitting(false);
+            return;
         }
+
+        // One backend CAS stores the category and opens the case. There is no
+        // interval in which an open case still carries the superseded type.
+        const { error } = await confirmCase(caseId, caseTypeInput);
+        if (error) {
+            toast.show(error.message || "Could not confirm your case. Please try again.", "error", 4000);
+            setIntakeSubmitting(false);
+            return;
+        }
+        setConvertedCaseType(caseTypeInput);
+        setCaseConfirmed(true);
+        scopedRemove("aai-intake-token");
+        setIntakeToken(null);
 
         completeIntake({
             role,
@@ -745,7 +887,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
         // nobody reviewing it and no two-hour commitment behind it. A client who
         // believed that would wait instead of choosing a lawyer, which is the
         // one action that actually moves their matter forward.
-        toast.show("Your case has been created.", "success", 3000);
+        toast.show("Case confirmed — you can now choose a lawyer.", "success", 3000);
         setTimeout(
             () => toast.show(
                 "Next: choose a lawyer to send it to — nobody is reviewing it yet.",
@@ -873,6 +1015,14 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
 
     return (
         <div>
+            {intakeBootError && (
+                <Card style={{ padding: 16, marginBottom: 16, border: `1px solid ${t.danger}55` }}>
+                    <div style={{ color: t.danger, fontSize: 13, marginBottom: 10 }}>{intakeBootError}</div>
+                    <BtnOutline disabled={intakeBooting} onClick={resumeOrStart}>
+                        {intakeBooting ? "Checking…" : "Try again"}
+                    </BtnOutline>
+                </Card>
+            )}
             {/* Compact horizontal stepper */}
             <div style={{ display: "flex", alignItems: "center", marginBottom: 28, padding: "12px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, gap: 0 }}>
                 {steps.map((s, i) => {
@@ -1149,7 +1299,10 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                                         >
                                             <Ic n="file" s={15} c={t.primary} />
                                             <span style={{ fontSize: 12, fontWeight: 700, color: t.primary }}>{T("Upload Files", "فائلیں اپ لوڈ کریں")}</span>
-                                            <span style={{ fontSize: 11, color: t.textMuted }}>PDF, Word, JPG, PNG · max 10 MB each</span>
+                                            {/* The REAL limits. This said "max 10 MB each" only, so a client hit
+     the file-count or total-size cap with no warning that either
+     existed — the caption described the one limit it knew about. */}
+                                            <span style={{ fontSize: 11, color: t.textMuted }}>PDF, Word, JPG, PNG · max 10 MB each · up to 12 files, 40 MB total</span>
                                         </div>
                                         {/* Uploaded file list */}
                                         {evidenceFiles.length > 0 && (
@@ -1157,6 +1310,9 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                                                 {evidenceFiles.map(ef => {
                                                     const icon = ef.content_type?.startsWith("image/") ? "🖼️" : ef.content_type === "application/pdf" ? "📄" : "📝";
                                                     const kb   = ef.size ? `${(ef.size / 1024).toFixed(0)} KB` : "";
+                                                    // Absent until the intake has been converted — extraction runs
+                                                    // then, and before that there is nothing honest to claim.
+                                                    const read = extractionLabel(ef);
                                                     return (
                                                         <div key={ef.file_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 8, background: ef.error ? "#fef2f2" : t.inputBg, border: `1px solid ${ef.error ? "#fca5a5" : t.border}` }}>
                                                             <span style={{ fontSize: 15 }}>{icon}</span>
@@ -1165,10 +1321,29 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                                                                     {ef.filename}
                                                                 </div>
                                                                 <div style={{ fontSize: 10, color: t.textMuted }}>{ef.error || (ef.uploading ? "Uploading…" : kb)}</div>
+                                                                {/* Uploading and upload-failure already have the line above;
+                                                                    this covers the other four states, including the
+                                                                    storage-only one that is known before any extraction runs. */}
+                                                                {!ef.uploading && !ef.error && (
+                                                                    <div data-testid={`extraction-${ef.file_id}`} data-state={read.state} style={{ fontSize: 10, marginTop: 2, whiteSpace: "normal", color: EXTRACTION_TONE_COLOUR[read.tone] || t.textMuted, fontWeight: read.tone === TONE_OK || read.tone === TONE_NEUTRAL ? 400 : 600 }}>
+                                                                        {EXTRACTION_TONE_ICON[read.tone] || "•"} {read.title}
+                                                                        {read.detail ? ` — ${read.detail}` : ""}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                             {ef.uploading && <div style={{ width: 12, height: 12, border: `2px solid ${t.primary}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
+                                                            {!ef.uploading && !ef.error && (
+                                                                <button
+                                                                    title="Download"
+                                                                    onClick={() => downloadEvidence(ef)}
+                                                                    style={{ background: "none", border: "none", cursor: "pointer", color: t.textMuted, fontSize: 13, lineHeight: 1, padding: 2 }}>⭳</button>
+                                                            )}
                                                             {!ef.uploading && (
-                                                                <button onClick={() => setEvidenceFiles(prev => prev.filter(x => x.file_id !== ef.file_id))} style={{ background: "none", border: "none", cursor: "pointer", color: t.textMuted, fontSize: 14, lineHeight: 1, padding: 2 }}>✕</button>
+                                                                <button
+                                                                    title="Remove"
+                                                                    disabled={removingFile === ef.file_id}
+                                                                    onClick={() => removeEvidence(ef)}
+                                                                    style={{ background: "none", border: "none", cursor: "pointer", color: t.textMuted, fontSize: 14, lineHeight: 1, padding: 2, opacity: removingFile === ef.file_id ? 0.4 : 1 }}>✕</button>
                                                             )}
                                                         </div>
                                                     );
@@ -1410,7 +1585,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                     <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
                         <BtnOutline onClick={() => setStep(3)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
                         <div style={{ flex: 1 }} />
-                        <BtnPrimary disabled={confirming} onClick={handleConfirmCase} style={{ fontSize: 13, padding: "8px 18px", opacity: confirming ? 0.7 : 1 }}>{confirming ? T("Confirming…", "تصدیق ہو رہی ہے…") : T("Confirm & Save Case →", "تصدیق کریں اور کیس محفوظ کریں ←")}</BtnPrimary>
+                        <BtnPrimary onClick={handleContinueToCategory} style={{ fontSize: 13, padding: "8px 18px" }}>{T("Continue to Category →", "درجہ بندی کی طرف جائیں ←")}</BtnPrimary>
                     </div>
                     <div>
                         <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI-Generated <em>Case Summary</em></div>
@@ -1437,6 +1612,50 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                                             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary, marginBottom: 10 }}>📋 Case Summary</div>
                                             <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.7 }}>{aiStructured.summary}</div>
                                         </div>
+
+                                        {/* WHAT THE ANALYSIS DID NOT SEE.
+                                            Shown beside the summary, not on the upload screen, because
+                                            this is the screen where the client decides whether to trust
+                                            the analysis. The previous wording — "some uploaded files
+                                            could not be read" — was true but unactionable: it never said
+                                            which file, or how much of it, so a bundle read down to its
+                                            cover sheet looked the same as one missing a blurred photo. */}
+                                        {(() => {
+                                            const records = Array.isArray(aiStructured.evidence_extraction) ? aiStructured.evidence_extraction : [];
+                                            if (!records.length) return null;
+                                            const nameOf = id => (evidenceFiles.find(f => f.file_id === id) || {}).filename || "an uploaded file";
+                                            const gaps = incompleteFiles(records.map(r => ({ ...r, extraction_status: r.status })));
+                                            if (!gaps.length) {
+                                                return (
+                                                    <div style={{ padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, fontSize: 12, color: t.textMuted }}>
+                                                        ✓ All {records.length} uploaded file(s) were read in full and included in this analysis.
+                                                    </div>
+                                                );
+                                            }
+                                            return (
+                                                <div data-testid="evidence-gaps" style={{ padding: "12px 14px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fcd34d", fontSize: 12, color: "#78350f" }}>
+                                                    <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                                                        ⚠ This analysis did not see all of your evidence
+                                                    </div>
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                                        {gaps.map(g => {
+                                                            const label = extractionLabel(g);
+                                                            return (
+                                                                <div key={g.file_id}>
+                                                                    <strong>{nameOf(g.file_id)}</strong> — {label.title}
+                                                                    {label.detail ? ` (${label.detail})` : ""}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    <div style={{ marginTop: 7, lineHeight: 1.6 }}>
+                                                        Anything above was not part of the analysis. Type those details into
+                                                        your description, upload a text-based copy, or continue knowing they
+                                                        were left out.
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
 
                                         {/* Applicable Laws */}
                                         {aiStructured.applicable_laws?.length > 0 && (
@@ -1599,9 +1818,9 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                         <div style={{ flex: 1 }} />
                         <BtnPrimary
                             disabled={intakeSubmitting}
-                            onClick={() => { if (!intakeSubmitting) { toast.show("🎉 Case fully structured!"); handleSubmit(); } }}
+                            onClick={() => { if (!intakeSubmitting) handleSubmit(); }}
                             style={{ fontSize: 13, padding: "8px 18px", opacity: intakeSubmitting ? 0.7 : 1 }}>
-                            {intakeSubmitting ? "Submitting…" : "🎉 Complete Case Intake →"}
+                            {intakeSubmitting ? "Confirming…" : "Confirm Category & Open Case →"}
                         </BtnPrimary>
                     </div>
                     <div>
@@ -1644,12 +1863,16 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                             <Card style={{ padding: 20, border: `1px solid ${t.primary}50`, background: t.primaryGlow, textAlign: "center" }}>
                                 <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-                                <div style={{ fontFamily: "'Fraunces',serif", fontSize: 18, fontWeight: 600, color: t.primary, marginBottom: 6 }}>{T("Case Intake Complete", "کیس کی درخواست مکمل")}</div>
+                                <div style={{ fontFamily: "'Fraunces',serif", fontSize: 18, fontWeight: 600, color: t.primary, marginBottom: 6 }}>{T(caseConfirmed ? "Case Intake Complete" : "Ready to Confirm", "کیس کی تصدیق")}</div>
                                 {/* "ready for review" implies somebody is about to review it. Nothing
      is: conversion creates an open case and stops. The next move is the
      client's, and saying so is the difference between them choosing a
      lawyer today and waiting for a call that was never scheduled. */}
-                                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>{T("Your case is structured. Choose a lawyer to send it to — it has not been sent to anyone yet.", "آپ کا کیس ترتیب پا چکا ہے۔ اسے بھیجنے کے لیے وکیل منتخب کریں — ابھی یہ کسی کو نہیں بھیجا گیا۔")}</div>
+                                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>
+                                    {caseConfirmed
+                                        ? T("Your case is open. Choose a lawyer to send it to — it has not been sent to anyone yet.", "آپ کا کیس کھل چکا ہے۔ اسے بھیجنے کے لیے وکیل منتخب کریں — ابھی یہ کسی کو نہیں بھیجا گیا۔")
+                                        : T("Review the category, then confirm it to open your case. Until confirmation succeeds, this remains a draft and cannot be matched or sent.", "درجہ بندی کا جائزہ لیں، پھر کیس کھولنے کے لیے اس کی تصدیق کریں۔ کامیاب تصدیق تک یہ مسودہ رہے گا اور اسے میچ یا بھیجا نہیں جا سکتا۔")}
+                                </div>
                                 <div style={{ textAlign: "left" }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>Case ID</span>
@@ -1665,15 +1888,17 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                                         <span style={{ color: t.text, fontWeight: 600 }}>{PROVINCES.find(p => p.value === province)?.label || province}</span>
                                     </div>
                                     <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                        <span style={{ color: t.textMuted }}>Status</span><Badge type="success">Ready</Badge>
+                                        <span style={{ color: t.textMuted }}>Status</span><Badge type={caseConfirmed ? "success" : "warn"}>{caseConfirmed ? "Open" : "Draft"}</Badge>
                                     </div>
                                 </div>
                                 <BtnPrimary
+                                    disabled={!caseConfirmed}
                                     onClick={() => {
+                                        if (!caseConfirmed) return;
                                         const dest = caseId ? `/lawyers?case_id=${caseId}` : "/lawyers";
                                         router.push(dest);
                                     }}
-                                    style={{ width: "100%", marginTop: 20, padding: 14, fontSize: 14 }}
+                                    style={{ width: "100%", marginTop: 20, padding: 14, fontSize: 14, opacity: caseConfirmed ? 1 : 0.55 }}
                                 >{T("Find a Lawyer →", "وکیل تلاش کریں ←")}</BtnPrimary>
                             </Card>
 

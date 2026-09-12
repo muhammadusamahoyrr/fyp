@@ -2,7 +2,7 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from app.core.constants import KycStatus, NotificationType
+from app.core.constants import CaseStatus, KycStatus, NotificationType
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.core.security import TOKENS_VALID_FROM, hash_password, password_change_cutoff
 from app.db.collections import (
@@ -253,8 +253,16 @@ async def get_analytics() -> dict:
     for ct in ["civil", "criminal", "constitutional", "family"]:
         cases_by_type[ct] = await cases_col.count_documents({"case_type": ct})
 
+    # Derived from the enum, not hand-listed.
+    #
+    # The hand-written list was exactly `CaseStatus` minus `DRAFT`, because it
+    # predated drafts existing. `total_cases` counts every row, so the breakdown
+    # silently stopped summing to the total the moment intake began producing
+    # unconfirmed drafts — and the missing count was invisible rather than wrong,
+    # which is worse. Reading the enum means a future status cannot go unreported
+    # the same way.
     cases_by_status: dict[str, int] = {}
-    for st in ["open", "in_progress", "pending_lawyer", "closed", "dismissed"]:
+    for st in [s.value for s in CaseStatus]:
         cases_by_status[st] = await cases_col.count_documents({"status": st})
 
     return {

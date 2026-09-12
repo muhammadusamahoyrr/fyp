@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { DARK, LIGHT, useT } from "./theme.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useCase } from "./CaseContext.jsx";
+import { confirmedCases } from "@/lib/caseStatus.js";
 import { listCases, getCaseTimeline, listAppointments, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt } from "@/lib/api.js";
 
 // ─── DATA ─────────────────────────────────────────────────────────────────────
@@ -1752,8 +1753,15 @@ export default function Module7({ isDark }) {
     // Load cases from API on mount
     useEffect(() => {
         listCases({ page_size: 20 }).then(({ data }) => {
-            if (data?.items?.length) {
-                const mapped = data.items.map(mapApiCase);
+            // Drafts are filtered out BEFORE mapping. `mapApiCase` stamps a
+            // "Filed" date from `created_at`, and a draft has not been filed
+            // anywhere — it has not even been confirmed. Worse, cases arrive
+            // newest-first and the first one becomes the active case, so a
+            // fresh draft became the client's headline matter and displaced a
+            // real one.
+            const real = confirmedCases(data?.items);
+            if (real.length) {
+                const mapped = real.map(mapApiCase);
                 setApiCases(mapped);
                 setActiveCaseId(mapped[0].id);
             }

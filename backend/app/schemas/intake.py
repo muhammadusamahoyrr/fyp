@@ -104,6 +104,28 @@ class IntakeEvidenceFile(BaseModel):
     filename: str
     content_type: str | None = None
     size: int | None = None
+    # ── How much of this file the analysis actually read ─────────────────────
+    #
+    # Absent until the intake is converted, because extraction happens then —
+    # and absent is the honest value before that, not "complete".
+    #
+    # `extraction_status` mirrors the recorded per-file status
+    # (readable / partially_read / unreadable / missing / omitted_limit /
+    # invalid_path). `completeness` is the extractor's own judgement. The page
+    # counters are carried so the UI can say WHICH pages produced nothing
+    # instead of only that something was missing — a client who is told "3 of 5
+    # pages could not be read" knows what to retype.
+    extraction_status: str | None = None
+    completeness: str | None = None
+    pages_total: int | None = None
+    pages_with_text: int | None = None
+    pages_failed: int | None = None
+    pages_skipped: int | None = None
+    # Set when the file extracted fully but the ANALYSIS PROMPT ran out of room.
+    # A different fact from "could not be read", and the client is owed the
+    # difference: one is fixable by re-uploading, the other is not.
+    prompt_truncated: bool | None = None
+    limitations: list[str] = []
 
 
 class IntakeDetailResponse(BaseModel):
@@ -116,6 +138,10 @@ class IntakeDetailResponse(BaseModel):
     # without it the UI would offer to confirm an already-open case, or claim a
     # draft was ready.
     case_status: str | None = None
+    # Current case classification after conversion. Step 2 is historical input
+    # and must not overwrite this authoritative value on refresh.
+    case_type: str | None = None
+    ai_case_type: str | None = None
     ai_structured_case: dict | None = None
     # ── What the client already filled in ────────────────────────────────────
     #
@@ -131,15 +157,33 @@ class IntakeDetailResponse(BaseModel):
 
 
 class IntakeClarifyRequest(BaseModel):
-    answer: str | None = None   # user's answer to the previous question; None on first call
+    model_config = ConfigDict(extra="forbid")
+
+    # BOUNDED, like every other free-text field on this router. It was the one
+    # unbounded string left: the answer is stored on the intake and folded into
+    # the text the analysis reads, so an unbounded value is both an unbounded
+    # document and an unbounded prompt. 5k matches step 5's notes — far above a
+    # real answer to "was an FIR filed?".
+    answer: str | None = Field(default=None, max_length=5_000)
 
 
 class IntakeClarifyResponse(BaseModel):
     question: str | None        # next clarifying question; None if done
     done: bool                  # True = no more questions needed, proceed to convert
-    round: int                  # 1 or 2 (max 2 clarification rounds)
+    # Up to _MAX_CLARIFY_ROUNDS (4). The comment here said "1 or 2 (max 2
+    # clarification rounds)" while the service allowed four — three separate
+    # comments claimed two, and a reader trusting any of them would size a UI
+    # for half the conversation.
+    round: int
 
 
 class IntakeConvertRequest(BaseModel):
-    language: str = "en"        # detected language from voice input or UI selector
-    urgency:  str | None = None # user-selected urgency; overrides stored step2 value if provided
+    model_config = ConfigDict(extra="forbid")
+
+    # An ENUM, not a free string. It reaches the analysis prompt as the language
+    # to answer in, and it was accepted unbounded and unvalidated — so the one
+    # field on this request that steers model output was the one nothing checked.
+    # These are the two the UI offers; `urgency` is validated the same way
+    # step 2 validates it.
+    language: Literal["en", "ur"] = "en"
+    urgency:  Literal["low", "medium", "high", "urgent"] | None = None

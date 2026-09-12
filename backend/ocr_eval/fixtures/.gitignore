@@ -1,0 +1,6 @@
+# Real legal documents and their transcripts never enter version control.
+# Allow-list, not a block-list: a new file type must be added deliberately
+# rather than inheriting an exemption someone wrote for something else.
+*
+!.gitignore
+!README.md

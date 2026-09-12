@@ -53,6 +53,13 @@ class CaseRepository(BaseRepository):
             },
         )
 
+    async def find_draft_ids_for_client(self, client_id: str) -> list[str]:
+        """Return every draft case id for this owner, without a page cap."""
+        cursor = self.col.find(
+            {"client_id": client_id, "status": "draft"}, {"_id": 1}
+        )
+        return [doc["_id"] async for doc in cursor]
+
     async def add_hearing(self, case_id: str, hearing: dict) -> bool:
         return await self.update_one(
             {"_id": case_id},
@@ -97,10 +104,4 @@ class CaseRepository(BaseRepository):
         return await self.update_one(
             {"_id": case_id, "tasks._id": task_id},
             {"$set": {"tasks.$.done": done, "tasks.$.completed_at": completed_at}},
-        )
-
-    async def set_matched_lawyers(self, case_id: str, matches: list[dict]) -> bool:
-        return await self.update_one(
-            {"_id": case_id},
-            {"$set": {"matched_lawyers": matches, "updated_at": datetime.now(timezone.utc)}},
         )

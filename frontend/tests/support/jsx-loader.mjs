@@ -27,6 +27,8 @@ const API_STUB = pathToFileURL(
     path.join(ROOT, "tests", "support", "api-stub.mjs")).href;
 
 const COMPONENTS = pathToFileURL(path.join(SRC, "components")).href;
+// Context providers are application code too — see the note in resolve().
+const CONTEXT = pathToFileURL(path.join(SRC, "context")).href;
 
 /* Minimal stand-ins for the Next.js runtime modules a page-level component
  * imports. Deliberately tiny and inert: a test that wants to assert on routing
@@ -88,8 +90,20 @@ export async function resolve(specifier, context, nextResolve) {
         return { url: `${NEXT_STUB_PREFIX}${specifier}`, shortCircuit: true };
     }
 
-    const fromComponent = (context.parentURL || "").startsWith(COMPONENTS);
-    if (fromComponent && /\/lib\/api(\.js)?$/.test(specifier)) {
+    // `src/context/` counts as component code for this purpose.
+    //
+    // The guard's intent is "application code must not reach the network in a
+    // mounted test". It matched `src/components/` only, so `AuthContext.jsx` —
+    // which lives in src/context and calls bootstrapAuth/getMe on mount — got
+    // the REAL client, failed against no server, and left `user` null. Any
+    // component whose behaviour depends on the signed-in user then behaved as
+    // though nobody were logged in, silently.
+    //
+    // Tests that deliberately import the real client are imported FROM tests/,
+    // so their parentURL matches neither prefix and they are unaffected.
+    const parent = context.parentURL || "";
+    const fromAppCode = parent.startsWith(COMPONENTS) || parent.startsWith(CONTEXT);
+    if (fromAppCode && /\/lib\/api(\.js)?$/.test(specifier)) {
         return { url: API_STUB, shortCircuit: true };
     }
     if (specifier.startsWith("@/")) {
