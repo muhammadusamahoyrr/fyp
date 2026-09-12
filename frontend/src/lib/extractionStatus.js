@@ -45,11 +45,25 @@ export const ALL_STATES = [
     STATE_UNREADABLE, STATE_STORAGE_ONLY, STATE_ERROR,
 ];
 
-/** Pages that yielded nothing, as a phrase, or "" when everything yielded text. */
+/**
+ * A counter, or null when it is genuinely unknown.
+ *
+ * `Number(null)` is 0, so passing a missing counter straight into Number turns
+ * "we could not determine the page count" into a confident zero — and a page
+ * count of 0 against a total of 5 renders as "5 of 5 pages produced no text",
+ * which is a definite claim manufactured out of an absence.
+ */
+function num(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
+
+/** Pages that yielded nothing, as a phrase, or "" when unknown or all yielded. */
 function unreadPages(ef) {
-    const total = Number(ef?.pages_total);
-    const withText = Number(ef?.pages_with_text);
-    if (!Number.isFinite(total) || !Number.isFinite(withText)) return "";
+    const total = num(ef?.pages_total);
+    const withText = num(ef?.pages_with_text);
+    if (total === null || withText === null) return "";
     if (total <= 0 || withText >= total) return "";
     return `${total - withText} of ${total} page${total === 1 ? "" : "s"} produced no text`;
 }
@@ -59,14 +73,10 @@ function detailFor(ef) {
     const unread = unreadPages(ef);
     if (unread) bits.push(unread);
 
-    const skipped = Number(ef?.pages_skipped);
-    if (Number.isFinite(skipped) && skipped > 0) {
-        bits.push(`${skipped} not processed`);
-    }
-    const failed = Number(ef?.pages_failed);
-    if (Number.isFinite(failed) && failed > 0) {
-        bits.push(`${failed} could not be read`);
-    }
+    const skipped = num(ef?.pages_skipped);
+    if (skipped !== null && skipped > 0) bits.push(`${skipped} not processed`);
+    const failed = num(ef?.pages_failed);
+    if (failed !== null && failed > 0) bits.push(`${failed} could not be read`);
     for (const note of ef?.limitations || []) {
         if (typeof note === "string" && note.startsWith("unsupported_part:")) {
             bits.push(`${note.slice("unsupported_part:".length)} not read`);
@@ -106,6 +116,12 @@ export function extractionLabel(ef) {
     }
 
     const status = ef?.extraction_status;
+    // ONE contract for truncation. The live upload response and a restored
+    // intake describe it with different field names; both mean the analysis was
+    // shown less than was extracted, so both resolve here rather than at each
+    // call site.
+    const truncated = Boolean(ef?.prompt_truncated ?? ef?.truncated);
+
     if (!status) {
         return {
             state: STATE_PENDING, tone: TONE_NEUTRAL, title: "Not analysed yet",
@@ -115,8 +131,30 @@ export function extractionLabel(ef) {
 
     switch (status) {
         case "readable":
-            // Only ever set when the extractor judged the whole document read.
+            // The extractor read the whole document — but the ANALYSIS may still
+            // have been shown only the beginning of it. Those are two different
+            // facts and the optimistic one must not win: a truncated file that
+            // says "Read in full" is a false success, and it is the one state a
+            // client would never think to question.
+            if (truncated) {
+                return {
+                    state: STATE_PARTIAL, tone: TONE_WARN,
+                    title: "Read in full, but shortened for the analysis",
+                    detail: "the analysis saw only the beginning of this file",
+                };
+            }
             return { state: STATE_COMPLETE, tone: TONE_OK, title: "Read in full", detail: "" };
+
+        case "storage_only":
+            // Reported by the analysis as well as at upload now, so the state
+            // survives a refresh instead of decaying into "could not be read".
+            return {
+                state: STATE_STORAGE_ONLY, tone: TONE_WARN,
+                title: "Stored, not analysed",
+                detail: typeof ef?.notice === "string" && ef.notice
+                    ? ef.notice
+                    : "this format cannot be read for analysis",
+            };
 
         case "partially_read":
             return {

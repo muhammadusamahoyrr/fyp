@@ -38,11 +38,62 @@ def test_build_case_context_is_a_tight_whitelist():
         "client_phone": "0311-9999999", "lawyer_id": "lw-1", "balance": 50000,
     }
     ctx = cc.build_case_context(case)
-    assert set(ctx.keys()) == {"case_type", "province", "case_number", "summary"}
+    # `evidence_coverage` was added deliberately: `ai_summary` is written from
+    # whatever evidence could be read, so a model drafting from it must be told
+    # how much of the evidence it stands on. This assertion is the gate that
+    # made that a decision rather than a side effect — widening the whitelist
+    # has to break a test.
+    assert set(ctx.keys()) == {"case_type", "province", "case_number", "summary",
+                               "evidence_coverage"}
     assert ctx["province"] == "punjab"                 # normalised
     blob = str(ctx)
     assert "Jane" not in blob and "jane@x.com" not in blob and "lw-1" not in blob
     assert "0300-1234567" not in ctx["summary"]        # scrubbed
+
+
+def test_evidence_coverage_cannot_carry_document_content():
+    """The newest whitelist entry, held to the same standard as the rest.
+
+    It renders from a snapshot stored on the case. A snapshot polluted with a
+    filename, a path or extracted text must not leak any of it — the renderer
+    reads named numeric keys and formats them, so there is no path for arbitrary
+    text to reach the prompt.
+    """
+    from app.services.evidence_coverage import snapshot_from_statuses
+
+    # A STRUCTURALLY VALID snapshot carrying extra junk keys. Built from the real
+    # producer rather than by hand: a hand-made partial dict is rejected as
+    # malformed, which would make this pass by refusing to render at all and
+    # prove nothing about leakage.
+    polluted = {
+        **snapshot_from_statuses([
+            {"status": "readable", "pages_total": 2, "pages_with_text": 2},
+            {"status": "unreadable", "pages_total": 4, "pages_with_text": 0},
+        ]),
+        "filename": "Zubaida-Bibi-FIR.pdf",
+        "path": "/srv/uploads/evidence/tok/secret.pdf",
+        "text": "CONFIDENTIAL client statement",
+    }
+    ctx = cc.build_case_context({
+        "ai_summary": "A tenancy claim.", "case_type": "civil",
+        "province": "punjab", "ai_evidence_coverage": polluted,
+    })
+    line = ctx["evidence_coverage"]
+
+    assert "2 uploaded file(s)" in line, (
+        "the snapshot must actually render, or this proves nothing")
+    for leaked in ("Zubaida", "secret.pdf", "/srv", "CONFIDENTIAL"):
+        assert leaked not in line
+
+
+def test_a_case_with_no_coverage_record_is_reported_unknown():
+    """Every case created before coverage tracking has no snapshot, and the
+    tempting rendering of that is silence — which reads as 'fine'."""
+    ctx = cc.build_case_context({"ai_summary": "An older summary.",
+                                 "case_type": "civil", "province": "punjab"})
+
+    assert "UNKNOWN" in ctx["evidence_coverage"]
+    assert "read in full" not in ctx["evidence_coverage"].lower()
 
 
 def test_context_block_marks_untrusted():

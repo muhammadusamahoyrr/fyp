@@ -21,6 +21,11 @@ from app.schemas.intake import (
     IntakeStep4,
     IntakeStep5,
 )
+from app.services.evidence_coverage import (
+    STORAGE_ONLY_MIMES,
+    derive_analysis_support,
+    snapshot_from_statuses,
+)
 from app.utils.file_handler import detect_mime, ext_for_mime
 
 logger = logging.getLogger(__name__)
@@ -618,6 +623,30 @@ async def _convert_claimed_intake(
             {"$set": {
                 "ai_summary": ai_data.get("summary"),
                 "case_type":  ai_case_type,
+                # Written in the SAME guarded update as the summary it qualifies.
+                # A separate write could land without it — and a summary that
+                # outlives its caveat is exactly the failure being closed: a
+                # lawyer reads a confident paragraph with no sign that two
+                # thirds of the bundle was never opened.
+                #
+                # Sanitised by construction: counts and versions only. No
+                # filenames, no paths, no extracted text.
+                #
+                # Built from the LOCAL extraction result, not from `ai_data`.
+                # The analysis echoes the statuses back, but it can fail or come
+                # from a path that never set the key — and `.get()` returning
+                # None then produced a snapshot of zero, which asserts on the
+                # case that nothing was uploaded. `evidence_status` is computed
+                # before the model runs and is always a list, so it cannot go
+                # missing because the model did.
+                #
+                # `uploaded_count` corroborates the empty case: no statuses AND
+                # no attachments is a verified zero; no statuses WITH
+                # attachments is a gap, and records UNKNOWN instead.
+                "ai_evidence_coverage": snapshot_from_statuses(
+                    evidence_status,
+                    uploaded_count=len(intake.get("evidence_files") or []),
+                ),
             }}
         )
 
@@ -881,7 +910,13 @@ async def _extract_intake_evidence(files: list[dict]) -> tuple[str, list[dict]]:
             # child process is even asked about it.
             statuses.append({"file_id": file_id, "status": "invalid_path"})
             continue
-        owned.append({"file_id": file_id, "path": str(resolved)})
+        owned.append({
+            "file_id": file_id,
+            "path": str(resolved),
+            # Derived server-side, falling back to the stored content type for
+            # records written before the field existed.
+            "analysis_support": derive_analysis_support(meta),
+        })
 
     if not owned:
         return "", statuses
@@ -918,8 +953,17 @@ async def _extract_intake_evidence(files: list[dict]) -> tuple[str, list[dict]]:
 
         stripped = (text or "").strip()
         if not stripped:
-            record["status"] = (
-                "missing" if result.error_code == "file_missing" else "unreadable")
+            # A format no extractor can read is NOT a failure, and calling it
+            # one tells the client to re-upload something that will fail the
+            # same way. Kept distinct so the six presentation states survive
+            # analysis, not just the upload response.
+            if item.get("analysis_support") == "storage_only" or result.error_code in (
+                    "legacy_doc_format", "image_no_text_extraction"):
+                record["status"] = "storage_only"
+            elif result.error_code == "file_missing":
+                record["status"] = "missing"
+            else:
+                record["status"] = "unreadable"
             record["truncated"] = False
             statuses.append(record)
             continue
@@ -950,34 +994,53 @@ async def _extract_intake_evidence(files: list[dict]) -> tuple[str, list[dict]]:
         record["truncated"] = prompt_truncated
         statuses.append(record)
 
-    # FILES THAT CONTRIBUTED NOTHING MUST STILL APPEAR IN THE PROMPT.
+    # WHAT THE MODEL WAS NOT GIVEN, BY CATEGORY.
     #
-    # A file that produced no text was simply skipped, so the model saw an
-    # evidence block containing only what could be read — and no way to tell
-    # that from a client who uploaded exactly those documents and nothing else.
-    # It would then reason about "the evidence" while three scanned exhibits
-    # were invisible to it. Partial disclosure on the readable files does not
-    # cover this: the unreadable ones had no line to attach a warning to.
+    # A file that produced no text was simply skipped, so the prompt looked
+    # identical to a client who never uploaded it. Listing them is not enough on
+    # its own either: "not read" covers three situations with three different
+    # remedies, and collapsing them tells the client to re-upload a file that
+    # will always fail, or to shorten a bundle that was actually unreadable.
     #
-    # Listed by id and reason only. The filename is the client's own text and
-    # has no business inside an untrusted-data block.
-    unread = [
-        s for s in statuses
-        if s.get("status") not in ("readable", "partially_read")
-    ]
+    # Listed by id and reason only. Filenames are the client's own text and have
+    # no business inside an untrusted-data block.
     blocks = list(excerpts)
-    if unread:
+
+    def _block(rows, heading, instruction):
+        if not rows:
+            return
         lines = "\n".join(
-            f"- file {s['file_id']}: {_UNREAD_REASONS.get(s.get('status'), 'not read')}"
-            for s in unread
-        )
+            f"- file {r['file_id']}: {_UNREAD_REASONS.get(r.get('status'), 'not read')}"
+            for r in rows)
+        blocks.append("[" + heading + "]\n" + lines + "\n" + instruction)
+
+    _block(
+        [s for s in statuses if s.get("status") == "omitted_limit"],
+        "OMITTED FOR LENGTH — read successfully, but not shown to you",
+        "These were readable. Their contents are simply absent here, so do not "
+        "treat their subject matter as unevidenced.")
+    _block(
+        [s for s in statuses if s.get("status") == "storage_only"],
+        "NOT ANALYSABLE — stored, but this format cannot be read at all",
+        "Nothing is wrong with these files. Say they must be read by a person, "
+        "and do not ask the client to upload the same format again.")
+    _block(
+        [s for s in statuses
+         if s.get("status") in ("unreadable", "missing", "invalid_path")],
+        "COULD NOT BE READ — extraction failed",
+        "Treat the evidence as incomplete and say plainly that these could not "
+        "be read.")
+
+    # A file counted as fully read can still have been cut by the prompt budget.
+    # Without this the model is told the document was read in full and shown
+    # only part of it — the most confident possible version of a partial answer.
+    truncated = [s for s in statuses if s.get("truncated")]
+    if truncated:
+        ids = ", ".join(str(s["file_id"]) for s in truncated)
         blocks.append(
-            "[NOT READ — these files were uploaded but contributed NOTHING to "
-            "the text above]\n" + lines + "\n"
-            "Treat the evidence as incomplete. Do not state or imply that the "
-            "documents above are all the evidence, and say plainly that these "
-            "files could not be read."
-        )
+            "[TRUNCATED — you were shown only the beginning of these files]\n"
+            + "- " + ids + "\n"
+            + "Do not state or imply that you have seen these documents in full.")
 
     return "\n\n".join(blocks), statuses
 
@@ -987,10 +1050,10 @@ _UNREAD_REASONS = {
     "unreadable": "could not be read (no text could be extracted)",
     "missing": "is recorded but missing from storage",
     "invalid_path": "could not be located",
+    "storage_only": "is stored but its format cannot be read for analysis",
     "omitted_limit": ("was read successfully but left out because the analysis "
                       "reached its length limit"),
 }
-
 
 def _evidence_gap_sentence(result) -> str:
     """What was not read, in words, for the analysis prompt.
@@ -1098,6 +1161,13 @@ async def upload_evidence(token: str, client_id: str, file) -> dict:
         "size":         len(content),
         "path":         str(save_path),
     }
+    # PERSISTED, not just returned. The upload response carried this and the
+    # stored record did not, so the moment the page reloaded a legacy .doc or an
+    # image stopped saying "stored, not analysed" and started saying "could not
+    # be read" — a different and wrongly alarming claim about a file that is
+    # perfectly fine.
+    if detected_mime in _STORAGE_ONLY_MIMES:
+        file_meta["analysis_support"] = "storage_only"
     # THE FILE IS ON DISK BEFORE THE RECORD EXISTS. If the record write fails,
     # the bytes are stored with nothing pointing at them — unreachable by the
     # client, uncounted by the quota, and invisible to any later cleanup. The
@@ -1154,6 +1224,8 @@ async def upload_evidence(token: str, client_id: str, file) -> dict:
 #: lawyer can still open it, and discarding it to avoid an awkward message loses
 #: something real. So it is kept, downloadable, and deliberately storage-only,
 #: with the limitation stated at upload.
+_STORAGE_ONLY_MIMES = STORAGE_ONLY_MIMES
+
 _STORAGE_ONLY_NOTICES = {
     "application/msword": (
         "Saved, but legacy Word (.doc) files cannot be read for analysis. "
@@ -1288,16 +1360,29 @@ def _public_evidence(files: list[dict] | None,
             "content_type": f.get("content_type"),
             "size":         f.get("size"),
         }
+        # Derived server-side and returned on EVERY read, not only in the upload
+        # response. Without it a reload turned "stored, not analysed" into
+        # "could not be read" — a wrongly alarming claim about a fine file.
+        support = derive_analysis_support(f)
+        if support:
+            entry["analysis_support"] = support
+            entry["notice"] = _STORAGE_ONLY_NOTICES.get(
+                str(f.get("content_type") or ""))
+
         record = by_id.get(str(f.get("file_id")))
         if record:
             entry.update({
                 "extraction_status": record.get("status"),
                 "completeness":      record.get("completeness"),
+                # Counters are passed through AS STORED. `None` means the
+                # extractor could not determine the count, which is not zero —
+                # coercing it would let "unknown" render as "0 of 5 pages had
+                # text", a definite claim built from an absence.
                 "pages_total":       record.get("pages_total"),
                 "pages_with_text":   record.get("pages_with_text"),
                 "pages_failed":      record.get("pages_failed"),
                 "pages_skipped":     record.get("pages_skipped"),
-                "prompt_truncated":  record.get("truncated"),
+                "prompt_truncated":  bool(record.get("truncated")),
                 "limitations":       list(record.get("limitations") or []),
             })
         out.append(entry)

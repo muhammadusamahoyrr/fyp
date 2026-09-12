@@ -532,6 +532,114 @@ test("the disclosure never claims a page was a scan", async () => {
     await unmount();
 });
 
+// ── mounted: the screen must not announce a success it cannot support ──────
+
+test("a truncated file is never announced as read in full and included", async () => {
+    reset();
+    const intake = convertedIntake({
+        evidence_files: [{
+            file_id: "f-trunc", filename: "long-contract.pdf",
+            content_type: "application/pdf", size: 90000,
+            extraction_status: "readable", completeness: "complete",
+            pages_total: 8, pages_with_text: 8, prompt_truncated: true,
+        }],
+    });
+    // Every page was read; the ANALYSIS was shown only the beginning. The
+    // optimistic reading of that is the one a client would never question.
+    intake.ai_structured_case.evidence_extraction = [{
+        file_id: "f-trunc", status: "readable", completeness: "complete",
+        pages_total: 8, pages_with_text: 8, truncated: true,
+    }];
+    api.__respond("intakeGet", { data: intake });
+    seedToken();
+
+    const { container, unmount } = await mountIntake();
+    const text = container.textContent || "";
+
+    assert.doesNotMatch(text, /were read in full and included in this analysis/,
+        "a truncated file produced an all-clear");
+    assert.match(text, /did not see all of your evidence/i);
+    await unmount();
+});
+
+test("a storage-only file survives a restore without becoming an error", async () => {
+    reset();
+    const intake = convertedIntake({
+        evidence_files: [{
+            file_id: "f-doc", filename: "affidavit.doc",
+            content_type: "application/msword", size: 40000,
+            analysis_support: "storage_only",
+            notice: "Saved, but legacy Word (.doc) files cannot be read for analysis.",
+            extraction_status: "storage_only",
+        }],
+    });
+    intake.ai_structured_case.evidence_extraction = [
+        { file_id: "f-doc", status: "storage_only" }];
+    api.__respond("intakeGet", { data: intake });
+    seedToken();
+
+    const { container, unmount } = await mountIntake();
+    const text = container.textContent || "";
+
+    assert.match(text, /Stored, not analysed/i);
+    assert.doesNotMatch(text, /Could not be read/i,
+        "a perfectly fine file was reported as a failure after a reload");
+    await unmount();
+});
+
+test("an unknown page count is never rendered as a confident zero", async () => {
+    reset();
+    const intake = convertedIntake({
+        evidence_files: [{
+            file_id: "f-unk", filename: "bundle.pdf",
+            content_type: "application/pdf",
+            extraction_status: "partially_read",
+            pages_total: 6, pages_with_text: null,
+        }],
+    });
+    intake.ai_structured_case.evidence_extraction = [{
+        file_id: "f-unk", status: "partially_read",
+        pages_total: 6, pages_with_text: null,
+    }];
+    api.__respond("intakeGet", { data: intake });
+    seedToken();
+
+    const { container, unmount } = await mountIntake();
+    const text = container.textContent || "";
+
+    assert.doesNotMatch(text, /6 of 6 pages produced no text/,
+        "an unknown counter was rendered as a definite claim");
+    assert.doesNotMatch(text, /NaN/);
+    await unmount();
+});
+
+test("a genuinely complete analysis may still say so", async () => {
+    // The guards must not have made every outcome a warning; a real all-clear
+    // that can no longer be given is its own kind of dishonesty.
+    reset();
+    const intake = convertedIntake({
+        evidence_files: [{
+            file_id: "f-ok", filename: "typed.pdf",
+            content_type: "application/pdf",
+            extraction_status: "readable", completeness: "complete",
+            pages_total: 2, pages_with_text: 2, prompt_truncated: false,
+        }],
+    });
+    intake.ai_structured_case.evidence_extraction = [{
+        file_id: "f-ok", status: "readable", completeness: "complete",
+        pages_total: 2, pages_with_text: 2, truncated: false,
+    }];
+    api.__respond("intakeGet", { data: intake });
+    seedToken();
+
+    const { container, unmount } = await mountIntake();
+    const text = container.textContent || "";
+
+    assert.match(text, /were read in full and included in this analysis/);
+    assert.doesNotMatch(text, /did not see all of your evidence/i);
+    await unmount();
+});
+
 test.after(() => {
     for (const id of liveTimers) { realClearTimeout(id); realClearInterval(id); }
     liveTimers.clear();

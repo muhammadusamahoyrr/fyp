@@ -248,3 +248,81 @@ test("only `readable` ever produces the complete state", () => {
             `status ${status} was upgraded to complete`);
     }
 });
+
+// ── one truncation contract, and unknown stays unknown ─────────────────────
+//
+// Two field names describe the same fact: the live upload path calls it
+// `truncated`, a restored intake calls it `prompt_truncated`. Both mean the
+// analysis was shown less than was extracted. Resolving that here, once, is
+// what stops each call site inventing its own answer.
+
+test("a prompt-truncated file never reports being read in full", () => {
+    const label = extractionLabel({
+        extraction_status: "readable", prompt_truncated: true,
+    });
+    assert.notEqual(label.state, STATE_COMPLETE);
+    assert.equal(label.state, STATE_PARTIAL);
+    assert.doesNotMatch(label.title, /^Read in full$/);
+});
+
+test("the live field name produces the same answer as the restored one", () => {
+    const live = extractionLabel({ extraction_status: "readable", truncated: true });
+    const restored = extractionLabel({
+        extraction_status: "readable", prompt_truncated: true,
+    });
+    assert.equal(live.state, restored.state);
+    assert.equal(live.title, restored.title);
+});
+
+test("an untruncated readable file is still read in full", () => {
+    // The guard must not swallow the honest success case.
+    const label = extractionLabel({
+        extraction_status: "readable", prompt_truncated: false,
+    });
+    assert.equal(label.state, STATE_COMPLETE);
+    assert.equal(label.title, "Read in full");
+});
+
+test("a truncated file counts as a gap in the evidence", () => {
+    assert.equal(isIncomplete({ extraction_status: "readable", truncated: true }), true);
+    assert.deepEqual(
+        incompleteFiles([
+            { file_id: "a", extraction_status: "readable" },
+            { file_id: "b", extraction_status: "readable", prompt_truncated: true },
+        ]).map(f => f.file_id),
+        ["b"]);
+});
+
+test("storage_only survives as an analysis status, not just an upload field", () => {
+    const fromAnalysis = extractionLabel({ extraction_status: "storage_only" });
+    const fromUpload = extractionLabel({ analysis_support: "storage_only" });
+    assert.equal(fromAnalysis.state, STATE_STORAGE_ONLY);
+    assert.equal(fromUpload.state, STATE_STORAGE_ONLY);
+    assert.equal(fromAnalysis.title, fromUpload.title);
+});
+
+test("unknown page counters never become a confident zero", () => {
+    // Number(null) is 0, which would render "5 of 5 pages produced no text"
+    // out of an absence. Unknown must produce no page claim at all.
+    const label = extractionLabel({
+        extraction_status: "partially_read", pages_total: 5, pages_with_text: null,
+    });
+    assert.doesNotMatch(label.detail, /5 of 5/);
+    assert.doesNotMatch(label.detail, /pages produced no text/);
+});
+
+test("a real zero still reports as a zero", () => {
+    const label = extractionLabel({
+        extraction_status: "partially_read", pages_total: 4, pages_with_text: 0,
+    });
+    assert.match(label.detail, /4 of 4 pages produced no text/);
+});
+
+test("undefined and empty-string counters are treated as unknown", () => {
+    for (const v of [undefined, ""]) {
+        const label = extractionLabel({
+            extraction_status: "partially_read", pages_total: 3, pages_with_text: v,
+        });
+        assert.doesNotMatch(label.detail, /pages produced no text/);
+    }
+});

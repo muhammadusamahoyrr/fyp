@@ -115,6 +115,12 @@ class IntakeEvidenceFile(BaseModel):
     # counters are carried so the UI can say WHICH pages produced nothing
     # instead of only that something was missing — a client who is told "3 of 5
     # pages could not be read" knows what to retype.
+    # Server-derived from the DETECTED mime at upload, and returned on every
+    # read — not only in the upload response. `storage_only` means the file is
+    # fine and simply cannot be read by any extractor, which is a different
+    # thing from "could not be read" and has a different remedy.
+    analysis_support: str | None = None
+    notice: str | None = None
     extraction_status: str | None = None
     completeness: str | None = None
     pages_total: int | None = None

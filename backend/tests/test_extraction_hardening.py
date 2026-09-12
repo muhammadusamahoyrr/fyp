@@ -510,7 +510,12 @@ async def test_a_file_that_produced_nothing_is_named_in_the_prompt(tmp_path):
         scan.unlink(missing_ok=True)
 
     assert "The tenancy began" in text
-    assert "NOT READ" in text, "the unreadable file is invisible to the model"
+    # The manifest is now split by CATEGORY. "Not read" covered three situations
+    # with three different remedies, and collapsing them told the client to
+    # re-upload a file that would always fail, or to shorten a bundle that was
+    # actually unreadable.
+    assert "COULD NOT BE READ" in text, (
+        "the unreadable file is invisible to the model")
     assert "f-scan" in text
     assert "incomplete" in text.lower()
 
