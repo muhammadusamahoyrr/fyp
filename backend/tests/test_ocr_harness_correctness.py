@@ -463,6 +463,39 @@ def test_a_slice_is_keyed_on_the_manifest_not_on_the_output(tmp_path):
     assert by_id["eng-1"]["language"] == "eng"
 
 
+def test_every_report_path_states_which_harness_produced_it(tmp_path):
+    """A score is meaningless without the ruler's version beside it.
+
+    Caught a real bug: the freeze stamped `harness_version` on the refusal path
+    only, so the reports that actually CARRY numbers — the ones where the
+    version matters — were the ones missing it.
+    """
+    from ocr_eval import HARNESS_VERSION
+    from ocr_eval.harness import OcrConfig, run_benchmark
+
+    passthrough = OcrConfig(name="synthetic", lang="eng",
+                            engine="passthrough_synthetic")
+    real_engine = OcrConfig(name="urd+eng", lang="urd+eng")
+    ready = {"platform": {}, "tesseract": {"available": True,
+                                           "languages_missing": []}}
+    absent = {"platform": {}, "tesseract": {"available": False,
+                                            "languages_missing": ["urd"]}}
+    dataset = _two_language_dataset(tmp_path)
+
+    reports = {
+        "engine_unavailable": run_benchmark(dataset, configs=(real_engine,),
+                                            capability=absent),
+        "fixtures_missing": run_benchmark(tmp_path / "gone" / "manifest.json",
+                                          configs=(passthrough,), capability=ready),
+        "harness_only": run_benchmark(dataset, configs=(passthrough,),
+                                      capability=ready),
+    }
+
+    for name, report in reports.items():
+        assert report.get("harness_version") == HARNESS_VERSION, (
+            f"the {name} report does not say which harness produced it")
+
+
 def test_a_synthetic_run_still_carries_no_headline_aggregate(tmp_path):
     """Per-language blocks must not become a back door for accuracy claims from
     a run that never looked at a pixel."""

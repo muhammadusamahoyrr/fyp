@@ -426,6 +426,7 @@ def run_benchmark(
 
     report = {
         "schema": "ocr_benchmark_report/1",
+        "harness_version": HARNESS_VERSION,
         "generated_utc": _now(),
         "status": status,
         "measured": status == MEASURED,
