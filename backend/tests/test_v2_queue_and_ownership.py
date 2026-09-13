@@ -378,17 +378,61 @@ async def test_paging_one_tab_never_yields_a_row_from_another(enabled):
 
 
 async def test_a_cursor_from_one_tab_does_not_smuggle_rows_into_another(enabled):
-    # The cursor is an `_id`, which is meaningful in any tab. Applying one from
-    # the submitted tab to the rejected tab must still return only rejected
-    # documents — the status filter is applied independently of the cursor.
-    for _ in range(3):
-        await _submitted()
+    """The cursor is an `_id`, meaningful in any tab. Applying one from the
+    submitted tab to the rejected tab must still return only rejected documents
+    — the status filter is applied independently of the cursor.
+
+    WHY THIS TEST CONTROLS ITS OWN ORDERING.
+
+    An earlier version took `next_cursor` from the submitted tab and asserted
+    `returned <= rejected`. Document ids are `secrets.token_urlsafe(16)` and the
+    queue paginates by `_id` lexicographically, so which rejected rows fall after
+    that cursor was down to chance. When none did, the result was EMPTY — and the
+    empty set is a subset of everything, so the test passed having checked
+    nothing. It could only ever fail, never meaningfully pass.
+
+    So the cursor is now chosen from the observed ids rather than accepted from
+    the queue, the expectation is computed from those same ids, and the assertion
+    is EXACT EQUALITY plus a non-empty guard. A run that would have been vacuous
+    now fails loudly instead.
+    """
+    submitted = {(await _submitted())[0] for _ in range(3)}
     rejected = {(await _decided("reject"))[0] for _ in range(3)}
 
-    first = await tx.review_queue(LAWYER["_id"], status="submitted", limit=1)
+    # CONTROLLED ORDERING, not a retry loop.
+    #
+    # Document ids are `secrets.token_urlsafe(16)` and the queue paginates on
+    # `{"_id": {"$gt": cursor}}`, so nothing about the real ids guarantees a
+    # non-empty page. An earlier version created extra rejected documents until
+    # one happened to sort late enough, which left the test's own coverage down
+    # to chance -- the very property it exists to remove.
+    #
+    # Instead the cursor is CHOSEN from the sorted rejected ids. Taking the
+    # middle of three fixes the expected page by construction, whatever the
+    # random ids turn out to be: exactly the one rejected id above it.
+    low, pivot, high = sorted(rejected)
+    page = await tx.review_queue(LAWYER["_id"], status="rejected",
+                                 cursor=pivot, limit=100)
+    returned = {row["id"] for row in page["items"]}
+
+    # Exact, not a subset: a subset assertion cannot tell "correctly filtered"
+    # from "returned nothing", which is how the previous version passed while
+    # asserting nothing at all.
+    assert returned == {high}
+    assert low not in returned and pivot not in returned
+
+    # And the property the test is named for: a cursor carried over from the
+    # SUBMITTED tab still yields only rejected rows. Its page may legitimately be
+    # empty depending on where the submitted ids sort, so this is checked by
+    # exact equality against the same rule -- with the non-empty guarantee
+    # already established above.
+    crossed_cursor = min(submitted)
     crossed = await tx.review_queue(LAWYER["_id"], status="rejected",
-                                    cursor=first["next_cursor"], limit=100)
-    assert {row["id"] for row in crossed["items"]} <= rejected
+                                    cursor=crossed_cursor, limit=100)
+    crossed_ids = {row["id"] for row in crossed["items"]}
+
+    assert crossed_ids == {r for r in rejected if r > crossed_cursor}
+    assert not (crossed_ids & submitted), "a submitted row crossed into the rejected tab"
 
 
 async def test_every_page_reports_the_tab_it_answered(enabled):
