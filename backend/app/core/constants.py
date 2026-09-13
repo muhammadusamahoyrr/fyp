@@ -48,6 +48,19 @@ class CaseStatus(str, Enum):
     DISMISSED = "dismissed"
 
 
+# The matter is over. Retention reads this: `closed_at` is stamped on entering
+# one of these and cleared on leaving, and the case-data period runs from it.
+#
+# Defined once because two copies would drift, and a drifted copy here means a
+# case that is over by one module's reckoning and live by another's — the clock
+# either never starts or never stops, and neither failure is visible until the
+# data is gone or kept for ever.
+TERMINAL_CASE_STATUSES = frozenset({
+    CaseStatus.CLOSED.value,
+    CaseStatus.DISMISSED.value,
+})
+
+
 class IntakeStep(int, Enum):
     ONE = 1
     TWO = 2

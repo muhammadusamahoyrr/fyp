@@ -2,7 +2,12 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from app.core.constants import CaseStatus, KycStatus, NotificationType
+from app.core.constants import (
+    TERMINAL_CASE_STATUSES,
+    CaseStatus,
+    KycStatus,
+    NotificationType,
+)
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.core.security import TOKENS_VALID_FROM, hash_password, password_change_cutoff
 from app.db.collections import (
@@ -472,10 +477,29 @@ async def update_case_status(case_id: str, status: str, actor: dict | None = Non
     case = await case_repo.find_by_id(case_id)
     if not case:
         raise NotFoundError("Case")
-    await case_repo.update_one(
-        {"_id": case_id},
-        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
-    )
+
+    now = datetime.now(timezone.utc)
+    changes: dict = {"status": status, "updated_at": now}
+
+    # The retention clock. This is the only path that can both end a matter and
+    # revive one, so both edges are handled here.
+    #
+    # ENTERING terminal stamps the closure instant. LEAVING it clears the stamp
+    # — a reopened case that kept its old `closed_at` would keep counting down
+    # while somebody was actively working it, and expire mid-matter.
+    #
+    # Terminal → terminal (closed → dismissed) is neither edge and is left
+    # alone. The matter ended once; re-labelling how it ended does not reopen
+    # it, and re-stamping would let a status toggle silently restart a
+    # twelve-year clock.
+    was_terminal = case.get("status") in TERMINAL_CASE_STATUSES
+    now_terminal = status in TERMINAL_CASE_STATUSES
+    if now_terminal and not was_terminal:
+        changes["closed_at"] = now
+    elif was_terminal and not now_terminal:
+        changes["closed_at"] = None
+
+    await case_repo.update_one({"_id": case_id}, {"$set": changes})
     await _audit(actor, "case.status_changed", case_id,
                  {"from": case.get("status"), "to": status})
 

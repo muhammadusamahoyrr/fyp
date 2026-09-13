@@ -717,9 +717,18 @@ async def complete_engagement(
 
     # The lawyer KEEPS the case. They did the work; the history is theirs, and
     # the case closes with them on it rather than being handed back unowned.
+    #
+    # `closed_at` starts the case-data retention clock. Stamped unconditionally
+    # because this path cannot run on an already-closed case: it requires the
+    # engagement to be ACCEPTED and sets it COMPLETED, so one engagement cannot
+    # close a case twice, and a second engagement cannot reach ACCEPTED here —
+    # both the request and accept paths require `lawyer_id: None`, and the line
+    # above deliberately leaves the lawyer on the case.
     await case_repo.update_one(
         {"_id": eng["case_id"], "lawyer_id": eng["lawyer_id"]},
-        {"$set": {"status": CaseStatus.CLOSED.value, "updated_at": now}},
+        {"$set": {"status": CaseStatus.CLOSED.value,
+                  "updated_at": now,
+                  "closed_at": now}},
     )
 
     case = await case_repo.find_by_id(eng["case_id"])
