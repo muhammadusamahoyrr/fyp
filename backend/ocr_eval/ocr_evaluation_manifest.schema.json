@@ -5,7 +5,14 @@
   "description": "Declares a private, de-identified OCR ground-truth dataset. The manifest is the ONLY authority on what each fixture is: document type, language, capture style and handwriting are declared by a human who looked at the page, never inferred from OCR output or from engine confidence. Fixture files and transcripts live outside version control; this manifest records their hashes so a silent substitution fails closed.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "dataset_id", "created_utc", "de_identified", "consent", "fixtures"],
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "created_utc",
+    "de_identified",
+    "consent",
+    "fixtures"
+  ],
   "properties": {
     "schema_version": {
       "const": 1,
@@ -31,7 +38,11 @@
     "de_identified": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["confirmed", "confirmed_by", "method"],
+      "required": [
+        "confirmed",
+        "confirmed_by",
+        "method"
+      ],
       "description": "Dataset-level de-identification attestation. Required: these are real legal documents, and the whole dataset is disqualified if any page still carries a living person's identifiers.",
       "properties": {
         "confirmed": {
@@ -50,16 +61,24 @@
           "maxLength": 500,
           "description": "How identifiers were removed or replaced (e.g. 'names and CNICs replaced with consistent synthetic values before scanning')."
         },
-        "confirmed_utc": {"type": "string", "format": "date-time"}
+        "confirmed_utc": {
+          "type": "string",
+          "format": "date-time"
+        }
       }
     },
     "consent": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["confirmed", "basis"],
+      "required": [
+        "confirmed",
+        "basis"
+      ],
       "description": "Permission to use these documents for evaluation. Separate from de-identification: a de-identified document may still be one we were never permitted to retain.",
       "properties": {
-        "confirmed": {"const": true},
+        "confirmed": {
+          "const": true
+        },
         "basis": {
           "type": "string",
           "minLength": 1,
@@ -77,7 +96,9 @@
       "type": "array",
       "minItems": 1,
       "description": "The pages. A real accuracy dataset is expected to hold 30-50 representative pages; the schema does not enforce that, because enforcing a count would tempt padding with unrepresentative pages to reach it.",
-      "items": {"$ref": "#/$defs/fixture"}
+      "items": {
+        "$ref": "#/$defs/fixture"
+      }
     }
   },
   "$defs": {
@@ -97,7 +118,9 @@
         "transcript_path",
         "critical_tokens",
         "de_identified",
-        "consent"
+        "consent",
+        "document_family",
+        "split"
       ],
       "properties": {
         "fixture_id": {
@@ -138,22 +161,40 @@
         },
         "language": {
           "type": "string",
-          "enum": ["eng", "urd", "mixed"],
+          "enum": [
+            "eng",
+            "urd",
+            "mixed"
+          ],
           "description": "Language of the page CONTENT, declared by a human reader."
         },
         "script_style": {
           "type": "string",
-          "enum": ["latin", "naskh", "nastaliq", "mixed", "unknown"],
+          "enum": [
+            "latin",
+            "naskh",
+            "nastaliq",
+            "mixed",
+            "unknown"
+          ],
           "description": "Urdu legal documents appear in both Naskh and Nastaliq, and Tesseract handles them very differently. Recording it is what makes a bad aggregate score diagnosable instead of merely bad."
         },
         "capture": {
           "type": "string",
-          "enum": ["searchable", "scanned", "photograph"],
+          "enum": [
+            "searchable",
+            "scanned",
+            "photograph"
+          ],
           "description": "searchable = already has a text layer (OCR should not be needed); scanned = flatbed/MFP image; photograph = camera, with the lighting and perspective that implies."
         },
         "writing": {
           "type": "string",
-          "enum": ["printed", "handwritten", "mixed"],
+          "enum": [
+            "printed",
+            "handwritten",
+            "mixed"
+          ],
           "description": "Declared by a human. NEVER derived from OCR confidence."
         },
         "handwriting_policy": {
@@ -163,7 +204,14 @@
         },
         "rotation": {
           "type": "string",
-          "enum": ["none", "rotated_90", "rotated_180", "rotated_270", "skewed_minor", "skewed_major"],
+          "enum": [
+            "none",
+            "rotated_90",
+            "rotated_180",
+            "rotated_270",
+            "skewed_minor",
+            "skewed_major"
+          ],
           "description": "Category, not degrees. Degrees imply a measurement precision a human eyeballing a scan does not have."
         },
         "expected_page_count": {
@@ -190,11 +238,24 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "value"],
+            "required": [
+              "kind",
+              "value",
+              "field",
+              "occurrence_index"
+            ],
             "properties": {
               "kind": {
                 "type": "string",
-                "enum": ["name", "date", "amount", "section", "case_number", "identifier", "other"]
+                "enum": [
+                  "name",
+                  "date",
+                  "amount",
+                  "section",
+                  "case_number",
+                  "identifier",
+                  "other"
+                ]
               },
               "value": {
                 "type": "string",
@@ -202,7 +263,31 @@
                 "maxLength": 200,
                 "description": "The exact expected string. MUST already be de-identified: this value IS quoted in failure output, so a real name here would leak into every report."
               },
-              "page": {"type": "integer", "minimum": 1}
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "field": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "description": "Which semantic slot this value fills: fine_amount, imprisonment_years, section_number, order_date, respondent_name. Required because token PRESENCE does not establish correctness -- 'fine 1000 imprisonment 3' and 'fine 3 imprisonment 1000' contain the same tokens and mean opposite things. Scoring field accuracy is impossible without this."
+              },
+              "occurrence_index": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "0-based index of this occurrence of the SAME field on the page, in reading order. A judgment listing three fines needs each bound to its own slot."
+              },
+              "context_before": {
+                "type": "string",
+                "maxLength": 120,
+                "description": "Verbatim reference text immediately preceding the value, used to locate it in a hypothesis. This is what makes field binding checkable without a layout model."
+              },
+              "context_after": {
+                "type": "string",
+                "maxLength": 120,
+                "description": "Verbatim reference text immediately following the value."
+              }
             }
           }
         },
@@ -223,16 +308,41 @@
           "type": "string",
           "maxLength": 1000,
           "description": "Human notes. MUST NOT contain document text beyond the declared critical tokens."
+        },
+        "document_family": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Documents sharing layout, typeface, scanner or issuing office belong to ONE family. The train/holdout split is applied per family, never per page or per fixture: pages from one document share almost everything that makes OCR easy or hard, so splitting below family level leaks the holdout into tuning and inflates the score."
+        },
+        "split": {
+          "type": "string",
+          "enum": [
+            "train",
+            "holdout"
+          ],
+          "description": "Which side of the tuning/holdout separation this fixture sits on. Every fixture in a document_family MUST carry the same value; a family split across both sides is a leak and fails the manifest closed."
         }
       },
       "allOf": [
         {
           "if": {
-            "properties": {"writing": {"enum": ["handwritten", "mixed"]}},
-            "required": ["writing"]
+            "properties": {
+              "writing": {
+                "enum": [
+                  "handwritten",
+                  "mixed"
+                ]
+              }
+            },
+            "required": [
+              "writing"
+            ]
           },
           "then": {
-            "required": ["handwriting_policy"],
+            "required": [
+              "handwriting_policy"
+            ],
             "description": "Handwriting must be declared unsupported_by_policy explicitly."
           }
         }

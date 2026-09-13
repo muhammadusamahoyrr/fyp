@@ -107,8 +107,13 @@ def _dataset(
         "rotation": "none",
         "expected_page_count": 1,
         "transcript_path": "transcripts/f1.txt",
+        # Required since the field-scoring work: the split is assigned per
+        # document family, and a critical token carries the slot it fills.
+        "document_family": "helper_family",
+        "split": "holdout",
         "critical_tokens": critical_tokens if critical_tokens is not None else [
-            {"kind": "section", "value": "Section 12"},
+            {"kind": "section", "value": "Section 12",
+             "field": "section_number", "occurrence_index": 0},
         ],
         "de_identified": True,
         "consent": True,

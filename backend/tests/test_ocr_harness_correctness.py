@@ -395,6 +395,8 @@ def _two_language_dataset(tmp_path: Path) -> Path:
             "writing": "printed",
             "rotation": "none",
             "expected_page_count": 1,
+            "document_family": f"fam_{fid}",
+            "split": "holdout",
             "transcript_path": f"transcripts/{fid}.txt",
             "critical_tokens": [],
             "de_identified": True,
