@@ -49,7 +49,7 @@ from pathlib import Path
 # when only the limits below move. A stored result whose versions differ from
 # the running code must be treated as re-extractable, never as agreeing with it.
 EXTRACTOR_VERSION = "2"
-CONFIG_VERSION = "1"
+CONFIG_VERSION = "2"  # parent-enforced per-file and queue-inclusive batch deadlines
 
 # ── outcomes ────────────────────────────────────────────────────────────────
 OUTCOME_SUCCEEDED = "succeeded"

@@ -105,7 +105,7 @@ def _incompleteness_sentence(result) -> str:
             + "; ".join(bits) + ".")
 
 
-async def _read_file(path_str: str) -> dict:
+async def _read_file(path_str: str, *, owner_id: str = "", file_id: str = "f") -> dict:
     """Read one file through the bounded child-process runner.
 
     No longer `asyncio.to_thread`: that shares the interpreter-wide executor
@@ -114,7 +114,7 @@ async def _read_file(path_str: str) -> dict:
     """
     from app.ai.extraction_runner import extract_one
 
-    result, text = await extract_one(path_str)
+    result, text = await extract_one(path_str, file_id=file_id, owner_id=owner_id)
     return _public_extraction(result, text)
 
 
@@ -202,7 +202,8 @@ def build_document_tools(user_id: str, role: str = "client") -> list[BaseTool]:
         for session in sessions:
             for meta in session.get("evidence_files", []):
                 if meta.get("file_id") == file_id:
-                    result = await _read_file(meta.get("path", ""))
+                    result = await _read_file(meta.get("path", ""),
+                                              owner_id=user_id, file_id=file_id)
                     result["filename"] = meta.get("filename")
                     return result
 

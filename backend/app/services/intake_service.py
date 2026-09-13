@@ -589,7 +589,7 @@ async def _convert_claimed_intake(
     effective_urgency = urgency or step2.get("urgency", "medium")
 
     evidence_text, evidence_status = await _extract_intake_evidence(
-        intake.get("evidence_files") or []
+        intake.get("evidence_files") or [], owner_id=client_id
     )
 
     # Run AI structured analysis using the AI-verified case type
@@ -869,7 +869,7 @@ _EVIDENCE_CHUNK = 1024 * 1024
 _MAX_EVIDENCE_PROMPT_CHARS = 12_000
 
 
-async def _extract_intake_evidence(files: list[dict]) -> tuple[str, list[dict]]:
+async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> tuple[str, list[dict]]:
     """Extract bounded text from owned intake files for the analysis prompt.
 
     WHAT CHANGED AND WHY IT MATTERS HERE
@@ -889,8 +889,9 @@ async def _extract_intake_evidence(files: list[dict]) -> tuple[str, list[dict]]:
     previously have been told `readable`, and the prompt builder reads the
     counts rather than the label.
 
-    Extraction runs in ONE bounded child process for the whole batch — not on
-    the shared thread pool, and not per file. See `app.ai.extraction_runner`.
+    Extraction runs sequentially in bounded per-file child processes, within a
+    whole-batch deadline. See `app.ai.extraction_runner`. The authenticated
+    owner scopes deduplication; helper callers without one do not share work.
     """
     from app.ai import extraction_runner
     from app.ai.extraction import COMPLETE, NONE, OUTCOME_SUCCEEDED
@@ -921,7 +922,7 @@ async def _extract_intake_evidence(files: list[dict]) -> tuple[str, list[dict]]:
     if not owned:
         return "", statuses
 
-    extracted = await extraction_runner.extract_many(owned)
+    extracted = await extraction_runner.extract_many(owned, owner_id=owner_id)
 
     excerpts: list[str] = []
     remaining = _MAX_EVIDENCE_PROMPT_CHARS

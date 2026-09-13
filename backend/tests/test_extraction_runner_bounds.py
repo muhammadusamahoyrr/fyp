@@ -53,7 +53,7 @@ def _worker_children() -> list:
 
 # ── the runner does its job ─────────────────────────────────────────────────
 
-async def test_a_batch_is_extracted_in_one_child_process(tmp_path):
+async def test_a_batch_preserves_each_child_process_result(tmp_path):
     files = [
         {"file_id": "a", "path": str(_text_file(tmp_path, "a.txt", "Alpha text."))},
         {"file_id": "b", "path": str(_text_file(tmp_path, "b.txt", "Beta text."))},
@@ -127,13 +127,9 @@ def _wedge_the_child(monkeypatch, seconds: int = 60) -> dict:
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", wedged)
 
-    # The runner waits `budget + 15s`; shortened so the test does not.
-    real_wait_for = asyncio.wait_for
-
-    async def impatient(awaitable, timeout=None):
-        return await real_wait_for(awaitable, timeout=min(timeout or 1.0, 1.0))
-
-    monkeypatch.setattr(R.asyncio, "wait_for", impatient)
+    # Exercise the real parent-enforced per-file deadline, not a replacement
+    # asyncio primitive that could pass while production never times out.
+    monkeypatch.setattr(R, "PER_FILE_TIMEOUT_SECONDS", 1.0)
     return captured
 
 

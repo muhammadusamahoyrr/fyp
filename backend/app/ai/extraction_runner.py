@@ -27,9 +27,11 @@ no infrastructure.
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -52,9 +54,9 @@ logger = logging.getLogger(__name__)
 #: `backend/`, so `python -m app.ai.extraction_worker` resolves.
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 
-#: Per-file and whole-batch ceilings. The batch ceiling is not the sum of the
-#: per-file ones: twelve files each taking their full allowance would hold a
-#: request open far longer than any client will wait.
+#: Extraction deadlines include process startup; the batch deadline also
+#: includes semaphore queueing. Killing/reaping is mandatory even after expiry
+#: and may add cleanup time. These are not hard real-time OS scheduling bounds.
 PER_FILE_TIMEOUT_SECONDS = 30.0
 BATCH_TIMEOUT_SECONDS = 120.0
 
@@ -183,30 +185,32 @@ async def _terminate(proc) -> None:
         logger.exception("extraction: error while reaping child")
 
 
-#: Batches currently being extracted IN THIS PROCESS, keyed by owner + the
-#: content hashes of the files. Shared futures rather than locks: a second
+#: Batches currently being extracted IN THIS PROCESS, keyed by owner, ordered
+#: file identities, paths, hashes and timeout policy. Shared futures: a second
 #: arrival for the same bytes must get the ANSWER, not an error and not a second
 #: child process.
 _inflight: dict[str, asyncio.Future] = {}
 _inflight_loop: asyncio.AbstractEventLoop | None = None
 
 
-def _batch_key(owner_id: str, claims: list) -> str | None:
-    """Identity of this exact unit of work: who, which bytes, which extractor.
+def _batch_key(owner_id: str, claims: list, files: list[dict],
+               batch_timeout: float) -> str | None:
+    """Identity of the RESULT, not just the bytes: results are keyed by file id.
 
     Returns None when any file could not be hashed, which disables deduplication
     for the batch — sharing a result keyed on an identity we could not establish
     is worse than extracting twice.
     """
-    if not claims or any(c is None for c in claims):
+    if not owner_id or not claims or any(c is None for c in claims):
         return None
-    digest = hashlib.sha256()
-    digest.update(owner_id.encode("utf-8"))
-    digest.update(EXTRACTOR_VERSION.encode("utf-8"))
-    digest.update(CONFIG_VERSION.encode("utf-8"))
-    for content_sha in sorted(c.content_sha256 for c in claims):
-        digest.update(content_sha.encode("ascii"))
-    return digest.hexdigest()
+    # Preserve order: the last file may exhaust the batch budget. Paths matter
+    # both for parser selection and for stale-input checks on separate copies.
+    identity = [owner_id, EXTRACTOR_VERSION, CONFIG_VERSION,
+                batch_timeout, PER_FILE_TIMEOUT_SECONDS,
+                [(c.file_id, str(Path(f["path"]).resolve()), c.content_sha256)
+                 for c, f in zip(claims, files)]]
+    return hashlib.sha256(json.dumps(identity, ensure_ascii=True,
+                                     separators=(",", ":")).encode()).hexdigest()
 
 
 def _reset_inflight_if_loop_changed() -> None:
@@ -230,26 +234,55 @@ async def _run_batch(
     files: list[dict],
     batch_timeout: float = BATCH_TIMEOUT_SECONDS,
 ) -> dict[str, tuple[ExtractionResult, str]]:
-    """Extract several files in ONE child process.
+    """One killable process per file, sequentially within a batch deadline.
 
-    Returns `{file_id: (result, text)}`. Never raises: a runner failure is
-    reported per file, because the caller's job is to tell a client what
-    happened to their evidence, and an exception from here would instead fail
-    the whole conversion.
-
-    One child for the batch rather than one per file: process start plus the
-    pypdf/python-docx import costs about a second, which is fine once per
-    conversion and is not fine twelve times.
+    A wedged parser cannot be interrupted safely inside a shared child. A fresh
+    process per file adds startup cost but preserves other files' results when
+    one times out. Cancellation always propagates after child cleanup.
     """
     wanted = [str(f.get("file_id") or "") for f in files]
     if not files:
         return {}
 
-    budget = min(batch_timeout, PER_FILE_TIMEOUT_SECONDS * max(1, len(files)))
+    if (isinstance(batch_timeout, bool) or not isinstance(batch_timeout, (int, float))
+            or not math.isfinite(batch_timeout) or batch_timeout <= 0):
+        return {fid: (_failure(ERR_TIMEOUT), "") for fid in wanted}
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + batch_timeout
+    out = {}
+    for item, fid in zip(files, wanted):
+        if loop.time() >= deadline:
+            out[fid] = (_failure(ERR_TIMEOUT), "")
+            continue
+        try:
+            # Queue wait is part of the batch ceiling. Per-file timing begins
+            # after acquiring capacity and includes subprocess startup.
+            async with asyncio.timeout_at(deadline):
+                async with _get_semaphore():
+                    timeout = min(PER_FILE_TIMEOUT_SECONDS, deadline - loop.time())
+                    out[fid] = await _run_file(item, timeout)
+        except TimeoutError:
+            out[fid] = (_failure(ERR_TIMEOUT), "")
+    return out
+
+
+async def _finish_cleanup(task: asyncio.Task):
+    """Finish a tracked cleanup/spawn even if the caller is cancelled again."""
+    interrupted = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            interrupted = True
+            continue
+    return task.result(), interrupted
+
+
+async def _run_file(item: dict, timeout: float) -> tuple[ExtractionResult, str]:
+    fid = str(item.get("file_id") or "")
     job = json.dumps({
-        "files": [{"file_id": f.get("file_id"), "path": str(f.get("path") or "")}
-                  for f in files],
-        "budget_seconds": budget,
+        "files": [{"file_id": fid, "path": str(item.get("path") or "")}],
+        "budget_seconds": timeout,
     })
 
     env = os.environ.copy()
@@ -258,53 +291,62 @@ async def _run_batch(
     # pool pressure the child exists to relieve.
     env.setdefault("OMP_NUM_THREADS", "1")
 
-    async with _get_semaphore():
-        proc = None
-        try:
-            proc = await asyncio.create_subprocess_exec(
+    proc = None
+    spawn = None
+    try:
+        async with asyncio.timeout(timeout):
+            # Shield process creation so cancellation cannot lose the handle
+            # after the OS created a process but before it was returned to us.
+            spawn = asyncio.create_task(asyncio.create_subprocess_exec(
                 sys.executable, "-m", "app.ai.extraction_worker",
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(_BACKEND_ROOT),
                 env=env,
-            )
-            stdout, _ = await asyncio.wait_for(
-                proc.communicate(job.encode("utf-8")),
-                timeout=budget + 15.0)
-        except asyncio.TimeoutError:
-            if proc is not None:
-                await _terminate(proc)
-            logger.warning("extraction: batch of %d timed out", len(files))
-            return {fid: (_failure(ERR_TIMEOUT), "") for fid in wanted}
-        except Exception:
-            if proc is not None:
-                await _terminate(proc)
-            logger.exception("extraction: child process failed")
-            return {fid: (_failure(ERR_INTERNAL), "") for fid in wanted}
+            ))
+            proc = await asyncio.shield(spawn)
+            stdout, _ = await proc.communicate(job.encode("utf-8"))
+    except TimeoutError:
+        return _failure(ERR_TIMEOUT), ""
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("extraction: child failed (%s)", type(exc).__name__)
+        return _failure(ERR_INTERNAL), ""
+    finally:
+        # Covers timeout, request cancellation, parser failure, and cancellation
+        # DURING spawn. Keep the semaphore until cleanup has completed.
+        interrupted = False
+        if proc is None and spawn is not None:
+            try:
+                proc, interrupted = await _finish_cleanup(spawn)
+            except Exception:
+                pass
+        if proc is not None:
+            cleanup = asyncio.create_task(_terminate(proc))
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                interrupted = True
+                await _finish_cleanup(cleanup)
+        if interrupted:
+            raise asyncio.CancelledError()
 
     try:
         payload = json.loads(stdout.decode("utf-8", errors="replace") or "{}")
-    except json.JSONDecodeError:
-        logger.error("extraction: child produced unparseable output")
-        return {fid: (_failure(ERR_INTERNAL), "") for fid in wanted}
-
-    if not payload.get("ok"):
-        return {fid: (_failure(payload.get("error_code") or ERR_INTERNAL), "")
-                for fid in wanted}
-
-    out: dict[str, tuple[ExtractionResult, str]] = {}
-    for entry in payload.get("results") or []:
-        out[str(entry.get("file_id") or "")] = (
-            _result_from_payload(entry.get("result") or {}),
-            entry.get("text") or "",
-        )
-
-    # A file the child never reported on must not silently disappear from the
-    # caller's accounting — that is the same class of bug as a skipped page.
-    for fid in wanted:
-        out.setdefault(fid, (_failure(ERR_INTERNAL), ""))
-    return out
+        if not payload.get("ok"):
+            return _failure(ERR_INTERNAL), ""
+        entries = payload.get("results")
+        if not isinstance(entries, list) or len(entries) != 1:
+            return _failure(ERR_INTERNAL), ""
+        entry = entries[0]
+        if entry.get("file_id") != fid or not isinstance(entry.get("text"), str):
+            return _failure(ERR_INTERNAL), ""
+        return _result_from_payload(entry["result"]), entry["text"]
+    except (ValueError, TypeError, KeyError, AttributeError):
+        logger.warning("extraction: malformed child response")
+        return _failure(ERR_INTERNAL), ""
 
 
 async def extract_many(
@@ -331,10 +373,10 @@ async def extract_many(
     document — the text describes a file that no longer exists, and publishing it
     would attach one document's contents to another's record.
 
-    Scope, stated plainly: this map is per-process. It collapses the duplicates
-    that land on one API worker, which is where a double-click lands. Across
-    workers it does nothing, and making it global needs the shared store already
-    in this stack.
+    Scope: per-process; duplicate requests can land on different API workers and
+    will not then be collapsed. Unknown owners disable sharing. If the owner
+    task is cancelled, its waiters are cancelled too and can explicitly retry;
+    cancelling a waiter never cancels or restarts the owner's work.
     """
     if not files:
         return {}
@@ -343,10 +385,10 @@ async def extract_many(
         claim_for(owner_id, str(f.get("file_id") or ""), str(f.get("path") or ""))
         for f in files
     ]
-    key = _batch_key(owner_id, claims) if dedupe else None
+    key = _batch_key(owner_id, claims, files, batch_timeout) if dedupe else None
 
     if key is None:
-        return await _run_batch(files, batch_timeout)
+        return _refuse_stale(await _run_batch(files, batch_timeout), files, claims)
 
     _reset_inflight_if_loop_changed()
 
@@ -355,28 +397,35 @@ async def extract_many(
         try:
             # `shield` so that OUR timeout does not cancel the extraction the
             # other caller is still waiting on.
-            return dict(await asyncio.wait_for(
-                asyncio.shield(existing), timeout=batch_timeout + 20.0))
-        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-            # The in-flight run died or outlived its welcome. Fall through and
-            # do the work rather than inheriting someone else's failure.
-            logger.warning("extraction: shared batch did not complete; re-running")
+            result = await asyncio.wait_for(asyncio.shield(existing), timeout=batch_timeout)
+            return _refuse_stale(copy.deepcopy(result), files, claims)
+        except asyncio.TimeoutError:
+            # Do not replace an owner's in-flight entry or duplicate its work.
+            return {str(f.get("file_id") or ""): (_failure(ERR_TIMEOUT), "") for f in files}
 
     loop = asyncio.get_running_loop()
     future: asyncio.Future = loop.create_future()
     _inflight[key] = future
 
+    results = None
     try:
         results = await _run_batch(files, batch_timeout)
         results = _refuse_stale(results, files, claims)
-    except Exception:
-        logger.exception("extraction: batch failed")
+    except asyncio.CancelledError:
+        future.cancel()
+        raise
+    except Exception as exc:
+        logger.warning("extraction: batch failed (%s)", type(exc).__name__)
         results = {str(f.get("file_id") or ""): (_failure(ERR_INTERNAL), "")
                    for f in files}
     finally:
-        _inflight.pop(key, None)
+        if _inflight.get(key) is future:
+            _inflight.pop(key, None)
         if not future.done():
-            future.set_result(results)
+            if results is None:
+                future.cancel()
+            else:
+                future.set_result(copy.deepcopy(results))
 
     return results
 
