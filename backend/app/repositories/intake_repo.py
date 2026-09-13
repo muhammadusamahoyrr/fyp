@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from pymongo import DESCENDING, ReturnDocument
+from pymongo import ASCENDING, DESCENDING, ReturnDocument
 
 from app.db.collections import get_intakes_col
 from app.repositories.base import BaseRepository
@@ -262,3 +262,35 @@ class IntakeRepository(BaseRepository):
                 "conversion_claim_expires_at": "",
             }},
         )
+
+    # ── retention ───────────────────────────────────────────────────────────
+
+    async def find_expired_unconverted(self, cutoff: datetime, limit: int) -> list[dict]:
+        """Intakes never bound to a case, untouched since `cutoff`.
+
+        UNCONVERTED means no `case_id`, not `completed: False`. `attach_case`
+        writes the case id BEFORE the analysis finishes, precisely so a crash
+        mid-conversion leaves a findable case — so an intake can carry a case id
+        while still incomplete, and that one is the case's to govern, not this
+        sweep's. Testing `completed` here would hand a half-converted intake to
+        the 365-day rule and destroy the evidence behind a real case.
+
+        Missing and null are both unconverted; a case id is always a string.
+        """
+        return await self.find_many(
+            {
+                "case_id": {"$not": {"$type": "string"}},
+                "updated_at": {"$type": "date", "$lt": cutoff},
+            },
+            limit=limit,
+            sort=[("updated_at", ASCENDING)],
+        )
+
+    async def delete_intake_row(self, intake_id: str) -> bool:
+        """Remove one intake document. The LAST step of a deletion.
+
+        By itself this is not the deletion — the evidence bytes go first, and a
+        tombstone naming them is written before either. Called out of that order
+        it orphans files nothing points at any more.
+        """
+        return await self.delete_one({"_id": intake_id})

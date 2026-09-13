@@ -97,8 +97,54 @@ def test_the_policy_reports_itself_rather_than_being_restated():
     described = retention.describe()
     assert described["user_data_days"] == 365
     assert described["accountability_days"] == 7 * 365
-    assert described["clock"] == "last activity"
+    assert described["case_data_days"] == 12 * 365
     assert described["deletion_enabled"] is False
+
+
+def test_the_clock_is_stated_per_store_rather_than_once():
+    """THIS TEST USED TO ASSERT ONE GLOBAL CLOCK, and that was right until cases
+    arrived.
+
+    Everywhere else the clock is last activity, because data someone still uses
+    must never be truncated from underneath them. A case inverts it: an OPEN
+    case can be dormant for years and still be live, so an inactivity clock
+    would destroy the evidence behind a matter nobody had finished. Two rules
+    cannot be described by one sentence, and the sentence was the part that
+    would have gone quietly wrong.
+    """
+    described = retention.describe()
+    assert described["clocks"]["chat_sessions"] == "last activity"
+    assert described["clocks"]["cases"].startswith("case closure")
+    assert "clock" not in described, (
+        "a single global clock would be describing a rule nothing enforces")
+
+
+def test_no_store_is_missing_a_clock():
+    """A period with no stated clock is a period nobody can audit."""
+    missing = set(retention.PERIODS) - set(retention.CLOCKS)
+    assert not missing, f"these stores have a period but no clock: {missing}"
+
+
+def test_the_case_period_is_its_own_number():
+    """Independent ON PURPOSE. It is the only figure here chosen against a
+    limitation period rather than a privacy promise, and expressing it in terms
+    of another would mean a future change to accountability silently moving a
+    client's evidence with it."""
+    assert retention.CASE_DATA_SECONDS == 12 * 365 * retention.DAY
+    assert retention.PERIODS["cases"] == retention.CASE_DATA_SECONDS
+    assert retention.CASE_DATA_SECONDS != retention.ACCOUNTABILITY_SECONDS
+    assert retention.CASE_DATA_SECONDS != retention.USER_DATA_SECONDS
+
+
+def test_case_evidence_outlives_the_record_of_the_advice_given_on_it():
+    """Not an accident, and written down so it is not mistaken for one.
+
+    Twelve years covers executing a decree; accountability is seven. Between
+    those, a case keeps its evidence while the provenance record of what the
+    system advised about that evidence has expired. If this ever needs to stop
+    being true, it is a policy decision, not a tidy-up.
+    """
+    assert retention.CASE_DATA_SECONDS > retention.ACCOUNTABILITY_SECONDS
 
 
 def test_an_unknown_store_has_no_period_rather_than_a_default():

@@ -132,6 +132,16 @@ class Settings(BaseSettings):
     # tombstone-first and crash-safe (services/document_deletion.py).
     documents_v2_deletion_enabled: bool = False
 
+    # Retention DELETION for intakes and their uploaded evidence — its own
+    # switch, deliberately not shared with the V2 one above. The two stores hold
+    # different things and were approved separately; one flag would mean turning
+    # on evidence destruction as a side effect of a documents decision.
+    #
+    # Off by default: the planner reports counts and the admin route is dry-run,
+    # but nothing is destroyed until this is explicitly turned on. Deletion is
+    # tombstone-first and crash-safe (services/intake_deletion.py).
+    intake_deletion_enabled: bool = False
+
     @field_validator("secret_key")
     @classmethod
     def validate_jwt_secret(cls, value: str) -> str:

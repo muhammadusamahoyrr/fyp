@@ -551,3 +551,40 @@ async def list_lawyers_monitoring() -> list[dict]:
             "is_active": lw.get("is_active", False),
         })
     return result
+
+
+async def purge_intake_retention(
+    *,
+    dry_run: bool = True,
+    limit: int | None = None,
+    actor: dict | None = None,
+) -> dict:
+    """Run the intake retention sweep as an administrator, and record who did.
+
+    Here rather than in `intake_deletion` so that auditing stays where every
+    other privileged action's auditing lives, and the retention service stays
+    free of it: the sweep is meant to be callable by something other than an
+    admin — a scheduled job has no acting user to record — and a service that
+    demanded one would have to be given a fake.
+
+    `intake_deletion.purge` owns every safety decision. This adds the audit
+    line and nothing else: the dry-run default, the configuration flag and the
+    per-record legal-hold re-read are all enforced there, and passing through
+    this function cannot relax any of them.
+    """
+    from app.services.intake_deletion import purge
+
+    result = await purge(limit, dry_run=dry_run)
+    totals = result.get("totals") or {}
+    await _audit(
+        actor, "retention.intakes_purge", None,
+        {
+            "dry_run": dry_run,
+            "enabled": result.get("enabled"),
+            "eligible": totals.get("eligible"),
+            "deleted": totals.get("deleted"),
+            "held_skipped": totals.get("held_skipped"),
+            "failed": totals.get("failed"),
+        },
+    )
+    return result

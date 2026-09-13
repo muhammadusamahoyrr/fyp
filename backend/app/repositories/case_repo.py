@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 
-from pymongo import DESCENDING
+from pymongo import ASCENDING, DESCENDING
 
+from app.core.constants import TERMINAL_CASE_STATUSES, CaseStatus
 from app.db.collections import get_cases_col
 from app.repositories.base import BaseRepository
 
@@ -104,4 +105,51 @@ class CaseRepository(BaseRepository):
         return await self.update_one(
             {"_id": case_id, "tasks._id": task_id},
             {"$set": {"tasks.$.done": done, "tasks.$.completed_at": completed_at}},
+        )
+
+    # ── retention ───────────────────────────────────────────────────────────
+    #
+    # Selectors only. Nothing here deletes; `services/intake_deletion` decides
+    # what to do with what these return, and re-checks a legal hold before it
+    # touches anything.
+
+    async def find_expired_closed(self, cutoff: datetime, limit: int) -> list[dict]:
+        """Cases whose matter ended before `cutoff`, oldest closure first.
+
+        `$type: "date"` is the whole safety property. A case closed before
+        `closed_at` existed carries no value, and one reopened since carries
+        null — both mean "we do not know when this ended", and neither may ever
+        be selected. MongoDB's type bracketing already refuses a missing field
+        against a Date operand; this states the intent so a future edit that
+        passes a non-Date cutoff fails loudly instead of silently matching
+        everything.
+
+        The status clause is independent of the date clause on purpose: a live
+        case carrying a stale stamp is still refused, so one bug cannot expire
+        an open matter on its own.
+        """
+        return await self.find_many(
+            {
+                "status": {"$in": sorted(TERMINAL_CASE_STATUSES)},
+                "closed_at": {"$type": "date", "$lt": cutoff},
+            },
+            limit=limit,
+            sort=[("closed_at", ASCENDING)],
+        )
+
+    async def find_abandoned_drafts(self, cutoff: datetime, limit: int) -> list[dict]:
+        """Draft cases created before `cutoff` — converted intakes whose client
+        never pressed Confirm.
+
+        Keyed on `created_at`, not `updated_at`: a draft nobody confirmed must
+        not have its abandonment clock reset by a write its owner never made —
+        a re-analysis, a migration, a backfill touching every row.
+        """
+        return await self.find_many(
+            {
+                "status": CaseStatus.DRAFT.value,
+                "created_at": {"$type": "date", "$lt": cutoff},
+            },
+            limit=limit,
+            sort=[("created_at", ASCENDING)],
         )

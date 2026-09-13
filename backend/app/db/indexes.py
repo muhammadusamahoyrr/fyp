@@ -358,6 +358,9 @@ async def _documents_v2_indexes() -> None:
     await get_deletion_tombstones_col().create_indexes([
         IndexModel([("document_id", ASCENDING)]),
         IndexModel([("started_at", DESCENDING)]),
+        # The collection is shared between deletion paths. `kind` is what lets
+        # an intake tombstone be found without reading every V2 revision's.
+        IndexModel([("kind", ASCENDING)]),
     ])
 
     # The V2 query indexes, taken from the one manifest rather than restated.
@@ -476,6 +479,13 @@ async def _cases_indexes() -> None:
         # There was no index on `intake_id` at all, so finding the case an
         # intake already produced was a collection scan.
         IndexModel([("intake_id", ASCENDING)]),
+        # Retention. Both selectors lead on `status` because that clause is what
+        # excludes every live case, and it must do so from the index rather than
+        # after a scan — a retention sweep that walks the whole collection is
+        # one an operator will be tempted to run less often than the policy
+        # says.
+        IndexModel([("status", ASCENDING), ("closed_at", ASCENDING)]),
+        IndexModel([("status", ASCENDING), ("created_at", ASCENDING)]),
     ])
     # ONE case per intake, enforced by the database.
     #
@@ -513,6 +523,9 @@ async def _intakes_indexes() -> None:
                     ("updated_at", DESCENDING)]),
         IndexModel([("client_id", ASCENDING), ("completed", ASCENDING),
                     ("case_id", ASCENDING), ("updated_at", DESCENDING)]),
+        # Retention: the unconverted sweep orders the whole collection by idle
+        # time, with no client to narrow it first.
+        IndexModel([("updated_at", ASCENDING)]),
     ])
 
 

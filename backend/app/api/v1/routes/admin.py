@@ -190,6 +190,32 @@ async def retention_plan(current_user: dict = Depends(require_admin)):
     return await plan()
 
 
+@router.post("/retention/intakes/purge")
+async def purge_intakes(
+    dry_run: bool = Query(True),
+    limit: int | None = Query(None, ge=1),
+    current_user: dict = Depends(require_admin),
+):
+    """Apply the intake retention policy. DRY RUN BY DEFAULT.
+
+    TWO INDEPENDENT SWITCHES have to agree before anything is destroyed: this
+    call must pass `dry_run=false`, AND `intake_deletion_enabled` must be on in
+    configuration. Either left alone and the sweep counts eligible records and
+    destroys nothing.
+
+    That is deliberate rather than belt-and-braces. A dry-run default protects
+    against the mistyped call; the configuration flag protects against the
+    correctly typed one made against the wrong environment. The first observable
+    effect of a wrong retention number is that a client's evidence is gone, and
+    no single mistake should be enough to produce it.
+
+    A legal hold is re-read per record immediately before destruction, so a hold
+    placed after this sweep started still protects.
+    """
+    return await admin_service.purge_intake_retention(
+        dry_run=dry_run, limit=limit, actor=current_user)
+
+
 @router.get("/retention/holds")
 async def list_holds(
     include_lifted: bool = Query(False),
