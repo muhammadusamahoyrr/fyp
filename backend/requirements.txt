@@ -33,6 +33,7 @@ jinja2==3.1.4
 
 # Document generation
 docxtpl==0.18.0
+python-docx==1.2.0
 reportlab==4.2.5
 
 # HTML sanitisation for lawyer-authored editor drafts. Rust (ammonia) — bleach
@@ -71,4 +72,4 @@ python-dotenv==1.0.1
 arabic-reshaper==3.0.0
 python-bidi==0.6.6
 beautifulsoup4
-pypdf
+pypdf==6.14.2
