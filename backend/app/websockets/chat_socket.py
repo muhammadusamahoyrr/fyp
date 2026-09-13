@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import secrets
 from datetime import datetime, timezone
 
@@ -118,27 +119,141 @@ async def _session_history(ref, turn_id: str | None = None) -> list[dict]:
     return await conversations.recent_context(ref, exclude_turn_id=turn_id)
 
 
-async def _fetch_matched_lawyers(session: dict, n: int = 3) -> list[dict]:
+#: What the chat surface can say about lawyer matching. `unavailable` is ours —
+#: the service never returns it — and covers "no case to match against" and "the
+#: lookup failed". It exists so the UI can distinguish "we could not check" from
+#: "we checked and there is nobody", which are different things to tell a client.
+MATCH_KIND_UNAVAILABLE = "unavailable"
+
+
+async def _fetch_matched_lawyers(session: dict, n: int = 3) -> dict:
+    """Lawyer candidates for the chat surface, with the service's verdict intact.
+
+    THE BUG THIS FIXES
+
+    `match_lawyers_for_case` returns `{"result_kind", "notice", "matches"}`. This
+    iterated that dict directly, so `m` was the string `"result_kind"`, `m.get`
+    raised `AttributeError`, and a bare `except` turned it into `[]`. The chat
+    surface has therefore shown **zero** matched lawyers for every session since,
+    silently — the failure produced an empty list, which is indistinguishable
+    from a genuine absence of candidates.
+
+    WHY THE VERDICT TRAVELS TOO
+
+    `result_kind` separates ranked candidates from a general listing offered
+    only for browsing, and the service deliberately sets `match_score` to None
+    for the latter so nothing can present them as ranked. Returning the bare
+    list threw that distinction away and left the UI to invent one.
+
+    Never raises: a matching failure must not take down a chat turn.
+    """
+    empty = {"result_kind": MATCH_KIND_UNAVAILABLE, "notice": "",
+             "matched_lawyers": []}
+
     case_id = session.get("case_id")
     if not case_id:
-        return []
+        # Nothing to match against. Not a failure, and not "no lawyers found".
+        return empty
+
     try:
         from app.services.lawyer_service import match_lawyers_for_case
-        matches = await match_lawyers_for_case(case_id, top_n=n)
-        return [
-            {
-                "id":              str(m.get("_id", "")),
-                "full_name":       m.get("full_name", ""),
-                "province":        m.get("province", ""),
-                "match_score":     m.get("match_score", 0.0),
-                "match_reason":    m.get("match_reason", ""),
-                "rating":          (m.get("lawyer_profile") or {}).get("rating", 0.0),
-                "specializations": (m.get("lawyer_profile") or {}).get("specializations", []),
-            }
-            for m in matches
-        ]
-    except Exception:
-        return []
+        result = await match_lawyers_for_case(case_id, top_n=n)
+    except Exception as exc:
+        # The class name only. An exception body can quote a query, a document
+        # fragment or a connection string, and this is a diagnostic line, not a
+        # place to reproduce them. No case or client id either.
+        logger.warning(
+            "chat: lawyer matching unavailable (%s); continuing without matches",
+            exc.__class__.__name__)
+        return empty
+
+    if not isinstance(result, dict):
+        logger.warning(
+            "chat: lawyer matching returned %s, expected a result mapping",
+            type(result).__name__)
+        return empty
+
+    candidates = result.get("matches")
+    if not isinstance(candidates, list):
+        # A string is iterable, so `for m in candidates` would walk it character
+        # by character and silently yield nothing — reporting "matched" with no
+        # candidates. Anything that is not a list is a malformed result.
+        logger.warning(
+            "chat: lawyer matching returned matches as %s, expected a list",
+            type(candidates).__name__)
+        return empty
+
+    return {
+        "result_kind": str(result.get("result_kind") or MATCH_KIND_UNAVAILABLE),
+        "notice": str(result.get("notice") or ""),
+        "matched_lawyers": [
+            _public_lawyer(m) for m in candidates if isinstance(m, dict)
+        ],
+    }
+
+
+def _match_score(value):
+    """The score as a finite float, or None when there is no usable one.
+
+    None is the service saying "not ranked", and it must survive. A genuine 0.0
+    must survive too — that is a real measurement of a poor fit, and collapsing
+    the two would lose it. Anything non-numeric becomes None rather than a
+    number nobody measured; `bool` is excluded because `isinstance(True, int)`
+    is True in Python and would score a flag as 100%.
+
+    NaN and ±Infinity are numbers to `isinstance` and are not values JSON can
+    carry. Python emits them as the bare tokens `NaN` and `Infinity`, which are
+    not valid JSON — `JSON.parse` rejects them outright — so one non-finite
+    score would make the entire websocket frame unparseable in the browser and
+    take down a chat turn that had otherwise succeeded. A score that cannot be
+    transmitted is not a score.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def _public_lawyer(m: dict) -> dict:
+    """One candidate, projected to the fixed set the browser may see.
+
+    EVERY FIELD IS COERCED, because the old projection trusted the shape of a
+    nested value. `(m.get("lawyer_profile") or {})` guards None and "" — but a
+    `lawyer_profile` that is a STRING or a LIST is truthy, so `.get` was called
+    on it and raised `AttributeError`, taking down the whole chat turn. One
+    malformed row must cost that row, never the conversation.
+    """
+    profile = m.get("lawyer_profile")
+    if not isinstance(profile, dict):
+        profile = {}
+
+    rating = profile.get("rating")
+    if (isinstance(rating, bool)
+            or not isinstance(rating, (int, float))
+            # Same JSON hazard as the score. A rating follows the existing
+            # unavailable convention instead of None: 0.0 is what every other
+            # path already uses for "no rating", and the UI omits the stars
+            # rather than printing a zero.
+            or not math.isfinite(rating)):
+        rating = 0.0
+
+    specializations = profile.get("specializations")
+    if not isinstance(specializations, list):
+        # A bare string would reach the UI and be rendered with `.slice().join()`,
+        # which is a TypeError on a string — a malformed record crashing the
+        # component that displays it.
+        specializations = []
+
+    return {
+        "id":              str(m.get("_id") or ""),
+        "full_name":       str(m.get("full_name") or ""),
+        "province":        str(m.get("province") or ""),
+        "match_score":     _match_score(m.get("match_score")),
+        "match_reason":    str(m.get("match_reason") or ""),
+        "rating":          float(rating),
+        "specializations": [str(s) for s in specializations if isinstance(s, str)],
+    }
 
 
 def _build_state(
@@ -1233,7 +1348,12 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                             matched = await _fetch_matched_lawyers(session, n=3)
                             ws_response = {
                                 "type": "clarification", "question": new_question,
-                                "matched_lawyers": matched,
+                                "matched_lawyers": matched["matched_lawyers"],
+                                # The service's verdict travels with the list.
+                                # Without it the UI cannot tell ranked candidates
+                                # from a browsing listing, and invented a score.
+                                "match_result_kind": matched["result_kind"],
+                                "match_notice": matched["notice"],
                                 "request_id": tracer.request_id,
                             }
                             db_content = new_question
@@ -1270,8 +1390,11 @@ async def chat_endpoint(websocket: WebSocket, session_id: str, ticket: str = "")
                                 "arbitration_source": result.get("arbitration_source", ""),
                             }
                             if convergence == "max_attempts":
-                                ws_response["matched_lawyers"] = await _fetch_matched_lawyers(session, n=3)
-                                ws_response["suggest_lawyer"]  = True
+                                matched = await _fetch_matched_lawyers(session, n=3)
+                                ws_response["matched_lawyers"]   = matched["matched_lawyers"]
+                                ws_response["match_result_kind"] = matched["result_kind"]
+                                ws_response["match_notice"]      = matched["notice"]
+                                ws_response["suggest_lawyer"]    = True
 
                             db_content = result.get("answer", "")
 
