@@ -219,6 +219,12 @@ class ExtractionResult:
     pages_failed: int = 0
     pages_skipped: int = 0
     page_reports: list[PageReport] = field(default_factory=list)
+    #: OCR readings of the pages that yielded no native text, populated ONLY by
+    #: the extraction runner when OCR ran inside the child process. Deliberately
+    #: NOT part of `text` and NOT in `as_dict()`: `text` is what the analysis
+    #: prompt is built from, and unconfirmed OCR output must never arrive there
+    #: by riding along in a field that looks like extracted text.
+    ocr_pages: list = field(default_factory=list)
     extractor_version: str = EXTRACTOR_VERSION
     config_version: str = CONFIG_VERSION
 

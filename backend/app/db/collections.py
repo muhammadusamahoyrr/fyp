@@ -208,3 +208,9 @@ def get_deletion_tombstones_col() -> AsyncIOMotorCollection:
     """Written BEFORE any destructive retention step, so an interrupted deletion
     is resumable and an erased artifact still leaves an audit residue."""
     return get_database()["deletion_tombstones"]
+
+def get_ocr_revisions_col() -> AsyncIOMotorCollection:
+    """Immutable OCR readings. One row per (owner, file, page, source bytes,
+    engine build, config) — inserted, never updated, so what was read and what
+    produced it stay answerable after the fact."""
+    return get_database()["ocr_revisions"]

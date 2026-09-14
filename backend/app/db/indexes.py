@@ -277,6 +277,7 @@ async def create_all_indexes() -> None:
     await _checkpoint_indexes()
     await _provenance_indexes()
     await _documents_v2_indexes()
+    await _ocr_revision_indexes()
 
 
 async def _provenance_indexes() -> None:
@@ -754,3 +755,17 @@ async def _auth_indexes() -> None:
     await get_ws_tickets_col().create_indexes([
         IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
     ])
+
+async def _ocr_revision_indexes() -> None:
+    """Immutable OCR readings.
+
+    The unique index is the idempotency guarantee itself, not an optimisation:
+    two concurrent retries of the same page both see "absent" and both insert,
+    and this is what makes the second one fail instead of storing a duplicate
+    reading of the same bytes.
+    """
+    from app.db.collections import get_ocr_revisions_col
+    from app.repositories.ocr_revision_repo import index_models
+
+    col = get_ocr_revisions_col()
+    await col.create_indexes(index_models())

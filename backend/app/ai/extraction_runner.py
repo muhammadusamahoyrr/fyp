@@ -110,6 +110,39 @@ def _result_from_payload(payload: dict) -> ExtractionResult:
     return result
 
 
+def _ocr_results_from_payload(payload) -> list:
+    """Rebuild `OcrPageResult`s from the child's report plus its text map.
+
+    Text is carried separately in the payload for the same reason extracted
+    text is: a report can be logged and stored, and must not contain document
+    content. It is rejoined here, in memory, and goes only to the OCR store.
+    """
+    if not isinstance(payload, dict):
+        return []
+    from app.ai.ocr import OcrPageResult
+
+    texts = payload.get("texts") or {}
+    out = []
+    for page in payload.get("pages") or []:
+        if not isinstance(page, dict):
+            continue
+        number = int(page.get("page_number") or 0)
+        out.append(OcrPageResult(
+            page_number=number,
+            status=str(page.get("status") or ""),
+            text=str(texts.get(str(number)) or ""),
+            text_sha256=str(page.get("text_sha256") or ""),
+            engine=str(page.get("engine") or ""),
+            engine_version=str(page.get("engine_version") or ""),
+            language=str(page.get("language") or "eng"),
+            config_version=str(page.get("config_version") or ""),
+            duration_ms=int(page.get("duration_ms") or 0),
+            error_code=page.get("error_code"),
+            limitations=list(page.get("limitations") or []),
+        ))
+    return out
+
+
 def _failure(code: str) -> ExtractionResult:
     return ExtractionResult(outcome=OUTCOME_FAILED, completeness=NONE,
                             error_code=code)
@@ -194,7 +227,7 @@ _inflight_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _batch_key(owner_id: str, claims: list, files: list[dict],
-               batch_timeout: float) -> str | None:
+               batch_timeout: float, ocr: dict | None = None) -> str | None:
     """Identity of the RESULT, not just the bytes: results are keyed by file id.
 
     Returns None when any file could not be hashed, which disables deduplication
@@ -207,6 +240,12 @@ def _batch_key(owner_id: str, claims: list, files: list[dict],
     # both for parser selection and for stale-input checks on separate copies.
     identity = [owner_id, EXTRACTOR_VERSION, CONFIG_VERSION,
                 batch_timeout, PER_FILE_TIMEOUT_SECONDS,
+                # The OCR request is part of the identity of the RESULT. Without
+                # it, a plain extraction already in flight would satisfy a
+                # request that asked for OCR, and the caller would get a result
+                # with no OCR in it and no way to tell.
+                bool((ocr or {}).get("enabled")),
+                (ocr or {}).get("language"),
                 [(c.file_id, str(Path(f["path"]).resolve()), c.content_sha256)
                  for c, f in zip(claims, files)]]
     return hashlib.sha256(json.dumps(identity, ensure_ascii=True,
@@ -233,6 +272,8 @@ def _reset_inflight_if_loop_changed() -> None:
 async def _run_batch(
     files: list[dict],
     batch_timeout: float = BATCH_TIMEOUT_SECONDS,
+    *,
+    ocr: dict | None = None,
 ) -> dict[str, tuple[ExtractionResult, str]]:
     """One killable process per file, sequentially within a batch deadline.
 
@@ -260,7 +301,7 @@ async def _run_batch(
             async with asyncio.timeout_at(deadline):
                 async with _get_semaphore():
                     timeout = min(PER_FILE_TIMEOUT_SECONDS, deadline - loop.time())
-                    out[fid] = await _run_file(item, timeout)
+                    out[fid] = await _run_file(item, timeout, ocr=ocr)
         except TimeoutError:
             out[fid] = (_failure(ERR_TIMEOUT), "")
     return out
@@ -278,11 +319,16 @@ async def _finish_cleanup(task: asyncio.Task):
     return task.result(), interrupted
 
 
-async def _run_file(item: dict, timeout: float) -> tuple[ExtractionResult, str]:
+async def _run_file(item: dict, timeout: float, *,
+                    ocr: dict | None = None) -> tuple[ExtractionResult, str]:
     fid = str(item.get("file_id") or "")
     job = json.dumps({
-        "files": [{"file_id": fid, "path": str(item.get("path") or "")}],
+        "files": [{"file_id": fid, "path": str(item.get("path") or ""),
+                   "content_type": str(item.get("content_type") or "")}],
         "budget_seconds": timeout,
+        # Absent unless the caller asked. The child does no OCR work, and
+        # imports no OCR module, when this is missing.
+        "ocr": ocr or {},
     })
 
     env = os.environ.copy()
@@ -343,7 +389,9 @@ async def _run_file(item: dict, timeout: float) -> tuple[ExtractionResult, str]:
         entry = entries[0]
         if entry.get("file_id") != fid or not isinstance(entry.get("text"), str):
             return _failure(ERR_INTERNAL), ""
-        return _result_from_payload(entry["result"]), entry["text"]
+        result = _result_from_payload(entry["result"])
+        result.ocr_pages = _ocr_results_from_payload(entry.get("ocr"))
+        return result, entry["text"]
     except (ValueError, TypeError, KeyError, AttributeError):
         logger.warning("extraction: malformed child response")
         return _failure(ERR_INTERNAL), ""
@@ -354,6 +402,7 @@ async def extract_many(
     batch_timeout: float = BATCH_TIMEOUT_SECONDS,
     owner_id: str = "",
     dedupe: bool = True,
+    ocr: dict | None = None,
 ) -> dict[str, tuple[ExtractionResult, str]]:
     """Extract a batch, collapsing concurrent requests for the same bytes.
 
@@ -385,10 +434,13 @@ async def extract_many(
         claim_for(owner_id, str(f.get("file_id") or ""), str(f.get("path") or ""))
         for f in files
     ]
-    key = _batch_key(owner_id, claims, files, batch_timeout) if dedupe else None
+    key = (_batch_key(owner_id, claims, files, batch_timeout, ocr)
+           if dedupe else None)
 
     if key is None:
-        return _refuse_stale(await _run_batch(files, batch_timeout), files, claims)
+        batch = (await _run_batch(files, batch_timeout, ocr=ocr) if ocr
+                 else await _run_batch(files, batch_timeout))
+        return _refuse_stale(batch, files, claims)
 
     _reset_inflight_if_loop_changed()
 
@@ -409,7 +461,8 @@ async def extract_many(
 
     results = None
     try:
-        results = await _run_batch(files, batch_timeout)
+        results = (await _run_batch(files, batch_timeout, ocr=ocr) if ocr
+                   else await _run_batch(files, batch_timeout))
         results = _refuse_stale(results, files, claims)
     except asyncio.CancelledError:
         future.cancel()

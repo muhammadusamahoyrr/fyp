@@ -142,6 +142,20 @@ class Settings(BaseSettings):
     # tombstone-first and crash-safe (services/intake_deletion.py).
     intake_deletion_enabled: bool = False
 
+    # ── ENGLISH OCR (Milestone 3A) ────────────────────────────────────────────
+    # OFF by default, and this milestone does not turn it on. When off, nothing
+    # spawns an OCR engine, no revision is written, and extraction behaves
+    # byte-for-byte as it did before.
+    #
+    # The flag gates the RUN, not the storage schema: rows already written stay
+    # readable, because turning a feature off must not make existing records
+    # unreadable.
+    #
+    # Even when on, OCR output is `ocr_completed_unconfirmed` and is excluded
+    # from every analysis prompt. A second, separately approved step is what
+    # allows confirmed text into analysis — see the UI-confirmation milestone.
+    english_ocr_enabled: bool = False
+
     @field_validator("secret_key")
     @classmethod
     def validate_jwt_secret(cls, value: str) -> str:
