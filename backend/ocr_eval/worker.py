@@ -277,9 +277,51 @@ def _run_passthrough(path: Path, cfg: dict) -> dict:
     }
 
 
+def _run_vision_fake(path: Path, cfg: dict) -> dict:
+    """Fake vision provider: return a canned hypothesis from a sidecar file.
+
+    NO NETWORK, NO PROVIDER, NO KEY. It reads `<fixture>.hyp.txt` if present and
+    falls back to the fixture's own text, so a test can hand the pipeline a
+    hypothesis containing SPECIFIC errors -- a swapped amount, a dropped
+    paragraph, a misread section number -- and assert what the scoring does with
+    them.
+
+    `passthrough_synthetic` cannot do that: it returns the fixture verbatim, so
+    every score is perfect and nothing downstream is exercised. Wiring the real
+    harness to field scoring, slice verdicts and the budget ledger needs an
+    engine that can be WRONG on purpose.
+
+    Like every non-recognition engine it is absent from `_REAL_ENGINES`, so any
+    run using it is labelled HARNESS_TEST_ONLY and can never be read as accuracy
+    evidence.
+    """
+    delay = float(cfg.get("synthetic_delay_seconds") or 0.0)
+    if delay:
+        time.sleep(delay)
+    sidecar = path.with_suffix(path.suffix + ".hyp.txt")
+    source = sidecar if sidecar.exists() else path
+    try:
+        text = source.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return _fail(_DECODE_ERROR, "not valid utf-8")
+    except OSError:
+        return _fail(_MISSING_FILE, "could not be opened")
+    return {
+        "ok": True, "text": text,
+        "failure_category": None, "failure_detail": None,
+        "render_seconds": 0.0, "ocr_seconds": 0.0,
+        # Usage a real provider would report, so the budget ledger has something
+        # to record. Derived from the text rather than invented per call.
+        "usage": {"input_tokens": max(1, len(text) // 4),
+                  "output_tokens": max(1, len(text) // 4)},
+        **_page_accounting(total=1, processed=1),
+    }
+
+
 ENGINES = {
     "tesseract_cli": _run_tesseract,
     "passthrough_synthetic": _run_passthrough,
+    "vision_fake": _run_vision_fake,
 }
 
 

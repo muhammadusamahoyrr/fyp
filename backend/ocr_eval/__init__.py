@@ -18,7 +18,14 @@ accuracy and "we could not run the engine" is not.
 #: 1.0.0 — first frozen harness. Token matching is whole-identifier, page
 #:         accounting separates total/processed/failed/skipped, pages render one
 #:         at a time, and the threshold evaluator receives real metrics.
-HARNESS_VERSION = "1.0.0"
+#: 2.0.0 — MAJOR: scores from 1.0.0 are not comparable to these. Field-aware
+#:         adjudication is added beside token presence and requires the FULL
+#:         annotated context (one matching token used to be enough); occurrence
+#:         binding is shared across fields; slice verdicts gained a decidable
+#:         minimum and reject non-finite rates; the budget ledger moved to
+#:         per-attempt accounting with retained unknown charges. Manifest schema
+#:         v2 is required — v1 is refused, not migrated.
+HARNESS_VERSION = "2.0.0"
 
 from ocr_eval.status import (
     HARNESS_TEST_ONLY,

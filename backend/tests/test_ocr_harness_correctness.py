@@ -322,17 +322,17 @@ def test_slices_are_evaluated_when_configured():
         "frozen": True,
         "metrics": {"character_error_rate": {"direction": "lower", "value": 0.10}},
         "slices": {
-            "urd/photograph": {
+            "urd:photograph": {
                 "metrics": {"character_error_rate": {"direction": "lower",
                                                      "value": 0.30}},
             },
         },
     }
-    by_slice = {"urd/photograph": _aggregates(cer=0.20)}
+    by_slice = {"urd:photograph": _aggregates(cer=0.20)}
 
     verdicts = evaluate_slices(by_slice, config)
 
-    assert verdicts["urd/photograph"]["passed"] is True, (
+    assert verdicts["urd:photograph"]["passed"] is True, (
         "the slice threshold, not the global one, decides a slice")
 
 
@@ -342,18 +342,18 @@ def test_a_configured_slice_that_was_not_measured_fails_loudly():
     config = {
         "frozen": True,
         "metrics": {"character_error_rate": {"direction": "lower", "value": 0.1}},
-        "slices": {"urd/photograph": {"metrics": {}}},
+        "slices": {"urd:photograph": {"metrics": {}}},
     }
 
-    verdicts = evaluate_slices({"eng/scanned": _aggregates()}, config)
+    verdicts = evaluate_slices({"eng:scanned": _aggregates()}, config)
 
-    assert verdicts["urd/photograph"]["evaluated"] is False
-    assert verdicts["urd/photograph"]["passed"] is None
-    assert "not measured" in verdicts["urd/photograph"]["reason"]
+    assert verdicts["urd:photograph"]["evaluated"] is False
+    assert verdicts["urd:photograph"]["passed"] is None
+    assert "not measured" in verdicts["urd:photograph"]["reason"]
 
 
 def test_no_slice_verdicts_when_no_slice_is_configured():
-    assert evaluate_slices({"eng/scanned": _aggregates()}, THRESHOLD_SCHEMA) == {}
+    assert evaluate_slices({"eng:scanned": _aggregates()}, THRESHOLD_SCHEMA) == {}
 
 
 def test_the_shipped_schema_is_still_unfrozen():
@@ -361,7 +361,12 @@ def test_the_shipped_schema_is_still_unfrozen():
     assert THRESHOLD_SCHEMA["frozen"] is False
     assert all(spec["value"] is None
                for spec in THRESHOLD_SCHEMA["metrics"].values())
-    assert all(v is None for v in THRESHOLD_SCHEMA["slices"].values())
+    # The slice list moved to `ocr_eval.slices`, which is now the one canonical
+    # registry: two copies of it drifted silently because each stayed
+    # self-consistent. What this test still guards is that nothing is frozen.
+    assert "slices" not in THRESHOLD_SCHEMA
+    from ocr_eval.thresholds import canonical_slice_keys
+    assert canonical_slice_keys(), "the canonical registry is empty"
 
 
 # ── English, Urdu and mixed are reported separately ────────────────────────
@@ -405,7 +410,7 @@ def _two_language_dataset(tmp_path: Path) -> Path:
         })
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "dataset_id": "two-lang",
         "created_utc": "2026-01-01T00:00:00+00:00",
         "de_identified": {"confirmed": True, "confirmed_by": "QA",
@@ -439,7 +444,10 @@ def test_english_and_urdu_are_reported_separately(tmp_path):
     block = report["results"]["synthetic"]
 
     assert set(block["by_language"]) == {"eng", "urd"}
-    assert set(block["by_slice"]) == {"eng/scanned", "urd/scanned"}
+    # One key convention across the package: `language:capture`. This used to
+    # read `eng/scanned` while the acceptance registry read `eng:scanned`, so the
+    # two named the same slice differently and neither could see the other's.
+    assert set(block["by_slice"]) == {"eng:scanned", "urd:scanned"}
     for language in ("eng", "urd"):
         assert block["by_language"][language]["fixtures_attempted"] == 1
 

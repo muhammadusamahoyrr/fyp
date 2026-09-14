@@ -30,6 +30,18 @@ NOT_RUN_FIXTURES_MISSING = "NOT_RUN_FIXTURES_MISSING"
 #: because a partial subset silently changes what the number means.
 NOT_RUN_MANIFEST_INVALID = "NOT_RUN_MANIFEST_INVALID"
 
+#: A paid engine was requested without an explicit run budget. Refusing is the
+#: only safe default: prices used to fall back to zero, which produced a ledger
+#: that could never be exceeded and a paid run with no ceiling at all.
+NOT_RUN_BUDGET_UNAVAILABLE = "NOT_RUN_BUDGET_UNAVAILABLE"
+
+#: A fixture's transcript vanished or became unreadable BETWEEN manifest
+#: validation and scoring. The ground truth is gone, so nothing measured against
+#: it means anything -- and scoring against an empty reference would award a
+#: perfect CER for a missing transcript, which is the most flattering possible
+#: reading of a broken dataset.
+NOT_RUN_DATASET_INTEGRITY = "NOT_RUN_DATASET_INTEGRITY"
+
 #: A real measurement against declared-real fixtures.
 MEASURED = "MEASURED"
 
@@ -39,6 +51,8 @@ HARNESS_TEST_ONLY = "HARNESS_TEST_ONLY_NOT_ACCURACY_EVIDENCE"
 
 #: Every outcome a run may report.
 RUN_STATUSES = frozenset({
+    NOT_RUN_BUDGET_UNAVAILABLE,
+    NOT_RUN_DATASET_INTEGRITY,
     NOT_RUN_ENGINE_UNAVAILABLE,
     NOT_RUN_FIXTURES_MISSING,
     NOT_RUN_MANIFEST_INVALID,
@@ -49,6 +63,8 @@ RUN_STATUSES = frozenset({
 #: The outcomes that do NOT carry accuracy evidence. `harness` asserts against
 #: this set before attaching any aggregate score to a report.
 NON_MEASURED_STATUSES = frozenset({
+    NOT_RUN_BUDGET_UNAVAILABLE,
+    NOT_RUN_DATASET_INTEGRITY,
     NOT_RUN_ENGINE_UNAVAILABLE,
     NOT_RUN_FIXTURES_MISSING,
     NOT_RUN_MANIFEST_INVALID,

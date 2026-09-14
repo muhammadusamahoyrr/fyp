@@ -112,6 +112,7 @@ def build_inventory(fixtures) -> dict:
     A slice with no fixtures is reported at zero rather than omitted: an absent
     row reads as "fine", and the whole point is that it is not.
     """
+    fixtures = list(fixtures)          # consumed twice: buckets and family leaks
     buckets: dict[str, list] = {}
     for fixture in fixtures:
         buckets.setdefault(fixture_slice_key(fixture), []).append(fixture)
@@ -160,6 +161,15 @@ def build_inventory(fixtures) -> dict:
         ))
 
     ready = [s for s in slices if s.status == "READY"]
+
+    # A LEAK BLOCKS READINESS. `family_assignments` could already detect a family
+    # sitting on both sides of the split, but nothing consulted it here -- so the
+    # one function that decides whether to measure ignored the one that knew the
+    # measurement would be invalid. A holdout sharing a document family with the
+    # tuning set is not a holdout.
+    families = family_assignments(fixtures)
+    leaks = families["leaks"]
+
     return {
         "slices": [s.as_report_dict() for s in slices],
         "slices_ready": len(ready),
@@ -167,7 +177,10 @@ def build_inventory(fixtures) -> dict:
         "total_documents": sum(s.documents for s in slices),
         "total_pages": sum(s.pages for s in slices),
         "total_holdout_pages": sum(s.holdout_pages for s in slices),
-        "ready": len(ready) == len(REQUIRED_SLICES),
+        "families": families["families"],
+        "family_count": families["family_count"],
+        "leaks": leaks,
+        "ready": len(ready) == len(REQUIRED_SLICES) and not leaks,
     }
 
 

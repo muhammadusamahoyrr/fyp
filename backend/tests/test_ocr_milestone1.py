@@ -165,7 +165,7 @@ def test_a_slice_key_is_derived_from_the_fixture_not_written_by_hand():
 
 
 def test_a_missing_slice_reports_not_evaluated_and_blocks_an_overall_pass():
-    good = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12,
+    good = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12, "decidable_tokens": 12,
             "cer": 0.0, "wer": 0.0, "field_accuracy": 1.0}
     # Five of six slices perfect; one absent entirely.
     results = {s.key: dict(good) for s in S.REQUIRED_SLICES[:-1]}
@@ -181,17 +181,17 @@ def test_a_missing_slice_reports_not_evaluated_and_blocks_an_overall_pass():
 def test_thin_evidence_reports_not_evaluated_rather_than_a_flattering_pass():
     """One page can score 0.0. Reporting that as a pass would be the most
     misleading thing this harness could do."""
-    thin = {"holdout_documents": 1, "holdout_pages": 1, "critical_tokens": 1,
+    thin = {"holdout_documents": 1, "holdout_pages": 1, "critical_tokens": 1, "decidable_tokens": 1,
             "cer": 0.0, "wer": 0.0, "field_accuracy": 1.0}
 
     verdict = S.evaluate_slice(S.REQUIRED_SLICES[0], **thin)
 
     assert verdict["verdict"] == S.NOT_EVALUATED
-    assert len(verdict["reasons"]) == 3
+    assert len(verdict["reasons"]) == 4  # + decidable_tokens
 
 
 def test_presence_only_runs_cannot_claim_field_correctness():
-    measured = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12,
+    measured = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12, "decidable_tokens": 12,
                 "cer": 0.0, "wer": 0.0, "field_accuracy": None}
 
     verdict = S.evaluate_slice(S.REQUIRED_SLICES[0], **measured)
@@ -201,23 +201,27 @@ def test_presence_only_runs_cannot_claim_field_correctness():
 
 
 def test_a_breach_of_any_single_threshold_fails_the_slice():
-    measured = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12,
+    measured = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12, "decidable_tokens": 12,
                 "cer": 0.99, "wer": 0.0, "field_accuracy": 1.0}
 
     assert S.evaluate_slice(S.REQUIRED_SLICES[0], **measured)["verdict"] == S.FAIL
 
 
 def test_all_six_slices_satisfied_is_the_only_overall_pass():
-    good = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12,
+    good = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12, "decidable_tokens": 12,
             "cer": 0.0, "wer": 0.0, "field_accuracy": 1.0}
-    report = S.evaluate({s.key: dict(good) for s in S.REQUIRED_SLICES})
+    # `approved=True` because the registry's own numbers are proposals: an
+    # unapproved gate must never return PASS. See
+    # test_ocr_milestone1_hardening.test_unapproved_thresholds_never_return_pass.
+    report = S.evaluate({s.key: dict(good) for s in S.REQUIRED_SLICES},
+                        approved=True)
 
     assert report["overall"] == S.PASS
     assert report["evaluated"] == report["required"] == 6
 
 
 def test_a_fixture_in_an_unthresholded_slice_is_surfaced_not_ignored():
-    good = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12,
+    good = {"holdout_documents": 2, "holdout_pages": 4, "critical_tokens": 12, "decidable_tokens": 12,
             "cer": 0.0, "wer": 0.0, "field_accuracy": 1.0}
     results = {s.key: dict(good) for s in S.REQUIRED_SLICES}
     results["urd:handwritten_scrawl"] = dict(good)
@@ -323,7 +327,8 @@ def test_settling_releases_unused_retry_headroom():
     ledger.reserve("c1", input_tokens=1000)
     reserved = ledger.committed
 
-    actual = ledger.settle("c1", input_tokens=1000, output_tokens=10, attempts=1)
+    actual = ledger.record_attempt("c1", input_tokens=1000, output_tokens=10)
+    ledger.settle("c1")
 
     assert actual < reserved
     assert ledger.confirmed_cost == pytest.approx(actual)
@@ -336,22 +341,31 @@ def test_retries_are_charged_for_every_attempt_issued():
     ledger.reserve("c1", input_tokens=1000)
 
     once = PRICES.cost(1000, 50)
-    actual = ledger.settle("c1", input_tokens=1000, output_tokens=50, attempts=3)
+    for _ in range(3):
+        ledger.record_attempt("c1", input_tokens=1000, output_tokens=50)
+    actual = ledger.settle("c1")
 
     assert actual == pytest.approx(once * 3), "a retried call is billed three times"
 
 
-def test_a_timeout_without_usage_keeps_its_reservation():
-    """THE UNKNOWN-COST RULE. A timed-out call was probably billed; treating the
-    missing usage as zero understates spend exactly when a run is going wrong."""
-    ledger = _ledger()
-    reservation = ledger.reserve("c1", input_tokens=1000)
+def test_a_timeout_without_usage_keeps_its_charge():
+    """THE UNKNOWN-COST RULE. A timed-out attempt was probably billed; treating
+    the missing usage as zero understates spend exactly when a run is going
+    wrong.
 
-    ledger.settle_unknown("c1", reason="read timeout")
+    The charge is ONE ATTEMPT at worst case, not the whole call's three-attempt
+    reservation: one attempt timed out, and billing the other two before they
+    happen would overstate spend as badly as dropping this one understates it.
+    """
+    ledger = _ledger()
+    ledger.reserve("c1", input_tokens=1000)
+    # Input AND the output cap: the prompt was certainly sent.
+    one_attempt_worst_case = PRICES.cost(1000, 1000)
+
+    ledger.record_unknown_attempt("c1", reason="read timeout")
 
     assert ledger.confirmed_cost == 0.0
-    assert ledger.unknown_exposure == pytest.approx(reservation.reserved)
-    assert ledger.committed == pytest.approx(reservation.reserved)
+    assert ledger.unknown_exposure == pytest.approx(one_attempt_worst_case)
     assert ledger.unreconciled_calls == 1
 
 
@@ -359,7 +373,7 @@ def test_unknown_exposure_still_blocks_further_spending():
     one = PRICES.cost(1000, 1000) * 3
     ledger = _ledger(ceiling=one * 1.5)
     ledger.reserve("c1", input_tokens=1000)
-    ledger.settle_unknown("c1")
+    ledger.record_unknown_attempt("c1")
 
     with pytest.raises(B.BudgetExceeded):
         ledger.reserve("c2", input_tokens=1000)
@@ -368,9 +382,9 @@ def test_unknown_exposure_still_blocks_further_spending():
 def test_an_unknown_call_can_be_reconciled_from_the_billing_console():
     ledger = _ledger()
     ledger.reserve("c1", input_tokens=1000)
-    ledger.settle_unknown("c1")
+    ledger.record_unknown_attempt("c1")
 
-    ledger.reconcile("c1", input_tokens=1000, output_tokens=20, attempts=1)
+    ledger.reconcile_unknown("c1", input_tokens=1000, output_tokens=20)
 
     assert ledger.unknown_exposure == 0.0
     assert ledger.unreconciled_calls == 0
@@ -380,7 +394,8 @@ def test_an_unknown_call_can_be_reconciled_from_the_billing_console():
 def test_a_run_with_unknown_exposure_reports_estimated_not_final():
     ledger = _ledger()
     ledger.reserve("c1", input_tokens=1000)
-    ledger.settle_unknown("c1")
+    ledger.record_unknown_attempt("c1")
+    ledger.settle("c1")          # closed, but its timed-out attempt is unresolved
 
     report = ledger.as_report_dict()
 
@@ -395,7 +410,8 @@ def test_a_run_with_unknown_exposure_reports_estimated_not_final():
 def test_a_fully_reconciled_run_reports_final():
     ledger = _ledger()
     ledger.reserve("c1", input_tokens=1000)
-    ledger.settle("c1", input_tokens=1000, output_tokens=10)
+    ledger.record_attempt("c1", input_tokens=1000, output_tokens=10)
+    ledger.settle("c1")
 
     assert ledger.as_report_dict()["status"] == "FINAL"
 
@@ -413,12 +429,13 @@ def test_release_is_only_for_calls_that_never_dispatched():
 def test_a_call_id_cannot_be_reserved_or_settled_twice():
     ledger = _ledger()
     ledger.reserve("c1", input_tokens=1000)
-    with pytest.raises(ValueError):
+    with pytest.raises(B.BudgetError):
         ledger.reserve("c1", input_tokens=1000)
 
-    ledger.settle("c1", input_tokens=1000, output_tokens=10)
+    ledger.record_attempt("c1", input_tokens=1000, output_tokens=10)
+    ledger.settle("c1")
     with pytest.raises(KeyError):
-        ledger.settle("c1", input_tokens=1000, output_tokens=10)
+        ledger.settle("c1")
 
 
 def test_a_simulated_run_with_fake_responses_never_exceeds_the_ceiling():
@@ -435,14 +452,18 @@ def test_a_simulated_run_with_fake_responses_never_exceeds_the_ceiling():
     for response in fake_responses:
         ledger.reserve(response["id"], input_tokens=response["input"])
         if response["usage"]:
-            ledger.settle(response["id"], input_tokens=response["input"],
-                          output_tokens=response["output"],
-                          attempts=response["attempts"])
+            for _ in range(response["attempts"]):
+                ledger.record_attempt(response["id"],
+                                      input_tokens=response["input"],
+                                      output_tokens=response["output"])
+            ledger.settle(response["id"])
         else:
-            ledger.settle_unknown(response["id"], reason="timeout")
+            ledger.record_unknown_attempt(response["id"], reason="timeout")
+            ledger.settle(response["id"])
 
     report = ledger.as_report_dict()
-    assert report["calls_settled"] == 3
+    assert report["calls_settled"] == 4      # every call is settled, including
+    #                                          the one whose attempt timed out
     assert report["calls_unreconciled"] == 1
     assert report["status"] == "ESTIMATED"
     assert ledger.committed <= ledger.ceiling_usd

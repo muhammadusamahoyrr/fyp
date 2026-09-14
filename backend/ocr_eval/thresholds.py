@@ -30,6 +30,22 @@ DIRECTIONS = {
     "p95_seconds_per_page": "lower",
 }
 
+def canonical_slice_keys() -> tuple[str, ...]:
+    """The ONE slice list, owned by `ocr_eval.slices`.
+
+    This module used to declare its own copy. Two registries for one concept
+    drift silently -- each stays self-consistent, so neither looks wrong, and the
+    disagreement only surfaces when a slice is measured under one name and
+    gated under the other.
+
+    Imported lazily because `slices` imports nothing from here; keeping the
+    dependency one-way is what stops the duplication coming back.
+    """
+    from ocr_eval.slices import REQUIRED_SLICES
+
+    return tuple(s.key for s in REQUIRED_SLICES)
+
+
 THRESHOLD_SCHEMA: dict = {
     "schema": "ocr_release_thresholds/1",
     "frozen": False,
@@ -44,15 +60,6 @@ THRESHOLD_SCHEMA: dict = {
     # CER would be dominated by whichever slice happens to be largest, and the
     # slice that matters most for this product — Urdu photographs — is the one a
     # global average hides most effectively.
-    "slices": {
-        "eng/searchable": None,
-        "eng/scanned": None,
-        "eng/photograph": None,
-        "urd/scanned": None,
-        "urd/photograph": None,
-        "mixed/scanned": None,
-        "mixed/photograph": None,
-    },
     "metrics": {
         name: {"direction": direction, "value": None}
         for name, direction in DIRECTIONS.items()

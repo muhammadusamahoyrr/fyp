@@ -21,6 +21,8 @@ is never a pass and never contributes to an overall pass.
 """
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
@@ -85,9 +87,38 @@ REQUIRED_SLICES: tuple[SliceThreshold, ...] = (
 
 _BY_KEY = {s.key: s for s in REQUIRED_SLICES}
 
+#: THE NUMBERS ABOVE ARE PROPOSALS, NOT AN APPROVED GATE.
+#:
+#: `thresholds.THRESHOLD_SCHEMA` already carried a `frozen` flag and refused to
+#: return a verdict without it. This registry did not, so the same proposed
+#: figures that must not gate a release were free to report PASS here -- a green
+#: tick whose real meaning was "nobody agreed to these".
+#:
+#: Flip it in a separate, reviewed change, together with the values, exactly as
+#: `thresholds.py` documents for its own gate.
+APPROVED = False
+
 
 def threshold_for(key: str) -> SliceThreshold | None:
     return _BY_KEY.get(key)
+
+
+def _usable_rate(value, *, upper: float | None = None) -> bool:
+    """Is this a number a threshold can actually be compared against?
+
+    NaN FAILS EVERY COMPARISON SILENTLY. `nan > 0.02` is False, so a NaN error
+    rate passed every threshold and the slice was reported as a PASS. Infinity
+    and negatives are equally meaningless as error rates, and a value above
+    `upper` (1.0 for an accuracy) is not a rate at all. All of them mean the
+    measurement is unusable -- which is missing evidence, never a good result.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if not math.isfinite(value):
+        return False
+    if value < 0:
+        return False
+    return not (upper is not None and value > upper)
 
 
 def evaluate_slice(
@@ -96,6 +127,7 @@ def evaluate_slice(
     holdout_documents: int,
     holdout_pages: int,
     critical_tokens: int,
+    decidable_tokens: int,
     cer: float | None,
     wer: float | None,
     field_accuracy: float | None,
@@ -105,6 +137,13 @@ def evaluate_slice(
     Evidence sufficiency is checked BEFORE the numbers. A slice with one page can
     produce a CER of 0.0, and reporting that as a pass would be the single most
     misleading thing this harness could do.
+
+    `decidable_tokens` is separate from `critical_tokens` and both minimums
+    apply. Field accuracy is scored over DECIDABLE tokens only, so a slice with
+    twelve annotated tokens of which eleven were indeterminate was being judged
+    on one -- and scored 1.0, and passed. Annotating tokens is not the same as
+    being able to adjudicate them, and the minimum has to bind on the count that
+    actually reaches the denominator.
     """
     shortfalls = []
     if holdout_documents < threshold.min_holdout_documents:
@@ -116,10 +155,18 @@ def evaluate_slice(
     if critical_tokens < threshold.min_critical_tokens:
         shortfalls.append(
             f"critical_tokens {critical_tokens} < {threshold.min_critical_tokens}")
+    if decidable_tokens < threshold.min_critical_tokens:
+        shortfalls.append(
+            f"decidable_tokens {decidable_tokens} < {threshold.min_critical_tokens}")
 
     # A missing metric is missing evidence, not a zero.
     if cer is None or wer is None:
         shortfalls.append("no error rates computed")
+    else:
+        if not _usable_rate(cer):
+            shortfalls.append(f"cer is not a usable rate ({cer!r})")
+        if not _usable_rate(wer):
+            shortfalls.append(f"wer is not a usable rate ({wer!r})")
 
     if shortfalls:
         return {
@@ -138,12 +185,15 @@ def evaluate_slice(
         failures.append(f"wer {wer:.4f} > {threshold.max_wer}")
     # field_accuracy None means the field-aware metric was not run. That is a
     # NOT_EVALUATED for this column, and it must not silently pass.
-    if field_accuracy is None:
+    if field_accuracy is None or not _usable_rate(field_accuracy, upper=1.0):
+        detail = ("field accuracy not computed -- presence-only run cannot "
+                  "establish that values landed in the correct field"
+                  if field_accuracy is None
+                  else f"field_accuracy is not a usable rate ({field_accuracy!r})")
         return {
             "key": threshold.key, "label": threshold.label,
             "verdict": NOT_EVALUATED,
-            "reasons": ["field accuracy not computed -- presence-only run cannot "
-                        "establish that values landed in the correct field"],
+            "reasons": [detail],
             "cer": cer, "wer": wer, "field_accuracy": None,
             "holdout_documents": holdout_documents,
             "holdout_pages": holdout_pages,
@@ -164,7 +214,8 @@ def evaluate_slice(
     }
 
 
-def evaluate(slice_results: Mapping[str, Mapping[str, Any]]) -> dict:
+def evaluate(slice_results: Mapping[str, Mapping[str, Any]],
+             *, approved: bool | None = None) -> dict:
     """Every required slice, plus an overall verdict that cannot be faked.
 
     `slice_results` maps a slice key to measured evidence. A required key absent
@@ -191,6 +242,10 @@ def evaluate(slice_results: Mapping[str, Mapping[str, Any]]) -> dict:
             holdout_documents=int(measured.get("holdout_documents") or 0),
             holdout_pages=int(measured.get("holdout_pages") or 0),
             critical_tokens=int(measured.get("critical_tokens") or 0),
+            decidable_tokens=int(
+                measured.get("decidable_tokens")
+                if measured.get("decidable_tokens") is not None
+                else measured.get("critical_tokens") or 0),
             cer=measured.get("cer"),
             wer=measured.get("wer"),
             field_accuracy=measured.get("field_accuracy"),
@@ -205,8 +260,30 @@ def evaluate(slice_results: Mapping[str, Mapping[str, Any]]) -> dict:
     else:
         overall = PASS
 
+    # BEFORE APPROVAL THERE IS NO VERDICT -- not PASS, and not FAIL either.
+    #
+    # An earlier version let a FAIL stand, reasoning that measuring worse than a
+    # proposal is still information. It is, but calling it FAIL asserts the bar
+    # was agreed, and these numbers are the plan's proposals. The comparison is
+    # kept and reported as an OBSERVATION so the information survives without
+    # the verdict it has not earned.
+    is_approved = APPROVED if approved is None else bool(approved)
+    for entry in slices:
+        entry.setdefault("observations", [])
+    if not is_approved:
+        for entry in slices:
+            if entry["verdict"] in (PASS, FAIL):
+                entry["observations"] = [
+                    f"against PROPOSED thresholds this slice would be "
+                    f"{entry['verdict']}"] + list(entry["reasons"])
+                entry["verdict"] = NOT_EVALUATED
+                entry["reasons"] = [
+                    "thresholds are not approved; acceptance cannot be decided"]
+        overall = NOT_EVALUATED
+
     return {
         "overall": overall,
+        "approved": is_approved,
         "slices": slices,
         "unslotted_slice_keys": unslotted,
         "evaluated": sum(1 for v in verdicts if v != NOT_EVALUATED),

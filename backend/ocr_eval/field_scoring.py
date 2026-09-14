@@ -44,10 +44,17 @@ WRONG_FIELD = "wrong_field"      # value present, but bound to a different field
 MISSING = "missing"              # value absent from the hypothesis entirely
 INDETERMINATE = "indeterminate"  # present, but context cannot decide the binding
 
-#: How much of the annotated context must survive for a binding to be accepted.
-#: Not a similarity threshold on the VALUE -- the value is still matched exactly.
-#: This governs only whether we can tell which slot an exact value sits in.
-_MIN_CONTEXT_TOKENS = 1
+#: CONSERVATIVE ADJUDICATION. Every annotated context token must survive for a
+#: binding to be accepted. Not a similarity threshold on the VALUE -- the value
+#: is still matched exactly; this governs only whether we can tell which slot an
+#: exact value sits in.
+#:
+#: The threshold used to be ONE token, and one token is not evidence of a slot.
+#: "compensation of 1000 rupees" annotated against "fine of 1000 rupees" matched
+#: on `rupees` alone, binding the amount to a finding it does not belong to.
+#: Context exists precisely to separate slots that share a value, so accepting a
+#: fraction of it defeats the reason it is collected.
+_REQUIRE_FULL_CONTEXT = True
 
 
 @dataclass(frozen=True)
@@ -112,6 +119,20 @@ class FieldScore:
         }
 
 
+def _is_boundary(char: str) -> bool:
+    """Anything that is not part of a word or number ends a token.
+
+    Whitespace ALONE was the rule, and it reported `1000` absent from
+    "fine of 1000, rupees" -- which is how amounts are actually written. That
+    understated the engine in the worst direction: a correctly read value looked
+    like a missing one.
+
+    Alphanumerics stay excluded so `1000` still does not match inside `21000`;
+    loosening the boundary for punctuation must not loosen it for digits.
+    """
+    return not char.isalnum()
+
+
 def _occurrences(needle: str, haystack: str) -> list[int]:
     """Start offsets of every whole-token occurrence of `needle`."""
     if not needle:
@@ -121,29 +142,42 @@ def _occurrences(needle: str, haystack: str) -> list[int]:
         at = haystack.find(needle, start)
         if at < 0:
             return found
-        before_ok = at == 0 or haystack[at - 1] == " "
+        before_ok = at == 0 or _is_boundary(haystack[at - 1])
         after = at + len(needle)
-        after_ok = after >= len(haystack) or haystack[after] == " "
+        after_ok = after >= len(haystack) or _is_boundary(haystack[after])
         if before_ok and after_ok:
             found.append(at)
         start = at + 1
 
 
+def _words(text: str) -> list[str]:
+    """Whitespace tokens with their outer punctuation removed, empties dropped.
+
+    "fine of (1000) rupees" tokenises to `["fine", "of", "(1000)", "rupees"]`,
+    so a context of "of" compared against the raw token "(" never matched and a
+    correctly read value scored WRONG_FIELD. Bracketed and quoted values are
+    ordinary in legal prose, so the comparison strips the punctuation rather than
+    treating it as part of the word.
+    """
+    cleaned = (t.strip("".join(c for c in t if not c.isalnum())) for t in text.split())
+    return [t for t in cleaned if t]
+
+
 def _context_tokens(text: str, limit: int = 4) -> list[str]:
-    return [t for t in text.split() if t][-limit:] if text else []
+    return _words(text)[-limit:] if text else []
 
 
 def _context_score(hyp: str, at: int, value: str,
                    before: str, after: str) -> tuple[int, int]:
     """(matched_context_tokens, available_context_tokens) around one occurrence."""
     want_before = _context_tokens(before)
-    want_after = [t for t in (after or "").split() if t][:4]
+    want_after = _words(after or "")[:4]
     available = len(want_before) + len(want_after)
     if available == 0:
         return 0, 0
 
-    left = hyp[:at].split()
-    right = hyp[at + len(value):].split()
+    left = _words(hyp[:at])
+    right = _words(hyp[at + len(value):])
     hit = 0
     for offset, token in enumerate(reversed(want_before), start=1):
         if len(left) >= offset and left[-offset] == token:
@@ -180,15 +214,23 @@ def score_fields(tokens: list[dict], hypothesis: str,
     """
     hyp = normalise(hypothesis, policy)
     score = FieldScore()
+    #: index -> (context signature, bound offset), for the ordering check below.
+    bound: dict[int, tuple] = {}
 
     # Group by field so occurrence_index is resolved within its own field.
     by_field: dict[str, list[tuple[int, dict]]] = {}
     for index, token in enumerate(tokens or []):
         by_field.setdefault(str(token.get("field") or ""), []).append((index, token))
 
+    # ONE OCCURRENCE BELONGS TO ONE ANNOTATION. `consumed` used to be reset per
+    # field, so a single number on the page satisfied every field that described
+    # it -- two fields, one occurrence, both MATCHED. It is shared across fields
+    # now, and a later field finding its only occurrence already taken reports
+    # MISSING, which is what actually happened: the page carried one of them.
+    consumed: set[int] = set()
+
     for field_name, entries in by_field.items():
         entries.sort(key=lambda pair: int(pair[1].get("occurrence_index") or 0))
-        consumed: set[int] = set()
 
         for index, token in entries:
             score.total += 1
@@ -237,19 +279,88 @@ def score_fields(tokens: list[dict], hypothesis: str,
                     index, kind, field_name, occurrence_index, INDETERMINATE,
                     "annotated context carried no usable tokens"))
                 continue
-            if hit >= _MIN_CONTEXT_TOKENS:
+            if hit == available:
+                # Every annotated context token survived. This is the only
+                # evidence that establishes a slot.
                 consumed.add(at)
                 score.matched += 1
                 score.outcomes.append(TokenOutcome(
                     index, kind, field_name, occurrence_index, MATCHED,
                     f"context matched {hit}/{available}"))
-            else:
+                bound[index] = (_signature(token, policy), at)
+            elif hit == 0:
+                # Nothing around the value resembles the annotation: the value
+                # survived OCR and landed somewhere else entirely.
                 score.wrong_field += 1
                 score.outcomes.append(TokenOutcome(
                     index, kind, field_name, occurrence_index, WRONG_FIELD,
-                    f"value present but context matched {hit}/{available}"))
+                    f"value present but no annotated context matched (0/{available})"))
+            else:
+                # PARTIAL. This is either the right slot with a misread context
+                # word, or the wrong slot that happens to share one -- and
+                # nothing here can separate those. Undecidable is the honest
+                # answer; resolving it either way invents evidence.
+                score.indeterminate += 1
+                score.outcomes.append(TokenOutcome(
+                    index, kind, field_name, occurrence_index, INDETERMINATE,
+                    f"context matched {hit}/{available}; cannot establish the slot"))
 
+    _demote_out_of_order(score, bound)
     return score
+
+
+def _signature(token: dict, policy: str) -> tuple[str, str]:
+    """The annotated context, normalised. Two fields with the same signature
+    cannot be told apart by context alone."""
+    return (normalise(str(token.get("context_before") or ""), policy),
+            normalise(str(token.get("context_after") or ""), policy))
+
+
+def _demote_out_of_order(score: FieldScore, bound: dict[int, tuple]) -> None:
+    """Demote matches that sit in the wrong ORDER within a shared context.
+
+    THE FAILURE THIS CLOSES. Two fields can declare identical surrounding text --
+    "fine of X rupees" twice on one page. Context then identifies the KIND of
+    slot but not WHICH one, so a hypothesis with the two amounts swapped matched
+    both: each value really did appear with that context somewhere. That is the
+    same "present, therefore correct" error the field metric exists to prevent,
+    reappearing one level up.
+
+    Reading order decides. Within one signature the annotated tokens are in
+    document order, so the Nth annotated token must bind to the Nth occurrence in
+    the hypothesis. A token whose position RANK differs from its annotation rank
+    is in somebody else's slot.
+
+    RANK EQUALITY RATHER THAN A LONGEST INCREASING RUN. The first version kept
+    the longest increasing subsequence, which is too lenient and overstates
+    accuracy in exactly the case this exists for: with two values swapped, LIS
+    keeps one of them as MATCHED, though neither is in its own slot. On three
+    tokens read as positions 1,3,2 it keeps two where only the first is right.
+    Rank equality gives 0 and 1 respectively, which is what actually happened.
+    """
+    groups: dict[tuple, list[tuple[int, int]]] = {}
+    for index, (signature, at) in bound.items():
+        groups.setdefault(signature, []).append((index, at))
+
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        members.sort()                       # annotation order
+        order = sorted(range(len(members)), key=lambda i: members[i][1])
+        rank = [0] * len(members)
+        for position_rank, slot in enumerate(order):
+            rank[slot] = position_rank
+
+        for slot, (index, _) in enumerate(members):
+            if rank[slot] == slot:
+                continue
+            outcome = next(o for o in score.outcomes if o.index == index)
+            score.outcomes[score.outcomes.index(outcome)] = TokenOutcome(
+                outcome.index, outcome.kind, outcome.field,
+                outcome.occurrence_index, WRONG_FIELD,
+                "value appears out of reading order for its shared context")
+            score.matched -= 1
+            score.wrong_field += 1
 
 
 def aggregate(scores: list[FieldScore]) -> dict:

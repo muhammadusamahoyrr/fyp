@@ -127,7 +127,7 @@ def _dataset(
         fixtures.append(extra_fixture)
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "dataset_id": "test-ds",
         "created_utc": "2026-01-01T00:00:00+00:00",
         "de_identified": {

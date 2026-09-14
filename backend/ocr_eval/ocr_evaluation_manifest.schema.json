@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://attorney.ai/schemas/ocr_evaluation_manifest/1",
+  "$id": "https://attorney.ai/schemas/ocr_evaluation_manifest/2",
   "title": "OCR evaluation dataset manifest",
   "description": "Declares a private, de-identified OCR ground-truth dataset. The manifest is the ONLY authority on what each fixture is: document type, language, capture style and handwriting are declared by a human who looked at the page, never inferred from OCR output or from engine confidence. Fixture files and transcripts live outside version control; this manifest records their hashes so a silent substitution fails closed.",
   "type": "object",
@@ -15,8 +15,8 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 1,
-      "description": "Frozen. A different value must fail closed rather than be coerced."
+      "const": 2,
+      "description": "Frozen at 2. A different value must fail closed rather than be coerced. VERSION 1 IS REFUSED, NOT MIGRATED: v2 made document_family, split, field and occurrence_index required, and a v1 manifest carries none of them. Defaulting them would produce a dataset with no train/holdout separation and no field annotation -- which still scores, and scores meaninglessly. There is no automatic migration; a v1 manifest must be re-annotated, because the missing information is a human judgement about the documents and cannot be inferred from the file."
     },
     "dataset_id": {
       "type": "string",

@@ -62,6 +62,11 @@ class Fixture:
     critical_tokens: tuple[dict, ...]
     synthetic: bool
     skipped_by_policy: bool
+    #: The schema REQUIRES both, and they were being validated on the way in and
+    #: dropped on the way out -- so the train/holdout split a manifest declared
+    #: could not be read back by the inventory that has to enforce it.
+    document_family: str = ""
+    split: str = ""
 
     def as_report_dict(self) -> dict:
         """Report-safe view.
@@ -79,6 +84,8 @@ class Fixture:
             "writing": self.writing,
             "rotation": self.rotation,
             "expected_page_count": self.expected_page_count,
+            "document_family": self.document_family,
+            "split": self.split,
             "critical_token_count": len(self.critical_tokens),
             "synthetic": self.synthetic,
             "skipped_by_policy": self.skipped_by_policy,
@@ -346,6 +353,8 @@ def load_manifest(manifest_path: str | Path) -> LoadedManifest:
             critical_tokens=tuple(entry.get("critical_tokens") or ()),
             synthetic=bool(entry.get("synthetic", False)),
             skipped_by_policy=handwritten,
+            document_family=str(entry.get("document_family") or ""),
+            split=str(entry.get("split") or ""),
         ))
 
     if not entries or (missing_files and missing_files == len(entries)):
