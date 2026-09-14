@@ -6,19 +6,24 @@
  * document or only its cover sheet. A client who is told "3 of 5 pages produced
  * no text" knows what to retype; one who is told nothing assumes it was read.
  *
- * SIX STATES, KEPT APART ON PURPOSE
+ * SEVEN STATES, KEPT APART ON PURPOSE
  *
- *   pending       not analysed yet — extraction runs at conversion
- *   complete      the whole document was read
- *   partial       some of it reached the analysis, some did not
- *   unreadable    none of it did
- *   storage_only  kept and downloadable, but no extractor can ever read it
- *   error         the upload itself failed
+ *   pending         not analysed yet — extraction runs at conversion
+ *   complete        the whole document was read
+ *   partial         some of it reached the analysis, some did not
+ *   unreadable      none of it did
+ *   storage_only    kept and downloadable, but no extractor can ever read it
+ *   legacy_encoding read, but the text decoded to nothing usable
+ *   error           the upload itself failed
  *
  * Collapsing any two of these loses something the client needs. `storage_only`
  * is not `unreadable`: nothing is wrong with the file and re-uploading the same
  * format will not help. `pending` is not `complete`: nothing has been read yet.
  * `error` is not `unreadable`: the bytes never arrived at all.
+ * `legacy_encoding` is not `unreadable` either: the file has a perfectly good
+ * text layer, it is simply written in a legacy non-Unicode Urdu encoding. The
+ * remedy is the part that differs — typed text or an English translation, and
+ * NOT a scan, which cannot help while Urdu OCR is unavailable.
  *
  * TWO THINGS THIS DELIBERATELY NEVER SAYS
  *
@@ -37,13 +42,26 @@ export const STATE_COMPLETE = "complete";
 export const STATE_PARTIAL = "partial";
 export const STATE_UNREADABLE = "unreadable";
 export const STATE_STORAGE_ONLY = "storage_only";
+export const STATE_LEGACY_ENCODING = "legacy_encoding";
 export const STATE_ERROR = "error";
 
 /** Every state a file can be shown in. Used by tests to prove none collapse. */
 export const ALL_STATES = [
     STATE_PENDING, STATE_COMPLETE, STATE_PARTIAL,
-    STATE_UNREADABLE, STATE_STORAGE_ONLY, STATE_ERROR,
+    STATE_UNREADABLE, STATE_STORAGE_ONLY, STATE_LEGACY_ENCODING, STATE_ERROR,
 ];
+
+/**
+ * What the client is told about a legacy Urdu encoding, in one place.
+ *
+ * Deliberately does NOT suggest a scan or a photo. Urdu OCR is not available,
+ * so a scan of this document would be exactly as unreadable as the original —
+ * advising one sends the client away to do work that cannot help them.
+ */
+export const LEGACY_ENCODING_MESSAGE =
+    "This document uses an unsupported legacy Urdu text encoding. Urdu OCR is "
+    + "not currently available. Please provide typed text or an English "
+    + "translation.";
 
 /**
  * A counter, or null when it is genuinely unknown.
@@ -65,7 +83,19 @@ function unreadPages(ef) {
     const withText = num(ef?.pages_with_text);
     if (total === null || withText === null) return "";
     if (total <= 0 || withText >= total) return "";
-    return `${total - withText} of ${total} page${total === 1 ? "" : "s"} produced no text`;
+    // Pages whose text did not decode are NOT blank pages, and saying they
+    // "produced no text" points the client at the wrong remedy.
+    const untrusted = num(ef?.pages_text_untrusted) || 0;
+    const blank = Math.max(0, total - withText - untrusted);
+    const bits = [];
+    if (blank > 0) {
+        bits.push(`${blank} of ${total} page${total === 1 ? "" : "s"} produced no text`);
+    }
+    if (untrusted > 0) {
+        bits.push(`${untrusted} of ${total} page${total === 1 ? "" : "s"} `
+            + "use an unsupported legacy Urdu text encoding");
+    }
+    return bits.join(" · ");
 }
 
 function detailFor(ef) {
@@ -172,6 +202,16 @@ export function extractionLabel(ef) {
                 detail: "the analysis reached its length limit",
             };
 
+        case "unextractable_encoding":
+            // NOT "could not be read", and never "Read status unknown". The
+            // file is fine and was read; its text is in an encoding we cannot
+            // decode, and only one remedy exists.
+            return {
+                state: STATE_LEGACY_ENCODING, tone: TONE_BAD,
+                title: "Unsupported legacy Urdu encoding",
+                detail: LEGACY_ENCODING_MESSAGE,
+            };
+
         case "missing":
             return {
                 state: STATE_UNREADABLE, tone: TONE_BAD, title: "File not found",
@@ -204,7 +244,7 @@ export function extractionLabel(ef) {
 export function isIncomplete(ef) {
     const { state } = extractionLabel(ef);
     return state === STATE_PARTIAL || state === STATE_UNREADABLE
-        || state === STATE_STORAGE_ONLY;
+        || state === STATE_STORAGE_ONLY || state === STATE_LEGACY_ENCODING;
 }
 
 /**

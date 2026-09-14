@@ -1322,8 +1322,10 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                                                                 </div>
                                                                 <div style={{ fontSize: 10, color: t.textMuted }}>{ef.error || (ef.uploading ? "Uploading…" : kb)}</div>
                                                                 {/* Uploading and upload-failure already have the line above;
-                                                                    this covers the other four states, including the
-                                                                    storage-only one that is known before any extraction runs. */}
+                                                                    this covers the other five states, including the
+                                                                    storage-only one that is known before any extraction runs
+                                                                    and the legacy-Urdu-encoding one, which carries its own
+                                                                    remedy in the detail line. */}
                                                                 {!ef.uploading && !ef.error && (
                                                                     <div data-testid={`extraction-${ef.file_id}`} data-state={read.state} style={{ fontSize: 10, marginTop: 2, whiteSpace: "normal", color: EXTRACTION_TONE_COLOUR[read.tone] || t.textMuted, fontWeight: read.tone === TONE_OK || read.tone === TONE_NEUTRAL ? 400 : 600 }}>
                                                                         {EXTRACTION_TONE_ICON[read.tone] || "•"} {read.title}

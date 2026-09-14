@@ -111,7 +111,12 @@ class IntakeEvidenceFile(BaseModel):
     #
     # `extraction_status` mirrors the recorded per-file status
     # (readable / partially_read / unreadable / missing / omitted_limit /
-    # invalid_path). `completeness` is the extractor's own judgement. The page
+    # invalid_path / storage_only / unextractable_encoding).
+    # `unextractable_encoding` means the file HAS a text layer that decodes to
+    # nothing usable — a legacy non-Unicode Urdu encoding. It is separate from
+    # `unreadable` because the remedy differs: re-uploading the same file, or a
+    # scan of it, cannot help while Urdu OCR is unavailable; typed text or an
+    # English translation can. `completeness` is the extractor's own judgement. The page
     # counters are carried so the UI can say WHICH pages produced nothing
     # instead of only that something was missing — a client who is told "3 of 5
     # pages could not be read" knows what to retype.
@@ -125,6 +130,9 @@ class IntakeEvidenceFile(BaseModel):
     completeness: str | None = None
     pages_total: int | None = None
     pages_with_text: int | None = None
+    # Pages carrying a text layer that decoded to nothing usable. Distinct from
+    # `pages_failed` (nothing failed) and from a blank page (it is not blank).
+    pages_text_untrusted: int | None = None
     pages_failed: int | None = None
     pages_skipped: int | None = None
     # Set when the file extracted fully but the ANALYSIS PROMPT ran out of room.

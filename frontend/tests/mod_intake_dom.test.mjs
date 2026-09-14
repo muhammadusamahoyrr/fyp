@@ -645,3 +645,114 @@ test.after(() => {
     liveTimers.clear();
     dom.window.close();
 });
+
+// ── the legacy-Urdu-encoding status, as the client actually sees it ─────────
+//
+// The backend can report that a file HAS a text layer which decodes to nothing
+// usable. Before the UI knew that status it fell through to the default arm and
+// rendered "Read status unknown" — which tells the client nothing, implies we
+// never looked, and offers no remedy. A source-reading test cannot catch that:
+// the fall-through only happens once the component is mounted with real data.
+
+const LEGACY_FILE = {
+    file_id: "f-urdu",
+    filename: "PCS_Act_1974.pdf",
+    content_type: "application/pdf",
+    size: 204800,
+    extraction_status: "unextractable_encoding",
+    completeness: "none",
+    pages_total: 9,
+    pages_with_text: 0,
+    pages_text_untrusted: 9,
+};
+
+function extractionLine(container, fileId) {
+    return container.querySelector(`[data-testid="extraction-${fileId}"]`);
+}
+
+/* The evidence list lives on the upload screen, behind "do you have evidence".
+   A converted intake lands past it, so these tests restore an UNFINISHED one
+   sitting on that step with files already uploaded. */
+function intakeOnEvidenceStep(files) {
+    const data = convertedIntake({ evidence_files: files });
+    return {
+        ...data,
+        completed: false,
+        case_id: null,
+        case_status: null,
+        current_step: 2,
+        steps: { ...data.steps, 4: { has_evidence: true } },
+    };
+}
+
+test("a legacy-encoding file renders its own status, not 'Read status unknown'", async () => {
+    reset();
+    seedToken();
+    api.__respond("intakeGet", {
+        data: intakeOnEvidenceStep([LEGACY_FILE]),
+    });
+    const { container, unmount } = await mountIntake();
+
+    const line = extractionLine(container, "f-urdu");
+    assert.ok(line, "the extraction status line was not rendered at all");
+    assert.equal(line.getAttribute("data-state"), "legacy_encoding");
+    assert.match(line.textContent, /Unsupported legacy Urdu encoding/);
+    assert.doesNotMatch(line.textContent, /Read status unknown/);
+
+    await unmount();
+});
+
+test("the mounted UI tells the client what would actually help", async () => {
+    reset();
+    seedToken();
+    api.__respond("intakeGet", {
+        data: intakeOnEvidenceStep([LEGACY_FILE]),
+    });
+    const { container, unmount } = await mountIntake();
+
+    const text = extractionLine(container, "f-urdu").textContent;
+
+    assert.match(text, /typed text or an English translation/);
+    // Urdu OCR is unavailable, so a scan would be exactly as unreadable.
+    assert.doesNotMatch(text, /scan/i);
+    assert.doesNotMatch(text, /photo/i);
+
+    await unmount();
+});
+
+test("no raw extracted mojibake reaches the mounted UI", async () => {
+    reset();
+    seedToken();
+    api.__respond("intakeGet", {
+        data: intakeOnEvidenceStep([LEGACY_FILE]),
+    });
+    const { container, unmount } = await mountIntake();
+
+    const body = container.textContent;
+    for (const fragment of ["Z}5i]w", "!!!!", "%^&*l1", "}[O5i#w"]) {
+        assert.ok(!body.includes(fragment),
+            `raw extracted mojibake reached the page: ${fragment}`);
+    }
+
+    await unmount();
+});
+
+test("a readable file is still shown as read in full", async () => {
+    reset();
+    seedToken();
+    api.__respond("intakeGet", {
+        data: intakeOnEvidenceStep([{
+            file_id: "f-ok", filename: "notice.pdf",
+            content_type: "application/pdf", size: 1024,
+            extraction_status: "readable", completeness: "complete",
+            pages_total: 2, pages_with_text: 2,
+        }]),
+    });
+    const { container, unmount } = await mountIntake();
+
+    const line = extractionLine(container, "f-ok");
+    assert.equal(line.getAttribute("data-state"), "complete");
+    assert.match(line.textContent, /Read in full/);
+
+    await unmount();
+});

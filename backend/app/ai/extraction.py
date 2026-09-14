@@ -37,6 +37,7 @@ No I/O beyond reading the file it is given. No database, no network, no settings
 """
 from __future__ import annotations
 
+import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +65,8 @@ NONE = "none"
 # ── per-page states ─────────────────────────────────────────────────────────
 PAGE_TEXT_FOUND = "text_found"
 PAGE_NO_TEXT_FOUND = "no_text_found"
+PAGE_TEXT_UNTRUSTED = "text_untrusted"
+PAGE_TEXT_SUSPECT = "text_suspect"
 PAGE_FAILED = "failed"
 PAGE_SKIPPED = "skipped"
 
@@ -83,6 +86,11 @@ ERR_PACKAGE_TOO_LARGE = "package_too_large"
 ERR_ENCRYPTED = "encrypted"
 ERR_PARSE_FAILED = "parse_failed"
 ERR_NO_TEXT_LAYER = "no_text_layer"
+#: A text layer EXISTS but does not decode to meaningful characters -- the
+#: case this was built for is a born-digital Urdu PDF typeset in a legacy
+#: InPage/Noori font whose glyphs carry no usable Unicode mapping. Extraction
+#: "succeeds" and returns thousands of characters of mojibake.
+ERR_UNEXTRACTABLE_TEXT_ENCODING = "unextractable_text_encoding"
 ERR_TIMEOUT = "timeout"
 ERR_STALE_INPUT = "stale_input"
 ERR_INTERNAL = "internal_error"
@@ -117,6 +125,14 @@ ERROR_MESSAGES = {
     ERR_PARSE_FAILED: "This file is damaged or malformed and could not be read.",
     ERR_NO_TEXT_LAYER: (
         "This file has no readable text layer — it is most likely a scan or photo."
+    ),
+    # NO "send us a scan" ADVICE. Urdu OCR is deferred, so a scan would be just
+    # as unreadable as the original -- telling the client to supply one sends
+    # them away to do work that cannot help them.
+    ERR_UNEXTRACTABLE_TEXT_ENCODING: (
+        "This document uses an unsupported legacy Urdu text encoding. Urdu OCR "
+        "is not currently available. Please provide typed text or an English "
+        "translation."
     ),
     ERR_TIMEOUT: "Reading this file took too long and was stopped.",
     ERR_STALE_INPUT: (
@@ -192,6 +208,14 @@ class ExtractionResult:
     pages_total: int | None = None
     pages_attempted: int = 0
     pages_with_text: int = 0
+    #: Pages that yielded characters we could not trust as text. Counted
+    #: apart from `pages_with_text`, because a page whose glyphs do not
+    #: decode is not a page we have read.
+    pages_text_untrusted: int = 0
+    #: Pages whose text looked unlike language but was KEPT. Counted IN
+    #: `pages_with_text` as well -- the text is in the output -- and tracked
+    #: only so the document cannot be reported as complete.
+    pages_text_suspect: int = 0
     pages_failed: int = 0
     pages_skipped: int = 0
     page_reports: list[PageReport] = field(default_factory=list)
@@ -233,6 +257,8 @@ class ExtractionResult:
             "pages_total": self.pages_total,
             "pages_attempted": self.pages_attempted,
             "pages_with_text": self.pages_with_text,
+            "pages_text_untrusted": self.pages_text_untrusted,
+            "pages_text_suspect": self.pages_text_suspect,
             "pages_failed": self.pages_failed,
             "pages_skipped": self.pages_skipped,
             "processing_coverage": self.processing_coverage,
@@ -347,6 +373,20 @@ def extract_pdf(path: Path, max_pages: int = MAX_PDF_PAGES) -> ExtractionResult:
             continue
 
         stripped = text.strip()
+        verdict = _assess_text_layer(page, stripped) if stripped else TEXT_OK
+
+        if verdict == TEXT_UNUSABLE:
+            # A known legacy Urdu font that produced no Urdu. The text is
+            # DISCARDED rather than counted: it must never reach the analysis
+            # prompt, and a page whose glyphs we cannot map is not a page we
+            # have read.
+            result.pages_text_untrusted += 1
+            result.page_reports.append(
+                PageReport(index + 1, PAGE_TEXT_UNTRUSTED,
+                           images_present=has_image,
+                           error_code=ERR_UNEXTRACTABLE_TEXT_ENCODING))
+            continue
+
         if stripped:
             if total_chars + len(stripped) > MAX_EXTRACTED_CHARS:
                 room = max(0, MAX_EXTRACTED_CHARS - total_chars)
@@ -355,9 +395,15 @@ def extract_pdf(path: Path, max_pages: int = MAX_PDF_PAGES) -> ExtractionResult:
             chunks.append(stripped)
             total_chars += len(stripped)
             result.pages_with_text += 1
+            if verdict == TEXT_SUSPECT:
+                # KEPT, and counted as read, because it may well be real text.
+                # Recorded only so the document cannot be called complete.
+                result.pages_text_suspect += 1
             result.page_reports.append(
-                PageReport(index + 1, PAGE_TEXT_FOUND, chars=len(stripped),
-                           images_present=has_image))
+                PageReport(index + 1,
+                           PAGE_TEXT_SUSPECT if verdict == TEXT_SUSPECT
+                           else PAGE_TEXT_FOUND,
+                           chars=len(stripped), images_present=has_image))
         else:
             result.page_reports.append(
                 PageReport(index + 1, PAGE_NO_TEXT_FOUND, images_present=has_image))
@@ -373,6 +419,13 @@ def extract_pdf(path: Path, max_pages: int = MAX_PDF_PAGES) -> ExtractionResult:
 
     result.text = "\n".join(chunks)
     result.completeness = _judge_pdf_completeness(result)
+    if result.completeness == NONE and result.pages_text_untrusted:
+        # Every page that produced anything produced characters we could not
+        # trust. Distinct from "no text layer at all": the remedy differs, and
+        # telling the client to re-scan a file that is perfectly fine is the
+        # wrong instruction.
+        result.error_code = ERR_UNEXTRACTABLE_TEXT_ENCODING
+        return result
     if result.completeness == NONE:
         # Every page was looked at and none gave up any text. The attempt
         # SUCCEEDED — this is a fact about the document, not a failure of ours —
@@ -380,6 +433,196 @@ def extract_pdf(path: Path, max_pages: int = MAX_PDF_PAGES) -> ExtractionResult:
         # is named here rather than left as a bare empty string.
         result.error_code = ERR_NO_TEXT_LAYER
     return result
+
+
+# -- is this text usable? ---------------------------------------------------
+#
+# THREE ANSWERS, NOT TWO. Rejecting text is destructive -- the client's evidence
+# disappears from the analysis -- so it takes positive, measured evidence of a
+# specific known-bad encoding. Text that merely looks odd is KEPT and the
+# document is marked uncertain instead.
+
+TEXT_OK = "ok"
+TEXT_SUSPECT = "suspect"        # kept, but the document cannot be called complete
+TEXT_UNUSABLE = "unusable"      # discarded: measured evidence it decodes to nothing
+
+#: Normalised `/BaseFont` substrings that identify a legacy non-Unicode Urdu
+#: typesetting font, chiefly InPage's Noori Nastaliq family.
+#:
+#: MEASURED over 975 real pages of public documents:
+#:     the 3 local Urdu statutes  38 pages   94.0-98.2% of fonts match
+#:     8 English public statutes 937 pages    0.0% of fonts match (23 distinct
+#:                                            BaseFont names, none matching)
+#: The separation is total, which is why this -- and not the shape of the text
+#: -- is what may discard a page.
+_LEGACY_URDU_FONT_MARKERS = (
+    "NOORI",        # Noori Nastaliq -- InPage's default, seen as NOORIN##/NOORIC##
+    "INPAGE",
+    "NASTALIQ",
+    "NASTALEEQ",
+)
+
+#: Fraction of a page's fonts that must carry a legacy marker. MEASURED: real
+#: Noori pages run 0.940-0.982 (never 1.0 -- they mix in an Arial for Latin
+#: numerals), and English pages run 0.000. Anything in between is unobserved.
+_LEGACY_FONT_RATIO_FLOOR = 0.5
+
+#: A legacy Urdu font that produced NO Urdu script is the whole finding: the
+#: glyphs were mapped onto Latin/symbol codepoints, so the Urdu never arrived.
+#: MEASURED: all 38 real Noori pages yield exactly 0.000 Arabic-script
+#: characters. Valid Unicode Urdu sits far above this and is never discarded.
+_URDU_SCRIPT_FLOOR = 0.10
+
+#: Letter-coherence below which text stops looking like language.
+#:
+#: THIS NO LONGER DISCARDS ANYTHING. MEASURED across 967 pages the bands
+#: overlap -- Urdu 0.663-0.859, English 0.800-1.000 -- and at 0.90 it wrongly
+#: rejected 7 real English pages (0.8%). It now only marks text SUSPECT, which
+#: keeps the text and refuses to call the document complete.
+_LETTER_COHERENCE_FLOOR = 0.90
+
+#: Below this many letter-bearing tokens the coherence figure is not a
+#: measurement, it is one or two tokens voting. MEASURED: the lowest count on
+#: any of the 38 real undecodable pages is 81. It excludes the degenerate short
+#: page, where a token like "p0" is 50% letters.
+_MIN_TOKENS_TO_JUDGE = 20
+
+_FONT_SUBSET_PREFIX = re.compile(r"^[A-Z]{6}\+")
+
+
+def _normalised_basefont(raw) -> str:
+    """`/CXOYBI+NOORIN22` -> `NOORIN22`.
+
+    PDF subset-embedded fonts carry a random six-letter tag, so the raw name is
+    never comparable. Punctuation and case are dropped too, because the same
+    family appears as `NOORIN22`, `Noori Nastaliq` and `NooriNastaleeq`.
+    """
+    name = str(raw or "").lstrip("/")
+    name = _FONT_SUBSET_PREFIX.sub("", name)
+    return re.sub(r"[^A-Z0-9]", "", name.upper())
+
+
+def _legacy_urdu_font_ratio(page) -> float | None:
+    """Fraction of the page's fonts that are a known legacy Urdu font.
+
+    Returns None when the resource dictionary cannot be read -- malformed
+    metadata must not crash extraction, and "unknown" is not evidence.
+    """
+    try:
+        fonts = page["/Resources"]["/Font"]
+        names = [_normalised_basefont(fonts[key].get_object().get("/BaseFont"))
+                 for key in fonts.keys()]
+    except Exception:                                     # noqa: BLE001
+        return None
+    if not names:
+        return None
+    hits = sum(1 for n in names
+               if any(marker in n for marker in _LEGACY_URDU_FONT_MARKERS))
+    return hits / len(names)
+
+
+def _is_urdu_script(ch: str) -> bool:
+    code = ord(ch)
+    return (0x0600 <= code <= 0x06FF        # Arabic
+            or 0x0750 <= code <= 0x077F     # Arabic Supplement
+            or 0x08A0 <= code <= 0x08FF     # Arabic Extended-A
+            or 0xFB50 <= code <= 0xFDFF     # Arabic Presentation Forms-A
+            or 0xFE70 <= code <= 0xFEFF)    # Arabic Presentation Forms-B
+
+
+def _urdu_script_fraction(text: str) -> float:
+    """Fraction of non-space characters lying in the Arabic/Urdu script blocks."""
+    body = [c for c in text if not c.isspace()]
+    if not body:
+        return 0.0
+    return sum(1 for c in body if _is_urdu_script(c)) / len(body)
+
+
+def _lettered_tokens(text: str) -> list[str]:
+    """Tokens carrying at least one letter.
+
+    Tokens with NO letter -- "1882", "[(4)]", "*" -- are excluded rather than
+    counted against the text: digits and legal punctuation are CONTENT.
+    """
+    return [t for t in text.split() if any(c.isalpha() for c in t)]
+
+
+def _coherence_of(lettered: list[str]) -> float:
+    if not lettered:
+        return 1.0          # digits and punctuation only: nothing to disbelieve
+    coherent = sum(
+        1 for t in lettered
+        if sum(1 for c in t if c.isalpha()) / len(t) >= 0.6)
+    return coherent / len(lettered)
+
+
+def _letter_coherence(text: str) -> float:
+    """Of the tokens that carry letters, how many are mostly letters?
+
+    Script-agnostic: `str.isalpha()` is true for Urdu, Latin and every other
+    script, so text is never judged for not being English.
+    """
+    return _coherence_of(_lettered_tokens(text))
+
+
+def _assess_text_layer(page, text: str) -> str:
+    """Can these extracted characters be believed as the document's text?
+
+    SEPARATE FROM COMPLETENESS. Completeness asks how much of the document we
+    saw; this asks whether what came back means anything. A born-digital Urdu
+    PDF typeset in InPage's Noori Nastaliq returns thousands of characters per
+    page and zero usable Urdu, and the old rule -- `if stripped:` -- counted
+    every one of those pages as fully read.
+
+    DISCARDING REQUIRES THREE POSITIVE, MEASURED FACTS, all about this page:
+
+      1. The page is typeset in a KNOWN legacy non-Unicode Urdu font.
+      2. That font produced NO Urdu script at all -- so the Urdu did not
+         survive the glyph mapping.
+      3. What it produced instead does not read as language.
+
+    Each one alone is innocent. Valid Unicode Urdu in a Noori-named font fails
+    (2); a Noori-named font that somehow produced real readable text fails (3);
+    an English page that merely scores badly fails (1). Measured together they
+    separate perfectly: 38 of 38 real Noori pages discarded, 0 of 937 real
+    English pages. Note what is NOT used. An earlier version rejected
+    on the shape of the text alone and wrongly discarded 7 real English pages.
+    An earlier version also claimed a `/ToUnicode` font check corroborated the
+    decision, when measurement showed that check passes on 100% of BOTH corpora
+    and therefore discriminates nothing at all.
+
+    EVERYTHING ELSE THAT LOOKS WRONG IS ONLY SUSPECT. Low-coherence text is
+    kept and the document is marked uncertain, because "this looks odd" is not
+    grounds to delete a client's evidence.
+
+    Fails OPEN throughout: unreadable metadata leaves the text usable, since
+    refusing a document we merely failed to inspect is its own dishonesty.
+    """
+    if not text.strip():
+        return TEXT_OK                   # nothing to judge; handled elsewhere
+
+    lettered = _lettered_tokens(text)
+    if len(lettered) < _MIN_TOKENS_TO_JUDGE:
+        # Not enough text to have an opinion: on a page carrying a word or two
+        # a single token would decide the verdict.
+        return TEXT_OK
+
+    incoherent = _coherence_of(lettered) < _LETTER_COHERENCE_FLOOR
+    legacy_ratio = _legacy_urdu_font_ratio(page)
+    legacy_font = (legacy_ratio is not None
+                   and legacy_ratio >= _LEGACY_FONT_RATIO_FLOOR)
+    no_urdu = _urdu_script_fraction(text) < _URDU_SCRIPT_FLOOR
+
+    if legacy_font and no_urdu and incoherent:
+        # ALL THREE. A known legacy Urdu font, no Urdu script in what came back,
+        # and what did come back does not read as language. Valid Unicode Urdu
+        # fails the second test; a Noori-named font that somehow produced real
+        # readable text fails the third.
+        return TEXT_UNUSABLE
+
+    if incoherent:
+        return TEXT_SUSPECT
+    return TEXT_OK
 
 
 def _judge_pdf_completeness(result: ExtractionResult) -> str:
@@ -398,7 +641,18 @@ def _judge_pdf_completeness(result: ExtractionResult) -> str:
         return PARTIAL_OR_UNCERTAIN
     if result.pages_attempted < result.pages_total:
         return PARTIAL_OR_UNCERTAIN
+    if result.pages_text_suspect:
+        # The text is in the output and may be perfectly real, but something
+        # about it did not look like language. Saying `complete` here would
+        # assert a confidence we do not have.
+        return PARTIAL_OR_UNCERTAIN
     if result.pages_with_text < result.pages_attempted:
+        # This is also what catches a partly undecodable document. A page whose
+        # glyphs carry no character information is attempted but never counted
+        # as a text page, so a mixed file lands here: some real evidence, not
+        # the whole document. No separate `pages_text_untrusted` branch —
+        # a page is either trusted text or untrusted, never both, so one could
+        # never be reached and would rot untested.
         return PARTIAL_OR_UNCERTAIN
     if any(p.images_present for p in result.page_reports):
         return PARTIAL_OR_UNCERTAIN

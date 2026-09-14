@@ -35,6 +35,10 @@ _BUDGET = {"omitted_limit"}
 #: Accepted and stored, but no extractor can read this format. Nothing is wrong
 #: with the file.
 _STORAGE_ONLY = {"storage_only"}
+#: Read, but the text decoded to nothing usable -- a legacy non-Unicode Urdu
+#: encoding. NOT READ, and named here rather than left to the remainder so the
+#: count is a decision on the record instead of an accident of arithmetic.
+_UNEXTRACTABLE_ENCODING = {"unextractable_encoding"}
 
 #: Formats accepted at upload that no extractor can read. Derived from the
 #: SERVER-detected mime, never from the client's filename or Content-Type.
@@ -119,9 +123,9 @@ def snapshot_from_statuses(
     partial = _count_status(rows, _PARTIAL)
     budget = _count_status(rows, _BUDGET)
     storage = _count_status(rows, _STORAGE_ONLY)
-    # Everything else — unreadable, missing, invalid_path, and any status a
-    # future extractor introduces. Counted as not-read rather than ignored, so a
-    # new status cannot silently vanish from the totals.
+    # Everything else — unreadable, missing, invalid_path, unextractable_encoding,
+    # and any status a future extractor introduces. Counted as not-read rather
+    # than ignored, so a new status cannot silently vanish from the totals.
     not_read = len(rows) - full - partial - budget - storage
 
     # A file marked fully read can still have been truncated out of the prompt.

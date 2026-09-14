@@ -940,6 +940,12 @@ async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> 
             "pages_total": result.pages_total,
             "pages_attempted": result.pages_attempted,
             "pages_with_text": result.pages_with_text,
+            # Pages that DID carry a text layer which could not be decoded. A
+            # separate count from `pages_failed`: nothing failed, and the page
+            # is not blank — the glyphs simply carry no character information.
+            # Collapsing it into either one would misstate what happened and
+            # what would help.
+            "pages_text_untrusted": result.pages_text_untrusted,
             "pages_failed": result.pages_failed,
             "pages_skipped": result.pages_skipped,
             "processing_coverage": result.processing_coverage,
@@ -958,7 +964,14 @@ async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> 
             # one tells the client to re-upload something that will fail the
             # same way. Kept distinct so the six presentation states survive
             # analysis, not just the upload response.
-            if item.get("analysis_support") == "storage_only" or result.error_code in (
+            if result.error_code == "unextractable_text_encoding":
+                # The file HAS a text layer; it simply does not decode. Distinct
+                # from "no text could be extracted", because the remedy differs:
+                # re-uploading the same PDF fails identically, and so would a
+                # scan while Urdu OCR is unavailable. What helps is typed text
+                # or an English translation.
+                record["status"] = "unextractable_encoding"
+            elif item.get("analysis_support") == "storage_only" or result.error_code in (
                     "legacy_doc_format", "image_no_text_extraction"):
                 record["status"] = "storage_only"
             elif result.error_code == "file_missing":
@@ -1021,10 +1034,12 @@ async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> 
         "These were readable. Their contents are simply absent here, so do not "
         "treat their subject matter as unevidenced.")
     _block(
-        [s for s in statuses if s.get("status") == "storage_only"],
-        "NOT ANALYSABLE — stored, but this format cannot be read at all",
-        "Nothing is wrong with these files. Say they must be read by a person, "
-        "and do not ask the client to upload the same format again.")
+        [s for s in statuses
+         if s.get("status") in ("storage_only", "unextractable_encoding")],
+        "NOT ANALYSABLE — stored, but this cannot be read at all",
+        "Nothing is wrong with these files. Do not ask the client to upload the "
+        "same format again, and do not suggest a scan or photo: Urdu OCR is not "
+        "available, so ask for typed text or an English translation.")
     _block(
         [s for s in statuses
          if s.get("status") in ("unreadable", "missing", "invalid_path")],
@@ -1052,6 +1067,10 @@ _UNREAD_REASONS = {
     "missing": "is recorded but missing from storage",
     "invalid_path": "could not be located",
     "storage_only": "is stored but its format cannot be read for analysis",
+    "unextractable_encoding": (
+        "uses an unsupported legacy Urdu text encoding that cannot be read, and "
+        "Urdu OCR is not currently available — it needs typed text or an "
+        "English translation"),
     "omitted_limit": ("was read successfully but left out because the analysis "
                       "reached its length limit"),
 }
@@ -1063,10 +1082,18 @@ def _evidence_gap_sentence(result) -> str:
     cannot read, not what it is.
     """
     bits = []
-    if result.pages_total and result.pages_with_text < result.pages_total:
-        bits.append(
-            f"{result.pages_total - result.pages_with_text} of "
-            f"{result.pages_total} pages produced no text")
+    untrusted = getattr(result, "pages_text_untrusted", 0) or 0
+    if result.pages_total:
+        # Untrusted pages are NOT blank pages. Reporting them as "produced no
+        # text" points the client at the wrong remedy: re-supplying the same
+        # born-digital file will produce the same undecodable glyphs.
+        blank = max(0, result.pages_total - result.pages_with_text - untrusted)
+        if blank:
+            bits.append(f"{blank} of {result.pages_total} pages produced no text")
+        if untrusted:
+            bits.append(
+                f"{untrusted} of {result.pages_total} pages use an unsupported "
+                "legacy Urdu text encoding and could not be read")
     if result.pages_skipped:
         bits.append(f"{result.pages_skipped} pages were not processed")
     if result.pages_failed:
@@ -1381,6 +1408,7 @@ def _public_evidence(files: list[dict] | None,
                 # text", a definite claim built from an absence.
                 "pages_total":       record.get("pages_total"),
                 "pages_with_text":   record.get("pages_with_text"),
+                "pages_text_untrusted": record.get("pages_text_untrusted"),
                 "pages_failed":      record.get("pages_failed"),
                 "pages_skipped":     record.get("pages_skipped"),
                 "prompt_truncated":  bool(record.get("truncated")),

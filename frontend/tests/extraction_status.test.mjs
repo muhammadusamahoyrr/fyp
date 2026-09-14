@@ -23,8 +23,10 @@ import {
     STATE_ERROR,
     STATE_PARTIAL,
     STATE_PENDING,
+    STATE_LEGACY_ENCODING,
     STATE_STORAGE_ONLY,
     STATE_UNREADABLE,
+    LEGACY_ENCODING_MESSAGE,
     TONE_OK,
     TONE_WARN,
     TONE_BAD,
@@ -170,10 +172,11 @@ const SAMPLES = {
     partial: { file_id: "pa", extraction_status: "partially_read", pages_total: 4, pages_with_text: 1 },
     unreadable: { file_id: "u", extraction_status: "unreadable" },
     storage_only: { file_id: "s", analysis_support: "storage_only", notice: "Saved, but images cannot be read." },
+    legacy_encoding: { file_id: "l", extraction_status: "unextractable_encoding" },
     error: { file_id: "e", error: "Upload failed" },
 };
 
-test("every one of the six states is reachable and distinct", () => {
+test("every one of the seven states is reachable and distinct", () => {
     const seen = Object.fromEntries(
         Object.entries(SAMPLES).map(([name, ef]) => [name, extractionLabel(ef).state]));
 
@@ -183,6 +186,7 @@ test("every one of the six states is reachable and distinct", () => {
         partial: STATE_PARTIAL,
         unreadable: STATE_UNREADABLE,
         storage_only: STATE_STORAGE_ONLY,
+        legacy_encoding: STATE_LEGACY_ENCODING,
         error: STATE_ERROR,
     });
     assert.equal(new Set(Object.values(seen)).size, ALL_STATES.length,
@@ -325,4 +329,92 @@ test("undefined and empty-string counters are treated as unknown", () => {
         });
         assert.doesNotMatch(label.detail, /pages produced no text/);
     }
+});
+
+
+// ── legacy non-Unicode Urdu encoding ───────────────────────────────────────
+//
+// The backend can now say a file HAS a text layer that decodes to nothing
+// usable. Before this status existed the UI fell through to its default arm and
+// showed "Read status unknown", which tells the client nothing and implies we
+// did not look.
+
+test("a legacy-encoding file is named specifically, never 'Read status unknown'", () => {
+    const label = extractionLabel({ extraction_status: "unextractable_encoding" });
+
+    assert.equal(label.state, STATE_LEGACY_ENCODING);
+    assert.notEqual(label.title, "Read status unknown");
+    assert.equal(label.title, "Unsupported legacy Urdu encoding");
+    assert.equal(label.tone, TONE_BAD);
+});
+
+test("it tells the client the one thing that would actually help", () => {
+    const { detail } = extractionLabel({ extraction_status: "unextractable_encoding" });
+
+    assert.equal(detail, LEGACY_ENCODING_MESSAGE);
+    assert.match(detail, /typed text or an English translation/);
+});
+
+test("it never asks for a scan or a photo", () => {
+    // Urdu OCR is not available, so a scan of this document would be exactly as
+    // unreadable as the original. Advising one sends the client away to do work
+    // that cannot help them.
+    const { title, detail } = extractionLabel({
+        extraction_status: "unextractable_encoding" });
+
+    for (const text of [title, detail, LEGACY_ENCODING_MESSAGE]) {
+        assert.doesNotMatch(text, /scan/i, `"${text}" asks for a scan`);
+        assert.doesNotMatch(text, /photo/i, `"${text}" asks for a photo`);
+    }
+});
+
+test("it is not collapsed into 'could not be read'", () => {
+    // The file is fine and WAS read. Only its encoding is unsupported, and the
+    // remedy is different from every other unreadable state.
+    const legacy = extractionLabel({ extraction_status: "unextractable_encoding" });
+    const unreadable = extractionLabel({ extraction_status: "unreadable" });
+
+    assert.notEqual(legacy.state, unreadable.state);
+    assert.notEqual(legacy.title, unreadable.title);
+});
+
+test("it counts as incomplete evidence", () => {
+    assert.equal(isIncomplete({ extraction_status: "unextractable_encoding" }), true);
+    const gaps = incompleteFiles([
+        { file_id: "a", extraction_status: "readable" },
+        { file_id: "b", extraction_status: "unextractable_encoding" },
+    ]);
+    assert.deepEqual(gaps.map(g => g.file_id), ["b"]);
+});
+
+test("undecodable pages are not described as blank pages", () => {
+    // "produced no text" points the client at the wrong remedy: re-supplying
+    // the same born-digital file decodes exactly as badly the second time.
+    const { detail } = extractionLabel({
+        extraction_status: "partially_read",
+        pages_total: 5, pages_with_text: 3, pages_text_untrusted: 2,
+    });
+
+    assert.match(detail, /2 of 5 pages use an unsupported legacy Urdu text encoding/);
+    assert.doesNotMatch(detail, /2 of 5 pages produced no text/);
+});
+
+test("a document with both blank and undecodable pages counts them apart", () => {
+    const { detail } = extractionLabel({
+        extraction_status: "partially_read",
+        pages_total: 10, pages_with_text: 4, pages_text_untrusted: 3,
+    });
+
+    assert.match(detail, /3 of 10 pages produced no text/);
+    assert.match(detail, /3 of 10 pages use an unsupported legacy Urdu text encoding/);
+});
+
+test("an ordinary partial file is worded exactly as before", () => {
+    const { detail } = extractionLabel({
+        extraction_status: "partially_read",
+        pages_total: 10, pages_with_text: 7,
+    });
+
+    assert.match(detail, /3 of 10 pages produced no text/);
+    assert.doesNotMatch(detail, /legacy/i);
 });
