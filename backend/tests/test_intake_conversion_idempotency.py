@@ -96,6 +96,12 @@ class FakeIntakeRepo:
         self.doc["ai_structured_case"] = ai_data
         return True
 
+    async def save_evidence_review_state(self, token, statuses, owner) -> bool:
+        if self.doc.get("conversion_claim_owner") != owner:
+            return False
+        self.doc["evidence_review_state"] = statuses
+        return True
+
 
 class FakeCaseRepo:
     def __init__(self):
@@ -243,6 +249,45 @@ async def test_a_repeat_convert_replays_the_first_answer(wired):
     assert second["case_id"] == first["case_id"]
     assert second["completed"] is True
     assert len(cases.cases) == 1
+
+
+async def test_unconfirmed_ocr_pauses_before_analysis_then_resumes_same_case(
+    wired, monkeypatch
+):
+    intakes, cases, log = wired
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "english_ocr_enabled", True)
+    calls = 0
+
+    async def extraction(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return "", [{
+                "file_id": "f1", "status": "unreadable",
+                "ocr_review_required": True,
+                "ocr_revision_ids": ["r1"],
+            }]
+        return "human confirmed text", [{
+            "file_id": "f1", "status": "partially_read",
+            "ocr_review_required": False, "ocr_confirmed": True,
+        }]
+
+    monkeypatch.setattr(intake_service, "_extract_intake_evidence", extraction)
+
+    paused = await intake_service.convert_to_case(TOKEN, CLIENT)
+    assert paused["ocr_review_required"] is True
+    assert paused["completed"] is False
+    assert log["analysed"] == 0
+    assert log["created"] == [], "a case was opened before OCR review"
+    assert "conversion_claim_owner" not in intakes.doc
+
+    completed = await intake_service.convert_to_case(TOKEN, CLIENT)
+    assert completed["completed"] is True
+    assert completed["case_id"] is not None
+    assert len(cases.cases) == 1
+    assert log["analysed"] == 1
 
 
 async def test_the_replay_carries_the_classification_the_first_call_decided(wired):

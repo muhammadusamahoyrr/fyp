@@ -142,8 +142,8 @@ class Settings(BaseSettings):
     # tombstone-first and crash-safe (services/intake_deletion.py).
     intake_deletion_enabled: bool = False
 
-    # ── ENGLISH OCR (Milestone 3A) ────────────────────────────────────────────
-    # OFF by default, and this milestone does not turn it on. When off, nothing
+    # ── LOCAL ENGLISH OCR ─────────────────────────────────────────────────────
+    # OFF by default. When off, nothing
     # spawns an OCR engine, no revision is written, and extraction behaves
     # byte-for-byte as it did before.
     #
@@ -151,10 +151,14 @@ class Settings(BaseSettings):
     # readable, because turning a feature off must not make existing records
     # unreadable.
     #
-    # Even when on, OCR output is `ocr_completed_unconfirmed` and is excluded
-    # from every analysis prompt. A second, separately approved step is what
-    # allows confirmed text into analysis — see the UI-confirmation milestone.
+    # When on, engine output is excluded from every analysis prompt until the
+    # owning client reviews/corrects and confirms every OCR page. Confirmation
+    # is hash-bound; only the separately stored confirmed value is analysed.
     english_ocr_enabled: bool = False
+    # Identifier of the reviewed benchmark/evidence used to approve production
+    # activation. Development may exercise the feature without one; production
+    # may not turn it on with an untraceable "someone tested it" assertion.
+    english_ocr_benchmark_id: str = ""
 
     @field_validator("secret_key")
     @classmethod
@@ -183,6 +187,15 @@ class Settings(BaseSettings):
     def validate_production_transport(self):
         if self.app_env.lower() == "production" and not self.frontend_url.startswith("https://"):
             raise ValueError("FRONTEND_URL must use HTTPS in production")
+        if (
+            self.app_env.lower() == "production"
+            and self.english_ocr_enabled
+            and not self.english_ocr_benchmark_id.strip()
+        ):
+            raise ValueError(
+                "ENGLISH_OCR_BENCHMARK_ID is required when English OCR is "
+                "enabled in production"
+            )
         return self
 
 

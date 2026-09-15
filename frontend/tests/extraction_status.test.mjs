@@ -46,6 +46,19 @@ test("an un-extracted file is not counted as incomplete", () => {
     assert.equal(isIncomplete({ file_id: "a" }), false);
 });
 
+test("unconfirmed OCR is visibly pending and never described as analysed", () => {
+    const file = {
+        file_id: "ocr", extraction_status: "unreadable",
+        ocr_review_required: true,
+    };
+    const label = extractionLabel(file);
+    assert.equal(label.state, STATE_PENDING);
+    assert.equal(label.tone, TONE_WARN);
+    assert.match(label.title, /needs your review/i);
+    assert.match(label.detail, /not be used in the analysis/i);
+    assert.equal(isAnalysed(file), false);
+});
+
 test("a fully read file says so and is not flagged", () => {
     const label = extractionLabel({
         extraction_status: "readable", completeness: "complete",

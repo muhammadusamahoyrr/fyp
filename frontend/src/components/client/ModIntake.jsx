@@ -6,7 +6,7 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "./CaseContext.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge, Tooltip } from "@/components/shared/shared.jsx";
-import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence, confirmCase, deleteIntakeEvidence, downloadIntakeEvidence, getResumableIntake } from "@/lib/api.js";
+import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence, confirmCase, deleteIntakeEvidence, downloadIntakeEvidence, getResumableIntake, getIntakeOcrReview, confirmIntakeOcrPage } from "@/lib/api.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { readIntakeValue, writeIntakeValue, clearIntakeValue } from "@/lib/intakeStorage.js";
@@ -195,6 +195,12 @@ const ModIntake = () => {
     const [hasEvidence, setHasEvidence]       = useState(false);
     const [evidenceDesc, setEvidenceDesc]     = useState("");
     const [evidenceFiles, setEvidenceFiles]   = useState([]); // [{file_id,filename,size,content_type,uploading,error}]
+    const [ocrReviewRequired, setOcrReviewRequired] = useState(false);
+    const [ocrReviewPages, setOcrReviewPages] = useState([]);
+    const [ocrReviewLoading, setOcrReviewLoading] = useState(false);
+    const [ocrConfirming, setOcrConfirming] = useState(null);
+    const [ocrReviewError, setOcrReviewError] = useState("");
+    const [ocrReviewFileIds, setOcrReviewFileIds] = useState([]);
     const fileInputRef                        = useRef(null);
     const [desiredOutcome, setDesiredOutcome] = useState("");
 
@@ -209,6 +215,12 @@ const ModIntake = () => {
     ];
     const completedSteps = Math.max(0, step - 1);
     const progress = (completedSteps / steps.length) * 100;
+    const ocrReviewComplete = ocrReviewFileIds.length > 0
+        && ocrReviewPages.length > 0
+        && ocrReviewFileIds.every(fileId =>
+            ocrReviewPages.some(page => page.file_id === fileId)
+        )
+        && ocrReviewPages.every(page => page.confirmed === true);
 
     // ── Evidence removal, on the SERVER ────────────────────────────
     //
@@ -218,6 +230,68 @@ const ModIntake = () => {
     // described it as uploaded. The client had every reason to believe it was
     // gone.
     const [removingFile, setRemovingFile] = useState(null);
+
+    const loadOcrReview = async (token, files) => {
+        const ids = (files || []).map(f => f.file_id).filter(Boolean);
+        setOcrReviewFileIds(ids);
+        setOcrReviewError("");
+        setOcrReviewLoading(true);
+        const responses = await Promise.all(
+            ids.map(fileId => getIntakeOcrReview(token, fileId))
+        );
+        if (responses.some(result => result.error)) {
+            setOcrReviewError("Could not load the extracted text.");
+            toast.show("Could not load the extracted text. Try again.", "error");
+            setOcrReviewLoading(false);
+            return false;
+        }
+        const pagesByFile = responses.map(({ data }, index) =>
+            (Array.isArray(data) ? data : [])
+                .filter(page => page?.file_id === ids[index])
+                .map(page => ({
+                    ...page,
+                    draft_text: page.confirmed_text ?? page.text ?? "",
+                }))
+        );
+        if (ids.length > 0 && pagesByFile.some(pages => pages.length === 0)) {
+            setOcrReviewError("One or more extracted files has no current review pages.");
+            toast.show(
+                "One or more extracted files has no current review pages. Reload the intake before continuing.",
+                "error",
+            );
+            setOcrReviewPages([]);
+            setOcrReviewLoading(false);
+            return false;
+        }
+        const pages = pagesByFile.flat();
+        setOcrReviewPages(pages);
+        setOcrReviewLoading(false);
+        return true;
+    };
+
+    const confirmOcrPage = async page => {
+        setOcrConfirming(page.revision_id);
+        const { error } = await confirmIntakeOcrPage(
+            intakeToken,
+            page.file_id,
+            page.revision_id,
+            {
+                source_sha256: page.source_sha256,
+                text_sha256: page.text_sha256,
+                confirmed_text: page.draft_text,
+            },
+        );
+        setOcrConfirming(null);
+        if (error) {
+            toast.show(error?.message || "Could not confirm this page. Reload and try again.", "error");
+            return;
+        }
+        setOcrReviewPages(prev => prev.map(p =>
+            p.revision_id === page.revision_id
+                ? { ...p, confirmed: true, review_state: "confirmed", confirmed_text: p.draft_text }
+                : p
+        ));
+    };
 
     const removeEvidence = async (ef) => {
         // A row that never reached the server (a failed upload) has nothing to
@@ -518,6 +592,14 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
         }
         restoreFromServer(data);
 
+        if (data.ocr_review_required) {
+            setOcrReviewRequired(true);
+            const reviewFiles = (data.evidence_files || []).filter(
+                f => f.ocr_review_required
+            );
+            void loadOcrReview(data.session_token, reviewFiles);
+        }
+
         // WHERE they were, not just WHAT they typed.
         //
         // `current_step` was returned by the API and read by nothing, so a
@@ -719,7 +801,10 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
 
     // ── Step 3 → 4: save remaining steps, convert, fetch AI ───────
     const handleConvertAndSummarise = async () => {
-        if (caseId) { setStep(4); return; } // already converted
+        if (caseId && aiStructured && !ocrReviewRequired) {
+            setStep(4);
+            return;
+        }
 
         if (!intakeToken) {
             toast.show("Questionnaire complete", "success");
@@ -777,6 +862,22 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
             return; // do not advance to step 4 on failure
         }
 
+        if (converted?.ocr_review_required) {
+            setOcrReviewRequired(true);
+            const loaded = await loadOcrReview(
+                savedToken,
+                Array.isArray(converted.ocr_files) ? converted.ocr_files : [],
+            );
+            setConverting(false);
+            if (loaded) {
+                toast.show(
+                    "Review the extracted text before AI analysis continues.",
+                    "info", 5000,
+                );
+            }
+            return;
+        }
+
         if (converted?.case_id) {
             setCaseId(converted.case_id);
             setConvertedCaseType(converted.ai_case_type || null);
@@ -803,7 +904,6 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                     "info", 5000
                 );
             }
-
             // Fetch the AI-structured case data
             const { data: intake } = await intakeGet(savedToken);
             if (intake?.ai_structured_case?.summary && intake.ai_structured_case.summary !== "pending") {
@@ -811,6 +911,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
             }
         }
 
+        setOcrReviewRequired(false);
         setConverting(false);
         toast.show("✅ Case analysis complete", "success", 3000);
         setStep(4);
@@ -1390,7 +1491,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                         <BtnOutline onClick={() => setStep(2)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
                         <div style={{ flex: 1 }} />
                         {/* "Next Question" for rounds 1-3; "Complete & Continue" on round 4 or when done */}
-                        {(clarifyRound >= 1 && clarifyRound <= 3) && !clarifyDone ? (
+                        {!ocrReviewRequired && (clarifyRound >= 1 && clarifyRound <= 3) && !clarifyDone ? (
                             <BtnPrimary
                                 disabled={clarifyLoading || !getCurrentAnswer().trim()}
                                 onClick={handleClarifyNext}
@@ -1400,18 +1501,101 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                             </BtnPrimary>
                         ) : (
                             <BtnPrimary
-                                disabled={converting || clarifyLoading || (clarifyRound === 4 && !clarifyA4.trim())}
+                                disabled={converting || clarifyLoading || ocrReviewLoading
+                                    || (ocrReviewRequired && !ocrReviewComplete)
+                                    || (!ocrReviewRequired && clarifyRound === 4 && !clarifyA4.trim())}
                                 onClick={handleConvertAndSummarise}
                                 style={{ fontSize: 13, padding: "8px 18px", opacity: converting ? 0.7 : 1 }}
                             >
-                                {converting ? "Analysing case…" : clarifyLoading ? "Thinking…" : "Complete & Continue →"}
+                                {converting ? "Analysing case…"
+                                    : ocrReviewLoading ? "Loading extracted text…"
+                                    : ocrReviewRequired ? "Continue analysis →"
+                                    : clarifyLoading ? "Thinking…" : "Complete & Continue →"}
                             </BtnPrimary>
                         )}
                     </div>
                     <div>
-                        <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI Follow-up Questions</div>
-                        <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>Our AI has analysed your case and identified the most important missing facts.</div>
+                        <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>
+                            {ocrReviewRequired ? "Review Extracted Text" : "AI Follow-up Questions"}
+                        </div>
+                        <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>
+                            {ocrReviewRequired
+                                ? "OCR can misread names, dates and amounts. Compare each page with the original and correct it before confirming."
+                                : "Our AI has analysed your case and identified the most important missing facts."}
+                        </div>
                     </div>
+
+                    {ocrReviewRequired && (
+                        <Card data-testid="ocr-review" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+                            <div style={{ padding: "10px 12px", borderRadius: 9, background: "#fffbeb", border: "1px solid #fcd34d", color: "#78350f", fontSize: 12, lineHeight: 1.55 }}>
+                                The text below was generated automatically and has not been used in your case analysis. Confirming means it matches the original page; it does not mean the document itself is legally valid.
+                            </div>
+                            {ocrReviewLoading && <div style={{ fontSize: 13, color: t.textMuted }}>Loading extracted text…</div>}
+                            {!ocrReviewLoading && ocrReviewError && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                    <span role="alert" style={{ flex: 1, color: "#b91c1c", fontSize: 12 }}>
+                                        {ocrReviewError} Your intake has not advanced.
+                                    </span>
+                                    <BtnOutline
+                                        onClick={() => loadOcrReview(
+                                            intakeToken,
+                                            ocrReviewFileIds.map(file_id => ({ file_id })),
+                                        )}
+                                        style={{ fontSize: 11, padding: "6px 10px" }}
+                                    >
+                                        Try loading again
+                                    </BtnOutline>
+                                </div>
+                            )}
+                            {!ocrReviewLoading && ocrReviewPages.map(page => {
+                                const file = evidenceFiles.find(f => f.file_id === page.file_id);
+                                return (
+                                    <div key={page.revision_id} style={{ border: `1px solid ${t.border}`, borderRadius: 10, padding: 14 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
+                                            <div style={{ flex: 1, fontSize: 12, fontWeight: 700, color: t.text }}>
+                                                {file?.filename || "Evidence file"} · page {Number(page.page_number)}
+                                            </div>
+                                            {file && (
+                                                <BtnOutline onClick={() => downloadEvidence(file)} style={{ fontSize: 11, padding: "5px 9px" }}>
+                                                    Open original
+                                                </BtnOutline>
+                                            )}
+                                            <Badge type={page.confirmed ? "success" : "warn"}>
+                                                {page.confirmed ? "Confirmed" : "Needs review"}
+                                            </Badge>
+                                        </div>
+                                        <textarea
+                                            aria-label={`Extracted text page ${Number(page.page_number)}`}
+                                            value={page.draft_text}
+                                            disabled={page.confirmed}
+                                            onChange={e => setOcrReviewPages(prev => prev.map(p =>
+                                                p.revision_id === page.revision_id
+                                                    ? { ...p, draft_text: e.target.value }
+                                                    : p
+                                            ))}
+                                            style={{ width: "100%", minHeight: 150, resize: "vertical", background: t.inputBg, color: t.text, border: `1px solid ${t.border}`, borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 12, lineHeight: 1.6 }}
+                                        />
+                                        {!page.confirmed && (
+                                            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                                                <BtnPrimary
+                                                    disabled={Boolean(ocrConfirming)}
+                                                    onClick={() => confirmOcrPage(page)}
+                                                    style={{ fontSize: 12, padding: "7px 12px" }}
+                                                >
+                                                    {ocrConfirming === page.revision_id ? "Confirming…" : "Confirm this page"}
+                                                </BtnPrimary>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                            {ocrReviewComplete && (
+                                <div style={{ color: "#15803d", fontSize: 12, fontWeight: 700 }}>
+                                    ✓ All extracted pages are confirmed. Continue analysis when ready.
+                                </div>
+                            )}
+                        </Card>
+                    )}
 
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 14 }}>
                         <div>

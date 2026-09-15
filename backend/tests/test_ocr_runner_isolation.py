@@ -51,6 +51,20 @@ def _scan(tmp_path, name="scan.pdf", pages=1) -> str:
     return str(p)
 
 
+def _vector_page(tmp_path, name="vector-only.pdf") -> str:
+    """Visible PDF marks with neither a text layer nor an embedded image."""
+    from reportlab.pdfgen import canvas
+
+    path = tmp_path / name
+    pdf = canvas.Canvas(str(path), pagesize=(300, 300))
+    pdf.rect(45, 70, 16, 160, fill=1, stroke=0)
+    pdf.rect(105, 70, 16, 160, fill=1, stroke=0)
+    pdf.rect(45, 142, 76, 16, fill=1, stroke=0)
+    pdf.rect(175, 70, 16, 160, fill=1, stroke=0)
+    pdf.save()
+    return str(path)
+
+
 def _file(path, file_id="f1", content_type="application/pdf"):
     return {"file_id": file_id, "path": path, "content_type": content_type}
 
@@ -74,6 +88,21 @@ async def test_ocr_runs_inside_the_extraction_child(tmp_path):
         assert page.status == O.OCR_COMPLETED_UNCONFIRMED
         assert "COURT" in page.text.upper()
         assert page.engine == "tesseract"
+
+
+@needs_engine
+async def test_vector_only_pdf_is_rendered_inside_the_extraction_child(tmp_path):
+    """Exercise the product seam, not merely the renderer helper."""
+    path = _vector_page(tmp_path)
+
+    out = await R.extract_many([_file(path)], owner_id="o1", ocr=OCR_ON)
+    result, native_text = out["f1"]
+
+    assert native_text == ""
+    assert len(result.ocr_pages) == 1
+    assert result.ocr_pages[0].page_number == 1
+    assert result.ocr_pages[0].status == O.OCR_COMPLETED_UNCONFIRMED
+    assert result.ocr_pages[0].engine == "tesseract"
 
 
 async def test_no_ocr_happens_unless_the_caller_asks(tmp_path):

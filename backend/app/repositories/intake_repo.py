@@ -73,6 +73,19 @@ class IntakeRepository(BaseRepository):
             {"$set": {"ai_structured_case": ai_data, "updated_at": datetime.now(timezone.utc)}},
         )
 
+    async def save_evidence_review_state(
+        self, token: str, statuses: list[dict], owner: str
+    ) -> bool:
+        """Persist the extraction/OCR review checkpoint under the claim fence."""
+        return await self.update_one(
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": owner},
+            {"$set": {
+                "evidence_review_state": list(statuses),
+                "updated_at": datetime.now(timezone.utc),
+            }},
+        )
+
     async def save_clarification_qa(self, token: str, qa_list: list) -> bool:
         return await self.update_one(
             {"session_token": token, "completed": {"$ne": True},
@@ -139,6 +152,10 @@ class IntakeRepository(BaseRepository):
             {
                 "session_token": token,
                 "completed": {"$ne": True},
+                # Evidence deletion removes the source and its derived OCR as
+                # one logical operation.  Conversion must not snapshot the
+                # intake between those two steps.
+                "evidence_deletion_claim": {"$exists": False},
                 "$or": [
                     {"conversion_claim_expires_at": {"$lte": now}},
                     {"$and": [
@@ -164,6 +181,50 @@ class IntakeRepository(BaseRepository):
             return_document=ReturnDocument.AFTER,
         )
         return int(claimed["conversion_epoch"]) if claimed else None
+
+    async def claim_evidence_deletion(
+        self, token: str, file_id: str
+    ) -> bool:
+        """Fence conversion before deleting a source and its derived OCR.
+
+        A marker for the same file is deliberately reclaimable.  If a process
+        dies after deleting OCR but before pulling the source entry, the
+        client's retry can finish the operation instead of leaving the intake
+        permanently wedged.  A different deletion waits until this one ends.
+        """
+        now = datetime.now(timezone.utc)
+        claimed = await self.col.find_one_and_update(
+            {
+                "session_token": token,
+                "completed": {"$ne": True},
+                "conversion_claim_owner": {"$exists": False},
+                "conversion_claimed_at": {"$exists": False},
+                "evidence_files.file_id": file_id,
+                "$or": [
+                    {"evidence_deletion_claim": {"$exists": False}},
+                    {"evidence_deletion_claim.file_id": file_id},
+                ],
+            },
+            {"$set": {
+                "evidence_deletion_claim": {
+                    "file_id": file_id,
+                    "claimed_at": now,
+                },
+                "updated_at": now,
+            }},
+            projection={"_id": 1},
+            return_document=ReturnDocument.AFTER,
+        )
+        return claimed is not None
+
+    async def release_evidence_deletion(self, token: str, file_id: str) -> bool:
+        """Release a deletion marker when no destructive step completed."""
+        return await self.update_one(
+            {"session_token": token,
+             "evidence_deletion_claim.file_id": file_id},
+            {"$unset": {"evidence_deletion_claim": ""},
+             "$set": {"updated_at": datetime.now(timezone.utc)}},
+        )
 
     async def renew_conversion(
         self, token: str, owner: str, ttl: timedelta
@@ -213,15 +274,22 @@ class IntakeRepository(BaseRepository):
 
         `$pull` rather than read-modify-write: two deletes arriving together
         would otherwise each write back the list they read, and the second would
-        restore the entry the first removed.
+        restore the entry the first removed. The extraction/OCR checkpoint is
+        pruned in the SAME update; leaving it behind makes a refresh restore a
+        review for a file the client already deleted.
         """
         return await self.update_one(
             {"session_token": token, "completed": {"$ne": True},
              "conversion_claim_owner": {"$exists": False},
              "conversion_claimed_at": {"$exists": False},
+             "evidence_deletion_claim.file_id": file_id,
              "evidence_files.file_id": file_id},
             {
-                "$pull": {"evidence_files": {"file_id": file_id}},
+                "$pull": {
+                    "evidence_files": {"file_id": file_id},
+                    "evidence_review_state": {"file_id": file_id},
+                },
+                "$unset": {"evidence_deletion_claim": ""},
                 "$set":  {"updated_at": datetime.now(timezone.utc)},
             },
         )

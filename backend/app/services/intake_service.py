@@ -417,8 +417,9 @@ async def convert_to_case(
     # first read and the claim must be included in the conversion snapshot.
     intake = await intake_repo.find_by_token(token) or intake
     heartbeat = asyncio.create_task(_renew_conversion_claim(token, owner))
+    result = None
     try:
-        return await _convert_claimed_intake(
+        result = await _convert_claimed_intake(
             token, client_id, intake, language, urgency, owner,
             conversion_epoch,
         )
@@ -433,6 +434,9 @@ async def convert_to_case(
             await heartbeat
         except asyncio.CancelledError:
             pass
+    if result and result.get("ocr_review_required"):
+        await intake_repo.release_conversion(token, owner)
+    return result
 
 
 async def _convert_claimed_intake(
@@ -450,6 +454,48 @@ async def _convert_claimed_intake(
     step3 = intake.get("step3") or {}
     step4 = intake.get("step4") or {}
     step5 = intake.get("step5") or {}
+
+    # Evidence goes first. OCR review is a prerequisite to every AI call and
+    # to case creation, not a pause after we have already spent a classifier
+    # call and opened a draft. Retrying after confirmation repeats only the
+    # bounded/idempotent extraction; then normal conversion begins.
+    evidence_text, evidence_status = await _extract_intake_evidence(
+        intake.get("evidence_files") or [],
+        owner_id=client_id,
+        session_id=token,
+        # Disabling the engine must stop NEW OCR without abandoning a review
+        # that was already durably created. Otherwise a client could confirm a
+        # page, retry conversion, and have that confirmed text silently ignored
+        # merely because an operator toggled the flag between the two calls.
+        resume_ocr_state=list(intake.get("evidence_review_state") or []),
+    )
+    review_required = any(
+        row.get("ocr_review_required") is True for row in evidence_status
+    )
+    if settings.english_ocr_enabled or intake.get("evidence_review_state"):
+        if not await intake_repo.save_evidence_review_state(
+            token, evidence_status, conversion_owner
+        ):
+            raise ConflictError("Intake conversion ownership was lost")
+    if review_required:
+        return {
+            "session_token": token,
+            "current_step": 5,
+            "completed": False,
+            "case_id": intake.get("case_id"),
+            "ai_case_type": intake.get("ai_case_type"),
+            "user_case_type": (intake.get("step2") or {}).get("case_type"),
+            "type_was_corrected": bool(intake.get("type_was_corrected")),
+            "ocr_review_required": True,
+            "ocr_files": [
+                {
+                    "file_id": row.get("file_id"),
+                    "revision_ids": list(row.get("ocr_revision_ids") or []),
+                }
+                for row in evidence_status
+                if row.get("ocr_review_required") is True
+            ],
+        }
 
     # Classify on the base description ONLY — before Q&A is appended.
     # Appending clarification Q&A first would pollute keyword scores because the
@@ -587,10 +633,6 @@ async def _convert_claimed_intake(
 
     # Use frontend-provided urgency if given; fall back to what the user stored in step 2
     effective_urgency = urgency or step2.get("urgency", "medium")
-
-    evidence_text, evidence_status = await _extract_intake_evidence(
-        intake.get("evidence_files") or [], owner_id=client_id
-    )
 
     # Run AI structured analysis using the AI-verified case type
     ai_data = await _run_intake_ai(
@@ -869,7 +911,18 @@ _EVIDENCE_CHUNK = 1024 * 1024
 _MAX_EVIDENCE_PROMPT_CHARS = 12_000
 
 
-async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> tuple[str, list[dict]]:
+def _local_ocr_supports(content_type: str | None) -> bool:
+    """Whether this deployment will attempt this image with local OCR."""
+    if not settings.english_ocr_enabled:
+        return False
+    from app.ai.ocr import SUPPORTED_IMAGE_TYPES
+    return str(content_type or "").lower() in SUPPORTED_IMAGE_TYPES
+
+
+async def _extract_intake_evidence(
+    files: list[dict], *, owner_id: str = "", session_id: str = "",
+    resume_ocr_state: list[dict] | None = None,
+) -> tuple[str, list[dict]]:
     """Extract bounded text from owned intake files for the analysis prompt.
 
     WHAT CHANGED AND WHY IT MATTERS HERE
@@ -894,7 +947,10 @@ async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> 
     owner scopes deduplication; helper callers without one do not share work.
     """
     from app.ai import extraction_runner
-    from app.ai.extraction import COMPLETE, NONE, OUTCOME_SUCCEEDED
+    from app.ai.extraction import (
+        COMPLETE, NONE, OUTCOME_SUCCEEDED, PAGE_TEXT_FOUND,
+        PAGE_TEXT_SUSPECT,
+    )
 
     statuses: list[dict] = []
     root = _EVIDENCE_DIR.resolve()
@@ -911,18 +967,42 @@ async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> 
             # child process is even asked about it.
             statuses.append({"file_id": file_id, "status": "invalid_path"})
             continue
+        content_type = str(
+            meta.get("detected_content_type") or meta.get("content_type") or ""
+        )
+        support = derive_analysis_support(meta)
+        if _local_ocr_supports(content_type):
+            support = None
         owned.append({
             "file_id": file_id,
             "path": str(resolved),
+            "content_type": content_type,
             # Derived server-side, falling back to the stored content type for
             # records written before the field existed.
-            "analysis_support": derive_analysis_support(meta),
+            "analysis_support": support,
         })
 
     if not owned:
         return "", statuses
 
-    extracted = await extraction_runner.extract_many(owned, owner_id=owner_id)
+    # OCR is requested explicitly. Merely enabling the setting used to change
+    # nothing because the intake caller omitted this argument, leaving the
+    # complete OCR implementation with no production entry point.
+    ocr_requested = bool(settings.english_ocr_enabled and owner_id and session_id)
+    # A persisted review checkpoint remains usable if the execution flag is
+    # turned off. This never starts Tesseract: only `ocr_requested` is passed to
+    # the child. It permits already-stored, current-source confirmations to
+    # finish the intake rather than being stranded by an operational rollback.
+    resume_by_file = {
+        str(row.get("file_id")): row
+        for row in (resume_ocr_state or [])
+        if isinstance(row, dict) and row.get("file_id")
+    }
+    extracted = await extraction_runner.extract_many(
+        owned,
+        owner_id=owner_id,
+        ocr={"enabled": True, "language": "eng"} if ocr_requested else None,
+    )
 
     excerpts: list[str] = []
     remaining = _MAX_EVIDENCE_PROMPT_CHARS
@@ -934,12 +1014,77 @@ async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> 
             statuses.append({"file_id": file_id, "status": "unreadable"})
             continue
 
+        confirmed_ocr_text = ""
+        ocr_all_confirmed = False
+        ocr_page_count = 0
+        confirmed_ocr_pages: set[int] = set()
+        ocr_summary = None
+        resume_record = resume_by_file.get(file_id)
+        ocr_state_available = bool(
+            owner_id and session_id and (ocr_requested or resume_record)
+        )
+        if ocr_state_available:
+            from app.ai import ocr as ocr_engine
+            from app.services import ocr_service
+
+            if ocr_requested:
+                ocr_summary = await ocr_service.run_ocr_for_file(
+                    owner_id=owner_id,
+                    session_id=session_id,
+                    file_id=file_id,
+                    path=item["path"],
+                    content_type=item["content_type"],
+                    extraction_result=result,
+                    ocr_pages=result.ocr_pages,
+                )
+            source_sha = ocr_engine.source_digest(item["path"])
+            if source_sha:
+                pinned_revisions = (
+                    list(ocr_summary.get("review_revisions") or [])
+                    if ocr_summary is not None
+                    else list((resume_record or {}).get("ocr_revision_ids") or [])
+                )
+                (
+                    confirmed_ocr_text,
+                    ocr_all_confirmed,
+                    ocr_page_count,
+                    confirmed_ocr_pages,
+                ) = (
+                    await ocr_service.confirmed_text_for_file(
+                        owner_id=owner_id,
+                        file_id=file_id,
+                        source_sha256=source_sha,
+                        revision_ids=pinned_revisions,
+                    )
+                )
+
+        native_text_pages = {
+            int(page.number)
+            for page in result.page_reports
+            if page.state in (PAGE_TEXT_FOUND, PAGE_TEXT_SUSPECT)
+        }
+        if result.page_reports:
+            effective_pages_with_text = len(
+                native_text_pages | confirmed_ocr_pages
+            )
+        else:
+            effective_pages_with_text = (
+                result.pages_with_text + len(confirmed_ocr_pages)
+            )
+        if result.pages_total is not None:
+            effective_pages_with_text = min(
+                result.pages_total, effective_pages_with_text
+            )
+
         record = {
             "file_id": file_id,
             "completeness": result.completeness,
             "pages_total": result.pages_total,
             "pages_attempted": result.pages_attempted,
-            "pages_with_text": result.pages_with_text,
+            # This describes text actually supplied to analysis: trusted native
+            # text plus hash-verified, human-confirmed OCR. Engine output that
+            # is still awaiting review never increments it.
+            "pages_with_text": effective_pages_with_text,
             # Pages that DID carry a text layer which could not be decoded. A
             # separate count from `pages_failed`: nothing failed, and the page
             # is not blank — the glyphs simply carry no character information.
@@ -949,7 +1094,10 @@ async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> 
             "pages_failed": result.pages_failed,
             "pages_skipped": result.pages_skipped,
             "processing_coverage": result.processing_coverage,
-            "text_yielding_page_ratio": result.text_yielding_page_ratio,
+            "text_yielding_page_ratio": (
+                effective_pages_with_text / result.pages_attempted
+                if result.pages_attempted else None
+            ),
             "extractor_version": result.extractor_version,
             "config_version": result.config_version,
         }
@@ -958,7 +1106,35 @@ async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> 
         if result.error_code:
             record["error_code"] = result.error_code
 
-        stripped = (text or "").strip()
+        if ocr_summary and ocr_summary.get("status") not in (
+            "ocr_disabled", "ocr_not_needed"
+        ):
+            record["ocr_status"] = ocr_summary.get("status")
+            record["ocr_revision_ids"] = list(
+                ocr_summary.get("review_revisions") or []
+            )
+        if ocr_page_count:
+            # On a flag-off resume there is intentionally no new run summary;
+            # the existing rows are the authority. The engine outcome remains
+            # unconfirmed even after review because confirmedness is a separate
+            # human state, not a rewrite of what the engine did.
+            record.setdefault("ocr_status", "ocr_completed_unconfirmed")
+            record.setdefault(
+                "ocr_revision_ids",
+                list((resume_record or {}).get("ocr_revision_ids") or []),
+            )
+            record["ocr_pages"] = ocr_page_count
+            record["ocr_review_required"] = bool(
+                ocr_page_count and not ocr_all_confirmed
+            )
+            record["ocr_confirmed"] = bool(ocr_page_count and ocr_all_confirmed)
+
+        # Only the separately stored human-confirmed value crosses this seam.
+        # The engine's original `result.ocr_pages[*].text` never does.
+        native_text = (text or "").strip()
+        stripped = "\n\n".join(
+            part for part in (native_text, confirmed_ocr_text.strip()) if part
+        )
         if not stripped:
             # A format no extractor can read is NOT a failure, and calling it
             # one tells the client to re-upload something that will fail the
@@ -1000,7 +1176,9 @@ async def _extract_intake_evidence(files: list[dict], *, owner_id: str = "") -> 
             # The warning travels INSIDE the prompt text, beside the excerpt it
             # qualifies. A note kept only in the status list would be a record
             # that the model never saw.
-            header += "\n[WARNING: " + _evidence_gap_sentence(result) + "]"
+            header += "\n[WARNING: " + _evidence_gap_sentence(
+                result, confirmed_ocr_pages=confirmed_ocr_pages
+            ) + "]"
         excerpts.append(header + "\n" + excerpt)
 
         record["status"] = (
@@ -1075,19 +1253,33 @@ _UNREAD_REASONS = {
                       "reached its length limit"),
 }
 
-def _evidence_gap_sentence(result) -> str:
+def _evidence_gap_sentence(
+    result, *, confirmed_ocr_pages: set[int] | None = None
+) -> str:
     """What was not read, in words, for the analysis prompt.
 
     Never calls a page a scan. An image reference tells us there is something we
     cannot read, not what it is.
     """
     bits = []
+    confirmed_pages = set(confirmed_ocr_pages or set())
+    native_pages = {
+        int(page.number)
+        for page in result.page_reports
+        if page.state in ("text_found", "text_suspect")
+    }
+    pages_with_analysis_text = native_pages | confirmed_pages
     untrusted = getattr(result, "pages_text_untrusted", 0) or 0
     if result.pages_total:
         # Untrusted pages are NOT blank pages. Reporting them as "produced no
         # text" points the client at the wrong remedy: re-supplying the same
         # born-digital file will produce the same undecodable glyphs.
-        blank = max(0, result.pages_total - result.pages_with_text - untrusted)
+        read_count = (
+            len(pages_with_analysis_text)
+            if result.page_reports
+            else result.pages_with_text + len(confirmed_pages)
+        )
+        blank = max(0, result.pages_total - read_count - untrusted)
         if blank:
             bits.append(f"{blank} of {result.pages_total} pages produced no text")
         if untrusted:
@@ -1098,8 +1290,16 @@ def _evidence_gap_sentence(result) -> str:
         bits.append(f"{result.pages_skipped} pages were not processed")
     if result.pages_failed:
         bits.append(f"{result.pages_failed} pages could not be read")
-    if any(p.images_present for p in result.page_reports):
+    if any(
+        p.images_present and int(p.number) not in confirmed_pages
+        for p in result.page_reports
+    ):
         bits.append("some pages contain images whose contents cannot be read")
+    elif confirmed_pages and not bits:
+        bits.append(
+            "the reviewed OCR covers the page text, but visual layout and "
+            "non-text details were not interpreted"
+        )
     for note in result.limitations:
         if note.startswith("unsupported_part:"):
             bits.append(f"{note.split(':', 1)[1]} were not read")
@@ -1194,7 +1394,7 @@ async def upload_evidence(token: str, client_id: str, file) -> dict:
     # image stopped saying "stored, not analysed" and started saying "could not
     # be read" — a different and wrongly alarming claim about a file that is
     # perfectly fine.
-    if detected_mime in _STORAGE_ONLY_MIMES:
+    if detected_mime in _STORAGE_ONLY_MIMES and not _local_ocr_supports(detected_mime):
         file_meta["analysis_support"] = "storage_only"
     # THE FILE IS ON DISK BEFORE THE RECORD EXISTS. If the record write fails,
     # the bytes are stored with nothing pointing at them — unreachable by the
@@ -1235,7 +1435,8 @@ async def upload_evidence(token: str, client_id: str, file) -> dict:
     # So it is kept, downloadable, and deliberately storage-only — with the
     # limitation stated at the moment of upload, which is the moment they can
     # cheaply do something about it.
-    notice = _STORAGE_ONLY_NOTICES.get(detected_mime)
+    notice = (_STORAGE_ONLY_NOTICES.get(detected_mime)
+              if not _local_ocr_supports(detected_mime) else None)
     if notice:
         result["analysis_support"] = "storage_only"
         result["notice"] = notice
@@ -1324,6 +1525,81 @@ async def get_evidence_file(token: str, client_id: str, file_id: str) -> tuple[P
     return (resolved, entry.get("filename") or "evidence", served_mime)
 
 
+async def get_evidence_ocr_review(
+    token: str, client_id: str, file_id: str
+) -> list[dict]:
+    """Current-source OCR text for its owner's explicit review."""
+    from app.services import ocr_service
+
+    intake, _ = await _find_evidence(token, client_id, file_id)
+    checkpoint = next(
+        (
+            row for row in (intake.get("evidence_review_state") or [])
+            if row.get("file_id") == file_id
+        ),
+        None,
+    )
+    if checkpoint is None:
+        # Only the conversion checkpoint defines which immutable revisions the
+        # client is being asked to review. Showing arbitrary current rows here
+        # would create a preview that the confirmation endpoint correctly
+        # refuses to accept.
+        raise NotFoundError("OCR review")
+    path, _, _ = await get_evidence_file(token, client_id, file_id)
+    return await ocr_service.review_pages_for_file(
+        owner_id=client_id,
+        file_id=file_id,
+        path=str(path),
+        revision_ids=(list(checkpoint.get("ocr_revision_ids") or [])
+                      if checkpoint is not None else None),
+    )
+
+
+async def confirm_evidence_ocr_page(
+    token: str,
+    client_id: str,
+    file_id: str,
+    revision_id: str,
+    *,
+    source_sha256: str,
+    text_sha256: str,
+    confirmed_text: str,
+) -> dict:
+    """Confirm/correct one OCR page without trusting browser ownership."""
+    from app.services import ocr_service
+
+    intake, _ = await _find_evidence(token, client_id, file_id)
+    if intake.get("completed"):
+        raise ConflictError("This intake analysis is already complete")
+    checkpoint = next(
+        (
+            row for row in (intake.get("evidence_review_state") or [])
+            if isinstance(row, dict) and row.get("file_id") == file_id
+        ),
+        None,
+    )
+    pinned_ids = {
+        str(value) for value in ((checkpoint or {}).get("ocr_revision_ids") or [])
+    }
+    if checkpoint is None or str(revision_id) not in pinned_ids:
+        # A revision owned by this client but belonging to an older run is not
+        # the page this intake is waiting for.  Confirming it would create a
+        # truthful audit row that the conversion can never consume, while the
+        # UI misleadingly reports progress.  The durable checkpoint, not a
+        # browser-supplied id, decides which revisions are confirmable.
+        raise NotFoundError("OCR revision")
+    path, _, _ = await get_evidence_file(token, client_id, file_id)
+    return await ocr_service.confirm_page(
+        owner_id=client_id,
+        file_id=file_id,
+        revision_id=revision_id,
+        path=str(path),
+        source_sha256=source_sha256,
+        ocr_text_sha256=text_sha256,
+        confirmed_text=confirmed_text,
+    )
+
+
 async def delete_evidence_file(token: str, client_id: str, file_id: str) -> dict:
     """Remove an uploaded file — the record AND the bytes.
 
@@ -1331,8 +1607,12 @@ async def delete_evidence_file(token: str, client_id: str, file_id: str) -> dict
     on disk and in the intake for ever: the client believed it was gone, the
     quota still counted it, and the analysis still described it.
 
-    The record goes first. A record with no file reads as a missing file and is
-    recoverable; a file with no record is an invisible orphan.
+    A deletion claim is taken before either store changes. It excludes
+    conversion, so a conversion that won the race leaves both the source and
+    reviewed OCR intact. Derived OCR then goes first so a database failure
+    leaves the visible source intact and retryable. The intake record goes
+    before the source bytes: a record with no file is visible and recoverable;
+    a file with no record is an invisible orphan.
     """
     intake, entry = await _find_evidence(token, client_id, file_id)
     if intake.get("completed"):
@@ -1341,10 +1621,39 @@ async def delete_evidence_file(token: str, client_id: str, file_id: str) -> dict
             "the case record and cannot be removed here."
         )
 
-    if not await intake_repo.remove_evidence_file(token, file_id):
+    if not await intake_repo.claim_evidence_deletion(token, file_id):
         raise ConflictError(
-            "The intake changed before this file could be removed. Reload and try again."
+            "The intake is being converted or another evidence file is being "
+            "removed. Reload and try again."
         )
+
+    # OCR rows contain a second copy of the evidence text. Remove them before
+    # unlinking the source entry so a database failure leaves a retryable,
+    # visible file rather than invisible derived text with no deletion route.
+    from app.repositories.ocr_revision_repo import ocr_revision_repo
+    try:
+        await ocr_revision_repo().delete_for_file(
+            owner_id=client_id, file_id=file_id
+        )
+    except Exception:
+        # No destructive step completed, so make conversion and a later retry
+        # possible again. The exception is intentionally allowed to propagate.
+        await intake_repo.release_evidence_deletion(token, file_id)
+        raise
+
+    if not await intake_repo.remove_evidence_file(token, file_id):
+        current = await intake_repo.find_by_token(token)
+        if current and not any(
+            str(row.get("file_id")) == str(file_id)
+            for row in (current.get("evidence_files") or [])
+        ):
+            # A concurrent retry completed the same idempotent deletion.
+            pass
+        else:
+            await intake_repo.release_evidence_deletion(token, file_id)
+            raise ConflictError(
+                "The intake changed before this file could be removed. Reload and try again."
+            )
 
     stored = Path(entry.get("path") or "")
     try:
@@ -1388,16 +1697,20 @@ def _public_evidence(files: list[dict] | None,
             "content_type": f.get("content_type"),
             "size":         f.get("size"),
         }
+        record = by_id.get(str(f.get("file_id")))
         # Derived server-side and returned on EVERY read, not only in the upload
         # response. Without it a reload turned "stored, not analysed" into
         # "could not be read" — a wrongly alarming claim about a fine file.
         support = derive_analysis_support(f)
+        if _local_ocr_supports(f.get("content_type")) or (
+            record and (record.get("ocr_status") or record.get("ocr_confirmed"))
+        ):
+            support = None
         if support:
             entry["analysis_support"] = support
             entry["notice"] = _STORAGE_ONLY_NOTICES.get(
                 str(f.get("content_type") or ""))
 
-        record = by_id.get(str(f.get("file_id")))
         if record:
             entry.update({
                 "extraction_status": record.get("status"),
@@ -1413,6 +1726,10 @@ def _public_evidence(files: list[dict] | None,
                 "pages_skipped":     record.get("pages_skipped"),
                 "prompt_truncated":  bool(record.get("truncated")),
                 "limitations":       list(record.get("limitations") or []),
+                "ocr_status":        record.get("ocr_status"),
+                "ocr_review_required": bool(record.get("ocr_review_required")),
+                "ocr_confirmed":     bool(record.get("ocr_confirmed")),
+                "ocr_pages":         record.get("ocr_pages"),
             })
         out.append(entry)
     return out
@@ -1505,8 +1822,13 @@ async def get_intake(token: str, client_id: str) -> dict:
         # alongside the files rather than burying them in the AI payload.
         "evidence_files":    _public_evidence(
             intake.get("evidence_files"),
-            (intake.get("ai_structured_case") or {}).get("evidence_extraction"),
+            (intake.get("ai_structured_case") or {}).get("evidence_extraction")
+            or intake.get("evidence_review_state"),
         ),
+        "ocr_review_required": any(
+            row.get("ocr_review_required") is True
+            for row in (intake.get("evidence_review_state") or [])
+        ) and not bool(intake.get("completed")),
     }
 
 

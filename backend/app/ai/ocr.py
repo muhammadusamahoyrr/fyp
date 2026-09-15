@@ -54,7 +54,6 @@ logger = logging.getLogger(__name__)
 # different responses: install the engine, raise the limit, retry, or never
 # retry because the language is unsupported.
 
-OCR_PENDING = "ocr_pending"
 OCR_COMPLETED_UNCONFIRMED = "ocr_completed_unconfirmed"
 OCR_ENGINE_UNAVAILABLE = "ocr_engine_unavailable"
 OCR_TIMEOUT = "ocr_timeout"
@@ -64,8 +63,8 @@ OCR_NOT_SUPPORTED_LANGUAGE = "ocr_not_supported_language"
 #: Every status this module can produce. Tests assert on the whole set so a new
 #: one cannot be added without being considered everywhere it must be handled.
 OCR_STATUSES = frozenset({
-    OCR_PENDING, OCR_COMPLETED_UNCONFIRMED, OCR_ENGINE_UNAVAILABLE,
-    OCR_TIMEOUT, OCR_FAILED, OCR_NOT_SUPPORTED_LANGUAGE,
+    OCR_COMPLETED_UNCONFIRMED, OCR_ENGINE_UNAVAILABLE, OCR_TIMEOUT,
+    OCR_FAILED, OCR_NOT_SUPPORTED_LANGUAGE,
 })
 
 #: Statuses from which a retry could plausibly succeed. `NOT_SUPPORTED_LANGUAGE`
@@ -80,7 +79,7 @@ LANG_ENG = "eng"
 #: arguments, the page-segmentation mode, the preprocessing. It is part of the
 #: idempotency identity, so a config change produces a new revision rather than
 #: silently reusing a result produced under different rules.
-OCR_CONFIG_VERSION = "1"
+OCR_CONFIG_VERSION = "2"
 
 # ── bounds ──────────────────────────────────────────────────────────────────
 
@@ -97,6 +96,12 @@ MAX_IMAGE_BYTES = 30 * 1024 * 1024
 #: Pages per document. Matches the extractor's own page ceiling: OCR is far
 #: more expensive per page, so it may never exceed it.
 MAX_OCR_PAGES = 20
+
+#: Whole PDF pages are rendered before OCR. This handles ordinary scans,
+#: several images composed onto one page, and text drawn as vector outlines.
+#: It is part of OCR_CONFIG_VERSION: changing it changes the pixels and must
+#: therefore create a new immutable reading instead of reusing an old one.
+PDF_RENDER_DPI = 200
 
 #: Wall-clock ceiling for ONE page. The child process is killed at this point
 #: and the page reported as `ocr_timeout`. The parent runner enforces its own
@@ -383,41 +388,57 @@ def ocr_image_bytes(
 # ── getting pixels out of a page ────────────────────────────────────────────
 
 def page_image_bytes(pdf_path: str, page_number: int) -> bytes | None:
-    """The largest image embedded in one PDF page, or None.
+    """Render one complete PDF page to a bounded lossless PNG, or ``None``.
 
-    WHY EMBEDDED IMAGES RATHER THAN RENDERING THE PAGE
+    Extracting only the largest embedded image lost real evidence: a page may
+    contain several scans, or draw every character as vector outlines and have
+    no embedded image at all. Rendering is the only representation that matches
+    what the client sees. It runs inside the already-fenced extraction child, so
+    a malformed document or native renderer failure cannot take down the API
+    worker and is covered by the parent's process-tree timeout.
 
-    A scanned PDF is a container: each page holds one photograph of a sheet of
-    paper. Pulling that image out is exactly what we want to read, and it needs
-    nothing but pypdf -- which is already a dependency.
-
-    Rendering instead would mean PyMuPDF or poppler: a new native dependency on
-    every deployment target, for a picture we already have. The cost is that a
-    page drawing its text as vectors yields nothing here -- but such a page has
-    a text layer, so it never reaches OCR in the first place.
-
-    The LARGEST image is chosen because a scan often carries a small logo or a
-    stamp beside the page itself.
+    Dimensions are checked before allocating the bitmap. The renderer and DPI
+    are direct, pinned dependencies/configuration and OCR_CONFIG_VERSION changes
+    whenever either changes, so idempotency never aliases different pixels.
     """
     try:
-        from pypdf import PdfReader
+        import io
+
+        import pypdfium2 as pdfium
     except Exception:                                     # noqa: BLE001
         return None
+
+    pdf = page = bitmap = image = None
     try:
-        reader = PdfReader(pdf_path)
-        if page_number < 1 or page_number > len(reader.pages):
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        if page_number < 1 or page_number > len(pdf):
             return None
-        images = list(reader.pages[page_number - 1].images)
+        page = pdf[page_number - 1]
+        scale = PDF_RENDER_DPI / 72.0
+        width, height = page.get_size()
+        rendered_width = max(1, int(width * scale + 0.5))
+        rendered_height = max(1, int(height * scale + 0.5))
+        if rendered_width * rendered_height > MAX_IMAGE_PIXELS:
+            return None
+
+        bitmap = page.render(scale=scale)
+        image = bitmap.to_pil()
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        data = output.getvalue()
+        return data if data and len(data) <= MAX_IMAGE_BYTES else None
     except Exception:                                     # noqa: BLE001
-        # Malformed page, encrypted file, unsupported filter. Not a crash.
+        # Malformed/encrypted PDF or renderer failure. The caller records a
+        # fixed OCR failure status; paths and native exception text stay out of
+        # logs and responses.
         return None
-    if not images:
-        return None
-    try:
-        best = max(images, key=lambda im: len(im.data or b""))
-        return best.data or None
-    except Exception:                                     # noqa: BLE001
-        return None
+    finally:
+        for resource in (image, bitmap, page, pdf):
+            if resource is not None:
+                try:
+                    resource.close()
+                except Exception:                         # noqa: BLE001
+                    pass
 
 
 def read_source_bytes(path: str, *, limit: int = MAX_IMAGE_BYTES) -> bytes | None:

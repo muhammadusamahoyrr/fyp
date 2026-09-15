@@ -320,6 +320,23 @@ export async function uploadIntakeEvidence(sessionToken, file) {
   return apiFetchMultipart(`/intake/${sessionToken}/evidence`, formData);
 }
 
+export async function getIntakeOcrReview(sessionToken, fileId) {
+  return apiFetch(`/intake/${sessionToken}/evidence/${fileId}/ocr`);
+}
+
+export async function confirmIntakeOcrPage(
+  sessionToken, fileId, revisionId,
+  { source_sha256, text_sha256, confirmed_text },
+) {
+  return apiFetch(
+    `/intake/${sessionToken}/evidence/${fileId}/ocr/${revisionId}/confirm`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ source_sha256, text_sha256, confirmed_text }),
+    },
+  );
+}
+
 // answer = null on first call (get Q1); answer = string on second call (get Q2 or done)
 export async function intakeClarify(sessionToken, answer = null) {
   return apiFetch(`/intake/${sessionToken}/clarify`, {

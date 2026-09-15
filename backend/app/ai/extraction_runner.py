@@ -291,19 +291,30 @@ async def _run_batch(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + batch_timeout
     out = {}
-    for item, fid in zip(files, wanted):
+    for index, (item, fid) in enumerate(zip(files, wanted)):
         if loop.time() >= deadline:
             out[fid] = (_failure(ERR_TIMEOUT), "")
             continue
+        used_batch_remainder = False
         try:
             # Queue wait is part of the batch ceiling. Per-file timing begins
             # after acquiring capacity and includes subprocess startup.
             async with asyncio.timeout_at(deadline):
                 async with _get_semaphore():
-                    timeout = min(PER_FILE_TIMEOUT_SECONDS, deadline - loop.time())
+                    remaining = deadline - loop.time()
+                    used_batch_remainder = remaining <= PER_FILE_TIMEOUT_SECONDS
+                    timeout = min(PER_FILE_TIMEOUT_SECONDS, remaining)
                     out[fid] = await _run_file(item, timeout, ocr=ocr)
         except TimeoutError:
             out[fid] = (_failure(ERR_TIMEOUT), "")
+        if used_batch_remainder and out[fid][0].error_code == ERR_TIMEOUT:
+            # `_run_file` turns its own timeout into a result. When its timeout
+            # was the entire remainder of the BATCH budget, that result is the
+            # boundary: do not depend on sub-millisecond clock/scheduler
+            # rounding to decide whether another child may be spawned.
+            for later_fid in wanted[index + 1:]:
+                out[later_fid] = (_failure(ERR_TIMEOUT), "")
+            break
     return out
 
 

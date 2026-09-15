@@ -106,6 +106,40 @@ async def test_the_feature_is_off_and_does_nothing(tmp_path, repo):
     assert repo.collection.docs == [], "a row was written with the flag off"
 
 
+def test_production_cannot_enable_unmeasured_ocr():
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="ENGLISH_OCR_BENCHMARK_ID"):
+        Settings(
+            _env_file=None,
+            secret_key="s" * 64,
+            encryption_key="unused-by-this-test",
+            app_env="production",
+            frontend_url="https://attorney.example",
+            english_ocr_enabled=True,
+            english_ocr_benchmark_id="",
+        )
+
+
+def test_production_activation_names_its_reviewed_benchmark():
+    from app.core.config import Settings
+
+    configured = Settings(
+        _env_file=None,
+        secret_key="s" * 64,
+        encryption_key="unused-by-this-test",
+        app_env="production",
+        frontend_url="https://attorney.example",
+        english_ocr_enabled=True,
+        english_ocr_benchmark_id="english-intake-scans-2026-09-v1",
+    )
+
+    assert configured.english_ocr_enabled is True
+    assert configured.english_ocr_benchmark_id == "english-intake-scans-2026-09-v1"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Routing: OCR runs only where there is nothing else
 # ══════════════════════════════════════════════════════════════════════════════
@@ -158,6 +192,60 @@ def test_a_mixed_pdf_routes_only_the_unread_pages(tmp_path):
 
     assert result.pages_with_text == 2, "the native pages were not read"
     assert plan.pages == [2, 4], "OCR was planned for the wrong pages"
+
+
+def test_a_whole_pdf_page_is_rendered_when_it_has_no_embedded_image(tmp_path):
+    """Vector-only pages used to route to OCR and then supply zero pixels.
+
+    Draw block-letter shapes with PDF path operators: no text layer and no
+    raster image exists, but it is still visible evidence and must produce the
+    complete rendered page that the client sees.
+    """
+    import io
+
+    from PIL import Image
+    from pypdf import PdfReader
+    from reportlab.pdfgen import canvas
+
+    path = tmp_path / "vector-only.pdf"
+    pdf = canvas.Canvas(str(path), pagesize=(300, 300))
+    # "HI" made entirely from vector rectangles, not a font or image.
+    pdf.rect(45, 70, 16, 160, fill=1, stroke=0)
+    pdf.rect(105, 70, 16, 160, fill=1, stroke=0)
+    pdf.rect(45, 142, 76, 16, fill=1, stroke=0)
+    pdf.rect(175, 70, 16, 160, fill=1, stroke=0)
+    pdf.save()
+
+    reader = PdfReader(str(path))
+    assert list(reader.pages[0].images) == []
+    extracted = E.extract_file(str(path))
+    assert extracted.pages_with_text == 0
+    assert R.plan_for_result(extracted).pages == [1]
+
+    rendered = O.page_image_bytes(str(path), 1)
+    assert rendered is not None
+    with Image.open(io.BytesIO(rendered)) as image:
+        assert image.format == "PNG"
+        assert image.width * image.height <= O.MAX_IMAGE_PIXELS
+        # 300 PDF points at 200 dpi. PDFium rounds the boundary up on this
+        # platform; tolerate the one-pixel implementation difference.
+        expected = 300 * O.PDF_RENDER_DPI / 72
+        assert abs(image.width - expected) <= 1
+        assert abs(image.height - expected) <= 1
+
+
+def test_pdf_rendering_configuration_is_versioned():
+    assert O.PDF_RENDER_DPI == 200
+    assert O.OCR_CONFIG_VERSION == "2"
+
+
+def test_ocr_pixel_dependencies_are_direct_and_pinned():
+    requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(
+        encoding="utf-8"
+    ).splitlines()
+
+    assert "Pillow==10.4.0" in requirements
+    assert "pypdfium2==5.8.0" in requirements
 
 
 def test_the_page_ceiling_bounds_how_much_is_ocred():
@@ -626,12 +714,12 @@ async def test_failure_logs_carry_a_type_not_an_exception_message(
 
 def test_every_required_status_exists_and_is_distinct():
     required = {
-        "ocr_pending", "ocr_completed_unconfirmed", "ocr_engine_unavailable",
-        "ocr_timeout", "ocr_failed", "ocr_not_supported_language",
+        "ocr_completed_unconfirmed", "ocr_engine_unavailable", "ocr_timeout",
+        "ocr_failed", "ocr_not_supported_language",
     }
 
     assert O.OCR_STATUSES == required
-    assert len(O.OCR_STATUSES) == 6
+    assert len(O.OCR_STATUSES) == 5
 
 
 def test_a_completed_result_is_never_described_as_trusted():

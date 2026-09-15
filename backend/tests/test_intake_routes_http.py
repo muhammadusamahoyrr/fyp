@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 async def seeded(mongo):
     """A client and an intake part-way through. Returns ids only."""
-    from app.db.collections import get_intakes_col, get_users_col
+    from app.db.collections import get_intakes_col, get_ocr_revisions_col, get_users_col
 
     tag = secrets.token_hex(4)
     client_id = f"HT-C-{tag}"
@@ -63,6 +63,7 @@ async def seeded(mongo):
     from app.db.collections import get_cases_col
     await get_users_col().delete_many({"_id": client_id})
     await get_intakes_col().delete_many({"session_token": token})
+    await get_ocr_revisions_col().delete_many({"owner_id": client_id})
     await get_cases_col().delete_many({"client_id": client_id})
 
 
@@ -323,6 +324,91 @@ async def test_a_stranger_cannot_download_or_delete_evidence(seeded, mongo):
             f"/intake/{seeded['token']}/evidence/{file_id}")).status_code == 404
         assert (await http.delete(
             f"/intake/{seeded['token']}/evidence/{file_id}")).status_code == 404
+
+
+async def test_ocr_review_and_confirmation_are_owner_scoped_over_http(seeded, mongo):
+    from pathlib import Path
+    from app.ai.ocr import OCR_COMPLETED_UNCONFIRMED, sha256_of, source_digest
+    from app.db.collections import get_intakes_col, get_ocr_revisions_col
+
+    pdf = b"%PDF-1.4\n" + b"0" * 100
+    async with _as(seeded["client_id"]) as http:
+        up = await http.post(
+            f"/intake/{seeded['token']}/evidence",
+            files={"file": ("scan.pdf", pdf, "application/pdf")})
+    file_id = up.json()["file_id"]
+    intake = await get_intakes_col().find_one({"session_token": seeded["token"]})
+    entry = next(f for f in intake["evidence_files"] if f["file_id"] == file_id)
+    path = Path(entry["path"])
+    original = "The flne is 1000 rupees"
+    await get_ocr_revisions_col().insert_one({
+        "_id": f"HT-OCR-{seeded['tag']}",
+        "owner_id": seeded["client_id"], "session_id": seeded["token"],
+        "file_id": file_id, "page_number": 1,
+        "source_sha256": source_digest(str(path)),
+        "text": original, "text_sha256": sha256_of(original),
+        "status": OCR_COMPLETED_UNCONFIRMED,
+        "review_state": "pending_confirmation", "confirmed": False,
+        "engine": "tesseract", "engine_version": "5.4.0",
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    })
+    await get_intakes_col().update_one(
+        {"session_token": seeded["token"]},
+        {"$set": {"evidence_review_state": [{
+            "file_id": file_id,
+            "ocr_revision_ids": [f"HT-OCR-{seeded['tag']}"],
+            "ocr_review_required": True,
+        }] }},
+    )
+
+    async with _as("HT-STRANGER") as stranger:
+        refused = await stranger.get(
+            f"/intake/{seeded['token']}/evidence/{file_id}/ocr")
+        refused_write = await stranger.post(
+            f"/intake/{seeded['token']}/evidence/{file_id}/ocr/"
+            f"HT-OCR-{seeded['tag']}/confirm",
+            json={
+                "source_sha256": source_digest(str(path)),
+                "text_sha256": sha256_of(original),
+                "confirmed_text": "A stranger's replacement",
+            },
+        )
+    assert refused.status_code == 404
+    assert refused_write.status_code == 404
+    untouched = await get_ocr_revisions_col().find_one({
+        "_id": f"HT-OCR-{seeded['tag']}"
+    })
+    assert untouched["confirmed"] is False
+
+    async with _as(seeded["client_id"]) as http:
+        review = await http.get(
+            f"/intake/{seeded['token']}/evidence/{file_id}/ocr")
+        assert review.status_code == 200
+        page = review.json()[0]
+        assert page["text"] == original
+        assert not ({"owner_id", "session_id", "path"} & set(page))
+        malformed = await http.post(
+            f"/intake/{seeded['token']}/evidence/{file_id}/ocr/"
+            f"{page['revision_id']}/confirm",
+            json={
+                "source_sha256": "not-a-digest",
+                "text_sha256": page["text_sha256"],
+                "confirmed_text": "The fine is 10,000 rupees",
+            },
+        )
+        assert malformed.status_code == 422
+        confirmed = await http.post(
+            f"/intake/{seeded['token']}/evidence/{file_id}/ocr/"
+            f"{page['revision_id']}/confirm",
+            json={
+                "source_sha256": page["source_sha256"],
+                "text_sha256": page["text_sha256"],
+                "confirmed_text": "The fine is 10,000 rupees",
+            },
+        )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["confirmed"] is True
 
 
 async def test_an_oversized_upload_is_refused_over_http(seeded, mongo):

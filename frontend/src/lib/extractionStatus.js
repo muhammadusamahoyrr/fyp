@@ -134,6 +134,13 @@ export function extractionLabel(ef) {
             detail: "",
         };
     }
+    if (ef?.ocr_review_required) {
+        return {
+            state: STATE_PENDING, tone: TONE_WARN,
+            title: "Extracted text needs your review",
+            detail: "it will not be used in the analysis until you confirm it",
+        };
+    }
     // Known at upload, before any extraction: the format can never be read.
     if (ef?.analysis_support === "storage_only") {
         return {

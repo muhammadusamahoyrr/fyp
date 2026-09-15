@@ -250,6 +250,133 @@ test("the token is cleared only once the case is confirmed", async () => {
     await unmount();
 });
 
+test("OCR text must be reviewed and confirmed before analysis can continue", async () => {
+    reset();
+    seedToken();
+    const paused = convertedIntake({
+        completed: false,
+        case_id: null,
+        case_status: null,
+        ai_structured_case: null,
+        ocr_review_required: true,
+        evidence_files: [{
+            file_id: "file-ocr",
+            filename: "notice-scan.pdf",
+            content_type: "application/pdf",
+            ocr_review_required: true,
+        }],
+    });
+    api.__respond("intakeGet", { data: paused });
+    api.__respond("getIntakeOcrReview", { data: [{
+        revision_id: "rev-1",
+        file_id: "file-ocr",
+        page_number: 1,
+        source_sha256: "a".repeat(64),
+        text_sha256: "b".repeat(64),
+        text: "The flne is 1000 rupees",
+        confirmed: false,
+        review_state: "pending_confirmation",
+    }] });
+    api.__respond("confirmIntakeOcrPage", { data: {
+        revision_id: "rev-1", confirmed: true,
+    } });
+    api.__respond("intakeConvert", { data: {
+        case_id: CASE_ID, completed: true, ai_case_type: "civil",
+    } });
+
+    const mounted = await mountIntake();
+    assert.match(mounted.container.textContent, /Review Extracted Text/);
+    const editor = mounted.container.querySelector(
+        'textarea[aria-label="Extracted text page 1"]');
+    assert.ok(editor, "the OCR page text is not visible for review");
+    assert.equal(editor.value, "The flne is 1000 rupees");
+
+    const continueButton = findButton(mounted.container, "Continue analysis");
+    assert.equal(continueButton.disabled, true,
+        "analysis can continue before the OCR page is confirmed");
+    await click(findButton(mounted.container, "Confirm this page"));
+    assert.equal(api.__calls("confirmIntakeOcrPage").length, 1);
+    assert.equal(continueButton.disabled, false);
+
+    await click(continueButton);
+    assert.equal(api.__calls("intakeConvert").length, 1,
+        "confirmation did not resume the paused conversion");
+    await mounted.unmount();
+});
+
+test("a failed OCR-review load has a visible retry and does not strand the intake", async () => {
+    reset();
+    seedToken();
+    api.__respond("intakeGet", { data: convertedIntake({
+        completed: false,
+        case_id: null,
+        case_status: null,
+        ai_structured_case: null,
+        ocr_review_required: true,
+        evidence_files: [{
+            file_id: "file-ocr", filename: "notice-scan.pdf",
+            content_type: "application/pdf", ocr_review_required: true,
+        }],
+    }) });
+    let attempts = 0;
+    api.__respond("getIntakeOcrReview", () => {
+        attempts += 1;
+        if (attempts === 1) return { error: { message: "temporarily offline" } };
+        return { data: [{
+            revision_id: "rev-retry", file_id: "file-ocr", page_number: 1,
+            source_sha256: "a".repeat(64), text_sha256: "b".repeat(64),
+            text: "Recovered extracted text", confirmed: false,
+        }] };
+    });
+
+    const mounted = await mountIntake();
+    const retry = findButton(mounted.container, "Try loading again");
+    assert.ok(retry, "a transient review failure left no recovery control");
+    assert.equal(findButton(mounted.container, "Continue analysis").disabled, true);
+
+    await click(retry);
+    assert.equal(api.__calls("getIntakeOcrReview").length, 2);
+    assert.ok(mounted.container.querySelector(
+        'textarea[aria-label="Extracted text page 1"]'));
+    await mounted.unmount();
+});
+
+test("one loaded OCR file cannot hide a missing second file", async () => {
+    reset();
+    seedToken();
+    api.__respond("intakeGet", { data: convertedIntake({
+        completed: false,
+        case_id: null,
+        case_status: null,
+        ai_structured_case: null,
+        ocr_review_required: true,
+        evidence_files: ["file-a", "file-b"].map(file_id => ({
+            file_id, filename: `${file_id}.pdf`,
+            content_type: "application/pdf", ocr_review_required: true,
+        })),
+    }) });
+    api.__respond("getIntakeOcrReview", (_token, fileId) => ({
+        data: fileId === "file-a" ? [{
+            revision_id: "rev-a", file_id: "file-a", page_number: 1,
+            source_sha256: "a".repeat(64), text_sha256: "b".repeat(64),
+            text: "Only the first file loaded", confirmed: true,
+        }] : [],
+    }));
+
+    const mounted = await mountIntake();
+    assert.match(
+        mounted.container.textContent,
+        /one or more extracted files has no current review pages/i,
+    );
+    assert.equal(findButton(mounted.container, "Continue analysis").disabled, true);
+    assert.equal(
+        mounted.container.querySelectorAll('[aria-label^="Extracted text page"]').length,
+        0,
+        "a partial response was rendered as if the review set were complete",
+    );
+    await mounted.unmount();
+});
+
 // ── #2: the category must be saved before matching is triggered ────────────
 
 test("confirmation calls the server exactly once per press", async () => {

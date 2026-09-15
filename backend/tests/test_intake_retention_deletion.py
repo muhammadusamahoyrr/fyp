@@ -47,6 +47,7 @@ from app.db.collections import (
     get_cases_col,
     get_deletion_tombstones_col,
     get_intakes_col,
+    get_ocr_revisions_col,
 )
 from app.services import intake_deletion, legal_holds, retention
 
@@ -80,6 +81,7 @@ async def world(app_indexes):
     await get_intakes_col().delete_many({"_id": {"$regex": f"^{tag}"}})
     await get_cases_col().delete_many({"_id": {"$regex": f"^{tag}"}})
     await get_deletion_tombstones_col().delete_many({"_id": {"$regex": f"^{tag}"}})
+    await get_ocr_revisions_col().delete_many({"owner_id": f"{tag}-client"})
     await legal_holds.get_legal_holds_col().delete_many(
         {"target_id": {"$regex": f"^{tag}"}})
 
@@ -491,7 +493,24 @@ async def test_running_the_whole_sweep_twice_changes_nothing(world):
     assert second["deleted"] == 0
     assert not await _exists(intake["_id"])
     ts = await get_deletion_tombstones_col().find_one({"_id": intake["_id"]})
-    assert ts["steps_done"] and set(ts["steps_done"]) == {"evidence", "row"}
+    assert ts["steps_done"] and set(ts["steps_done"]) == {"evidence", "ocr", "row"}
+
+
+async def test_retention_deletes_the_ocr_copy_with_the_source_evidence(world):
+    intake = await _intake(world, "ocr", idle_days=USER_DATA_DAYS + 1)
+    await get_ocr_revisions_col().insert_one({
+        "_id": f"{world}-ocr-row",
+        "owner_id": f"{world}-client",
+        "session_id": intake["session_token"],
+        "file_id": "f0",
+        "text": "sensitive OCR output",
+    })
+
+    await intake_deletion.delete_intake(intake, reason="retention:test")
+
+    assert await get_ocr_revisions_col().find_one({
+        "_id": f"{world}-ocr-row"
+    }) is None
 
 
 async def test_the_session_token_is_dropped_from_the_finished_tombstone(world):

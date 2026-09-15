@@ -73,3 +73,7 @@ arabic-reshaper==3.0.0
 python-bidi==0.6.6
 beautifulsoup4
 pypdf==6.14.2
+# Local English OCR: Pillow validates/renders image inputs and PDFium renders
+# the complete page that the user sees (including vector-only content).
+Pillow==10.4.0
+pypdfium2==5.8.0

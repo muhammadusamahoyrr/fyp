@@ -1,4 +1,4 @@
-"""Immutable OCR revisions.
+"""OCR revisions with an immutable extraction payload.
 
 WHY IMMUTABLE
 
@@ -6,9 +6,10 @@ An OCR result is a claim about what a document says, made by a specific engine
 version under a specific configuration at a specific time. If a later run could
 overwrite it, there would be no way to answer "what did we show the client, and
 what produced it" -- which is the only question that matters when a fine or a
-date turns out to have been misread. So rows are inserted and never updated.
-Superseding happens by inserting a NEW revision and marking the old one
-superseded by source hash, not by editing anything.
+date turns out to have been misread. The engine output is therefore inserted
+once and never overwritten. Human review may atomically add a separate
+``confirmed_text`` value and its audit fields; it never edits ``text`` or
+``text_sha256``. Superseding still means inserting a NEW revision.
 
 IDEMPOTENCY IS BY CONTENT, NOT BY REQUEST
 
@@ -37,7 +38,7 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timezone
 
-from pymongo import ASCENDING, DESCENDING
+from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from app.db.collections import get_ocr_revisions_col
@@ -47,12 +48,13 @@ from app.repositories.base import BaseRepository
 #: without guessing from which fields happen to be present.
 OCR_REVISION_SCHEMA = "ocr_revision/1"
 
-#: The review state every row is born in, and the only one this milestone can
-#: write. It is SEPARATE from the OCR outcome status: `ocr_completed_unconfirmed`
+#: The review state every row is born in. It is SEPARATE from the OCR outcome
+#: status: `ocr_completed_unconfirmed`
 #: says the engine finished, `pending_confirmation` says no human has agreed the
-#: characters are what the document says. A later milestone adds the confirmed
-#: state; nothing here may set it.
+#: characters are what the document says. Confirmation changes only review
+#: fields and stores corrected text separately from the engine payload.
 PENDING_CONFIRMATION = "pending_confirmation"
+CONFIRMED = "confirmed"
 
 
 def _now() -> datetime:
@@ -132,14 +134,13 @@ class OcrRevisionRepository(BaseRepository):
             "language": str(language),
             "config_version": str(config_version),
             "status": str(status),
-            # Born pending. There is no code path in 3A that writes anything
-            # else, which is what keeps unconfirmed text out of analysis.
+            # Born pending. Confirmation changes this review state only through
+            # the hash-bound CAS below; raw engine text itself stays immutable.
             "review_state": PENDING_CONFIRMATION,
             "error_code": error_code,
             "duration_ms": int(duration_ms),
             "limitations": list(limitations or []),
-            # Confirmation is a SEPARATE, later, server-side act. Nothing in
-            # this milestone may set these.
+            # Confirmation is a separate, later, owner-scoped server-side act.
             "confirmed": False,
             "confirmed_at": None,
             "confirmed_by": None,
@@ -180,6 +181,73 @@ class OcrRevisionRepository(BaseRepository):
             "source_sha256": str(source_sha256),
         })
 
+    async def find_revision(self, *, owner_id: str, revision_id: str,
+                            file_id: str | None = None) -> dict | None:
+        query = {"_id": str(revision_id), "owner_id": str(owner_id)}
+        if file_id is not None:
+            query["file_id"] = str(file_id)
+        return await self.find_one(query)
+
+    async def confirm_once(
+        self,
+        *,
+        owner_id: str,
+        file_id: str,
+        revision_id: str,
+        source_sha256: str,
+        ocr_text_sha256: str,
+        confirmed_text: str,
+        confirmed_text_sha256: str,
+        confirmed_by: str,
+    ) -> tuple[dict | None, str]:
+        """Confirm exactly the source bytes and OCR text the client reviewed.
+
+        The original engine output is never overwritten. Both hashes are in
+        the CAS filter, so a stale browser cannot approve a replaced file or a
+        different OCR reading. An identical retry is idempotent.
+        """
+        now = _now()
+        row = await self.col.find_one_and_update(
+            {
+                "_id": str(revision_id),
+                "owner_id": str(owner_id),
+                "file_id": str(file_id),
+                "source_sha256": str(source_sha256),
+                "text_sha256": str(ocr_text_sha256),
+                "status": "ocr_completed_unconfirmed",
+                "review_state": PENDING_CONFIRMATION,
+                "confirmed": False,
+            },
+            {"$set": {
+                "review_state": CONFIRMED,
+                "confirmed": True,
+                "confirmed_text": confirmed_text,
+                "confirmed_text_sha256": str(confirmed_text_sha256),
+                "confirmed_at": now,
+                "confirmed_by": str(confirmed_by),
+                "updated_at": now,
+            }},
+            return_document=ReturnDocument.AFTER,
+        )
+        if row is not None:
+            return row, "confirmed"
+
+        existing = await self.find_revision(
+            owner_id=owner_id, revision_id=revision_id, file_id=file_id)
+        if existing is None:
+            return None, "missing"
+        if (
+            existing.get("confirmed") is True
+            and existing.get("review_state") == CONFIRMED
+            and existing.get("source_sha256") == str(source_sha256)
+            and existing.get("text_sha256") == str(ocr_text_sha256)
+            and existing.get("confirmed_text") == confirmed_text
+            and existing.get("confirmed_text_sha256") == str(confirmed_text_sha256)
+            and existing.get("confirmed_by") == str(confirmed_by)
+        ):
+            return existing, "replayed"
+        return existing, "conflict"
+
     async def stale_for_file(self, *, owner_id: str, file_id: str,
                              current_sha256: str) -> list[dict]:
         """Revisions that read bytes this file no longer has.
@@ -191,6 +259,13 @@ class OcrRevisionRepository(BaseRepository):
             "owner_id": str(owner_id), "file_id": str(file_id),
             "source_sha256": {"$ne": str(current_sha256)},
         }, sort=[("created_at", DESCENDING)])
+
+    async def delete_for_file(self, *, owner_id: str, file_id: str) -> int:
+        """Erase OCR text when its unconverted source evidence is deleted."""
+        result = await self.col.delete_many({
+            "owner_id": str(owner_id), "file_id": str(file_id),
+        })
+        return int(result.deleted_count)
 
 
 _repo: OcrRevisionRepository | None = None

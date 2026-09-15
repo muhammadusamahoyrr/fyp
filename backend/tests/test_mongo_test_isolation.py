@@ -15,9 +15,16 @@ nobody exercises is a safety check that quietly stops working.
 """
 from __future__ import annotations
 
-import pytest
+import secrets
 
-from tests.conftest import TEST_DB_SUFFIX, _looks_like_the_configured_uri
+import pytest
+from pymongo.errors import DuplicateKeyError
+
+from tests.conftest import (
+    TEST_DB_SUFFIX,
+    _looks_like_the_configured_uri,
+    ensure_ocr_indexes,
+)
 
 
 # ── the host comparison ──────────────────────────────────────────────────────
@@ -89,6 +96,8 @@ def test_the_fixture_offers_no_configured_fallback():
     assert "original_url," not in body, (
         "the configured URI is back in the candidate list")
     assert "_looks_like_the_configured_uri" in body
+    assert "await ensure_ocr_indexes(db)" in body, (
+        "integration tests no longer install the OCR correctness index")
 
 
 @pytest.mark.integration
@@ -107,3 +116,39 @@ async def test_the_correctness_indexes_are_present_for_every_integration_test(mo
     assert "uniq_revision_document_idempotency" in info
     assert info["uniq_revision_document_idempotency"].get("unique") is True
     assert "uniq_revision_document_version" in info
+
+
+@pytest.mark.integration
+async def test_the_real_ocr_idempotency_index_is_present_and_enforced(mongo):
+    """Prove the constraint against Mongo, not only a recording fake."""
+    col = mongo["ocr_revisions"]
+    # Do not inherit a green result from an earlier application startup. Remove
+    # the exact test-only index and prove the fixture helper reconstructs it
+    # from the production repository declaration.
+    info = await col.index_information()
+    if "uniq_ocr_revision_identity" in info:
+        await col.drop_index("uniq_ocr_revision_identity")
+    await ensure_ocr_indexes(mongo)
+
+    info = await col.index_information()
+    index = info.get("uniq_ocr_revision_identity")
+    assert index is not None
+    assert index.get("key") == [("owner_id", 1), ("idempotency_key", 1)]
+    assert index.get("unique") is True
+
+    marker = secrets.token_urlsafe(18)
+    await col.delete_many({"owner_id": marker})
+    try:
+        await col.insert_one({
+            "_id": f"{marker}-one",
+            "owner_id": marker,
+            "idempotency_key": "same-reading",
+        })
+        with pytest.raises(DuplicateKeyError):
+            await col.insert_one({
+                "_id": f"{marker}-two",
+                "owner_id": marker,
+                "idempotency_key": "same-reading",
+            })
+    finally:
+        await col.delete_many({"owner_id": marker})

@@ -12,18 +12,17 @@ exactly what produced it. The text stops at the database.
 
 THE FLAG IS CHECKED HERE, ONCE
 
-`english_ocr_enabled` is off, and this milestone does not turn it on. With it
-off nothing spawns an engine and no row is written; extraction behaves exactly
-as it did before. One check, at the entry point, so there is no second path
-that could be reached with the flag off.
+`english_ocr_enabled` controls NEW engine work and is off by default. With it
+off nothing spawns an engine and no row is written. A review that was already
+created while the flag was on remains readable and confirmable: operationally
+disabling Tesseract must not strand an intake between extraction and review.
 
 NOTHING HERE MAKES TEXT READABLE
 
-The status written is `ocr_completed_unconfirmed`, never `readable`. Evidence
-coverage is not touched. The intake prompt is not touched. A separate,
-server-side confirmation step is what may later promote this text, and it does
-not exist yet -- deliberately, because building the promotion path at the same
-time as the reading path is how unconfirmed text ends up in an analysis.
+The status written is `ocr_completed_unconfirmed`, never `readable`. A separate,
+server-side confirmation stores corrected text without overwriting the engine
+output. Intake prompt assembly reads only that confirmed value; the raw OCR
+field never crosses that boundary.
 
 LOGGING
 
@@ -32,11 +31,13 @@ never filenames, never paths.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from app.ai import ocr as O
 from app.ai import ocr_routing
 from app.core.config import settings
+from app.core.exceptions import ConflictError, NotFoundError
 from app.repositories.ocr_revision_repo import ocr_revision_repo
 
 logger = logging.getLogger(__name__)
@@ -49,8 +50,18 @@ OCR_NOT_NEEDED = "ocr_not_needed"
 
 
 def _summary(status: str, **kw) -> dict:
-    out = {"status": status, "pages": [], "revisions": [], "created": 0,
-           "reused": 0, "engine": None, "engine_version": None}
+    out = {
+        "status": status,
+        "pages": [],
+        # All immutable rows are audit revisions. Only completed readings are
+        # reviewable; a timeout/failure row can never be human-confirmed.
+        "revisions": [],
+        "review_revisions": [],
+        "created": 0,
+        "reused": 0,
+        "engine": None,
+        "engine_version": None,
+    }
     out.update(kw)
     return out
 
@@ -122,6 +133,7 @@ async def run_ocr_for_file(
     repo = ocr_revision_repo()
     created = reused = 0
     rows = []
+    review_rows = []
     for page in results:
         row, was_created = await repo.create_if_absent(
             owner_id=owner_id,
@@ -141,6 +153,8 @@ async def run_ocr_for_file(
             limitations=page.limitations,
         )
         rows.append(row["_id"])
+        if page.status == O.OCR_COMPLETED_UNCONFIRMED:
+            review_rows.append(row["_id"])
         created += int(was_created)
         reused += int(not was_created)
 
@@ -161,8 +175,16 @@ async def run_ocr_for_file(
 
     return _summary(
         overall,
-        pages=[p.as_dict() for p in results],
+        # The summary is safe to propagate or log. Text lives only in the
+        # owner-scoped revision store and the explicit review response.
+        pages=[{
+            "page_number": p.page_number,
+            "status": p.status,
+            "error_code": p.error_code,
+            "duration_ms": p.duration_ms,
+        } for p in results],
         revisions=rows,
+        review_revisions=review_rows,
         created=created,
         reused=reused,
         engine=(engine.name if engine else None),
@@ -186,3 +208,176 @@ async def unconfirmed_text_for_file(*, owner_id: str, file_id: str,
     rows = await ocr_revision_repo().find_for_file(
         owner_id=owner_id, file_id=file_id, source_sha256=source_sha256)
     return [r for r in rows if r.get("status") == O.OCR_COMPLETED_UNCONFIRMED]
+
+
+def _current_pages(rows: list[dict]) -> list[dict]:
+    """Newest reading per page, in page order.
+
+    Multiple engines/configurations may have read the same source. A review UI
+    must not ask a client to approve two competing readings of one page.
+    ``find_for_file`` is newest-first, so the first row wins.
+    """
+    pages: dict[int, dict] = {}
+    for row in rows:
+        page = int(row.get("page_number") or 0)
+        pages.setdefault(page, row)
+    return [
+        pages[n] for n in sorted(pages)
+        if pages[n].get("status") == O.OCR_COMPLETED_UNCONFIRMED
+    ]
+
+
+def _pinned_pages(
+    rows: list[dict], revision_ids: list[str] | None,
+) -> tuple[list[dict], bool, int]:
+    """Select an exact immutable revision set, never a convenient subset.
+
+    The intake checkpoint is the authority on what the client was asked to
+    review.  If one of those rows disappears, filtering the rows that remain
+    and asking whether *those* are confirmed turns a missing page into a pass.
+    ``exact`` therefore requires every requested id exactly once and one row
+    per page.  The expected count is returned so callers can remain visibly
+    blocked even when no row survives.
+    """
+    if revision_ids is None:
+        pages = _current_pages(rows)
+        return pages, True, len(pages)
+
+    wanted = [str(value) for value in revision_ids if str(value)]
+    wanted_set = set(wanted)
+    selected = [row for row in rows if str(row.get("_id")) in wanted_set]
+    pages = _current_pages(selected)
+    found = {str(row.get("_id")) for row in selected}
+    exact = (
+        bool(wanted)
+        and len(wanted) == len(wanted_set)
+        and found == wanted_set
+        and len(selected) == len(wanted_set)
+        and len(pages) == len(wanted_set)
+    )
+    return pages, exact, len(wanted_set)
+
+
+def _confirmed_value_is_intact(row: dict, owner_id: str) -> bool:
+    """Whether the value entering a prompt is the value the owner confirmed."""
+    if (
+        row.get("confirmed") is not True
+        or row.get("review_state") != "confirmed"
+        or str(row.get("confirmed_by") or "") != str(owner_id)
+        or not isinstance(row.get("confirmed_text"), str)
+    ):
+        return False
+    actual = hashlib.sha256(row["confirmed_text"].encode("utf-8")).hexdigest()
+    return actual == str(row.get("confirmed_text_sha256") or "")
+
+
+async def review_pages_for_file(
+    *, owner_id: str, file_id: str, path: str,
+    revision_ids: list[str] | None = None,
+) -> list[dict]:
+    """Return current-source OCR pages safe for the owner's review UI.
+
+    This is the one intentional API boundary where OCR text leaves the store.
+    Paths, filenames, owner ids and engine error bodies never do.
+    """
+    source_sha = O.source_digest(path)
+    if not source_sha:
+        raise NotFoundError("Evidence file")
+    rows = await ocr_revision_repo().find_for_file(
+        owner_id=owner_id, file_id=file_id, source_sha256=source_sha)
+    pages, exact, _ = _pinned_pages(rows, revision_ids)
+    if not exact:
+        raise ConflictError(
+            "The saved OCR review is incomplete. Reload the intake and run extraction again."
+        )
+    return [
+        {
+            "revision_id": row["_id"],
+            "file_id": row["file_id"],
+            "page_number": row["page_number"],
+            "source_sha256": row["source_sha256"],
+            "text": row.get("text") or "",
+            "text_sha256": row.get("text_sha256") or "",
+            "review_state": row.get("review_state"),
+            "confirmed": bool(row.get("confirmed")),
+            "confirmed_text": row.get("confirmed_text"),
+            "engine": row.get("engine"),
+            "engine_version": row.get("engine_version"),
+            "limitations": list(row.get("limitations") or []),
+        }
+        for row in pages
+    ]
+
+
+async def confirm_page(
+    *,
+    owner_id: str,
+    file_id: str,
+    revision_id: str,
+    path: str,
+    source_sha256: str,
+    ocr_text_sha256: str,
+    confirmed_text: str,
+) -> dict:
+    """Bind a human-reviewed value to an exact source and OCR revision."""
+    current_source = O.source_digest(path)
+    if not current_source or current_source != source_sha256:
+        raise ConflictError(
+            "The evidence file changed after this OCR preview was loaded. Reload it."
+        )
+    confirmed_hash = hashlib.sha256(confirmed_text.encode("utf-8")).hexdigest()
+    row, outcome = await ocr_revision_repo().confirm_once(
+        owner_id=owner_id,
+        file_id=file_id,
+        revision_id=revision_id,
+        source_sha256=source_sha256,
+        ocr_text_sha256=ocr_text_sha256,
+        confirmed_text=confirmed_text,
+        confirmed_text_sha256=confirmed_hash,
+        confirmed_by=owner_id,
+    )
+    if outcome == "missing":
+        raise NotFoundError("OCR revision")
+    if outcome == "conflict":
+        raise ConflictError(
+            "This OCR page was changed or already confirmed differently. Reload it."
+        )
+    return {
+        "revision_id": row["_id"],
+        "file_id": row["file_id"],
+        "page_number": row["page_number"],
+        "review_state": row.get("review_state"),
+        "confirmed": True,
+        "confirmed_text_sha256": row.get("confirmed_text_sha256"),
+        "replayed": outcome == "replayed",
+    }
+
+
+async def confirmed_text_for_file(
+    *, owner_id: str, file_id: str, source_sha256: str,
+    revision_ids: list[str] | None = None,
+) -> tuple[str, bool, int, set[int]]:
+    """Return confirmed text and page numbers for the exact pinned revision set."""
+    rows = await ocr_revision_repo().find_for_file(
+        owner_id=owner_id, file_id=file_id, source_sha256=source_sha256)
+    pages, exact, expected_count = _pinned_pages(rows, revision_ids)
+    if not exact:
+        return "", False, expected_count, set()
+    confirmed = [r for r in pages if _confirmed_value_is_intact(r, owner_id)]
+    text = "\n\n".join(
+        str(r.get("confirmed_text") or "").strip()
+        for r in confirmed
+        if str(r.get("confirmed_text") or "").strip()
+    )
+    page_numbers = {
+        int(r["page_number"])
+        for r in confirmed
+        if isinstance(r.get("page_number"), int)
+        and not isinstance(r.get("page_number"), bool)
+    }
+    return (
+        text,
+        bool(pages) and len(confirmed) == len(pages),
+        len(pages),
+        page_numbers,
+    )

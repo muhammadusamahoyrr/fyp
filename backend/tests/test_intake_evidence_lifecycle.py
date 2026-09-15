@@ -45,7 +45,7 @@ def _pdf(size: int) -> bytes:
 
 @pytest.fixture
 async def intake(mongo):
-    from app.db.collections import get_intakes_col, get_users_col
+    from app.db.collections import get_intakes_col, get_ocr_revisions_col, get_users_col
 
     tag = secrets.token_hex(4)
     client_id, token = f"EV-C-{tag}", f"EV-T-{tag}"
@@ -69,6 +69,7 @@ async def intake(mongo):
 
     await get_users_col().delete_many({"_id": client_id})
     await get_intakes_col().delete_many({"session_token": token})
+    await get_ocr_revisions_col().delete_many({"owner_id": client_id})
 
 
 async def _upload(intake, size=2048, **kw):
@@ -330,13 +331,90 @@ async def test_deleting_removes_both_the_record_and_the_file(intake):
     path, _, _ = await intake_service.get_evidence_file(
         intake["token"], intake["client_id"], up["file_id"])
     assert path.is_file()
+    from app.db.collections import get_ocr_revisions_col
+    await get_ocr_revisions_col().insert_one({
+        "_id": f"ocr-{intake['tag']}",
+        "owner_id": intake["client_id"],
+        "file_id": up["file_id"],
+        "text": "derived sensitive text",
+    })
+    from app.db.collections import get_intakes_col
+    await get_intakes_col().update_one(
+        {"session_token": intake["token"]},
+        {"$set": {"evidence_review_state": [{
+            "file_id": up["file_id"], "ocr_review_required": True,
+        }]}}
+    )
 
     await intake_service.delete_evidence_file(
         intake["token"], intake["client_id"], up["file_id"])
 
     assert not path.exists(), "the record went but the bytes stayed"
+    assert await get_ocr_revisions_col().find_one({
+        "_id": f"ocr-{intake['tag']}"
+    }) is None, "the source went but its OCR text stayed"
     detail = await intake_service.get_intake(intake["token"], intake["client_id"])
     assert detail["evidence_files"] == []
+    assert detail["ocr_review_required"] is False, (
+        "a deleted file left the resumed intake trapped in OCR review"
+    )
+
+
+async def test_conversion_that_wins_the_race_preserves_source_and_reviewed_ocr(
+    intake,
+):
+    """A refused delete must not erase the confirmation conversion will use."""
+    from app.db.collections import get_ocr_revisions_col
+
+    up = await _upload(intake)
+    path, _, _ = await intake_service.get_evidence_file(
+        intake["token"], intake["client_id"], up["file_id"]
+    )
+    revision_id = f"ocr-race-{intake['tag']}"
+    await get_ocr_revisions_col().insert_one({
+        "_id": revision_id,
+        "owner_id": intake["client_id"],
+        "file_id": up["file_id"],
+        "text": "reviewed evidence",
+    })
+    epoch = await intake_service.intake_repo.claim_conversion(
+        intake["token"], timedelta(minutes=10), "conversion-won"
+    )
+    assert epoch == 1
+
+    with pytest.raises(ConflictError):
+        await intake_service.delete_evidence_file(
+            intake["token"], intake["client_id"], up["file_id"]
+        )
+
+    assert path.is_file()
+    assert await get_ocr_revisions_col().find_one({"_id": revision_id})
+    detail = await intake_service.get_intake(
+        intake["token"], intake["client_id"]
+    )
+    assert [row["file_id"] for row in detail["evidence_files"]] == [up["file_id"]]
+
+
+async def test_ocr_delete_failure_releases_the_fence(intake, monkeypatch):
+    """A transient derived-store failure cannot wedge conversion forever."""
+    from app.repositories import ocr_revision_repo as module
+
+    up = await _upload(intake)
+
+    class BrokenOcrRepo:
+        async def delete_for_file(self, **_kwargs):
+            raise RuntimeError("derived store unavailable")
+
+    monkeypatch.setattr(module, "ocr_revision_repo", lambda: BrokenOcrRepo())
+    with pytest.raises(RuntimeError, match="derived store unavailable"):
+        await intake_service.delete_evidence_file(
+            intake["token"], intake["client_id"], up["file_id"]
+        )
+
+    epoch = await intake_service.intake_repo.claim_conversion(
+        intake["token"], timedelta(minutes=10), "conversion-after-failure"
+    )
+    assert epoch == 1
 
 
 async def test_deleting_frees_the_quota(intake):

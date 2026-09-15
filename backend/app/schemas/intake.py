@@ -89,6 +89,8 @@ class IntakeResponse(BaseModel):
     # dropped on the way out, so that notice never reached anyone.
     user_case_type: str | None = None
     type_was_corrected: bool = False
+    ocr_review_required: bool = False
+    ocr_files: list[dict[str, Any]] = []
 
 
 class IntakeEvidenceFile(BaseModel):
@@ -140,6 +142,10 @@ class IntakeEvidenceFile(BaseModel):
     # difference: one is fixable by re-uploading, the other is not.
     prompt_truncated: bool | None = None
     limitations: list[str] = []
+    ocr_status: str | None = None
+    ocr_review_required: bool = False
+    ocr_confirmed: bool = False
+    ocr_pages: int | None = None
 
 
 class IntakeDetailResponse(BaseModel):
@@ -168,6 +174,44 @@ class IntakeDetailResponse(BaseModel):
     steps: dict[str, Any] = {}
     clarification_qa: list[dict] = []
     evidence_files: list[IntakeEvidenceFile] = []
+    ocr_review_required: bool = False
+
+
+class OcrConfirmRequest(BaseModel):
+    """The exact OCR reading reviewed plus the client's corrected value."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    confirmed_text: str = Field(max_length=40_000)
+
+
+class OcrReviewPage(BaseModel):
+    revision_id: str
+    file_id: str
+    page_number: int
+    source_sha256: str
+    text: str
+    text_sha256: str
+    review_state: str | None = None
+    confirmed: bool = False
+    confirmed_text: str | None = None
+    engine: str | None = None
+    engine_version: str | None = None
+    limitations: list[str] = []
+
+
+class OcrConfirmResponse(BaseModel):
+    """The deliberately small public result of a confirmation CAS."""
+
+    revision_id: str
+    file_id: str
+    page_number: int
+    review_state: str | None = None
+    confirmed: bool
+    confirmed_text_sha256: str | None = None
+    replayed: bool = False
 
 
 class IntakeClarifyRequest(BaseModel):

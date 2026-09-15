@@ -106,6 +106,20 @@ class FakeCollection:
             modified_count = 0
         return _Result()
 
+    async def find_one_and_update(self, query, update, **kwargs):
+        self.updates.append((query, update))
+        for i, doc in enumerate(self.docs):
+            if not _matches(doc, query):
+                continue
+            changed = dict(doc)
+            for key, value in (update.get("$set") or {}).items():
+                changed[key] = value
+            for key in (update.get("$unset") or {}):
+                changed.pop(key, None)
+            self.docs[i] = changed
+            return dict(changed)
+        return None
+
     async def delete_one(self, query):
         for i, doc in enumerate(self.docs):
             if _matches(doc, query):
@@ -117,6 +131,14 @@ class FakeCollection:
 
         class _Result:
             deleted_count = 0
+        return _Result()
+
+    async def delete_many(self, query):
+        before = len(self.docs)
+        self.docs = [doc for doc in self.docs if not _matches(doc, query)]
+
+        class _Result:
+            deleted_count = before - len(self.docs)
         return _Result()
 
     async def count_documents(self, query):

@@ -10,6 +10,9 @@ from app.schemas.intake import (
     IntakeResponse,
     IntakeStartResponse,
     IntakeStepData,
+    OcrConfirmRequest,
+    OcrConfirmResponse,
+    OcrReviewPage,
 )
 from app.services import intake_service
 
@@ -111,6 +114,48 @@ async def upload_evidence(
     current_user: dict = Depends(require_client),
 ):
     return await intake_service.upload_evidence(token, current_user["_id"], file)
+
+
+@router.get(
+    "/{token}/evidence/{file_id}/ocr",
+    response_model=list[OcrReviewPage],
+)
+@limiter.limit(_LIMIT_STEP)
+async def review_evidence_ocr(
+    request: Request,
+    token: str,
+    file_id: str,
+    current_user: dict = Depends(require_client),
+):
+    """Show only this client's current-source OCR pages for correction."""
+    return await intake_service.get_evidence_ocr_review(
+        token, current_user["_id"], file_id
+    )
+
+
+@router.post(
+    "/{token}/evidence/{file_id}/ocr/{revision_id}/confirm",
+    response_model=OcrConfirmResponse,
+)
+@limiter.limit(_LIMIT_STEP)
+async def confirm_evidence_ocr(
+    request: Request,
+    token: str,
+    file_id: str,
+    revision_id: str,
+    body: OcrConfirmRequest,
+    current_user: dict = Depends(require_client),
+):
+    """Confirm a correction against exact source and OCR-text hashes."""
+    return await intake_service.confirm_evidence_ocr_page(
+        token,
+        current_user["_id"],
+        file_id,
+        revision_id,
+        source_sha256=body.source_sha256,
+        text_sha256=body.text_sha256,
+        confirmed_text=body.confirmed_text,
+    )
 
 
 @router.get("/{token}/evidence/{file_id}")

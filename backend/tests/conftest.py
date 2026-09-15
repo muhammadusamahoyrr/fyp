@@ -229,6 +229,7 @@ async def mongo():
     )
 
     await ensure_v2_indexes(db)
+    await ensure_ocr_indexes(db)
 
     try:
         yield db
@@ -306,6 +307,20 @@ async def ensure_v2_indexes(db) -> None:
             info = await db[spec.collection].index_information()
             if evaluate(spec, info) is not None:
                 raise
+
+
+async def ensure_ocr_indexes(db) -> None:
+    """Install OCR correctness indexes from the production declaration.
+
+    The OCR repository handles a duplicate-key race as the idempotent retry
+    path. Without the unique index that path is never exercised: two identical
+    readings are both stored successfully. Building the test index from the
+    same ``index_models`` function as application startup prevents the fixture
+    from drifting into a different contract.
+    """
+    from app.repositories.ocr_revision_repo import index_models
+
+    await db["ocr_revisions"].create_indexes(index_models())
 
 
 @pytest.fixture

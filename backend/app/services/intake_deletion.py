@@ -12,7 +12,7 @@ record"; expiring it on the intake's own clock would have made that a lie, and
 worse, would have destroyed the evidence behind a live matter 365 days after the
 conversion that started it.
 
-ORDER: TOMBSTONE, THEN BYTES, THEN ROW
+ORDER: TOMBSTONE, THEN BYTES, THEN OCR TEXT, THEN ROW
 
 The tombstone is written first and names the evidence directory, so a crash
 between steps leaves files that are still findable. Deleting the row first would
@@ -52,7 +52,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.core.config import settings
-from app.db.collections import get_deletion_tombstones_col
+from app.db.collections import get_deletion_tombstones_col, get_ocr_revisions_col
 from app.repositories.case_repo import CaseRepository
 from app.repositories.intake_repo import IntakeRepository
 from app.services import legal_holds, retention
@@ -65,7 +65,7 @@ intake_repo = IntakeRepository()
 #: Tombstones from this module. The collection is shared with DOCUMENTS_V2.
 KIND_INTAKE = "intake"
 
-_STEPS = ("evidence", "row")
+_STEPS = ("evidence", "ocr", "row")
 
 #: Why a sweep touched a record, recorded on the tombstone.
 REASON_UNCONVERTED = "retention:unconverted_intake"
@@ -157,7 +157,19 @@ async def delete_intake(intake: dict, *, reason: str) -> dict:
         await tombstones.update_one(
             {"_id": intake_id}, {"$addToSet": {"steps_done": "evidence"}})
 
-    # 2. THE ROW. Last, so nothing is ever pointed at by nothing.
+    # 2. OCR TEXT. It is another copy of the evidence's contents and follows
+    #    the same retention clock. Deleting only the source bytes would leave
+    #    the most sensitive derived copy behind indefinitely.
+    if "ocr" not in steps:
+        session_id = source.get("session_token") or ts.get("evidence_dir")
+        if session_id:
+            await get_ocr_revisions_col().delete_many({
+                "owner_id": str(client_id), "session_id": str(session_id),
+            })
+        await tombstones.update_one(
+            {"_id": intake_id}, {"$addToSet": {"steps_done": "ocr"}})
+
+    # 3. THE ROW. Last, so nothing is ever pointed at by nothing.
     if "row" not in steps:
         await intake_repo.delete_intake_row(intake_id)
         await tombstones.update_one(
