@@ -413,26 +413,72 @@ async def test_requesting_on_an_assigned_case_is_refused(parties):
 # no control to reach them and displayed `no_show` as "Cancelled". These pin the
 # eligibility rule the UI now mirrors: CONFIRMED only, and only the appointment's
 # own lawyer.
+#
+# A second rule joined them with the state machine: an appointment that has not
+# STARTED cannot be a no-show, because the client has not yet failed to attend
+# anything. Booking validates that the slot is in the future, so these tests
+# reach a started appointment the only way the product can — by letting the
+# clock pass it, which in a test means moving the row rather than waiting.
 
 
-async def test_a_confirmed_appointment_can_be_marked_no_show(parties):
+async def _start_now(appt_id: str) -> None:
+    """Move a booked appointment's window to one that has just begun.
+
+    Written against the stored row on purpose. Every route into the service
+    refuses a past `scheduled_at`, so there is no legitimate API call that
+    produces this state — only elapsed time does, and a test cannot wait for it.
+    """
+    from app.db.collections import get_appointments_col
+
+    started = datetime.now(timezone.utc) - timedelta(minutes=5)
+    await get_appointments_col().update_one(
+        {"_id": appt_id},
+        {"$set": {"scheduled_at": started, "end_at": started + timedelta(minutes=30)}},
+    )
+
+
+async def test_a_confirmed_appointment_that_has_started_can_be_marked_no_show(parties):
     from app.services import appointment_service
 
     appt = await _book(parties, _slot())
     await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _start_now(appt["id"])
 
     out = await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
 
     assert out["status"] == AppointmentStatus.NO_SHOW.value
 
 
+async def test_an_appointment_that_has_not_started_is_not_a_no_show_yet(parties):
+    """422, not 409: nothing is stale, the lawyer is just early.
+
+    The distinction is the caller's next move. A conflict means re-read and
+    look again; this means the appointment is fine and the answer will change
+    on its own once the time arrives.
+    """
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())  # 48 hours away
+    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+
+    with pytest.raises(AppValidationError, match="has not started"):
+        await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+
 async def test_only_a_confirmed_appointment_can_be_marked_no_show(parties):
-    """The rule the UI mirrors by offering the action on Upcoming rows only."""
+    """The rule the UI mirrors by offering the action on Upcoming rows only.
+
+    Now a 409 rather than a 422. A pending appointment being marked no-show is
+    a caller acting on a stale view — the lawyer never confirmed it, or someone
+    else moved it — and re-reading is what resolves it.
+    """
+    from app.core.exceptions import ConflictError
     from app.services import appointment_service
 
     appt = await _book(parties, _slot())  # still PENDING
+    await _start_now(appt["id"])          # and the status rule still decides
 
-    with pytest.raises(AppValidationError, match="confirmed"):
+    with pytest.raises(ConflictError, match="pending"):
         await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
 
 
@@ -455,6 +501,7 @@ async def test_a_no_show_is_not_a_cancellation(parties):
 
     appt = await _book(parties, _slot())
     await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _start_now(appt["id"])
     await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
 
     stored = await get_appointments_col().find_one({"_id": appt["id"]})

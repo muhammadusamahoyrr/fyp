@@ -21,6 +21,39 @@ import {
 // APPOINTMENTS PAGE
 // ============================================================
 
+// How often the page re-reads the clock. Time-based controls (Accept, No Show,
+// Done) each become available or unavailable at an instant the server also
+// knows about, and nothing else on the page would trigger a re-render when
+// that instant arrives — so without this a lawyer sits in front of a stale
+// button until some unrelated state change happens to repaint it.
+//
+// Thirty seconds is chosen against the cost of being wrong, not for precision:
+// every one of these controls is re-validated by the server, so the only
+// consequence of a late tick is a button that turns on up to half a minute
+// after it could have.
+export const CLOCK_TICK_MS = 30000;
+
+/** An appointment's end, preferring the server's stored value.
+ *
+ * `end_at` is authoritative — the backend compares against that stored field
+ * when deciding whether a consultation may be completed. The duration
+ * arithmetic is only for a response that does not carry it (a row written
+ * before the field existed, or a malformed payload), and it is a reconstruction
+ * rather than a cross-check: where the two disagree, the server's value is the
+ * one the server will enforce.
+ */
+export function endOf(a) {
+    if (!a) return null;
+    if (a.end_at) {
+        const parsed = new Date(a.end_at);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    if (!a.scheduled_at) return null;
+    const start = new Date(a.scheduled_at);
+    if (Number.isNaN(start.getTime())) return null;
+    return new Date(start.getTime() + (a.duration_minutes || 0) * 60000);
+}
+
 const CAL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const CAL_HOURS = ["9:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
 
@@ -338,6 +371,11 @@ function AppointmentsPage() {
     const [search, setSearch] = useState("");
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
+    // Read once at mount rather than called inline during render, so every
+    // control on a single paint is decided against ONE instant. Calling
+    // `Date.now()` per button would let two buttons on the same row disagree
+    // about whether a boundary had passed.
+    const [now, setNow] = useState(() => Date.now());
     const [scheduleModal, setScheduleModal] = useState(undefined); // undefined=closed, null=new, apt=reschedule
     const [joinModal, setJoinModal] = useState(null);
     // "No Show" earns a tab because it is now its own status. The tab filter is
@@ -364,6 +402,18 @@ function AppointmentsPage() {
     const mapApiAppt = (a) => ({
         id: a.id,
         at: a.scheduled_at ? new Date(a.scheduled_at) : null,
+        // When the consultation is over. The server will not accept a
+        // completion before this instant, so the row has to carry it — the
+        // display `duration` beside it is the string "30 min" and cannot be
+        // compared to anything.
+        //
+        // `end_at` is the AUTHORITATIVE value: the server stores it on the
+        // appointment and decides completion against that stored field, so
+        // recomputing it here could only ever disagree with the authority. The
+        // arithmetic below is a FALLBACK for a response that lacks it — a
+        // legacy row written before the field, or a malformed payload — and it
+        // is a guess, not a second opinion. Where both exist, `end_at` wins.
+        endAt: endOf(a),
         client: a.client_name || "Client",
         initials: (a.client_name || "??").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
         purpose: a.notes || "Consultation",
@@ -391,6 +441,48 @@ function AppointmentsPage() {
             setLoading(false);
         }).catch(() => setLoading(false));
     }, []);
+
+    // The clock, as state.
+    //
+    // Three controls below turn on or off at an instant — an appointment
+    // starting, ending, or slipping into the past. React has no reason to
+    // re-render when that instant arrives, so the buttons were correct only
+    // until the moment they mattered, and a lawyer watching the page would see
+    // No Show still greyed out after the client failed to appear.
+    //
+    // The cleanup is not a formality: this interval holds a closure over
+    // component state, so leaving it running after unmount means setting state
+    // on a dead component on every tick, for as long as the tab is open.
+    useEffect(() => {
+        const id = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+        return () => clearInterval(id);
+    }, []);
+
+    // Each of these mirrors a rule the server enforces, evaluated against the
+    // single `now` above. They answer "may this be done yet", never "is this
+    // the right kind of appointment" — the status gate is the surrounding JSX,
+    // and keeping the two separate is what stopped Done and No Show from
+    // inheriting each other's conditions.
+    //
+    // A row with no usable time is treated as NOT actionable. The alternative
+    // is offering a control whose precondition cannot be evaluated, which is
+    // how these buttons behaved before they were gated at all.
+    const startedAt = (apt) => (apt.at ? apt.at.getTime() : null);
+    const endedAt = (apt) => (apt.endAt ? apt.endAt.getTime() : null);
+
+    const canAccept = (apt) => startedAt(apt) !== null && now < startedAt(apt);
+    const canNoShow = (apt) => startedAt(apt) !== null && now >= startedAt(apt);
+    const canComplete = (apt) => endedAt(apt) !== null && now >= endedAt(apt);
+
+    const whyNotAccept = (apt) => (canAccept(apt) ? undefined
+        : startedAt(apt) === null ? "This appointment has no scheduled time"
+        : "This time has already passed — cancel the request instead");
+    const whyNotNoShow = (apt) => (canNoShow(apt) ? undefined
+        : startedAt(apt) === null ? "This appointment has no scheduled time"
+        : "Available once the appointment has started");
+    const whyNotComplete = (apt) => (canComplete(apt) ? undefined
+        : endedAt(apt) === null ? "This appointment has no end time"
+        : "Available once the consultation has ended");
 
     const handleAccept = async (id) => {
         const apt = appointments.find(a => a.id === id);
@@ -723,7 +815,15 @@ function AppointmentsPage() {
                                             {/* Action buttons */}
                                             <div style={{ display: "flex", gap: 8 }}>
                                                 {apt.status === "Pending" && (<>
-                                                    <Btn variant="success" size="sm" style={{ flex: 1 }} onClick={() => handleAccept(apt.id)}>
+                                                    {/* The server refuses to confirm a slot that has
+                                                        already passed — it would only produce a confirmed
+                                                        row for a meeting that cannot happen. Reject stays
+                                                        enabled, because clearing the stale request is the
+                                                        action that remains. */}
+                                                    <Btn variant="success" size="sm" style={{ flex: 1 }}
+                                                        disabled={!canAccept(apt)}
+                                                        title={whyNotAccept(apt)}
+                                                        onClick={() => handleAccept(apt.id)}>
                                                         <Icon d={I.check} size={12} /> Accept
                                                     </Btn>
                                                     <Btn variant="danger" size="sm" style={{ flex: 1 }} onClick={() => handleReject(apt.id)}>
@@ -753,16 +853,29 @@ function AppointmentsPage() {
                                                             <Icon d={I.map} size={12} /> View Details
                                                         </Btn>
                                                     )}
-                                                    <Btn variant="success" size="sm" onClick={() => handleComplete(apt.id)}>
+                                                    {/* Both of these are offered on Upcoming only, because
+                                                        that is the display status for `confirmed` and the
+                                                        server accepts neither outcome on anything else.
+
+                                                        They are now ALSO gated on the clock, which reverses
+                                                        an earlier decision here. That note said the server
+                                                        had no "is it past?" rule and that inventing one
+                                                        client-side would refuse actions the API allowed.
+                                                        The server has those rules now — an outcome cannot
+                                                        be declared for a meeting that has not happened — so
+                                                        the choice is no longer between gating and not
+                                                        gating. It is between a disabled button and a button
+                                                        that always fails. */}
+                                                    <Btn variant="success" size="sm"
+                                                        disabled={!canComplete(apt)}
+                                                        title={whyNotComplete(apt)}
+                                                        onClick={() => handleComplete(apt.id)}>
                                                         <Icon d={I.check} size={12} /> Done
                                                     </Btn>
-                                                    {/* Offered on Upcoming only, because that is the display
-                                                        status for `confirmed` and the server accepts a
-                                                        no-show on nothing else. No extra "is it past?"
-                                                        rule: the server does not have one, and inventing a
-                                                        client-side clock rule would refuse actions the API
-                                                        would have allowed. */}
-                                                    <Btn variant="secondary" size="sm" onClick={() => handleNoShow(apt.id)}>
+                                                    <Btn variant="secondary" size="sm"
+                                                        disabled={!canNoShow(apt)}
+                                                        title={whyNotNoShow(apt)}
+                                                        onClick={() => handleNoShow(apt.id)}>
                                                         No Show
                                                     </Btn>
                                                     <Btn variant="accent" size="sm" onClick={() => setScheduleModal(apt)}>

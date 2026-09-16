@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -46,6 +47,40 @@ class CancelAppointmentRequest(BaseModel):
 class CompleteAppointmentRequest(BaseModel):
     lawyer_notes: str | None = Field(default=None, max_length=2000)
     meeting_link: str | None = Field(default=None, max_length=500)
+
+    @field_validator("meeting_link")
+    @classmethod
+    def must_be_https_url(cls, v: str | None) -> str | None:
+        """A join link is rendered as a clickable anchor, so it is executable input.
+
+        `ModTracking.jsx` puts this value straight into `href`. The field was
+        `max_length` and nothing else, so `javascript:` — which browsers run in
+        the client's own session on click — was a 500-character string like any
+        other, stored by one party to the appointment and clicked by the other.
+
+        HTTPS only. Not http, because a meeting link is credential-bearing: the
+        URL IS the admission to the consultation, and sending it in clear text
+        hands the room to anyone on the path. An allowlist of schemes is used
+        rather than a blocklist, so a scheme nobody thought of is refused by
+        default instead of admitted by default.
+        """
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            # An empty string is "no link", not a link that fails validation —
+            # otherwise clearing the field becomes impossible.
+            return None
+
+        parsed = urlparse(v)
+        if parsed.scheme.lower() != "https":
+            raise ValueError("meeting_link must be an https:// URL")
+        # A scheme alone is not a URL. `urlparse("https:evil")` parses without
+        # error and yields an empty netloc, which is not somewhere a client can
+        # be sent.
+        if not parsed.netloc:
+            raise ValueError("meeting_link must include a host, e.g. https://meet.example.com/abc")
+        return v
 
 
 class AvailabilityQuery(BaseModel):

@@ -164,20 +164,52 @@ test("the two statuses are distinguishable side by side", async () => {
 
 /* ── the action ───────────────────────────────────────────────────────────── */
 
-test("a confirmed appointment offers the No Show action", async () => {
+/* An appointment that has already begun.
+ *
+ * The server will not record a no-show for a meeting that has not started —
+ * the client cannot yet have failed to attend it — so this is the state the
+ * action actually applies to. The default fixture is an hour in the FUTURE,
+ * which is now deliberately not actionable. */
+function started(over = {}) {
+    return appointment({
+        scheduled_at: new Date(Date.now() - 36e5).toISOString(),
+        status: "confirmed",
+        ...over,
+    });
+}
+
+test("a confirmed appointment that has started offers the No Show action", async () => {
+    const ui = await mountAppointments([started()]);
+
+    const noShow = [...ui.container.querySelectorAll("button")]
+        .find(b => b.textContent.trim() === "No Show");
+    assert.ok(noShow, "no No Show control on a started confirmed appointment");
+    assert.equal(noShow.disabled, false, "it must be usable, not merely present");
+    await ui.unmount();
+});
+
+test("No Show is offered but disabled before the appointment starts", async () => {
+    // Present, so the lawyer can see the action exists and when it applies —
+    // and disabled, because the server refuses it. The alternative is a button
+    // that is always there and always fails.
     const ui = await mountAppointments([appointment({ status: "confirmed" })]);
 
-    const labels = [...ui.container.querySelectorAll("button")]
-        .map(b => b.textContent.trim());
-    assert.ok(labels.includes("No Show"),
-              `no No Show control on a confirmed appointment; buttons: ${labels}`);
+    const noShow = [...ui.container.querySelectorAll("button")]
+        .find(b => b.textContent.trim() === "No Show");
+    assert.ok(noShow, "the action should still be visible");
+    assert.equal(noShow.disabled, true,
+                 "a future appointment cannot be a no-show yet");
+
+    await ui.click("No Show");
+    assert.equal(api.__calls("markNoShow").length, 0,
+                 "a disabled control must not reach the API at all");
     await ui.unmount();
 });
 
 test("marking a no-show calls the existing endpoint and updates the row",
      async () => {
     api.__respond("markNoShow", { data: { success: true } });
-    const ui = await mountAppointments([appointment({ status: "confirmed" })]);
+    const ui = await mountAppointments([started()]);
 
     assert.deepEqual(ui.badges(), ["Upcoming"],
                      "the row did not start as a confirmed appointment");
@@ -198,8 +230,8 @@ test("a refused no-show leaves the appointment unchanged", async () => {
     // The server allows this only on a CONFIRMED appointment, so a stale card
     // is refused. The row must not optimistically flip on a failure.
     api.__respond("markNoShow",
-                  { data: null, error: { message: "Only confirmed appointments can be marked as no-show" } });
-    const ui = await mountAppointments([appointment({ status: "confirmed" })]);
+                  { data: null, error: { message: "An appointment in 'cancelled' status cannot be marked 'no_show'." } });
+    const ui = await mountAppointments([started()]);
 
     await ui.click("No Show");
 

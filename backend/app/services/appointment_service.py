@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -9,9 +10,17 @@ from app.core.constants import (
     AppointmentStatus,
     NotificationType,
 )
-from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
+from app.core.exceptions import (
+    AppValidationError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+)
 from app.repositories.appointment_repo import AppointmentRepository
 from app.repositories.user_repo import UserRepository
+from app.services import appointment_transitions as transitions
+
+logger = logging.getLogger(__name__)
 
 appt_repo = AppointmentRepository()
 user_repo = UserRepository()
@@ -79,6 +88,155 @@ def _sanitize(appt: dict) -> dict:
     if not appt.get("timezone"):
         appt["timezone"] = BOOKING_TZ_NAME
     return appt
+
+
+# ── Access, as one rule ───────────────────────────────────────────────────────
+
+# One response for "no such appointment" AND "not your appointment".
+#
+# Splitting them lets anyone walk appointment ids and learn which exist, and
+# which lawyer is busy when — the 404/403 split IS the leak. This repo already
+# made that decision for cases and wrote down why (`_CASE_DENIED`,
+# routes/ai.py). Appointments follow it rather than inventing a second
+# convention: two non-leaking conventions in one codebase still teach the next
+# reader that the choice is arbitrary, and the next surface then picks either.
+#
+# The distinction is preserved in the server log, where it is useful and not
+# attacker-visible.
+_APPT_DENIED = "Appointment not available"
+
+
+def _actor_filter(user_id: str, user_role: str) -> dict:
+    """The query predicate that makes an appointment this actor's business.
+
+    Admin authorisation used to be IMPLICIT: `get_appointment` and
+    `cancel_appointment` tested `role == "client"` and `role == "lawyer"`, and
+    an admin failed both tests and fell through into full access. Nothing said
+    admins could do this; it was the absence of a rule, not a rule. An unknown
+    future role would have inherited the same silent power.
+
+    So the rule is stated. `case_service._assert_access` is the shape being
+    copied — admin by deliberate early return, each party by ownership,
+    everything else refused — because appointments having their OWN access
+    convention is how the two drift apart.
+    """
+    if user_role == "admin":
+        # Owner filter cannot literally apply to an admin, who owns nothing.
+        # An empty predicate is the honest expression of "no ownership
+        # requirement", and it is reached only here, by name.
+        return {}
+    if user_role == "client":
+        return {"client_id": user_id}
+    if user_role == "lawyer":
+        return {"lawyer_id": user_id}
+    raise ForbiddenError(_APPT_DENIED)
+
+
+async def _load_for_actor(appt_id: str, user_id: str, user_role: str) -> dict:
+    """Fetch an appointment the actor is entitled to, or refuse indistinguishably."""
+    appt = await appt_repo.find_for_actor(appt_id, _actor_filter(user_id, user_role))
+    if appt:
+        return appt
+    # Only the log gets to know which of the two it was.
+    exists = await appt_repo.find_by_id(appt_id) is not None
+    logger.info(
+        "appointment_access_denied appointment_id=%s role=%s reason=%s",
+        appt_id, user_role, "not_a_party" if exists else "no_such_appointment")
+    raise ForbiddenError(_APPT_DENIED)
+
+
+def _current_status(appt: dict) -> AppointmentStatus:
+    """The stored status as an enum member.
+
+    A row whose status is not a value this code knows is a data fault, not a
+    client fault. Letting `AppointmentStatus(...)` raise ValueError would turn
+    it into a 500 with a traceback; it is refused as a conflict instead, and
+    the unrecognised value is logged rather than returned.
+    """
+    try:
+        return AppointmentStatus(appt.get("status"))
+    except ValueError:
+        logger.error(
+            "appointment_unknown_status appointment_id=%s status=%r",
+            appt.get("_id"), appt.get("status"))
+        raise ConflictError(
+            "This appointment is in a state this version cannot act on.")
+
+
+async def _transition(
+    appt: dict,
+    target: AppointmentStatus,
+    user_id: str,
+    user_role: str,
+    extra: dict | None = None,
+) -> dict:
+    """Validate and atomically apply one state change.
+
+    The order is the point. Rules are checked against the row that was read,
+    then the write re-asserts the SOURCE STATUS it was checked against, so a
+    change that lands in between cannot be overwritten — it makes this caller
+    lose, loudly.
+    """
+    appt_id = appt["_id"]
+    source = _current_status(appt)
+
+    if not transitions.is_allowed(source, target):
+        raise ConflictError(transitions.explain(source, target))
+
+    timing = transitions.timing_error(
+        target,
+        scheduled_at=_as_utc(appt["scheduled_at"]),
+        end_at=_as_utc(appt["end_at"]),
+        now=datetime.now(timezone.utc),
+    )
+    if timing:
+        raise AppValidationError(timing)
+
+    actor_filter = _actor_filter(user_id, user_role)
+    updated = await appt_repo.compare_and_set(
+        appt_id, [source], target, actor_filter, extra)
+    if updated is not None:
+        return updated
+
+    # The CAS matched nothing, and on its own that is ambiguous: the status
+    # moved, or this actor was never entitled to the row. Re-read under the
+    # SAME actor predicate — never by _id alone, which would answer a question
+    # the caller has not earned.
+    current = await appt_repo.find_for_actor(appt_id, actor_filter)
+    if current is None:
+        logger.info(
+            "appointment_access_denied appointment_id=%s role=%s reason=%s",
+            appt_id, user_role, "vanished_or_not_a_party")
+        raise ForbiddenError(_APPT_DENIED)
+    raise ConflictError(transitions.explain(_current_status(current), target))
+
+
+async def _notify(appt_id: str, transition: str, **kwargs) -> None:
+    """Deliver a notification, or lose it without losing the transition.
+
+    `create_notification` can raise from its insert or from the WebSocket
+    fan-out, and this service had no try/except around any of them. The
+    transition had already been COMMITTED by then, so a delivery failure
+    answered the caller with an error for work that had in fact succeeded —
+    and the caller's only sensible response, retrying, would then be refused as
+    a stale-state conflict.
+
+    Notifications are therefore best-effort by declaration. Making them durable
+    needs a relay, and the one that exists (`_documents_v2_relay`) returns
+    immediately while DOCUMENTS_V2 is off, so `logical_event_id` alone would be
+    the dedup half of a design whose delivery half is switched off.
+
+    The log records the appointment, the transition and the exception CLASS —
+    never the exception, whose driver messages carry URIs and credentials
+    (house style, per `indexes.py`).
+    """
+    from app.services.notification_service import create_notification
+    try:
+        await create_notification(**kwargs)
+    except Exception as exc:
+        logger.warning(
+            "appointment_notification_failed appointment_id=%s transition=%s "
+            "error=%s", appt_id, transition, type(exc).__name__)
 
 
 async def _get_verified_lawyer(lawyer_id: str) -> dict:
@@ -168,15 +326,20 @@ async def book_appointment(
     lawyer_name = lawyer.get("full_name", "Lawyer")
     slot_str = _slot_text(scheduled_at)
 
-    from app.services.notification_service import create_notification
-    await create_notification(
+    # Best-effort, for the same reason the transitions are: the appointment row
+    # is already inserted. Raising here would report a failed booking for a slot
+    # that is genuinely held, and the client's retry would then be refused by
+    # the conflict check against their OWN appointment.
+    await _notify(
+        doc["_id"], "book",
         user_id=lawyer_id,
         type=NotificationType.APPOINTMENT_BOOKED,
         title="New Appointment Request",
         body=f"{client_name} booked a {mode.value} consultation for {slot_str}.",
         payload={"appointment_id": doc["_id"]},
     )
-    await create_notification(
+    await _notify(
+        doc["_id"], "book",
         user_id=client_id,
         type=NotificationType.APPOINTMENT_BOOKED,
         title="Appointment Requested",
@@ -188,32 +351,27 @@ async def book_appointment(
 
 
 async def confirm_appointment(appt_id: str, lawyer_id: str) -> dict:
-    appt = await appt_repo.find_by_id(appt_id)
-    if not appt:
-        raise NotFoundError("Appointment")
-    if appt["lawyer_id"] != lawyer_id:
-        raise ForbiddenError("Not your appointment")
-    if appt["status"] != AppointmentStatus.PENDING.value:
-        raise AppValidationError(f"Cannot confirm an appointment in '{appt['status']}' status")
+    appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
+    updated = await _transition(
+        appt, AppointmentStatus.CONFIRMED, lawyer_id, "lawyer")
 
-    await appt_repo.update_status(appt_id, AppointmentStatus.CONFIRMED)
-
-    client = await user_repo.find_by_id(appt["client_id"])
     lawyer = await user_repo.find_by_id(lawyer_id)
-    slot_str = _slot_text(appt["scheduled_at"])
+    slot_str = _slot_text(updated["scheduled_at"])
 
-    from app.services.notification_service import create_notification
-    await create_notification(
-        user_id=appt["client_id"],
+    await _notify(
+        appt_id, "confirm",
+        user_id=updated["client_id"],
         type=NotificationType.APPOINTMENT_CONFIRMED,
         title="Appointment Confirmed",
         body=f"{(lawyer or {}).get('full_name','Lawyer')} confirmed your appointment on {slot_str}.",
         payload={"appointment_id": appt_id},
     )
 
-    appt["status"] = AppointmentStatus.CONFIRMED.value
-    appt["updated_at"] = datetime.now(timezone.utc)
-    return _sanitize(appt)
+    # The document the DATABASE returned, not a local edit of the one that was
+    # read. Hand-patching `appt["status"]` after the write reported whatever
+    # this request intended rather than what is stored, which is exactly the
+    # discrepancy a concurrent transition produces.
+    return _sanitize(updated)
 
 
 async def cancel_appointment(
@@ -222,18 +380,7 @@ async def cancel_appointment(
     user_role: str,
     reason: str | None,
 ) -> dict:
-    appt = await appt_repo.find_by_id(appt_id)
-    if not appt:
-        raise NotFoundError("Appointment")
-
-    # Permission: client can cancel their own, lawyer can cancel their own
-    if user_role == "client" and appt["client_id"] != user_id:
-        raise ForbiddenError("Not your appointment")
-    if user_role == "lawyer" and appt["lawyer_id"] != user_id:
-        raise ForbiddenError("Not your appointment")
-
-    if appt["status"] in (AppointmentStatus.CANCELLED.value, AppointmentStatus.COMPLETED.value):
-        raise AppValidationError(f"Appointment is already {appt['status']}")
+    appt = await _load_for_actor(appt_id, user_id, user_role)
 
     # Clients cannot cancel within the cutoff window
     if user_role == "client":
@@ -253,25 +400,34 @@ async def cancel_appointment(
         "cancel_reason": reason,
         "cancelled_by":  user_role,
     }
-    await appt_repo.update_status(appt_id, AppointmentStatus.CANCELLED, extra)
+    updated = await _transition(
+        appt, AppointmentStatus.CANCELLED, user_id, user_role, extra)
 
-    # Notify the other party
-    slot_str = _slot_text(appt["scheduled_at"])
-    other_id = appt["lawyer_id"] if user_role == "client" else appt["client_id"]
+    # Notify the other party. An admin cancellation has TWO other parties, and
+    # telling only one of them would leave a lawyer holding a slot for a client
+    # who has been told it is gone.
+    if user_role == "client":
+        recipients = [updated["lawyer_id"]]
+    elif user_role == "lawyer":
+        recipients = [updated["client_id"]]
+    else:
+        recipients = [updated["client_id"], updated["lawyer_id"]]
+
+    slot_str = _slot_text(updated["scheduled_at"])
     canceller_name = (await user_repo.find_by_id(user_id) or {}).get("full_name", user_role.title())
 
-    from app.services.notification_service import create_notification
-    await create_notification(
-        user_id=other_id,
-        type=NotificationType.APPOINTMENT_CANCELLED,
-        title="Appointment Cancelled",
-        body=f"{canceller_name} cancelled the appointment scheduled for {slot_str}."
-             + (f" Reason: {reason}" if reason else ""),
-        payload={"appointment_id": appt_id},
-    )
+    for recipient in recipients:
+        await _notify(
+            appt_id, "cancel",
+            user_id=recipient,
+            type=NotificationType.APPOINTMENT_CANCELLED,
+            title="Appointment Cancelled",
+            body=f"{canceller_name} cancelled the appointment scheduled for {slot_str}."
+                 + (f" Reason: {reason}" if reason else ""),
+            payload={"appointment_id": appt_id},
+        )
 
-    appt.update({"status": AppointmentStatus.CANCELLED.value, **extra, "updated_at": datetime.now(timezone.utc)})
-    return _sanitize(appt)
+    return _sanitize(updated)
 
 
 async def complete_appointment(
@@ -280,60 +436,37 @@ async def complete_appointment(
     lawyer_notes: str | None,
     meeting_link: str | None,
 ) -> dict:
-    appt = await appt_repo.find_by_id(appt_id)
-    if not appt:
-        raise NotFoundError("Appointment")
-    if appt["lawyer_id"] != lawyer_id:
-        raise ForbiddenError("Not your appointment")
-    if appt["status"] not in (
-        AppointmentStatus.PENDING.value,
-        AppointmentStatus.CONFIRMED.value,
-    ):
-        raise AppValidationError(f"Cannot complete an appointment in '{appt['status']}' status")
+    appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
 
     extra = {
         "lawyer_notes": lawyer_notes,
         "meeting_link": meeting_link,
     }
-    await appt_repo.update_status(appt_id, AppointmentStatus.COMPLETED, extra)
+    updated = await _transition(
+        appt, AppointmentStatus.COMPLETED, lawyer_id, "lawyer", extra)
 
     lawyer = await user_repo.find_by_id(lawyer_id)
-    from app.services.notification_service import create_notification
-    await create_notification(
-        user_id=appt["client_id"],
+    await _notify(
+        appt_id, "complete",
+        user_id=updated["client_id"],
         type=NotificationType.APPOINTMENT_COMPLETED,
         title="Consultation Completed",
         body=f"Your consultation with {(lawyer or {}).get('full_name','your lawyer')} is now complete.",
         payload={"appointment_id": appt_id},
     )
 
-    appt.update({"status": AppointmentStatus.COMPLETED.value, **extra, "updated_at": datetime.now(timezone.utc)})
-    return _sanitize(appt)
+    return _sanitize(updated)
 
 
 async def mark_no_show(appt_id: str, lawyer_id: str) -> dict:
-    appt = await appt_repo.find_by_id(appt_id)
-    if not appt:
-        raise NotFoundError("Appointment")
-    if appt["lawyer_id"] != lawyer_id:
-        raise ForbiddenError("Not your appointment")
-    if appt["status"] != AppointmentStatus.CONFIRMED.value:
-        raise AppValidationError("Only confirmed appointments can be marked as no-show")
-
-    await appt_repo.update_status(appt_id, AppointmentStatus.NO_SHOW)
-    appt["status"] = AppointmentStatus.NO_SHOW.value
-    appt["updated_at"] = datetime.now(timezone.utc)
-    return _sanitize(appt)
+    appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
+    updated = await _transition(
+        appt, AppointmentStatus.NO_SHOW, lawyer_id, "lawyer")
+    return _sanitize(updated)
 
 
 async def get_appointment(appt_id: str, user_id: str, user_role: str) -> dict:
-    appt = await appt_repo.find_by_id(appt_id)
-    if not appt:
-        raise NotFoundError("Appointment")
-    if user_role == "client" and appt["client_id"] != user_id:
-        raise ForbiddenError("Not your appointment")
-    if user_role == "lawyer" and appt["lawyer_id"] != user_id:
-        raise ForbiddenError("Not your appointment")
+    appt = await _load_for_actor(appt_id, user_id, user_role)
     return _enrich(_sanitize(appt), await _names(appt))
 
 
@@ -344,10 +477,19 @@ async def list_appointments(
     page: int,
     page_size: int,
 ) -> dict:
+    # Stated per role, for the same reason the single-fetch rule is. An admin
+    # used to fall into the `else` and be listed their OWN lawyer appointments,
+    # of which they have none — so the endpoint answered an empty page as
+    # though the admin simply had nothing, rather than as what it was: a role
+    # this endpoint has no scoped query for. An empty success is the worst
+    # possible answer, because it looks like data.
     if user_role == "client":
         result = await appt_repo.find_for_client(user_id, status, page, page_size)
-    else:
+    elif user_role == "lawyer":
         result = await appt_repo.find_for_lawyer(user_id, status, page, page_size)
+    else:
+        raise ForbiddenError(
+            "Listing appointments requires a client or lawyer account.")
 
     enriched = []
     for appt in result.items:
