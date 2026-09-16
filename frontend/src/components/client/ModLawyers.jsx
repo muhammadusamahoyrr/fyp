@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
 import { useSearchParams, useRouter as useNextRouter } from "next/navigation";
@@ -13,6 +13,7 @@ import { useAuth } from "@/context/AuthContext.jsx";
 import { hireableCases as hireable, isDraftCase } from "@/lib/caseStatus.js";
 import { readIntakeValue } from "@/lib/intakeStorage.js";
 import { pktToday, pktSlotToDate, pktSlotToUtcISO, isPktSlotPast, formatPkt } from "@/lib/bookingTime.js";
+import { createBookingKeyHolder } from "@/lib/bookingIdempotency.js";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), {
     ssr: false,
@@ -579,6 +580,11 @@ const ModLawyers = () => {
         setShowApptModal(true);
     };
 
+    // Survives re-renders, so a retry after a failed attempt carries the same
+    // key. A useState would work too; a ref makes it explicit that this is not
+    // rendered and must not trigger one.
+    const bookingKey = useRef(createBookingKeyHolder());
+
     const submitBooking = async () => {
         try {
             console.log("📋 Booking submission started...");
@@ -625,13 +631,21 @@ const ModLawyers = () => {
                     mode: apptMode
                 });
 
-                const { error, data } = await bookAppointment({
+                // One key for this booking INTENT, reused on every retry of it.
+                // A key minted per request would make a second click after a
+                // dropped response look like a second booking, which is exactly
+                // what idempotency is here to stop.
+                const intent = {
                     lawyer_id: apptLawyer._id,
                     case_id: getCaseId(),
                     scheduled_at,
                     duration_minutes: 60,
                     mode: apptMode,
                     notes: apptDetails || null,
+                };
+                const { error, data } = await bookAppointment({
+                    ...intent,
+                    idempotency_key: bookingKey.current.keyFor(intent),
                 });
 
                 setApptSubmitting(false);
@@ -666,6 +680,11 @@ const ModLawyers = () => {
                 time: apptTime,
                 desc: `Consultation booked · ${apptLawyer?.spec} · ${fmtFee(apptLawyer?.fee)}/hr`,
             });
+
+            // The intent is finished, so its key is retired: the next booking
+            // is a NEW booking, and reusing this key would make the server
+            // replay this appointment instead of creating that one.
+            bookingKey.current.complete();
 
             toast.show("Appointment booked! Redirecting to tracking…", "success", 2500);
             setShowApptModal(false);

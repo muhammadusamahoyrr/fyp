@@ -331,7 +331,14 @@ function ScheduleModal({ apt, onClose, onConfirm, t }) {
                 <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <Field label="Duration">
                         <select value={form.duration} onChange={e => f("duration")(e.target.value)} style={{ ...inp, cursor: "pointer" }}>
-                            {["30 min", "45 min", "60 min", "90 min"].map(d => <option key={d}>{d}</option>)}
+                            {/* Whole half-hours only. 45 minutes is gone because it
+                                DEFEATS the server's overlap guard rather than merely
+                                being unsupported: 10:00/45 claims {10:00, 10:30} and
+                                10:45/45 claims {10:45, 11:15}, so the two overlap for
+                                a real quarter of an hour while sharing no indexed
+                                slot — the unique index still exists and quietly stops
+                                catching them. The server rejects it with a 422. */}
+                            {["30 min", "60 min", "90 min", "120 min"].map(d => <option key={d}>{d}</option>)}
                         </select>
                     </Field>
                     <Field label="Meeting Type">

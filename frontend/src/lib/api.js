@@ -533,7 +533,7 @@ export async function getLawyerReviews(lawyer_id, { page = 1, page_size = 10 } =
 
 // ── Appointments ─────────────────────────────────────────────────────────────
 
-export async function bookAppointment({ lawyer_id, case_id, scheduled_at, duration_minutes, mode, notes }) {
+export async function bookAppointment({ lawyer_id, case_id, scheduled_at, duration_minutes, mode, notes, idempotency_key }) {
   return apiFetch('/appointments', {
     method: 'POST',
     body: JSON.stringify({
@@ -543,6 +543,10 @@ export async function bookAppointment({ lawyer_id, case_id, scheduled_at, durati
       duration_minutes: duration_minutes || 60,
       mode: mode || 'video',
       notes: notes || null,
+      // Identifies ONE booking intent across retries, so a dropped response
+      // does not become a second appointment. Omitted rather than sent as null
+      // when absent: the server indexes this field only when it is a string.
+      ...(idempotency_key ? { idempotency_key } : {}),
     }),
   });
 }

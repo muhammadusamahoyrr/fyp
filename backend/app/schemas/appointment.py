@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.constants import AppointmentMode, AppointmentStatus
+from app.services.appointment_slots import alignment_error, duration_error
 
 
 class BookAppointmentRequest(BaseModel):
@@ -13,6 +14,12 @@ class BookAppointmentRequest(BaseModel):
     duration_minutes: int = Field(default=60, ge=30, le=180)
     mode: AppointmentMode = AppointmentMode.VIDEO
     notes: str | None = Field(default=None, max_length=1000)
+    # A client-generated key identifying ONE booking intent, so a retry after a
+    # dropped response is recognised as the same booking rather than made into
+    # a second one. Optional: a caller that does not send one gets the old
+    # at-most-once-if-nothing-goes-wrong behaviour, which is what every existing
+    # caller already relies on.
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
 
     @field_validator("scheduled_at")
     @classmethod
@@ -37,6 +44,27 @@ class BookAppointmentRequest(BaseModel):
         v = v.astimezone(timezone.utc)
         if v <= datetime.now(timezone.utc):
             raise ValueError("Appointment must be scheduled in the future")
+        # Alignment is a CORRECTNESS precondition, not formatting. The unique
+        # slot index only prevents overlap if two overlapping appointments are
+        # guaranteed to share a generated half-hour instant, and an unaligned
+        # start breaks that guarantee silently — the index still exists, still
+        # looks right, and stops catching the overlap. See services/
+        # appointment_slots.py.
+        misaligned = alignment_error(v)
+        if misaligned:
+            raise ValueError(misaligned)
+        return v
+
+    @field_validator("duration_minutes")
+    @classmethod
+    def must_fill_whole_slots(cls, v: int) -> int:
+        # `ge=30, le=180` accepts 45, which is the value that quietly defeats
+        # the overlap guard: 10:00/45min occupies {10:00, 10:30} and 10:45/45min
+        # occupies {10:45, 11:15}, so they overlap for fifteen real minutes and
+        # share no indexed instant.
+        bad = duration_error(v)
+        if bad:
+            raise ValueError(bad)
         return v
 
 

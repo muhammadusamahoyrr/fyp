@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.constants import AppointmentStatus
+from app.core.rate_limit import limiter
 from app.dependencies import get_current_user, require_client, require_lawyer
 from app.schemas.appointment import (
     AppointmentOut,
@@ -15,8 +16,21 @@ from app.services import appointment_service
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
 
+# A booking writes a document and notifies two people, and nothing cleared
+# stale PENDING requests until Phase 4 adds expiry — so an unlimited POST lets
+# one client carpet-book a lawyer's entire diary with requests that never
+# expire, which is a denial of service against that lawyer's availability
+# rather than against the server.
+#
+# Ten a minute is well above any real booking session and far below a useful
+# flood. The repository's own limiter is used, not a new mechanism.
+_LIMIT_BOOK = "10/minute"
+
+
 @router.post("", status_code=201, response_model=AppointmentOut)
+@limiter.limit(_LIMIT_BOOK)
 async def book_appointment(
+    request: Request,
     body: BookAppointmentRequest,
     current_user: dict = Depends(require_client),
 ):
@@ -29,6 +43,7 @@ async def book_appointment(
         duration_minutes=body.duration_minutes,
         mode=body.mode,
         notes=body.notes,
+        idempotency_key=body.idempotency_key,
     )
 
 

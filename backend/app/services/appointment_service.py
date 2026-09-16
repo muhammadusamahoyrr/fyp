@@ -1,9 +1,13 @@
+import hashlib
+import json
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from pymongo.errors import DuplicateKeyError
+
+from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
 
 from app.core.constants import (
     AppointmentMode,
@@ -19,6 +23,7 @@ from app.core.exceptions import (
 from app.repositories.appointment_repo import AppointmentRepository
 from app.repositories.user_repo import UserRepository
 from app.services import appointment_transitions as transitions
+from app.services.appointment_slots import occupied_slots
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +244,97 @@ async def _notify(appt_id: str, transition: str, **kwargs) -> None:
             "error=%s", appt_id, transition, type(exc).__name__)
 
 
+# ── Booking idempotency ───────────────────────────────────────────────────────
+
+def _booking_fingerprint(
+    lawyer_id: str,
+    case_id: str | None,
+    scheduled_at: datetime,
+    duration_minutes: int,
+    mode: AppointmentMode,
+    notes: str | None,
+) -> str:
+    """A deterministic hash of the booking INTENT.
+
+    Computed here and never accepted from the caller. A client-supplied
+    fingerprint would let a retry declare itself identical to a booking it does
+    not match, which turns idempotency from a safety property into a way to be
+    handed somebody else's appointment.
+
+    Every field that changes what is being booked is included, so "same key,
+    different booking" is detectable rather than silently replayed. `notes` is
+    in because it is stored on the appointment and shown to the lawyer — a
+    retry that quietly dropped a changed note would return a receipt for an
+    appointment that does not say what the client last sent.
+
+    Normalisation is conservative: whitespace is collapsed and the instant is
+    expressed in UTC, so the same intent re-sent through a client that reformats
+    its own payload still matches. Nothing else is normalised away, because
+    every remaining difference is a real difference.
+    """
+    payload = {
+        "lawyer_id": lawyer_id,
+        "case_id": case_id or "",
+        # UTC, to the minute. The alignment rules make sub-minute precision
+        # invalid anyway, so this cannot mask a meaningful difference.
+        "scheduled_at": _as_utc(scheduled_at).replace(
+            second=0, microsecond=0).isoformat(),
+        "duration_minutes": int(duration_minutes),
+        "mode": mode.value if isinstance(mode, AppointmentMode) else str(mode),
+        "notes": " ".join((notes or "").split()),
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _booking_event_id(appt_id: str, recipient_id: str) -> str:
+    """A stable logical id for a booking notification.
+
+    Derived from the appointment and the recipient rather than generated, so a
+    replayed booking that does reach the notification path produces the SAME id
+    and `create_notification` recognises it as already delivered. Without this a
+    retry would notify the lawyer a second time about one request.
+    """
+    return f"appointment:{appt_id}:booked:{recipient_id}"
+
+
+def _duplicate_constraint(exc: DuplicateKeyError) -> str | None:
+    """Which of our constraints rejected this write, by NAME, safely.
+
+    Matched on `keyPattern` — a structural field — rather than by reading the
+    driver's error text. The message carries the collection, the index name and
+    THE DUPLICATED VALUES, which for these indexes means another client's id
+    and the exact times a lawyer is booked. None of it may reach a response, so
+    none of it is parsed into one.
+    """
+    details = getattr(exc, "details", None) or {}
+    pattern = details.get("keyPattern") or {}
+    observed = tuple(str(k) for k in pattern.keys())
+    for spec in APPOINTMENT_INDEX_REQUIREMENTS:
+        if observed == tuple(field for field, _ in spec.keys):
+            return spec.name
+    return None
+
+
+async def _replay(client_id: str, idempotency_key: str, fingerprint: str) -> dict | None:
+    """The appointment this key already created, if it matches.
+
+    Returns None when the key is unused. Raises when the key is reused for a
+    DIFFERENT booking, because silently replaying then would hand the client a
+    receipt for an appointment they did not just ask for.
+    """
+    existing = await appt_repo.find_one({
+        "client_id": client_id, "idempotency_key": idempotency_key})
+    if existing is None:
+        return None
+    if existing.get("payload_fingerprint") != fingerprint:
+        raise ConflictError(
+            "idempotency_mismatch: this idempotency_key was already used for a "
+            "different booking. Use a new key for a new appointment.")
+    return _sanitize(existing)
+
+
 async def _get_verified_lawyer(lawyer_id: str) -> dict:
     lawyer = await user_repo.find_by_id(lawyer_id)
     if not lawyer or lawyer.get("role") != "lawyer":
@@ -259,13 +355,49 @@ async def book_appointment(
     duration_minutes: int,
     mode: AppointmentMode,
     notes: str | None,
+    idempotency_key: str | None = None,
 ) -> dict:
+    fingerprint = _booking_fingerprint(
+        lawyer_id, case_id, scheduled_at, duration_minutes, mode, notes)
+
+    # THE REPLAY LOOKUP RUNS BEFORE THE CONFLICT CHECK, and the order is the
+    # whole point.
+    #
+    # Reversed, a retry finds the appointment ITS OWN first attempt created
+    # already occupying the slot, and reports "this time slot is already
+    # booked" — telling the client their booking failed at the exact moment it
+    # had in fact succeeded. That is the precise failure idempotency exists to
+    # prevent, so the check that recognises the retry has to come first.
+    if idempotency_key:
+        replayed = await _replay(client_id, idempotency_key, fingerprint)
+        if replayed is not None:
+            return replayed
+
     # Validate lawyer
     lawyer = await _get_verified_lawyer(lawyer_id)
 
-    # Availability check
+    # A friendly early error, NOT the correctness guarantee.
+    #
+    # This reads, then the insert below writes, and nothing holds the range in
+    # between — two callers can both pass this check. It stays because losing a
+    # booking to a clear message is better than losing it to a conflict, but
+    # the unique slot indexes are what actually prevent the overlap.
     has_conflict = await appt_repo.has_conflict(lawyer_id, scheduled_at, duration_minutes)
     if has_conflict:
+        # The conflicting appointment may be THIS CALLER'S OWN first attempt.
+        #
+        # The replay lookup above ran before the insert that beat us existed:
+        # two concurrent retries both find no key, both continue, one commits,
+        # and the other arrives here to be told the slot is taken — by itself.
+        # Checking the key again is what turns that into the replay it is.
+        #
+        # This is the same hazard as the ordering rule above, in its concurrent
+        # form, and it needs its own answer because the friendly pre-check sits
+        # between the lookup and the index that would otherwise catch it.
+        if idempotency_key:
+            replayed = await _replay(client_id, idempotency_key, fingerprint)
+            if replayed is not None:
+                return replayed
         raise AppValidationError(
             "This time slot is already booked. Please choose a different time."
         )
@@ -304,6 +436,15 @@ async def book_appointment(
         # appointment after the booking zone ever changes would silently
         # reinterpret it in the new one.
         "timezone":         BOOKING_TZ_NAME,
+        # The discrete half-hours this appointment claims. What the unique
+        # multikey indexes compare, and therefore what actually prevents a
+        # double booking — see services/appointment_slots.py.
+        "occupied_slots":   occupied_slots(scheduled_at, duration_minutes),
+        # Present only when the caller supplied one: the idempotency index is
+        # partial on `$type: "string"`, so a None here would be indexed as a
+        # null and collide with every other keyless booking by this client.
+        **({"idempotency_key": idempotency_key,
+            "payload_fingerprint": fingerprint} if idempotency_key else {}),
         "notes":            notes,
         "lawyer_notes":     None,
         "cancel_reason":    None,
@@ -314,11 +455,53 @@ async def book_appointment(
     }
     try:
         await appt_repo.insert(doc)
-    except DuplicateKeyError:
-        # Lost the race: another booking claimed this exact lawyer + slot first.
-        raise AppValidationError(
-            "This time slot was just booked. Please choose a different time."
-        )
+    except DuplicateKeyError as exc:
+        # The atomic guarantee firing. Which constraint it was decides whether
+        # this is a retry to be replayed or a genuine clash to be reported, and
+        # it is identified structurally — the driver's message names the index
+        # AND the duplicated values, which here are another client's id and the
+        # exact hours a lawyer is booked.
+        constraint = _duplicate_constraint(exc)
+
+        # THE REPLAY CHECK COMES BEFORE THE CONSTRAINT IS INTERPRETED, and it
+        # is not an optimisation.
+        #
+        # Two identical retries racing do NOT usually collide on the
+        # idempotency index. They carry the same client and the same slots, so
+        # whichever unique index Mongo evaluates first is the one that reports
+        # the duplicate — in practice `uniq_appointment_client_slot`, because a
+        # client booking the same hour twice is what a retry looks like from
+        # the outside. Branching on the constraint name would therefore tell a
+        # client "you already have an appointment during this time" about their
+        # OWN booking, which is true, useless, and the failure this whole
+        # mechanism exists to prevent.
+        #
+        # So: if this caller holds the key, find out whether the row that beat
+        # them is theirs. If it is, it is a success. `_replay` still raises for
+        # the same key with a different payload.
+        if idempotency_key:
+            replayed = await _replay(client_id, idempotency_key, fingerprint)
+            if replayed is not None:
+                return replayed
+
+        if constraint == "uniq_appointment_client_slot":
+            # The half `has_conflict` never checked: the client's OWN diary.
+            raise ConflictError(
+                "You already have an appointment during this time. Please "
+                "choose a different time.")
+
+        if constraint == "uniq_appointment_lawyer_slot":
+            raise ConflictError(
+                "This time slot was just booked. Please choose a different time.")
+
+        # An unrecognised constraint. Report a conflict without guessing what
+        # it was, and log the index NAME only — never the exception, whose
+        # message carries the values that collided.
+        logger.warning(
+            "appointment_insert_duplicate_unmapped client_id=%s constraint=%s",
+            client_id, constraint or "unknown")
+        raise ConflictError(
+            "This booking could not be completed. Please try again.")
 
     # Notify both parties
     client = await user_repo.find_by_id(client_id)
@@ -337,6 +520,10 @@ async def book_appointment(
         title="New Appointment Request",
         body=f"{client_name} booked a {mode.value} consultation for {slot_str}.",
         payload={"appointment_id": doc["_id"]},
+        # Stable and derived, so a replay cannot produce a second one. The id
+        # is for DEDUP, not durability — delivery remains best-effort until a
+        # relay exists that does not depend on the DOCUMENTS_V2 flag.
+        logical_event_id=_booking_event_id(doc["_id"], lawyer_id),
     )
     await _notify(
         doc["_id"], "book",
@@ -345,6 +532,7 @@ async def book_appointment(
         title="Appointment Requested",
         body=f"Your appointment with {lawyer_name} on {slot_str} is pending confirmation.",
         payload={"appointment_id": doc["_id"]},
+        logical_event_id=_booking_event_id(doc["_id"], client_id),
     )
 
     return _sanitize(doc)

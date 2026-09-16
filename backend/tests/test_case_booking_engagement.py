@@ -207,9 +207,16 @@ async def test_a_slot_race_is_refused_by_the_unique_index(parties, monkeypatch):
 
     `has_conflict` is neutralised so the booking reaches the insert believing
     the slot is free — exactly the state two concurrent requests are both in
-    before either has written. Only `uniq_pending_slot` can decide it, and the
+    before either has written. Only the unique index can decide it, and the
     message proves which guard fired.
+
+    Now a ConflictError (409) rather than an AppValidationError (422), and the
+    guard is `uniq_appointment_lawyer_slot` rather than the superseded
+    `uniq_pending_slot`. A slot clash IS a conflict: nothing the caller sent is
+    invalid, the world moved under them, and re-reading availability is the fix
+    — the same distinction Phase 2 drew for stale transitions.
     """
+    from app.core.exceptions import ConflictError
     from app.repositories.appointment_repo import AppointmentRepository
 
     when = _slot()
@@ -220,7 +227,7 @@ async def test_a_slot_race_is_refused_by_the_unique_index(parties, monkeypatch):
 
     monkeypatch.setattr(AppointmentRepository, "has_conflict", _no_conflict)
 
-    with pytest.raises(AppValidationError, match="was just booked"):
+    with pytest.raises(ConflictError, match="was just booked"):
         await _book(parties, when)
 
 

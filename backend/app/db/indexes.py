@@ -8,6 +8,9 @@ from app.core.constants import (
     AppointmentStatus,
     EngagementStatus,
 )
+from app.db.appointment_index_spec import (
+    APPOINTMENT_INDEX_REQUIREMENTS,
+)
 from app.db.collections import (
     get_agreements_col,
     get_auth_sessions_col,
@@ -254,6 +257,85 @@ async def enforce_v2_correctness_indexes() -> list[IndexProblem]:
         + f". ({len(correctness)} of {len(problems)} are correctness "
         "guarantees.) Run `python -m app.db.v2_index_preflight` for the exact "
         "commands, or disable DOCUMENTS_V2.")
+
+
+# ── APPOINTMENT INDEX VALIDATION ──────────────────────────────────────────────
+#
+# Separate from the V2 machinery above, and unconditional, because appointments
+# are ALREADY LIVE and have no flag to hide behind. See
+# `appointment_index_spec` for why that difference matters.
+
+
+class MissingAppointmentIndexes(RuntimeError):
+    """A constraint the booking path depends on is not in force."""
+
+
+async def validate_appointment_indexes() -> list[IndexProblem]:
+    """Every appointment requirement that is not satisfied. Reads only.
+
+    An empty list means overlap and idempotency are genuinely enforced. A
+    non-empty one means the booking code is writing as though they are.
+    """
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    problems: list[IndexProblem] = []
+
+    collections = sorted({s.collection for s in APPOINTMENT_INDEX_REQUIREMENTS})
+    info_by_collection: dict[str, dict] = {}
+    for collection in collections:
+        try:
+            info_by_collection[collection] = await db[collection].index_information()
+        except Exception as exc:  # noqa: BLE001
+            # The class, never the message: a driver connection error carries
+            # the host, the port and sometimes the credentials.
+            problems.append(IndexProblem(
+                CODE_UNREADABLE, collection, "*", kind=CORRECTNESS,
+                message=("index metadata could not be read "
+                         f"(error_class={type(exc).__name__}); check database "
+                         "connectivity and the application's read permissions")))
+
+    for spec in APPOINTMENT_INDEX_REQUIREMENTS:
+        info = info_by_collection.get(spec.collection)
+        if info is None:
+            continue   # already reported as unreadable
+        problem = evaluate(spec, info)
+        if problem is not None:
+            problems.append(problem)
+
+    return problems
+
+
+async def enforce_appointment_correctness_indexes() -> list[IndexProblem]:
+    """Raise when a booking guarantee is not actually in force.
+
+    UNCONDITIONAL — there is no flag, and no "nothing depends on it yet" state.
+    Every booking that runs while one of these is missing may be a double
+    booking, and nothing in the system will say so: the write succeeds, the two
+    appointments look normal, and the collision is discovered by whoever turns
+    up to the second one.
+
+    Refusing to start is the lesser failure, and it is loud. This is NOT wired
+    into application startup by this change — see the activation sequence in
+    the preflight module, which requires the backfill to have run first. Wiring
+    it in before then would refuse to boot for a reason the operator has not
+    yet been given the chance to fix.
+
+    Every part of the message is generated from the SPECIFICATION and the
+    problem codes — a fixed vocabulary, a collection name, an index name. No
+    Mongo response body reaches it, so it is safe to log, to return from a
+    readiness probe, and to paste into a ticket.
+    """
+    problems = await validate_appointment_indexes()
+    if not problems:
+        return []
+
+    detail = "; ".join(str(p) for p in problems)
+    raise MissingAppointmentIndexes(
+        "Appointment correctness indexes are not in place, so overlap and "
+        "idempotency are NOT enforced: " + detail
+        + ". Run `python -m app.db.appointment_slot_preflight` for the exact "
+        "commands and the state of the data.")
 
 
 async def create_all_indexes() -> None:
@@ -660,12 +742,22 @@ async def _appointments_indexes() -> None:
         IndexModel([("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)]),
         IndexModel([("created_at", DESCENDING)]),
     ])
-    # Atomic guard: at most one PENDING appointment per lawyer + exact start time.
-    # Closes the concurrent-booking race (two requests both passing has_conflict).
-    await _try_unique_partial(
-        col, [("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)],
-        "uniq_pending_slot", AppointmentStatus.PENDING.value,
-    )
+
+    # The correctness guarantees come from the canonical specification, and
+    # NOT through `_try_unique_partial`.
+    #
+    # That helper logs and continues when creation fails, which would leave the
+    # overlap guard silently absent on a collection whose write path assumes it
+    # — the failure then surfaces as two clients in one appointment slot. These
+    # are created directly so a failure raises, and `enforce_appointment_
+    # correctness_indexes` is what decides whether that is fatal.
+    #
+    # `uniq_pending_slot` is deliberately NO LONGER CREATED: exact-start only,
+    # and scoped to PENDING so confirming an appointment released its slot. It
+    # is not dropped here — dropping an index in application startup is an
+    # operator's decision, and the preflight prints the command.
+    await col.create_indexes(
+        [spec.model() for spec in APPOINTMENT_INDEX_REQUIREMENTS])
 
 
 async def _engagements_indexes() -> None:

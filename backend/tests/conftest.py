@@ -429,6 +429,45 @@ async def ensure_app_indexes(db) -> None:
             "would pass without them:\n  " + "\n  ".join(skipped)
         )
 
+    # Superseded appointment indexes, dropped ON THE TEST DATABASE ONLY.
+    #
+    # `_appointments_indexes` no longer CREATES `uniq_pending_slot`, but a test
+    # database built by an earlier run still carries it — and it is not inert.
+    # Being unique on (lawyer_id, scheduled_at) it rejects the second of two
+    # IDENTICAL IDEMPOTENT RETRIES, which are by definition the same lawyer at
+    # the same start time. So a stale copy turns a replay into a conflict, and
+    # tests would be measuring a database that no longer matches the design.
+    #
+    # Production does this through the operator-run preflight command, inside
+    # the write freeze, never automatically: dropping an index is irreversible
+    # without another build. Here the drop is safe and necessary, and it is the
+    # test-side equivalent of the rollout step.
+    from app.db.appointment_index_spec import OBSOLETE_INDEXES
+
+    for collection, index_name, _why in OBSOLETE_INDEXES:
+        try:
+            await db[collection].drop_index(index_name)
+        except Exception:  # noqa: BLE001 - absent is the expected state
+            pass
+
+    # CREATION IS NOT THE SAME CHECK AS VALIDATION.
+    #
+    # The block above catches an index that was not created. It cannot catch
+    # one that WAS created and is wrong — the classic case being an index left
+    # over from an earlier definition, which Mongo keeps in place while
+    # refusing the new options. The appointment overlap guards are now the
+    # mechanism preventing double-booking rather than a nicety, so the fixture
+    # asks the canonical specification whether what exists is what was
+    # specified, instead of assuming a silent create means a correct index.
+    problems = await _indexes.validate_appointment_indexes()
+    if problems:
+        raise RuntimeError(
+            "appointment correctness indexes are not valid on the test "
+            "database, so overlap and idempotency are NOT enforced and any "
+            "test relying on them would pass without them:\n  "
+            + "\n  ".join(str(p) for p in problems)
+        )
+
     _APP_INDEXES_BUILT.add(db.name)
 
 
