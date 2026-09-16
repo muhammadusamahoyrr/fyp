@@ -1,6 +1,7 @@
 'use client';
 // Lawyer Dashboard Page — paste your code here
 import { useTheme } from "./theme.js";
+import { isPktToday, formatPkt } from "@/lib/bookingTime.js";
 import { useCase } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { Card, Badge, Divider } from "./components.jsx";
@@ -59,12 +60,14 @@ function DashboardPage() {
     // "Court Hearing 10:00 AM", "Client Meeting 12:30 PM" and so on — shown to
     // a lawyer as their actual agenda. A fabricated schedule in a legal product
     // is something a user can plan a day around.
-    const _today = new Date().toDateString();
+    // "Today" is a PAKISTAN day. `toDateString()` is the browser's, so a
+    // lawyer travelling — or a machine with the wrong zone — got yesterday's
+    // or tomorrow's agenda presented as today's.
     const events = appts
-        .filter(a => a.scheduled_at && new Date(a.scheduled_at).toDateString() === _today)
+        .filter(a => a.scheduled_at && isPktToday(a.scheduled_at))
         .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))
         .map(a => ({
-            time: new Date(a.scheduled_at).toLocaleTimeString("en-PK", { hour: "numeric", minute: "2-digit" }),
+            time: formatPkt(a.scheduled_at, { hour: "numeric", minute: "2-digit" }),
             title: a.client_name ? `Consultation — ${a.client_name}` : "Consultation",
             color: a.status === "confirmed" ? "#3EECD6" : "#FFBE45",
             page: "appointments",

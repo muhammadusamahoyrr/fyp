@@ -1,5 +1,6 @@
 'use client';
 import React from "react";
+import { formatPkt } from "@/lib/bookingTime.js";
 import { useT } from "./theme.js";
 import Ic from "./Ic.jsx";
 import { Card, Badge } from "@/components/shared/shared.jsx";
@@ -40,7 +41,7 @@ const ModOverview = () => {
     const apptCount = appointments.length;
     const nextAppt = appointments[0];
     const nextApptLabel = nextAppt
-        ? new Date(nextAppt.scheduled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        ? formatPkt(nextAppt.scheduled_at, { month: "short", day: "numeric" })
         : null;
 
     // Only tiles backed by a real number get a bar, and the bar is derived from
@@ -152,8 +153,8 @@ const ModOverview = () => {
                         <STitle icon="cal" sub="Events & deadlines">Upcoming</STitle>
                         {upcomingAppts.length > 0 ? upcomingAppts.map((a, i) => {
                             const apptDate = new Date(a.scheduled_at);
-                            const label = apptDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                            const time = apptDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+                            const label = formatPkt(apptDate, { month: "short", day: "numeric" });
+                            const time = formatPkt(apptDate, { hour: "2-digit", minute: "2-digit" });
                             const accentColor = a.mode === "court" ? t.danger : a.mode === "video" ? t.info : t.primary;
                             const title = a.mode === "court" ? "Court Hearing"
                                 : a.mode === "video" ? "Video Meeting"

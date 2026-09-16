@@ -1,5 +1,9 @@
 'use client';
 import { useState, useEffect } from "react";
+import {
+    formatPkt, isPktToday, pktHourMinute, pktDayKey, pktHour,
+    pktWeekDayKeys, pktToday, dayOfMonth,
+} from "@/lib/bookingTime.js";
 import { useTheme } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
@@ -20,14 +24,14 @@ import {
 const CAL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const CAL_HOURS = ["9:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
 
-// Current week (Mon–Sun) as Date objects — calendar shows real appointments in this window
-const _weekDates = (() => {
-    const now = new Date();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-    return CAL_DAYS.map((_, i) => { const d = new Date(monday); d.setDate(monday.getDate() + i); return d; });
-})();
-const _isToday = (d) => d.toDateString() === new Date().toDateString();
+// Current week (Mon-Sun) as PAKISTAN day keys. A calendar column is a calendar
+// day, not an instant — building these from the browser's `new Date()` put the
+// column headers on one clock and the appointments inside them on another.
+const _weekDayKeys = pktWeekDayKeys();
+// A PAKISTAN day, not the browser's. Display was fixed first; grouping and
+// the "Today" tally read the same instant through a different clock and so
+// could still disagree with the card right next to them.
+const _isToday = (d) => isPktToday(d);
 
 // ── Status badge styles — high contrast, clearly visible ─────
 const STATUS_STYLES = {
@@ -354,7 +358,7 @@ function AppointmentsPage() {
     const bookedToday = new Set(
         appointments
             .filter(a => a.at && _isToday(a.at) && !DID_NOT_HAPPEN.has(a.status))
-            .map(a => `${String(a.at.getHours()).padStart(2, "0")}:${String(a.at.getMinutes()).padStart(2, "0")}`)
+            .map(a => pktHourMinute(a.at))
     );
 
     const mapApiAppt = (a) => ({
@@ -363,8 +367,13 @@ function AppointmentsPage() {
         client: a.client_name || "Client",
         initials: (a.client_name || "??").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
         purpose: a.notes || "Consultation",
-        date: new Date(a.scheduled_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-        time: new Date(a.scheduled_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        // Rendered in PKT, not the browser's zone. The stored instant used to
+        // come back from Mongo without an offset, which JS then read as LOCAL
+        // time — so an appointment displayed correctly when it was created and
+        // five hours early after a refresh, and the lawyer and the client could
+        // read two different clock faces off the same row.
+        date: formatPkt(a.scheduled_at, { month: "short", day: "numeric", year: "numeric" }),
+        time: formatPkt(a.scheduled_at, { hour: "2-digit", minute: "2-digit" }),
         duration: `${a.duration_minutes} min`,
         type: a.mode === "video" ? "Video Call" : a.mode === "phone" ? "Phone Call" : "In-Person",
         // `no_show` is NOT "Cancelled". It was mapped that way, which told the
@@ -851,7 +860,7 @@ function AppointmentsPage() {
                                                 {CAL_DAYS.map((d, i) => (
                                                     <th key={d} style={{ padding: "10px 6px", borderBottom: `1px solid ${t.border}`, borderRight: `1px solid ${t.border}`, background: t.surface, textAlign: "center", minWidth: 95 }}>
                                                         <div style={{ fontSize: 10, color: t.textFaint, fontWeight: 600, textTransform: "uppercase" }}>{d} Day</div>
-                                                        <div style={{ fontSize: 18, fontWeight: 700, color: _isToday(_weekDates[i]) ? t.primary : t.text, marginTop: 1 }}>{_weekDates[i].getDate()}</div>
+                                                        <div style={{ fontSize: 18, fontWeight: 700, color: _weekDayKeys[i] === pktToday() ? t.primary : t.text, marginTop: 1 }}>{dayOfMonth(_weekDayKeys[i])}</div>
                                                     </th>
                                                 ))}
                                             </tr>
@@ -863,8 +872,8 @@ function AppointmentsPage() {
                                                     {CAL_DAYS.map((_, di) => {
                                                         const evs = appointments.filter(a =>
                                                             a.at && !DID_NOT_HAPPEN.has(a.status) &&
-                                                            a.at.toDateString() === _weekDates[di].toDateString() &&
-                                                            a.at.getHours() === parseInt(hr)
+                                                            pktDayKey(a.at) === _weekDayKeys[di] &&
+                                                            pktHour(a.at) === parseInt(hr)
                                                         );
                                                         return (
                                                             <td key={di} style={{ padding: 3, borderRight: `1px solid ${t.border}`, borderBottom: `1px solid ${t.border}`, verticalAlign: "top", height: 50 }}>

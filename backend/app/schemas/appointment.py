@@ -16,6 +16,24 @@ class BookAppointmentRequest(BaseModel):
     @field_validator("scheduled_at")
     @classmethod
     def must_be_future(cls, v: datetime) -> datetime:
+        # A timestamp with no offset does not name an instant, so this used to
+        # raise TypeError comparing it to an aware `now`. Pydantic v2 wraps
+        # ValueError into a 422 but lets TypeError ESCAPE — so every offsetless
+        # booking was answered with a 500. The web client is accidentally safe
+        # (`toISOString()` always emits `Z`); a mobile client or a raw
+        # datetime-local value is not.
+        #
+        # It is refused rather than assumed. Guessing a zone here would silently
+        # book an appointment five hours from where the client meant it, and the
+        # client would not find out until they missed it. Legacy timestamps
+        # ALREADY inside the system are read as UTC (see ai/case_context.py);
+        # that leniency is for values this system itself wrote, never for input.
+        if v.tzinfo is None or v.utcoffset() is None:
+            raise ValueError(
+                "scheduled_at must include a UTC offset "
+                "(e.g. 2026-09-20T10:00:00Z or 2026-09-20T15:00:00+05:00)"
+            )
+        v = v.astimezone(timezone.utc)
         if v <= datetime.now(timezone.utc):
             raise ValueError("Appointment must be scheduled in the future")
         return v
@@ -60,6 +78,10 @@ class AppointmentOut(BaseModel):
     duration_minutes: int | None = None
     status: str | None = None
     mode: str | None = None
+    # The zone the appointment's wall-clock time was chosen in. Always present
+    # on a read: new rows store it, and `_sanitize` defaults legacy rows to
+    # Asia/Karachi at the read boundary rather than migrating them.
+    timezone: str | None = None
     notes: str | None = None
     lawyer_notes: str | None = None
     cancel_reason: str | None = None

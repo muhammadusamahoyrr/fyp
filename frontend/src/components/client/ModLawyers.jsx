@@ -12,6 +12,7 @@ import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppoin
 import { useAuth } from "@/context/AuthContext.jsx";
 import { hireableCases as hireable, isDraftCase } from "@/lib/caseStatus.js";
 import { readIntakeValue } from "@/lib/intakeStorage.js";
+import { pktToday, pktSlotToDate, pktSlotToUtcISO, isPktSlotPast, formatPkt } from "@/lib/bookingTime.js";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), {
     ssr: false,
@@ -355,7 +356,9 @@ const ModLawyers = () => {
     const isSlotBooked = (timeStr) => {
         if (!apptDate || !bookedSlots.length) return false;
         // Build UTC timestamp for the slot (local → ISO → UTC via Date)
-        const slotStart = new Date(`${apptDate}T${timeStr}:00`);
+        // PKT wall-clock, not the browser's zone.
+        const slotStart = pktSlotToDate(apptDate, timeStr);
+        if (!slotStart) return false;
         const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
         return bookedSlots.some(b => {
             // Ensure strings without 'Z' are treated as UTC (backend now always sends Z)
@@ -368,7 +371,7 @@ const ModLawyers = () => {
 
     const isSlotPast = (timeStr) => {
         if (!apptDate) return false;
-        return new Date(`${apptDate}T${timeStr}:00`) <= new Date();
+        return isPktSlotPast(apptDate, timeStr);
     };
 
     // Reads the same user-scoped key ModIntake writes. It used to read a
@@ -568,7 +571,7 @@ const ModLawyers = () => {
     const openBooking = (lawyer) => {
         setApptLawyer(lawyer);
         selectLawyer(lawyer);
-        setApptDate(new Date().toISOString().split("T")[0]); // default to today
+        setApptDate(pktToday()); // default to today IN PAKISTAN
         setApptTime("10:00");
         setApptDetails("");
         setApptMode("video");
@@ -600,7 +603,7 @@ const ModLawyers = () => {
             });
 
             // Guard: reject past date+time before hitting the API
-            if (new Date(`${apptDate}T${apptTime}:00`) <= new Date()) {
+            if (isPktSlotPast(apptDate, apptTime)) {
                 toast.show("That time slot has already passed. Please select a future time.", "warn", 3500);
                 return;
             }
@@ -613,7 +616,7 @@ const ModLawyers = () => {
             let bookingData = null;
             if (isApiLawyer) {
                 setApptSubmitting(true);
-                const scheduled_at = new Date(`${apptDate}T${apptTime}:00`).toISOString();
+                const scheduled_at = pktSlotToUtcISO(apptDate, apptTime);
 
                 console.log("🔗 Calling API with:", {
                     lawyer_id: apptLawyer._id,
@@ -659,7 +662,7 @@ const ModLawyers = () => {
                 type: "hearing",
                 urgency: "upcoming",
                 title: `Appointment — ${apptLawyer?.name}`,
-                date: new Date(apptDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+                date: formatPkt(pktSlotToDate(apptDate, apptTime), { month: "short", day: "numeric" }),
                 time: apptTime,
                 desc: `Consultation booked · ${apptLawyer?.spec} · ${fmtFee(apptLawyer?.fee)}/hr`,
             });
@@ -899,7 +902,7 @@ const ModLawyers = () => {
                     {/* Date */}
                     <div style={{ marginBottom: 14 }}>
                         <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Date *</label>
-                        <input type="date" value={apptDate} min={new Date().toISOString().split("T")[0]} onChange={e => setApptDate(e.target.value)}
+                        <input type="date" value={apptDate} min={pktToday()} onChange={e => setApptDate(e.target.value)}
                             style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${apptDate ? t.primary : t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
                     </div>
 

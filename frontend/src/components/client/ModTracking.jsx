@@ -5,6 +5,7 @@ import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useCase } from "./CaseContext.jsx";
 import { confirmedCases } from "@/lib/caseStatus.js";
 import { listCases, getCaseTimeline, listAppointments, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt } from "@/lib/api.js";
+import { formatPkt } from "@/lib/bookingTime.js";
 
 // ─── DATA ─────────────────────────────────────────────────────────────────────
 // Nothing is hardcoded here on purpose. This block used to hold five arrays of
@@ -1674,9 +1675,11 @@ function PageAppointments({ appointments, loading, t }) {
             <div style={{ fontSize: 20, fontWeight: 800, color: t.text, marginBottom: 4 }}>{T("Your Appointments", "آپ کی ملاقاتیں")}</div>
             {appointments.map(appt => {
                 const s = statusStyle[appt.status] || statusStyle.pending;
-                const date = new Date(appt.scheduled_at);
-                const dateStr = date.toLocaleDateString("en-PK", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
-                const timeStr = date.toLocaleTimeString("en-PK", { hour: "2-digit", minute: "2-digit" });
+                // PKT explicitly — `toLocale*` without a timeZone renders in
+                // whatever zone the browser is in, which is not the zone this
+                // appointment was booked in.
+                const dateStr = formatPkt(appt.scheduled_at, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+                const timeStr = formatPkt(appt.scheduled_at, { hour: "2-digit", minute: "2-digit" });
                 return (
                     <Card key={appt.id} t={t} style={{ padding: 0 }}>
                         {/* Status strip */}

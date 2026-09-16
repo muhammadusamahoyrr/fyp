@@ -1,5 +1,6 @@
 import secrets
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from pymongo.errors import DuplicateKeyError
 
@@ -18,10 +19,65 @@ user_repo = UserRepository()
 # Clients must cancel at least this many minutes before the appointment
 _CANCEL_CUTOFF_MINUTES = 120
 
+# The booking zone is SERVER-OWNED for this release, not client-supplied.
+#
+# Every party to an appointment is in Pakistan today, and a client-sent zone is
+# one more thing a caller can get wrong on a value that decides when a lawyer is
+# expected to be in a room. Pakistan also abolished DST in 2009, so PKT is UTC+5
+# year-round and the ambiguous / nonexistent local-time cases are EMPTY rather
+# than merely rare — none of the wall-clock arithmetic below can land in a gap
+# or a fold.
+#
+# This is temporary by design. The Overseas Desk means non-PK clients
+# eventually, and the DST rules this release gets to ignore must be written
+# before a second zone is accepted.
+BOOKING_TZ_NAME = "Asia/Karachi"
+BOOKING_TZ = ZoneInfo(BOOKING_TZ_NAME)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """A stored instant as an aware UTC datetime.
+
+    Rows written before `tz_aware=True` decode naive. They were always UTC —
+    every writer here uses `datetime.now(timezone.utc)` — so they are read as
+    UTC rather than migrated. Requiring a production backfill just to READ an
+    existing appointment would turn a code fix into an operations event.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _local(value: datetime) -> datetime:
+    """A stored instant as Pakistan wall-clock time."""
+    return _as_utc(value).astimezone(BOOKING_TZ)
+
+
+def _slot_text(value: datetime) -> str:
+    """How an appointment time is said to a human.
+
+    Was `"%d %b %Y at %H:%M UTC"`, which told a Pakistani client their 3 pm
+    consultation was at 10:00 — a correct instant, named in a zone nobody in
+    this product thinks in, five hours from the time they had just typed.
+    """
+    return _local(value).strftime("%d %b %Y at %H:%M PKT")
+
 
 def _sanitize(appt: dict) -> dict:
     appt = dict(appt)
     appt["id"] = appt.pop("_id", appt.get("id", ""))
+    # Rows written before the zone was recorded carry no `timezone`. They were
+    # all booked in Pakistan — that was the only zone this product has ever had
+    # — so the field is DEFAULTED AT THE READ BOUNDARY rather than migrated.
+    #
+    # `_sanitize` already copies the dict, so this cannot write back to the
+    # stored document: a legacy row stays legacy in the database and a later
+    # backfill (if one is ever wanted) still sees the true set of rows that
+    # never had the field. The client is told the zone either way, so nothing
+    # downstream has to guess.
+    appt.setdefault("timezone", BOOKING_TZ_NAME)
+    if not appt.get("timezone"):
+        appt["timezone"] = BOOKING_TZ_NAME
     return appt
 
 
@@ -84,6 +140,12 @@ async def book_appointment(
         "duration_minutes": duration_minutes,
         "status":           AppointmentStatus.PENDING.value,
         "mode":             mode.value,
+        # The zone the wall-clock time was chosen in, recorded WITH the
+        # appointment. `scheduled_at` is an instant and says nothing about the
+        # clock face the client read — so without this, rendering an old
+        # appointment after the booking zone ever changes would silently
+        # reinterpret it in the new one.
+        "timezone":         BOOKING_TZ_NAME,
         "notes":            notes,
         "lawyer_notes":     None,
         "cancel_reason":    None,
@@ -104,7 +166,7 @@ async def book_appointment(
     client = await user_repo.find_by_id(client_id)
     client_name = (client or {}).get("full_name", "Client")
     lawyer_name = lawyer.get("full_name", "Lawyer")
-    slot_str = scheduled_at.strftime("%d %b %Y at %H:%M UTC")
+    slot_str = _slot_text(scheduled_at)
 
     from app.services.notification_service import create_notification
     await create_notification(
@@ -138,7 +200,7 @@ async def confirm_appointment(appt_id: str, lawyer_id: str) -> dict:
 
     client = await user_repo.find_by_id(appt["client_id"])
     lawyer = await user_repo.find_by_id(lawyer_id)
-    slot_str = appt["scheduled_at"].strftime("%d %b %Y at %H:%M UTC")
+    slot_str = _slot_text(appt["scheduled_at"])
 
     from app.services.notification_service import create_notification
     await create_notification(
@@ -175,7 +237,12 @@ async def cancel_appointment(
 
     # Clients cannot cancel within the cutoff window
     if user_role == "client":
-        cutoff = appt["scheduled_at"] - timedelta(minutes=_CANCEL_CUTOFF_MINUTES)
+        # `_as_utc` is what makes this line run at all. `scheduled_at` came back
+        # naive from Mongo, so comparing it to an aware `now` raised TypeError
+        # and every client cancellation answered 500 — the cutoff this enforces
+        # had never once been evaluated. It was unreachable from the UI too, so
+        # nothing reported it.
+        cutoff = _as_utc(appt["scheduled_at"]) - timedelta(minutes=_CANCEL_CUTOFF_MINUTES)
         if datetime.now(timezone.utc) >= cutoff:
             raise AppValidationError(
                 f"Appointments can only be cancelled at least "
@@ -189,7 +256,7 @@ async def cancel_appointment(
     await appt_repo.update_status(appt_id, AppointmentStatus.CANCELLED, extra)
 
     # Notify the other party
-    slot_str = appt["scheduled_at"].strftime("%d %b %Y at %H:%M UTC")
+    slot_str = _slot_text(appt["scheduled_at"])
     other_id = appt["lawyer_id"] if user_role == "client" else appt["client_id"]
     canceller_name = (await user_repo.find_by_id(user_id) or {}).get("full_name", user_role.title())
 
@@ -308,15 +375,23 @@ async def get_availability(lawyer_id: str, date_str: str) -> dict:
     except ValueError:
         raise AppValidationError("date must be in YYYY-MM-DD format")
 
-    day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+    # The requested day is a PAKISTAN calendar day, not a UTC one.
+    #
+    # `date_str` comes from a date picker the client reads as their own day.
+    # Building the window naively made it 00:00-24:00 UTC, which in PKT is
+    # 05:00 to 05:00 the next morning: an appointment in the first five hours of
+    # the local day fell OUTSIDE the window and came back as free. The client
+    # then picked a slot the booking check refused a moment later, which looks
+    # like a broken product rather than a busy lawyer.
+    day_start = day.replace(hour=0, minute=0, second=0, microsecond=0,
+                            tzinfo=BOOKING_TZ)
     day_end = day_start + timedelta(days=1)
 
-    booked = await appt_repo.booked_slots_on_date(lawyer_id, day_start, day_end)
+    booked = await appt_repo.booked_slots_on_date(
+        lawyer_id, day_start.astimezone(timezone.utc), day_end.astimezone(timezone.utc))
 
     def _to_utc_iso(dt: datetime) -> str:
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.isoformat().replace("+00:00", "Z")
+        return _as_utc(dt).isoformat().replace("+00:00", "Z")
 
     slots = [
         {
