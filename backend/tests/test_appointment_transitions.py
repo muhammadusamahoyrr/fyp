@@ -611,7 +611,11 @@ async def test_a_lawyer_may_cancel_inside_the_window_a_client_may_not(parties):
     """The cutoff is the CLIENT's rule. It had no test on either side."""
     from app.services import appointment_service
 
-    soon = datetime.now(timezone.utc) + timedelta(minutes=30)
+    # Aligned, because the service now refuses sub-minute precision on a
+    # direct call — an unaligned row is invisible to the overlap guard. Still
+    # comfortably inside the two-hour cutoff, which is what this pins.
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=90)).replace(
+        minute=0, second=0, microsecond=0)
     appt = await _book(parties, soon)
 
     with pytest.raises(AppValidationError, match="hours before"):

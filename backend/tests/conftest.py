@@ -433,10 +433,10 @@ async def ensure_app_indexes(db) -> None:
     #
     # `_appointments_indexes` no longer CREATES `uniq_pending_slot`, but a test
     # database built by an earlier run still carries it — and it is not inert.
-    # Being unique on (lawyer_id, scheduled_at) it rejects the second of two
-    # IDENTICAL IDEMPOTENT RETRIES, which are by definition the same lawyer at
-    # the same start time. So a stale copy turns a replay into a conflict, and
-    # tests would be measuring a database that no longer matches the design.
+    # Being unique on (lawyer_id, scheduled_at) and scoped to PENDING, it
+    # refuses writes the new indexes allow: a second PENDING booking at the
+    # same lawyer and instant. Tests would then be measuring a database
+    # enforcing a rule the code no longer has.
     #
     # Production does this through the operator-run preflight command, inside
     # the write freeze, never automatically: dropping an index is irreversible
@@ -449,6 +449,16 @@ async def ensure_app_indexes(db) -> None:
             await db[collection].drop_index(index_name)
         except Exception:  # noqa: BLE001 - absent is the expected state
             pass
+
+    # The appointment correctness indexes are created EXPLICITLY, because
+    # production no longer creates them at startup.
+    #
+    # That is the point of the split: a deploy that builds these would repair
+    # correctness state as a side effect of restarting, and nobody could then
+    # tell whether the guarantee held yesterday. Tests need the same indexes
+    # production will have, so they ask for them by name — the way an operator
+    # does, on a database they own.
+    await _indexes.create_appointment_correctness_indexes()
 
     # CREATION IS NOT THE SAME CHECK AS VALIDATION.
     #

@@ -20,21 +20,36 @@ the evidence used to approve the fix.
 WHAT IT DOES NOT COVER
 
 Index readiness is a necessary condition, not permission. The activation
-sequence is ordered, and the order is not negotiable:
+sequence is ordered, and each step is where it is for a reason:
 
-    booking write freeze
-      -> preflight (this)
-      -> resolve the rows it reports
-      -> backfill occupied_slots on active appointments
-      -> create the indexes
-      -> validate
-      -> deploy the slot-writing code
-      -> reopen booking
+    1.  keep the OLD app running                (it is what still serves)
+    2.  freeze booking writes
+    3.  preflight (this) — inspect
+    4.  repair the rows it reports
+    5.  backfill_occupied_slots(dry_run=True)   — review the plan
+    6.  backfill_occupied_slots(dry_run=False)  — once approved
+    7.  create_appointment_correctness_indexes()
+    8.  validate_appointment_indexes()          — must be empty
+    9.  drop the obsolete uniq_pending_slot
+    10. preflight again: safe_to_activate must be true
+    11. deploy the NEW app (its startup re-checks and refuses if not)
+    12. reopen booking
 
-THE FREEZE IS NOT CAUTION, IT IS THE POINT. Backfill first and deploy later,
-without a freeze, and any booking created in between carries no
+THE FREEZE IS NOT CAUTION, IT IS THE POINT (2). Backfill first and deploy
+later, without a freeze, and any booking created in between carries no
 `occupied_slots` at all — so it is invisible to the very indexes being built to
 catch it, and escapes overlap protection permanently rather than briefly.
+
+THE OLD APP KEEPS SERVING UNTIL 11 (1). The new app's startup refuses to boot
+while the contract does not hold, so deploying it before the indexes exist
+takes the service down rather than bringing it up.
+
+THE OBSOLETE DROP COMES AFTER THE NEW INDEXES ARE VALIDATED (9, not earlier).
+`uniq_pending_slot` is weak — exact-start-only and PENDING-scoped — but while
+it is the only guard present it is the only thing preventing an identical
+double booking. Dropping it at step 4, as an earlier version of this sequence
+did, leaves a window with NO overlap protection at all, during a window that
+exists precisely to add some.
 
 OUTPUT IS SANITISED. Counts and appointment ids only. No client or lawyer
 names, notes, meeting links or case descriptions, and no raw driver errors —
@@ -46,7 +61,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.db.appointment_index_spec import (
     ACTIVE_STATUSES,
@@ -97,6 +112,38 @@ def _as_utc(value):
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+# How a stored `occupied_slots` compares to the slots its own times imply.
+SLOTS_OK = "ok"
+SLOTS_MISSING = "missing"
+SLOTS_MALFORMED = "malformed"
+SLOTS_WRONG = "wrong"
+
+
+def classify_slots(stored, expected: list[datetime]) -> str:
+    """Judge a stored slot array WITHOUT discarding the parts that do not parse.
+
+    The first version of this filtered non-datetime entries out before
+    comparing, which made a row like `[10:00, 10:30, "garbage"]` compare EQUAL
+    to `[10:00, 10:30]` and pass as correct. That is the wrong direction to be
+    wrong in: an unreadable entry is evidence the row was written by something
+    that does not agree with this code about what a slot is, and a preflight
+    whose job is to find exactly that should not be the thing that hides it.
+
+    So anything that is not a datetime makes the row MALFORMED, and malformed
+    is reported rather than silently repaired or ignored.
+    """
+    if not stored:
+        return SLOTS_MISSING
+    if not isinstance(stored, (list, tuple)):
+        return SLOTS_MALFORMED
+    if any(not isinstance(s, datetime) for s in stored):
+        return SLOTS_MALFORMED
+    observed = sorted(_as_utc(s).replace(tzinfo=None) for s in stored)
+    if observed != sorted(e.replace(tzinfo=None) for e in expected):
+        return SLOTS_WRONG
+    return SLOTS_OK
+
+
 async def inspect_rows(db) -> list[dict]:
     """Every active appointment that would block or defeat the indexes.
 
@@ -112,8 +159,11 @@ async def inspect_rows(db) -> list[dict]:
     bad_duration: list[str] = []
     missing_slots: list[str] = []
     wrong_slots: list[str] = []
+    malformed_slots: list[str] = []
+    end_mismatch: list[str] = []
     counts = {"missing_times": 0, "misaligned": 0, "bad_duration": 0,
-              "missing_slots": 0, "wrong_slots": 0}
+              "missing_slots": 0, "wrong_slots": 0, "malformed_slots": 0,
+              "end_at_mismatch": 0}
 
     cursor = col.find(
         {"status": {"$in": list(ACTIVE_STATUSES)}},
@@ -146,16 +196,27 @@ async def inspect_rows(db) -> list[dict]:
             # so this row is not also judged against them.
             continue
 
-        stored = row.get("occupied_slots")
-        if not stored:
+        # `end_at` is STORED, not derived on read, and it is what the
+        # completion rule compares against (`transitions.timing_error`). So a
+        # row whose end does not match its own start plus duration is telling
+        # two different stories about when it finishes: the slots it claims
+        # come from the duration, while whether it may be completed comes from
+        # `end_at`. One of them is wrong and this cannot tell which, so the row
+        # is reported rather than silently recomputed.
+        expected_end = start + timedelta(minutes=duration)
+        if end != expected_end:
+            counts["end_at_mismatch"] += 1
+            end_mismatch.append(appt_id)
+
+        verdict = classify_slots(row.get("occupied_slots"),
+                                 occupied_slots(start, duration))
+        if verdict == SLOTS_MISSING:
             counts["missing_slots"] += 1
             missing_slots.append(appt_id)
-            continue
-
-        expected = [s.replace(tzinfo=None) for s in occupied_slots(start, duration)]
-        observed = [(_as_utc(s) or s).replace(tzinfo=None)
-                    for s in stored if isinstance(s, datetime)]
-        if sorted(observed) != sorted(expected):
+        elif verdict == SLOTS_MALFORMED:
+            counts["malformed_slots"] += 1
+            malformed_slots.append(appt_id)
+        elif verdict == SLOTS_WRONG:
             counts["wrong_slots"] += 1
             wrong_slots.append(appt_id)
 
@@ -183,6 +244,18 @@ async def inspect_rows(db) -> list[dict]:
                  "scheduled_at and duration imply — it is claiming the wrong "
                  "hours",
                  wrong_slots, counts["wrong_slots"]),
+        _finding("end_at_mismatch",
+                 "end_at is not scheduled_at plus duration_minutes — the row "
+                 "disagrees with itself about when it finishes, and the "
+                 "completion rule reads end_at while the slot claim comes from "
+                 "the duration",
+                 end_mismatch, counts["end_at_mismatch"]),
+        _finding("malformed_occupied_slots",
+                 "occupied_slots contains an entry that is not a datetime — "
+                 "the row was written by something that does not agree with "
+                 "this code about what a slot is, and its claim cannot be "
+                 "trusted in either direction",
+                 malformed_slots, counts["malformed_slots"]),
     ]
 
 
@@ -207,9 +280,20 @@ async def find_overlaps(db) -> list[dict]:
                         "occupied_slots": {"$type": "array", "$ne": []}}},
             {"$unwind": "$occupied_slots"},
             {"$group": {"_id": {"party": f"${party}", "slot": "$occupied_slots"},
-                        "ids": {"$addToSet": "$_id"},
-                        "n": {"$sum": 1}}},
-            {"$match": {"n": {"$gt": 1}}},
+                        "ids": {"$addToSet": "$_id"}}},
+            # DISTINCT APPOINTMENTS, not unwound entries.
+            #
+            # `{"$sum": 1}` counted rows produced by `$unwind`, so ONE row whose
+            # occupied_slots contained the same instant twice — exactly the
+            # malformed shape `classify_slots` now reports — produced a group of
+            # size two and was announced as an overlap between an appointment
+            # and itself. That is a preflight inventing blocking work during a
+            # maintenance window, which is worse than missing something: the
+            # operator goes looking for a clash that does not exist.
+            #
+            # `$addToSet` already dedupes ids, so the size of that set is the
+            # number of genuinely distinct appointments sharing the slot.
+            {"$match": {"$expr": {"$gt": [{"$size": "$ids"}, 1]}}},
             # Only the ids travel out of the aggregation. The party id is
             # dropped here deliberately: knowing WHICH appointments clash is
             # enough to resolve them, and the appointment ids lead an operator
@@ -290,9 +374,59 @@ async def preflight() -> dict:
     drops = [f'db.{o["collection"]}.dropIndex("{o["name"]}")'
              for o in obsolete if o.get("present")]
 
+    # THE GATES, each named, so a red line says which one.
+    #
+    # Reporting findings and leaving the operator to add them up is how a
+    # window gets opened on a database that is not ready: the numbers are all
+    # there, and one of them is non-zero halfway down a long report. The
+    # judgement is made here instead, and it is made CONSERVATIVELY — every
+    # gate must be affirmatively clean, so a check that could not run leaves
+    # `safe_to_activate` false rather than absent.
+    #
+    # `uniq_pending_slot` is a gate rather than a note because it is narrower
+    # than the guard that replaces it and still refuses writes the new rules
+    # allow: exact-start-only and PENDING-scoped, it rejects a second PENDING
+    # booking at the same lawyer and instant even where the new indexes would
+    # not, and a keyless retry is one such write.
+    #
+    # It does NOT necessarily break an idempotent retry — a retry that carries
+    # a key is replayed before the duplicate-key error is ever interpreted, so
+    # it succeeds regardless of which index raised it. An earlier version of
+    # this comment claimed otherwise; that was measured against an earlier
+    # revision of the service, before the replay check was moved ahead of the
+    # constraint mapping, and it was not re-checked afterwards.
+    #
+    # It is still a gate because leaving it in place means production is
+    # enforcing two overlapping rules, one of which nothing in the code agrees
+    # with any more.
+    gates = {
+        "indexes_valid": not problems,
+        "no_overlapping_active_rows": all(
+            f["count"] == 0 for f in overlaps),
+        "all_active_rows_usable": all(
+            f["count"] == 0 for f in rows
+            if f["code"] in ("active_missing_times", "misaligned_start",
+                             "duration_not_whole_slots",
+                             "malformed_occupied_slots",
+                             "end_at_mismatch")),
+        "all_active_rows_slotted": all(
+            f["count"] == 0 for f in rows
+            if f["code"] in ("missing_occupied_slots",
+                             "incorrect_occupied_slots")),
+        "no_idempotency_collisions": idempotency["count"] == 0,
+        "obsolete_indexes_absent": not any(
+            o.get("present") for o in obsolete),
+    }
+
     return {
         "database": db.name,
         "indexes_ready": not problems,
+        # Not a synonym for `indexes_ready`. Indexes being valid is one of six
+        # conditions, and it is the one an operator is most likely to check
+        # alone and mistake for permission.
+        "safe_to_activate": all(gates.values()),
+        "gates": gates,
+        "failed_gates": sorted(k for k, ok in gates.items() if not ok),
         "problems": [
             {"code": p.code, "collection": p.collection, "name": p.name,
              "kind": p.kind, "message": p.message}
@@ -313,12 +447,19 @@ async def preflight() -> dict:
 
 
 def render(result: dict) -> str:
+    verdict = ("SAFE TO ACTIVATE" if result.get("safe_to_activate")
+               else "NOT SAFE TO ACTIVATE")
     lines = [
         f"Appointment slot preflight — database {result['database']!r}",
         "",
         "  THIS CHECK WRITES NOTHING.",
         "",
+        f"  {verdict}",
     ]
+    if not result.get("safe_to_activate"):
+        for gate in result.get("failed_gates", []):
+            lines.append(f"    failed gate: {gate}")
+    lines.append("")
 
     if result["indexes_ready"]:
         lines.append("  INDEXES: every declared index is present and valid.")
@@ -361,22 +502,87 @@ def render(result: dict) -> str:
 
     lines += [
         "",
-        "  ACTIVATION ORDER — the freeze is not caution, it is the point:",
+        "  ACTIVATION ORDER — every step is where it is for a reason:",
         "",
-        "      booking write freeze",
-        "        -> preflight (this)",
-        "        -> resolve the rows above",
-        "        -> backfill occupied_slots   (backfill_occupied_slots, dry run first)",
-        "        -> create the indexes",
-        "        -> validate                  (validate_appointment_indexes)",
-        "        -> deploy the slot-writing code",
-        "        -> reopen booking",
+        "      1.  keep the OLD app running",
+        "      2.  freeze booking writes",
+        "      3.  preflight (this)",
+        "      4.  repair the rows above",
+        "      5.  backfill_occupied_slots(dry_run=True)   review the plan",
+        "      6.  backfill_occupied_slots(dry_run=False)  once approved",
+        "      7.  create_appointment_correctness_indexes()",
+        "      8.  validate_appointment_indexes()          must be empty",
+        "      9.  drop uniq_pending_slot",
+        "      10. preflight again: safe_to_activate must be true",
+        "      11. deploy the NEW app",
+        "      12. reopen booking",
         "",
         "  A booking created between the backfill and the deploy carries no",
         "  occupied_slots, so it is invisible to the indexes and escapes",
         "  overlap protection permanently. That is what the freeze prevents.",
+        "",
+        "  The obsolete drop is step 9, NOT step 4: while it is the only guard",
+        "  present it is the only thing preventing an identical double booking,",
+        "  so dropping it early leaves a window with no protection at all.",
+        "",
+        "  The new app refuses to start while this reports NOT SAFE, so step 11",
+        "  before step 7 takes the service down rather than bringing it up.",
     ]
     return "\n".join(lines) + "\n"
+
+
+class AppointmentBookingNotReady(RuntimeError):
+    """The booking path is live code and its guarantees are not in force."""
+
+
+async def assert_appointment_booking_ready() -> None:
+    """Refuse to serve bookings unless the whole contract holds. Reads only.
+
+    WHY THIS IS THE FULL CHECK AND NOT JUST THE INDEXES
+
+    "Do the indexes exist" is the question it is tempting to ask at startup,
+    and it is not sufficient. An index can be present and valid over a
+    collection whose active rows carry no `occupied_slots` at all — those rows
+    are simply absent from it. Every guarantee then reads as enforced while the
+    appointments that predate the backfill claim nothing, collide with nobody,
+    and can be double-booked freely. The indexes would be telling the truth
+    about themselves and nothing about the data.
+
+    WHY FAIL-CLOSED
+
+    The booking path has no feature flag. It writes slots and relies on the
+    indexes from the first request after deploy, so there is no state in which
+    "not ready yet" is survivable — a booking accepted while the guarantee is
+    absent is a booking nobody will discover is wrong until two people arrive
+    for it. Refusing to start is loud, immediate, and reversible; accepting the
+    booking is none of those.
+
+    IT REPAIRS NOTHING. It does not create the indexes it finds missing, drop
+    the obsolete one, or backfill the rows it reports. A startup that fixed any
+    of that would make a restart a way to establish correctness state silently,
+    which is exactly what makes the current absence of a guarantee so hard to
+    notice.
+
+    COST: one pass over the active appointments, on boot. Acceptable because it
+    is bounded by the ACTIVE rows rather than the collection, and because the
+    alternative is booting into a state nobody has checked.
+    """
+    result = await preflight()
+    if result["safe_to_activate"]:
+        return
+
+    failed = ", ".join(result["failed_gates"])
+    hits = "; ".join(
+        f"{f['code']}={f['count']}" for f in result["findings"] if f["count"])
+    raise AppointmentBookingNotReady(
+        "Appointment booking cannot be served: the overlap and idempotency "
+        f"guarantees are not in force. Failed gates: {failed}."
+        + (f" Findings: {hits}." if hits else "")
+        + " NOTHING HAS BEEN CHANGED — run "
+        "`python -m app.db.appointment_slot_preflight` for the full report and "
+        "the operator commands, and follow the activation order it prints. Do "
+        "not restart to clear this; a restart repairs nothing by design."
+    )
 
 
 async def backfill_occupied_slots(db, *, dry_run: bool = True) -> dict:
@@ -412,9 +618,11 @@ async def backfill_occupied_slots(db, *, dry_run: bool = True) -> dict:
             continue
 
         expected = occupied_slots(start, duration)
-        observed = [(_as_utc(s) or s) for s in (row.get("occupied_slots") or [])
-                    if isinstance(s, datetime)]
-        if sorted(observed) == sorted(expected):
+        # The same strict judgement the preflight uses. Filtering unreadable
+        # entries out before comparing would make a row carrying one compare
+        # EQUAL and be skipped — so the backfill would leave in place exactly
+        # the rows it exists to repair.
+        if classify_slots(row.get("occupied_slots"), expected) == SLOTS_OK:
             continue
 
         planned += 1

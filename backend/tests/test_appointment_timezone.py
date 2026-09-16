@@ -58,6 +58,21 @@ async def parties(app_indexes):
     await get_appointments_col().delete_many({"client_id": client_id})
 
 
+def _aligned(**delta) -> datetime:
+    """A future instant on a half-hour UTC boundary.
+
+    `datetime.now(...)` carries seconds and microseconds, which the service now
+    refuses — rightly. These tests reach `book_appointment` DIRECTLY, bypassing
+    the HTTP schema, and an unaligned row written that way is invisible to the
+    overlap guard: two such appointments can overlap in real time while sharing
+    no indexed half-hour. Aligning here is not appeasing a validator, it is
+    writing the rows the product can actually store.
+    """
+    base = datetime.now(timezone.utc) + timedelta(**delta)
+    return base.replace(minute=0 if base.minute < 30 else 30,
+                        second=0, microsecond=0)
+
+
 async def _book(parties, when, **over):
     from app.services import appointment_service
     kwargs = {"client_id": parties["client_id"], "lawyer_id": parties["lawyer_id"],
@@ -165,7 +180,7 @@ async def test_a_client_cannot_cancel_inside_the_cutoff(parties):
     """The cutoff is now actually evaluated rather than raising before it."""
     from app.services import appointment_service
 
-    soon = datetime.now(timezone.utc) + timedelta(minutes=30)
+    soon = _aligned(minutes=90)
     appt = await _book(parties, soon)
 
     with pytest.raises(AppValidationError, match="2 hours"):
@@ -179,7 +194,7 @@ async def test_a_lawyer_may_still_cancel_inside_the_cutoff(parties):
     trapped into attending."""
     from app.services import appointment_service
 
-    soon = datetime.now(timezone.utc) + timedelta(minutes=30)
+    soon = _aligned(minutes=90)
     appt = await _book(parties, soon)
 
     out = await appointment_service.cancel_appointment(
@@ -257,7 +272,7 @@ async def test_a_new_appointment_records_the_zone_it_was_booked_in(parties):
     it in the new one."""
     from app.db.collections import get_appointments_col
 
-    appt = await _book(parties, datetime.now(timezone.utc) + timedelta(days=2))
+    appt = await _book(parties, _aligned(days=2))
 
     assert appt["timezone"] == "Asia/Karachi"
     stored = await get_appointments_col().find_one({"_id": appt["id"]})
@@ -272,7 +287,7 @@ async def test_a_legacy_row_reads_as_karachi_without_being_rewritten(parties):
     from app.db.collections import get_appointments_col
     from app.services import appointment_service
 
-    appt = await _book(parties, datetime.now(timezone.utc) + timedelta(days=2))
+    appt = await _book(parties, _aligned(days=2))
     await get_appointments_col().update_one(
         {"_id": appt["id"]}, {"$unset": {"timezone": ""}})
 
@@ -292,7 +307,7 @@ async def test_the_zone_survives_listing_too(parties):
     its own assertion rather than inheriting one."""
     from app.services import appointment_service
 
-    await _book(parties, datetime.now(timezone.utc) + timedelta(days=2))
+    await _book(parties, _aligned(days=2))
 
     page = await appointment_service.list_appointments(
         user_id=parties["client_id"], user_role="client",

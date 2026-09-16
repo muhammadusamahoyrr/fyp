@@ -270,6 +270,38 @@ class MissingAppointmentIndexes(RuntimeError):
     """A constraint the booking path depends on is not in force."""
 
 
+async def create_appointment_correctness_indexes() -> None:
+    """Build the appointment correctness indexes. EXPLICIT CALLERS ONLY.
+
+    Deliberately not part of `create_all_indexes`, and therefore not part of
+    normal application startup. Two reasons, and the second is the important
+    one:
+
+    1. Building a unique index on a live collection FAILS when the data already
+       violates it, and succeeds — expensively — when it does not. Neither
+       belongs in the path that also has to bring the app up.
+
+    2. A startup that creates these indexes is a startup that REPAIRS
+       correctness state as a side effect of being restarted. That is the
+       behaviour this whole phase exists to remove. The moment a deploy can
+       silently establish the guarantee, nobody can tell from the outside
+       whether it held yesterday, and a restart becomes a way to paper over a
+       collection that was never checked.
+
+    So creation is an operator step, run knowingly inside the write freeze,
+    after the preflight is clean and the backfill has been approved. Tests call
+    it directly for the same reason: explicitly, on a database they own.
+
+    Not `_try_unique_partial`: that helper ends in a bare
+    `except -> warning -> return`, so a collection carrying duplicates would
+    leave the index absent while every reader believes the guarantee holds.
+    Here a failure raises, and the caller is a person who can act on it.
+    """
+    col = get_appointments_col()
+    await col.create_indexes(
+        [spec.model() for spec in APPOINTMENT_INDEX_REQUIREMENTS])
+
+
 async def validate_appointment_indexes() -> list[IndexProblem]:
     """Every appointment requirement that is not satisfied. Reads only.
 
@@ -743,21 +775,14 @@ async def _appointments_indexes() -> None:
         IndexModel([("created_at", DESCENDING)]),
     ])
 
-    # The correctness guarantees come from the canonical specification, and
-    # NOT through `_try_unique_partial`.
+    # THE CORRECTNESS INDEXES ARE NOT CREATED HERE. See
+    # `create_appointment_correctness_indexes` below for why, and for the
+    # explicit call that does create them.
     #
-    # That helper logs and continues when creation fails, which would leave the
-    # overlap guard silently absent on a collection whose write path assumes it
-    # — the failure then surfaces as two clients in one appointment slot. These
-    # are created directly so a failure raises, and `enforce_appointment_
-    # correctness_indexes` is what decides whether that is fatal.
-    #
-    # `uniq_pending_slot` is deliberately NO LONGER CREATED: exact-start only,
-    # and scoped to PENDING so confirming an appointment released its slot. It
-    # is not dropped here — dropping an index in application startup is an
-    # operator's decision, and the preflight prints the command.
-    await col.create_indexes(
-        [spec.model() for spec in APPOINTMENT_INDEX_REQUIREMENTS])
+    # `uniq_pending_slot` is also no longer created: exact-start only, and
+    # scoped to PENDING so confirming an appointment released its slot. It is
+    # not dropped here either — dropping an index during application startup is
+    # an operator's decision, and the preflight prints the command.
 
 
 async def _engagements_indexes() -> None:

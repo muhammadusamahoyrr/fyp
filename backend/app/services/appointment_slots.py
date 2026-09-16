@@ -70,6 +70,13 @@ def duration_error(minutes: int) -> str | None:
     le=180` alone accepts 45, which is the value that breaks the overlap
     guarantee while looking perfectly reasonable in a dropdown.
     """
+    # A non-integer reaches this from a direct service call or a legacy row.
+    # Comparing it would raise TypeError and surface as a 500 rather than the
+    # controlled refusal every other bad duration gets. `bool` is excluded
+    # explicitly because it IS an int in Python, and `True` minutes is not a
+    # duration.
+    if isinstance(minutes, bool) or not isinstance(minutes, int):
+        return "duration_minutes must be a whole number of minutes"
     if minutes < MIN_DURATION_MINUTES or minutes > MAX_DURATION_MINUTES:
         return (f"duration_minutes must be between {MIN_DURATION_MINUTES} and "
                 f"{MAX_DURATION_MINUTES}")

@@ -23,7 +23,11 @@ from app.core.exceptions import (
 from app.repositories.appointment_repo import AppointmentRepository
 from app.repositories.user_repo import UserRepository
 from app.services import appointment_transitions as transitions
-from app.services.appointment_slots import occupied_slots
+from app.services.appointment_slots import (
+    alignment_error,
+    duration_error,
+    occupied_slots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +81,31 @@ def _slot_text(value: datetime) -> str:
     return _local(value).strftime("%d %b %Y at %H:%M PKT")
 
 
+# Fields that exist to make the guarantees work and are nobody's business
+# outside this service.
+#
+# `AppointmentOut` is `extra="allow"` — deliberately, because CaseContext caches
+# the whole appointments list and components read arbitrary fields off it — so
+# the response model is NOT a filter. Whatever `_sanitize` returns is what the
+# client receives, which makes this the only place the boundary exists.
+#
+#   occupied_slots      internal mechanism, and a list of instants per
+#                       appointment inflates every payload for nothing.
+#   idempotency_key     the caller's own key coming back is harmless; ANOTHER
+#                       party's is not, and a lawyer reads the same object for
+#                       an appointment whose key belongs to the client.
+#   payload_fingerprint a hash of the booking intent. It never needs to leave
+#                       the server, and publishing it lets a holder of the key
+#                       confirm guesses about a booking they cannot otherwise
+#                       read.
+_INTERNAL_FIELDS = ("occupied_slots", "idempotency_key", "payload_fingerprint")
+
+
 def _sanitize(appt: dict) -> dict:
     appt = dict(appt)
     appt["id"] = appt.pop("_id", appt.get("id", ""))
+    for field in _INTERNAL_FIELDS:
+        appt.pop(field, None)
     # Rows written before the zone was recorded carry no `timezone`. They were
     # all booked in Pakistan — that was the only zone this product has ever had
     # — so the field is DEFAULTED AT THE READ BOUNDARY rather than migrated.
@@ -357,6 +383,34 @@ async def book_appointment(
     notes: str | None,
     idempotency_key: str | None = None,
 ) -> dict:
+    # THE SCHEMA IS NOT THE ONLY DOOR.
+    #
+    # `BookAppointmentRequest` enforces offset-awareness, alignment and whole
+    # slots, but it only guards the HTTP route. Tests, fixtures, seed scripts,
+    # the scheduler and any future internal caller reach this function directly,
+    # and an unaligned or part-slot booking written that way is not merely
+    # untidy — it is invisible to the overlap guard. Two such appointments can
+    # overlap in real time while sharing no indexed instant, so the unique index
+    # still exists, still looks correct, and silently stops catching them.
+    #
+    # It is REFUSED, never rounded. Rounding would move an appointment the
+    # caller explicitly asked for, and would do it to exactly the rows that are
+    # already wrong about when they are.
+    #
+    # This runs before any lookup and before any write, so an invalid booking
+    # touches nothing at all — not the idempotency lookup, not the lawyer read,
+    # and certainly not the collection.
+    if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
+        raise AppValidationError(
+            "scheduled_at must include a UTC offset "
+            "(e.g. 2026-09-20T10:00:00Z or 2026-09-20T15:00:00+05:00)")
+    misaligned = alignment_error(scheduled_at)
+    if misaligned:
+        raise AppValidationError(misaligned)
+    bad_duration = duration_error(duration_minutes)
+    if bad_duration:
+        raise AppValidationError(bad_duration)
+
     fingerprint = _booking_fingerprint(
         lawyer_id, case_id, scheduled_at, duration_minutes, mode, notes)
 

@@ -440,7 +440,7 @@ async def test_a_missing_index_is_detected(app_indexes):
     that runs it proves nothing."""
     from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
     from app.db.collections import get_appointments_col
-    from app.db.indexes import _appointments_indexes, validate_appointment_indexes
+    from app.db.indexes import create_appointment_correctness_indexes, validate_appointment_indexes
 
     spec = APPOINTMENT_INDEX_REQUIREMENTS[0]
     await get_appointments_col().drop_index(spec.name)
@@ -448,7 +448,7 @@ async def test_a_missing_index_is_detected(app_indexes):
         problems = await validate_appointment_indexes()
         assert any(p.name == spec.name and p.code == "missing" for p in problems)
     finally:
-        await _appointments_indexes()
+        await create_appointment_correctness_indexes()
 
     assert await validate_appointment_indexes() == []
 
@@ -461,7 +461,7 @@ async def test_a_malformed_index_is_detected(app_indexes):
 
     from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
     from app.db.collections import get_appointments_col
-    from app.db.indexes import _appointments_indexes, validate_appointment_indexes
+    from app.db.indexes import create_appointment_correctness_indexes, validate_appointment_indexes
 
     spec = next(s for s in APPOINTMENT_INDEX_REQUIREMENTS
                 if s.name == "uniq_appointment_lawyer_slot")
@@ -477,7 +477,7 @@ async def test_a_malformed_index_is_detected(app_indexes):
                    for p in problems), problems
     finally:
         await col.drop_index(spec.name)
-        await _appointments_indexes()
+        await create_appointment_correctness_indexes()
 
     assert await validate_appointment_indexes() == []
 
@@ -489,7 +489,7 @@ async def test_the_enforcer_raises_rather_than_warning(app_indexes):
     from app.db.collections import get_appointments_col
     from app.db.indexes import (
         MissingAppointmentIndexes,
-        _appointments_indexes,
+        create_appointment_correctness_indexes,
         enforce_appointment_correctness_indexes,
     )
 
@@ -500,7 +500,7 @@ async def test_the_enforcer_raises_rather_than_warning(app_indexes):
             await enforce_appointment_correctness_indexes()
         assert "NOT enforced" in str(exc.value)
     finally:
-        await _appointments_indexes()
+        await create_appointment_correctness_indexes()
 
     assert await enforce_appointment_correctness_indexes() == []
 
@@ -591,7 +591,7 @@ async def test_the_preflight_reports_an_overlap_without_naming_anyone(app_indexe
     # are built, on a collection whose history predates them. With the indexes
     # in place this row cannot exist — that is the whole point of them.
     from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
-    from app.db.indexes import _appointments_indexes
+    from app.db.indexes import create_appointment_correctness_indexes
 
     slot_indexes = [s.name for s in APPOINTMENT_INDEX_REQUIREMENTS
                     if "slot" in s.name]
@@ -613,7 +613,7 @@ async def test_the_preflight_reports_an_overlap_without_naming_anyone(app_indexe
         findings = await find_overlaps(get_database())
     finally:
         await get_appointments_col().delete_many({"_id": {"$regex": "^legacy-"}})
-        await _appointments_indexes()
+        await create_appointment_correctness_indexes()
 
     lawyer_finding = next(f for f in findings
                           if f["code"] == "overlapping_active_lawyer_id")
@@ -733,3 +733,968 @@ def test_the_limit_allows_normal_use_and_refuses_a_flood():
 
     assert codes[:allowed] == [200] * allowed, f"a normal session was refused: {codes}"
     assert codes[allowed:] == [429, 429], f"the flood was not refused: {codes}"
+
+
+# ── 10. Internal fields never reach a response ───────────────────────────────
+#
+# `AppointmentOut` is `extra="allow"` on purpose — CaseContext caches the whole
+# appointments list and components read arbitrary fields off it — so the
+# response model filters NOTHING. Whatever `_sanitize` returns is what the
+# client gets, which makes these four paths the entire boundary.
+
+_INTERNAL = ("occupied_slots", "idempotency_key", "payload_fingerprint")
+
+# The fields the UI actually reads. Asserted alongside the leak check so a
+# future "sanitise everything" cannot pass this file by emptying the payload.
+_UI_FIELDS = ("id", "status", "scheduled_at", "end_at", "duration_minutes",
+              "mode", "timezone", "lawyer_id", "client_id")
+
+
+def _assert_clean(payload: dict, where: str) -> None:
+    for field in _INTERNAL:
+        assert field not in payload, f"{field} leaked from {where}"
+    for field in _UI_FIELDS:
+        assert field in payload, f"{where} dropped {field}, which the UI reads"
+
+
+async def test_booking_response_carries_no_internal_fields(parties):
+    key = f"bk_{secrets.token_hex(8)}"
+    appt = await _book(parties, _slot(), idempotency_key=key)
+    _assert_clean(appt, "book_appointment")
+
+
+async def test_replay_response_carries_no_internal_fields(parties):
+    """The replay path returns a row read straight back out of Mongo, so it is
+    the one most likely to hand over the stored document verbatim."""
+    key = f"bk_{secrets.token_hex(8)}"
+    when = _slot()
+    await _book(parties, when, idempotency_key=key)
+
+    replay = await _book(parties, when, idempotency_key=key)
+
+    _assert_clean(replay, "the idempotent replay")
+
+
+async def test_get_response_carries_no_internal_fields(parties):
+    from app.services import appointment_service
+
+    key = f"bk_{secrets.token_hex(8)}"
+    appt = await _book(parties, _slot(), idempotency_key=key)
+
+    fetched = await appointment_service.get_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"], user_role="client")
+
+    _assert_clean(fetched, "get_appointment")
+
+
+async def test_list_response_carries_no_internal_fields(parties):
+    from app.services import appointment_service
+
+    key = f"bk_{secrets.token_hex(8)}"
+    await _book(parties, _slot(), idempotency_key=key)
+
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=10)
+
+    assert page["items"]
+    for item in page["items"]:
+        _assert_clean(item, "list_appointments")
+
+
+async def test_a_lawyer_never_sees_the_clients_idempotency_key(parties):
+    """The key belongs to the client. The lawyer reads the same object."""
+    from app.services import appointment_service
+
+    key = f"bk_{secrets.token_hex(8)}"
+    appt = await _book(parties, _slot(), idempotency_key=key)
+
+    seen = await appointment_service.get_appointment(
+        appt_id=appt["id"], user_id=parties["lawyer_id"], user_role="lawyer")
+
+    assert key not in str(seen)
+
+
+async def test_the_internal_fields_are_still_stored(parties):
+    """Hidden from the response, NOT dropped from the database — they are what
+    the guarantees are made of."""
+    from app.db.collections import get_appointments_col
+
+    key = f"bk_{secrets.token_hex(8)}"
+    appt = await _book(parties, _slot(), idempotency_key=key)
+
+    stored = await get_appointments_col().find_one({"_id": appt["id"]})
+    assert stored["occupied_slots"]
+    assert stored["idempotency_key"] == key
+    assert stored["payload_fingerprint"]
+
+
+# ── 11. The service validates without the schema ─────────────────────────────
+#
+# `BookAppointmentRequest` guards the HTTP route only. Tests, fixtures, seed
+# scripts and any internal caller reach the service directly, and a part-slot
+# row written that way is invisible to the overlap guard rather than merely
+# untidy.
+
+async def _count(parties) -> int:
+    from app.db.collections import get_appointments_col
+    return await get_appointments_col().count_documents(
+        {"client_id": {"$in": [parties["client_id"], parties["client2_id"]]}})
+
+
+@pytest.mark.parametrize("minute,duration,expected", [
+    (45, 60, "30-minute boundary"),
+    (15, 60, "30-minute boundary"),
+    (0, 45, "multiple of 30"),
+    (0, 100, "multiple of 30"),
+    (0, 10, "between 30 and 180"),
+    (0, 240, "between 30 and 180"),
+])
+async def test_a_direct_service_call_refuses_invalid_slots(
+        parties, minute, duration, expected):
+    before = await _count(parties)
+
+    with pytest.raises(AppValidationError, match=expected):
+        await _book(parties, _slot(minute=minute), duration_minutes=duration)
+
+    assert await _count(parties) == before, "an invalid booking was written"
+
+
+async def test_a_direct_service_call_refuses_a_naive_timestamp(parties):
+    """Naive means the caller never said which instant they meant."""
+    before = await _count(parties)
+    naive = _slot().replace(tzinfo=None)
+
+    with pytest.raises(AppValidationError, match="UTC offset"):
+        await _book(parties, naive)
+
+    assert await _count(parties) == before
+
+
+async def test_a_direct_service_call_refuses_sub_minute_precision(parties):
+    before = await _count(parties)
+
+    with pytest.raises(AppValidationError, match="exact to the minute"):
+        await _book(parties, _slot().replace(second=30))
+
+    assert await _count(parties) == before
+
+
+async def test_a_bad_duration_type_is_a_controlled_error_not_a_500(parties):
+    before = await _count(parties)
+
+    with pytest.raises(AppValidationError, match="whole number of minutes"):
+        await _book(parties, _slot(), duration_minutes="60")
+
+    assert await _count(parties) == before
+
+
+async def test_invalid_input_is_rejected_before_any_lookup_or_write(parties, monkeypatch):
+    """Validation comes first, so a bad booking touches nothing — not the
+    idempotency lookup, not the lawyer read, not the collection."""
+    from app.repositories.appointment_repo import AppointmentRepository
+    from app.repositories.user_repo import UserRepository
+
+    touched: list[str] = []
+
+    async def _watch_find_one(self, *a, **k):
+        touched.append("appointment_lookup")
+        return None
+
+    async def _watch_user(self, *a, **k):
+        touched.append("lawyer_lookup")
+        return None
+
+    monkeypatch.setattr(AppointmentRepository, "find_one", _watch_find_one)
+    monkeypatch.setattr(UserRepository, "find_by_id", _watch_user)
+
+    with pytest.raises(AppValidationError):
+        await _book(parties, _slot(minute=45),
+                    idempotency_key=f"bk_{secrets.token_hex(8)}")
+
+    assert touched == [], f"an invalid booking still queried: {touched}"
+
+
+async def test_the_service_refuses_rather_than_rounding(parties):
+    """Rounding would move an appointment the caller explicitly asked for, and
+    would do it to exactly the rows already wrong about when they are."""
+    from app.db.collections import get_appointments_col
+
+    with pytest.raises(AppValidationError):
+        await _book(parties, _slot(minute=45))
+
+    # Nothing was quietly created at the neighbouring aligned instant either.
+    assert await get_appointments_col().count_documents(
+        {"client_id": parties["client_id"]}) == 0
+
+
+# ── 12. The preflight is honest ──────────────────────────────────────────────
+
+async def _clear(parties=None) -> None:
+    """Empty the appointments collection on the TEST database.
+
+    Deliberately not scoped to this fixture's rows. The preflight and the
+    backfill are WHOLE-COLLECTION audits — that is their job — so a gate
+    asserting "clean" cannot be evaluated while another module's leftovers are
+    still present. Scoping the delete made these tests report the state of the
+    whole suite rather than the state under test.
+
+    Safe because pytest runs sequentially and every appointment fixture in this
+    suite creates the rows it needs.
+    """
+    from app.db.collections import get_appointments_col
+    await get_appointments_col().delete_many({})
+
+
+async def test_one_row_with_a_repeated_slot_is_not_reported_as_an_overlap(parties):
+    """The false positive. `$sum: 1` counted UNWOUND entries, so a single row
+    whose occupied_slots contained one instant twice was announced as an
+    overlap between an appointment and itself — blocking work invented during a
+    maintenance window."""
+    from app.db.appointment_slot_preflight import find_overlaps
+    from app.db.collections import get_appointments_col
+    from app.db.mongodb import get_database
+
+    await _clear(parties)
+    when = _slot()
+    occupied = appointment_slots.occupied_slots(when, 60)
+    await get_appointments_col().insert_one({
+        "_id": f"legacy-{secrets.token_hex(4)}",
+        "client_id": parties["client_id"], "lawyer_id": parties["lawyer_id"],
+        "status": AppointmentStatus.PENDING.value,
+        "scheduled_at": when, "end_at": when + timedelta(minutes=60),
+        "duration_minutes": 60,
+        # The same instant twice, in ONE row.
+        "occupied_slots": [occupied[0], occupied[0], occupied[1]],
+    })
+    try:
+        findings = await find_overlaps(get_database())
+    finally:
+        await _clear(parties)
+
+    for finding in findings:
+        assert finding["count"] == 0, (
+            f"{finding['code']} reported an overlap between one row and itself")
+
+
+async def test_a_malformed_slot_entry_is_reported_not_filtered_away(parties):
+    """Filtering non-datetimes out before comparing made a row carrying one
+    compare EQUAL to the correct pair and pass as healthy."""
+    from app.db.appointment_slot_preflight import inspect_rows
+    from app.db.collections import get_appointments_col
+    from app.db.mongodb import get_database
+
+    await _clear(parties)
+    when = _slot()
+    good = appointment_slots.occupied_slots(when, 60)
+    await get_appointments_col().insert_one({
+        "_id": f"legacy-{secrets.token_hex(4)}",
+        "client_id": parties["client_id"], "lawyer_id": parties["lawyer_id"],
+        "status": AppointmentStatus.PENDING.value,
+        "scheduled_at": when, "end_at": when + timedelta(minutes=60),
+        "duration_minutes": 60,
+        "occupied_slots": [*good, "not-a-datetime"],
+    })
+    try:
+        findings = {f["code"]: f for f in await inspect_rows(get_database())}
+    finally:
+        await _clear(parties)
+
+    assert findings["malformed_occupied_slots"]["count"] == 1
+    assert findings["incorrect_occupied_slots"]["count"] == 0, (
+        "a malformed row must be reported as malformed, not merely as wrong")
+
+
+async def test_a_clean_database_is_safe_to_activate(app_indexes, parties):
+    from app.db.appointment_slot_preflight import preflight
+
+    await _clear(parties)
+    await _book(parties, _slot())
+    await _book(parties, _slot(hours_ahead=52), client_id=parties["client2_id"])
+
+    result = await preflight()
+
+    assert result["safe_to_activate"] is True, result["failed_gates"]
+    assert result["failed_gates"] == []
+
+
+async def test_activation_is_refused_when_an_index_is_missing(app_indexes, parties):
+    from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
+    from app.db.appointment_slot_preflight import preflight
+    from app.db.collections import get_appointments_col
+    from app.db.indexes import create_appointment_correctness_indexes
+
+    await _clear(parties)
+    spec = APPOINTMENT_INDEX_REQUIREMENTS[0]
+    await get_appointments_col().drop_index(spec.name)
+    try:
+        result = await preflight()
+    finally:
+        await create_appointment_correctness_indexes()
+
+    assert result["safe_to_activate"] is False
+    assert "indexes_valid" in result["failed_gates"]
+
+
+async def test_activation_is_refused_while_the_superseded_index_is_present(
+        app_indexes, parties):
+    """Not a note: it is narrower than its replacement and still refuses writes
+    the new rules allow — a second PENDING booking at the same lawyer and
+    instant, which a KEYLESS retry is.
+
+    It does not break a retry that carries a key: that is replayed before the
+    duplicate-key error is interpreted, so it succeeds whichever index raised
+    it. The gate exists because leaving it in place means production enforces
+    two overlapping rules, one of which nothing in the code agrees with."""
+    from pymongo import ASCENDING, IndexModel
+
+    from app.db.appointment_slot_preflight import preflight
+    from app.db.collections import get_appointments_col
+
+    await _clear(parties)
+    col = get_appointments_col()
+    await col.create_indexes([IndexModel(
+        [("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)],
+        name="uniq_pending_slot", unique=True,
+        partialFilterExpression={"status": AppointmentStatus.PENDING.value})])
+    try:
+        result = await preflight()
+    finally:
+        await col.drop_index("uniq_pending_slot")
+
+    assert result["safe_to_activate"] is False
+    assert "obsolete_indexes_absent" in result["failed_gates"]
+
+
+async def test_activation_is_refused_while_rows_are_unslotted(app_indexes, parties):
+    from app.db.appointment_slot_preflight import preflight
+    from app.db.collections import get_appointments_col
+
+    await _clear(parties)
+    when = _slot()
+    await get_appointments_col().insert_one({
+        "_id": f"legacy-{secrets.token_hex(4)}",
+        "client_id": parties["client_id"], "lawyer_id": parties["lawyer_id"],
+        "status": AppointmentStatus.PENDING.value,
+        "scheduled_at": when, "end_at": when + timedelta(minutes=60),
+        "duration_minutes": 60,
+    })
+    try:
+        result = await preflight()
+    finally:
+        await _clear(parties)
+
+    assert result["safe_to_activate"] is False
+    assert "all_active_rows_slotted" in result["failed_gates"]
+
+
+async def test_activation_is_refused_while_a_row_is_unusable(app_indexes, parties):
+    from app.db.appointment_slot_preflight import preflight
+    from app.db.collections import get_appointments_col
+
+    await _clear(parties)
+    when = _slot()
+    await get_appointments_col().insert_one({
+        "_id": f"legacy-{secrets.token_hex(4)}",
+        "client_id": parties["client_id"], "lawyer_id": parties["lawyer_id"],
+        "status": AppointmentStatus.PENDING.value,
+        # Misaligned, so no correct slot set exists for it.
+        "scheduled_at": when + timedelta(minutes=15),
+        "end_at": when + timedelta(minutes=75),
+        "duration_minutes": 60,
+    })
+    try:
+        result = await preflight()
+    finally:
+        await _clear(parties)
+
+    assert result["safe_to_activate"] is False
+    assert "all_active_rows_usable" in result["failed_gates"]
+
+
+async def test_activation_is_refused_while_a_true_overlap_exists(app_indexes, parties):
+    from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
+    from app.db.appointment_slot_preflight import preflight
+    from app.db.collections import get_appointments_col
+    from app.db.indexes import create_appointment_correctness_indexes
+
+    await _clear(parties)
+    when = _slot()
+    slots = appointment_slots.occupied_slots(when, 60)
+    col = get_appointments_col()
+    slot_indexes = [s.name for s in APPOINTMENT_INDEX_REQUIREMENTS if "slot" in s.name]
+    for name in slot_indexes:
+        await col.drop_index(name)
+    try:
+        for tag in ("a", "b"):
+            await col.insert_one({
+                "_id": f"legacy-{tag}-{secrets.token_hex(4)}",
+                "client_id": (parties["client_id"] if tag == "a"
+                              else parties["client2_id"]),
+                "lawyer_id": parties["lawyer_id"],
+                "status": AppointmentStatus.PENDING.value,
+                "scheduled_at": when, "end_at": when + timedelta(minutes=60),
+                "duration_minutes": 60, "occupied_slots": slots,
+            })
+        result = await preflight()
+    finally:
+        await _clear(parties)
+        await create_appointment_correctness_indexes()
+
+    assert result["safe_to_activate"] is False
+    assert "no_overlapping_active_rows" in result["failed_gates"]
+
+
+async def test_activation_is_refused_while_idempotency_keys_collide(app_indexes, parties):
+    from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
+    from app.db.appointment_slot_preflight import preflight
+    from app.db.collections import get_appointments_col
+    from app.db.indexes import create_appointment_correctness_indexes
+
+    await _clear(parties)
+    col = get_appointments_col()
+    idx = next(s.name for s in APPOINTMENT_INDEX_REQUIREMENTS
+               if s.name == "uniq_appointment_idempotency")
+    await col.drop_index(idx)
+    try:
+        for i, hours in enumerate((60, 64)):
+            when = _slot(hours_ahead=hours)
+            await col.insert_one({
+                "_id": f"legacy-{i}-{secrets.token_hex(4)}",
+                "client_id": parties["client_id"],
+                "lawyer_id": parties["lawyer_id"],
+                "status": AppointmentStatus.PENDING.value,
+                "scheduled_at": when, "end_at": when + timedelta(minutes=60),
+                "duration_minutes": 60,
+                "occupied_slots": appointment_slots.occupied_slots(when, 60),
+                "idempotency_key": "bk_shared_key_value",
+            })
+        result = await preflight()
+    finally:
+        await _clear(parties)
+        await create_appointment_correctness_indexes()
+
+    assert result["safe_to_activate"] is False
+    assert "no_idempotency_collisions" in result["failed_gates"]
+
+
+async def test_the_verdict_is_rendered_not_only_returned(app_indexes, parties):
+    """An operator reads the report, not the dict."""
+    from app.db.appointment_slot_preflight import preflight, render
+
+    await _clear(parties)
+    await _book(parties, _slot())
+    text = render(await preflight())
+
+    assert "SAFE TO ACTIVATE" in text
+    assert "NOT SAFE TO ACTIVATE" not in text
+
+
+async def test_the_gates_are_still_read_only(app_indexes, parties):
+    """Adding a verdict must not have added a write."""
+    from app.db.appointment_slot_preflight import preflight
+    from app.db.mongodb import get_database
+
+    await _clear(parties)
+    await _book(parties, _slot())
+
+    db = get_database()
+    calls: list[str] = []
+
+    class _Guard:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            attr = getattr(self._inner, name)
+            if name in ("insert_one", "insert_many", "update_one", "update_many",
+                        "replace_one", "delete_one", "delete_many",
+                        "find_one_and_update", "find_one_and_replace",
+                        "find_one_and_delete", "bulk_write", "create_index",
+                        "create_indexes", "drop_index", "drop_indexes", "drop"):
+                def _refuse(*a, **kw):
+                    calls.append(name)
+                    raise AssertionError(f"preflight called {name}")
+                return _refuse
+            return attr
+
+    real_getitem = type(db).__getitem__
+    type(db).__getitem__ = lambda self, key: _Guard(real_getitem(self, key))
+    try:
+        await preflight()
+    finally:
+        type(db).__getitem__ = real_getitem
+
+    assert calls == []
+
+
+async def test_the_backfill_repairs_a_malformed_row_rather_than_skipping_it(parties):
+    """Filtering unreadable entries out before comparing would make such a row
+    compare EQUAL and be skipped — leaving in place exactly what the backfill
+    exists to fix. Still a dry run: planned, not written."""
+    from app.db.appointment_slot_preflight import backfill_occupied_slots
+    from app.db.collections import get_appointments_col
+    from app.db.mongodb import get_database
+
+    await _clear(parties)
+    when = _slot()
+    good = appointment_slots.occupied_slots(when, 60)
+    legacy_id = f"legacy-{secrets.token_hex(4)}"
+    await get_appointments_col().insert_one({
+        "_id": legacy_id,
+        "client_id": parties["client_id"], "lawyer_id": parties["lawyer_id"],
+        "status": AppointmentStatus.PENDING.value,
+        "scheduled_at": when, "end_at": when + timedelta(minutes=60),
+        "duration_minutes": 60,
+        "occupied_slots": [*good, "not-a-datetime"],
+    })
+    try:
+        result = await backfill_occupied_slots(get_database())
+    finally:
+        await _clear(parties)
+
+    assert result["planned"] == 1, "the malformed row was skipped as healthy"
+    assert result["written"] == 0
+
+
+# ── 13. end_at must agree with the row's own start and duration ──────────────
+#
+# `end_at` is STORED, not derived on read, and it is what the completion rule
+# compares against. A row whose end disagrees with start + duration is telling
+# two stories about when it finishes: the slots it claims come from the
+# duration, whether it may be completed comes from end_at.
+
+async def _insert_legacy(parties, **over) -> str:
+    """A row written straight to Mongo, the way a legacy row exists."""
+    from app.db.collections import get_appointments_col
+
+    when = over.pop("scheduled_at", None) or _slot()
+    duration = over.pop("duration_minutes", 60)
+    doc = {
+        "_id": f"legacy-{secrets.token_hex(4)}",
+        "client_id": parties["client_id"], "lawyer_id": parties["lawyer_id"],
+        "status": AppointmentStatus.PENDING.value,
+        "scheduled_at": when,
+        "end_at": when + timedelta(minutes=duration),
+        "duration_minutes": duration,
+        "occupied_slots": appointment_slots.occupied_slots(when, duration),
+    }
+    doc.update(over)
+    # `occupied_slots=None` means the field was never written, which is what a
+    # pre-backfill row looks like. Setting it to null instead would be a
+    # different row — one that HAS the field — and a test asserting "startup
+    # did not backfill" would then pass whatever startup did.
+    if doc.get("occupied_slots") is None:
+        doc.pop("occupied_slots", None)
+    await get_appointments_col().insert_one(doc)
+    return doc["_id"]
+
+
+async def test_an_end_time_that_is_too_early_is_reported(parties):
+    from app.db.appointment_slot_preflight import inspect_rows
+    from app.db.mongodb import get_database
+
+    await _clear(parties)
+    when = _slot()
+    appt_id = await _insert_legacy(
+        parties, scheduled_at=when, duration_minutes=60,
+        end_at=when + timedelta(minutes=30))
+    try:
+        findings = {f["code"]: f for f in await inspect_rows(get_database())}
+    finally:
+        await _clear(parties)
+
+    assert findings["end_at_mismatch"]["count"] == 1
+    assert appt_id in findings["end_at_mismatch"]["appointment_ids"]
+
+
+async def test_an_end_time_that_is_too_late_is_reported(parties):
+    from app.db.appointment_slot_preflight import inspect_rows
+    from app.db.mongodb import get_database
+
+    await _clear(parties)
+    when = _slot()
+    appt_id = await _insert_legacy(
+        parties, scheduled_at=when, duration_minutes=60,
+        end_at=when + timedelta(minutes=120))
+    try:
+        findings = {f["code"]: f for f in await inspect_rows(get_database())}
+    finally:
+        await _clear(parties)
+
+    assert findings["end_at_mismatch"]["count"] == 1
+    assert appt_id in findings["end_at_mismatch"]["appointment_ids"]
+
+
+async def test_a_consistent_end_time_is_not_reported(parties):
+    from app.db.appointment_slot_preflight import inspect_rows
+    from app.db.mongodb import get_database
+
+    await _clear(parties)
+    await _insert_legacy(parties)
+    try:
+        findings = {f["code"]: f for f in await inspect_rows(get_database())}
+    finally:
+        await _clear(parties)
+
+    assert findings["end_at_mismatch"]["count"] == 0
+
+
+@pytest.mark.parametrize("skew", [-30, 30])
+async def test_an_end_at_mismatch_blocks_activation(app_indexes, parties, skew):
+    from app.db.appointment_slot_preflight import preflight
+
+    await _clear(parties)
+    when = _slot()
+    await _insert_legacy(parties, scheduled_at=when, duration_minutes=60,
+                         end_at=when + timedelta(minutes=60 + skew))
+    try:
+        result = await preflight()
+    finally:
+        await _clear(parties)
+
+    assert result["safe_to_activate"] is False
+    assert "all_active_rows_usable" in result["failed_gates"]
+
+
+# ── 14. Activation is enforced, not merely documented ────────────────────────
+#
+# The booking path has no feature flag: it writes slots and relies on the
+# indexes from the first request after deploy. So there is no state in which
+# "not ready yet" is survivable, and startup is fail-closed.
+
+async def test_a_prepared_database_permits_startup(app_indexes, parties):
+    from app.db.appointment_slot_preflight import assert_appointment_booking_ready
+
+    await _clear(parties)
+    await _book(parties, _slot())
+
+    await assert_appointment_booking_ready()   # must not raise
+
+
+async def test_startup_refuses_while_an_index_is_missing(app_indexes, parties):
+    from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
+    from app.db.appointment_slot_preflight import (
+        AppointmentBookingNotReady,
+        assert_appointment_booking_ready,
+    )
+    from app.db.collections import get_appointments_col
+    from app.db.indexes import create_appointment_correctness_indexes
+
+    await _clear(parties)
+    spec = APPOINTMENT_INDEX_REQUIREMENTS[0]
+    await get_appointments_col().drop_index(spec.name)
+    try:
+        with pytest.raises(AppointmentBookingNotReady) as exc:
+            await assert_appointment_booking_ready()
+        assert "indexes_valid" in str(exc.value)
+    finally:
+        await create_appointment_correctness_indexes()
+
+
+async def test_startup_refuses_while_an_index_is_malformed(app_indexes, parties):
+    """The realistic failure. Mongo keeps the old index when a redefinition is
+    refused, so "present" and "correct" are different questions."""
+    from pymongo import ASCENDING, IndexModel
+
+    from app.db.appointment_slot_preflight import (
+        AppointmentBookingNotReady,
+        assert_appointment_booking_ready,
+    )
+    from app.db.collections import get_appointments_col
+    from app.db.indexes import create_appointment_correctness_indexes
+
+    await _clear(parties)
+    col = get_appointments_col()
+    await col.drop_index("uniq_appointment_lawyer_slot")
+    # Same keys, NOT unique — it enforces nothing.
+    await col.create_indexes([IndexModel(
+        [("lawyer_id", ASCENDING), ("occupied_slots", ASCENDING)],
+        name="uniq_appointment_lawyer_slot")])
+    try:
+        with pytest.raises(AppointmentBookingNotReady):
+            await assert_appointment_booking_ready()
+    finally:
+        await col.drop_index("uniq_appointment_lawyer_slot")
+        await create_appointment_correctness_indexes()
+
+
+async def test_startup_refuses_while_unsafe_legacy_rows_exist(app_indexes, parties):
+    """The case an index-only check cannot see.
+
+    Every index is present and valid; the row simply carries no slots, so it is
+    absent from them. The guarantee reads as enforced and this appointment can
+    be double-booked freely.
+    """
+    from app.db.appointment_slot_preflight import (
+        AppointmentBookingNotReady,
+        assert_appointment_booking_ready,
+    )
+    from app.db.indexes import validate_appointment_indexes
+
+    await _clear(parties)
+    await _insert_legacy(parties, occupied_slots=None)
+    try:
+        assert await validate_appointment_indexes() == [], (
+            "precondition: the indexes themselves are fine")
+        with pytest.raises(AppointmentBookingNotReady) as exc:
+            await assert_appointment_booking_ready()
+        assert "all_active_rows_slotted" in str(exc.value)
+    finally:
+        await _clear(parties)
+
+
+async def test_startup_refuses_while_the_obsolete_index_is_present(app_indexes, parties):
+    from pymongo import ASCENDING, IndexModel
+
+    from app.db.appointment_slot_preflight import (
+        AppointmentBookingNotReady,
+        assert_appointment_booking_ready,
+    )
+    from app.db.collections import get_appointments_col
+
+    await _clear(parties)
+    col = get_appointments_col()
+    await col.create_indexes([IndexModel(
+        [("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)],
+        name="uniq_pending_slot", unique=True,
+        partialFilterExpression={"status": AppointmentStatus.PENDING.value})])
+    try:
+        with pytest.raises(AppointmentBookingNotReady) as exc:
+            await assert_appointment_booking_ready()
+        assert "obsolete_indexes_absent" in str(exc.value)
+    finally:
+        await col.drop_index("uniq_pending_slot")
+
+
+async def test_the_refusal_names_the_remedy_and_says_nothing_changed(app_indexes, parties):
+    """An operator reads this in a crash log at deploy time."""
+    from app.db.appointment_slot_preflight import (
+        AppointmentBookingNotReady,
+        assert_appointment_booking_ready,
+    )
+
+    await _clear(parties)
+    await _insert_legacy(parties, occupied_slots=None)
+    try:
+        with pytest.raises(AppointmentBookingNotReady) as exc:
+            await assert_appointment_booking_ready()
+    finally:
+        await _clear(parties)
+
+    message = str(exc.value)
+    assert "NOTHING HAS BEEN CHANGED" in message
+    assert "appointment_slot_preflight" in message
+    assert "not restart" in message.lower()
+
+
+async def test_startup_never_silently_repairs_correctness_state(app_indexes, parties):
+    """The property that makes the refusal meaningful.
+
+    If a failed startup could create the index, drop the obsolete one or
+    backfill the rows, then restarting would establish correctness quietly and
+    nobody could tell from the outside whether the guarantee ever held.
+    """
+    from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
+    from app.db.appointment_slot_preflight import (
+        AppointmentBookingNotReady,
+        assert_appointment_booking_ready,
+    )
+    from app.db.collections import get_appointments_col
+    from app.db.indexes import create_appointment_correctness_indexes
+
+    await _clear(parties)
+    legacy_id = await _insert_legacy(parties, occupied_slots=None)
+    spec = APPOINTMENT_INDEX_REQUIREMENTS[0]
+    col = get_appointments_col()
+    await col.drop_index(spec.name)
+    try:
+        for _ in range(3):          # restarting changes nothing
+            with pytest.raises(AppointmentBookingNotReady):
+                await assert_appointment_booking_ready()
+
+        info = await col.index_information()
+        assert spec.name not in info, "startup created a correctness index"
+
+        row = await col.find_one({"_id": legacy_id})
+        assert "occupied_slots" not in row, "startup backfilled a row"
+    finally:
+        await _clear(parties)
+        await create_appointment_correctness_indexes()
+
+
+async def test_normal_index_creation_does_not_build_the_correctness_indexes(app_indexes):
+    """`create_all_indexes` is what startup runs. If it built these, a deploy
+    would repair correctness state as a side effect of restarting."""
+    from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
+    from app.db.collections import get_appointments_col
+    from app.db.indexes import _appointments_indexes, create_appointment_correctness_indexes
+
+    col = get_appointments_col()
+    for spec in APPOINTMENT_INDEX_REQUIREMENTS:
+        await col.drop_index(spec.name)
+    try:
+        await _appointments_indexes()
+        info = await col.index_information()
+        for spec in APPOINTMENT_INDEX_REQUIREMENTS:
+            assert spec.name not in info, (
+                f"{spec.name} was created by ordinary startup index creation")
+    finally:
+        await create_appointment_correctness_indexes()
+
+    assert await _validate() == []
+
+
+async def _validate():
+    from app.db.indexes import validate_appointment_indexes
+    return await validate_appointment_indexes()
+
+
+async def test_the_explicit_creation_function_builds_exactly_the_spec(app_indexes):
+    from app.db.appointment_index_spec import APPOINTMENT_INDEX_REQUIREMENTS
+    from app.db.collections import get_appointments_col
+    from app.db.indexes import create_appointment_correctness_indexes
+
+    col = get_appointments_col()
+    for spec in APPOINTMENT_INDEX_REQUIREMENTS:
+        await col.drop_index(spec.name)
+
+    await create_appointment_correctness_indexes()
+
+    assert await _validate() == []
+
+
+async def test_the_readiness_check_is_read_only(app_indexes, parties):
+    """It is the thing standing between a deploy and the database, so it gets
+    its own write-interception proof rather than inheriting the preflight's."""
+    from app.db.appointment_slot_preflight import assert_appointment_booking_ready
+    from app.db.mongodb import get_database
+
+    await _clear(parties)
+    await _book(parties, _slot())
+
+    db = get_database()
+    calls: list[str] = []
+
+    class _Guard:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            attr = getattr(self._inner, name)
+            if name in ("insert_one", "insert_many", "update_one", "update_many",
+                        "replace_one", "delete_one", "delete_many",
+                        "find_one_and_update", "find_one_and_replace",
+                        "find_one_and_delete", "bulk_write", "create_index",
+                        "create_indexes", "drop_index", "drop_indexes", "drop"):
+                def _refuse(*a, **kw):
+                    calls.append(name)
+                    raise AssertionError(f"readiness check called {name}")
+                return _refuse
+            return attr
+
+    real_getitem = type(db).__getitem__
+    type(db).__getitem__ = lambda self, key: _Guard(real_getitem(self, key))
+    try:
+        await assert_appointment_booking_ready()
+    finally:
+        type(db).__getitem__ = real_getitem
+
+    assert calls == []
+
+
+def test_startup_calls_the_full_readiness_check_not_just_the_index_one():
+    """An index-only gate at startup would pass over a collection whose active
+    rows carry no slots — every guarantee reading as enforced while the rows
+    that predate the backfill claim nothing."""
+    import inspect
+
+    from app import main
+
+    source = inspect.getsource(main.lifespan)
+    assert "assert_appointment_booking_ready" in source
+    assert "enforce_appointment_correctness_indexes" not in source, (
+        "the index-only enforcer is not sufficient at startup")
+
+
+# ── 15. The obsolete index, described accurately ─────────────────────────────
+
+async def test_a_keyed_retry_survives_the_obsolete_index(app_indexes, parties):
+    """The correction.
+
+    An earlier claim here was that `uniq_pending_slot` breaks every idempotent
+    retry. It does not: a retry carrying a key is replayed BEFORE the
+    duplicate-key error is interpreted, so it succeeds whichever index raised
+    it. That claim was measured against a revision of the service in which the
+    replay was gated behind the constraint name, and was not re-checked after
+    the ordering was fixed.
+    """
+    from pymongo import ASCENDING, IndexModel
+
+    from app.db.collections import get_appointments_col
+
+    await _clear(parties)
+    col = get_appointments_col()
+    await col.create_indexes([IndexModel(
+        [("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)],
+        name="uniq_pending_slot", unique=True,
+        partialFilterExpression={"status": AppointmentStatus.PENDING.value})])
+    key = f"bk_{secrets.token_hex(8)}"
+    when = _slot()
+    try:
+        first = await _book(parties, when, idempotency_key=key)
+        replay = await _book(parties, when, idempotency_key=key)
+
+        assert replay["id"] == first["id"], (
+            "a keyed retry must still replay with the obsolete index present")
+    finally:
+        await col.drop_index("uniq_pending_slot")
+        await _clear(parties)
+
+
+async def test_the_obsolete_index_still_refuses_writes_the_new_rules_allow(
+        app_indexes, parties):
+    """Why it is still a blocking gate. It is narrower than its replacement and
+    scoped to PENDING, so it rejects a second PENDING booking at the same
+    lawyer and instant — which a KEYLESS retry is."""
+    from pymongo import ASCENDING, IndexModel
+
+    from app.db.collections import get_appointments_col
+
+    await _clear(parties)
+    col = get_appointments_col()
+    await col.create_indexes([IndexModel(
+        [("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)],
+        name="uniq_pending_slot", unique=True,
+        partialFilterExpression={"status": AppointmentStatus.PENDING.value})])
+    when = _slot()
+    try:
+        await _book(parties, when)
+        with pytest.raises((ConflictError, AppValidationError)):
+            await _book(parties, when, client_id=parties["client2_id"])
+    finally:
+        await col.drop_index("uniq_pending_slot")
+        await _clear(parties)
+
+
+def test_the_documented_order_drops_the_obsolete_index_after_validation():
+    """Dropping it before the replacements exist leaves a window with NO
+    overlap protection, inside a window that exists to add some."""
+    from app.db import appointment_slot_preflight as pf
+
+    doc = pf.__doc__
+    drop_at = doc.index("drop the obsolete uniq_pending_slot")
+    create_at = doc.index("create_appointment_correctness_indexes()")
+    validate_at = doc.index("validate_appointment_indexes()")
+
+    assert create_at < drop_at, "the drop must come after the indexes are built"
+    assert validate_at < drop_at, "and after they are validated"
+
+
+def test_the_obsolete_entry_does_not_overstate_its_effect():
+    from app.db.appointment_index_spec import OBSOLETE_INDEXES
+
+    why = next(w for _, name, w in OBSOLETE_INDEXES if name == "uniq_pending_slot")
+    assert "ONLY AFTER" in why
+    assert "every retr" not in why.lower(), (
+        "the overstated claim must not come back")

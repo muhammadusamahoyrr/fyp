@@ -67,7 +67,10 @@ OBSOLETE_INDEXES: tuple[tuple[str, str, str], ...] = (
      "(lawyer_id, scheduled_at) — EXACT START ONLY — so 10:00/60min and "
      "10:30/60min both survived it, and it was scoped to PENDING alone, so "
      "confirming an appointment released the slot it had just been agreed "
-     "for. It is no longer created; an existing deployment still carries it."),
+     "for. It is no longer created; an existing deployment still carries it. "
+     "DROP IT ONLY AFTER the replacement indexes are built and validated: it "
+     "is weak, but while it is the only guard in place, dropping it first "
+     "leaves no overlap protection at all."),
 )
 
 

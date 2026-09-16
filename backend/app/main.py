@@ -51,6 +51,7 @@ from app.core.exceptions import (
     rate_limit_handler,
 )
 from app.core.rate_limit import RateLimitStateDefault, limiter
+from app.db.appointment_slot_preflight import assert_appointment_booking_ready
 from app.db.chroma import close_chroma, connect_chroma
 from app.db.indexes import (
     create_all_indexes,
@@ -215,6 +216,22 @@ async def lifespan(app: FastAPI):
     # because from that point the missing index is not a slow query, it is a
     # guarantee that silently is not held.
     await enforce_v2_correctness_indexes()
+
+    # Appointments have no feature flag, so this is fail-closed and
+    # unconditional.
+    #
+    # The booking path writes `occupied_slots` and relies on the unique indexes
+    # from the first request after deploy. There is no "not ready yet" state it
+    # can survive: a booking accepted while the guarantee is absent is one
+    # nobody discovers is wrong until two people arrive for it.
+    #
+    # This checks the DATA as well as the indexes, because a valid index over
+    # rows that carry no slots enforces nothing while reporting itself healthy.
+    # It repairs nothing — index creation, the obsolete-index drop and the
+    # backfill are operator steps, so that restarting can never become a way to
+    # establish correctness state quietly.
+    await assert_appointment_booking_ready()
+
     connect_chroma()
     from app.services.notification_service import set_ws_manager
     from app.websockets.manager import notification_manager
