@@ -1897,6 +1897,57 @@ function RescheduleAppointment({ appt, t, onReload, error, setError }) {
     );
 }
 
+// Who cancelled, in words the client reads rather than the value we store.
+//
+// `cancelled_by` holds a ROLE — "client", "lawyer", "admin". Rendering it raw
+// would show a client the word "client" as though it named someone else, and
+// legacy rows are worse: an older seeder wrote the client's `_id` into this
+// field, so an unrecognised value is not merely unknown, it is actively
+// misleading if echoed.
+//
+// Anything not in this map is treated as UNKNOWN and the actor is simply not
+// named. Inventing one — "cancelled by your lawyer" when the row does not say
+// so — would be a claim about a person, in a record of a legal engagement.
+const CANCELLED_BY_LABEL = {
+    client: "You cancelled this appointment.",
+    lawyer: "Your lawyer cancelled this appointment.",
+    admin: "This appointment was cancelled by Attorney.AI support.",
+};
+
+/** The cancellation details, where the row actually has them.
+ *
+ * Renders nothing at all when both fields are missing — which is what a legacy
+ * cancellation looks like, and the honest thing to show for one. A heading with
+ * an empty body tells the client their record is incomplete without telling
+ * them anything.
+ */
+function CancellationDetail({ appt, t }) {
+    if (appt.status !== "cancelled") return null;
+
+    const who = CANCELLED_BY_LABEL[appt.cancelled_by] || null;
+    const reason = (appt.cancel_reason || "").trim();
+    if (!who && !reason) return null;
+
+    return (
+        <div style={{
+            marginTop: 10, padding: "10px 12px", borderRadius: 8,
+            background: `${t.danger}0e`, border: `1px solid ${t.danger}33`,
+        }}>
+            {who && (
+                <div style={{ fontSize: 12, color: t.text, fontWeight: 600 }}>
+                    {who}
+                </div>
+            )}
+            {reason && (
+                <div style={{ fontSize: 12, color: t.textMuted, marginTop: who ? 4 : 0 }}>
+                    <span style={{ fontWeight: 600, color: t.textDim }}>Reason</span>
+                    {" · "}{reason}
+                </div>
+            )}
+        </div>
+    );
+}
+
 /** Client-side cancellation for one appointment.
  *
  * `PageAppointments` was read-only, so `cancelled_by: "client"` could never
@@ -2254,6 +2305,7 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                                     "{appt.notes}"
                                 </div>
                             )}
+                            <CancellationDetail appt={appt} t={t} />
                             {appt.meeting_link ? (
                                 <div style={{ marginTop: 10 }}>
                                     <a href={appt.meeting_link} target="_blank" rel="noreferrer"

@@ -1293,3 +1293,118 @@ test("phone and in-person appointments show no joining prompt", async () => {
         await ui.unmount();
     }
 });
+
+/* ── cancelled appointments: who, and why ─────────────────────────────────── */
+//
+// The card showed a "Cancelled" badge and nothing else. A client could not tell
+// whether they had cancelled it or their lawyer had — which for a legal
+// engagement is the difference between a decision they made and one made about
+// them.
+
+test("a lawyer cancellation names the lawyer, not a raw role value", async () => {
+    serveAppointments([appointment({
+        status: "cancelled", cancelled_by: "lawyer",
+        cancel_reason: "Court ran over.",
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.match(ui.text(), /Your lawyer cancelled this appointment/);
+    assert.match(ui.text(), /Court ran over/);
+    // The stored value must not be echoed at the client.
+    assert.doesNotMatch(ui.text(), /cancelled_by/);
+    await ui.unmount();
+});
+
+test("a client's own cancellation is addressed to them", async () => {
+    serveAppointments([appointment({
+        status: "cancelled", cancelled_by: "client",
+        cancel_reason: "Double booked.",
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.match(ui.text(), /You cancelled this appointment/);
+    assert.match(ui.text(), /Double booked/);
+    await ui.unmount();
+});
+
+test("an admin cancellation is named without exposing the enum", async () => {
+    serveAppointments([appointment({
+        status: "cancelled", cancelled_by: "admin", cancel_reason: null,
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.match(ui.text(), /Attorney\.AI support/);
+    assert.doesNotMatch(ui.text(), /\badmin\b/);
+    await ui.unmount();
+});
+
+test("a cancellation with a reason but no actor names no actor", async () => {
+    serveAppointments([appointment({
+        status: "cancelled", cancelled_by: null,
+        cancel_reason: "No longer needed.",
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.match(ui.text(), /No longer needed/);
+    assert.doesNotMatch(ui.text(), /cancelled this appointment/,
+                        "an actor was invented for a row that names none");
+    await ui.unmount();
+});
+
+test("a legacy cancellation with neither field shows no invented detail", async () => {
+    // An older seeder wrote the client's `_id` into `cancelled_by`, so an
+    // unrecognised value is not merely unknown — echoing it would be worse
+    // than silence.
+    serveAppointments([appointment({
+        status: "cancelled", cancelled_by: "SD-C-9f3a2b11", cancel_reason: null,
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.doesNotMatch(ui.text(), /SD-C-9f3a2b11/, "a raw id reached the client");
+    assert.doesNotMatch(ui.text(), /cancelled this appointment/);
+    assert.doesNotMatch(ui.text(), /Reason/);
+    assert.match(ui.text(), /Cancelled/, "the status itself should still show");
+    await ui.unmount();
+});
+
+test("a cancellation with no metadata at all renders nothing extra", async () => {
+    serveAppointments([appointment({ status: "cancelled" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.doesNotMatch(ui.text(), /Reason/);
+    assert.doesNotMatch(ui.text(), /cancelled this appointment/);
+    await ui.unmount();
+});
+
+test("cancellation detail appears only on cancelled appointments", async () => {
+    serveAppointments([appointment({
+        status: "confirmed", cancelled_by: "lawyer", cancel_reason: "stale data",
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.doesNotMatch(ui.text(), /cancelled this appointment/);
+    assert.doesNotMatch(ui.text(), /stale data/);
+    await ui.unmount();
+});
+
+test("the client is never shown the lawyer's private notes", async () => {
+    // The server strips these now; the client must not render them even if a
+    // stale cache or a future response carries one.
+    serveAppointments([appointment({
+        status: "cancelled", cancelled_by: "lawyer", cancel_reason: "Unwell.",
+        lawyer_notes: "PRIVATE-NOTE-7f3a: client unreliable",
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.doesNotMatch(ui.text(), /PRIVATE-NOTE-7f3a/);
+    assert.doesNotMatch(ui.text(), /unreliable/);
+    await ui.unmount();
+});

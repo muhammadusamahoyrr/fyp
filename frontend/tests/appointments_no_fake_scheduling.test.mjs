@@ -493,3 +493,89 @@ test("phone and in-person appointments offer no video control", async () => {
         await ui.unmount();
     }
 });
+
+/* ── controls that did nothing ────────────────────────────────────────────── */
+//
+// Three more inert affordances, all of the same kind as the scheduling buttons
+// above: rendered, styled as actions, and wired to nothing.
+
+test("a completed appointment offers no dead View Summary button", async () => {
+    const ui = await mountAppointments([appointment({ status: "completed" })]);
+
+    assert.ok(!ui.labels().some(l => l.includes("View Summary")),
+              `View Summary is still offered: ${ui.labels()}`);
+    await ui.unmount();
+});
+
+test("the Block Time quick action is gone", async () => {
+    const ui = await mountAppointments([appointment()]);
+
+    assert.ok(!ui.labels().some(l => l.includes("Block Time")));
+    assert.doesNotMatch(ui.text(), /Quick Actions/,
+                        "an empty Quick Actions card was left behind");
+    await ui.unmount();
+});
+
+test("the invented working-day grid is gone", async () => {
+    // Sixteen hardcoded half-hours from 09:00 to 16:30 were rendered as
+    // BUTTONS — the unbooked ones enabled, coloured like an action, with no
+    // onClick anywhere. They looked bookable, did nothing, and asserted a
+    // working day nobody had configured.
+    const ui = await mountAppointments([appointment({ status: "confirmed" })]);
+
+    assert.doesNotMatch(ui.text(), /TODAY'S SCHEDULE/);
+    const labels = ui.labels();
+    for (const invented of ["09:00", "09:30", "16:00", "16:30"]) {
+        assert.ok(!labels.includes(invented),
+                  `${invented} is still a button: ${labels}`);
+    }
+    await ui.unmount();
+});
+
+test("today's booked hours are read-only, not clickable", async () => {
+    // An appointment that started an hour ago is today's.
+    const ui = await mountAppointments([appointment({ status: "confirmed" })]);
+
+    assert.match(ui.text(), /TODAY'S BOOKED HOURS/);
+    // Whatever times are shown must not be buttons.
+    const timeButtons = ui.labels().filter(l => /^\d{2}:\d{2}$/.test(l));
+    assert.deepEqual(timeButtons, [],
+                     `booked hours are rendered as buttons: ${timeButtons}`);
+    await ui.unmount();
+});
+
+test("an empty day says so rather than showing invented free slots", async () => {
+    const future = new Date(Date.now() + 30 * 24 * 36e5);
+    const ui = await mountAppointments([appointment({
+        status: "confirmed",
+        scheduled_at: future.toISOString(),
+        end_at: new Date(future.getTime() + 18e5).toISOString(),
+    })]);
+
+    assert.match(ui.text(), /Nothing booked today/);
+    await ui.unmount();
+});
+
+test("no control on the page is enabled with nothing behind it", async () => {
+    // The general form of the defect: an enabled button that sends no request
+    // and changes no state. Every enabled control is clicked; the page must
+    // either act or be honestly inert by being disabled.
+    const ui = await mountAppointments([appointment({ status: "completed" })]);
+    const before = ui.text();
+
+    for (const btn of [...ui.container.querySelectorAll("button")]) {
+        if (btn.disabled) continue;
+        const label = btn.textContent.trim();
+        if (label === "" || /Close|✕/.test(label)) continue;
+        await act(async () => {
+            btn.dispatchEvent(new dom.window.MouseEvent(
+                "click", { bubbles: true, cancelable: true }));
+        });
+    }
+    await act(async () => { await new Promise(r => realSetTimeout(r, 20)); });
+
+    // Nothing invented an appointment or silently mutated the list.
+    assert.equal(api.__calls("bookAppointment").length, 0);
+    assert.ok(before.length > 0);
+    await ui.unmount();
+});

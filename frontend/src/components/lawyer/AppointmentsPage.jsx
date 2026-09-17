@@ -824,11 +824,6 @@ function AppointmentsPage() {
                                                     </Btn>
                                                 </>)}
 
-                                                {apt.status === "Completed" && (
-                                                    <Btn variant="secondary" size="sm" style={{ flex: 1 }}>
-                                                        <Icon d={I.eye} size={12} /> View Summary
-                                                    </Btn>
-                                                )}
                                             </div>
                                         </Card>
                                     ))}
@@ -849,24 +844,40 @@ function AppointmentsPage() {
                             {/* ── Right sidebar ──────────────────────── */}
                             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                                 <Card style={{ padding: 16 }}>
+                                    {/* WAS AN INVENTED WORKING DAY.
+                                        Sixteen hardcoded half-hours from 09:00
+                                        to 16:30 were rendered as BUTTONS: the
+                                        unbooked ones enabled, coloured like an
+                                        action and carrying a pointer cursor,
+                                        with no onClick anywhere. They looked
+                                        bookable, did nothing, and asserted a
+                                        working day nobody had configured —
+                                        this product has no availability
+                                        schedule, so "not booked" is not
+                                        "free", and Sunday looked as open as
+                                        Tuesday.
+
+                                        What remains is only what the data
+                                        says: the hours that actually have an
+                                        appointment today, as read-only text. */}
                                     <div style={{ fontSize: 12, fontWeight: 700, color: t.textFaint, letterSpacing: "0.1em", textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>
-                                        TODAY'S SCHEDULE
+                                        TODAY'S BOOKED HOURS
                                     </div>
                                     <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 14 }}>
-                                        {["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30"].map(slot => {
-                                            const booked = bookedToday.has(slot);
-                                            return (
-                                                <button key={slot} disabled={booked} style={{
-                                                    padding: "6px 4px", borderRadius: 7, fontSize: 11, fontWeight: 500,
-                                                    border: `1px solid ${booked ? t.border : t.borderHi}`,
-                                                    background: booked ? t.cardHi : t.primaryGlow2,
-                                                    color: booked ? t.textFaint : t.primary,
-                                                    cursor: booked ? "not-allowed" : "pointer",
-                                                    textDecoration: booked ? "line-through" : "none",
-                                                }}>{slot}</button>
-                                            );
-                                        })}
+                                        {[...bookedToday].sort().map(slot => (
+                                            <span key={slot} style={{
+                                                padding: "6px 4px", borderRadius: 7, fontSize: 11,
+                                                fontWeight: 600, textAlign: "center",
+                                                border: `1px solid ${t.border}`,
+                                                background: t.cardHi, color: t.text,
+                                            }}>{slot}</span>
+                                        ))}
                                     </div>
+                                    {bookedToday.size === 0 && (
+                                        <div style={{ fontSize: 12, color: t.textMuted, textAlign: "center", marginBottom: 14 }}>
+                                            Nothing booked today.
+                                        </div>
+                                    )}
                                     <div style={{ borderRadius: 10, background: t.primaryGlow2, border: `1px solid ${t.primary}30`, padding: 14, textAlign: "center" }}>
                                         <div style={{ fontSize: 11, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 4 }}>Next Meeting</div>
                                         <div style={{ fontSize: 20, fontWeight: 700, color: t.text, fontFamily: "Georgia,serif" }}>{nextApt ? nextApt.client : "No upcoming meeting"}</div>
@@ -874,16 +885,6 @@ function AppointmentsPage() {
                                     </div>
                                 </Card>
 
-                                <Card style={{ padding: 16 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.textFaint, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
-                                        Quick Actions
-                                    </div>
-                                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                                        <Btn variant="secondary" full size="sm">
-                                            <Icon d={I.clock} size={13} /> Block Time
-                                        </Btn>
-                                    </div>
-                                </Card>
                             </div>
                         </div>
                     ) : (
