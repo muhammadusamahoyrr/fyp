@@ -1,0 +1,189 @@
+# Appointment slot rollout — operator checklist
+
+Status: **NO-GO.** Two prerequisites are unverified. Nothing in this document
+has been executed; no production system has been contacted.
+
+The sequence and its reasoning live in
+`backend/app/db/appointment_slot_preflight.py`. This is the operator-facing
+short form, plus the three things that decide whether a window may open at all.
+
+---
+
+## Blocking prerequisites
+
+### 1. Verified backup and a restore REHEARSAL — ❌ UNVERIFIED
+
+Not "a backup exists". A backup nobody has restored is a hypothesis.
+
+Required before step 6:
+
+- [ ] A backup of the `appointments` collection taken **after** the write
+      freeze and **before** the backfill, so its contents match what the
+      backfill will operate on.
+- [ ] That backup **restored into a scratch database** and spot-checked:
+      document count matches, and a handful of known `_id`s come back with
+      their `scheduled_at`, `status` and `occupied_slots` intact.
+- [ ] The restore command written down, with its measured duration.
+
+Why a rehearsal and not a checkbox: the backfill's `$set` on `occupied_slots`
+is **irreversible in place**. Restore is the only rollback, so an untested
+restore means the rollback plan for step 6 is untested.
+
+### 2. Write-freeze METHOD — ❌ UNVERIFIED
+
+**There is no freeze mechanism in the code.** No maintenance flag, no read-only
+mode, no booking kill-switch exists in `app/core/config.py`, `app/main.py` or
+`app/api/v1/routes/appointments.py`. The freeze must be achieved
+operationally, and the method must be chosen and rehearsed before a window.
+
+Candidate methods, each needing a decision:
+
+- Stop / scale the application to zero (total outage, simplest to verify).
+- Block `POST /appointments` and `PATCH /appointments/*` at the ingress.
+- Revoke the application's write role on the `appointments` collection.
+
+> **`--booking-writes-frozen` IS AN ACKNOWLEDGEMENT, NOT PROOF.** The flag
+> records that a human asserted the freeze. It verifies nothing, and the CLI
+> cannot. A booking created between the backfill and the deploy carries no
+> `occupied_slots`, so it is invisible to the indexes being built and escapes
+> overlap protection **permanently, not briefly**. Treat the flag as a
+> signature on a decision, not as a check that passed.
+
+Required before step 6:
+
+- [ ] Method chosen and written down.
+- [ ] Rehearsed in staging, with a **positive test**: attempt a booking and
+      confirm it is refused.
+- [ ] The un-freeze step confirmed to restore service.
+
+---
+
+## Sequence
+
+Steps 1–5 are reversible. Step 6 is the first irreversible one.
+
+| # | Step | Command | Reversible |
+|---|---|---|---|
+| 1 | Keep the OLD app serving | — | n/a |
+| 2 | **Freeze booking writes** | operator-defined (above) | yes |
+| 3 | Take the verified backup | operator-defined (above) | n/a |
+| 4 | Preflight — inspect | `python -m app.db.appointment_slot_preflight` | read-only |
+| 5 | Resolve every reported row, then dry run | `python -m app.db.appointment_backfill_cli --database <NAME>` | read-only |
+| 6 | **Backfill — apply** | `python -m app.db.appointment_backfill_cli --database <NAME> --apply --confirm-database <NAME> --confirm-endpoint <scheme://host[:port]> --booking-writes-frozen` | **NO — restore only** |
+| 7 | Create the three indexes | `createIndex` × 3 (below) | yes — drop them |
+| 8 | Validate | `validate_appointment_indexes()` must return `[]` | read-only |
+| 9 | **Drop the obsolete index** | `db.appointments.dropIndex("uniq_pending_slot")` | **NO — rebuild only** |
+| 10 | Preflight again | `safe_to_activate` must be `true` | read-only |
+| 11 | Deploy the NEW app | startup runs `assert_appointment_booking_ready()` | yes — redeploy old |
+| 12 | Reopen booking | reverse of step 2 | yes |
+
+`AAI_BACKFILL_MONGO_URL` must be exported for steps 5 and 6. The CLI reads the
+connection string from that variable only — there is no `--uri` flag, because
+an argument reaches shell history, `ps` output and CI logs.
+
+**Confirming the database name is not enough.** Environments routinely carry
+the same database name on different servers, so the name alone proves only that
+you know the name.
+
+`--confirm-endpoint` identifies the server, and **an endpoint is scheme + host
++ port**. Two Mongo instances on one host differing only by port is exactly how
+a staging and a production database end up side by side, and a confirmation
+that dropped the port would confirm both. Give it once per host for a replica
+set, in any order.
+
+Both the endpoint set and the database name must match before anything is
+written. A mismatch, an unsupported scheme, or a connection string that cannot
+be parsed all refuse **before connecting**, and the refusal does not echo the
+real endpoint back. **A dry run prints the exact `--confirm-endpoint` arguments
+to copy** — do not retype them.
+
+### If step 6 reports PARTIAL/UNKNOWN
+
+The apply exits non-zero and does **not** print `APPLIED` when it cannot say
+the result is complete:
+
+- a row that vanished mid-run (Mongo matched nothing),
+- a written count that disagrees with the plan,
+- an exception part-way through the write,
+- a post-apply pass that still finds work,
+- **a post-apply verification that could not be read at all.**
+
+The last one matters most and is the least obvious: the writes already
+happened, so a verification that fails does not mean they were fine — it means
+nobody knows. Only the exception class is printed, never the driver message,
+which carries the connection string.
+
+Some rows then carry new slots and some do not, which no single count
+describes.
+
+- [ ] **Keep booking writes frozen.** Do not proceed to step 7.
+- [ ] Do not re-run the apply blindly; it is not a retry.
+- [ ] Inspect: `python -m app.db.appointment_slot_preflight`.
+- [ ] If the state cannot be explained, **restore from the step-3 backup**.
+
+A "vanished row" in particular may mean a second writer was active — which
+would mean the freeze was not actually in force.
+
+### Step 7, verbatim
+
+```
+db.appointments.createIndex({"lawyer_id": 1, "occupied_slots": 1}, {name: "uniq_appointment_lawyer_slot", unique: true, partialFilterExpression: {"status": {"$in": ["pending", "confirmed"]}}})
+db.appointments.createIndex({"client_id": 1, "occupied_slots": 1}, {name: "uniq_appointment_client_slot", unique: true, partialFilterExpression: {"status": {"$in": ["pending", "confirmed"]}}})
+db.appointments.createIndex({"client_id": 1, "idempotency_key": 1}, {name: "uniq_appointment_idempotency", unique: true, partialFilterExpression: {"idempotency_key": {"$type": "string"}}})
+```
+
+**Step 6 must precede step 7, and not only for tidiness.** Rows with no
+`occupied_slots` all index as `occupied_slots: null`, so two slotless active
+rows sharing a lawyer — or a client — collide on the unique index and the build
+fails outright. Observed while testing the CLI, not deduced.
+
+---
+
+## Rollback points
+
+| If it fails at | Do this | Cost |
+|---|---|---|
+| 1–5 | Un-freeze. Nothing was written. | A closed booking window |
+| 6 | **Restore from the step-3 backup.** No in-place undo exists. | Whatever the rehearsal measured |
+| 7–8 | Drop the three new indexes; the old app ignores them. | An index build's worth of IO |
+| **After 9** | `uniq_pending_slot` is gone. Rolling back to the old app leaves **weaker** overlap protection than before the window, until it is rebuilt. | See below |
+| 11 | Redeploy the previous app. | A deploy cycle |
+
+**Step 9 is the point of no easy return.** Before it, the old app can be left
+running unchanged. After it, the old app runs with its only overlap guard
+removed and the new guards unused, so a rollback past step 9 should rebuild
+`uniq_pending_slot` rather than simply redeploying:
+
+```
+db.appointments.createIndex({"lawyer_id": 1, "scheduled_at": 1}, {name: "uniq_pending_slot", unique: true, partialFilterExpression: {"status": "pending"}})
+```
+
+**The new app refuses to boot while the contract does not hold.** Deploying it
+before step 7 takes the service down rather than bringing it up — which is the
+intended fail-closed behaviour, not a fault.
+
+---
+
+## Gates at step 10
+
+All six must be true, and `safe_to_activate` is their conjunction:
+
+`indexes_valid` · `no_overlapping_active_rows` · `all_active_rows_usable` ·
+`all_active_rows_slotted` · `no_idempotency_collisions` ·
+`obsolete_indexes_absent`
+
+---
+
+## Still requiring explicit approval
+
+1. The write-freeze method (blocking, above).
+2. Backup taken and **restore rehearsed** (blocking, above).
+3. Authorisation for step 6 — irreversible write.
+4. Authorisation for step 9 — irreversible drop.
+5. Capacity sign-off: three unique index builds on a live collection.
+6. Acknowledgement that **`PATCH /appointments/{id}/confirm` now requires a
+   versioned body**; any non-UI client receives 422 until updated.
+
+Recommended before scheduling: run step 4 against a **restored clone** of
+production to see real findings and real row counts, with no window open and
+nothing at risk.

@@ -603,6 +603,7 @@ async def backfill_occupied_slots(db, *, dry_run: bool = True) -> dict:
     planned = 0
     skipped = 0
     written = 0
+    vanished = 0
 
     cursor = col.find(
         {"status": {"$in": list(ACTIVE_STATUSES)}},
@@ -627,12 +628,28 @@ async def backfill_occupied_slots(db, *, dry_run: bool = True) -> dict:
 
         planned += 1
         if not dry_run:
-            await col.update_one({"_id": row["_id"]},
-                                 {"$set": {"occupied_slots": expected}})
-            written += 1
+            result = await col.update_one({"_id": row["_id"]},
+                                          {"$set": {"occupied_slots": expected}})
+            # WRITTEN MEANS MONGO MATCHED THE ROW.
+            #
+            # This used to increment unconditionally, so `written` counted
+            # ATTEMPTS and was equal to `planned` by construction — it could
+            # never disagree, and therefore could never report that anything
+            # had gone wrong. A row deleted or cancelled between the cursor
+            # reading it and the update reaching it matches nothing, and the
+            # operator was told it had been repaired.
+            if result.matched_count:
+                written += 1
+            else:
+                vanished += 1
 
     return {"dry_run": dry_run, "planned": planned,
-            "written": written, "skipped_unfixable": skipped}
+            "written": written, "skipped_unfixable": skipped,
+            # Rows the cursor saw and the update did not find. Not an error on
+            # its own — a cancellation during the run is legitimate — but it
+            # means the applied count will not equal the plan, and the caller
+            # has to decide rather than assume.
+            "vanished": vanished}
 
 
 async def _main() -> int:
