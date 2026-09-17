@@ -100,12 +100,33 @@ def _slot_text(value: datetime) -> str:
 #                       read.
 _INTERNAL_FIELDS = ("occupied_slots", "idempotency_key", "payload_fingerprint")
 
+# The lawyer's own record of the consultation, and nobody else's.
+#
+# `lawyer_notes` is documented as private and was returned to everyone. Every
+# response goes through `_sanitize`, which stripped the three fields above and
+# passed this one straight to the client — so a note written for the lawyer's
+# file ("client unreliable; consider declining future work") was readable by
+# its subject through `GET /appointments/{id}` and through the list.
+#
+# `AppointmentOut` cannot be the filter: it DECLARES `lawyer_notes` and is
+# `extra="allow"`, so it strips nothing. This is the only boundary there is.
+_LAWYER_ONLY_FIELDS = ("lawyer_notes",)
 
-def _sanitize(appt: dict) -> dict:
+
+def _sanitize(appt: dict, *, for_lawyer: bool = False) -> dict:
+    """The stored row as a response, for a given viewer.
+
+    FAILS CLOSED. `for_lawyer` defaults to False, so a new response path that
+    forgets to think about the viewer hides the private fields rather than
+    exposing them. Opting in is a decision each caller makes by name.
+    """
     appt = dict(appt)
     appt["id"] = appt.pop("_id", appt.get("id", ""))
     for field in _INTERNAL_FIELDS:
         appt.pop(field, None)
+    if not for_lawyer:
+        for field in _LAWYER_ONLY_FIELDS:
+            appt.pop(field, None)
     # Rows written before the zone was recorded carry no `timezone`. They were
     # all booked in Pakistan — that was the only zone this product has ever had
     # — so the field is DEFAULTED AT THE READ BOUNDARY rather than migrated.
@@ -693,7 +714,9 @@ async def confirm_appointment(
     # read. Hand-patching `appt["status"]` after the write reported whatever
     # this request intended rather than what is stored, which is exactly the
     # discrepancy a concurrent transition produces.
-    return _sanitize(updated)
+    # This endpoint is `require_lawyer` and the actor filter has already
+    # proved it is THIS appointment's lawyer, so the private note is theirs.
+    return _sanitize(updated, for_lawyer=True)
 
 
 async def cancel_appointment(
@@ -749,7 +772,12 @@ async def cancel_appointment(
             payload={"appointment_id": appt_id},
         )
 
-    return _sanitize(updated)
+    # Client, lawyer or admin can reach this. Only the lawyer sees the note;
+    # an admin is deliberately treated like the client, because no existing
+    # policy grants admins appointment notes — `_actor_filter` decides row
+    # ACCESS, not field access, and reading one into the other is how a
+    # privacy rule quietly widens.
+    return _sanitize(updated, for_lawyer=user_role == "lawyer")
 
 
 async def complete_appointment(
@@ -783,7 +811,9 @@ async def complete_appointment(
         payload={"appointment_id": appt_id},
     )
 
-    return _sanitize(updated)
+    # This endpoint is `require_lawyer` and the actor filter has already
+    # proved it is THIS appointment's lawyer, so the private note is theirs.
+    return _sanitize(updated, for_lawyer=True)
 
 
 async def mark_no_show(appt_id: str, lawyer_id: str) -> dict:
@@ -823,12 +853,15 @@ async def mark_no_show(appt_id: str, lawyer_id: str) -> dict:
         # notification twice cannot produce two.
         logical_event_id=f"appointment:{appt_id}:no_show",
     )
-    return _sanitize(updated)
+    # This endpoint is `require_lawyer` and the actor filter has already
+    # proved it is THIS appointment's lawyer, so the private note is theirs.
+    return _sanitize(updated, for_lawyer=True)
 
 
 async def get_appointment(appt_id: str, user_id: str, user_role: str) -> dict:
     appt = await _load_for_actor(appt_id, user_id, user_role)
-    return _enrich(_sanitize(appt), await _names(appt))
+    return _enrich(
+        _sanitize(appt, for_lawyer=user_role == "lawyer"), await _names(appt))
 
 
 async def list_appointments(
@@ -855,7 +888,8 @@ async def list_appointments(
     enriched = []
     for appt in result.items:
         names = await _names(appt)
-        enriched.append(_enrich(_sanitize(appt), names))
+        enriched.append(_enrich(
+            _sanitize(appt, for_lawyer=user_role == "lawyer"), names))
 
     return {
         "items": enriched,
@@ -1158,4 +1192,6 @@ async def set_meeting_link(
               f"{_slot_text(updated['scheduled_at'])}."),
         payload={"appointment_id": appt_id},
     )
-    return _sanitize(updated)
+    # This endpoint is `require_lawyer` and the actor filter has already
+    # proved it is THIS appointment's lawyer, so the private note is theirs.
+    return _sanitize(updated, for_lawyer=True)

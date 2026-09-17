@@ -41,6 +41,7 @@ async def parties(app_indexes):
     tag = secrets.token_hex(4)
     lawyer_id, lawyer2_id = f"RS-L-{tag}", f"RS-L2-{tag}"
     client_id, client2_id = f"RS-C-{tag}", f"RS-C2-{tag}"
+    admin_id = f"RS-A-{tag}"
     now = datetime.now(timezone.utc)
 
     def _lawyer(_id, name):
@@ -60,11 +61,15 @@ async def parties(app_indexes):
         {"_id": client2_id, "role": "client", "is_active": True,
          "email": f"{client2_id}@test.invalid", "full_name": "Client Two",
          "created_at": now},
+        {"_id": admin_id, "role": "admin", "is_active": True,
+         "email": f"{admin_id}@test.invalid", "full_name": "The Admin",
+         "created_at": now},
     ])
     yield {"lawyer_id": lawyer_id, "lawyer2_id": lawyer2_id,
-           "client_id": client_id, "client2_id": client2_id}
+           "client_id": client_id, "client2_id": client2_id,
+           "admin_id": admin_id}
     await get_users_col().delete_many(
-        {"_id": {"$in": [lawyer_id, lawyer2_id, client_id, client2_id]}})
+        {"_id": {"$in": [lawyer_id, lawyer2_id, client_id, client2_id, admin_id]}})
     await get_appointments_col().delete_many(
         {"client_id": {"$in": [client_id, client2_id]}})
 
@@ -1329,3 +1334,242 @@ async def test_an_existing_link_on_a_non_video_row_is_left_alone(parties):
     seen = await appointment_service.get_appointment(
         appt_id=appt["id"], user_id=parties["client_id"], user_role="client")
     assert seen["meeting_link"] == LINK
+
+
+# ── 13. lawyer_notes is the lawyer's record, and nobody else's ───────────────
+#
+# It is documented as private and was returned to everyone. Every response goes
+# through `_sanitize`, which stripped three internal fields and passed this one
+# straight through — so a note written for the lawyer's file was readable by
+# its subject through `GET /appointments/{id}` and through the list.
+#
+# `AppointmentOut` cannot be the filter: it DECLARES `lawyer_notes` and is
+# `extra="allow"`. That is why these tests assert at the HTTP boundary as well
+# as on the projection — the route is where a regression would actually surface.
+
+PRIVATE_NOTE = "PRIVATE-NOTE-7f3a: client unreliable, consider declining future work"
+
+
+async def _with_private_note(parties, mode=AppointmentMode.VIDEO):
+    """A stored appointment carrying a distinctive private note."""
+    from app.db.collections import get_appointments_col
+
+    appt = await _book(parties, _slot(), mode=mode)
+    await get_appointments_col().update_one(
+        {"_id": appt["id"]}, {"$set": {"lawyer_notes": PRIVATE_NOTE}})
+    return appt
+
+
+def _assert_hidden(payload, where: str) -> None:
+    assert PRIVATE_NOTE not in str(payload), f"the private note leaked via {where}"
+    assert not payload.get("lawyer_notes"), (
+        f"{where} returned a lawyer_notes value")
+
+
+# --- the service projection -------------------------------------------------
+
+async def test_the_client_never_receives_the_private_note_from_get(parties):
+    from app.services import appointment_service
+
+    appt = await _with_private_note(parties)
+
+    seen = await appointment_service.get_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"], user_role="client")
+
+    _assert_hidden(seen, "get_appointment as client")
+
+
+async def test_the_client_never_receives_it_from_the_list(parties):
+    from app.services import appointment_service
+
+    await _with_private_note(parties)
+
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=10)
+
+    assert page["items"]
+    for item in page["items"]:
+        _assert_hidden(item, "list_appointments as client")
+
+
+async def test_the_client_never_receives_it_from_a_cancellation(parties):
+    """Not only get and list. Cancellation returns the row too."""
+    from app.services import appointment_service
+
+    appt = await _with_private_note(parties)
+
+    out = await appointment_service.cancel_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"],
+        user_role="client", reason=None)
+
+    _assert_hidden(out, "cancel_appointment as client")
+
+
+async def test_the_client_never_receives_it_from_a_reschedule(parties):
+    from app.services import appointment_service
+
+    appt = await _with_private_note(parties)
+    row = await _row(appt["id"])
+
+    out = await appointment_service.reschedule_appointment(
+        appt_id=appt["id"], client_id=parties["client_id"],
+        scheduled_at=_slot(96), expected_version=row["schedule_version"])
+
+    _assert_hidden(out, "reschedule_appointment")
+
+
+async def test_the_client_never_receives_it_from_an_idempotent_replay(parties):
+    """The replay returns a row read straight back out of Mongo, so it is the
+    path most likely to hand over the stored document verbatim."""
+    from app.db.collections import get_appointments_col
+
+    key = f"bk_{secrets.token_hex(8)}"
+    when = _slot()
+    first = await _book(parties, when, idempotency_key=key)
+    await get_appointments_col().update_one(
+        {"_id": first["id"]}, {"$set": {"lawyer_notes": PRIVATE_NOTE}})
+
+    replay = await _book(parties, when, idempotency_key=key)
+
+    assert replay["id"] == first["id"]
+    _assert_hidden(replay, "the idempotent replay")
+
+
+async def test_an_admin_does_not_receive_it(parties):
+    """Hidden by default. `_actor_filter` grants an admin row ACCESS, not field
+    access, and reading one into the other is how a privacy rule widens."""
+    from app.services import appointment_service
+
+    appt = await _with_private_note(parties)
+
+    seen = await appointment_service.get_appointment(
+        appt_id=appt["id"], user_id=parties["admin_id"], user_role="admin")
+
+    _assert_hidden(seen, "get_appointment as admin")
+
+
+# --- the lawyer still has their own record ----------------------------------
+
+async def test_the_assigned_lawyer_still_reads_the_note(parties):
+    from app.services import appointment_service
+
+    appt = await _with_private_note(parties)
+
+    seen = await appointment_service.get_appointment(
+        appt_id=appt["id"], user_id=parties["lawyer_id"], user_role="lawyer")
+
+    assert seen["lawyer_notes"] == PRIVATE_NOTE
+
+
+async def test_the_lawyer_list_still_carries_the_note(parties):
+    from app.services import appointment_service
+
+    await _with_private_note(parties)
+
+    page = await appointment_service.list_appointments(
+        user_id=parties["lawyer_id"], user_role="lawyer",
+        status=None, page=1, page_size=10)
+
+    assert any(i.get("lawyer_notes") == PRIVATE_NOTE for i in page["items"])
+
+
+async def test_the_lawyer_reads_it_back_after_writing_it(parties):
+    """The note a lawyer just wrote at completion comes back to them."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    row = await _row(appt["id"])
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"])
+    await _elapse_for_completion(appt["id"])
+
+    out = await appointment_service.complete_appointment(
+        appt_id=appt["id"], lawyer_id=parties["lawyer_id"],
+        lawyer_notes=PRIVATE_NOTE, meeting_link=None)
+
+    assert out["lawyer_notes"] == PRIVATE_NOTE
+
+
+async def test_the_stored_value_is_untouched(parties):
+    """Hidden from a response, NOT deleted. It is the lawyer's file."""
+    from app.services import appointment_service
+
+    appt = await _with_private_note(parties)
+
+    await appointment_service.get_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"], user_role="client")
+
+    assert (await _row(appt["id"]))["lawyer_notes"] == PRIVATE_NOTE
+
+
+def test_the_projection_fails_closed():
+    """A new response path that forgets to think about the viewer must hide the
+    field rather than expose it."""
+    import inspect
+
+    from app.services.appointment_service import _sanitize
+
+    assert inspect.signature(_sanitize).parameters["for_lawyer"].default is False
+
+    hidden = _sanitize({"_id": "a", "lawyer_notes": PRIVATE_NOTE})
+    assert "lawyer_notes" not in hidden
+    shown = _sanitize({"_id": "a", "lawyer_notes": PRIVATE_NOTE}, for_lawyer=True)
+    assert shown["lawyer_notes"] == PRIVATE_NOTE
+
+
+# --- and at the HTTP boundary ----------------------------------------------
+#
+# `AppointmentOut` declares `lawyer_notes` and allows extras, so the schema
+# strips nothing. If the projection ever regresses, this is where it shows.
+
+async def test_http_the_client_sees_no_private_note(http, parties):
+    appt = await _with_private_note(parties)
+    c = http["client"]
+
+    http["be_client"]()
+    single = await c.get(f"/appointments/{appt['id']}")
+    listed = await c.get("/appointments")
+
+    assert single.status_code == 200
+    assert PRIVATE_NOTE not in single.text, "the note leaked through GET /{id}"
+    assert not single.json().get("lawyer_notes")
+    assert PRIVATE_NOTE not in listed.text, "the note leaked through the list"
+
+
+async def test_http_the_lawyer_sees_their_own_note(http, parties):
+    appt = await _with_private_note(parties)
+    c = http["client"]
+
+    http["be_lawyer"]()
+    single = await c.get(f"/appointments/{appt['id']}")
+
+    assert single.status_code == 200
+    assert single.json()["lawyer_notes"] == PRIVATE_NOTE
+
+
+async def test_http_a_client_cancellation_returns_no_note(http, parties):
+    appt = await _with_private_note(parties)
+    c = http["client"]
+
+    http["be_client"]()
+    resp = await c.patch(f"/appointments/{appt['id']}/cancel", json={})
+
+    assert resp.status_code == 200
+    assert PRIVATE_NOTE not in resp.text
+
+
+async def test_http_a_client_reschedule_returns_no_note(http, parties):
+    appt = await _with_private_note(parties)
+    row = await _row(appt["id"])
+    c = http["client"]
+
+    http["be_client"]()
+    resp = await c.patch(
+        f"/appointments/{appt['id']}/reschedule",
+        json={"scheduled_at": _slot(96).isoformat(),
+              "schedule_version": row["schedule_version"]})
+
+    assert resp.status_code == 200, resp.text
+    assert PRIVATE_NOTE not in resp.text
