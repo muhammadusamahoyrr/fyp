@@ -382,6 +382,27 @@ async def _replay(client_id: str, idempotency_key: str, fingerprint: str) -> dic
     return _sanitize(existing)
 
 
+def _assert_link_allowed(appt: dict) -> None:
+    """A NEW joining link belongs to a video consultation only.
+
+    A phone appointment's joining information is a number and an in-person
+    one's is an address; neither is a URL, and storing one on them puts a
+    "Join Meeting" link on a card whose client is expected in a room. The
+    frontend only offers the control for video, but the frontend is not the
+    rule — a direct caller is.
+
+    EXISTING STORED LINKS ARE NOT TOUCHED. This gates writing a new one, so a
+    row that already carries a link keeps it: retroactively clearing links on
+    non-video appointments would destroy a record of where a consultation
+    happened in order to enforce a rule that did not exist when it was written.
+    """
+    mode = appt.get("mode")
+    if mode != AppointmentMode.VIDEO.value:
+        raise AppValidationError(
+            "A joining link can only be added to a video consultation. This "
+            f"appointment is {mode or 'of an unknown mode'}.")
+
+
 async def _get_verified_lawyer(lawyer_id: str) -> dict:
     lawyer = await user_repo.find_by_id(lawyer_id)
     if not lawyer or lawyer.get("role") != "lawyer":
@@ -621,6 +642,7 @@ async def book_appointment(
 
 async def confirm_appointment(
     appt_id: str, lawyer_id: str, *, expected_version: int,
+    meeting_link: str | None = None,
 ) -> dict:
     """Accept a pending request, at the schedule the caller OBSERVED.
 
@@ -645,8 +667,14 @@ async def confirm_appointment(
     caller has to supply the version it actually saw.
     """
     appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
+    if meeting_link:
+        _assert_link_allowed(appt)
+    # Written in the SAME atomic update as the status. A link attached by a
+    # second write could land after a concurrent cancellation, leaving a join
+    # link on an appointment nobody is attending.
+    extra = {"meeting_link": meeting_link} if meeting_link else None
     updated = await _transition(
-        appt, AppointmentStatus.CONFIRMED, lawyer_id, "lawyer",
+        appt, AppointmentStatus.CONFIRMED, lawyer_id, "lawyer", extra,
         expected_version=expected_version)
 
     lawyer = await user_repo.find_by_id(lawyer_id)
@@ -732,10 +760,16 @@ async def complete_appointment(
 ) -> dict:
     appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
 
-    extra = {
-        "lawyer_notes": lawyer_notes,
-        "meeting_link": meeting_link,
-    }
+    if meeting_link:
+        _assert_link_allowed(appt)
+
+    extra = {"lawyer_notes": lawyer_notes}
+    # ONLY WHEN ONE IS SUPPLIED. This used to write `meeting_link` whatever it
+    # was given, so completing a consultation without resending the link set it
+    # to None — erasing the record of where the consultation actually happened,
+    # at the exact moment that record became historical.
+    if meeting_link:
+        extra["meeting_link"] = meeting_link
     updated = await _transition(
         appt, AppointmentStatus.COMPLETED, lawyer_id, "lawyer", extra)
 
@@ -1019,4 +1053,76 @@ async def reschedule_appointment(
         logical_event_id=f"appointment:{appt_id}:rescheduled:{expected_version + 1}",
     )
 
+    return _sanitize(updated)
+
+
+async def set_meeting_link(
+    appt_id: str, lawyer_id: str, meeting_link: str,
+) -> dict:
+    """Attach or replace the join link on the lawyer's own appointment.
+
+    The lawyer's way to supply a link they did not have when they confirmed. A
+    video request must never appear joinable without one, and the alternative
+    was asking them to cancel and rebook.
+
+    PENDING OR CONFIRMED ONLY. A completed consultation's link is a record of
+    where it happened and is not rewritten afterwards; a cancelled one has
+    nowhere to join.
+
+    The link itself is validated at the schema boundary — HTTPS with a host —
+    so what arrives here has already been refused if it was `javascript:` or a
+    bare scheme.
+    """
+    # VALIDATED HERE TOO, not only at the schema boundary.
+    #
+    # The route's model refuses a blank or hostless link, but this function is
+    # reachable directly and a caller that passed one would store it — and then
+    # notify the client that a joining link had been added. The rule belongs
+    # wherever the write happens, and the same validator is reused so the two
+    # cannot diverge.
+    from app.schemas.appointment import validate_required_https_meeting_link
+
+    try:
+        meeting_link = validate_required_https_meeting_link(meeting_link)
+    except ValueError as exc:
+        raise AppValidationError(str(exc))
+
+    appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
+    _assert_link_allowed(appt)
+    status = _current_status(appt)
+    if status not in (AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED):
+        raise ConflictError(
+            f"A meeting link cannot be set on a {status.value} appointment.")
+
+    updated = await appt_repo.compare_and_set(
+        appt_id, [status], status,
+        _actor_filter(lawyer_id, "lawyer"),
+        {"meeting_link": meeting_link},
+    )
+    if updated is None:
+        current = await appt_repo.find_for_actor(
+            appt_id, _actor_filter(lawyer_id, "lawyer"))
+        if current is None:
+            logger.info(
+                "appointment_access_denied appointment_id=%s role=%s reason=%s",
+                appt_id, "lawyer", "vanished_or_not_a_party")
+            raise ForbiddenError(_APPT_DENIED)
+        raise ConflictError(
+            "This appointment changed while the link was being set. Reload "
+            "and try again.")
+
+    # The client is told, because a link they cannot see is a link that does
+    # not exist as far as they are concerned. Best-effort, like every other
+    # appointment notification.
+    lawyer = await user_repo.find_by_id(lawyer_id)
+    await _notify(
+        appt_id, "meeting_link",
+        user_id=updated["client_id"],
+        type=NotificationType.APPOINTMENT_CONFIRMED,
+        title="Joining Details Added",
+        body=(f"{(lawyer or {}).get('full_name', 'Your lawyer')} added a "
+              f"joining link for your consultation on "
+              f"{_slot_text(updated['scheduled_at'])}."),
+        payload={"appointment_id": appt_id},
+    )
     return _sanitize(updated)

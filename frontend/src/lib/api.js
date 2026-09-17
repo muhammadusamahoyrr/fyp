@@ -564,14 +564,24 @@ export async function getAppointment(id) {
   return apiFetch(`/appointments/${id}`);
 }
 
-export async function confirmAppointment(id, { schedule_version } = {}) {
+export async function setMeetingLink(id, meeting_link) {
+  return apiFetch(`/appointments/${id}/meeting-link`, {
+    method: 'PATCH',
+    body: JSON.stringify({ meeting_link }),
+  });
+}
+
+export async function confirmAppointment(id, { schedule_version, meeting_link } = {}) {
   return apiFetch(`/appointments/${id}/confirm`, {
     method: 'PATCH',
     // The schedule the lawyer was SHOWN. Required by the server: a client can
     // move a pending request while the page is open, and the status stays
     // PENDING throughout, so without this the confirmation would accept a time
     // the lawyer never saw.
-    body: JSON.stringify({ schedule_version }),
+    // The joining link belongs here, not at completion — a link that
+    // arrives once the consultation is over is not a joining link.
+    body: JSON.stringify({ schedule_version,
+      ...(meeting_link ? { meeting_link } : {}) }),
   });
 }
 

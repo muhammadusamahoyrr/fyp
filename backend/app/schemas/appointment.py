@@ -7,6 +7,62 @@ from app.core.constants import AppointmentMode, AppointmentStatus
 from app.services.appointment_slots import alignment_error, duration_error
 
 
+def validate_https_meeting_link(v: str | None) -> str | None:
+    """A join link is rendered as a clickable anchor, so it is executable input.
+
+    `ModTracking.jsx` puts this value straight into `href`. The field was
+    `max_length` and nothing else, so `javascript:` — which browsers run in the
+    client's own session on click — was a 500-character string like any other,
+    stored by one party to the appointment and clicked by the other.
+
+    HTTPS only. Not http, because a meeting link is credential-bearing: the URL
+    IS the admission to the consultation, and sending it in clear text hands
+    the room to anyone on the path. An allowlist of schemes is used rather than
+    a blocklist, so a scheme nobody thought of is refused by default.
+
+    Shared by every request that can carry a link. Confirmation and completion
+    validating it separately is how one of them ends up accepting something the
+    other refuses.
+    """
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        # An empty string is "no link", not a link that fails validation —
+        # otherwise clearing the field becomes impossible.
+        return None
+
+    parsed = urlparse(v)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("meeting_link must be an https:// URL")
+    # A PARSED HOSTNAME, not merely a non-empty netloc.
+    #
+    # `urlparse("https://user@")` yields netloc "user@" and hostname None — all
+    # credentials and no host. The netloc test passed it, so a link that leads
+    # nowhere was storable and would render as a dead anchor the client is told
+    # to click. `hostname` is the field that answers "is there a server here".
+    if not parsed.hostname:
+        raise ValueError(
+            "meeting_link must include a host, e.g. https://meet.example.com/abc")
+    return v
+
+
+def validate_required_https_meeting_link(v: str) -> str:
+    """The same rule, where a link is the POINT of the request.
+
+    `validate_https_meeting_link` maps blank to None so that confirmation and
+    completion can omit a link — which is right for them and wrong here. An
+    "after" validator's return value is not re-checked against the field type,
+    so a whitespace-only body sailed through `meeting_link: str` and arrived at
+    the service as None: the endpoint then stored nothing and told the client a
+    joining link had been added.
+    """
+    cleaned = validate_https_meeting_link(v)
+    if cleaned is None:
+        raise ValueError("meeting_link must not be blank")
+    return cleaned
+
+
 class BookAppointmentRequest(BaseModel):
     lawyer_id: str
     case_id: str | None = None
@@ -122,6 +178,15 @@ class ConfirmAppointmentRequest(BaseModel):
     """
 
     schedule_version: int = Field(ge=0)
+    # THE LINK BELONGS AT CONFIRMATION, not at completion.
+    #
+    # It used to be accepted only when the appointment was marked complete —
+    # after the consultation. A join link that arrives once the call is over is
+    # not a join link. Optional, because a lawyer may not have the room yet;
+    # `PATCH /{id}/meeting-link` is how they supply it afterwards.
+    meeting_link: str | None = Field(default=None, max_length=500)
+
+    _check_link = field_validator("meeting_link")(validate_https_meeting_link)
 
 
 class CancelAppointmentRequest(BaseModel):
@@ -130,41 +195,27 @@ class CancelAppointmentRequest(BaseModel):
 
 class CompleteAppointmentRequest(BaseModel):
     lawyer_notes: str | None = Field(default=None, max_length=2000)
+    # Optional, and OMITTING IT LEAVES THE EXISTING LINK ALONE. Completion used
+    # to write whatever it was given, so finishing a consultation without
+    # resending the link erased it — destroying the record of where the
+    # consultation actually happened.
     meeting_link: str | None = Field(default=None, max_length=500)
 
-    @field_validator("meeting_link")
-    @classmethod
-    def must_be_https_url(cls, v: str | None) -> str | None:
-        """A join link is rendered as a clickable anchor, so it is executable input.
+    _check_link = field_validator("meeting_link")(validate_https_meeting_link)
 
-        `ModTracking.jsx` puts this value straight into `href`. The field was
-        `max_length` and nothing else, so `javascript:` — which browsers run in
-        the client's own session on click — was a 500-character string like any
-        other, stored by one party to the appointment and clicked by the other.
 
-        HTTPS only. Not http, because a meeting link is credential-bearing: the
-        URL IS the admission to the consultation, and sending it in clear text
-        hands the room to anyone on the path. An allowlist of schemes is used
-        rather than a blocklist, so a scheme nobody thought of is refused by
-        default instead of admitted by default.
-        """
-        if v is None:
-            return None
-        v = v.strip()
-        if not v:
-            # An empty string is "no link", not a link that fails validation —
-            # otherwise clearing the field becomes impossible.
-            return None
+class SetMeetingLinkRequest(BaseModel):
+    """Attach or replace the join link on an appointment that already exists.
 
-        parsed = urlparse(v)
-        if parsed.scheme.lower() != "https":
-            raise ValueError("meeting_link must be an https:// URL")
-        # A scheme alone is not a URL. `urlparse("https:evil")` parses without
-        # error and yields an empty netloc, which is not somewhere a client can
-        # be sent.
-        if not parsed.netloc:
-            raise ValueError("meeting_link must include a host, e.g. https://meet.example.com/abc")
-        return v
+    The lawyer's way to supply a link they did not have at confirmation — a
+    video request must never appear joinable without one, and the alternative
+    was asking them to cancel and start again.
+    """
+
+    meeting_link: str = Field(min_length=1, max_length=500)
+
+    _check_link = field_validator("meeting_link")(
+        validate_required_https_meeting_link)
 
 
 class AvailabilityQuery(BaseModel):

@@ -2254,14 +2254,21 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                                     "{appt.notes}"
                                 </div>
                             )}
-                            {appt.meeting_link && (
+                            {appt.meeting_link ? (
                                 <div style={{ marginTop: 10 }}>
                                     <a href={appt.meeting_link} target="_blank" rel="noreferrer"
                                         style={{ fontSize: 12, color: t.primary, fontWeight: 700, textDecoration: "none" }}>
                                         🔗 Join Meeting →
                                     </a>
                                 </div>
-                            )}
+                            ) : appt.mode === "video" && CLIENT_CANCELLABLE.has(appt.status) ? (
+                                // A VIDEO APPOINTMENT WITH NO LINK IS NOT JOINABLE, and silence
+                                // reads as "the link is somewhere else". Said plainly instead, so
+                                // the client knows to expect one rather than hunting for it.
+                                <div style={{ marginTop: 10, fontSize: 12, color: t.textMuted }}>
+                                    Joining link not shared yet — your lawyer will add it.
+                                </div>
+                            ) : null}
                             <RescheduleAppointment appt={appt} t={t} onReload={onReload}
                                 error={(cancelErrors || {})[appt.id] || null}
                                 setError={setCancelError} />

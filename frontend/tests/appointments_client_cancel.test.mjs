@@ -1236,3 +1236,60 @@ test("the reschedule controls are keyboard-reachable with touch targets", async 
     }
     await ui.unmount();
 });
+
+/* ── the client's view of a video consultation ────────────────────────────── */
+
+test("a stored joining link is offered to the client on the appointment", async () => {
+    serveAppointments([appointment({
+        status: "confirmed", mode: "video",
+        meeting_link: "https://meet.example.com/room/abc",
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    const anchor = [...ui.container.querySelectorAll("a")]
+        .find(a => a.getAttribute("href") === "https://meet.example.com/room/abc");
+    assert.ok(anchor, "the client cannot reach the stored link");
+    await ui.unmount();
+});
+
+test("a video appointment with no link is not presented as joinable", async () => {
+    // Silence reads as "the link is somewhere else". Said plainly instead, so
+    // the client knows to expect one rather than hunting for it.
+    serveAppointments([appointment({
+        status: "confirmed", mode: "video", meeting_link: null,
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.equal([...ui.container.querySelectorAll("a")]
+        .filter(a => /Join Meeting/.test(a.textContent)).length, 0,
+        "a joinable link was shown for an appointment that has none");
+    assert.match(ui.text(), /not shared yet/);
+    await ui.unmount();
+});
+
+test("the client is never shown an invented meeting URL", async () => {
+    serveAppointments([appointment({
+        status: "confirmed", mode: "video", meeting_link: null,
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.doesNotMatch(ui.text(), /meet\.attorney\.ai/);
+    await ui.unmount();
+});
+
+test("phone and in-person appointments show no joining prompt", async () => {
+    for (const mode of ["phone", "in_person"]) {
+        serveAppointments([appointment({
+            status: "confirmed", mode, meeting_link: null,
+        })]);
+        const ui = await mountTracking();
+        await ui.openAppointments();
+
+        assert.doesNotMatch(ui.text(), /not shared yet/,
+                            `a ${mode} appointment prompted about a joining link`);
+        await ui.unmount();
+    }
+});

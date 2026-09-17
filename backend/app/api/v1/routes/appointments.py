@@ -11,6 +11,7 @@ from app.schemas.appointment import (
     CompleteAppointmentRequest,
     ConfirmAppointmentRequest,
     RescheduleAppointmentRequest,
+    SetMeetingLinkRequest,
 )
 from app.schemas.common import PaginatedResponse, StatusResponse
 from app.services import appointment_service
@@ -109,8 +110,32 @@ async def confirm_appointment(
         appt_id=appointment_id,
         lawyer_id=current_user["_id"],
         expected_version=body.schedule_version,
+        meeting_link=body.meeting_link,
     )
     return StatusResponse(success=True, message="Appointment confirmed")
+
+
+@router.patch("/{appointment_id}/meeting-link", response_model=AppointmentOut)
+async def set_meeting_link(
+    appointment_id: str,
+    body: SetMeetingLinkRequest,
+    current_user: dict = Depends(require_lawyer),
+):
+    """Lawyer attaches or replaces the joining link on their own appointment.
+
+    Separate from confirmation because a lawyer may not have the room yet when
+    they accept. Without this the only way to add a link was to complete the
+    appointment — which happens after the consultation, far too late to join
+    it — or to cancel and rebook.
+
+    Returns the appointment so the caller sees the stored link rather than the
+    one it just sent.
+    """
+    return await appointment_service.set_meeting_link(
+        appt_id=appointment_id,
+        lawyer_id=current_user["_id"],
+        meeting_link=body.meeting_link,
+    )
 
 
 # Rescheduling writes a new time and a new slot claim, so it is capped like

@@ -15,6 +15,7 @@ import {
     cancelAppointment as apiCancel,
     completeAppointment as apiComplete,
     markNoShow as apiNoShow,
+    setMeetingLink as apiSetMeetingLink,
 } from "@/lib/api.js";
 
 // ============================================================
@@ -122,74 +123,170 @@ function StatCard({ label, value, color, bg, border }) {
     );
 }
 
-// ── Join Call modal ───────────────────────────────────────────
-function JoinCallModal({ apt, onClose, t }) {
+// ── Video consultation modal ──────────────────────────────────
+/** What a lawyer sees for a video consultation.
+ *
+ * THIS USED TO INVENT A ROOM. It displayed
+ * `https://meet.attorney.ai/room/{id}-{firstname}` — a host this product does
+ * not own and a room nobody had created — listed the platform as
+ * "Zoom / Google Meet", and gave Copy and Launch buttons with no handlers at
+ * all. A lawyer could read that URL to a client over the phone and both would
+ * arrive nowhere.
+ *
+ * Now it shows the STORED link or says there is none, and every control does
+ * what it says. Nothing here claims a provider: the link is whatever the
+ * lawyer pasted, which is the only thing anyone actually knows about it.
+ */
+function JoinCallModal({ apt, onClose, onSaveLink, t }) {
+    const [link, setLink] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const [copied, setCopied] = useState(false);
+
+    const stored = apt.meetingLink || null;
+
+    const copy = async () => {
+        try {
+            await navigator.clipboard.writeText(stored);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            // Clipboard access can be refused outright. Saying so beats a
+            // button that silently does nothing — which is what the previous
+            // Copy button did in every browser.
+            setError("Could not copy — select the link and copy it manually.");
+        }
+    };
+
+    const save = async () => {
+        if (busy) return;
+        const value = link.trim();
+        if (!value) { setError("Paste the joining link first."); return; }
+        if (!/^https:\/\/.+\..+/i.test(value)) {
+            // Mirrors the server's rule so the common mistake is caught before
+            // a round trip. The server is still the authority.
+            setError("The link must start with https:// and include a host.");
+            return;
+        }
+        setBusy(true);
+        setError(null);
+        const { error: err } = await onSaveLink(apt.id, value);
+        setBusy(false);
+        if (err) { setError(err.message || "Could not save the link."); return; }
+        setLink("");
+    };
+
+    const row = { display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${t.border}20` };
+
     return (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
-            <div onClick={e => e.stopPropagation()} style={{
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)", padding: 16 }} onClick={onClose}>
+            <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Video consultation" style={{
                 background: t.card, border: `1px solid ${t.primary}40`,
-                borderRadius: 18, padding: 30, width: 400,
+                borderRadius: 18, padding: 26, width: "100%", maxWidth: 420,
                 boxShadow: `0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px ${t.primary}20`,
             }}>
-                {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
                     <div style={{
                         width: 44, height: 44, borderRadius: 12,
                         background: `${t.primary}20`, border: `1.5px solid ${t.primary}50`,
                         display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20,
                     }}>📹</div>
                     <div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>Join Video Call</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>Video consultation</div>
                         <div style={{ fontSize: 12, color: t.textMuted }}>with {apt.client}</div>
                     </div>
-                    <button onClick={onClose} style={{ marginLeft: "auto", background: "none", border: "none", color: t.textMuted, cursor: "pointer", fontSize: 18 }}>✕</button>
+                    <button type="button" onClick={onClose} aria-label="Close" style={{ marginLeft: "auto", background: "none", border: "none", color: t.textMuted, cursor: "pointer", fontSize: 18, minHeight: 44, minWidth: 44 }}>✕</button>
                 </div>
 
-                {/* Meeting info */}
-                <div style={{ background: t.cardHi, borderRadius: 12, padding: "14px 16px", marginBottom: 18 }}>
-                    {[
-                        ["📋 Purpose", apt.purpose],
-                        ["📅 Date", apt.date],
-                        ["⏰ Time", `${apt.time} · ${apt.duration}`],
-                        ["🔗 Platform", "Zoom / Google Meet"],
-                    ].map(([k, v]) => (
-                        <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${t.border}20` }}>
+                <div style={{ background: t.cardHi, borderRadius: 12, padding: "12px 16px", marginBottom: 16 }}>
+                    {/* No "Platform" row. This product does not know which
+                        service the link belongs to, and the old one asserted
+                        "Zoom / Google Meet" regardless. */}
+                    {[["📅 Date", apt.date], ["⏰ Time", `${apt.time} · ${apt.duration}`]].map(([k, v]) => (
+                        <div key={k} style={row}>
                             <span style={{ fontSize: 12, color: t.textFaint }}>{k}</span>
                             <span style={{ fontSize: 12, fontWeight: 600, color: t.text }}>{v}</span>
                         </div>
                     ))}
                 </div>
 
-                {/* Meeting link */}
-                <div style={{
-                    display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
-                    borderRadius: 10, background: `${t.primary}10`, border: `1px solid ${t.primary}30`,
-                    marginBottom: 18,
-                }}>
-                    <span style={{ fontSize: 12, color: t.primary, fontFamily: "monospace", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        https://meet.attorney.ai/room/{apt.id}-{apt.client.split(" ")[0].toLowerCase()}
-                    </span>
-                    <button style={{
-                        padding: "4px 10px", borderRadius: 7, border: "none",
-                        background: t.primary, color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                        fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                    }}>Copy</button>
-                </div>
+                {error && (
+                    <div role="alert" style={{ marginBottom: 12, fontSize: 12, color: t.danger, fontWeight: 600 }}>
+                        {error}
+                    </div>
+                )}
 
-                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <button onClick={onClose} style={{
-                        padding: "10px", borderRadius: 10, border: `1px solid ${t.border}`,
-                        background: "transparent", color: t.textMuted,
-                        fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
-                    }}>Cancel</button>
-                    <button style={{
-                        padding: "10px", borderRadius: 10, border: "none",
-                        background: `linear-gradient(135deg,${t.primary},#22a898)`,
-                        color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                        fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                        boxShadow: `0 4px 14px ${t.primary}50`,
-                    }}>📹 Launch Call</button>
-                </div>
+                {stored ? (
+                    <>
+                        <div style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
+                            borderRadius: 10, background: `${t.primary}10`,
+                            border: `1px solid ${t.primary}30`, marginBottom: 16, flexWrap: "wrap",
+                        }}>
+                            <span style={{ fontSize: 12, color: t.primary, fontFamily: "monospace", flex: "1 1 180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {stored}
+                            </span>
+                            <button type="button" onClick={copy} style={{
+                                padding: "8px 12px", minHeight: 44, borderRadius: 7, border: "none",
+                                background: t.primary, color: t.mode === "dark" ? "#0b1c22" : "#fff",
+                                fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                            }}>{copied ? "Copied" : "Copy"}</button>
+                        </div>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                            <button type="button" onClick={onClose} style={{
+                                padding: "10px", minHeight: 44, borderRadius: 10, border: `1px solid ${t.border}`,
+                                background: "transparent", color: t.textMuted,
+                                fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+                            }}>Close</button>
+                            {/* A real anchor to the stored link. The old
+                                "Launch Call" button had no handler at all. */}
+                            <a href={stored} target="_blank" rel="noreferrer" style={{
+                                padding: "10px", minHeight: 44, borderRadius: 10,
+                                background: `linear-gradient(135deg,${t.primary},#22a898)`,
+                                color: t.mode === "dark" ? "#0b1c22" : "#fff",
+                                fontSize: 13, fontWeight: 700, cursor: "pointer",
+                                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                textDecoration: "none", boxShadow: `0 4px 14px ${t.primary}50`,
+                            }}>📹 Open link</a>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
+                            <strong style={{ color: t.text }}>No joining link yet.</strong>{" "}
+                            This product does not host video calls — paste the link
+                            from whichever service you are using, and your client
+                            will see it on their appointment.
+                        </div>
+                        <input
+                            type="url"
+                            value={link}
+                            onChange={e => setLink(e.target.value)}
+                            placeholder="https://…"
+                            disabled={busy}
+                            aria-label="Joining link"
+                            style={{
+                                width: "100%", minHeight: 44, padding: "10px 12px",
+                                borderRadius: 9, border: `1px solid ${t.border}`,
+                                background: t.inputBg, color: t.text,
+                                fontSize: 13, fontFamily: "inherit", marginBottom: 12,
+                            }} />
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                            <button type="button" onClick={onClose} disabled={busy} style={{
+                                padding: "10px", minHeight: 44, borderRadius: 10, border: `1px solid ${t.border}`,
+                                background: "transparent", color: t.textMuted,
+                                fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+                            }}>Close</button>
+                            <button type="button" onClick={save} disabled={busy} aria-busy={busy} style={{
+                                padding: "10px", minHeight: 44, borderRadius: 10, border: "none",
+                                background: `linear-gradient(135deg,${t.primary},#22a898)`,
+                                color: t.mode === "dark" ? "#0b1c22" : "#fff",
+                                fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                                cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
+                            }}>{busy ? "Saving…" : "Save link"}</button>
+                        </div>
+                    </>
+                )}
             </div>
         </div>
     );
@@ -234,6 +331,10 @@ function AppointmentsPage() {
 
     const mapApiAppt = (a) => ({
         id: a.id,
+        // The STORED joining link, or null. The modal used to construct a
+        // meet.attorney.ai URL from the id and the client's first name — a host
+        // this product does not own and a room nobody had created.
+        meetingLink: a.meeting_link || null,
         // Carried through so Accept can pin the schedule the lawyer was shown.
         // Dropping it here was the gap: the row rendered correctly and the one
         // field that makes the confirmation safe never reached the handler.
@@ -376,6 +477,19 @@ function AppointmentsPage() {
         addNotif({ type: "appointment", title: "Appointment Accepted", body: msg, time: "Just now" });
     };
 
+    const handleSaveMeetingLink = async (id, link) => {
+        const result = await apiSetMeetingLink(id, link);
+        if (!result.error) {
+            await reload();
+            // Keep the modal open on the refreshed row so the lawyer sees the
+            // stored link rather than the one they typed.
+            setJoinModal(prev => (prev && prev.id === id
+                ? { ...prev, meetingLink: link } : prev));
+            toast.show("Joining link saved — your client can see it now.", "success", 3000);
+        }
+        return result;
+    };
+
     const handleReject = async (id) => {
         const apt = appointments.find(a => a.id === id);
         const { error } = await apiCancel(id);
@@ -440,7 +554,8 @@ function AppointmentsPage() {
 
                     {/* ── Modals ──────────────────────────────────── */}
                     {joinModal && (
-                        <JoinCallModal apt={joinModal} onClose={() => setJoinModal(null)} t={t} />
+                        <JoinCallModal apt={joinModal} onClose={() => setJoinModal(null)}
+                            onSaveLink={handleSaveMeetingLink} t={t} />
                     )}
 
                     {/* ── Header ──────────────────────────────────── */}
@@ -667,7 +782,12 @@ function AppointmentsPage() {
                                                                 fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
                                                                 boxShadow: `0 3px 10px ${t.primary}45`,
                                                             }}>
-                                                            📹 Join Call
+                                                            {/* The label follows the DATA. A video
+                                                                appointment with no stored link has
+                                                                nothing to join, and saying "Join Call"
+                                                                would promise a room that does not
+                                                                exist. */}
+                                                            {apt.meetingLink ? "📹 Join Call" : "📹 Add joining link"}
                                                         </button>
                                                     ) : (
                                                         <Btn variant="primary" size="sm" style={{ flex: 1 }}>

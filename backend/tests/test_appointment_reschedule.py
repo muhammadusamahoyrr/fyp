@@ -862,3 +862,470 @@ def test_no_production_caller_omits_the_version():
 
     assert not offenders, (
         "these application callers confirm without a version: " + "; ".join(offenders))
+
+
+# ── 11. The joining link ─────────────────────────────────────────────────────
+#
+# The link was accepted only at COMPLETION — after the consultation. A join
+# link that arrives once the call is over is not a join link. It now belongs at
+# confirmation, with a separate route for a lawyer who did not have the room
+# yet, and completion no longer erases it.
+
+LINK = "https://meet.example.com/room/abc-def"
+OTHER_LINK = "https://meet.example.com/room/second"
+
+
+async def _confirm_with_link(parties, appt_id, link=None):
+    from app.services import appointment_service
+
+    row = await _row(appt_id)
+    return await appointment_service.confirm_appointment(
+        appt_id, parties["lawyer_id"],
+        expected_version=row["schedule_version"],
+        meeting_link=link)
+
+
+async def test_a_lawyer_supplies_the_link_when_confirming(parties):
+    appt = await _book(parties, _slot())
+
+    out = await _confirm_with_link(parties, appt["id"], LINK)
+
+    assert out["status"] == AppointmentStatus.CONFIRMED.value
+    assert out["meeting_link"] == LINK
+    assert (await _row(appt["id"]))["meeting_link"] == LINK
+
+
+async def test_confirming_without_a_link_leaves_it_unset(parties):
+    """A lawyer may not have the room yet. That is not an error."""
+    appt = await _book(parties, _slot())
+
+    out = await _confirm_with_link(parties, appt["id"], None)
+
+    assert out["status"] == AppointmentStatus.CONFIRMED.value
+    assert out.get("meeting_link") is None
+
+
+@pytest.mark.parametrize("bad", [
+    "javascript:alert(document.cookie)",
+    "JavaScript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "http://meet.example.com/room",
+    "https:no-host",
+    "not a url",
+])
+def test_an_unsafe_link_is_refused_at_every_entry_point(bad):
+    """The client renders this into an `href`, so it is clicked, not read. All
+    three requests share one validator — separate ones are how a link refused
+    at confirmation is accepted at completion."""
+    from pydantic import ValidationError
+
+    from app.schemas.appointment import (
+        CompleteAppointmentRequest,
+        ConfirmAppointmentRequest,
+        SetMeetingLinkRequest,
+    )
+
+    with pytest.raises(ValidationError):
+        ConfirmAppointmentRequest(schedule_version=0, meeting_link=bad)
+    with pytest.raises(ValidationError):
+        CompleteAppointmentRequest(meeting_link=bad)
+    with pytest.raises(ValidationError):
+        SetMeetingLinkRequest(meeting_link=bad)
+
+
+# ── the separate way to supply one ───────────────────────────────────────────
+
+async def test_a_lawyer_can_add_a_link_after_confirming(parties):
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _confirm_with_link(parties, appt["id"], None)
+
+    out = await appointment_service.set_meeting_link(
+        appt["id"], parties["lawyer_id"], LINK)
+
+    assert out["meeting_link"] == LINK
+    assert out["status"] == AppointmentStatus.CONFIRMED.value
+
+
+async def test_a_link_can_be_added_before_confirmation(parties):
+    """A lawyer who has the room before they accept should not have to wait."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+
+    out = await appointment_service.set_meeting_link(
+        appt["id"], parties["lawyer_id"], LINK)
+
+    assert out["meeting_link"] == LINK
+    assert out["status"] == AppointmentStatus.PENDING.value
+
+
+async def test_a_link_can_be_replaced(parties):
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _confirm_with_link(parties, appt["id"], LINK)
+
+    out = await appointment_service.set_meeting_link(
+        appt["id"], parties["lawyer_id"], OTHER_LINK)
+
+    assert out["meeting_link"] == OTHER_LINK
+
+
+async def test_only_the_appointments_own_lawyer_may_set_the_link(parties):
+    """The existing access rule, unchanged — and it must not leak whether the
+    appointment exists."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+
+    with pytest.raises(ForbiddenError) as real:
+        await appointment_service.set_meeting_link(
+            appt["id"], "some-other-lawyer", LINK)
+    with pytest.raises(ForbiddenError) as imaginary:
+        await appointment_service.set_meeting_link(
+            "no-such-appointment", "some-other-lawyer", LINK)
+
+    assert real.value.detail == imaginary.value.detail
+    assert (await _row(appt["id"])).get("meeting_link") is None
+
+
+async def test_a_client_cannot_set_the_link(parties):
+    """`require_lawyer` guards the route; the service is asked directly here
+    because a future caller might not go through it."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+
+    with pytest.raises(ForbiddenError):
+        await appointment_service.set_meeting_link(
+            appt["id"], parties["client_id"], LINK)
+
+
+@pytest.mark.parametrize("terminal", ["cancelled", "completed", "no_show"])
+async def test_a_terminal_appointment_will_not_take_a_new_link(parties, terminal):
+    """A completed consultation's link is a record of where it happened, and a
+    cancelled one has nowhere to join."""
+    from app.db.collections import get_appointments_col
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await get_appointments_col().update_one(
+        {"_id": appt["id"]}, {"$set": {"status": terminal}})
+
+    with pytest.raises(ConflictError, match="cannot be set"):
+        await appointment_service.set_meeting_link(
+            appt["id"], parties["lawyer_id"], LINK)
+
+
+# ── completion must not erase it ─────────────────────────────────────────────
+
+async def test_completing_without_a_link_preserves_the_stored_one(parties):
+    """THE ERASURE BUG. Completion wrote `meeting_link` whatever it was given,
+    so finishing a consultation without resending the link set it to None —
+    destroying the record of where the consultation happened, at the moment
+    that record became historical."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _confirm_with_link(parties, appt["id"], LINK)
+    await _elapse_for_completion(appt["id"])
+
+    out = await appointment_service.complete_appointment(
+        appt_id=appt["id"], lawyer_id=parties["lawyer_id"],
+        lawyer_notes="Advised on filing", meeting_link=None)
+
+    assert out["meeting_link"] == LINK, "completion erased the joining link"
+    assert (await _row(appt["id"]))["meeting_link"] == LINK
+
+
+async def test_completing_with_a_link_still_replaces_it(parties):
+    """Preserving an absent value must not have made the field read-only."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _confirm_with_link(parties, appt["id"], LINK)
+    await _elapse_for_completion(appt["id"])
+
+    out = await appointment_service.complete_appointment(
+        appt_id=appt["id"], lawyer_id=parties["lawyer_id"],
+        lawyer_notes=None, meeting_link=OTHER_LINK)
+
+    assert out["meeting_link"] == OTHER_LINK
+
+
+async def _elapse_for_completion(appt_id: str) -> None:
+    from app.db.collections import get_appointments_col
+
+    start = datetime.now(timezone.utc) - timedelta(minutes=120)
+    await get_appointments_col().update_one(
+        {"_id": appt_id},
+        {"$set": {"scheduled_at": start, "end_at": start + timedelta(minutes=60)}})
+
+
+# ── the link travels only through the normal access rules ────────────────────
+
+async def test_the_client_on_the_appointment_sees_the_link(parties):
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _confirm_with_link(parties, appt["id"], LINK)
+
+    seen = await appointment_service.get_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"], user_role="client")
+
+    assert seen["meeting_link"] == LINK
+
+
+async def test_an_unrelated_client_cannot_read_the_link(parties):
+    """The link IS the admission to the consultation, so it is protected by
+    exactly the rule that protects the appointment."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _confirm_with_link(parties, appt["id"], LINK)
+
+    with pytest.raises(ForbiddenError):
+        await appointment_service.get_appointment(
+            appt_id=appt["id"], user_id=parties["client2_id"], user_role="client")
+
+
+async def test_phone_and_in_person_appointments_are_unchanged(parties):
+    """Nothing here should have altered the other two modes."""
+    from app.core.constants import AppointmentMode
+    from app.services import appointment_service
+
+    for mode, hours in ((AppointmentMode.PHONE, 60), (AppointmentMode.IN_PERSON, 64)):
+        appt = await _book(parties, _slot(hours_ahead=hours), mode=mode)
+        row = await _row(appt["id"])
+        assert row["mode"] == mode.value
+        assert row.get("meeting_link") is None
+
+        out = await appointment_service.confirm_appointment(
+            appt["id"], parties["lawyer_id"],
+            expected_version=row["schedule_version"])
+        assert out["status"] == AppointmentStatus.CONFIRMED.value
+        assert out.get("meeting_link") is None
+
+
+# ── 12. The three validation gaps ────────────────────────────────────────────
+
+# --- blank input must not become a stored None ------------------------------
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t", "\n  "])
+def test_a_blank_link_is_refused_where_a_link_is_the_point(blank):
+    """An "after" validator's return is NOT re-checked against the field type,
+    so a whitespace-only body sailed through `meeting_link: str` and arrived at
+    the service as None — which then stored nothing and told the client a
+    joining link had been added."""
+    from pydantic import ValidationError
+
+    from app.schemas.appointment import SetMeetingLinkRequest
+
+    with pytest.raises(ValidationError):
+        SetMeetingLinkRequest(meeting_link=blank)
+
+
+def test_the_set_link_request_never_yields_none():
+    from app.schemas.appointment import SetMeetingLinkRequest
+
+    assert SetMeetingLinkRequest(
+        meeting_link="  https://meet.example.com/a  ").meeting_link == \
+        "https://meet.example.com/a"
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_still_means_no_link_where_that_is_allowed(blank):
+    """Confirmation and completion may legitimately carry no link. Tightening
+    the dedicated request must not have removed that."""
+    from app.schemas.appointment import (
+        CompleteAppointmentRequest,
+        ConfirmAppointmentRequest,
+    )
+
+    assert ConfirmAppointmentRequest(
+        schedule_version=0, meeting_link=blank).meeting_link is None
+    assert CompleteAppointmentRequest(meeting_link=blank).meeting_link is None
+
+
+async def test_the_service_never_stores_a_none_link(parties):
+    """Belt and braces at the service: even called directly, an empty link must
+    not overwrite the field or notify the client."""
+    from app.db.collections import get_notifications_col
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot(), mode=AppointmentMode.VIDEO)
+    await _confirm_with_link(parties, appt["id"], LINK)
+    await get_notifications_col().delete_many({"payload.appointment_id": appt["id"]})
+
+    with pytest.raises((AppValidationError, ConflictError, ValueError)):
+        await appointment_service.set_meeting_link(
+            appt["id"], parties["lawyer_id"], "   ")
+
+    assert (await _row(appt["id"]))["meeting_link"] == LINK, "the link was cleared"
+    assert await get_notifications_col().count_documents(
+        {"payload.appointment_id": appt["id"]}) == 0, (
+        "the client was told a link was added when none was saved")
+
+
+# --- a real hostname, not merely a non-empty netloc -------------------------
+
+def test_a_url_with_credentials_and_no_host_is_refused():
+    """`urlparse("https://user@")` yields netloc "user@" and hostname None —
+    all credentials and no host. The netloc test passed it, so a link leading
+    nowhere was storable and would render as a dead anchor the client is told
+    to click."""
+    from pydantic import ValidationError
+
+    from app.schemas.appointment import (
+        ConfirmAppointmentRequest,
+        SetMeetingLinkRequest,
+    )
+
+    for bad in ("https://user@", "https://user:pw@", "https://@"):
+        with pytest.raises(ValidationError):
+            SetMeetingLinkRequest(meeting_link=bad)
+        with pytest.raises(ValidationError):
+            ConfirmAppointmentRequest(schedule_version=0, meeting_link=bad)
+
+
+def test_a_valid_https_url_with_credentials_still_works():
+    """The control: a host IS present here, so it is a real destination."""
+    from app.schemas.appointment import SetMeetingLinkRequest
+
+    ok = "https://user@meet.example.com/room/abc"
+    assert SetMeetingLinkRequest(meeting_link=ok).meeting_link == ok
+
+
+def test_the_plain_valid_control_is_unaffected():
+    from app.schemas.appointment import SetMeetingLinkRequest
+
+    assert SetMeetingLinkRequest(
+        meeting_link="https://meet.example.com/room/abc").meeting_link == \
+        "https://meet.example.com/room/abc"
+
+
+# --- a new link belongs to a video consultation only ------------------------
+
+@pytest.mark.parametrize("mode", [AppointmentMode.PHONE, AppointmentMode.IN_PERSON])
+async def test_a_non_video_appointment_refuses_a_new_link_at_confirmation(parties, mode):
+    """A phone appointment's joining information is a number and an in-person
+    one's is an address. Neither is a URL."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot(), mode=mode)
+    row = await _row(appt["id"])
+
+    with pytest.raises(AppValidationError, match="video consultation"):
+        await appointment_service.confirm_appointment(
+            appt["id"], parties["lawyer_id"],
+            expected_version=row["schedule_version"], meeting_link=LINK)
+
+    after = await _row(appt["id"])
+    assert after["status"] == AppointmentStatus.PENDING.value, (
+        "the confirmation applied despite the refused link")
+    assert after.get("meeting_link") is None
+
+
+@pytest.mark.parametrize("mode", [AppointmentMode.PHONE, AppointmentMode.IN_PERSON])
+async def test_a_non_video_appointment_refuses_the_set_link_endpoint(parties, mode):
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot(), mode=mode)
+
+    with pytest.raises(AppValidationError, match="video consultation"):
+        await appointment_service.set_meeting_link(
+            appt["id"], parties["lawyer_id"], LINK)
+
+    assert (await _row(appt["id"])).get("meeting_link") is None
+
+
+@pytest.mark.parametrize("mode", [AppointmentMode.PHONE, AppointmentMode.IN_PERSON])
+async def test_a_non_video_appointment_refuses_a_link_at_completion(parties, mode):
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot(), mode=mode)
+    row = await _row(appt["id"])
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"])
+    await _elapse_for_completion(appt["id"])
+
+    with pytest.raises(AppValidationError, match="video consultation"):
+        await appointment_service.complete_appointment(
+            appt_id=appt["id"], lawyer_id=parties["lawyer_id"],
+            lawyer_notes=None, meeting_link=LINK)
+
+    after = await _row(appt["id"])
+    assert after["status"] == AppointmentStatus.CONFIRMED.value, (
+        "the completion applied despite the refused link")
+
+
+@pytest.mark.parametrize("mode", [AppointmentMode.PHONE, AppointmentMode.IN_PERSON])
+async def test_a_non_video_appointment_completes_normally_without_a_link(parties, mode):
+    """The rule gates WRITING a link, not the other two modes themselves."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot(), mode=mode)
+    row = await _row(appt["id"])
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"])
+    await _elapse_for_completion(appt["id"])
+
+    out = await appointment_service.complete_appointment(
+        appt_id=appt["id"], lawyer_id=parties["lawyer_id"],
+        lawyer_notes="Spoke by phone", meeting_link=None)
+
+    assert out["status"] == AppointmentStatus.COMPLETED.value
+
+
+async def test_a_video_appointment_accepts_a_link_at_every_stage(parties):
+    """The control, so the refusals above are not passing because everything
+    is refused."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot(), mode=AppointmentMode.VIDEO)
+
+    # set-link before confirmation
+    pre = await appointment_service.set_meeting_link(
+        appt["id"], parties["lawyer_id"], LINK)
+    assert pre["meeting_link"] == LINK
+
+    # and at confirmation
+    row = await _row(appt["id"])
+    confirmed = await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"], meeting_link=OTHER_LINK)
+    assert confirmed["meeting_link"] == OTHER_LINK
+
+    # and at completion
+    await _elapse_for_completion(appt["id"])
+    done = await appointment_service.complete_appointment(
+        appt_id=appt["id"], lawyer_id=parties["lawyer_id"],
+        lawyer_notes=None, meeting_link=LINK)
+    assert done["meeting_link"] == LINK
+
+
+async def test_an_existing_link_on_a_non_video_row_is_left_alone(parties):
+    """The rule gates writing a NEW link. Retroactively clearing one would
+    destroy the record of where a consultation happened in order to enforce a
+    rule that did not exist when it was written."""
+    from app.db.collections import get_appointments_col
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot(), mode=AppointmentMode.PHONE)
+    # A legacy row that acquired a link before the rule existed.
+    await get_appointments_col().update_one(
+        {"_id": appt["id"]}, {"$set": {"meeting_link": LINK}})
+    row = await _row(appt["id"])
+
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"])
+
+    assert (await _row(appt["id"]))["meeting_link"] == LINK
+    seen = await appointment_service.get_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"], user_role="client")
+    assert seen["meeting_link"] == LINK
