@@ -9,6 +9,8 @@ from app.schemas.appointment import (
     BookAppointmentRequest,
     CancelAppointmentRequest,
     CompleteAppointmentRequest,
+    ConfirmAppointmentRequest,
+    RescheduleAppointmentRequest,
 )
 from app.schemas.common import PaginatedResponse, StatusResponse
 from app.services import appointment_service
@@ -93,14 +95,54 @@ async def get_appointment(
 @router.patch("/{appointment_id}/confirm", response_model=StatusResponse)
 async def confirm_appointment(
     appointment_id: str,
+    body: ConfirmAppointmentRequest,
     current_user: dict = Depends(require_lawyer),
 ):
-    """Lawyer confirms a pending appointment request."""
+    """Lawyer confirms a pending appointment request, at the time they were shown.
+
+    The body is REQUIRED, and carries the `schedule_version` displayed when
+    Accept was pressed. A client can move a pending request while the lawyer
+    reads the page, and the status stays PENDING throughout — so without the
+    version the confirmation would silently accept a time the lawyer never saw.
+    """
     await appointment_service.confirm_appointment(
         appt_id=appointment_id,
         lawyer_id=current_user["_id"],
+        expected_version=body.schedule_version,
     )
     return StatusResponse(success=True, message="Appointment confirmed")
+
+
+# Rescheduling writes a new time and a new slot claim, so it is capped like
+# booking: without a limit one client can walk a lawyer's diary, taking and
+# releasing slots as fast as the network allows.
+_LIMIT_RESCHEDULE = "10/minute"
+
+
+@router.patch("/{appointment_id}/reschedule", response_model=AppointmentOut)
+@limiter.limit(_LIMIT_RESCHEDULE)
+async def reschedule_appointment(
+    request: Request,
+    appointment_id: str,
+    body: RescheduleAppointmentRequest,
+    current_user: dict = Depends(require_client),
+):
+    """Client moves their own PENDING request to a different time.
+
+    `require_client` rather than `get_current_user`: this is the client's own
+    request to change, and a confirmed appointment is an agreement between two
+    people that neither may move unilaterally. A lawyer who needs a different
+    time cancels, which tells the client.
+
+    Returns the updated appointment rather than a bare status, because the
+    caller needs the new `schedule_version` to compose its next change.
+    """
+    return await appointment_service.reschedule_appointment(
+        appt_id=appointment_id,
+        client_id=current_user["_id"],
+        scheduled_at=body.scheduled_at,
+        expected_version=body.schedule_version,
+    )
 
 
 @router.patch("/{appointment_id}/cancel", response_model=StatusResponse)

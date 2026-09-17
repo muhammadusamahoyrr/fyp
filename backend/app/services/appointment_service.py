@@ -118,6 +118,15 @@ def _sanitize(appt: dict) -> dict:
     appt.setdefault("timezone", BOOKING_TZ_NAME)
     if not appt.get("timezone"):
         appt["timezone"] = BOOKING_TZ_NAME
+    # Rows booked before `schedule_version` existed carry none. Defaulted to 0
+    # HERE, at the read boundary, for the same reason `timezone` is: the client
+    # must send a version back, and a caller that received `null` has nothing to
+    # send. Leaving it absent would make every legacy appointment unmovable and
+    # unconfirmable the moment the version became required.
+    #
+    # `version_filter(0)` matches a row that has no field at all, so this
+    # default and the CAS agree without a migration.
+    appt["schedule_version"] = schedule_version_of(appt)
     return appt
 
 
@@ -200,6 +209,7 @@ async def _transition(
     user_id: str,
     user_role: str,
     extra: dict | None = None,
+    expected_version: int | None = None,
 ) -> dict:
     """Validate and atomically apply one state change.
 
@@ -225,7 +235,8 @@ async def _transition(
 
     actor_filter = _actor_filter(user_id, user_role)
     updated = await appt_repo.compare_and_set(
-        appt_id, [source], target, actor_filter, extra)
+        appt_id, [source], target, actor_filter, extra,
+        expected_version=expected_version)
     if updated is not None:
         return updated
 
@@ -239,7 +250,17 @@ async def _transition(
             "appointment_access_denied appointment_id=%s role=%s reason=%s",
             appt_id, user_role, "vanished_or_not_a_party")
         raise ForbiddenError(_APPT_DENIED)
-    raise ConflictError(transitions.explain(_current_status(current), target))
+    current_status = _current_status(current)
+    if (expected_version is not None
+            and current_status is source
+            and schedule_version_of(current) != expected_version):
+        # The status never moved; the SCHEDULE did. Saying "a pending
+        # appointment cannot be confirmed" would be both false and baffling, so
+        # the real reason is given.
+        raise ConflictError(
+            "The client changed the time of this request while you were "
+            "looking at it. Reload to see the new time before accepting.")
+    raise ConflictError(transitions.explain(current_status, target))
 
 
 async def _notify(appt_id: str, transition: str, **kwargs) -> None:
@@ -494,6 +515,12 @@ async def book_appointment(
         # multikey indexes compare, and therefore what actually prevents a
         # double booking — see services/appointment_slots.py.
         "occupied_slots":   occupied_slots(scheduled_at, duration_minutes),
+        # Bumped on every reschedule, and pinned by anyone acting on a
+        # time they have seen. A counter rather than a comparison of
+        # `scheduled_at`, because A -> B -> A returns to the original
+        # time and a value comparison cannot tell that two moves
+        # happened in between.
+        "schedule_version": 0,
         # Present only when the caller supplied one: the idempotency index is
         # partial on `$type: "string"`, so a None here would be indexed as a
         # null and collide with every other keyless booking by this client.
@@ -592,10 +619,25 @@ async def book_appointment(
     return _sanitize(doc)
 
 
-async def confirm_appointment(appt_id: str, lawyer_id: str) -> dict:
+async def confirm_appointment(
+    appt_id: str, lawyer_id: str, expected_version: int | None = None,
+) -> dict:
+    """Accept a pending request.
+
+    `expected_version` is the schedule the lawyer was LOOKING AT. Confirming is
+    agreeing to a specific time, and a client may move a pending request while
+    the lawyer reads the page — the status stays PENDING throughout, so the
+    status check alone would let the confirmation land on a time the lawyer
+    never saw. Pinning the version makes exactly one of the two win.
+
+    Optional, so existing callers keep working; when it is omitted the
+    confirmation is only as safe as the status check, which is the behaviour
+    that existed before.
+    """
     appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
     updated = await _transition(
-        appt, AppointmentStatus.CONFIRMED, lawyer_id, "lawyer")
+        appt, AppointmentStatus.CONFIRMED, lawyer_id, "lawyer",
+        expected_version=expected_version)
 
     lawyer = await user_repo.find_by_id(lawyer_id)
     slot_str = _slot_text(updated["scheduled_at"])
@@ -803,3 +845,168 @@ def _enrich(appt: dict, names: tuple[str, str]) -> dict:
     appt["client_name"] = names[0]
     appt["lawyer_name"]  = names[1]
     return appt
+
+
+def schedule_version_of(appt: dict) -> int:
+    """The schedule version of a stored row, defaulting legacy rows to 0.
+
+    Rows booked before the field existed carry none. Read as 0 at the boundary
+    rather than migrated, and `AppointmentRepository.version_filter` matches
+    them, so no backfill is needed to reschedule an old appointment.
+    """
+    value = appt.get("schedule_version")
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+async def reschedule_appointment(
+    appt_id: str,
+    client_id: str,
+    scheduled_at: datetime,
+    expected_version: int | None = None,
+) -> dict:
+    """Move a client's own PENDING appointment to a new time.
+
+    ONLY `scheduled_at` CHANGES. The lawyer, the case, the mode and the
+    duration are read from the stored row and left alone — a "reschedule" that
+    could also change who it is with, or how long it runs, is a different
+    booking wearing the same id, and the lawyer agreed to none of it.
+
+    PENDING ONLY, and deliberately so. A confirmed appointment is an agreement
+    between two people, and letting one of them move it unilaterally is not
+    rescheduling — it is telling the other party where to be. Confirmed
+    appointments answer 409; the honest route is to cancel and rebook, or to
+    ask the lawyer.
+    """
+    # Same validation as booking, and for the same reason: alignment is the
+    # precondition that makes the unique slot index mean anything, so a
+    # misaligned reschedule would move an appointment out from under the
+    # guarantee rather than merely look untidy. Refused, never rounded.
+    if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
+        raise AppValidationError(
+            "scheduled_at must include a UTC offset "
+            "(e.g. 2026-09-20T10:00:00Z or 2026-09-20T15:00:00+05:00)")
+    misaligned = alignment_error(scheduled_at)
+    if misaligned:
+        raise AppValidationError(misaligned)
+    scheduled_at = _as_utc(scheduled_at)
+    if scheduled_at <= datetime.now(timezone.utc):
+        raise AppValidationError("Appointment must be scheduled in the future")
+
+    appt = await _load_for_actor(appt_id, client_id, "client")
+
+    source = _current_status(appt)
+    if source is not AppointmentStatus.PENDING:
+        # Reuses the transition vocabulary so a client sees the same words for
+        # "this appointment has moved on" however they met it.
+        raise ConflictError(
+            f"Only a pending request can be rescheduled — this one is "
+            f"{source.value}. Cancel it and book a new time instead.")
+
+    # THE CUTOFF APPLIES TO THE OLD TIME, not the new one.
+    #
+    # The lawyer has already been told to hold the original slot, and it is
+    # that commitment the two-hour rule protects. Checking the new time instead
+    # would let a client move a 4pm appointment at 3:55 simply by choosing a
+    # time next week, which is exactly the last-minute change the rule exists
+    # to prevent.
+    old_start = _as_utc(appt["scheduled_at"])
+    cutoff = old_start - timedelta(minutes=_CANCEL_CUTOFF_MINUTES)
+    if datetime.now(timezone.utc) >= cutoff:
+        raise AppValidationError(
+            f"Appointments can only be rescheduled at least "
+            f"{_CANCEL_CUTOFF_MINUTES // 60} hours before the scheduled time. "
+            "Please contact your lawyer directly.")
+
+    duration = appt.get("duration_minutes")
+    bad_duration = duration_error(duration)
+    if bad_duration:
+        # A stored row that cannot be re-slotted. Refused rather than repaired:
+        # guessing a duration here would write a slot claim the lawyer never
+        # agreed to.
+        raise ConflictError(
+            "This appointment cannot be rescheduled automatically. "
+            "Please contact your lawyer.")
+
+    if expected_version is None:
+        # Substituting the CURRENT version here would defeat the mechanism
+        # entirely: every write would be pinned to whatever the row happens to
+        # say at the moment it is processed, which is exactly the unconditional
+        # write the version exists to prevent. A caller that does not know which
+        # schedule it composed against has to read one.
+        raise AppValidationError(
+            "schedule_version is required — reload the appointment and send the "
+            "version you are changing.")
+
+    end_at = scheduled_at + timedelta(minutes=duration)
+
+    try:
+        updated = await appt_repo.reschedule(
+            appt_id=appt_id,
+            client_id=client_id,
+            expected_version=expected_version,
+            scheduled_at=scheduled_at,
+            end_at=end_at,
+            occupied_slots=occupied_slots(scheduled_at, duration),
+        )
+    except DuplicateKeyError as exc:
+        # The unique slot indexes firing — the guarantee, not `has_conflict`,
+        # which is not consulted on this path at all. Identified structurally,
+        # because the driver's message names the index AND the duplicated
+        # values: another client's id and the exact hours a lawyer is booked.
+        constraint = _duplicate_constraint(exc)
+        if constraint == "uniq_appointment_client_slot":
+            raise ConflictError(
+                "You already have an appointment during this time. Please "
+                "choose a different time.")
+        if constraint == "uniq_appointment_lawyer_slot":
+            raise ConflictError(
+                "That time has just been taken. Please choose another.")
+        logger.warning(
+            "appointment_reschedule_duplicate_unmapped appointment_id=%s "
+            "constraint=%s", appt_id, constraint or "unknown")
+        raise ConflictError(
+            "That time could not be reserved. Please choose another.")
+
+    if updated is None:
+        # Nothing matched. Three things could have changed under us — the
+        # status, the version, or our right to the row — and they are
+        # distinguished the same way transitions are: re-read under the SAME
+        # actor predicate, never by _id alone.
+        actor_filter = _actor_filter(client_id, "client")
+        current = await appt_repo.find_for_actor(appt_id, actor_filter)
+        if current is None:
+            logger.info(
+                "appointment_access_denied appointment_id=%s role=%s reason=%s",
+                appt_id, "client", "vanished_or_not_a_party")
+            raise ForbiddenError(_APPT_DENIED)
+        now_status = _current_status(current)
+        if now_status is not AppointmentStatus.PENDING:
+            raise ConflictError(
+                f"This appointment is now {now_status.value} and can no longer "
+                "be rescheduled.")
+        raise ConflictError(
+            "This appointment was changed a moment ago. Reload it and try "
+            "again so you are working from the current time.")
+
+    # AFTER the write, and only after. A notification sent on a conflict or a
+    # retry tells a lawyer to rearrange their day for a change that did not
+    # happen. Best-effort, like every other appointment notification: the
+    # reschedule is already committed and a delivery failure must not report it
+    # as failed.
+    lawyer = await user_repo.find_by_id(updated["lawyer_id"])
+    client = await user_repo.find_by_id(client_id)
+    await _notify(
+        appt_id, "reschedule",
+        user_id=updated["lawyer_id"],
+        type=NotificationType.APPOINTMENT_BOOKED,
+        title="Appointment Time Changed",
+        body=(f"{(client or {}).get('full_name', 'A client')} moved their "
+              f"pending request from {_slot_text(old_start)} to "
+              f"{_slot_text(scheduled_at)}."),
+        payload={"appointment_id": appt_id},
+        # Derived from the version, so a retry of one reschedule cannot notify
+        # twice while two genuinely different moves both do.
+        logical_event_id=f"appointment:{appt_id}:rescheduled:{expected_version + 1}",
+    )
+
+    return _sanitize(updated)

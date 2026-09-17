@@ -865,3 +865,374 @@ test("the failed-read state offers a way to try again", async () => {
     assert.doesNotMatch(ui.text(), /Could not load your appointments/);
     await ui.unmount();
 });
+
+/* ── rescheduling a pending request ───────────────────────────────────────── */
+//
+// The client may move their own PENDING request and nothing else. A confirmed
+// appointment is an agreement between two people; moving it unilaterally is not
+// rescheduling, it is telling the other party where to be. The server refuses
+// that too — the control is kept off the card so it cannot be a button that
+// always fails.
+//
+// The card NEVER moves optimistically. The slot may be taken, the cutoff may
+// have passed, the lawyer may have confirmed — so the new time appears only
+// after the server confirms it on reload.
+
+const NEW_DATE = "2026-12-01";
+const NEW_TIME = "15:30";
+// 15:30 PKT is 10:30Z — PKT is UTC+5 year-round, with no DST since 2009.
+const NEW_ISO = "2026-12-01T10:30:00.000Z";
+
+async function openReschedule(ui) {
+    await ui.click("Change time");
+    const date = ui.container.querySelector('input[type="date"]');
+    const time = ui.container.querySelector("select");
+    assert.ok(date && time, "the reschedule form did not open");
+    await act(async () => {
+        nativeSet(date, NEW_DATE);
+        date.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+        nativeSet(time, NEW_TIME, "HTMLSelectElement");
+        time.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    return { date, time };
+}
+
+/* React installs its own value setter on inputs, so assigning `.value`
+ * directly is swallowed. This reaches the prototype setter the way a real
+ * keystroke does. */
+function nativeSet(el, value, kind = "HTMLInputElement") {
+    const proto = dom.window[kind].prototype;
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
+}
+
+test("only a pending request offers a time change", async () => {
+    serveAppointments([appointment({ status: "pending" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    assert.ok(ui.byText("Change time"));
+    await ui.unmount();
+});
+
+for (const status of ["confirmed", "cancelled", "completed", "no_show"]) {
+    test(`a ${status} appointment offers no time change`, async () => {
+        serveAppointments([appointment({ status })]);
+        const ui = await mountTracking();
+        await ui.openAppointments();
+
+        assert.equal(ui.byText("Change time"), undefined,
+                     `a ${status} appointment could be moved`);
+        await ui.unmount();
+    });
+}
+
+test("the form is pre-filled with the appointment's own PKT time", async () => {
+    // Not blank, and not the browser's zone: the client edits the time they
+    // were shown.
+    serveAppointments([appointment({
+        status: "pending", scheduled_at: "2026-11-20T09:00:00.000Z",
+    })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await ui.click("Change time");
+
+    const date = ui.container.querySelector('input[type="date"]');
+    const time = ui.container.querySelector("select");
+    assert.equal(date.value, "2026-11-20");
+    assert.equal(time.value, "14:00", "09:00Z is 14:00 in Karachi");
+    await ui.unmount();
+});
+
+test("a successful change sends PKT converted to UTC, with the version", async () => {
+    serveAppointments(
+        [appointment({ status: "pending", schedule_version: 3 })],
+        [appointment({ status: "pending", schedule_version: 4, scheduled_at: NEW_ISO })],
+    );
+    api.__respond("rescheduleAppointment", {
+        data: appointment({ status: "pending", scheduled_at: NEW_ISO, schedule_version: 4 }),
+        error: null, status: 200,
+    });
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await openReschedule(ui);
+
+    await ui.click("Confirm new time");
+
+    const calls = api.__calls("rescheduleAppointment");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args[0], "apt-1");
+    assert.equal(new Date(calls[0].args[1].scheduled_at).toISOString(), NEW_ISO);
+    assert.equal(calls[0].args[1].schedule_version, 3,
+                 "the version the client was looking at was not sent");
+    await ui.unmount();
+});
+
+test("the new time shown is the server's, after a reload", async () => {
+    // The server is made to answer with a time the client did NOT choose. A
+    // component that moved the card itself would show the chosen time.
+    const serverTime = "2026-12-05T06:00:00.000Z";   // 11:00 PKT
+    serveAppointments(
+        [appointment({ status: "pending" })],
+        [appointment({ status: "pending", scheduled_at: serverTime })],
+    );
+    api.__respond("rescheduleAppointment", { data: {}, error: null, status: 200 });
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await openReschedule(ui);
+
+    await ui.click("Confirm new time");
+
+    assert.match(ui.text(), /11:00/, "the card does not show the server's time");
+    assert.doesNotMatch(ui.text(), /03:30/, "a locally chosen time was displayed");
+    await ui.unmount();
+});
+
+test("the server's new time survives a remount", async () => {
+    const serverTime = "2026-12-05T06:00:00.000Z";
+    serveAppointments(
+        [appointment({ status: "pending" })],
+        [appointment({ status: "pending", scheduled_at: serverTime })],
+    );
+    api.__respond("rescheduleAppointment", { data: {}, error: null, status: 200 });
+
+    const first = await mountTracking();
+    await first.openAppointments();
+    await openReschedule(first);
+    await first.click("Confirm new time");
+    await first.unmount();
+
+    const second = await mountTracking();
+    await second.openAppointments();
+
+    assert.match(second.text(), /11:00/);
+    await second.unmount();
+});
+
+test("a slot conflict is explained and the card is refreshed", async () => {
+    serveAppointments(
+        [appointment({ status: "pending" })],
+        [appointment({ status: "confirmed" })],
+    );
+    api.__respond("rescheduleAppointment", {
+        data: null, status: 409,
+        error: { message: "That time has just been taken. Please choose another." },
+    });
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await openReschedule(ui);
+
+    await ui.click("Confirm new time");
+
+    assert.match(ui.text(), /just been taken/);
+    assert.match(ui.text(), /Confirmed/, "the refreshed status is not shown");
+    await ui.unmount();
+});
+
+test("the cutoff refusal is shown and the list refreshed", async () => {
+    // A 422 does not prove the status either — the cutoff is checked before
+    // anything else — so this refreshes as well.
+    const served = serveAppointments([appointment({ status: "pending" })]);
+    api.__respond("rescheduleAppointment", {
+        data: null, status: 422,
+        error: { message: "Appointments can only be rescheduled at least 2 hours before the scheduled time." },
+    });
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    const before = served.calls();
+    await openReschedule(ui);
+
+    await ui.click("Confirm new time");
+
+    assert.match(ui.text(), /at least 2 hours/);
+    assert.ok(served.calls() > before, "a 422 did not refresh server state");
+    await ui.unmount();
+});
+
+test("a stale version is reported without moving the card", async () => {
+    serveAppointments(
+        [appointment({ status: "pending", schedule_version: 0 })],
+        [appointment({ status: "pending", schedule_version: 2, scheduled_at: NEW_ISO })],
+    );
+    api.__respond("rescheduleAppointment", {
+        data: null, status: 409,
+        error: { message: "This appointment was changed a moment ago. Reload it and try again so you are working from the current time." },
+    });
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await openReschedule(ui);
+
+    await ui.click("Confirm new time");
+
+    assert.match(ui.text(), /changed a moment ago/);
+    await ui.unmount();
+});
+
+test("a lost reply is verified rather than assumed", async () => {
+    // Status 0 is the BROWSER's view. The server may have moved the appointment
+    // and lost the connection while replying.
+    serveAppointments(
+        [appointment({ status: "pending" })],
+        [appointment({ status: "pending", scheduled_at: NEW_ISO })],
+    );
+    api.__respond("rescheduleAppointment", {
+        data: null, status: 0,
+        error: { message: "Network error. Please check your connection." },
+    });
+    api.__respond("getAppointment", {
+        data: appointment({ status: "pending", scheduled_at: NEW_ISO }),
+        error: null, status: 200,
+    });
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await openReschedule(ui);
+
+    await ui.click("Confirm new time");
+
+    assert.equal(api.__calls("getAppointment").length, 1,
+                 "the outcome was not verified");
+    assert.doesNotMatch(ui.text(), /could not confirm/i,
+                        "a verified move was still reported as uncertain");
+    await ui.unmount();
+});
+
+test("a lost reply whose read shows the old time stays uncertain", async () => {
+    // The read RACES the original request, so the old time is not proof the
+    // move failed.
+    serveAppointments([appointment({ status: "pending" })]);
+    api.__respond("rescheduleAppointment", {
+        data: null, status: 0,
+        error: { message: "Network error. Please check your connection." },
+    });
+    api.__respond("getAppointment", {
+        data: appointment({ status: "pending" }), error: null, status: 200,
+    });
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await openReschedule(ui);
+
+    await ui.click("Confirm new time");
+
+    assert.match(ui.text(), /could not confirm/i);
+    assert.match(ui.text(), /may still be completing/i);
+    assert.doesNotMatch(ui.text(), /Moved,/, "an unverified move was reported as done");
+    await ui.unmount();
+});
+
+test("a failed verification admits the outcome is unknown", async () => {
+    serveAppointments([appointment({ status: "pending" })]);
+    api.__respond("rescheduleAppointment", {
+        data: null, status: 0, error: { message: "Network error." },
+    });
+    api.__respond("getAppointment", {
+        data: null, status: 0, error: { message: "Network error." },
+    });
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await openReschedule(ui);
+
+    await ui.click("Confirm new time");
+
+    assert.match(ui.text(), /could not confirm whether the time changed/i);
+    assert.match(ui.text(), /Refresh to check/i);
+    await ui.unmount();
+});
+
+test("a second click while the change is in flight sends nothing", async () => {
+    serveAppointments([appointment({ status: "pending" })]);
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    api.__respond("rescheduleAppointment", () => pending);
+
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await openReschedule(ui);
+
+    const confirm = ui.byText("Confirm new time");
+    await act(async () => {
+        confirm.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+
+    const inFlight = ui.buttons().find(b => b.textContent.trim() === "Changing…");
+    assert.ok(inFlight, "the control does not show it is working");
+    assert.equal(inFlight.disabled, true);
+    assert.equal(inFlight.getAttribute("aria-busy"), "true");
+
+    await act(async () => {
+        inFlight.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(api.__calls("rescheduleAppointment").length, 1,
+                 "a double click sent two reschedules");
+
+    release({ data: {}, error: null, status: 200 });
+    await ui.settle(40);
+    await ui.unmount();
+});
+
+test("an incomplete selection is refused before any request", async () => {
+    serveAppointments([appointment({ status: "pending" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await ui.click("Change time");
+
+    // Clear the pre-filled time and submit.
+    const time = ui.container.querySelector("select");
+    await act(async () => {
+        nativeSet(time, "", "HTMLSelectElement");
+        time.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await ui.click("Confirm new time");
+
+    assert.equal(api.__calls("rescheduleAppointment").length, 0);
+    assert.match(ui.text(), /Choose both a date and a time/);
+    await ui.unmount();
+});
+
+test("keeping the current time sends nothing", async () => {
+    serveAppointments([appointment({ status: "pending" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await openReschedule(ui);
+
+    await ui.click("Keep current time");
+
+    assert.equal(api.__calls("rescheduleAppointment").length, 0);
+    assert.ok(ui.byText("Change time"), "the control should be offered again");
+    await ui.unmount();
+});
+
+test("the time picker offers only half-hour slots", async () => {
+    // Alignment is what lets the unique slot index detect an overlap at all, so
+    // an off-grid time is refused by the server with a 422.
+    serveAppointments([appointment({ status: "pending" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await ui.click("Change time");
+
+    const options = [...ui.container.querySelectorAll("option")]
+        .map(o => o.value).filter(Boolean);
+    assert.ok(options.length > 0);
+    for (const value of options) {
+        assert.match(value, /^\d{2}:(00|30)$/, `${value} is not on the half hour`);
+    }
+    await ui.unmount();
+});
+
+test("the reschedule controls are keyboard-reachable with touch targets", async () => {
+    serveAppointments([appointment({ status: "pending" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+
+    const open = ui.byText("Change time");
+    assert.equal(open.tagName, "BUTTON");
+    assert.equal(open.getAttribute("type"), "button");
+    assert.equal(open.style.minHeight, "44px");
+
+    await ui.click("Change time");
+    for (const label of ["Confirm new time", "Keep current time"]) {
+        const el = ui.byText(label);
+        assert.equal(el.tagName, "BUTTON", `${label} is not a button`);
+        assert.equal(el.getAttribute("type"), "button");
+        assert.equal(el.style.minHeight, "44px");
+    }
+    await ui.unmount();
+});

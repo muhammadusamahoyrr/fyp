@@ -4,8 +4,8 @@ import { DARK, LIGHT, useT } from "./theme.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useCase } from "./CaseContext.jsx";
 import { confirmedCases } from "@/lib/caseStatus.js";
-import { listCases, getCaseTimeline, listAppointments, cancelAppointment as apiCancelAppointment, getAppointment as apiGetAppointment, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt } from "@/lib/api.js";
-import { formatPkt } from "@/lib/bookingTime.js";
+import { listCases, getCaseTimeline, listAppointments, cancelAppointment as apiCancelAppointment, getAppointment as apiGetAppointment, rescheduleAppointment as apiRescheduleAppointment, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt } from "@/lib/api.js";
+import { formatPkt, pktToday, pktDayKey, pktHourMinute, pktSlotToUtcISO, isPktSlotPast } from "@/lib/bookingTime.js";
 
 // ─── DATA ─────────────────────────────────────────────────────────────────────
 // Nothing is hardcoded here on purpose. This block used to hold five arrays of
@@ -1655,6 +1655,14 @@ const CLIENT_CANCELLABLE = new Set(["pending", "confirmed"]);
 // lawyer instead, and one who does not just meets a refusal they cannot act on.
 const CANCEL_CUTOFF_HOURS = 2;
 
+// The half-hour grid the server enforces. A time off this grid is refused with
+// a 422, because alignment is what makes the unique slot index able to detect
+// an overlap at all — so the picker offers only times that can be booked.
+const PKT_SLOT_TIMES = Array.from({ length: 48 }, (_, i) => {
+    const h = String(Math.floor(i / 2)).padStart(2, "0");
+    return `${h}:${i % 2 ? "30" : "00"}`;
+});
+
 // Stored statuses in words. `no_show` in particular must not reach a client as
 // "no_show", and "completed" versus "cancelled" is the difference between a
 // consultation they may owe a fee for and one they do not.
@@ -1663,6 +1671,231 @@ const STATUS_WORDS = {
     completed: "completed", no_show: "a no-show",
 };
 const statusWord = (status) => STATUS_WORDS[status] || String(status || "unknown");
+
+// Only a PENDING request may be moved. A confirmed appointment is an agreement
+// between two people, and letting one of them move it is not rescheduling — it
+// is telling the other party where to be. The server refuses it too; this keeps
+// the control off a card where it would always fail.
+const CLIENT_RESCHEDULABLE = new Set(["pending"]);
+
+/** Move a pending request to a different time.
+ *
+ * Pakistan time throughout, in both directions: the pickers are filled from the
+ * stored instant rendered in PKT, and the chosen wall-clock time is converted
+ * back to a UTC instant before it is sent. A date input reads and writes the
+ * BROWSER's zone, so a client outside PKT would otherwise compose a time five
+ * hours from the one on screen.
+ *
+ * The card never moves optimistically. The server owns the outcome — the slot
+ * may be taken, the cutoff may have passed, the lawyer may have confirmed — so
+ * the new time appears only after a successful reload.
+ */
+function RescheduleAppointment({ appt, t, onReload, error, setError }) {
+    const [open, setOpen] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [date, setDate] = useState("");
+    const [time, setTime] = useState("");
+
+    if (!CLIENT_RESCHEDULABLE.has(appt.status)) return null;
+
+    const begin = () => {
+        setError(appt.id, null);
+        // Pre-filled from the appointment's own PKT clock face, so the client
+        // edits the time they were shown rather than starting from blank.
+        setDate(pktDayKey(appt.scheduled_at));
+        setTime(pktHourMinute(appt.scheduled_at));
+        setOpen(true);
+    };
+
+    const close = () => { setOpen(false); setError(appt.id, null); };
+
+    const submit = async () => {
+        // The handler is guarded as well as the button: a keyboard repeat or a
+        // dispatched event does not go through `disabled`, and a double submit
+        // is a second PATCH against a row the first one is already moving.
+        if (busy) return;
+        if (!date || !time) {
+            setError(appt.id, "Choose both a date and a time.");
+            return;
+        }
+        if (isPktSlotPast(date, time)) {
+            setError(appt.id, "That time has already passed. Choose a later one.");
+            return;
+        }
+        const iso = pktSlotToUtcISO(date, time);
+        if (!iso) {
+            setError(appt.id, "That is not a valid date and time.");
+            return;
+        }
+
+        setBusy(true);
+        setError(appt.id, null);
+        try {
+            const { error: err, status } = await apiRescheduleAppointment(appt.id, {
+                scheduled_at: iso,
+                schedule_version: appt.schedule_version,
+            });
+
+            // A LOST REPLY LEAVES THE OUTCOME UNKNOWN.
+            //
+            // `apiFetch` resolves with status 0 when the request never
+            // completed, which is the BROWSER's view — the server may have
+            // moved the appointment and lost the connection while replying.
+            // The card is never moved on this path; the appointment is read
+            // back, and only a confirmed new time closes the form.
+            if (status === 0) {
+                const { data: verified, error: readErr } =
+                    await apiGetAppointment(appt.id);
+                const refreshed = onReload ? await onReload() : true;
+
+                if (readErr || !verified || !verified.scheduled_at) {
+                    setError(appt.id,
+                        "The connection dropped and we could not confirm whether "
+                        + "the time changed. Refresh to check before relying on it.");
+                    return;
+                }
+                if (new Date(verified.scheduled_at).toISOString() === new Date(iso).toISOString()) {
+                    setOpen(false);
+                    if (!refreshed) {
+                        setError(appt.id,
+                            "Moved, but the list could not be refreshed. "
+                            + "What you see may be out of date.");
+                    }
+                    return;
+                }
+                // The read shows the old time — which does NOT prove the move
+                // failed, because the read races the original request. Left
+                // open so the client can see and retry, described as unknown.
+                setError(appt.id,
+                    "The connection dropped, so we could not confirm this. It may "
+                    + "still be completing — refresh in a moment, and try again "
+                    + "only if it still shows the old time.");
+                return;
+            }
+
+            if (err) {
+                setError(appt.id, err.message || "Could not change this time.");
+                // A 409 means the appointment moved underneath us — confirmed,
+                // cancelled, or rescheduled in another tab. A 422 does not
+                // prove the status either: the cutoff is checked before
+                // anything else, so re-read on both.
+                if ((status === 409 || status === 422) && onReload) await onReload();
+                return;
+            }
+
+            setOpen(false);
+            const refreshed = onReload ? await onReload() : true;
+            if (!refreshed) {
+                setError(appt.id,
+                    "Moved, but the list could not be refreshed. "
+                    + "What you see may be out of date.");
+            }
+        } catch {
+            setError(appt.id,
+                "Something went wrong and we could not confirm whether the time "
+                + "changed. Refresh to check before relying on it.");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    if (!open) {
+        return (
+            <div style={{ marginTop: 10 }}>
+                <button
+                    type="button"
+                    onClick={begin}
+                    style={{
+                        minHeight: 44, padding: "10px 16px", width: "100%", maxWidth: 280,
+                        borderRadius: 10, cursor: "pointer",
+                        border: "1px solid " + t.border, background: "transparent",
+                        color: t.text, fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                    }}>
+                    Change time
+                </button>
+                {error && (
+                    <div role="alert" style={{ marginTop: 8, fontSize: 12, color: t.danger }}>
+                        {error}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    const field = {
+        minHeight: 44, padding: "10px 12px", borderRadius: 9,
+        border: "1px solid " + t.border, background: t.inputBg,
+        color: t.text, fontSize: 13, fontFamily: "inherit", flex: "1 1 150px",
+    };
+
+    return (
+        <div style={{
+            marginTop: 10, padding: "12px 14px", borderRadius: 10,
+            border: "1px solid " + t.border, background: t.inputBg,
+        }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 6 }}>
+                Choose a new time
+            </div>
+            <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.5, marginBottom: 10 }}>
+                Times are Pakistan Standard Time, on the hour or half hour. Your
+                lawyer has not accepted this request yet, so moving it does not
+                need their approval — but it can only be changed up to{" "}
+                {CANCEL_CUTOFF_HOURS} hours before the current time.
+            </div>
+            {error && (
+                <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: t.danger, fontWeight: 600 }}>
+                    {error}
+                </div>
+            )}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                <label style={{ flex: "1 1 150px", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 11, color: t.textMuted, fontWeight: 600 }}>Date (PKT)</span>
+                    <input type="date" value={date} min={pktToday()}
+                        onChange={e => setDate(e.target.value)}
+                        disabled={busy} style={field} />
+                </label>
+                <label style={{ flex: "1 1 150px", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 11, color: t.textMuted, fontWeight: 600 }}>Time (PKT)</span>
+                    <select value={time} onChange={e => setTime(e.target.value)}
+                        disabled={busy} style={field}>
+                        <option value="">Select…</option>
+                        {PKT_SLOT_TIMES.map(slot => (
+                            <option key={slot} value={slot}>{slot}</option>
+                        ))}
+                    </select>
+                </label>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                    type="button"
+                    onClick={submit}
+                    disabled={busy}
+                    aria-busy={busy}
+                    style={{
+                        minHeight: 44, padding: "10px 16px", flex: "1 1 160px",
+                        borderRadius: 10, border: "none", background: t.primary,
+                        color: "#08202a", fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                        cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
+                    }}>
+                    {busy ? "Changing…" : "Confirm new time"}
+                </button>
+                <button
+                    type="button"
+                    onClick={close}
+                    disabled={busy}
+                    style={{
+                        minHeight: 44, padding: "10px 16px", flex: "1 1 160px",
+                        borderRadius: 10, border: "1px solid " + t.border,
+                        background: "transparent", color: t.text,
+                        fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                        cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
+                    }}>
+                    Keep current time
+                </button>
+            </div>
+        </div>
+    );
+}
 
 /** Client-side cancellation for one appointment.
  *
@@ -2029,6 +2262,9 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                                     </a>
                                 </div>
                             )}
+                            <RescheduleAppointment appt={appt} t={t} onReload={onReload}
+                                error={(cancelErrors || {})[appt.id] || null}
+                                setError={setCancelError} />
                             <CancelAppointment appt={appt} t={t} onReload={onReload}
                                 error={(cancelErrors || {})[appt.id] || null}
                                 setError={setCancelError} />

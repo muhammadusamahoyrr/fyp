@@ -564,8 +564,15 @@ export async function getAppointment(id) {
   return apiFetch(`/appointments/${id}`);
 }
 
-export async function confirmAppointment(id) {
-  return apiFetch(`/appointments/${id}/confirm`, { method: 'PATCH' });
+export async function confirmAppointment(id, { schedule_version } = {}) {
+  return apiFetch(`/appointments/${id}/confirm`, {
+    method: 'PATCH',
+    // The schedule the lawyer was SHOWN. Required by the server: a client can
+    // move a pending request while the page is open, and the status stays
+    // PENDING throughout, so without this the confirmation would accept a time
+    // the lawyer never saw.
+    body: JSON.stringify({ schedule_version }),
+  });
 }
 
 // ─── Documents ────────────────────────────────────────────────────────────────
@@ -806,6 +813,19 @@ export async function listDocDrafts() {
 
 export async function deleteDocDraft(id) {
   return apiFetch(`/documents/drafts/${id}`, { method: 'DELETE' });
+}
+
+export async function rescheduleAppointment(id, { scheduled_at, schedule_version }) {
+  return apiFetch(`/appointments/${id}/reschedule`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      scheduled_at,
+      // The schedule the client was looking at. Sent so a write composed
+      // against a time they have since moved away from is refused rather than
+      // applied — including A -> B -> A, where the time alone is identical.
+      ...(Number.isInteger(schedule_version) ? { schedule_version } : {}),
+    }),
+  });
 }
 
 export async function cancelAppointment(id, reason) {

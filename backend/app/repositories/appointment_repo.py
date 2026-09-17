@@ -109,6 +109,63 @@ class AppointmentRepository(BaseRepository):
         """
         return await self.find_one({"_id": appt_id, **actor_filter})
 
+    @staticmethod
+    def version_filter(expected: int) -> dict:
+        """Match a document at exactly this schedule version.
+
+        Version 0 has to match a row that has no `schedule_version` at all.
+        Appointments booked before the field existed carry none, and in Mongo
+        `{"field": None}` matches both a null and a missing key — so an
+        unversioned legacy row is treated as version 0 without a migration, the
+        same read-boundary default the timezone work used.
+        """
+        return {"schedule_version": {"$in": [expected, None]} if expected == 0
+                else expected}
+
+    async def reschedule(
+        self,
+        appt_id: str,
+        client_id: str,
+        expected_version: int,
+        scheduled_at: datetime,
+        end_at: datetime,
+        occupied_slots: list[datetime],
+    ) -> dict | None:
+        """Move a PENDING appointment to a new time, atomically.
+
+        Returns the updated document, or None if nothing matched.
+
+        ONE UPDATE, THREE FIELDS. `scheduled_at`, `end_at` and `occupied_slots`
+        describe the same fact, and the unique slot indexes compare the third.
+        Writing them in separate operations would leave a window in which the
+        row claims hours it is not scheduled for — and since the index is what
+        actually prevents double-booking, a row whose slots disagree with its
+        time is a row the guarantee no longer covers.
+
+        The filter carries everything the caller believed: the actor, the
+        status, and the schedule VERSION. The version is what makes a stale
+        write fail even when it looks current — a client who reschedules
+        A -> B -> A ends at the same time they started, so a filter comparing
+        `scheduled_at` would accept a write that was composed two moves ago.
+        Comparing a counter cannot be fooled that way.
+        """
+        return await self.col.find_one_and_update(
+            {
+                "_id": appt_id,
+                "client_id": client_id,
+                "status": AppointmentStatus.PENDING.value,
+                **self.version_filter(expected_version),
+            },
+            {"$set": {
+                "scheduled_at": scheduled_at,
+                "end_at": end_at,
+                "occupied_slots": occupied_slots,
+                "schedule_version": expected_version + 1,
+                "updated_at": datetime.now(timezone.utc),
+            }},
+            return_document=ReturnDocument.AFTER,
+        )
+
     async def compare_and_set(
         self,
         appt_id: str,
@@ -116,6 +173,7 @@ class AppointmentRepository(BaseRepository):
         status: AppointmentStatus,
         actor_filter: dict,
         extra: dict | None = None,
+        expected_version: int | None = None,
     ) -> dict | None:
         """Move an appointment to `status`, but only from `expected`.
 
@@ -141,8 +199,17 @@ class AppointmentRepository(BaseRepository):
         }}
         if extra:
             update["$set"].update(extra)
+        # An optional version pin, for callers who are acting on a SCHEDULE they
+        # have seen rather than only on a status. A lawyer confirming an
+        # appointment is agreeing to a specific time; if the client moved it
+        # between the lawyer reading the page and pressing Accept, the status is
+        # still PENDING and the status filter alone would let the confirmation
+        # land on a time the lawyer never saw.
+        version = ({} if expected_version is None
+                   else self.version_filter(expected_version))
         return await self.col.find_one_and_update(
-            {"_id": appt_id, "status": {"$in": expected_values}, **actor_filter},
+            {"_id": appt_id, "status": {"$in": expected_values},
+             **actor_filter, **version},
             update,
             return_document=ReturnDocument.AFTER,
         )

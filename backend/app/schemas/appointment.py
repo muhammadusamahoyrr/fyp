@@ -68,6 +68,62 @@ class BookAppointmentRequest(BaseModel):
         return v
 
 
+class RescheduleAppointmentRequest(BaseModel):
+    """A new time for a pending request, and the schedule it was composed against.
+
+    Only the TIME. Lawyer, case, mode and duration are read from the stored row
+    — a reschedule that could also change those would be a different booking
+    wearing the same id, and the lawyer agreed to none of it.
+    """
+
+    scheduled_at: datetime
+    # REQUIRED. The `schedule_version` the client was looking at.
+    #
+    # Not optional with a server-side fallback: substituting the current version
+    # for a missing one pins every write to whatever the row says at the moment
+    # it is processed, which is the unconditional write the version exists to
+    # prevent. A caller that does not know which schedule it composed against
+    # must read one first.
+    #
+    # It is what stops a write composed against a time the client has since
+    # moved away from — including A -> B -> A, where the time alone is identical
+    # and only a counter can tell that two moves happened in between.
+    schedule_version: int = Field(ge=0)
+
+    @field_validator("scheduled_at")
+    @classmethod
+    def must_be_a_future_aligned_slot(cls, v: datetime) -> datetime:
+        # The same three rules booking enforces, for the same reason: alignment
+        # is the precondition that makes the unique slot index mean anything, so
+        # a misaligned reschedule moves an appointment out from under the
+        # overlap guarantee rather than merely looking untidy.
+        if v.tzinfo is None or v.utcoffset() is None:
+            raise ValueError(
+                "scheduled_at must include a UTC offset "
+                "(e.g. 2026-09-20T10:00:00Z or 2026-09-20T15:00:00+05:00)")
+        v = v.astimezone(timezone.utc)
+        if v <= datetime.now(timezone.utc):
+            raise ValueError("Appointment must be scheduled in the future")
+        misaligned = alignment_error(v)
+        if misaligned:
+            raise ValueError(misaligned)
+        return v
+
+
+class ConfirmAppointmentRequest(BaseModel):
+    """What the lawyer is agreeing to.
+
+    Confirming is agreeing to a TIME, not merely to a row. A client may move a
+    pending request while the lawyer reads the page — the status stays PENDING
+    throughout, so a status check alone lets the confirmation land on a time the
+    lawyer never saw. The version they were shown is required for the same
+    reason it is on a reschedule: a server-side default would pin the write to
+    whatever the row says when it arrives, which is no pin at all.
+    """
+
+    schedule_version: int = Field(ge=0)
+
+
 class CancelAppointmentRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
@@ -145,6 +201,10 @@ class AppointmentOut(BaseModel):
     # on a read: new rows store it, and `_sanitize` defaults legacy rows to
     # Asia/Karachi at the read boundary rather than migrating them.
     timezone: str | None = None
+    # Bumped on every reschedule. The client reads it and sends it back
+    # so a write composed against a time it has since moved away from is
+    # refused rather than silently applied.
+    schedule_version: int | None = None
     notes: str | None = None
     lawyer_notes: str | None = None
     cancel_reason: str | None = None

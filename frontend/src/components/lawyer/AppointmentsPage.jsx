@@ -234,6 +234,10 @@ function AppointmentsPage() {
 
     const mapApiAppt = (a) => ({
         id: a.id,
+        // Carried through so Accept can pin the schedule the lawyer was shown.
+        // Dropping it here was the gap: the row rendered correctly and the one
+        // field that makes the confirmation safe never reached the handler.
+        scheduleVersion: Number.isInteger(a.schedule_version) ? a.schedule_version : null,
         at: a.scheduled_at ? new Date(a.scheduled_at) : null,
         // When the consultation is over. The server will not accept a
         // completion before this instant, so the row has to carry it — the
@@ -268,12 +272,23 @@ function AppointmentsPage() {
         caseId: a.case_id,
     });
 
-    useEffect(() => {
-        listAppointments({ page_size: 50 }).then(({ data }) => {
-            if (data?.items) setAppointments(data.items.map(mapApiAppt));
+    // One loader, reused by the effect and by every handler that has to
+    // re-read after the server refused something.
+    const reload = async () => {
+        try {
+            const { data, error } = await listAppointments({ page_size: 50 });
+            // The client resolves on failure rather than throwing, so an error
+            // here is a value. Keep whatever is on screen: an empty list would
+            // read as "no appointments" when the read simply failed.
+            if (!error && data?.items) setAppointments(data.items.map(mapApiAppt));
+        } catch {
+            // Same rule.
+        } finally {
             setLoading(false);
-        }).catch(() => setLoading(false));
-    }, []);
+        }
+    };
+
+    useEffect(() => { reload(); }, []);
 
     // The clock, as state.
     //
@@ -319,26 +334,48 @@ function AppointmentsPage() {
 
     const handleAccept = async (id) => {
         const apt = appointments.find(a => a.id === id);
-        console.log("🔍 Confirming appointment:", id, apt?.client);
 
-        const result = await apiConfirm(id);
-        console.log("📡 API Response:", result);
-
-        const { error } = result;
-        if (error) {
-            console.error("❌ Confirmation failed:", error);
-            const errMsg = error.message || "Could not confirm appointment";
-            toast.show(errMsg, "danger", 4000);
-            addNotif({ type: "appointment", title: "Failed to Confirm", body: errMsg, time: "Just now" });
+        // THE VERSION DISPLAYED WHEN ACCEPT WAS CLICKED, not one read fresh.
+        //
+        // Confirming is agreeing to a TIME. The client may move a pending
+        // request while this page sits open, and the status stays PENDING
+        // throughout — so re-reading the version here would defeat the pin: it
+        // would agree to whatever the appointment says now, which is exactly
+        // the time the lawyer has not seen.
+        if (!Number.isInteger(apt?.scheduleVersion)) {
+            // Nothing safe to send. Reload rather than guess a version.
+            toast.show("Reload this page before accepting — its details are out of date.",
+                       "warn", 4000);
+            await reload();
             return;
         }
 
-        console.log("✅ Appointment confirmed successfully");
-        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Upcoming" } : a));
+        const { error, status } = await apiConfirm(id, {
+            schedule_version: apt.scheduleVersion,
+        });
+
+        if (error) {
+            const errMsg = error.message || "Could not confirm appointment";
+            toast.show(errMsg, "danger", 4000);
+            addNotif({ type: "appointment", title: "Failed to Confirm", body: errMsg, time: "Just now" });
+            // A 409 means the request moved underneath us — most often the
+            // client changed the time. The row must be re-read so the lawyer
+            // sees what they would actually be accepting, and NOT marked
+            // Upcoming: reporting success for a confirmation that did not
+            // happen is how a lawyer ends up holding a slot nobody agreed to.
+            if (status === 409) await reload();
+            return;
+        }
+
+        // Re-read rather than patching local state: the server owns the
+        // outcome, and the confirmed row carries the version any later action
+        // has to pin against.
+        await reload();
         const msg = `✅ Appointment confirmed with ${apt?.client}`;
         toast.show(msg, "success", 3000);
         addNotif({ type: "appointment", title: "Appointment Accepted", body: msg, time: "Just now" });
     };
+
     const handleReject = async (id) => {
         const apt = appointments.find(a => a.id === id);
         const { error } = await apiCancel(id);

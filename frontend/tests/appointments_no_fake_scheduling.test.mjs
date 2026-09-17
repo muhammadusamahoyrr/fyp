@@ -90,6 +90,17 @@ async function mountAppointments(items) {
         text: () => container.textContent,
         labels: () => [...container.querySelectorAll("button")]
             .map(b => b.textContent.trim()),
+        // Status badges only, identified STRUCTURALLY.
+        //
+        // The words also appear in the tab strip ("Upcoming", "Pending" as
+        // filters) and in the stat cards (as counters), so a text scan reports
+        // a status that is not on any card. A StatusBadge is the only one of
+        // the three that wraps a nested dot <span>.
+        badges: () => [...container.querySelectorAll("span")]
+            .filter(el => el.querySelector("span"))
+            .map(el => el.textContent.trim())
+            .filter(txt => ["Upcoming", "Pending", "Completed",
+                            "Cancelled", "No Show"].includes(txt)),
         unmount: async () => { await act(async () => root.unmount()); },
     };
 }
@@ -190,4 +201,125 @@ test("the module exports no scheduling modal", async () => {
     for (const name of Object.keys(mod)) {
         assert.doesNotMatch(name, /Schedule/i, `${name} is still exported`);
     }
+});
+
+/* ── the schedule version, through the lawyer's page ──────────────────────── */
+//
+// Accepting is agreeing to a TIME. A client may move a pending request while
+// this page sits open, and the status stays PENDING throughout — so the server
+// requires the version the lawyer was SHOWN, and the page has to carry it from
+// the row mapping to the handler. Dropping it anywhere in between turns the pin
+// back into an unconditional write, and the row would still render perfectly.
+
+function pending(over = {}) {
+    const future = new Date(Date.now() + 48 * 36e5);
+    return appointment({
+        status: "pending",
+        scheduled_at: future.toISOString(),
+        end_at: new Date(future.getTime() + 18e5).toISOString(),
+        schedule_version: 0,
+        ...over,
+    });
+}
+
+/** Click Accept inside THIS test's container.
+ *
+ * Scoped deliberately: `mountAppointments` appends to document.body, so a
+ * document-wide query finds the Accept button of every earlier test that did
+ * not unmount — and asserts against the wrong page.
+ */
+async function clickAccept(ui) {
+    const btn = [...ui.container.querySelectorAll("button")]
+        .find(b => b.textContent.trim() === "Accept");
+    assert.ok(btn, "Accept is not offered");
+    await act(async () => {
+        btn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    await act(async () => { await new Promise(r => realSetTimeout(r, 30)); });
+    return btn;
+}
+
+test("the version is carried from the API row to the Accept call", async () => {
+    // The gap this closes: `mapApiAppt` dropped `schedule_version`, so the card
+    // rendered correctly and the one field that makes confirmation safe never
+    // reached the handler.
+    const ui = await mountAppointments([pending({ schedule_version: 3 })]);
+    api.__respond("confirmAppointment", { data: { success: true }, error: null, status: 200 });
+
+    await clickAccept(ui);
+
+    const calls = api.__calls("confirmAppointment");
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].args[1], { schedule_version: 3 },
+                     "the version shown was not sent");
+    await ui.unmount();
+});
+
+test("a stale Accept is refused, reloaded, and then succeeds", async () => {
+    // The full sequence: the lawyer sees version 0, the client moves it to 1,
+    // the stale Accept 409s and must NOT show the row as confirmed, and the
+    // Accept after the reload works.
+    //
+    // Mounted FIRST so the first paint uses the static version-0 response;
+    // the function responder below then serves every later RELOAD.
+    const ui = await mountAppointments([pending({ schedule_version: 0 })]);
+    // A server with memory, so the reload after a successful confirm reflects
+    // it. A stub that always answered "pending" could not tell a confirmation
+    // that worked from one that was refused.
+    let confirmed = false;
+    api.__respond("listAppointments", () => ({
+        data: { items: [pending({
+            schedule_version: 1,
+            status: confirmed ? "confirmed" : "pending",
+        })] },
+        error: null, status: 200,
+    }));
+    api.__respond("confirmAppointment", (id, body) => {
+        if (body.schedule_version !== 1) {
+            return { data: null, status: 409,
+                     error: { message: "The client changed the time of this request while you were looking at it. Reload to see the new time before accepting." } };
+        }
+        confirmed = true;
+        return { data: { success: true }, error: null, status: 200 };
+    });
+
+    // Stale: pinned to the version that was displayed.
+    await clickAccept(ui);
+    assert.deepEqual(api.__calls("confirmAppointment")[0].args[1], { schedule_version: 0 });
+    assert.deepEqual(ui.badges(), ["Pending"],
+                     "a refused confirmation was shown as confirmed");
+
+    // The 409 forced a reload, so the card now carries version 1.
+    await clickAccept(ui);
+    assert.deepEqual(api.__calls("confirmAppointment")[1].args[1], { schedule_version: 1 },
+                     "the retry did not use the reloaded version");
+    assert.deepEqual(ui.badges(), ["Upcoming"],
+                     "the fresh confirmation is not reflected");
+    await ui.unmount();
+});
+
+test("a row with no usable version does not guess one", async () => {
+    // Sending a fabricated version would agree to a time nobody has seen. The
+    // page reloads instead.
+    const ui = await mountAppointments([pending({ schedule_version: null })]);
+    api.__respond("confirmAppointment", { data: { success: true }, error: null, status: 200 });
+
+    await clickAccept(ui);
+
+    assert.equal(api.__calls("confirmAppointment").length, 0,
+                 "a confirmation was sent with no version the lawyer had seen");
+    await ui.unmount();
+});
+
+test("a legacy row arrives as version 0 and is acceptable", async () => {
+    // The server defaults it at the read boundary, so the page never sees null
+    // for a real legacy appointment — and 0 is a version it can pin.
+    const ui = await mountAppointments([pending({ schedule_version: 0 })]);
+    api.__respond("confirmAppointment", { data: { success: true }, error: null, status: 200 });
+
+    await clickAccept(ui);
+
+    assert.deepEqual(api.__calls("confirmAppointment")[0].args[1],
+                     { schedule_version: 0 });
+    await ui.unmount();
 });
