@@ -620,19 +620,29 @@ async def book_appointment(
 
 
 async def confirm_appointment(
-    appt_id: str, lawyer_id: str, expected_version: int | None = None,
+    appt_id: str, lawyer_id: str, *, expected_version: int,
 ) -> dict:
-    """Accept a pending request.
+    """Accept a pending request, at the schedule the caller OBSERVED.
 
-    `expected_version` is the schedule the lawyer was LOOKING AT. Confirming is
+    `expected_version` is the schedule the lawyer was looking at. Confirming is
     agreeing to a specific time, and a client may move a pending request while
     the lawyer reads the page — the status stays PENDING throughout, so the
     status check alone would let the confirmation land on a time the lawyer
     never saw. Pinning the version makes exactly one of the two win.
 
-    Optional, so existing callers keep working; when it is omitted the
-    confirmation is only as safe as the status check, which is the behaviour
-    that existed before.
+    REQUIRED, AND KEYWORD-ONLY. It was optional so that existing callers kept
+    working, which left the guarantee resting on one route remembering to pass
+    it: any internal caller — a script, a future admin tool, a scheduler —
+    could confirm unversioned and silently get the pre-4B behaviour back. A
+    default of None was the bypass, not a convenience, so there is no default.
+
+    Keyword-only because a bare positional integer after two ids is the kind of
+    argument that gets passed in the wrong order and still type-checks.
+
+    There is deliberately no "read the current version" fallback. Reading it
+    here would pin the write to whatever the row says at the moment it is
+    processed, which is precisely the unconditional write this prevents — the
+    caller has to supply the version it actually saw.
     """
     appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
     updated = await _transition(

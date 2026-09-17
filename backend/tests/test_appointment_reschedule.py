@@ -184,7 +184,9 @@ async def test_a_confirmed_appointment_cannot_be_moved_unilaterally(parties):
     from app.services import appointment_service
 
     appt = await _book(parties, _slot())
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=(await _row(appt["id"]))["schedule_version"])
 
     with pytest.raises(ConflictError, match="pending"):
         await _move(parties, appt["id"], _slot(72))
@@ -753,3 +755,110 @@ async def test_http_a_legacy_row_is_movable_without_a_migration(http, parties):
 
     assert moved.status_code == 200, moved.text
     assert moved.json()["schedule_version"] == 1
+
+
+# ── 9. The internal bypass, closed ───────────────────────────────────────────
+#
+# `expected_version` was optional so existing callers kept working, which left
+# the guarantee resting on ONE route remembering to pass it. Any internal
+# caller — a script, an admin tool, a scheduler — could confirm unversioned and
+# silently get the pre-4B behaviour back. The default was the bypass, not a
+# convenience.
+
+def test_the_service_will_not_confirm_without_an_observed_version():
+    """A missing version is a programming error, caught at the call.
+
+    Asserted on the SIGNATURE as well as the call, because a default that came
+    back would make the call succeed again and this test would still pass if it
+    only checked for an exception.
+    """
+    import inspect
+
+    from app.services.appointment_service import confirm_appointment
+
+    parameter = inspect.signature(confirm_appointment).parameters["expected_version"]
+    assert parameter.default is inspect.Parameter.empty, (
+        "a default makes unversioned confirmation reachable again")
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, (
+        "a positional integer after two ids is the kind that gets passed in "
+        "the wrong order and still type-checks")
+
+
+async def test_omitting_the_version_raises_rather_than_confirming(parties):
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+
+    with pytest.raises(TypeError, match="expected_version"):
+        await appointment_service.confirm_appointment(
+            appt["id"], parties["lawyer_id"])
+
+    assert (await _row(appt["id"]))["status"] == AppointmentStatus.PENDING.value
+
+
+async def test_a_stale_direct_service_confirm_cannot_slip_past_the_route(parties):
+    """THE REGRESSION.
+
+    The public route is versioned, so this is the path that mattered: an
+    internal caller holding a version it read before the client moved the
+    appointment. It must lose exactly as the route does — the protection has to
+    live in the service, not in the layer above it.
+    """
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    observed = (await _row(appt["id"]))["schedule_version"]
+    assert observed == 0
+
+    # The client moves it while the internal caller holds `observed`.
+    await _move(parties, appt["id"], _slot(96), version=observed)
+
+    with pytest.raises(ConflictError, match="changed the time"):
+        await appointment_service.confirm_appointment(
+            appt["id"], parties["lawyer_id"], expected_version=observed)
+
+    row = await _row(appt["id"])
+    assert row["status"] == AppointmentStatus.PENDING.value, (
+        "a stale direct service call confirmed the appointment")
+    assert row["schedule_version"] == 1
+
+
+async def test_the_same_caller_succeeds_once_it_re_reads(parties):
+    """The other half: the guard refuses staleness, not the caller."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _move(parties, appt["id"], _slot(96), version=0)
+
+    fresh = (await _row(appt["id"]))["schedule_version"]
+    out = await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"], expected_version=fresh)
+
+    assert out["status"] == AppointmentStatus.CONFIRMED.value
+
+
+def test_no_production_caller_omits_the_version():
+    """Greps the application package, not the tests.
+
+    A signature can be relaxed again in one line, and the failure is silent:
+    everything keeps working and the guarantee quietly stops applying. This
+    fails if any `app/` caller ever confirms without naming a version.
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "app"
+    offenders = []
+    for path in root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"confirm_appointment\s*\(", text):
+            # The call's argument list, up to the matching close paren.
+            tail = text[match.end():match.end() + 400]
+            if "def confirm_appointment" in text[max(0, match.start() - 10):match.start() + 1]:
+                continue
+            head = tail.split(")")[0]
+            if "expected_version" not in head and "await" in text[max(0, match.start() - 40):match.start()]:
+                offenders.append(f"{path.name}: ...{head.strip()[:80]}")
+
+    assert not offenders, (
+        "these application callers confirm without a version: " + "; ".join(offenders))

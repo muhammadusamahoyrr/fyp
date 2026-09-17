@@ -428,6 +428,31 @@ async def test_requesting_on_an_assigned_case_is_refused(parties):
 # clock pass it, which in a test means moving the row rather than waiting.
 
 
+async def _observed_version(appt_id: str) -> int:
+    """The schedule version a caller would have READ before acting.
+
+    Exactly what the lawyer's page does: load the row, then accept the version
+    it displayed. Read explicitly here because the service refuses to guess one
+    — a default inside `confirm_appointment` would pin every write to whatever
+    the row says on arrival, which is the unconditional write the version
+    exists to prevent.
+    """
+    from app.db.collections import get_appointments_col
+
+    row = await get_appointments_col().find_one({"_id": appt_id})
+    return (row or {}).get("schedule_version", 0)
+
+
+async def _confirm(appt_id: str, lawyer_id: str, version=None):
+    """Confirm at the observed version, or at one the test names deliberately."""
+    from app.services import appointment_service
+
+    if version is None:
+        version = await _observed_version(appt_id)
+    return await appointment_service.confirm_appointment(
+        appt_id, lawyer_id, expected_version=version)
+
+
 async def _start_now(appt_id: str) -> None:
     """Move a booked appointment's window to one that has just begun.
 
@@ -448,7 +473,7 @@ async def test_a_confirmed_appointment_that_has_started_can_be_marked_no_show(pa
     from app.services import appointment_service
 
     appt = await _book(parties, _slot())
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _confirm(appt["id"], parties["lawyer_id"])
     await _start_now(appt["id"])
 
     out = await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
@@ -466,7 +491,7 @@ async def test_an_appointment_that_has_not_started_is_not_a_no_show_yet(parties)
     from app.services import appointment_service
 
     appt = await _book(parties, _slot())  # 48 hours away
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _confirm(appt["id"], parties["lawyer_id"])
 
     with pytest.raises(AppValidationError, match="has not started"):
         await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
@@ -493,7 +518,7 @@ async def test_another_lawyer_cannot_mark_a_no_show(parties):
     from app.services import appointment_service
 
     appt = await _book(parties, _slot())
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _confirm(appt["id"], parties["lawyer_id"])
 
     with pytest.raises(ForbiddenError):
         await appointment_service.mark_no_show(appt["id"], "some-other-lawyer")
@@ -507,7 +532,7 @@ async def test_a_no_show_is_not_a_cancellation(parties):
     from app.services import appointment_service
 
     appt = await _book(parties, _slot())
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _confirm(appt["id"], parties["lawyer_id"])
     await _start_now(appt["id"])
     await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
 

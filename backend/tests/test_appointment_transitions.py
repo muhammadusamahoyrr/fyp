@@ -106,6 +106,31 @@ async def _elapse(appt_id: str, *, started_minutes_ago: int = 45,
     )
 
 
+async def _observed_version(appt_id: str) -> int:
+    """The schedule version a caller would have READ before acting.
+
+    Exactly what the lawyer's page does: load the row, then accept the version
+    it displayed. Read explicitly here because the service refuses to guess one
+    — a default inside `confirm_appointment` would pin every write to whatever
+    the row says on arrival, which is the unconditional write the version
+    exists to prevent.
+    """
+    from app.db.collections import get_appointments_col
+
+    row = await get_appointments_col().find_one({"_id": appt_id})
+    return (row or {}).get("schedule_version", 0)
+
+
+async def _confirm(appt_id: str, lawyer_id: str, version=None):
+    """Confirm at the observed version, or at one the test names deliberately."""
+    from app.services import appointment_service
+
+    if version is None:
+        version = await _observed_version(appt_id)
+    return await appointment_service.confirm_appointment(
+        appt_id, lawyer_id, expected_version=version)
+
+
 async def _status(appt_id: str) -> str:
     from app.db.collections import get_appointments_col
     return (await get_appointments_col().find_one({"_id": appt_id}))["status"]
@@ -180,7 +205,7 @@ async def test_the_cas_pins_the_observed_status_not_the_legal_set(parties):
 
     # What the caller observed: PENDING. Then the world moves underneath it.
     observed = PENDING
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _confirm(appt["id"], parties["lawyer_id"])
 
     pinned = await repo.compare_and_set(appt["id"], [observed], CANCELLED, actor)
     assert pinned is None, (
@@ -230,8 +255,8 @@ async def test_two_simultaneous_confirms_produce_one_confirmation(parties):
     appt = await _book(parties)
 
     results = await asyncio.gather(
-        appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"]),
-        appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"]),
+        _confirm(appt["id"], parties["lawyer_id"]),
+        _confirm(appt["id"], parties["lawyer_id"]),
         return_exceptions=True,
     )
 
@@ -291,7 +316,7 @@ async def test_a_cancel_and_a_complete_cannot_both_win(parties):
     from app.services import appointment_service
 
     appt = await _book(parties)
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _confirm(appt["id"], parties["lawyer_id"])
     await _elapse(appt["id"])  # so completion is not premature
 
     results = await asyncio.gather(
@@ -319,7 +344,7 @@ async def test_the_returned_document_is_the_stored_one(parties):
     from app.services import appointment_service
 
     appt = await _book(parties)
-    out = await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    out = await _confirm(appt["id"], parties["lawyer_id"])
 
     assert out["status"] == await _status(appt["id"])
     assert out["updated_at"] is not None
@@ -365,7 +390,7 @@ async def test_a_stale_view_is_a_conflict_not_a_denial(parties):
         user_role="client", reason=None)
 
     with pytest.raises(ConflictError) as exc:
-        await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+        await _confirm(appt["id"], parties["lawyer_id"])
 
     assert exc.value.status_code == 409
     assert "cancelled" in exc.value.detail
@@ -378,7 +403,7 @@ async def test_another_lawyer_transitioning_is_refused_without_a_status_hint(par
     appt = await _book(parties)
 
     with pytest.raises(ForbiddenError) as exc:
-        await appointment_service.confirm_appointment(appt["id"], "some-other-lawyer")
+        await _confirm(appt["id"], "some-other-lawyer")
 
     assert exc.value.status_code == 403
     for status in AppointmentStatus:
@@ -477,7 +502,7 @@ async def test_a_notification_failure_does_not_undo_a_committed_transition(parti
 
     monkeypatch.setattr(notification_service, "create_notification", _explode)
 
-    out = await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    out = await _confirm(appt["id"], parties["lawyer_id"])
 
     assert out["status"] == CONFIRMED.value
     assert await _status(appt["id"]) == CONFIRMED.value
@@ -498,7 +523,7 @@ async def test_a_notification_failure_is_logged_without_the_driver_message(parti
     monkeypatch.setattr(notification_service, "create_notification", _explode)
 
     with caplog.at_level(logging.WARNING, logger="app.services.appointment_service"):
-        await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+        await _confirm(appt["id"], parties["lawyer_id"])
 
     logged = "\n".join(r.getMessage() for r in caplog.records)
     assert "appointment_notification_failed" in logged
@@ -560,14 +585,14 @@ async def test_confirming_a_slot_that_has_already_passed_is_refused(parties):
     await _elapse(appt["id"])
 
     with pytest.raises(AppValidationError, match="already passed"):
-        await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+        await _confirm(appt["id"], parties["lawyer_id"])
 
 
 async def test_a_consultation_cannot_be_completed_before_it_ends(parties):
     from app.services import appointment_service
 
     appt = await _book(parties)
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _confirm(appt["id"], parties["lawyer_id"])
 
     with pytest.raises(AppValidationError, match="has not finished"):
         await appointment_service.complete_appointment(
@@ -595,7 +620,7 @@ async def test_a_confirmed_consultation_completes_after_it_ends(parties):
     from app.services import appointment_service
 
     appt = await _book(parties)
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _confirm(appt["id"], parties["lawyer_id"])
     await _elapse(appt["id"])
 
     out = await appointment_service.complete_appointment(

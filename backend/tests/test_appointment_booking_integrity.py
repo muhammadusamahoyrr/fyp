@@ -81,6 +81,31 @@ async def _book(parties, when=None, **over):
     return await appointment_service.book_appointment(**kwargs)
 
 
+async def _observed_version(appt_id: str) -> int:
+    """The schedule version a caller would have READ before acting.
+
+    Exactly what the lawyer's page does: load the row, then accept the version
+    it displayed. Read explicitly here because the service refuses to guess one
+    — a default inside `confirm_appointment` would pin every write to whatever
+    the row says on arrival, which is the unconditional write the version
+    exists to prevent.
+    """
+    from app.db.collections import get_appointments_col
+
+    row = await get_appointments_col().find_one({"_id": appt_id})
+    return (row or {}).get("schedule_version", 0)
+
+
+async def _confirm(appt_id: str, lawyer_id: str, version=None):
+    """Confirm at the observed version, or at one the test names deliberately."""
+    from app.services import appointment_service
+
+    if version is None:
+        version = await _observed_version(appt_id)
+    return await appointment_service.confirm_appointment(
+        appt_id, lawyer_id, expected_version=version)
+
+
 def _one_winner(results, *, expect_conflict=True):
     winners = [r for r in results if not isinstance(r, Exception)]
     losers = [r for r in results if isinstance(r, Exception)]
@@ -258,7 +283,7 @@ async def test_confirming_an_appointment_keeps_its_claim(parties):
 
     at_ten = _slot()
     appt = await _book(parties, at_ten)
-    await appointment_service.confirm_appointment(appt["id"], parties["lawyer_id"])
+    await _confirm(appt["id"], parties["lawyer_id"])
 
     with pytest.raises((ConflictError, AppValidationError)):
         await _book(parties, at_ten, client_id=parties["client2_id"])
