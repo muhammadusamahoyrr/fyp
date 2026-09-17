@@ -7,7 +7,7 @@ import {
 import { useTheme } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
-import { Card, Btn, Input, Sel } from "./components.jsx";
+import { Card, Btn } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import {
     listAppointments,
@@ -195,179 +195,6 @@ function JoinCallModal({ apt, onClose, t }) {
     );
 }
 
-// Appointments are held in list state as display strings ("Mar 15, 2026",
-// "10:00 AM"), but the modal uses native date/time pickers, which require
-// ISO values. These convert across that boundary in both directions.
-const toISODate = (display) => {
-    if (!display) return "";
-    if (/^\d{4}-\d{2}-\d{2}$/.test(display)) return display;
-    const d = new Date(display);
-    if (Number.isNaN(d.getTime())) return "";
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-const fromISODate = (iso) => {
-    if (!iso) return "";
-    const [y, m, d] = iso.split("-").map(Number);
-    if (!y || !m || !d) return iso;
-    return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-};
-const toISOTime = (display) => {
-    if (!display) return "";
-    if (/^\d{2}:\d{2}$/.test(display)) return display;
-    const m = display.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-    if (!m) return "";
-    let h = Number(m[1]);
-    const ampm = m[3]?.toUpperCase();
-    if (ampm === "PM" && h !== 12) h += 12;
-    if (ampm === "AM" && h === 12) h = 0;
-    return `${String(h).padStart(2, "0")}:${m[2]}`;
-};
-const fromISOTime = (iso) => {
-    if (!iso) return "";
-    const [h, min] = iso.split(":").map(Number);
-    if (Number.isNaN(h)) return iso;
-    const ampm = h >= 12 ? "PM" : "AM";
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    return `${String(h12).padStart(2, "0")}:${String(min).padStart(2, "0")} ${ampm}`;
-};
-
-// ── Schedule / New Appointment modal ─────────────────────────
-function ScheduleModal({ apt, onClose, onConfirm, t }) {
-    const isNew = !apt;
-    const [form, setForm] = useState({
-        client: apt?.client || "",
-        purpose: apt?.purpose || "",
-        date: toISODate(apt?.date),
-        time: toISOTime(apt?.time),
-        duration: apt?.duration || "30 min",
-        type: apt?.type || "In-Person",
-    });
-    const f = (k) => (v) => setForm(prev => ({ ...prev, [k]: v }));
-
-    const Field = ({ label, children }) => (
-        <div style={{ marginBottom: 14 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: "rgba(180,210,225,0.7)", textTransform: "uppercase", letterSpacing: "0.07em", display: "block", marginBottom: 6 }}>{label}</label>
-            {children}
-        </div>
-    );
-    const inp = {
-        width: "100%", padding: "9px 12px", borderRadius: 9,
-        border: `1px solid ${t.border}`, background: t.cardHi,
-        color: t.text, fontSize: 13, outline: "none",
-        boxSizing: "border-box", fontFamily: "inherit",
-        transition: "border-color .15s",
-        // Tells the browser to render native date/time picker chrome (the
-        // calendar/clock glyph) for this theme, so it isn't a black-on-black icon.
-        colorScheme: t.mode === "dark" ? "dark" : "light",
-    };
-
-    return (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
-            <div onClick={e => e.stopPropagation()} style={{
-                background: t.card, border: `1px solid ${t.primary}35`,
-                borderRadius: 18, padding: 28, width: 420,
-                boxShadow: `0 20px 60px rgba(0,0,0,0.4)`,
-            }}>
-                {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-                    <div style={{
-                        width: 38, height: 38, borderRadius: 10,
-                        background: `${t.primary}18`, border: `1.5px solid ${t.primary}45`,
-                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
-                    }}>{isNew ? "📅" : "🕐"}</div>
-                    <div>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>
-                            {isNew ? "Schedule New Appointment" : "Reschedule Appointment"}
-                        </div>
-                        <div style={{ fontSize: 11, color: t.textMuted }}>
-                            {isNew ? "Book a new consultation" : `Update time for ${apt.client}`}
-                        </div>
-                    </div>
-                    <button onClick={onClose} style={{ marginLeft: "auto", background: "none", border: "none", color: t.textMuted, cursor: "pointer", fontSize: 18 }}>✕</button>
-                </div>
-
-                {isNew && (
-                    <>
-                        <Field label="Client Name">
-                            <input value={form.client} onChange={e => f("client")(e.target.value)}
-                                placeholder="e.g. Ahmed Raza Khan" style={inp}
-                                onFocus={e => e.target.style.borderColor = t.primary}
-                                onBlur={e => e.target.style.borderColor = t.border} />
-                        </Field>
-                        <Field label="Purpose / Case">
-                            <input value={form.purpose} onChange={e => f("purpose")(e.target.value)}
-                                placeholder="e.g. Property Dispute Consultation" style={inp}
-                                onFocus={e => e.target.style.borderColor = t.primary}
-                                onBlur={e => e.target.style.borderColor = t.border} />
-                        </Field>
-                    </>
-                )}
-
-                {!isNew && (
-                    <div style={{
-                        padding: "10px 14px", borderRadius: 10, marginBottom: 14,
-                        background: `${t.primary}10`, border: `1px solid ${t.primary}25`,
-                    }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{apt.purpose}</div>
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>with {apt.client}</div>
-                    </div>
-                )}
-
-                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <Field label="Date">
-                        <input type="date" value={form.date} onChange={e => f("date")(e.target.value)}
-                            style={inp}
-                            onFocus={e => e.target.style.borderColor = t.primary}
-                            onBlur={e => e.target.style.borderColor = t.border} />
-                    </Field>
-                    <Field label="Time">
-                        <input type="time" value={form.time} onChange={e => f("time")(e.target.value)}
-                            style={inp}
-                            onFocus={e => e.target.style.borderColor = t.primary}
-                            onBlur={e => e.target.style.borderColor = t.border} />
-                    </Field>
-                </div>
-
-                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <Field label="Duration">
-                        <select value={form.duration} onChange={e => f("duration")(e.target.value)} style={{ ...inp, cursor: "pointer" }}>
-                            {/* Whole half-hours only. 45 minutes is gone because it
-                                DEFEATS the server's overlap guard rather than merely
-                                being unsupported: 10:00/45 claims {10:00, 10:30} and
-                                10:45/45 claims {10:45, 11:15}, so the two overlap for
-                                a real quarter of an hour while sharing no indexed
-                                slot — the unique index still exists and quietly stops
-                                catching them. The server rejects it with a 422. */}
-                            {["30 min", "60 min", "90 min", "120 min"].map(d => <option key={d}>{d}</option>)}
-                        </select>
-                    </Field>
-                    <Field label="Meeting Type">
-                        <select value={form.type} onChange={e => f("type")(e.target.value)} style={{ ...inp, cursor: "pointer" }}>
-                            {["In-Person", "Video Call", "Phone Call"].map(tp => <option key={tp}>{tp}</option>)}
-                        </select>
-                    </Field>
-                </div>
-
-                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 6 }}>
-                    <button onClick={onClose} style={{
-                        padding: "8px 10px", borderRadius: 8,
-                        border: `1px solid ${t.border}`, background: "transparent",
-                        color: t.textMuted, fontSize: 12, fontWeight: 600,
-                        fontFamily: "inherit", cursor: "pointer",
-                    }}>Cancel</button>
-                    <button onClick={() => onConfirm(form)} style={{
-                        padding: "8px 10px", borderRadius: 8, border: "none",
-                        background: `linear-gradient(135deg,${t.primary},#22a898)`,
-                        color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                        fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                        boxShadow: `0 4px 14px ${t.primary}50`,
-                    }}>✓ {isNew ? "Book Appointment" : "Confirm Reschedule"}</button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
 // ── Main page ─────────────────────────────────────────────────
 function AppointmentsPage() {
     const { t } = useTheme();
@@ -383,7 +210,6 @@ function AppointmentsPage() {
     // `Date.now()` per button would let two buttons on the same row disagree
     // about whether a boundary had passed.
     const [now, setNow] = useState(() => Date.now());
-    const [scheduleModal, setScheduleModal] = useState(undefined); // undefined=closed, null=new, apt=reschedule
     const [joinModal, setJoinModal] = useState(null);
     // "No Show" earns a tab because it is now its own status. The tab filter is
     // an exact match on the display status, so without one a no-show would be
@@ -563,27 +389,6 @@ function AppointmentsPage() {
         addNotif({ type: "appointment", title: "Marked as No Show", body: msg, time: "Just now" });
     };
 
-    const confirmSchedule = (raw) => {
-        // Native pickers give ISO values — store the display strings the list renders.
-        const form = { ...raw, date: fromISODate(raw.date), time: fromISOTime(raw.time) };
-        if (scheduleModal === null) {
-            // New appointment
-            const newApt = {
-                id: Date.now(), client: form.client, purpose: form.purpose,
-                date: form.date, time: form.time, duration: form.duration,
-                type: form.type, status: "Upcoming",
-                initials: form.client.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
-            };
-            setAppointments(prev => [newApt, ...prev]);
-            addNotif({ type: "appointment", title: "Appointment Booked", body: `Booked ${form.client} for ${form.date}`, time: "Just now" });
-        } else {
-            setAppointments(prev => prev.map(a => a.id === scheduleModal.id
-                ? { ...a, date: form.date, time: form.time, duration: form.duration, type: form.type, status: "Upcoming" } : a));
-            addNotif({ type: "appointment", title: "Rescheduled", body: `${scheduleModal.client} → ${form.date} ${form.time}`, time: "Just now" });
-        }
-        setScheduleModal(undefined);
-    };
-
     const statCounts = {
         today: appointments.filter(a => a.at && _isToday(a.at) && !DID_NOT_HAPPEN.has(a.status)).length,
         upcoming: appointments.filter(a => a.status === "Upcoming").length,
@@ -597,14 +402,6 @@ function AppointmentsPage() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
                     {/* ── Modals ──────────────────────────────────── */}
-                    {scheduleModal !== undefined && (
-                        <ScheduleModal
-                            apt={scheduleModal}
-                            onClose={() => setScheduleModal(undefined)}
-                            onConfirm={confirmSchedule}
-                            t={t}
-                        />
-                    )}
                     {joinModal && (
                         <JoinCallModal apt={joinModal} onClose={() => setJoinModal(null)} t={t} />
                     )}
@@ -615,23 +412,6 @@ function AppointmentsPage() {
                             <div style={{ fontSize: 22, fontWeight: 700, color: t.text, fontFamily: "Georgia,serif" }}>Appointments</div>
                             <div style={{ fontSize: 13, color: t.textMuted, marginTop: 3 }}>Manage consultations and client meetings</div>
                         </div>
-                        {/* Schedule button — opens new appointment modal */}
-                        <button
-                            onClick={() => setScheduleModal(null)}
-                            style={{
-                                display: "inline-flex", alignItems: "center", gap: 8,
-                                padding: "10px 22px", borderRadius: 12, border: "none",
-                                background: `linear-gradient(135deg,${t.primary},#22a898)`,
-                                color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                                fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                                boxShadow: `0 4px 16px ${t.primary}50`,
-                                transition: "opacity .15s, transform .15s",
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                            onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
-                        >
-                            + Schedule
-                        </button>
                     </div>
 
                     {/* ── Enhanced Filter row ──────────────────────────────── */}
@@ -836,9 +616,6 @@ function AppointmentsPage() {
                                                     <Btn variant="danger" size="sm" style={{ flex: 1 }} onClick={() => handleReject(apt.id)}>
                                                         <Icon d={I.x} size={12} /> Reject
                                                     </Btn>
-                                                    <Btn variant="accent" size="sm" onClick={() => setScheduleModal(apt)}>
-                                                        <Icon d={I.calendar} size={12} />
-                                                    </Btn>
                                                 </>)}
 
                                                 {apt.status === "Upcoming" && (<>
@@ -885,9 +662,6 @@ function AppointmentsPage() {
                                                         onClick={() => handleNoShow(apt.id)}>
                                                         No Show
                                                     </Btn>
-                                                    <Btn variant="accent" size="sm" onClick={() => setScheduleModal(apt)}>
-                                                        <Icon d={I.clock} size={12} /> Reschedule
-                                                    </Btn>
                                                     <Btn variant="danger" size="sm" onClick={() => handleReject(apt.id)}>
                                                         <Icon d={I.x} size={12} />
                                                     </Btn>
@@ -896,11 +670,6 @@ function AppointmentsPage() {
                                                 {apt.status === "Completed" && (
                                                     <Btn variant="secondary" size="sm" style={{ flex: 1 }}>
                                                         <Icon d={I.eye} size={12} /> View Summary
-                                                    </Btn>
-                                                )}
-                                                {apt.status === "Cancelled" && (
-                                                    <Btn variant="accent" size="sm" style={{ flex: 1 }} onClick={() => setScheduleModal(apt)}>
-                                                        <Icon d={I.calendar} size={12} /> Reschedule
                                                     </Btn>
                                                 )}
                                             </div>
@@ -953,14 +722,6 @@ function AppointmentsPage() {
                                         Quick Actions
                                     </div>
                                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                                        <button onClick={() => setScheduleModal(null)} style={{
-                                            display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7,
-                                            width: "100%", padding: "9px 0", borderRadius: 9, border: "none",
-                                            background: `linear-gradient(135deg,${t.primary},#22a898)`,
-                                            color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                                            fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                                            boxShadow: `0 3px 10px ${t.primary}40`,
-                                        }}>+ New Appointment</button>
                                         <Btn variant="secondary" full size="sm">
                                             <Icon d={I.clock} size={13} /> Block Time
                                         </Btn>

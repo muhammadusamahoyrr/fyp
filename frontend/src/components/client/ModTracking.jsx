@@ -1,10 +1,10 @@
 'use client';
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { DARK, LIGHT, useT } from "./theme.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useCase } from "./CaseContext.jsx";
 import { confirmedCases } from "@/lib/caseStatus.js";
-import { listCases, getCaseTimeline, listAppointments, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt } from "@/lib/api.js";
+import { listCases, getCaseTimeline, listAppointments, cancelAppointment as apiCancelAppointment, getAppointment as apiGetAppointment, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt } from "@/lib/api.js";
 import { formatPkt } from "@/lib/bookingTime.js";
 
 // ─── DATA ─────────────────────────────────────────────────────────────────────
@@ -1645,7 +1645,263 @@ function PageReminders({ feed, setFeed, milestones = [], documents = [] }) {
 }
 
 // ─── PAGE: APPOINTMENTS ───────────────────────────────────────────────────────
-function PageAppointments({ appointments, loading, t }) {
+// Statuses a client may still call off. The server's transition table allows
+// cancellation from pending and confirmed only; everything else is terminal, so
+// offering the action there would be a button that always fails.
+const CLIENT_CANCELLABLE = new Set(["pending", "confirmed"]);
+
+// The server refuses a client cancellation inside this window. Stated up front
+// rather than discovered through a 422: a client who reads it can ring the
+// lawyer instead, and one who does not just meets a refusal they cannot act on.
+const CANCEL_CUTOFF_HOURS = 2;
+
+// Stored statuses in words. `no_show` in particular must not reach a client as
+// "no_show", and "completed" versus "cancelled" is the difference between a
+// consultation they may owe a fee for and one they do not.
+const STATUS_WORDS = {
+    pending: "pending", confirmed: "confirmed", cancelled: "cancelled",
+    completed: "completed", no_show: "a no-show",
+};
+const statusWord = (status) => STATUS_WORDS[status] || String(status || "unknown");
+
+/** Client-side cancellation for one appointment.
+ *
+ * `PageAppointments` was read-only, so `cancelled_by: "client"` could never
+ * occur — the backend path existed and nothing could reach it.
+ *
+ * Deliberately NOT optimistic. On success it re-reads the list from the server
+ * rather than writing "cancelled" into local state: the server owns the
+ * outcome, and a local status would show a state the database may not hold —
+ * most obviously when the request is refused, but also when the lawyer
+ * cancelled first and the real row says `cancelled_by: "lawyer"`.
+ */
+function CancelAppointment({ appt, t, onReload, error, setError }) {
+    const [confirming, setConfirming] = useState(false);
+    const [busy, setBusy] = useState(false);
+    // `error` is NOT local state. A reload re-creates the page component, which
+    // unmounts this subtree and destroys anything it owned — so an error raised
+    // just before a reload would vanish exactly when it is most needed, which
+    // is how a 409 came to change the card from Pending to Completed with no
+    // explanation at all. It is held by the page, which survives.
+
+    if (!CLIENT_CANCELLABLE.has(appt.status)) {
+        // The action is gone, but an explanation of why may still be owed.
+        //
+        // A 409 reloads the list, and the reloaded appointment is terminal — so
+        // returning null here removed the message along with the button, and
+        // the client watched the card silently change from Pending to Completed
+        // with nothing saying their cancellation had been refused or why.
+        return error ? (
+            <div role="alert" style={{ marginTop: 12, fontSize: 12, color: t.danger, fontWeight: 600 }}>
+                {error}
+            </div>
+        ) : null;
+    }
+
+    const run = async () => {
+        // Guard the handler as well as the button. `disabled` stops a second
+        // click, but a keyboard repeat or an event dispatched directly does not
+        // go through the same path, and a double submit here is a second PATCH
+        // against an appointment the first one is already cancelling.
+        if (busy) return;
+        setBusy(true);
+        setError(appt.id, null);
+        try {
+            const { error: err, status } = await apiCancelAppointment(appt.id, null);
+
+            // STATUS 0 MEANS THE OUTCOME IS UNKNOWN, NOT THAT NOTHING HAPPENED.
+            //
+            // `apiFetch` returns this when the request never completed — but
+            // "never completed" is from the BROWSER's side. The server may have
+            // received the PATCH, committed the cancellation and then lost the
+            // connection while replying. Saying "the appointment was not
+            // changed", as this used to, asserts the one thing nobody here
+            // knows, and a client who believes it turns up to a consultation
+            // that was cancelled.
+            //
+            // So the client asks. A read is safe to retry in a way the PATCH is
+            // not.
+            if (status === 0) {
+                const { data: verified, error: readErr } =
+                    await apiGetAppointment(appt.id);
+
+                if (readErr || !verified || !verified.status) {
+                    // Still blind. The honest answer is that we do not know,
+                    // and the refresh control is how the client finds out.
+                    setError(appt.id,
+                        "The connection dropped and we could not confirm whether "
+                        + "this was cancelled. Refresh to check before relying on it.");
+                    return;
+                }
+
+                // The read narrows the answer. It does not always settle it.
+                const refreshed = onReload ? await onReload() : true;
+
+                if (verified.status === "cancelled") {
+                    // THE ONLY CONFIRMED SUCCESS. Not "any terminal status":
+                    // this branch used to accept completed and no_show as
+                    // proof of cancellation, so an appointment the lawyer had
+                    // marked completed was reported to the client as
+                    // "Cancelled, but the list could not be refreshed" — a
+                    // cancellation that never happened, described as done.
+                    setConfirming(false);
+                    if (!refreshed) {
+                        setError(appt.id,
+                            "Cancelled, but the list could not be refreshed. "
+                            + "What you see may be out of date.");
+                    }
+                    return;
+                }
+
+                if (!CLIENT_CANCELLABLE.has(verified.status)) {
+                    // Terminal, but not by cancellation. The appointment ended
+                    // some other way — completed, or recorded as a no-show —
+                    // and the client's request is not what did it. Naming the
+                    // real status matters: "cancelled" and "completed" have
+                    // opposite consequences for whether they owe a fee.
+                    setError(appt.id,
+                        "This was NOT cancelled — it is now "
+                        + statusWord(verified.status) + "."
+                        + (refreshed ? "" : " The list could not be refreshed, so"
+                           + " what you see may be out of date."));
+                    return;
+                }
+
+                // STILL PENDING OR CONFIRMED ON THIS READ, WHICH IS NOT PROOF
+                // THAT THE CANCELLATION FAILED.
+                //
+                // The lost reply means the PATCH's fate is unknown, and an
+                // immediate read races it: the server may be committing the
+                // cancellation at the moment this read returns the old row.
+                // Saying "it is still pending, please try again" — as this did
+                // — turns one unknown into a false certainty and invites a
+                // second cancellation of something already cancelling.
+                //
+                // The wording is deliberately true under both outcomes, so it
+                // does not contradict the card if the refresh above has already
+                // pulled in a cancelled row.
+                setError(appt.id,
+                    "The connection dropped, so we could not confirm this. It may "
+                    + "still be completing — refresh in a moment, and try again "
+                    + "only if it still shows as "
+                    + statusWord(verified.status) + ".");
+                return;
+            }
+
+            if (err) {
+                setError(appt.id, err.message || "Could not cancel this appointment.");
+                // REFRESH ON 422 AS WELL AS 409.
+                //
+                // The two-hour cutoff is checked BEFORE the status transition,
+                // so a 422 says only that this request was refused — not that
+                // the appointment is still pending or confirmed. The lawyer may
+                // have cancelled it seconds earlier. Re-reading costs one
+                // request and is the difference between showing the client
+                // their appointment and showing them a guess.
+                //
+                // The refusal message survives because it is held by the page,
+                // not by this component, which the reload re-creates.
+                if ((status === 409 || status === 422) && onReload) await onReload();
+                return;
+            }
+
+            setConfirming(false);
+            // A cancellation that committed but could not be re-read leaves a
+            // PENDING card on screen. It must not be presented as current.
+            const refreshed = onReload ? await onReload() : true;
+            if (!refreshed) {
+                setError(appt.id,
+                    "Cancelled, but the list could not be refreshed. "
+                    + "What you see may be out of date.");
+            }
+        } catch {
+            // The client resolves rather than throws for network failures, so
+            // this is only reached if the client itself breaks. The outcome is
+            // just as unknown, and it is described that way.
+            setError(appt.id,
+                "Something went wrong and we could not confirm whether this was "
+                + "cancelled. Refresh to check before relying on it.");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    if (!confirming) {
+        return (
+            <div style={{ marginTop: 12 }}>
+                <button
+                    type="button"
+                    onClick={() => { setError(appt.id, null); setConfirming(true); }}
+                    style={{
+                        // 44px min target, full width up to a cap: this is a
+                        // destructive action reached with a thumb.
+                        minHeight: 44, padding: "10px 16px", width: "100%", maxWidth: 280,
+                        borderRadius: 10, cursor: "pointer",
+                        border: "1px solid " + t.danger + "55", background: "transparent",
+                        color: t.danger, fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                    }}>
+                    Cancel appointment
+                </button>
+                {error && (
+                    <div role="alert" style={{ marginTop: 8, fontSize: 12, color: t.danger }}>
+                        {error}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div style={{
+            marginTop: 12, padding: "12px 14px", borderRadius: 10,
+            border: "1px solid " + t.danger + "44", background: t.danger + "0e",
+        }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 6 }}>
+                Cancel this appointment?
+            </div>
+            <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.5, marginBottom: 10 }}>
+                This cannot be undone — rebooking means choosing a new slot.
+                {" "}Appointments can only be cancelled at least {CANCEL_CUTOFF_HOURS} hours
+                before the scheduled time; after that, contact your lawyer directly.
+            </div>
+            {error && (
+                <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: t.danger, fontWeight: 600 }}>
+                    {error}
+                </div>
+            )}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                    type="button"
+                    onClick={run}
+                    disabled={busy}
+                    aria-busy={busy}
+                    style={{
+                        minHeight: 44, padding: "10px 16px", flex: "1 1 160px",
+                        borderRadius: 10, border: "none", background: t.danger, color: "#fff",
+                        fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                        cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
+                    }}>
+                    {busy ? "Cancelling…" : "Yes, cancel it"}
+                </button>
+                <button
+                    type="button"
+                    onClick={() => { setConfirming(false); setError(appt.id, null); }}
+                    disabled={busy}
+                    style={{
+                        minHeight: 44, padding: "10px 16px", flex: "1 1 160px",
+                        borderRadius: 10, border: "1px solid " + t.border,
+                        background: "transparent", color: t.text,
+                        fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                        cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
+                    }}>
+                    Keep appointment
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function PageAppointments({ appointments, loading, t, onReload, cancelErrors, setCancelError, refreshError }) {
     const { T } = useLang();
     const statusStyle = {
         pending: { bg: `${t.warn}18`, color: t.warn, label: "⏳ Pending Confirmation" },
@@ -1662,6 +1918,31 @@ function PageAppointments({ appointments, loading, t }) {
         </div>
     );
 
+    // A FAILED READ IS NOT AN EMPTY DIARY.
+    //
+    // This used to be `if (!appointments.length)` alone, and the loader turned
+    // every failed read into `[]` — so a dropped connection or a 500 told the
+    // client, in plain words, that they had no appointments. That is a lie
+    // about their own legal engagements, and it is indistinguishable from the
+    // truth. When a read has failed and nothing is held, the page says the read
+    // failed and offers to try again.
+    if (!appointments.length && refreshError) return (
+        <div style={{ textAlign: "center", padding: "60px 24px" }} role="alert">
+            <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 8 }}>
+                {T("Could not load your appointments", "ملاقاتیں لوڈ نہیں ہو سکیں")}
+            </div>
+            <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 16 }}>{refreshError}</div>
+            <button type="button" onClick={() => onReload && onReload()} style={{
+                minHeight: 44, padding: "10px 20px", borderRadius: 10, cursor: "pointer",
+                border: "1px solid " + t.border, background: "transparent",
+                color: t.text, fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+            }}>
+                Try again
+            </button>
+        </div>
+    );
+
     if (!appointments.length) return (
         <div style={{ textAlign: "center", padding: "60px 24px" }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📅</div>
@@ -1673,6 +1954,28 @@ function PageAppointments({ appointments, loading, t }) {
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: t.text, marginBottom: 4 }}>{T("Your Appointments", "آپ کی ملاقاتیں")}</div>
+            {refreshError && (
+                // Rows are still shown — they are the last thing the server
+                // actually said — but they are labelled as possibly out of
+                // date rather than presented as current.
+                <div role="alert" style={{
+                    padding: "10px 14px", borderRadius: 10,
+                    border: "1px solid " + t.warn + "55", background: t.warn + "12",
+                    fontSize: 12, color: t.text, display: "flex",
+                    alignItems: "center", gap: 10, flexWrap: "wrap",
+                }}>
+                    <span style={{ flex: "1 1 220px" }}>
+                        {refreshError} These may be out of date.
+                    </span>
+                    <button type="button" onClick={() => onReload && onReload()} style={{
+                        minHeight: 44, padding: "8px 16px", borderRadius: 9, cursor: "pointer",
+                        border: "1px solid " + t.border, background: "transparent",
+                        color: t.text, fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                    }}>
+                        Refresh
+                    </button>
+                </div>
+            )}
             {appointments.map(appt => {
                 const s = statusStyle[appt.status] || statusStyle.pending;
                 // PKT explicitly — `toLocale*` without a timeZone renders in
@@ -1726,6 +2029,9 @@ function PageAppointments({ appointments, loading, t }) {
                                     </a>
                                 </div>
                             )}
+                            <CancelAppointment appt={appt} t={t} onReload={onReload}
+                                error={(cancelErrors || {})[appt.id] || null}
+                                setError={setCancelError} />
                         </div>
                     </Card>
                 );
@@ -1752,6 +2058,16 @@ export default function Module7({ isDark }) {
     const [apiHearings, setApiHearings] = useState([]);
     const [apiAppointments, setApiAppointments] = useState([]);
     const [apptLoading, setApptLoading] = useState(false);
+    // Cancellation failures, keyed by appointment id. Held here because a
+    // reload re-creates the page subtree below and would take any state it
+    // owned with it — see CancelAppointment.
+    const [cancelErrors, setCancelErrors] = useState({});
+    // Set when a READ fails. Distinct from a cancellation error: this one says
+    // the list on screen may be out of date, not that an action was refused.
+    const [apptRefreshError, setApptRefreshError] = useState(null);
+    const setCancelError = useCallback((id, message) => {
+        setCancelErrors(prev => ({ ...prev, [id]: message }));
+    }, []);
 
     // Load cases from API on mount
     useEffect(() => {
@@ -1771,15 +2087,59 @@ export default function Module7({ isDark }) {
         });
     }, []);
 
-    // Load appointments on mount and whenever the page switches to "appointments"
+    // One loader, reused.
+    //
+    // A cancellation must re-read the server rather than patch the row locally:
+    // the server decides the outcome (it can refuse inside the two-hour cutoff,
+    // or the lawyer may have moved the appointment first), and a local
+    // "cancelled" would show the client a state the database does not hold.
+    const reloadAppointments = useCallback(async () => {
+        setApptLoading(true);
+        try {
+            const { data, error } = await listAppointments({ page_size: 50 });
+
+            // THE CLIENT RESOLVES ON FAILURE; IT DOES NOT THROW.
+            //
+            // `apiFetch` returns `{data: null, error, status}` for an HTTP
+            // error and `{status: 0}` when the request never left — so the
+            // previous `data?.items || data || []` turned every failed read
+            // into an empty array, and the page then said "No appointments
+            // yet". That is a read failure rendered as a fact about the
+            // client's diary, and it is indistinguishable from the truth.
+            if (error) {
+                setApptRefreshError(
+                    error.message || "Could not refresh your appointments.");
+                return false;
+            }
+            const items = Array.isArray(data?.items) ? data.items
+                : Array.isArray(data) ? data
+                : null;
+            if (items === null) {
+                // A 200 whose body is not a list is a read we cannot use.
+                // Treating it as zero appointments would be the same lie.
+                setApptRefreshError(
+                    "Your appointments could not be read. Please refresh.");
+                return false;
+            }
+
+            setApiAppointments(items);
+            setApptRefreshError(null);
+            return true;
+        } catch {
+            // Reached only if the client itself throws. Same rule: keep what is
+            // on screen and say the refresh failed.
+            setApptRefreshError("Could not refresh your appointments.");
+            return false;
+        } finally {
+            setApptLoading(false);
+        }
+    }, []);
+
+    // Load on mount and whenever the page switches to "appointments"
     useEffect(() => {
         if (page !== "appointments") return;
-        setApptLoading(true);
-        listAppointments({ page_size: 50 }).then(({ data }) => {
-            setApiAppointments(data?.items || data || []);
-            setApptLoading(false);
-        }).catch(() => setApptLoading(false));
-    }, [page]);
+        reloadAppointments();
+    }, [page, reloadAppointments]);
 
     // Load timeline when the active case changes
     useEffect(() => {
@@ -1821,7 +2181,8 @@ export default function Module7({ isDark }) {
 
     const pages = {
         overview: (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} hearings={apiHearings} milestones={allMilestones} />,
-        appointments: (props) => <PageAppointments  {...props} appointments={apiAppointments} loading={apptLoading} />,
+        appointments: (props) => <PageAppointments  {...props} appointments={apiAppointments} loading={apptLoading} onReload={reloadAppointments} cancelErrors={cancelErrors} setCancelError={setCancelError}
+            refreshError={apptRefreshError} />,
         timeline: (props) => <PageTimeline      {...props} milestones={allMilestones} />,
         documents: (props) => <PageDocuments     {...props} activeCaseId={activeCaseId} milestones={allMilestones} />,
         payments: (props) => <PagePayments      {...props} />,
@@ -1831,7 +2192,19 @@ export default function Module7({ isDark }) {
         communication: (props) => <PageCommunication {...props} caseId={activeCaseId} milestones={allMilestones} />,
         reminders: (props) => <PageReminders     {...props} feed={feed} setFeed={setFeed} milestones={allMilestones} />,
     };
-    const PageComp = pages[page] || pages.overview;
+    // CALLED, not rendered as a component.
+    //
+    // `pages` is rebuilt on every render, so each entry is a NEW function
+    // identity — and rendering one as `<PageComp />` makes React see a
+    // different component type every time and remount the entire page subtree.
+    // Any state inside it is then destroyed by any state change out here: the
+    // cancel confirmation closed itself the moment it recorded an error, and
+    // every page in this module silently lost its local state on each keypress
+    // elsewhere.
+    //
+    // Calling the arrow returns the element directly, so the child type is the
+    // real page component and stays stable across renders.
+    const renderPage = pages[page] || pages.overview;
 
     return (
         <>
@@ -1852,7 +2225,7 @@ export default function Module7({ isDark }) {
                     <TopHeader t={t} onBack={() => setPage("overview")}
                         activeCaseId={activeCaseId} cases={displayCases} onCaseSwitch={setActiveCaseId} unreadCount={unreadCount} />
                     <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? 12 : 24 }}>
-                        <PageComp setPage={setPage} t={t} />
+                        {renderPage({ setPage, t })}
                     </div>
                 </div>
             </div>
