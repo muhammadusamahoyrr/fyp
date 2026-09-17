@@ -273,6 +273,14 @@ class NotificationType(str, Enum):
     APPOINTMENT_CONFIRMED = "appointment_confirmed"
     APPOINTMENT_CANCELLED = "appointment_cancelled"
     APPOINTMENT_COMPLETED = "appointment_completed"
+    # Its own type, not a reuse of CANCELLED. A no-show and a cancellation are
+    # different facts with different consequences: a cancellation is an
+    # appointment called off, a no-show is one the client did not attend, and
+    # only the second bears on them. The lawyer's page already learned this
+    # distinction the hard way — it rendered `no_show` as "Cancelled" and told
+    # a lawyer their client had called off when in fact the client had not
+    # turned up.
+    APPOINTMENT_NO_SHOW = "appointment_no_show"
     APPOINTMENT_REMINDER = "appointment_reminder"
     CAUSELIST_LISTED = "causelist_listed"
     PAYMENT_REQUESTED = "payment_requested"

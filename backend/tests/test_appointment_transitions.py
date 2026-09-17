@@ -30,7 +30,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.core.constants import AppointmentMode, AppointmentStatus
+from app.core.constants import (
+    AppointmentMode,
+    AppointmentStatus,
+    NotificationType,
+)
 from app.core.exceptions import AppValidationError, ConflictError, ForbiddenError
 from app.services import appointment_transitions as transitions
 
@@ -668,3 +672,203 @@ async def test_a_cancelled_appointment_cannot_be_cancelled_again(parties):
         await appointment_service.cancel_appointment(
             appt_id=appt["id"], user_id=parties["client_id"],
             user_role="client", reason=None)
+
+
+# ── 16. The client is told about a no-show ───────────────────────────────────
+#
+# It used to be recorded silently: the status changed, the client's own list
+# quietly said "No Show", and nothing announced it. That matters more than it
+# sounds — a completed appointment is what gates their right to review the
+# lawyer (`exists_completed`), so the one outcome that removes that right
+# arrived without a word, and a client who believes they attended had no idea
+# there was anything to dispute.
+
+async def _no_show_notifications(appt_id: str) -> list[dict]:
+    from app.db.collections import get_notifications_col
+
+    return await get_notifications_col().find(
+        {"payload.appointment_id": appt_id,
+         "type": NotificationType.APPOINTMENT_NO_SHOW.value}
+    ).to_list(length=20)
+
+
+async def _ready_for_no_show(parties):
+    """A confirmed appointment whose time has passed."""
+    appt = await _book(parties)
+    await _confirm(appt["id"], parties["lawyer_id"])
+    await _elapse(appt["id"])
+    return appt
+
+
+async def test_the_client_is_notified_when_a_no_show_is_recorded(parties):
+    from app.services import appointment_service
+
+    appt = await _ready_for_no_show(parties)
+
+    await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+    told = await _no_show_notifications(appt["id"])
+    assert len(told) == 1, f"expected one notification, got {len(told)}"
+    assert told[0]["user_id"] == parties["client_id"], (
+        "the lawyer was told about their own action")
+
+
+def test_the_no_show_type_is_its_own_thing():
+    """A no-show and a cancellation are different facts with different
+    consequences, and only the second is the appointment being called off."""
+    assert NotificationType.APPOINTMENT_NO_SHOW.value == "appointment_no_show"
+    assert (NotificationType.APPOINTMENT_NO_SHOW
+            is not NotificationType.APPOINTMENT_CANCELLED)
+
+
+async def test_the_wording_states_the_fact_and_offers_recourse(parties):
+    from app.services import appointment_service
+
+    appt = await _ready_for_no_show(parties)
+
+    await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+    note = (await _no_show_notifications(appt["id"]))[0]
+    assert "did not attend" in note["body"]
+    assert "contact them" in note["body"].lower(), (
+        "a client accused of missing a consultation needs a way to dispute it")
+    # Not described as a cancellation — the client did not call it off.
+    assert "cancel" not in note["body"].lower()
+    assert "cancel" not in note["title"].lower()
+
+
+async def test_the_notification_carries_no_private_notes(parties):
+    """`lawyer_notes` is the lawyer's own record. It must not travel to the
+    client on the back of a status change."""
+    from app.db.collections import get_appointments_col
+    from app.services import appointment_service
+
+    appt = await _ready_for_no_show(parties)
+    secret = "Client unreliable; consider declining future work."
+    await get_appointments_col().update_one(
+        {"_id": appt["id"]}, {"$set": {"lawyer_notes": secret}})
+
+    await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+    note = (await _no_show_notifications(appt["id"]))[0]
+    assert secret not in note["body"]
+    assert secret not in str(note.get("payload"))
+
+
+# ── the transition has to succeed first ──────────────────────────────────────
+
+async def test_a_refused_no_show_notifies_nobody(parties):
+    """A client told they missed a consultation that was never marked missed
+    has been accused of something that did not happen."""
+    from app.services import appointment_service
+
+    appt = await _book(parties)          # still PENDING — not confirmable
+    await _elapse(appt["id"])
+
+    with pytest.raises(ConflictError):
+        await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+    assert await _no_show_notifications(appt["id"]) == []
+
+
+async def test_a_premature_no_show_notifies_nobody(parties):
+    """Refused on the clock rather than the status — the other way in."""
+    from app.services import appointment_service
+
+    appt = await _book(parties)
+    await _confirm(appt["id"], parties["lawyer_id"])   # not yet started
+
+    with pytest.raises(AppValidationError, match="has not started"):
+        await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+    assert await _no_show_notifications(appt["id"]) == []
+
+
+async def test_another_lawyer_marking_it_notifies_nobody(parties):
+    from app.services import appointment_service
+
+    appt = await _ready_for_no_show(parties)
+
+    with pytest.raises(ForbiddenError):
+        await appointment_service.mark_no_show(appt["id"], "some-other-lawyer")
+
+    assert await _no_show_notifications(appt["id"]) == []
+
+
+async def test_a_retry_after_success_notifies_only_once(parties):
+    """The second attempt is a stale-state conflict: the appointment is already
+    NO_SHOW and the transition table forbids it. Nothing more is sent."""
+    from app.services import appointment_service
+
+    appt = await _ready_for_no_show(parties)
+    await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+    with pytest.raises(ConflictError):
+        await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+    assert len(await _no_show_notifications(appt["id"])) == 1
+
+
+async def test_concurrent_no_shows_notify_once(parties):
+    """Only one transition may win, so only one client notification exists."""
+    import asyncio as _asyncio
+
+    from app.services import appointment_service
+
+    appt = await _ready_for_no_show(parties)
+
+    results = await _asyncio.gather(
+        appointment_service.mark_no_show(appt["id"], parties["lawyer_id"]),
+        appointment_service.mark_no_show(appt["id"], parties["lawyer_id"]),
+        return_exceptions=True,
+    )
+
+    assert len([r for r in results if not isinstance(r, Exception)]) == 1
+    assert len(await _no_show_notifications(appt["id"])) == 1
+
+
+# ── delivery is best-effort ──────────────────────────────────────────────────
+
+async def test_a_notification_failure_does_not_undo_the_no_show(parties, monkeypatch):
+    """The transition is already committed by the time delivery runs. Answering
+    the caller with an error for work that succeeded would invite a retry, and
+    the retry is refused as a stale-state conflict."""
+    from app.services import appointment_service, notification_service
+
+    appt = await _ready_for_no_show(parties)
+
+    async def _explode(**kwargs):
+        raise RuntimeError("mongodb://user:hunter2@host/db is unreachable")
+
+    monkeypatch.setattr(notification_service, "create_notification", _explode)
+
+    out = await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+    assert out["status"] == NO_SHOW.value
+    assert await _status(appt["id"]) == NO_SHOW.value
+
+
+async def test_a_no_show_notification_failure_logs_only_the_exception_class(
+        parties, monkeypatch, caplog):
+    """Driver errors carry URIs and credentials."""
+    import logging
+
+    from app.services import appointment_service, notification_service
+
+    appt = await _ready_for_no_show(parties)
+    secret = "mongodb://user:hunter2@cluster.example.net/db"
+
+    async def _explode(**kwargs):
+        raise RuntimeError(f"{secret} is unreachable")
+
+    monkeypatch.setattr(notification_service, "create_notification", _explode)
+
+    with caplog.at_level(logging.WARNING, logger="app.services.appointment_service"):
+        await appointment_service.mark_no_show(appt["id"], parties["lawyer_id"])
+
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "appointment_notification_failed" in logged
+    assert "transition=no_show" in logged
+    assert "RuntimeError" in logged
+    assert secret not in logged
+    assert "hunter2" not in logged

@@ -790,6 +790,39 @@ async def mark_no_show(appt_id: str, lawyer_id: str) -> dict:
     appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
     updated = await _transition(
         appt, AppointmentStatus.NO_SHOW, lawyer_id, "lawyer")
+
+    # THE CLIENT IS TOLD, and this is the first time they are.
+    #
+    # A no-show was recorded silently: the status changed, the client's own
+    # appointment list quietly said "No Show", and nothing announced it. That
+    # matters more than it sounds, because a completed appointment is what
+    # gates their right to review the lawyer (`exists_completed`) — so the one
+    # outcome that removes that right arrived without a word, and a client who
+    # believes they attended has no idea there is anything to dispute.
+    #
+    # AFTER the transition, so a refused or lost race notifies nobody: a client
+    # told they missed a consultation that was never marked missed has been
+    # accused of something that did not happen. Best-effort, like every other
+    # appointment notification — the transition is already committed, and a
+    # delivery failure must not report it as failed.
+    #
+    # The wording states the fact and offers recourse. It carries no notes:
+    # `lawyer_notes` is the lawyer's private record and never reaches here.
+    lawyer = await user_repo.find_by_id(lawyer_id)
+    await _notify(
+        appt_id, "no_show",
+        user_id=updated["client_id"],
+        type=NotificationType.APPOINTMENT_NO_SHOW,
+        title="Appointment Marked as Missed",
+        body=(f"{(lawyer or {}).get('full_name', 'Your lawyer')} recorded that "
+              f"you did not attend the consultation on "
+              f"{_slot_text(updated['scheduled_at'])}. If that is wrong, "
+              "contact them directly."),
+        payload={"appointment_id": appt_id},
+        # Derived from the appointment, so a retry that somehow reached the
+        # notification twice cannot produce two.
+        logical_event_id=f"appointment:{appt_id}:no_show",
+    )
     return _sanitize(updated)
 
 
