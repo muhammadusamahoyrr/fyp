@@ -885,11 +885,16 @@ async def list_appointments(
         raise ForbiddenError(
             "Listing appointments requires a client or lawyer account.")
 
-    enriched = []
-    for appt in result.items:
-        names = await _names(appt)
-        enriched.append(_enrich(
-            _sanitize(appt, for_lawyer=user_role == "lawyer"), names))
+    # One read for the whole page, then a pure pass over the rows. The ORDER is
+    # the repository's — the map is only a lookup, so the sort the query
+    # applied is preserved exactly.
+    names_by_id = await _names_for(result.items)
+    enriched = [
+        _enrich(
+            _sanitize(appt, for_lawyer=user_role == "lawyer"),
+            _names_from(appt, names_by_id))
+        for appt in result.items
+    ]
 
     return {
         "items": enriched,
@@ -942,6 +947,45 @@ async def get_availability(lawyer_id: str, date_str: str) -> dict:
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+
+async def _names_for(appts: list[dict]) -> dict[str, str]:
+    """Full names for every party across a page of appointments, in ONE read.
+
+    `_names` costs two user lookups per row, so a fifty-row page was a hundred
+    queries to render fifty names — and the page size is the caller's, not
+    ours. The work grew with the page while the information did not: a client's
+    fifty appointments name at most fifty-one distinct people, and usually far
+    fewer, because the same lawyer recurs.
+
+    Distinct ids only, so repeats cost nothing extra. A missing user simply has
+    no entry, which is what lets the caller keep the old behaviour of rendering
+    an empty name rather than failing the page — an appointment whose lawyer
+    account was deleted is still an appointment the client is entitled to see.
+    """
+    wanted = {
+        str(value)
+        for appt in appts
+        for value in (appt.get("client_id"), appt.get("lawyer_id"))
+        if value
+    }
+    if not wanted:
+        return {}
+    rows = await user_repo.find_many({"_id": {"$in": sorted(wanted)}})
+    return {str(row["_id"]): row.get("full_name", "") for row in rows}
+
+
+def _names_from(appt: dict, by_id: dict[str, str]) -> tuple[str, str]:
+    """(client_name, lawyer_name) out of a prefetched map.
+
+    Defaults to "" for an id that is absent, matching `_names` exactly: it read
+    `(user or {}).get("full_name", "")`, so a missing user and a user with no
+    name were already indistinguishable in the response.
+    """
+    return (
+        by_id.get(str(appt.get("client_id") or ""), ""),
+        by_id.get(str(appt.get("lawyer_id") or ""), ""),
+    )
+
 
 async def _names(appt: dict) -> tuple[str, str]:
     client = await user_repo.find_by_id(appt.get("client_id", ""))

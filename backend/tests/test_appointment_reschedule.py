@@ -1573,3 +1573,262 @@ async def test_http_a_client_reschedule_returns_no_note(http, parties):
 
     assert resp.status_code == 200, resp.text
     assert PRIVATE_NOTE not in resp.text
+
+
+# ── 14. The list does not read one user per row ──────────────────────────────
+#
+# `_names` cost two user lookups per appointment, so a fifty-row page was a
+# hundred queries to render fifty names — and the page size is the caller's,
+# not ours. The work grew with the page while the information did not: fifty
+# appointments name at most fifty-one distinct people, and usually far fewer,
+# because the same lawyer recurs.
+
+class _CountingUsers:
+    """Counts reads against the users collection without changing behaviour."""
+
+    def __init__(self, monkeypatch):
+        from app.repositories.user_repo import UserRepository
+
+        self.find_one = 0
+        self.find_many = 0
+        self.ids_requested: list[int] = []
+
+        real_one = UserRepository.find_one
+        real_many = UserRepository.find_many
+
+        async def _one(inner, filt, *a, **kw):
+            self.find_one += 1
+            return await real_one(inner, filt, *a, **kw)
+
+        async def _many(inner, filt, *a, **kw):
+            self.find_many += 1
+            ids = (filt or {}).get("_id", {})
+            if isinstance(ids, dict) and "$in" in ids:
+                self.ids_requested.append(len(ids["$in"]))
+            return await real_many(inner, filt, *a, **kw)
+
+        monkeypatch.setattr(UserRepository, "find_one", _one)
+        monkeypatch.setattr(UserRepository, "find_many", _many)
+
+    @property
+    def total(self) -> int:
+        return self.find_one + self.find_many
+
+
+async def _book_n(parties, n, lawyer_id=None, start=0):
+    """`n` appointments for one client, spaced so none of them overlap.
+
+    `start` shifts the whole run, because a second call in one test would
+    otherwise reuse the first run's hours — and the client-slot index rejects
+    that, correctly. The collision is the guarantee working, not a fixture
+    quirk to route around silently.
+    """
+    made = []
+    for i in range(n):
+        made.append(await _book(
+            parties, _slot(hours_ahead=48 + (start + i) * 4),
+            lawyer_id=lawyer_id or parties["lawyer_id"]))
+    return made
+
+
+async def test_the_lookup_count_does_not_grow_with_the_page(parties, monkeypatch):
+    """THE PROPERTY, measured at two sizes rather than asserted once.
+
+    A single-size assertion cannot tell a batched read from a per-row one that
+    happens to be cheap on a small fixture.
+    """
+    from app.services import appointment_service
+
+    await _book_n(parties, 2)
+    small = _CountingUsers(monkeypatch)
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+    assert len(page["items"]) == 2
+    small_reads = small.total
+
+    await _book_n(parties, 6, start=2)
+    large = _CountingUsers(monkeypatch)
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+    assert len(page["items"]) == 8, "precondition: the page really did grow"
+
+    assert large.total == small_reads, (
+        f"reads grew with the page: {small_reads} for 2 rows, "
+        f"{large.total} for 8")
+    assert large.total <= 1, f"expected one batched read, got {large.total}"
+
+
+async def test_repeated_parties_are_requested_once(parties, monkeypatch):
+    """Eight appointments with one client and one lawyer name two people."""
+    from app.services import appointment_service
+
+    await _book_n(parties, 8)
+    counter = _CountingUsers(monkeypatch)
+
+    await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+
+    assert counter.find_many == 1
+    assert counter.ids_requested == [2], (
+        f"distinct ids were not deduplicated: {counter.ids_requested}")
+
+
+async def test_distinct_lawyers_are_all_fetched(parties, monkeypatch):
+    """Deduplication must not drop anyone."""
+    from app.services import appointment_service
+
+    await _book_n(parties, 2)
+    await _book_n(parties, 2, lawyer_id=parties["lawyer2_id"], start=2)
+    counter = _CountingUsers(monkeypatch)
+
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+
+    assert counter.ids_requested == [3], "client + two lawyers"
+    named = {i["lawyer_name"] for i in page["items"]}
+    assert named == {"Adv One", "Adv Two"}, named
+
+
+async def test_an_empty_page_reads_no_users(parties, monkeypatch):
+    from app.services import appointment_service
+
+    counter = _CountingUsers(monkeypatch)
+
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+
+    assert page["items"] == []
+    assert counter.total == 0, "an empty page still queried users"
+
+
+# --- behaviour that must not have changed -----------------------------------
+
+async def test_the_response_order_is_the_repositorys(parties):
+    """The map is a lookup, not a source of order. The sort the query applied
+    has to survive it."""
+    from app.services import appointment_service
+
+    made = await _book_n(parties, 4)
+    ids_by_time = [a["id"] for a in sorted(
+        made, key=lambda a: a["scheduled_at"], reverse=True)]
+
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+
+    assert [i["id"] for i in page["items"]] == ids_by_time
+
+
+async def test_a_missing_user_leaves_an_empty_name_rather_than_failing(parties):
+    """An appointment whose lawyer account was deleted is still an appointment
+    the client is entitled to see. `_names` read `(user or {}).get(...)`, so a
+    missing user and a nameless one were already indistinguishable."""
+    from app.db.collections import get_users_col
+    from app.services import appointment_service
+
+    await _book_n(parties, 2)
+    await get_users_col().delete_one({"_id": parties["lawyer_id"]})
+
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+
+    assert len(page["items"]) == 2
+    assert all(i["lawyer_name"] == "" for i in page["items"])
+    assert all(i["client_name"] == "Client One" for i in page["items"])
+
+
+async def test_a_user_with_no_name_reads_the_same_as_a_missing_one(parties):
+    from app.db.collections import get_users_col
+    from app.services import appointment_service
+
+    await _book_n(parties, 1)
+    await get_users_col().update_one(
+        {"_id": parties["lawyer_id"]}, {"$unset": {"full_name": ""}})
+
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+
+    assert page["items"][0]["lawyer_name"] == ""
+
+
+async def test_the_access_rules_are_unchanged(parties):
+    """A client sees their own; a lawyer sees theirs; an admin is refused."""
+    from app.services import appointment_service
+
+    await _book_n(parties, 2)
+
+    mine = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+    assert len(mine["items"]) == 2
+
+    theirs = await appointment_service.list_appointments(
+        user_id=parties["client2_id"], user_role="client",
+        status=None, page=1, page_size=50)
+    assert theirs["items"] == []
+
+    lawyers = await appointment_service.list_appointments(
+        user_id=parties["lawyer_id"], user_role="lawyer",
+        status=None, page=1, page_size=50)
+    assert len(lawyers["items"]) == 2
+
+    with pytest.raises(ForbiddenError):
+        await appointment_service.list_appointments(
+            user_id=parties["admin_id"], user_role="admin",
+            status=None, page=1, page_size=50)
+
+
+async def test_the_private_note_projection_survives_the_batching(parties):
+    """The batched path must not have bypassed `_sanitize`'s viewer rule."""
+    from app.db.collections import get_appointments_col
+    from app.services import appointment_service
+
+    made = await _book_n(parties, 2)
+    await get_appointments_col().update_one(
+        {"_id": made[0]["id"]}, {"$set": {"lawyer_notes": PRIVATE_NOTE}})
+
+    as_client = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+    for item in as_client["items"]:
+        _assert_hidden(item, "the batched client list")
+
+    as_lawyer = await appointment_service.list_appointments(
+        user_id=parties["lawyer_id"], user_role="lawyer",
+        status=None, page=1, page_size=50)
+    assert any(i.get("lawyer_notes") == PRIVATE_NOTE for i in as_lawyer["items"])
+
+
+async def test_the_internal_fields_are_still_stripped_by_the_batched_list(parties):
+    from app.services import appointment_service
+
+    await _book_n(parties, 2)
+
+    page = await appointment_service.list_appointments(
+        user_id=parties["client_id"], user_role="client",
+        status=None, page=1, page_size=50)
+
+    for item in page["items"]:
+        for field in ("occupied_slots", "idempotency_key", "payload_fingerprint"):
+            assert field not in item
+
+
+async def test_the_single_read_still_names_both_parties(parties):
+    """`get_appointment` is unchanged — two lookups for one row is not an N+1,
+    and changing it would be churn."""
+    from app.services import appointment_service
+
+    made = await _book_n(parties, 1)
+
+    one = await appointment_service.get_appointment(
+        appt_id=made[0]["id"], user_id=parties["client_id"], user_role="client")
+
+    assert one["client_name"] == "Client One"
+    assert one["lawyer_name"] == "Adv One"
