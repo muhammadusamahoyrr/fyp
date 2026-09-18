@@ -228,9 +228,9 @@ class AppointmentOut(BaseModel):
     """A single appointment. The service (`_sanitize`) already renames ``_id``
     → ``id`` (the UI reads ``appt.id``), so this uses a plain ``id`` field.
 
-    ``extra="allow"`` because CaseContext caches the whole /appointments list
-    (``caseData.appointments``) and components read arbitrary fields off it —
-    under-typing a wholesale-cached object silently breaks consumers.
+    ``extra="allow"`` is retained for response compatibility. It is not the
+    privacy boundary: the service uses an explicit stored-field allowlist
+    before constructing a response.
 
     ``status``/``mode`` are typed ``str`` (not the enums) on purpose: the dead
     prior schema's strict enums are a drift landmine if a stored value ever

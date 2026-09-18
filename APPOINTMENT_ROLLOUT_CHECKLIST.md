@@ -70,7 +70,7 @@ Steps 1–5 are reversible. Step 6 is the first irreversible one.
 | 4 | Preflight — inspect | `python -m app.db.appointment_slot_preflight` | read-only |
 | 5 | Resolve every reported row, then dry run | `python -m app.db.appointment_backfill_cli --database <NAME>` | read-only |
 | 6 | **Backfill — apply** | `python -m app.db.appointment_backfill_cli --database <NAME> --apply --confirm-database <NAME> --confirm-endpoint <scheme://host[:port]> --booking-writes-frozen` | **NO — restore only** |
-| 7 | Create the three indexes | `createIndex` × 3 (below) | yes — drop them |
+| 7 | Create the four indexes | `createIndex` × 4 (below) | yes — drop them |
 | 8 | Validate | `validate_appointment_indexes()` must return `[]` | read-only |
 | 9 | **Drop the obsolete index** | `db.appointments.dropIndex("uniq_pending_slot")` | **NO — rebuild only** |
 | 10 | Preflight again | `safe_to_activate` must be `true` | read-only |
@@ -130,7 +130,45 @@ would mean the freeze was not actually in force.
 db.appointments.createIndex({"lawyer_id": 1, "occupied_slots": 1}, {name: "uniq_appointment_lawyer_slot", unique: true, partialFilterExpression: {"status": {"$in": ["pending", "confirmed"]}}})
 db.appointments.createIndex({"client_id": 1, "occupied_slots": 1}, {name: "uniq_appointment_client_slot", unique: true, partialFilterExpression: {"status": {"$in": ["pending", "confirmed"]}}})
 db.appointments.createIndex({"client_id": 1, "idempotency_key": 1}, {name: "uniq_appointment_idempotency", unique: true, partialFilterExpression: {"idempotency_key": {"$type": "string"}}})
+db.appointments.createIndex({"status": 1, "expires_at": 1}, {name: "appointment_pending_expiry", partialFilterExpression: {"status": "pending"}})
 ```
+
+The fourth is a **QUERY** index, not a correctness one. Nothing is wrong
+without it and no guarantee depends on it — it exists so the pending-expiry
+sweep is a range read rather than a collection scan. It is listed here because
+`indexes_valid` (step 8, and gate one at step 10) checks every DECLARED index,
+so leaving it out fails that gate. It is not unique, so unlike the three above
+it cannot fail the build on existing data.
+
+**The expiry sweep itself is dormant and is NOT part of this rollout.** Nothing
+calls `services/appointment_expiry_sweep.py`; it is not registered in
+`main.py`. Turning it on is a separate, later decision with its own
+prerequisites, listed below. The mechanism is **not activation-ready**, and
+this index existing does not make it so.
+
+---
+
+## Prerequisites before the expiry sweep may be enabled
+
+Separate from, and later than, everything above. **All are unmet. NO-GO.**
+
+| # | Prerequisite | Why it blocks | State |
+|---|---|---|---|
+| E1 | The four indexes above exist and `safe_to_activate` is true | Until then a lapsed request is the only thing holding its slots, and releasing one under the old `uniq_pending_slot` frees an hour the replacement guarantee is not in place to re-protect | **unmet** |
+| E2 | **Deadline-guarded confirmation** | `confirm` does not check the deadline today, and that is correct while nothing expires. Once a sweep runs, the two race: a lawyer can confirm a request the next sweep was about to retire, and which one wins is a matter of timing rather than policy. Both CAS filters pin `status: pending`, so one loses cleanly — but the outcome is arbitrary | **unmet — not implemented** |
+| E3 | **Explicit approval for rows that already exist** | Appointments booked before `expires_at` existed are out of the sweep's scope by construction. Deciding what happens to them is a separate decision about real people's requests, and it must be taken against real numbers from `survey_legacy_pending()` — which counts and writes nothing | **unmet — approval not sought** |
+| E4 | A decision on cadence and burst size | The first applying run against an existing deployment meets the whole history of unanswered requests at once. `DEFAULT_LIMIT` bounds one run; nobody has chosen how often it runs | **unmet** |
+
+**E2 is not a defect to fix now.** Adding a deadline filter to `confirm` while
+the sweep is dormant would leave a lapsed request neither confirmable nor
+expired — stuck, slots still held, with no explanation for either party. The
+current behaviour is right for the current state; it is the ORDER of the two
+changes that matters, and E2 must land with or before activation, never after.
+
+**What is safe to run now:** `survey_legacy_pending()` and
+`expire_lapsed_requests()` without `apply=True`. Both read and count only. A
+bare `expire_lapsed_requests()` writes nothing and notifies nobody by design —
+expiring requires `apply=True` spelled out at the call site.
 
 **Step 6 must precede step 7, and not only for tidiness.** Rows with no
 `occupied_slots` all index as `occupied_slots: null`, so two slotless active
@@ -145,7 +183,7 @@ fails outright. Observed while testing the CLI, not deduced.
 |---|---|---|
 | 1–5 | Un-freeze. Nothing was written. | A closed booking window |
 | 6 | **Restore from the step-3 backup.** No in-place undo exists. | Whatever the rehearsal measured |
-| 7–8 | Drop the three new indexes; the old app ignores them. | An index build's worth of IO |
+| 7–8 | Drop the four new indexes; the old app ignores them. | An index build's worth of IO |
 | **After 9** | `uniq_pending_slot` is gone. Rolling back to the old app leaves **weaker** overlap protection than before the window, until it is rebuilt. | See below |
 | 11 | Redeploy the previous app. | A deploy cycle |
 
@@ -180,7 +218,11 @@ All six must be true, and `safe_to_activate` is their conjunction:
 2. Backup taken and **restore rehearsed** (blocking, above).
 3. Authorisation for step 6 — irreversible write.
 4. Authorisation for step 9 — irreversible drop.
-5. Capacity sign-off: three unique index builds on a live collection.
+5. Capacity sign-off: three unique index builds on a live collection,
+   plus one non-unique query index.
+6. **Enabling the pending-expiry sweep** — a separate decision with its own
+   four prerequisites (E1–E4 above), all currently unmet. Creating the query
+   index in step 7 does NOT enable anything.
 6. Acknowledgement that **`PATCH /appointments/{id}/confirm` now requires a
    versioned body**; any non-UI client receives 422 until updated.
 

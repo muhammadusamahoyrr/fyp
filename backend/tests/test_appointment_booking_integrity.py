@@ -762,10 +762,8 @@ def test_the_limit_allows_normal_use_and_refuses_a_flood():
 
 # ── 10. Internal fields never reach a response ───────────────────────────────
 #
-# `AppointmentOut` is `extra="allow"` on purpose — CaseContext caches the whole
-# appointments list and components read arbitrary fields off it — so the
-# response model filters NOTHING. Whatever `_sanitize` returns is what the
-# client gets, which makes these four paths the entire boundary.
+# `AppointmentOut` permits display-name extras, so the response model is not
+# a privacy filter. `_sanitize` is the stored-field allowlist boundary.
 
 _INTERNAL = ("occupied_slots", "idempotency_key", "payload_fingerprint")
 

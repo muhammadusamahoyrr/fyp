@@ -94,6 +94,7 @@ from app.db.appointment_backfill_cli import (  # noqa: E402
 )
 from app.db.appointment_index_spec import (  # noqa: E402
     APPOINTMENT_INDEX_REQUIREMENTS,
+    CORRECTNESS,
 )
 from app.services.appointment_slots import (  # noqa: E402
     alignment_error,
@@ -165,8 +166,12 @@ async def active_correctness_indexes(appts) -> list[str]:
     fictional consultations in it would be enforced as though real.
     """
     info = await appts.index_information()
+    # CORRECTNESS only. The declared set also carries QUERY indexes, which
+    # enforce nothing — `appointment_pending_expiry` just keeps the expiry
+    # sweep off a collection scan. Refusing to seed because a performance
+    # index exists would be refusing for a reason that is not the reason.
     return sorted(spec.name for spec in APPOINTMENT_INDEX_REQUIREMENTS
-                  if spec.name in info)
+                  if spec.kind == CORRECTNESS and spec.name in info)
 
 
 def _confirm_target(args, uri, database, out) -> int | None:

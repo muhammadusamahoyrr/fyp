@@ -130,6 +130,7 @@ class AppointmentRepository(BaseRepository):
         scheduled_at: datetime,
         end_at: datetime,
         occupied_slots: list[datetime],
+        expires_at: datetime | None = None,
     ) -> dict | None:
         """Move a PENDING appointment to a new time, atomically.
 
@@ -149,18 +150,125 @@ class AppointmentRepository(BaseRepository):
         `scheduled_at` would accept a write that was composed two moves ago.
         Comparing a counter cannot be fooled that way.
         """
+        # THE OLD START TIME IS PART OF THE FILTER, not only of the check.
+        #
+        # A pending request may be moved while its current time is still ahead,
+        # and time passes between the read and the write. Validating in the
+        # service alone leaves a window in which a request crosses its own start
+        # and is then moved anyway — the one case the boundary exists to stop,
+        # and the one a check-then-act cannot see. `$gt` rather than `$gte`: at
+        # exactly the start instant the appointment has begun. The filter uses
+        # Mongo's `$$NOW`, not a timestamp captured before the database call:
+        # only the server-time expression closes the actual clock-crossing gap.
+
+        # `expires_at` moves WITH the time it describes, in one update, for the
+        # same reason `occupied_slots` does: it is a statement about
+        # `scheduled_at`, and a row carrying a deadline for a start it no
+        # longer has could be swept over a time nobody is waiting for.
+        #
+        # A caller that cannot compute one passes None, and the field is
+        # REMOVED rather than left behind. Keeping the old value would be the
+        # only way this row could end up with a deadline that disagrees with
+        # its time; removing it drops the row onto the derived path, which
+        # declines to expire what it cannot assess.
+        update: dict = {"$set": {
+            "scheduled_at": scheduled_at,
+            "end_at": end_at,
+            "occupied_slots": occupied_slots,
+            "schedule_version": expected_version + 1,
+            "updated_at": datetime.now(timezone.utc),
+        }}
+        if expires_at is None:
+            update["$unset"] = {"expires_at": ""}
+        else:
+            update["$set"]["expires_at"] = expires_at
+
         return await self.col.find_one_and_update(
             {
                 "_id": appt_id,
                 "client_id": client_id,
                 "status": AppointmentStatus.PENDING.value,
                 **self.version_filter(expected_version),
+                "$expr": {"$gt": ["$scheduled_at", "$$NOW"]},
+            },
+            update,
+            return_document=ReturnDocument.AFTER,
+        )
+
+    async def find_lapsed_pending(
+        self, now: datetime, limit: int,
+    ) -> list[dict]:
+        """PENDING requests whose stored deadline has passed.
+
+        `$lte`, not `$lt`: the deadline is the instant the request stops
+        holding its slot, which matches `has_lapsed`. The two must agree or a
+        row selected by this query would be rejected by the policy that is
+        supposed to be selecting it.
+
+        Ordered by deadline so a backlog is cleared oldest-first and a bounded
+        run makes progress on the same rows it would have chosen anyway.
+        """
+        cursor = self.col.find({
+            "status": AppointmentStatus.PENDING.value,
+            "expires_at": {"$lte": now},
+        }).sort("expires_at", ASCENDING).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def find_undated_pending_page(
+        self, limit: int, after_id: str | None = None,
+    ) -> list[dict]:
+        """One PAGE of PENDING requests booked before `expires_at` existed.
+
+        Their deadline is DERIVED in code rather than backfilled, so this query
+        cannot filter on it: every row it returns must be assessed by the
+        caller, and most of them will turn out not to be due.
+
+        WHICH IS WHY IT PAGES, and why it pages on `_id` rather than by skipping
+        a limit. A caller that simply re-read "the first 200 undated rows"
+        would re-read the SAME 200 every time — and if those rows are
+        unassessable, or not yet due, the overdue ones behind them are never
+        reached at all. The rows that cannot be acted on are precisely the ones
+        that stay at the front for ever, so a non-advancing read starves on
+        exactly the population it was written to find.
+
+        `_id` is the cursor because it is unique and always present, so a page
+        boundary cannot repeat or skip a row the way a non-unique sort key
+        (`scheduled_at`, shared by two rows at the boundary) can.
+        """
+        query: dict = {
+            "status": AppointmentStatus.PENDING.value,
+            "expires_at": {"$exists": False},
+        }
+        if after_id is not None:
+            query["_id"] = {"$gt": after_id}
+        cursor = self.col.find(query).sort("_id", ASCENDING).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def expire_pending(
+        self, appt_id: str, expected_version: int,
+    ) -> dict | None:
+        """Retire one lapsed request. Returns the row, or None if it moved.
+
+        Not `compare_and_set`, which takes an actor predicate: there is no
+        actor here, and passing an empty one would make "the sweep has no
+        actor" indistinguishable from "somebody forgot the actor" at every
+        other call site.
+
+        The version pin is what makes this safe to run against a row that was
+        read a moment ago. A reschedule between the read and this write moves
+        the deadline, and it also bumps the version — so the stale expiry
+        matches nothing instead of retiring a request the client has just
+        moved into the future. Pinning the deadline itself could not do this:
+        a derived deadline is not in the document to compare against.
+        """
+        return await self.col.find_one_and_update(
+            {
+                "_id": appt_id,
+                "status": AppointmentStatus.PENDING.value,
+                **self.version_filter(expected_version),
             },
             {"$set": {
-                "scheduled_at": scheduled_at,
-                "end_at": end_at,
-                "occupied_slots": occupied_slots,
-                "schedule_version": expected_version + 1,
+                "status": AppointmentStatus.EXPIRED.value,
                 "updated_at": datetime.now(timezone.utc),
             }},
             return_document=ReturnDocument.AFTER,

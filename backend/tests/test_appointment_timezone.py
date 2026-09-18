@@ -34,6 +34,8 @@ pytestmark = pytest.mark.integration
 
 PKT = ZoneInfo("Asia/Karachi")
 
+from app.db.collections import get_appointments_col  # noqa: E402
+
 
 @pytest.fixture
 async def parties(app_indexes):
@@ -176,12 +178,22 @@ async def test_a_client_can_cancel_outside_the_cutoff(parties):
     assert out["cancelled_by"] == "client"
 
 
-async def test_a_client_cannot_cancel_inside_the_cutoff(parties):
-    """The cutoff is now actually evaluated rather than raising before it."""
+async def test_a_client_cannot_cancel_a_confirmed_appointment_inside_the_cutoff(parties):
+    """The cutoff is now actually evaluated rather than raising before it.
+
+    CONFIRMED, because the rule narrowed: it protects a commitment the lawyer
+    has accepted, and a pending request is not one. A pending row here would
+    now cancel freely — which is the point of that change, not a gap in this
+    one.
+    """
     from app.services import appointment_service
 
     soon = _aligned(minutes=90)
     appt = await _book(parties, soon)
+    row = await get_appointments_col().find_one({"_id": appt["id"]})
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"])
 
     with pytest.raises(AppValidationError, match="2 hours"):
         await appointment_service.cancel_appointment(

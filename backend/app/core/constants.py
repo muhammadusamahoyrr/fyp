@@ -281,6 +281,7 @@ class NotificationType(str, Enum):
     # a lawyer their client had called off when in fact the client had not
     # turned up.
     APPOINTMENT_NO_SHOW = "appointment_no_show"
+    APPOINTMENT_EXPIRED = "appointment_expired"
     APPOINTMENT_REMINDER = "appointment_reminder"
     CAUSELIST_LISTED = "causelist_listed"
     PAYMENT_REQUESTED = "payment_requested"
@@ -299,6 +300,11 @@ class AppointmentStatus(str, Enum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
     NO_SHOW = "no_show"
+    # An unanswered request that stopped holding its slot. Terminal, and its
+    # own thing: nobody cancelled it, so reusing CANCELLED would force
+    # `cancelled_by` to name an actor who does not exist and would make "did my
+    # lawyer decline?" unanswerable from the record.
+    EXPIRED = "expired"
 
 
 class AppointmentMode(str, Enum):

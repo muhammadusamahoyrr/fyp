@@ -440,7 +440,6 @@ const ModLawyers = () => {
         setMatchNotice(notice);
 
         if (lastError) {
-            console.error("matchLawyers error:", lastError);
             toast.show(lastError, "error", 4000);
         } else if (kind === "matched" && items.length) {
             const top = mapApiLawyer(items[0], 0);
@@ -534,16 +533,12 @@ const ModLawyers = () => {
             toast.show("Reviews can only be submitted for listed lawyers.", "warn", 3000);
             return;
         }
-        console.log("📝 Submitting review:", { lawyerId, stars: reviewStars, comment: reviewComment.trim() || null });
         setReviewSubmitting(true);
         const { error } = await submitReview(lawyerId, reviewStars, reviewComment.trim() || null);
         setReviewSubmitting(false);
-        console.log("📡 Review submission response:", { error });
         if (error) {
-            console.error("❌ Review submission error:", error);
             toast.show(error.message || "Failed to submit review. Please try again.", "error", 3000);
         } else {
-            console.log("✅ Review submitted successfully");
             toast.show("⭐ Review submitted — thank you!", "success", 3000);
             setShowReviewForm(false);
             setReviewComment("");
@@ -587,26 +582,15 @@ const ModLawyers = () => {
 
     const submitBooking = async () => {
         try {
-            console.log("📋 Booking submission started...");
-
             if (!apptDate) {
-                console.warn("⚠️ No date selected");
                 toast.show("Please select an appointment date first.", "warn", 3500);
                 return;
             }
 
             if (!apptTime) {
-                console.warn("⚠️ No time selected");
                 toast.show("Please select a time slot.", "warn", 3500);
                 return;
             }
-
-            console.log("📝 Booking details:", {
-                lawyer: apptLawyer?.name,
-                date: apptDate,
-                time: apptTime,
-                mode: apptMode
-            });
 
             // Guard: reject past date+time before hitting the API
             if (isPktSlotPast(apptDate, apptTime)) {
@@ -623,13 +607,6 @@ const ModLawyers = () => {
             if (isApiLawyer) {
                 setApptSubmitting(true);
                 const scheduled_at = pktSlotToUtcISO(apptDate, apptTime);
-
-                console.log("🔗 Calling API with:", {
-                    lawyer_id: apptLawyer._id,
-                    case_id: getCaseId(),
-                    scheduled_at,
-                    mode: apptMode
-                });
 
                 // One key for this booking INTENT, reused on every retry of it.
                 // A key minted per request would make a second click after a
@@ -650,15 +627,12 @@ const ModLawyers = () => {
 
                 setApptSubmitting(false);
 
-                console.log("📡 API Response:", { error, data });
-
                 if (error) {
                     // 422 detail is a Pydantic array: [{msg: "...", loc: [...]}]
                     const raw = error.detail;
                     const errMsg = Array.isArray(raw)
                         ? raw.map(e => e.msg?.replace(/^Value error,\s*/i, "")).join("; ")
                         : (raw || error.error || "Booking failed. Please try again.");
-                    console.error("❌ Booking API error:", errMsg);
                     toast.show(errMsg, "error", 4000);
                     return;
                 }
@@ -690,8 +664,7 @@ const ModLawyers = () => {
             setShowApptModal(false);
             setTimeout(() => router.push("/tracking"), 600);
 
-        } catch (err) {
-            console.error("💥 Booking exception:", err);
+        } catch {
             toast.show("An unexpected error occurred. Please try again.", "error", 4000);
             setApptSubmitting(false);
         }
@@ -1349,13 +1322,13 @@ const ModLawyers = () => {
                             Find Expert Legal Counsel
                         </div>
                         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.62)", maxWidth: 260, lineHeight: 1.6, marginBottom: 18 }}>
-                            Browse listed lawyers, check real-time availability, and book appointments in seconds.
+                            Browse listed lawyers and request a consultation time.
                         </div>
                         {/* Quick stats */}
                         <div style={{ display: "flex", gap: 20 }}>
                             {[
                                 [lawyers.length, "Lawyers"],
-                                [lawyers.filter(l => l.avail).length, "Available Now"],
+                                [lawyers.filter(l => l.avail).length, "Accepting Requests"],
                                 [new Set(lawyers.map(l => l.city)).size, "Cities"],
                             ].map(([val, label]) => (
                                 <div key={label}>

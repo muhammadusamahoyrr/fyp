@@ -69,7 +69,7 @@ from app.db.appointment_index_spec import (
     APPOINTMENTS,
     OBSOLETE_INDEXES,
 )
-from app.db.v2_index_spec import IndexSpec
+from app.db.v2_index_spec import CORRECTNESS, IndexSpec
 from app.services.appointment_slots import (
     SLOT_MINUTES,
     alignment_error,
@@ -346,6 +346,23 @@ async def preflight() -> dict:
     db = get_database()
     problems = await validate_appointment_indexes()
 
+    # SPLIT BY WHAT A MISSING INDEX ACTUALLY COSTS.
+    #
+    # `assert_appointment_booking_ready` refuses to start the service when
+    # `safe_to_activate` is false, so whatever this gate covers is a reason to
+    # take booking down. That is right for a CORRECTNESS index — without it the
+    # overlap guarantee is absent and every booking accepted is one nobody will
+    # discover is wrong until two people arrive for it.
+    #
+    # It is wrong for a QUERY index. `appointment_pending_expiry` makes the
+    # (dormant) expiry sweep a range read instead of a collection scan; nothing
+    # is incorrect without it, and refusing to serve bookings over a missing
+    # performance index would be an outage for a reason that is not the reason.
+    #
+    # So it is still reported, still recommended, and still counted in
+    # `indexes_ready` — it simply does not hold the gate.
+    correctness_problems = [p for p in problems if p.kind == CORRECTNESS]
+
     obsolete: list[dict] = []
     for collection, name, why in OBSOLETE_INDEXES:
         try:
@@ -400,7 +417,7 @@ async def preflight() -> dict:
     # enforcing two overlapping rules, one of which nothing in the code agrees
     # with any more.
     gates = {
-        "indexes_valid": not problems,
+        "indexes_valid": not correctness_problems,
         "no_overlapping_active_rows": all(
             f["count"] == 0 for f in overlaps),
         "all_active_rows_usable": all(
@@ -433,6 +450,14 @@ async def preflight() -> dict:
             for p in problems
         ],
         "findings": findings,
+        # Declared indexes that are missing or wrong but enforce nothing. Named
+        # separately so "not ready" and "not safe" stay distinguishable: this
+        # list can be non-empty while every guarantee holds.
+        "query_index_problems": [
+            {"code": p.code, "collection": p.collection, "name": p.name,
+             "kind": p.kind, "message": p.message}
+            for p in problems if p.kind != CORRECTNESS
+        ],
         # Named for what it means: these ROWS stop the index build. It is not a
         # claim that activation is otherwise safe.
         "build_blocking_rows": sum(f["count"] for f in blocking),
@@ -464,7 +489,19 @@ def render(result: dict) -> str:
     if result["indexes_ready"]:
         lines.append("  INDEXES: every declared index is present and valid.")
     else:
-        lines.append(f"  INDEXES NOT READY: {len(result['problems'])} problem(s).")
+        query_only = (result.get("query_index_problems")
+                      and len(result["query_index_problems"])
+                      == len(result["problems"]))
+        if query_only:
+            # Said plainly, because the difference decides whether an operator
+            # stops the rollout: these cost speed, not correctness.
+            lines.append(
+                f"  INDEXES NOT READY: {len(result['problems'])} problem(s) — "
+                "all of them QUERY indexes. No guarantee is affected; this "
+                "does not block activation.")
+        else:
+            lines.append(
+                f"  INDEXES NOT READY: {len(result['problems'])} problem(s).")
         for problem in result["problems"]:
             lines.append(f"    [{problem['kind']}/{problem['code']}] "
                          f"{problem['collection']}.{problem['name']}: "

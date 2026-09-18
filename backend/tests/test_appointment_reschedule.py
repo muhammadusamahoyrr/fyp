@@ -234,16 +234,29 @@ async def test_a_lawyer_cannot_reschedule(parties):
 
 # ── 3. Time rules ────────────────────────────────────────────────────────────
 
-async def test_the_cutoff_applies_to_the_old_time(parties):
-    """The lawyer has already been told to hold the ORIGINAL slot, and that is
-    the commitment the two-hour rule protects. Checking the new time instead
-    would let a client move a 4pm appointment at 3:55 by picking next week."""
+async def test_the_boundary_is_measured_against_the_old_time(parties):
+    """SUPERSEDED RULE, kept as a test of the new one.
+
+    This asserted the two-hour cutoff on a pending reschedule. That rule is
+    gone: it protected a commitment nobody had made, and it trapped every
+    short-notice request. What survives is the reason the OLD time is the one
+    measured — against the new time a client could move a 4pm request at 4:30
+    simply by choosing next week.
+
+    So a request 90 minutes out now MOVES, and one whose time has arrived does
+    not.
+    """
     soon = (datetime.now(timezone.utc) + timedelta(minutes=90)).replace(
         minute=0, second=0, microsecond=0)
     appt = await _book(parties, soon)
 
-    with pytest.raises(AppValidationError, match="hours before"):
-        await _move(parties, appt["id"], _slot(96))
+    moved = await _move(parties, appt["id"], _slot(96))
+    assert moved["scheduled_at"].replace(tzinfo=timezone.utc) == _slot(96)
+
+    # And the boundary still bites once the old time has passed.
+    await _set_start(appt["id"], datetime.now(timezone.utc) - timedelta(minutes=1))
+    with pytest.raises(AppValidationError, match="already passed"):
+        await _move(parties, appt["id"], _slot(120))
 
 
 @pytest.mark.parametrize("minute", [15, 45])
@@ -1519,6 +1532,28 @@ def test_the_projection_fails_closed():
     assert shown["lawyer_notes"] == PRIVATE_NOTE
 
 
+async def test_a_new_storage_only_field_cannot_leak_through_any_viewer(http, parties):
+    """A denylist would silently publish a newly added private Mongo field."""
+    from app.db.collections import get_appointments_col
+
+    appt = await _with_private_note(parties)
+    secret = "PRIVATE-APPOINTMENT-FIELD-8db1"
+    await get_appointments_col().update_one(
+        {"_id": appt["id"]}, {"$set": {"future_private_field": secret}})
+
+    for actor in ("be_client", "be_lawyer"):
+        http[actor]()
+        single = await http["client"].get(f"/appointments/{appt['id']}")
+        listed = await http["client"].get("/appointments")
+        assert single.status_code == listed.status_code == 200
+        assert secret not in single.text
+        assert secret not in listed.text
+        assert "future_private_field" not in single.json()
+        assert "future_private_field" not in listed.json()["items"][0]
+        assert single.json()["id"] == appt["id"]
+        assert single.json()["scheduled_at"]
+
+
 # --- and at the HTTP boundary ----------------------------------------------
 #
 # `AppointmentOut` declares `lawyer_notes` and allows extras, so the schema
@@ -1832,3 +1867,398 @@ async def test_the_single_read_still_names_both_parties(parties):
 
     assert one["client_name"] == "Client One"
     assert one["lawyer_name"] == "Adv One"
+
+
+# ── 15. The cutoff protects a commitment, and PENDING is not one ─────────────
+#
+# The two-hour rule applied to every client cancellation regardless of status,
+# which trapped people: booking permits any future time, so a request made 90
+# minutes before its start was born inside the window and could not be
+# withdrawn by the person who made it. Nobody had agreed to hold that slot, so
+# the rule was protecting a promise that did not exist — and the only party who
+# could clear the request was the one who had not answered it.
+
+async def _book_in(parties, minutes_ahead: int, **over):
+    """A booking whose start is the next aligned slot at least N minutes away."""
+    target = datetime.now(timezone.utc) + timedelta(minutes=minutes_ahead)
+    minute = 0 if target.minute < 30 else 30
+    when = target.replace(minute=minute, second=0, microsecond=0)
+    if when <= datetime.now(timezone.utc):
+        when += timedelta(minutes=30)
+    return await _book(parties, when, **over), when
+
+
+async def _set_start(appt_id: str, start):
+    """Move a stored row's window. Booking refuses a past start, so a test that
+    needs one has to write it — only the clock can produce this otherwise."""
+    from app.db.collections import get_appointments_col
+
+    await get_appointments_col().update_one(
+        {"_id": appt_id},
+        {"$set": {"scheduled_at": start,
+                  "end_at": start + timedelta(minutes=60),
+                  "occupied_slots": appointment_slots.occupied_slots(start, 60)}})
+
+
+# --- short-notice bookings can be withdrawn ---------------------------------
+
+@pytest.mark.parametrize("minutes", [30, 90])
+async def test_a_short_notice_pending_request_can_be_cancelled(parties, minutes):
+    """THE TRAP. Both of these were inside the two-hour window at the moment
+    they were created."""
+    from app.services import appointment_service
+
+    appt, _when = await _book_in(parties, minutes)
+
+    out = await appointment_service.cancel_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"],
+        user_role="client", reason=None)
+
+    assert out["status"] == AppointmentStatus.CANCELLED.value
+    assert out["cancelled_by"] == "client"
+
+
+@pytest.mark.parametrize("minutes", [30, 90])
+async def test_a_short_notice_pending_request_can_be_rescheduled(parties, minutes):
+    """Its start is still ahead, so it may move — the two-hour rule no longer
+    applies to a request nobody has accepted."""
+    from app.services import appointment_service
+
+    appt, _when = await _book_in(parties, minutes)
+    row = await _row(appt["id"])
+
+    out = await appointment_service.reschedule_appointment(
+        appt_id=appt["id"], client_id=parties["client_id"],
+        scheduled_at=_slot(96), expected_version=row["schedule_version"])
+
+    assert out["scheduled_at"].replace(tzinfo=timezone.utc) == _slot(96)
+
+
+async def test_a_pending_request_can_be_cancelled_after_its_start(parties):
+    """An unanswered request that has come and gone is exactly the thing a
+    client should be able to clear away."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _set_start(appt["id"],
+                     datetime.now(timezone.utc) - timedelta(hours=3))
+
+    out = await appointment_service.cancel_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"],
+        user_role="client", reason="Nobody replied.")
+
+    assert out["status"] == AppointmentStatus.CANCELLED.value
+    assert out["cancel_reason"] == "Nobody replied."
+
+
+# --- but a request whose time has arrived cannot be MOVED -------------------
+
+async def test_a_pending_request_cannot_be_rescheduled_after_its_start(parties):
+    """It is no longer a request about the future, and moving it would re-use a
+    slot the lawyer may already have attended."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _set_start(appt["id"],
+                     datetime.now(timezone.utc) - timedelta(minutes=5))
+    row = await _row(appt["id"])
+
+    with pytest.raises(AppValidationError, match="already passed"):
+        await appointment_service.reschedule_appointment(
+            appt_id=appt["id"], client_id=parties["client_id"],
+            scheduled_at=_slot(96),
+            expected_version=row["schedule_version"])
+
+    after = await _row(appt["id"])
+    assert after["schedule_version"] == row["schedule_version"], (
+        "a refused move still burned a version")
+
+
+async def test_the_boundary_is_the_start_instant_itself(parties):
+    """`$gt`, not `$gte`: at exactly the start the appointment has begun."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    exact = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    await _set_start(appt["id"], exact)
+    row = await _row(appt["id"])
+
+    with pytest.raises(AppValidationError, match="already passed"):
+        await appointment_service.reschedule_appointment(
+            appt_id=appt["id"], client_id=parties["client_id"],
+            scheduled_at=_slot(96),
+            expected_version=row["schedule_version"])
+
+
+async def test_a_request_one_minute_ahead_may_still_move(parties):
+    """The other side of the same boundary."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _set_start(appt["id"],
+                     datetime.now(timezone.utc) + timedelta(minutes=1))
+    row = await _row(appt["id"])
+
+    out = await appointment_service.reschedule_appointment(
+        appt_id=appt["id"], client_id=parties["client_id"],
+        scheduled_at=_slot(96), expected_version=row["schedule_version"])
+
+    assert out["scheduled_at"].replace(tzinfo=timezone.utc) == _slot(96)
+
+
+async def test_the_boundary_is_enforced_in_the_atomic_update_too(parties):
+    """Validation alone leaves a window: time passes between the read and the
+    write. Here the row crosses its start AFTER validation has passed, and the
+    update must match nothing rather than move it."""
+    from app.repositories.appointment_repo import AppointmentRepository
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _set_start(appt["id"],
+                     datetime.now(timezone.utc) + timedelta(minutes=2))
+    row = await _row(appt["id"])
+
+    real = AppointmentRepository.reschedule
+
+    async def _cross_the_boundary_first(self, *a, **kw):
+        # The appointment begins between validation and the write.
+        await _set_start(appt["id"],
+                         datetime.now(timezone.utc) - timedelta(minutes=1))
+        return await real(self, *a, **kw)
+
+    AppointmentRepository.reschedule = _cross_the_boundary_first
+    try:
+        with pytest.raises(AppValidationError, match="passed while"):
+            await appointment_service.reschedule_appointment(
+                appt_id=appt["id"], client_id=parties["client_id"],
+                scheduled_at=_slot(96),
+                expected_version=row["schedule_version"])
+    finally:
+        AppointmentRepository.reschedule = real
+
+    after = await _row(appt["id"])
+    assert after["schedule_version"] == row["schedule_version"]
+    assert after["status"] == AppointmentStatus.PENDING.value
+
+
+async def test_the_atomic_boundary_uses_mongos_clock_not_a_stale_caller_time(
+    parties,
+):
+    """A request that has actually started cannot be moved by a stale read.
+
+    Capture the real Mongo filter, then execute it. The earlier test changes
+    the stored time; this one pins the stronger contract: comparison against
+    Mongo's `$$NOW` at write execution, not an app timestamp from validation.
+    """
+    from app.repositories.appointment_repo import AppointmentRepository
+
+    appt = await _book(parties, _slot())
+    await _set_start(appt["id"], datetime.now(timezone.utc) - timedelta(minutes=1))
+    before = await _row(appt["id"])
+    target = _slot(96)
+    repo = AppointmentRepository()
+    collection = repo.col
+
+    class CheckedCollection:
+        async def find_one_and_update(self, query, update, **kwargs):
+            assert query.get("$expr") == {
+                "$gt": ["$scheduled_at", "$$NOW"]}, query
+            return await collection.find_one_and_update(query, update, **kwargs)
+
+    repo._col_accessor = CheckedCollection
+    result = await repo.reschedule(
+        appt_id=appt["id"], client_id=parties["client_id"],
+        expected_version=before["schedule_version"],
+        scheduled_at=target, end_at=target + timedelta(minutes=60),
+        occupied_slots=appointment_slots.occupied_slots(target, 60),
+    )
+
+    assert result is None
+    after = await _row(appt["id"])
+    assert after["schedule_version"] == before["schedule_version"]
+    assert after["scheduled_at"] == before["scheduled_at"]
+
+
+# --- CONFIRMED is unchanged -------------------------------------------------
+
+async def test_a_confirmed_appointment_keeps_the_two_hour_cutoff(parties):
+    from app.services import appointment_service
+
+    appt, _when = await _book_in(parties, 90)
+    row = await _row(appt["id"])
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"])
+
+    with pytest.raises(AppValidationError, match="hours before"):
+        await appointment_service.cancel_appointment(
+            appt_id=appt["id"], user_id=parties["client_id"],
+            user_role="client", reason=None)
+
+
+async def test_a_confirmed_appointment_outside_the_window_still_cancels(parties):
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    row = await _row(appt["id"])
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"])
+
+    out = await appointment_service.cancel_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"],
+        user_role="client", reason=None)
+
+    assert out["status"] == AppointmentStatus.CANCELLED.value
+
+
+async def test_a_lawyer_may_still_cancel_inside_the_window(parties):
+    """The cutoff was always the CLIENT's rule."""
+    from app.services import appointment_service
+
+    appt, _when = await _book_in(parties, 90)
+    row = await _row(appt["id"])
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"])
+
+    out = await appointment_service.cancel_appointment(
+        appt_id=appt["id"], user_id=parties["lawyer_id"],
+        user_role="lawyer", reason="Court ran over")
+
+    assert out["cancelled_by"] == "lawyer"
+
+
+async def test_a_confirmed_appointment_still_cannot_be_rescheduled(parties):
+    """Unilateral rescheduling stays forbidden once both parties have agreed."""
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    row = await _row(appt["id"])
+    await appointment_service.confirm_appointment(
+        appt["id"], parties["lawyer_id"],
+        expected_version=row["schedule_version"])
+
+    with pytest.raises(ConflictError, match="pending"):
+        await appointment_service.reschedule_appointment(
+            appt_id=appt["id"], client_id=parties["client_id"],
+            scheduled_at=_slot(96), expected_version=1)
+
+
+# --- races ------------------------------------------------------------------
+
+async def test_a_cancel_racing_a_reschedule_leaves_one_winner(parties):
+    """Both are the client's own actions on one pending request."""
+    import asyncio as _asyncio
+
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    row = await _row(appt["id"])
+
+    results = await _asyncio.gather(
+        appointment_service.cancel_appointment(
+            appt_id=appt["id"], user_id=parties["client_id"],
+            user_role="client", reason=None),
+        appointment_service.reschedule_appointment(
+            appt_id=appt["id"], client_id=parties["client_id"],
+            scheduled_at=_slot(96),
+            expected_version=row["schedule_version"]),
+        return_exceptions=True,
+    )
+
+    winners = [r for r in results if not isinstance(r, Exception)]
+    assert len(winners) == 1, f"both applied: {results!r}"
+    final = await _row(appt["id"])
+    if final["status"] == AppointmentStatus.CANCELLED.value:
+        assert final["schedule_version"] == row["schedule_version"]
+    else:
+        assert final["status"] == AppointmentStatus.PENDING.value
+        assert final["schedule_version"] == row["schedule_version"] + 1
+
+
+async def test_a_short_notice_cancel_racing_a_confirm_leaves_one_winner(parties):
+    """The client withdrawing while the lawyer accepts — now reachable at short
+    notice, because the client is no longer locked out."""
+    import asyncio as _asyncio
+
+    from app.services import appointment_service
+
+    appt, _when = await _book_in(parties, 90)
+    row = await _row(appt["id"])
+
+    results = await _asyncio.gather(
+        appointment_service.cancel_appointment(
+            appt_id=appt["id"], user_id=parties["client_id"],
+            user_role="client", reason=None),
+        appointment_service.confirm_appointment(
+            appt["id"], parties["lawyer_id"],
+            expected_version=row["schedule_version"]),
+        return_exceptions=True,
+    )
+
+    winners = [r for r in results if not isinstance(r, Exception)]
+    assert len(winners) == 1, f"both applied: {results!r}"
+    assert (await _row(appt["id"]))["status"] in (
+        AppointmentStatus.CANCELLED.value, AppointmentStatus.CONFIRMED.value)
+
+
+async def test_a_failed_reschedule_race_notifies_nobody(parties):
+    """A notification tells the lawyer to rearrange their day. It must not be
+    sent for a move that lost."""
+    from app.db.collections import get_notifications_col
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    row = await _row(appt["id"])
+    await appointment_service.cancel_appointment(
+        appt_id=appt["id"], user_id=parties["client_id"],
+        user_role="client", reason=None)
+    await get_notifications_col().delete_many(
+        {"payload.appointment_id": appt["id"]})
+
+    with pytest.raises(ConflictError):
+        await appointment_service.reschedule_appointment(
+            appt_id=appt["id"], client_id=parties["client_id"],
+            scheduled_at=_slot(96),
+            expected_version=row["schedule_version"])
+
+    assert await get_notifications_col().count_documents(
+        {"payload.appointment_id": appt["id"]}) == 0
+
+
+async def test_a_boundary_failure_notifies_nobody(parties):
+    """The same rule for the start-time refusal specifically."""
+    from app.db.collections import get_notifications_col
+    from app.services import appointment_service
+
+    appt = await _book(parties, _slot())
+    await _set_start(appt["id"],
+                     datetime.now(timezone.utc) - timedelta(minutes=5))
+    row = await _row(appt["id"])
+    await get_notifications_col().delete_many(
+        {"payload.appointment_id": appt["id"]})
+
+    with pytest.raises(AppValidationError):
+        await appointment_service.reschedule_appointment(
+            appt_id=appt["id"], client_id=parties["client_id"],
+            scheduled_at=_slot(96),
+            expected_version=row["schedule_version"])
+
+    assert await get_notifications_col().count_documents(
+        {"payload.appointment_id": appt["id"]}) == 0
+
+
+async def test_the_slot_guards_still_hold_for_a_short_notice_move(parties):
+    """Relaxing the cutoff must not have relaxed the overlap guarantee."""
+    from app.services import appointment_service
+
+    taken = _slot(96)
+    await _book(parties, taken, client_id=parties["client2_id"])
+    appt, _when = await _book_in(parties, 90)
+    row = await _row(appt["id"])
+
+    with pytest.raises(ConflictError, match="just been taken"):
+        await appointment_service.reschedule_appointment(
+            appt_id=appt["id"], client_id=parties["client_id"],
+            scheduled_at=taken, expected_version=row["schedule_version"])

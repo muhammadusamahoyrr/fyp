@@ -29,6 +29,7 @@ CONFIRMED = AppointmentStatus.CONFIRMED
 CANCELLED = AppointmentStatus.CANCELLED
 COMPLETED = AppointmentStatus.COMPLETED
 NO_SHOW = AppointmentStatus.NO_SHOW
+EXPIRED = AppointmentStatus.EXPIRED
 
 
 # An appointment that did not happen yet can be confirmed or called off. One
@@ -38,11 +39,15 @@ NO_SHOW = AppointmentStatus.NO_SHOW
 # review the lawyer (`exists_completed`) and a reversible outcome would make
 # that gate reversible too.
 _ALLOWED: dict[AppointmentStatus, frozenset[AppointmentStatus]] = {
-    PENDING:   frozenset({CONFIRMED, CANCELLED}),
+    # EXPIRED is reachable ONLY from PENDING, and only by the sweep. A
+    # confirmed appointment has been agreed by both parties and does not lapse
+    # because nobody looked at it again.
+    PENDING:   frozenset({CONFIRMED, CANCELLED, EXPIRED}),
     CONFIRMED: frozenset({CANCELLED, COMPLETED, NO_SHOW}),
     COMPLETED: frozenset(),
     CANCELLED: frozenset(),
     NO_SHOW:   frozenset(),
+    EXPIRED:   frozenset(),
 }
 
 TERMINAL: frozenset[AppointmentStatus] = frozenset(
@@ -132,6 +137,13 @@ def timing_error(
             "This appointment has not finished yet, so it cannot be marked "
             "completed."
         )
+    if target is EXPIRED:
+        # The clock rule for expiry is the DEADLINE, which depends on when the
+        # request was created as well as when it is for — so it lives in
+        # `appointment_expiry` with the rest of that policy, and the sweep
+        # asserts it in its own filter. There is nothing to add here, and a
+        # second half-rule in this file would be one more place to disagree.
+        return None
     if target is NO_SHOW and now < scheduled_at:
         # And a client cannot have failed to turn up to something that has not
         # started. This was reachable: the lawyer's UI offers no-show on

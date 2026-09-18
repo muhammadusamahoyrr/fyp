@@ -78,6 +78,15 @@ const STATUS_STYLES = {
     // own entry the badge falls through to `STATUS_STYLES.Upcoming` below and a
     // no-show would render in the teal reserved for a live upcoming booking.
     "No Show": { bg: "rgba(158,142,205,0.18)", color: "#9e8ecd", border: "rgba(158,142,205,0.55)", dot: "#9e8ecd" },
+    // A request that lapsed before it was answered. Muted and grey, because it
+    // is over and nobody acted: it is not a cancellation (no one called it
+    // off), not a no-show (nobody failed to attend), and emphatically not
+    // Upcoming, which is what it would render as without an entry here.
+    Expired: { bg: "rgba(148,158,175,0.16)", color: "#94a2af", border: "rgba(148,158,175,0.5)", dot: "#94a2af" },
+    // A status this build does not know — a newer server, or a row written by
+    // something else. Shown as itself rather than dressed up as one of the
+    // above; see the fallback in `StatusBadge`.
+    Unknown: { bg: "rgba(148,158,175,0.12)", color: "#94a2af", border: "rgba(148,158,175,0.4)", dot: "#94a2af" },
 };
 
 // Statuses that mean the appointment did not take place. Grouped because the
@@ -85,11 +94,23 @@ const STATUS_STYLES = {
 // on the day's schedule than a cancellation is. They were already excluded when
 // `no_show` was mislabelled "Cancelled"; naming the set keeps that true now that
 // the two are distinct.
-const DID_NOT_HAPPEN = new Set(["Cancelled", "No Show"]);
+// Expired belongs here for the same reason: an unanswered request that lapsed
+// is not a session on the day's schedule, and counting it as one would tell a
+// lawyer their day is busier than it is.
+const DID_NOT_HAPPEN = new Set(["Cancelled", "No Show", "Expired"]);
 
 
 function StatusBadge({ status }) {
-    const s = STATUS_STYLES[status] || STATUS_STYLES.Upcoming;
+    // Neutral, not Upcoming — but DEFENCE IN DEPTH ONLY, and worth being
+    // straight about: this branch is currently unreachable. The single caller
+    // passes a status produced by `mapApiAppt`, whose range is
+    // closed and every member of which has an entry above, including its own
+    // "Unknown" fallback. That mapper is where the real fix lives.
+    //
+    // It stays because the two lines have to agree, and the failure if they
+    // ever stop agreeing is a row wearing the teal reserved for a live
+    // booking — the one reading a lawyer acts on.
+    const s = STATUS_STYLES[status] || STATUS_STYLES.Unknown;
     return (
         <span style={{
             display: "inline-flex", alignItems: "center", gap: 5,
@@ -312,7 +333,10 @@ function AppointmentsPage() {
     // an exact match on the display status, so without one a no-show would be
     // reachable under "All" and nowhere else — it would simply disappear from
     // every filtered view the moment it was marked.
-    const tabs = ["All", "Upcoming", "Pending", "Completed", "Cancelled", "No Show"];
+    // "Expired" earns a tab on the same reasoning as "No Show": the filter is
+    // an exact match on the display status, so a status without a tab is
+    // reachable under "All" and nowhere else.
+    const tabs = ["All", "Upcoming", "Pending", "Completed", "Cancelled", "No Show", "Expired"];
 
     const filtered = appointments.filter(a =>
         (statusF === "All" || a.status === statusF) &&
@@ -369,7 +393,11 @@ function AppointmentsPage() {
         // turn up — a different fact, and the only one of the two that is the
         // client's fault. The client's own view (ModTracking) has always shown
         // "No Show" correctly, so the two sides of one appointment disagreed.
-        status: ({ confirmed: "Upcoming", pending: "Pending", completed: "Completed", cancelled: "Cancelled", no_show: "No Show" })[a.status] || "Pending",
+        // `expired` is mapped explicitly, and the fallback no longer lies.
+        // Defaulting an unrecognised status to "Pending" put lapsed requests
+        // in the Pending tab wearing Accept and Decline — controls the server
+        // answers with a 409, on a request nobody can act on any more.
+        status: ({ confirmed: "Upcoming", pending: "Pending", completed: "Completed", cancelled: "Cancelled", no_show: "No Show", expired: "Expired" })[a.status] || "Unknown",
         caseId: a.case_id,
     });
 

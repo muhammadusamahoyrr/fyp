@@ -1669,6 +1669,9 @@ const PKT_SLOT_TIMES = Array.from({ length: 48 }, (_, i) => {
 const STATUS_WORDS = {
     pending: "pending", confirmed: "confirmed", cancelled: "cancelled",
     completed: "completed", no_show: "a no-show",
+    // Not "cancelled". Nobody called this off; it lapsed unanswered, and a
+    // client told their request was cancelled would reasonably ask who by.
+    expired: "expired",
 };
 const statusWord = (status) => STATUS_WORDS[status] || String(status || "unknown");
 
@@ -1913,6 +1916,36 @@ const CANCELLED_BY_LABEL = {
     lawyer: "Your lawyer cancelled this appointment.",
     admin: "This appointment was cancelled by Attorney.AI support.",
 };
+
+/** Why an expired request ended, for the client whose request it was.
+ *
+ * A badge reading "Expired" on its own invites the wrong inference — that the
+ * client missed something, or that the lawyer refused. Neither happened: the
+ * request was never answered and stopped holding its slot.
+ *
+ * It does NOT say the original time is free again. A request can lapse at its
+ * own start time, so for some of these the slot is already in the past, and
+ * "book it again" would be pointing at an hour that no longer exists. What is
+ * true for all of them is that a new request can be made.
+ */
+function ExpiryDetail({ appt, t }) {
+    if (appt.status !== "expired") return null;
+
+    return (
+        <div style={{
+            marginTop: 10, padding: "10px 12px", borderRadius: 8,
+            background: t.cardHi, border: `1px solid ${t.border}`,
+        }}>
+            <div style={{ fontSize: 12, color: t.text, fontWeight: 600 }}>
+                This request expired before it was confirmed.
+            </div>
+            <div style={{ fontSize: 12, color: t.textMuted, marginTop: 4 }}>
+                Your lawyer did not respond in time, so the request was closed.
+                Nothing was charged. You can book a new time.
+            </div>
+        </div>
+    );
+}
 
 /** The cancellation details, where the row actually has them.
  *
@@ -2193,6 +2226,11 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
         cancelled: { bg: "rgba(255,107,122,0.12)", color: t.danger, label: "❌ Cancelled" },
         completed: { bg: `${t.info}14`, color: t.info, label: "🏁 Completed" },
         no_show: { bg: t.cardHi, color: t.textMuted, label: "👻 No Show" },
+        // A request that was never answered and has stopped holding its slot.
+        // Its own entry because it is its own outcome — and because without
+        // one the fallback below would have shown it as still pending, which
+        // is the one thing it definitely is not.
+        expired: { bg: t.cardHi, color: t.textMuted, label: "⌛ Expired" },
     };
     const modeIcon = { video: "📹", in_person: "🏛", phone: "📞" };
 
@@ -2261,7 +2299,14 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                 </div>
             )}
             {appointments.map(appt => {
-                const s = statusStyle[appt.status] || statusStyle.pending;
+                // NOT `|| statusStyle.pending`. Defaulting an unrecognised
+                // status to "Pending Confirmation" told the client their
+                // request was still live when it was not — including, before
+                // this entry existed, every expired one.
+                const s = statusStyle[appt.status] || {
+                    bg: t.cardHi, color: t.textMuted,
+                    label: statusWord(appt.status),
+                };
                 // PKT explicitly — `toLocale*` without a timeZone renders in
                 // whatever zone the browser is in, which is not the zone this
                 // appointment was booked in.
@@ -2306,6 +2351,7 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                                 </div>
                             )}
                             <CancellationDetail appt={appt} t={t} />
+                            <ExpiryDetail appt={appt} t={t} />
                             {appt.meeting_link ? (
                                 <div style={{ marginTop: 10 }}>
                                     <a href={appt.meeting_link} target="_blank" rel="noreferrer"

@@ -671,6 +671,14 @@ test("the map list button is labelled for what it does", async () => {
     await ui.unmount();
 });
 
+test("the directory makes no real-time schedule claim or sensitive browser log", async () => {
+    const fs = await import("node:fs");
+    const source = fs.readFileSync("src/components/client/ModLawyers.jsx", "utf8");
+    assert.doesNotMatch(source, /real-time availability|Available Now/);
+    assert.doesNotMatch(source, /console\.(?:log|warn|error)\s*\(/);
+    assert.match(source, /request a consultation time/);
+});
+
 /* ── the demo dataset, end to end ─────────────────────────────────────────── */
 //
 // Six seeded lawyers carry a real office address with pinned coordinates and

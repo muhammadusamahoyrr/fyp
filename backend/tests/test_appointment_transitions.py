@@ -45,6 +45,7 @@ CONFIRMED = AppointmentStatus.CONFIRMED
 CANCELLED = AppointmentStatus.CANCELLED
 COMPLETED = AppointmentStatus.COMPLETED
 NO_SHOW = AppointmentStatus.NO_SHOW
+EXPIRED = AppointmentStatus.EXPIRED
 
 
 @pytest.fixture
@@ -142,13 +143,19 @@ async def _status(appt_id: str) -> str:
 
 # ── 1. The table itself ──────────────────────────────────────────────────────
 #
-# Pure, so it is exhaustive. Every one of the 25 ordered pairs is decided here,
+# Pure, so it is exhaustive. Every one of the 36 ordered pairs is decided here,
 # which is what makes the table a specification rather than a summary of
-# whatever the four service functions happen to do.
+# whatever the four service functions happen to do. It grows with the enum on
+# purpose: adding a status without deciding its 11 new pairs fails here, which
+# is how EXPIRED came to be decided rather than assumed.
 
 def test_every_pair_of_statuses_is_decided_one_way_or_the_other():
     allowed = {
         (PENDING, CONFIRMED), (PENDING, CANCELLED),
+        # Only from PENDING, and only by the dormant sweep. A CONFIRMED
+        # appointment has been agreed by both parties and does not lapse
+        # because nobody looked at it again.
+        (PENDING, EXPIRED),
         (CONFIRMED, CANCELLED), (CONFIRMED, COMPLETED), (CONFIRMED, NO_SHOW),
     }
     for source in AppointmentStatus:
@@ -164,7 +171,11 @@ def test_an_ended_appointment_has_nowhere_left_to_go():
     (`exists_completed`), so a reversible outcome would make that gate
     reversible too.
     """
-    assert transitions.TERMINAL == frozenset({COMPLETED, CANCELLED, NO_SHOW})
+    # EXPIRED is an ending too, and a separate one: nobody cancelled the
+    # request, so it must not be folded into CANCELLED — that would force
+    # `cancelled_by` to name an actor who does not exist.
+    assert transitions.TERMINAL == frozenset(
+        {COMPLETED, CANCELLED, NO_SHOW, EXPIRED})
     for status in transitions.TERMINAL:
         assert transitions.allowed_from(status) == frozenset()
 
@@ -643,9 +654,14 @@ async def test_a_lawyer_may_cancel_inside_the_window_a_client_may_not(parties):
     # Aligned, because the service now refuses sub-minute precision on a
     # direct call — an unaligned row is invisible to the overlap guard. Still
     # comfortably inside the two-hour cutoff, which is what this pins.
+    #
+    # CONFIRMED FIRST: the cutoff narrowed to confirmed appointments, because a
+    # pending request is a commitment nobody has made. A pending row here would
+    # now cancel freely.
     soon = (datetime.now(timezone.utc) + timedelta(minutes=90)).replace(
         minute=0, second=0, microsecond=0)
     appt = await _book(parties, soon)
+    await _confirm(appt["id"], parties["lawyer_id"])
 
     with pytest.raises(AppValidationError, match="hours before"):
         await appointment_service.cancel_appointment(

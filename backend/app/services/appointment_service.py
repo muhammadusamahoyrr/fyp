@@ -22,6 +22,7 @@ from app.core.exceptions import (
 )
 from app.repositories.appointment_repo import AppointmentRepository
 from app.repositories.user_repo import UserRepository
+from app.services import appointment_expiry as expiry
 from app.services import appointment_transitions as transitions
 from app.services.appointment_slots import (
     alignment_error,
@@ -81,13 +82,22 @@ def _slot_text(value: datetime) -> str:
     return _local(value).strftime("%d %b %Y at %H:%M PKT")
 
 
+# Only these stored fields may cross the appointment response boundary. The
+# response model allows extras for the separately added display names, so it
+# cannot protect against a new private Mongo field being added later.
+# Adding a public field must be an explicit decision here and in AppointmentOut.
+_PUBLIC_FIELDS = frozenset({
+    "client_id", "lawyer_id", "case_id", "scheduled_at", "end_at",
+    "duration_minutes", "status", "mode", "timezone", "schedule_version",
+    "notes", "cancel_reason", "cancelled_by", "meeting_link", "created_at",
+    "updated_at",
+})
+
 # Fields that exist to make the guarantees work and are nobody's business
 # outside this service.
 #
-# `AppointmentOut` is `extra="allow"` — deliberately, because CaseContext caches
-# the whole appointments list and components read arbitrary fields off it — so
-# the response model is NOT a filter. Whatever `_sanitize` returns is what the
-# client receives, which makes this the only place the boundary exists.
+# `AppointmentOut` allows extra keys, so the response model is NOT a filter.
+# `_sanitize` is the boundary for all stored fields.
 #
 #   occupied_slots      internal mechanism, and a list of instants per
 #                       appointment inflates every payload for nothing.
@@ -98,19 +108,26 @@ def _slot_text(value: datetime) -> str:
 #                       the server, and publishing it lets a holder of the key
 #                       confirm guesses about a booking they cannot otherwise
 #                       read.
-_INTERNAL_FIELDS = ("occupied_slots", "idempotency_key", "payload_fingerprint")
+#   expires_at          A DEADLINE THE SYSTEM DOES NOT YET ENFORCE. The sweep
+#                       that acts on it is dormant (see
+#                       services/appointment_expiry_sweep.py), so publishing
+#                       the field would show both parties a time at which
+#                       nothing currently happens — and a client who reads
+#                       "expires at 14:00" and stops waiting has been told
+#                       something untrue by a mechanism that is switched off.
+#                       It belongs in a response when the sweep runs and the
+#                       product has words for it, not before.
 
 # The lawyer's own record of the consultation, and nobody else's.
 #
 # `lawyer_notes` is documented as private and was returned to everyone. Every
-# response goes through `_sanitize`, which stripped the three fields above and
-# passed this one straight to the client — so a note written for the lawyer's
+# response used to copy the stored row and omit only known internal fields,
+# passing this one straight to the client — so a note written for the lawyer's
 # file ("client unreliable; consider declining future work") was readable by
 # its subject through `GET /appointments/{id}` and through the list.
 #
 # `AppointmentOut` cannot be the filter: it DECLARES `lawyer_notes` and is
 # `extra="allow"`, so it strips nothing. This is the only boundary there is.
-_LAWYER_ONLY_FIELDS = ("lawyer_notes",)
 
 
 def _sanitize(appt: dict, *, for_lawyer: bool = False) -> dict:
@@ -120,13 +137,11 @@ def _sanitize(appt: dict, *, for_lawyer: bool = False) -> dict:
     forgets to think about the viewer hides the private fields rather than
     exposing them. Opting in is a decision each caller makes by name.
     """
-    appt = dict(appt)
-    appt["id"] = appt.pop("_id", appt.get("id", ""))
-    for field in _INTERNAL_FIELDS:
-        appt.pop(field, None)
-    if not for_lawyer:
-        for field in _LAWYER_ONLY_FIELDS:
-            appt.pop(field, None)
+    public = {key: appt[key] for key in _PUBLIC_FIELDS if key in appt}
+    public["id"] = appt.get("_id", appt.get("id", ""))
+    if for_lawyer and "lawyer_notes" in appt:
+        public["lawyer_notes"] = appt["lawyer_notes"]
+    appt = public
     # Rows written before the zone was recorded carry no `timezone`. They were
     # all booked in Pakistan — that was the only zone this product has ever had
     # — so the field is DEFAULTED AT THE READ BOUNDARY rather than migrated.
@@ -312,6 +327,26 @@ async def _notify(appt_id: str, transition: str, **kwargs) -> None:
             "error=%s", appt_id, transition, type(exc).__name__)
 
 
+async def _name_for_notice(
+    user_id: str, fallback: str, *, appt_id: str, transition: str,
+) -> str:
+    """Optional notification context must never turn a committed write into 500.
+
+    A database read after the appointment write can fail independently of that
+    write. The recipient still gets a useful generic message when possible;
+    only the exception class reaches the log, never a driver URI or user data.
+    """
+    try:
+        user = await user_repo.find_by_id(user_id)
+        name = user.get("full_name") if isinstance(user, dict) else None
+        return name if isinstance(name, str) and name.strip() else fallback
+    except Exception as exc:
+        logger.warning(
+            "appointment_notification_context_failed appointment_id=%s "
+            "transition=%s error=%s", appt_id, transition, type(exc).__name__)
+        return fallback
+
+
 # ── Booking idempotency ───────────────────────────────────────────────────────
 
 def _booking_fingerprint(
@@ -470,6 +505,8 @@ async def book_appointment(
     misaligned = alignment_error(scheduled_at)
     if misaligned:
         raise AppValidationError(misaligned)
+    if scheduled_at <= datetime.now(timezone.utc):
+        raise AppValidationError("Appointment must be scheduled in the future")
     bad_duration = duration_error(duration_minutes)
     if bad_duration:
         raise AppValidationError(bad_duration)
@@ -563,6 +600,12 @@ async def book_appointment(
         # time and a value comparison cannot tell that two moves
         # happened in between.
         "schedule_version": 0,
+        # When this request stops holding the slots above. Written at booking
+        # so the sweep's filter is indexable rather than computed per row; the
+        # policy itself lives in services/appointment_expiry.py, and a row
+        # without this field is still assessable there, so no backfill is
+        # needed for anything booked before today.
+        "expires_at":       expiry.deadline_for(now, scheduled_at),
         # Present only when the caller supplied one: the idempotency index is
         # partial on `$type: "string"`, so a None here would be indexed as a
         # null and collide with every other keyless booking by this client.
@@ -627,8 +670,8 @@ async def book_appointment(
             "This booking could not be completed. Please try again.")
 
     # Notify both parties
-    client = await user_repo.find_by_id(client_id)
-    client_name = (client or {}).get("full_name", "Client")
+    client_name = await _name_for_notice(
+        client_id, "Client", appt_id=doc["_id"], transition="book")
     lawyer_name = lawyer.get("full_name", "Lawyer")
     slot_str = _slot_text(scheduled_at)
 
@@ -698,7 +741,8 @@ async def confirm_appointment(
         appt, AppointmentStatus.CONFIRMED, lawyer_id, "lawyer", extra,
         expected_version=expected_version)
 
-    lawyer = await user_repo.find_by_id(lawyer_id)
+    lawyer_name = await _name_for_notice(
+        lawyer_id, "Lawyer", appt_id=appt_id, transition="confirm")
     slot_str = _slot_text(updated["scheduled_at"])
 
     await _notify(
@@ -706,7 +750,7 @@ async def confirm_appointment(
         user_id=updated["client_id"],
         type=NotificationType.APPOINTMENT_CONFIRMED,
         title="Appointment Confirmed",
-        body=f"{(lawyer or {}).get('full_name','Lawyer')} confirmed your appointment on {slot_str}.",
+        body=f"{lawyer_name} confirmed your appointment on {slot_str}.",
         payload={"appointment_id": appt_id},
     )
 
@@ -727,8 +771,23 @@ async def cancel_appointment(
 ) -> dict:
     appt = await _load_for_actor(appt_id, user_id, user_role)
 
-    # Clients cannot cancel within the cutoff window
-    if user_role == "client":
+    # THE CUTOFF PROTECTS A COMMITMENT, AND A PENDING REQUEST IS NOT ONE.
+    #
+    # It applied to every client cancellation regardless of status, which
+    # trapped people: booking permits any future time, so a request made 90
+    # minutes before its start was born inside the window and could not be
+    # withdrawn by the person who made it. Nobody had agreed to hold that slot
+    # — no lawyer had accepted it — so the rule was protecting a promise that
+    # did not exist, and the only party who could clear the request was the one
+    # who had not answered it.
+    #
+    # A CONFIRMED appointment is different: the lawyer has arranged their day
+    # around it, and two hours' notice is the whole point of the rule.
+    #
+    # A pending request may therefore be cancelled at any time, INCLUDING after
+    # its scheduled start. An unanswered request that has come and gone is
+    # exactly the thing a client should be able to clear away.
+    if user_role == "client" and _current_status(appt) is AppointmentStatus.CONFIRMED:
         # `_as_utc` is what makes this line run at all. `scheduled_at` came back
         # naive from Mongo, so comparing it to an aware `now` raised TypeError
         # and every client cancellation answered 500 — the cutoff this enforces
@@ -737,8 +796,9 @@ async def cancel_appointment(
         cutoff = _as_utc(appt["scheduled_at"]) - timedelta(minutes=_CANCEL_CUTOFF_MINUTES)
         if datetime.now(timezone.utc) >= cutoff:
             raise AppValidationError(
-                f"Appointments can only be cancelled at least "
-                f"{_CANCEL_CUTOFF_MINUTES // 60} hours before the scheduled time."
+                f"Confirmed appointments can only be cancelled at least "
+                f"{_CANCEL_CUTOFF_MINUTES // 60} hours before the scheduled "
+                "time. Please contact your lawyer directly."
             )
 
     extra = {
@@ -759,7 +819,8 @@ async def cancel_appointment(
         recipients = [updated["client_id"], updated["lawyer_id"]]
 
     slot_str = _slot_text(updated["scheduled_at"])
-    canceller_name = (await user_repo.find_by_id(user_id) or {}).get("full_name", user_role.title())
+    canceller_name = await _name_for_notice(
+        user_id, user_role.title(), appt_id=appt_id, transition="cancel")
 
     for recipient in recipients:
         await _notify(
@@ -801,13 +862,14 @@ async def complete_appointment(
     updated = await _transition(
         appt, AppointmentStatus.COMPLETED, lawyer_id, "lawyer", extra)
 
-    lawyer = await user_repo.find_by_id(lawyer_id)
+    lawyer_name = await _name_for_notice(
+        lawyer_id, "your lawyer", appt_id=appt_id, transition="complete")
     await _notify(
         appt_id, "complete",
         user_id=updated["client_id"],
         type=NotificationType.APPOINTMENT_COMPLETED,
         title="Consultation Completed",
-        body=f"Your consultation with {(lawyer or {}).get('full_name','your lawyer')} is now complete.",
+        body=f"Your consultation with {lawyer_name} is now complete.",
         payload={"appointment_id": appt_id},
     )
 
@@ -838,13 +900,14 @@ async def mark_no_show(appt_id: str, lawyer_id: str) -> dict:
     #
     # The wording states the fact and offers recourse. It carries no notes:
     # `lawyer_notes` is the lawyer's private record and never reaches here.
-    lawyer = await user_repo.find_by_id(lawyer_id)
+    lawyer_name = await _name_for_notice(
+        lawyer_id, "Your lawyer", appt_id=appt_id, transition="no_show")
     await _notify(
         appt_id, "no_show",
         user_id=updated["client_id"],
         type=NotificationType.APPOINTMENT_NO_SHOW,
         title="Appointment Marked as Missed",
-        body=(f"{(lawyer or {}).get('full_name', 'Your lawyer')} recorded that "
+        body=(f"{lawyer_name} recorded that "
               f"you did not attend the consultation on "
               f"{_slot_text(updated['scheduled_at'])}. If that is wrong, "
               "contact them directly."),
@@ -1057,20 +1120,27 @@ async def reschedule_appointment(
             f"Only a pending request can be rescheduled — this one is "
             f"{source.value}. Cancel it and book a new time instead.")
 
-    # THE CUTOFF APPLIES TO THE OLD TIME, not the new one.
+    # THE BOUNDARY IS THE OLD START TIME, not a two-hour cutoff.
     #
-    # The lawyer has already been told to hold the original slot, and it is
-    # that commitment the two-hour rule protects. Checking the new time instead
-    # would let a client move a 4pm appointment at 3:55 simply by choosing a
-    # time next week, which is exactly the last-minute change the rule exists
-    # to prevent.
+    # The two-hour rule exists to protect a lawyer's arranged day, and a PENDING
+    # request has not been accepted by anyone — so applying it here trapped the
+    # same short-notice bookings cancellation did, in the same way. What still
+    # has to hold is that a request cannot be moved once the time it was asked
+    # for has ARRIVED: at that point it is no longer a request about the future,
+    # and moving it would re-use a slot the lawyer may already have attended.
+    #
+    # Checked against the OLD time, never the new one. Against the new time a
+    # client could move a 4pm request at 4:30 simply by choosing next week.
+    #
+    # This is validation only. The same boundary rides in the atomic update
+    # below, because time passes between this line and the write — see
+    # `AppointmentRepository.reschedule`.
     old_start = _as_utc(appt["scheduled_at"])
-    cutoff = old_start - timedelta(minutes=_CANCEL_CUTOFF_MINUTES)
-    if datetime.now(timezone.utc) >= cutoff:
+    now = datetime.now(timezone.utc)
+    if now >= old_start:
         raise AppValidationError(
-            f"Appointments can only be rescheduled at least "
-            f"{_CANCEL_CUTOFF_MINUTES // 60} hours before the scheduled time. "
-            "Please contact your lawyer directly.")
+            "This request's time has already passed, so it can no longer be "
+            "moved. Cancel it and book a new time instead.")
 
     duration = appt.get("duration_minutes")
     bad_duration = duration_error(duration)
@@ -1102,6 +1172,18 @@ async def reschedule_appointment(
             scheduled_at=scheduled_at,
             end_at=end_at,
             occupied_slots=occupied_slots(scheduled_at, duration),
+            # The deadline follows the new time, and is written in the SAME
+            # update as the time it describes — a row whose `expires_at`
+            # belonged to a start it no longer has would be swept on the
+            # strength of a time nobody is waiting for.
+            #
+            # Anchored to the ORIGINAL `created_at`, never to now. That is what
+            # makes `created + 7d` a cap: recomputing from the moment of the
+            # move would let a client hold a slot indefinitely by nudging the
+            # request forward once a week.
+            expires_at=expiry.deadline_for(
+                _as_utc(appt["created_at"]), scheduled_at)
+            if isinstance(appt.get("created_at"), datetime) else None,
         )
     except DuplicateKeyError as exc:
         # The unique slot indexes firing — the guarantee, not `has_conflict`,
@@ -1139,6 +1221,12 @@ async def reschedule_appointment(
             raise ConflictError(
                 f"This appointment is now {now_status.value} and can no longer "
                 "be rescheduled.")
+        if datetime.now(timezone.utc) >= _as_utc(current["scheduled_at"]):
+            # It crossed its own start between the read and the write. Saying
+            # "someone changed it" would be false and unactionable.
+            raise AppValidationError(
+                "This request's time passed while the change was being saved, "
+                "so it was not moved. Cancel it and book a new time instead.")
         raise ConflictError(
             "This appointment was changed a moment ago. Reload it and try "
             "again so you are working from the current time.")
@@ -1148,14 +1236,14 @@ async def reschedule_appointment(
     # happen. Best-effort, like every other appointment notification: the
     # reschedule is already committed and a delivery failure must not report it
     # as failed.
-    lawyer = await user_repo.find_by_id(updated["lawyer_id"])
-    client = await user_repo.find_by_id(client_id)
+    client_name = await _name_for_notice(
+        client_id, "A client", appt_id=appt_id, transition="reschedule")
     await _notify(
         appt_id, "reschedule",
         user_id=updated["lawyer_id"],
         type=NotificationType.APPOINTMENT_BOOKED,
         title="Appointment Time Changed",
-        body=(f"{(client or {}).get('full_name', 'A client')} moved their "
+        body=(f"{client_name} moved their "
               f"pending request from {_slot_text(old_start)} to "
               f"{_slot_text(scheduled_at)}."),
         payload={"appointment_id": appt_id},
@@ -1225,13 +1313,14 @@ async def set_meeting_link(
     # The client is told, because a link they cannot see is a link that does
     # not exist as far as they are concerned. Best-effort, like every other
     # appointment notification.
-    lawyer = await user_repo.find_by_id(lawyer_id)
+    lawyer_name = await _name_for_notice(
+        lawyer_id, "Your lawyer", appt_id=appt_id, transition="meeting_link")
     await _notify(
         appt_id, "meeting_link",
         user_id=updated["client_id"],
         type=NotificationType.APPOINTMENT_CONFIRMED,
         title="Joining Details Added",
-        body=(f"{(lawyer or {}).get('full_name', 'Your lawyer')} added a "
+        body=(f"{lawyer_name} added a "
               f"joining link for your consultation on "
               f"{_slot_text(updated['scheduled_at'])}."),
         payload={"appointment_id": appt_id},

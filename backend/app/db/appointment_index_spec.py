@@ -40,7 +40,7 @@ from __future__ import annotations
 from pymongo import ASCENDING
 
 from app.core.constants import AppointmentStatus
-from app.db.v2_index_spec import CORRECTNESS, IndexSpec
+from app.db.v2_index_spec import CORRECTNESS, QUERY, IndexSpec
 
 APPOINTMENTS = "appointments"
 
@@ -110,6 +110,25 @@ APPOINTMENT_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
              "always present — so every appointment booked without a key would "
              "carry a null and the second one would collide with the first. "
              "The partial filter admits only rows that actually have a key."),
+    ),
+    # 4 — the expiry sweep's read, and only that.
+    IndexSpec(
+        collection=APPOINTMENTS,
+        name="appointment_pending_expiry",
+        keys=(("status", ASCENDING), ("expires_at", ASCENDING)),
+        kind=QUERY,
+        partial_filter={"status": AppointmentStatus.PENDING.value},
+        why=("QUERY, NOT CORRECTNESS. Nothing is wrong without it; the sweep "
+             "in services/appointment_expiry_sweep.py simply degrades into a "
+             "collection scan on a table that grows for ever. Equality on "
+             "`status`, then the RANGE and sort key `expires_at`, in that "
+             "order. Partial on pending alone because that is the only status "
+             "the sweep ever asks about, and the completed and cancelled rows "
+             "it excludes are the ones that accumulate — so the index stays "
+             "the size of the open queue rather than of the history. NOT "
+             "unique and NOT a TTL index: a TTL would DELETE the appointment "
+             "rather than record that it expired, destroying the record of a "
+             "legal engagement to save a status write."),
     ),
 )
 
