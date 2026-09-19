@@ -9,6 +9,7 @@ from app.core.constants import (
     EngagementStatus,
 )
 from app.db.appointment_index_spec import (
+    ALL_INDEX_REQUIREMENTS,
     APPOINTMENT_INDEX_REQUIREMENTS,
 )
 from app.db.collections import (
@@ -297,9 +298,22 @@ async def create_appointment_correctness_indexes() -> None:
     leave the index absent while every reader believes the guarantee holds.
     Here a failure raises, and the caller is a person who can act on it.
     """
-    col = get_appointments_col()
-    await col.create_indexes(
-        [spec.model() for spec in APPOINTMENT_INDEX_REQUIREMENTS])
+    # GROUPED BY THE COLLECTION EACH SPEC NAMES.
+    #
+    # This used to build every declared spec on `appointments`, which was
+    # indistinguishable from correct while every spec happened to be for that
+    # collection — and silently wrong the moment one was not: the index would
+    # be created on the wrong collection while `validate_appointment_indexes`,
+    # which has always honoured `spec.collection`, reported it missing on the
+    # right one. The two halves are now reading the same field.
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    by_collection: dict[str, list] = {}
+    for spec in ALL_INDEX_REQUIREMENTS:
+        by_collection.setdefault(spec.collection, []).append(spec.model())
+    for collection, models in sorted(by_collection.items()):
+        await db[collection].create_indexes(models)
 
 
 async def validate_appointment_indexes() -> list[IndexProblem]:
@@ -313,7 +327,7 @@ async def validate_appointment_indexes() -> list[IndexProblem]:
     db = get_database()
     problems: list[IndexProblem] = []
 
-    collections = sorted({s.collection for s in APPOINTMENT_INDEX_REQUIREMENTS})
+    collections = sorted({s.collection for s in ALL_INDEX_REQUIREMENTS})
     info_by_collection: dict[str, dict] = {}
     for collection in collections:
         try:
@@ -327,7 +341,7 @@ async def validate_appointment_indexes() -> list[IndexProblem]:
                          f"(error_class={type(exc).__name__}); check database "
                          "connectivity and the application's read permissions")))
 
-    for spec in APPOINTMENT_INDEX_REQUIREMENTS:
+    for spec in ALL_INDEX_REQUIREMENTS:
         info = info_by_collection.get(spec.collection)
         if info is None:
             continue   # already reported as unreadable

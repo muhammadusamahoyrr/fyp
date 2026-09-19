@@ -885,6 +885,49 @@ export async function markNoShow(id) {
  * and it must never be rendered as a list of plausible office hours — nobody
  * here is entitled to say when somebody else works.
  */
+/** Report that an appointment's record is wrong.
+ *
+ * FILING CHANGES NOTHING. The appointment keeps whatever status it has; this
+ * opens a case for support. An identical retry returns the existing report
+ * rather than filing a second one; a retry saying something different is a
+ * 409.
+ */
+export async function openAppointmentDispute(appointment_id, { category, statement }) {
+  return apiFetch(`/appointments/${appointment_id}/disputes`, {
+    method: 'POST',
+    body: JSON.stringify({ category, statement }),
+  });
+}
+
+/** Reports this client has filed about one appointment. Never carries the
+ * private support note. */
+export async function listAppointmentDisputes(appointment_id) {
+  return apiFetch(`/appointments/${appointment_id}/disputes`);
+}
+
+/** Support queue: open reports, oldest first, paginated server-side. */
+export async function listOpenDisputes({ page, page_size } = {}) {
+  const params = new URLSearchParams();
+  if (page) params.set('page', String(page));
+  if (page_size) params.set('page_size', String(page_size));
+  const qs = params.toString();
+  return apiFetch(`/admin/appointment-disputes${qs ? `?${qs}` : ''}`);
+}
+
+/** Decide a report. `expected_version` is required: two officers working the
+ * same queue must not silently overwrite each other's decision. */
+export async function resolveDispute(dispute_id, {
+  expected_version, decision, resolution_explanation, support_note,
+}) {
+  return apiFetch(`/admin/appointment-disputes/${dispute_id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      expected_version, decision, resolution_explanation,
+      support_note: support_note || null,
+    }),
+  });
+}
+
 export async function getLawyerWorkingHours(lawyer_id) {
   return apiFetch(`/lawyers/${lawyer_id}/availability`);
 }

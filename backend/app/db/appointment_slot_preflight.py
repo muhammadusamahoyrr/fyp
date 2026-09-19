@@ -65,6 +65,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.db.appointment_index_spec import (
     ACTIVE_STATUSES,
+    ALL_INDEX_REQUIREMENTS,
     APPOINTMENT_INDEX_REQUIREMENTS,
     APPOINTMENTS,
     OBSOLETE_INDEXES,
@@ -385,7 +386,7 @@ async def preflight() -> dict:
     blocking = [f for f in findings if f["count"] and f["code"].startswith(
         ("overlapping_active_", "idempotency_key_collisions"))]
 
-    by_name = {s.name: s for s in APPOINTMENT_INDEX_REQUIREMENTS}
+    by_name = {s.name: s for s in ALL_INDEX_REQUIREMENTS}
     fixes = [_create_command(by_name[p.name])
              for p in problems if p.name in by_name]
     drops = [f'db.{o["collection"]}.dropIndex("{o["name"]}")'

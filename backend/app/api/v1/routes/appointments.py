@@ -5,6 +5,10 @@ from fastapi import APIRouter, Depends, Query, Request
 from app.core.constants import AppointmentStatus
 from app.core.rate_limit import limiter
 from app.dependencies import get_current_user, require_client, require_lawyer
+from app.schemas.appointment_dispute import (
+    DisputeClientView,
+    OpenDisputeRequest,
+)
 from app.schemas.appointment import (
     AppointmentOut,
     OutcomeQueueResponse,
@@ -17,7 +21,11 @@ from app.schemas.appointment import (
     SetMeetingLinkRequest,
 )
 from app.schemas.common import PaginatedResponse, StatusResponse
-from app.services import appointment_outcomes, appointment_service
+from app.services import (
+    appointment_disputes,
+    appointment_outcomes,
+    appointment_service,
+)
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
@@ -81,6 +89,51 @@ async def get_lawyer_availability(
 ):
     """Return already-booked time slots for a lawyer on a specific date."""
     return await appointment_service.get_availability(lawyer_id, date)
+
+
+# A report is a written complaint that a person will read. Ten a minute is far
+# above any genuine use and far below a flood, matching the booking limiter
+# rather than introducing a second convention.
+_LIMIT_DISPUTE = "10/minute"
+
+
+@router.post("/{appointment_id}/disputes", status_code=201,
+             response_model=DisputeClientView)
+@limiter.limit(_LIMIT_DISPUTE)
+async def open_dispute(
+    request: Request,
+    appointment_id: str,
+    body: OpenDisputeRequest,
+    current_user: dict = Depends(require_client),
+):
+    """Report that this appointment's record is wrong.
+
+    FILING CHANGES NOTHING. The appointment keeps whatever status it has; this
+    opens a case for support. A client who could correct their own record by
+    asserting it could manufacture the review eligibility `exists_completed`
+    gates, so the correction is support's to make and nobody else's.
+
+    A retry carrying the SAME report returns the existing one rather than
+    filing a second complaint or failing — the client cannot tell whether a
+    dropped request landed. A retry carrying different text is a different
+    claim, and answers 409.
+    """
+    return await appointment_disputes.open_dispute(
+        appt_id=appointment_id,
+        client_id=current_user["_id"],
+        category=body.category,
+        statement=body.statement,
+    )
+
+
+@router.get("/{appointment_id}/disputes", response_model=list[DisputeClientView])
+async def list_my_disputes(
+    appointment_id: str,
+    current_user: dict = Depends(require_client),
+):
+    """Reports this client has filed about this appointment."""
+    return await appointment_disputes.list_for_appointment(
+        appointment_id, current_user["_id"])
 
 
 @router.get("/outcomes/pending", response_model=OutcomeQueueResponse)

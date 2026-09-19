@@ -76,6 +76,18 @@ def get_password_reset_col() -> AsyncIOMotorCollection:
     return get_database()["password_reset_tokens"]
 
 
+def get_appointment_disputes_col() -> AsyncIOMotorCollection:
+    """A client's report that an appointment's record is wrong.
+
+    ITS OWN COLLECTION, deliberately. A dispute holds a client's free-text
+    account of what happened and, later, a support officer's private note —
+    neither of which belongs on the appointment document, where every existing
+    reader would have to be trusted to strip them. Keeping them apart means the
+    appointment response cannot leak them by omission.
+    """
+    return get_database()["appointment_disputes"]
+
+
 def get_lawyer_availability_col() -> AsyncIOMotorCollection:
     """One document per lawyer, `_id` = the lawyer's user id.
 

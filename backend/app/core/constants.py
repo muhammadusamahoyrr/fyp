@@ -291,6 +291,14 @@ class NotificationType(str, Enum):
     # rows carrying it exist.
     APPOINTMENT_REMINDER = "appointment_reminder"
     APPOINTMENT_OUTCOME_NUDGE = "appointment_outcome_nudge"
+    # The client hears the outcome of the report they filed. Its own type: a
+    # client filtering appointment reminders must not thereby silence the
+    # answer to a complaint they raised.
+    APPOINTMENT_DISPUTE_RESOLVED = "appointment_dispute_resolved"
+    # And the lawyer hears only when an appointment's RECORD was administratively
+    # corrected — never that a report exists, which would tell them a client
+    # complained about them whatever the outcome.
+    APPOINTMENT_RECORD_CORRECTED = "appointment_record_corrected"
     CAUSELIST_LISTED = "causelist_listed"
     PAYMENT_REQUESTED = "payment_requested"
     PAYMENT_RECEIVED = "payment_received"

@@ -4,7 +4,7 @@ import { DARK, LIGHT, useT } from "./theme.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useCase } from "./CaseContext.jsx";
 import { confirmedCases } from "@/lib/caseStatus.js";
-import { listCases, getCaseTimeline, listAppointments, cancelAppointment as apiCancelAppointment, getAppointment as apiGetAppointment, rescheduleAppointment as apiRescheduleAppointment, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt } from "@/lib/api.js";
+import { listCases, getCaseTimeline, listAppointments, cancelAppointment as apiCancelAppointment, getAppointment as apiGetAppointment, rescheduleAppointment as apiRescheduleAppointment, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt, openAppointmentDispute, listAppointmentDisputes } from "@/lib/api.js";
 import { formatPkt, pktToday, pktDayKey, pktHourMinute, pktSlotToUtcISO, isPktSlotPast } from "@/lib/bookingTime.js";
 
 // ─── DATA ─────────────────────────────────────────────────────────────────────
@@ -1921,6 +1921,218 @@ const CANCELLED_BY_LABEL = {
     admin: "This appointment was cancelled by Attorney.AI support.",
 };
 
+// Which appointments a client may report, and which report each one supports.
+//
+// Mirrors the server's rule rather than inventing a looser one: the category
+// is a claim about what went wrong, and "the lawyer wrongly marked me absent"
+// cannot be said about an appointment nobody has recorded an outcome for. A
+// control offered where the server would refuse is a button that always fails.
+const OUTCOME_GRACE_HOURS = 2;
+
+function reportableCategory(appt) {
+    if (appt.status === "no_show") return "incorrect_no_show";
+    if (appt.status === "confirmed" && appt.end_at) {
+        const ended = new Date(appt.end_at);
+        if (Number.isFinite(ended.getTime())
+            && ended.getTime() < Date.now() - OUTCOME_GRACE_HOURS * 3600e3) {
+            return "outcome_not_recorded";
+        }
+    }
+    return null;
+}
+
+const CATEGORY_PROMPT = {
+    incorrect_no_show:
+        "Tell us what happened. Your lawyer recorded that you did not attend.",
+    outcome_not_recorded:
+        "Tell us what happened. This consultation has finished and no outcome "
+        + "has been recorded.",
+};
+
+const MAX_STATEMENT = 2000;
+
+/** Report that an appointment's record is wrong.
+ *
+ * WHAT THIS DOES NOT DO, said plainly to the client before they write
+ * anything: filing a report does not change the appointment. Letting someone
+ * believe their record had been corrected — when in fact a support officer has
+ * yet to look at it — would be worse than offering nothing, because they would
+ * stop pursuing it.
+ *
+ * FIVE OUTCOMES ARE KEPT APART. Submitting, submitted, an identical retry
+ * (which returns the report already filed), a conflicting retry, and a failed
+ * request. `apiFetch` RESOLVES on failure, so an unchecked result would turn a
+ * network error into a silent success — the client would believe a complaint
+ * had been filed that nobody ever received.
+ */
+function ReportIssue({ appt, t }) {
+    const category = reportableCategory(appt);
+    const [open, setOpen] = useState(false);
+    const [statement, setStatement] = useState("");
+    const [state, setState] = useState("idle");   // idle|sending|done|conflict|error
+    const [message, setMessage] = useState("");
+    const [filed, setFiled] = useState(null);
+
+    // Reports already filed about this appointment, so a client who returns
+    // sees the outcome rather than an invitation to complain again.
+    useEffect(() => {
+        let cancelled = false;
+        listAppointmentDisputes(appt.id).then(({ data, error }) => {
+            if (cancelled || error || !Array.isArray(data)) return;
+            setFiled(data[data.length - 1] || null);
+        });
+        return () => { cancelled = true; };
+    }, [appt.id]);
+
+    const submit = async () => {
+        const text = statement.trim();
+        if (!text) {
+            setState("error");
+            setMessage("Please describe what happened before sending.");
+            return;
+        }
+        setState("sending");
+        setMessage("");
+        const { data, error, status } = await openAppointmentDispute(appt.id, {
+            category, statement: text,
+        });
+        if (error || !data) {
+            if (status === 409) {
+                // A report already exists and says something different. Not an
+                // error to retry — support has the earlier one.
+                setState("conflict");
+                setMessage(error?.message
+                    || "You already have an open report for this appointment.");
+                return;
+            }
+            // A HUMAN SENTENCE, not the transport's. "network down" or a
+            // driver string tells a client nothing they can act on, and this
+            // is the surface where somebody is trying to report that their
+            // record is wrong.
+            setState("error");
+            setMessage("Your report could not be sent. Please try again.");
+            return;
+        }
+        setFiled(data);
+        setState("done");
+        setOpen(false);
+    };
+
+    // An existing report is shown instead of the form — including its outcome
+    // once support has decided. The PUBLIC explanation only; the private note
+    // never leaves the server.
+    if (filed) {
+        const decided = filed.status !== "open";
+        return (
+            <div style={{
+                marginTop: 10, padding: "10px 12px", borderRadius: 8,
+                background: t.cardHi, border: `1px solid ${t.border}`,
+            }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: t.text }}>
+                    {decided ? "Your report has been reviewed."
+                             : "Your report is with support."}
+                </div>
+                <div style={{ fontSize: 12, color: t.textMuted, marginTop: 4 }}>
+                    {decided
+                        ? (filed.resolution_explanation || "Support has decided this report.")
+                        : "Support will review it. The appointment is unchanged until then."}
+                </div>
+            </div>
+        );
+    }
+
+    if (!category) return null;
+
+    if (!open) {
+        return (
+            <div style={{ marginTop: 10 }}>
+                <button type="button" onClick={() => setOpen(true)} style={{
+                    minHeight: 40, padding: "9px 14px", borderRadius: 8,
+                    border: `1px solid ${t.border}`, background: "transparent",
+                    color: t.textMuted, fontSize: 12, fontWeight: 700,
+                    cursor: "pointer", fontFamily: "inherit",
+                }}>Report an issue</button>
+                {state === "done" && (
+                    <span role="status" style={{ fontSize: 12, color: t.success, marginLeft: 10 }}>
+                        Report sent.
+                    </span>
+                )}
+            </div>
+        );
+    }
+
+    const tooLong = statement.length > MAX_STATEMENT;
+
+    return (
+        <div style={{
+            marginTop: 10, padding: "12px 14px", borderRadius: 10,
+            background: t.cardHi, border: `1px solid ${t.border}`,
+        }}>
+            <label htmlFor={`report-${appt.id}`}
+                style={{ display: "block", fontSize: 12, fontWeight: 700, color: t.text }}>
+                {CATEGORY_PROMPT[category]}
+            </label>
+
+            {/* SAID BEFORE THEY WRITE ANYTHING. A client who believed the
+                record had been corrected would stop pursuing it. */}
+            <div style={{ fontSize: 11, color: t.textMuted, margin: "6px 0 8px" }}>
+                Sending this does not change the appointment. A member of the
+                Attorney.AI support team will review it and decide.
+            </div>
+
+            <textarea
+                id={`report-${appt.id}`}
+                value={statement}
+                maxLength={MAX_STATEMENT + 100}
+                onChange={e => setStatement(e.target.value)}
+                aria-invalid={tooLong || undefined}
+                aria-describedby={`report-help-${appt.id}`}
+                rows={4}
+                style={{
+                    width: "100%", boxSizing: "border-box", padding: "8px 10px",
+                    borderRadius: 8, border: `1px solid ${tooLong ? t.danger : t.border}`,
+                    background: t.inputBg, color: t.text, fontSize: 12,
+                    fontFamily: "inherit", resize: "vertical",
+                }} />
+
+            <div id={`report-help-${appt.id}`}
+                style={{ fontSize: 11, color: tooLong ? t.danger : t.textFaint, marginTop: 4 }}>
+                {statement.length} of {MAX_STATEMENT} characters
+                {tooLong ? " — too long to send." : ""}
+            </div>
+
+            {(state === "error" || state === "conflict") && (
+                <div role="alert" style={{ fontSize: 12, color: t.danger, marginTop: 8 }}>
+                    {message}
+                </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button type="button" onClick={submit}
+                    disabled={state === "sending" || tooLong}
+                    aria-busy={state === "sending" || undefined}
+                    style={{
+                        minHeight: 40, padding: "9px 16px", borderRadius: 8,
+                        border: `1px solid ${t.primary}`, background: t.primaryGlow,
+                        color: t.primary, fontSize: 12, fontWeight: 700,
+                        cursor: state === "sending" ? "wait" : "pointer",
+                        opacity: state === "sending" || tooLong ? 0.6 : 1,
+                        fontFamily: "inherit",
+                    }}>
+                    {state === "sending" ? "Sending…" : "Send report"}
+                </button>
+                <button type="button" onClick={() => { setOpen(false); setState("idle"); }}
+                    style={{
+                        minHeight: 40, padding: "9px 16px", borderRadius: 8,
+                        border: `1px solid ${t.border}`, background: "transparent",
+                        color: t.textMuted, fontSize: 12, fontWeight: 700,
+                        cursor: "pointer", fontFamily: "inherit",
+                    }}>Cancel</button>
+            </div>
+        </div>
+    );
+}
+
 /** Why an expired request ended, for the client whose request it was.
  *
  * A badge reading "Expired" on its own invites the wrong inference — that the
@@ -2357,6 +2569,7 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                             )}
                             <CancellationDetail appt={appt} t={t} />
                             <ExpiryDetail appt={appt} t={t} />
+                            <ReportIssue appt={appt} t={t} />
                             {appt.meeting_link ? (
                                 <div style={{ marginTop: 10 }}>
                                     <a href={appt.meeting_link} target="_blank" rel="noreferrer"

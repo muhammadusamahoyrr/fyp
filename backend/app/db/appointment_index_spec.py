@@ -43,6 +43,7 @@ from app.core.constants import AppointmentStatus
 from app.db.v2_index_spec import CORRECTNESS, QUERY, IndexSpec
 
 APPOINTMENTS = "appointments"
+APPOINTMENT_DISPUTES = "appointment_disputes"
 
 # The statuses that still HOLD a slot.
 #
@@ -170,8 +171,57 @@ APPOINTMENT_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
 )
 
 
+# The disputes collection's own indexes.
+#
+# A SEPARATE TUPLE, and not a style choice. Several callers — including tests
+# that drop and rebuild indexes by name — iterate
+# `APPOINTMENT_INDEX_REQUIREMENTS` and apply every entry to the APPOINTMENTS
+# collection. Putting another collection's specs in that list made those
+# callers ask Mongo to drop an index from a collection that never had it.
+# Keeping the two lists apart means a caller that means "the appointments
+# collection" still gets exactly that, and anything that wants both says so.
+DISPUTE_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
+    # 7 — one live complaint per appointment, enforced by the database.
+    IndexSpec(
+        collection=APPOINTMENT_DISPUTES,
+        name="uniq_active_appointment_dispute",
+        keys=(("active_key", ASCENDING),),
+        kind=CORRECTNESS, unique=True,
+        partial_filter={"active_key": {"$type": "string"}},
+        why=("A PRE-CHECK CANNOT DO THIS. Two submissions racing both read "
+             "'no open dispute', both pass, and the appointment ends up with "
+             "two live complaints — which support would then adjudicate "
+             "twice, possibly differently. `active_key` holds the appointment "
+             "id while the dispute is open and is REMOVED when it is resolved "
+             "or dismissed, so history accumulates freely while only one row "
+             "at a time can claim an appointment. PARTIAL ON $type, not "
+             "sparse: a resolved dispute has no key at all, and a plain unique "
+             "index would treat every one of them as a shared null."),
+    ),
+    # 8 — the support queue's read.
+    IndexSpec(
+        collection=APPOINTMENT_DISPUTES,
+        name="appointment_dispute_queue",
+        keys=(("status", ASCENDING), ("created_at", ASCENDING),
+              ("_id", ASCENDING)),
+        kind=QUERY,
+        why=("QUERY, NOT CORRECTNESS. Equality on `status`, then the sort and "
+             "keyset keys, so the support queue is a range read and pages "
+             "without repeating or skipping a row when two disputes are filed "
+             "in the same millisecond. Nothing is wrong without it."),
+    ),
+)
+
+# Everything this domain declares, across both collections. What the creation
+# and validation paths use, since they are the callers that genuinely mean
+# "all of it".
+ALL_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
+    APPOINTMENT_INDEX_REQUIREMENTS + DISPUTE_INDEX_REQUIREMENTS
+)
+
+
 def correctness_requirements() -> tuple[IndexSpec, ...]:
-    return tuple(s for s in APPOINTMENT_INDEX_REQUIREMENTS if s.kind == CORRECTNESS)
+    return tuple(s for s in ALL_INDEX_REQUIREMENTS if s.kind == CORRECTNESS)
 
 
 def index_names() -> frozenset[str]:
@@ -180,4 +230,4 @@ def index_names() -> frozenset[str]:
     Used to recognise which constraint a DuplicateKeyError came from WITHOUT
     putting the driver's message anywhere near a response.
     """
-    return frozenset(s.name for s in APPOINTMENT_INDEX_REQUIREMENTS)
+    return frozenset(s.name for s in ALL_INDEX_REQUIREMENTS)

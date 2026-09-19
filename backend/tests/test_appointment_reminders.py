@@ -574,9 +574,16 @@ def test_the_reminder_index_is_declared_as_a_query_index():
 
 
 def test_the_correctness_indexes_are_untouched():
-    from app.db.appointment_index_spec import correctness_requirements
+    """Scoped to the APPOINTMENTS collection. Other collections in this domain
+    declare correctness indexes of their own; this asserts that adding a query
+    index for reminders did not disturb the three that enforce booking."""
+    from app.db.appointment_index_spec import (
+        APPOINTMENTS,
+        correctness_requirements,
+    )
 
-    names = {s.name for s in correctness_requirements()}
+    names = {s.name for s in correctness_requirements()
+             if s.collection == APPOINTMENTS}
     assert names == {"uniq_appointment_lawyer_slot",
                      "uniq_appointment_client_slot",
                      "uniq_appointment_idempotency"}
