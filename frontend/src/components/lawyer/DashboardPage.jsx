@@ -32,16 +32,46 @@ function DashboardPage() {
     const { addNotif } = useNotif();
     const { user } = useAuth();
     const [rawCases, setRawCases] = useState([]);
-    const [aptCount, setAptCount] = useState(0);
+    // `null` = not known (not yet read, or the read failed). Distinct from 0,
+    // which is a real answer meaning "none".
+    const [aptCount, setAptCount] = useState(null);
     const [appts, setAppts] = useState([]);
 
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => { if (data?.items) setRawCases(data.items); });
+        // THE COUNT COMES FROM THE SERVER'S `total`, NOT FROM COUNTING ROWS.
+        //
+        // This used to fetch the first fifty appointments and count the
+        // pending and confirmed ones among them, then show that as
+        // "Appointments — Pending + Confirmed". For any lawyer with more than
+        // fifty it was the first page's count wearing the label of a total,
+        // and it was wrong in the direction that matters: it under-reported
+        // work, silently, with no way to tell.
+        //
+        // The backend has always returned `total` for the filter. Asking for a
+        // single row of each status reads the real figure without downloading
+        // an appointment history to count it.
+        Promise.all([
+            listAppointments({ status: "pending", page_size: 1 }),
+            listAppointments({ status: "confirmed", page_size: 1 }),
+        ]).then(([pending, confirmed]) => {
+            if (pending.error || confirmed.error) {
+                // A failed read is not zero appointments. The stat stays "—".
+                setAptCount(null);
+                return;
+            }
+            const count = (n) => (Number.isInteger(n?.data?.total) ? n.data.total : null);
+            const p = count(pending), c = count(confirmed);
+            setAptCount(p === null || c === null ? null : p + c);
+        });
+
+        // A BOUNDED PREVIEW, and labelled as one below. Today's agenda is
+        // drawn from the first page only: it is a glance at the day, not a
+        // claim to be every appointment a lawyer has.
         listAppointments({ page_size: 50 }).then(({ data }) => {
             if (!data?.items) return;
-            const live = data.items.filter(a => a.status === "confirmed" || a.status === "pending");
-            setAptCount(live.length);
-            setAppts(live);
+            setAppts(data.items.filter(
+                a => a.status === "confirmed" || a.status === "pending"));
         });
     }, []);
 
@@ -54,7 +84,7 @@ function DashboardPage() {
         { l: "Active Cases", v: rawCases.length ? String(activeCnt) : "—", c: "#3EECD6", ic: "cases", ch: "Assigned to you", pg: "cases" },
         { l: "Pending Docs", v: "—", c: "#FFBE45", ic: "fileText", ch: "See documents", pg: "documents" },
         { l: "Total Clients", v: rawCases.length ? String(clientCnt) : "—", c: "#42D4A0", ic: "clients", ch: "Across all cases", pg: "clients" },
-        { l: "Appointments", v: String(aptCount), c: "#4AAFFF", ic: "gavel", ch: "Pending + Confirmed", pg: "appointments" },
+        { l: "Appointments", v: aptCount === null ? "—" : String(aptCount), c: "#4AAFFF", ic: "gavel", ch: "Pending + Confirmed", pg: "appointments" },
     ];
     // Today's real appointments. This used to be four hardcoded entries —
     // "Court Hearing 10:00 AM", "Client Meeting 12:30 PM" and so on — shown to
@@ -126,7 +156,15 @@ function DashboardPage() {
                             </table>
                         </Card>
                         <Card className="fade-up s3" style={{ padding: 16 }}>
-                            <div className="serif" style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 14 }}>Today's Schedule</div>
+                            <div className="serif" style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 4 }}>Today&apos;s Schedule</div>
+                            {/* LABELLED AS A PREVIEW. It is drawn from the
+                                first page of appointments, so for a busy diary
+                                it is a glance at the day rather than a
+                                complete agenda — and a schedule a lawyer plans
+                                their day around must not overstate itself. */}
+                            <div style={{ fontSize: 11, color: t.textFaint, marginBottom: 12 }}>
+                                Preview — see Appointments for the full list.
+                            </div>
                             {!events.length && (
                                 <div style={{ padding: "18px 4px", fontSize: 12.5, color: t.textMuted }}>
                                     Nothing scheduled today.
@@ -147,7 +185,7 @@ function DashboardPage() {
                             <Divider />
                             <div style={{ display: "flex", gap: 6 }}>{[
                                 { v: String(events.length), l: "Today", c: t.info, pg: "appointments" },
-                                { v: String(aptCount), l: "Upcoming", c: t.success, pg: "appointments" },
+                                { v: aptCount === null ? "—" : String(aptCount), l: "Upcoming", c: t.success, pg: "appointments" },
                                 { v: String(activeCnt), l: "Active cases", c: t.warn, pg: "cases" },
                             ].map(s => (
                                 <div key={s.l} onClick={() => setPage(s.pg)} style={{ flex: 1, padding: "9px 6px", borderRadius: 9, background: t.primaryGlow2, border: `1px solid ${t.border}`, textAlign: "center", cursor: "pointer" }}>

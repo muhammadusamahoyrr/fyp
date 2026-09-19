@@ -38,6 +38,11 @@ const INITIAL = {
     notifications: [],
     cases: [],
     appointments: [],
+    // `null` until the server answers: NOT `false`, which would show a "load
+    // more" control before anything has been read, and NOT `true`, which
+    // would claim completeness nobody has established.
+    appointmentsComplete: null,
+    appointmentsTotal: null,
 };
 
 const normalizeNotificationType = (type) => {
@@ -182,7 +187,20 @@ export const CaseProvider = ({ children }) => {
             const patch = {};
             if (notifRes.data)  patch.notifications = notifRes.data.map(mapNotification);
             if (casesRes.data)  patch.cases         = casesRes.data.items || casesRes.data || [];
-            if (apptsRes.data)  patch.appointments  = apptsRes.data.items || apptsRes.data || [];
+            if (apptsRes.data) {
+                patch.appointments = apptsRes.data.items || apptsRes.data || [];
+                // WHETHER THIS IS ALL OF THEM, recorded rather than assumed.
+                //
+                // The cached list is the FIRST PAGE. Fifty is not "all" — it
+                // is the first fifty by the server's sort — and every consumer
+                // of `caseData.appointments` was reading it as the complete
+                // set. Carrying the flag means a surface that needs certainty
+                // can ask for more instead of quietly being wrong.
+                patch.appointmentsComplete = Number.isInteger(apptsRes.data.pages)
+                    ? apptsRes.data.pages <= 1 : false;
+                patch.appointmentsTotal = Number.isInteger(apptsRes.data.total)
+                    ? apptsRes.data.total : null;
+            }
             if (Object.keys(patch).length) updateCase(patch);
 
             // AFTER the answer, whichever way it went.
@@ -248,7 +266,46 @@ export const CaseProvider = ({ children }) => {
 
     const refreshAppointments = async () => {
         const { data } = await listAppointments({ page_size: 50 });
-        if (data) updateCase({ appointments: data.items || data || [] });
+        if (data) {
+            updateCase({
+                appointments: data.items || data || [],
+                appointmentsComplete: Number.isInteger(data.pages)
+                    ? data.pages <= 1 : false,
+                appointmentsTotal: Number.isInteger(data.total) ? data.total : null,
+            });
+        }
+    };
+
+    /** Fetch one more page of appointments, ON REQUEST.
+     *
+     * Deliberately not automatic. This cache feeds selectors across the app,
+     * and pulling an unbounded history into memory on mount to make a list
+     * feel complete is a cost every screen pays for one screen's benefit.
+     *
+     * A failed page changes NOTHING. The choices already loaded stay exactly
+     * as they were: discarding them because a later page failed would destroy
+     * good data to report a partial failure, and a selector would empty itself
+     * under the user.
+     */
+    const loadMoreAppointments = async () => {
+        const loaded = caseData.appointments || [];
+        if (caseData.appointmentsComplete) return false;
+        // Pages are fifty rows; whatever is loaded came from whole pages.
+        const nextPage = Math.ceil(loaded.length / 50) + 1;
+        const { data, error } = await listAppointments({
+            page: nextPage, page_size: 50,
+        });
+        if (error || !data || !Array.isArray(data.items)) return false;
+
+        const seen = new Set(loaded.map(a => a?.id));
+        const fresh = data.items.filter(a => a?.id === undefined || !seen.has(a.id));
+        updateCase({
+            appointments: [...loaded, ...fresh],
+            appointmentsComplete: Number.isInteger(data.pages)
+                ? data.page >= data.pages : false,
+            appointmentsTotal: Number.isInteger(data.total) ? data.total : null,
+        });
+        return true;
     };
 
     return (
@@ -258,6 +315,7 @@ export const CaseProvider = ({ children }) => {
             completeIntake,
             selectLawyer,
             confirmAppointment,
+            loadMoreAppointments,
             markNotificationDone,
             markAllNotificationsDone,
             addNotification,

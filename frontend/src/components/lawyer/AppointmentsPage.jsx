@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
     formatPkt, isPktToday, pktHourMinute, pktDayKey, pktHour,
     pktWeekDayKeys, pktToday, dayOfMonth,
@@ -323,6 +323,11 @@ function NeedsOutcome({ t, onRecorded }) {
  * as plausible office hours: this product does not get to decide when somebody
  * else works.
  */
+// One page of appointments. Smaller than the old fixed 50 because the list
+// now pages: a first screen should arrive quickly, and the rest is a click
+// away rather than a silent truncation.
+const PAGE_SIZE = 25;
+
 const WEEKDAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday",
                         "Friday", "Saturday", "Sunday"];
 
@@ -775,6 +780,24 @@ function AppointmentsPage() {
     const toast = useToast();
     const [viewMode, setViewMode] = useState("list");
     const [statusF, setStatusF] = useState("All");
+    // PAGING STATE, kept beside the list rather than inside it.
+    //
+    // Every caller used to ask for `page_size: 50` and stop. Fifty is not
+    // "all" — it is the first fifty by the server's sort — so a lawyer with a
+    // longer history saw a truncated diary with nothing saying so.
+    //
+    // `pagesTotal === null` means the server has not told us yet; it is NOT
+    // the same as "one page", and the list must not claim to be complete on
+    // that basis.
+    const [pageNo, setPageNo] = useState(1);
+    const [pagesTotal, setPagesTotal] = useState(null);
+    const [listTotal, setListTotal] = useState(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [moreError, setMoreError] = useState(null);
+    const [firstPageError, setFirstPageError] = useState(null);
+    // Per-status totals, read from the server rather than counted from the
+    // rows on screen. `null` means "not known", which is not zero.
+    const [statusTotals, setStatusTotals] = useState({});
     const [search, setSearch] = useState("");
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -793,8 +816,11 @@ function AppointmentsPage() {
     // reachable under "All" and nowhere else.
     const tabs = ["All", "Upcoming", "Pending", "Completed", "Cancelled", "No Show", "Expired"];
 
+    // The tab is applied server-side (see `reload`), so this is the search box
+    // only. Filtering a partial page locally would show "3 Completed" when the
+    // server holds forty, and a tab that silently means "of the rows we
+    // happen to have loaded" is the failure this milestone is about.
     const filtered = appointments.filter(a =>
-        (statusF === "All" || a.status === statusF) &&
         (a.client.toLowerCase().includes(search.toLowerCase()) ||
             a.purpose.toLowerCase().includes(search.toLowerCase()))
     );
@@ -858,21 +884,112 @@ function AppointmentsPage() {
 
     // One loader, reused by the effect and by every handler that has to
     // re-read after the server refused something.
-    const reload = async () => {
+    // Display tab -> the status the SERVER understands. "All" sends none.
+    const API_STATUS = {
+        Upcoming: "confirmed", Pending: "pending", Completed: "completed",
+        Cancelled: "cancelled", "No Show": "no_show", Expired: "expired",
+    };
+
+    // Only the newest request may write. A tab changed while a request is in
+    // flight would otherwise have the older answer land on top of the newer
+    // one, showing rows from a filter the lawyer has already left.
+    const requestToken = useRef(0);
+    // A REF, NOT THE `loadingMore` STATE. Two clicks in the same tick both read
+    // the state before React has re-rendered, so both pass the guard and both
+    // request the same page — appending it twice. A ref updates synchronously,
+    // which is the only thing that can stop re-entry within one tick.
+    const moreInFlight = useRef(false);
+
+    const reload = async (tab = statusF) => {
+        const mine = ++requestToken.current;
         try {
-            const { data, error } = await listAppointments({ page_size: 50 });
+            const { data, error } = await listAppointments({
+                status: API_STATUS[tab], page: 1, page_size: PAGE_SIZE,
+            });
+            if (mine !== requestToken.current) return;
             // The client resolves on failure rather than throwing, so an error
             // here is a value. Keep whatever is on screen: an empty list would
             // read as "no appointments" when the read simply failed.
-            if (!error && data?.items) setAppointments(data.items.map(mapApiAppt));
+            if (error || !data?.items) {
+                setFirstPageError(
+                    error?.message || "Could not load appointments.");
+                return;
+            }
+            setAppointments(data.items.map(mapApiAppt));
+            setPageNo(1);
+            setPagesTotal(Number.isInteger(data.pages) ? data.pages : null);
+            setListTotal(Number.isInteger(data.total) ? data.total : null);
+            setFirstPageError(null);
+            setMoreError(null);
         } catch {
             // Same rule.
         } finally {
-            setLoading(false);
+            if (mine === requestToken.current) setLoading(false);
         }
     };
 
-    useEffect(() => { reload(); }, []);
+    /** Append the next page. */
+    const loadMore = async () => {
+        // The guard, not a nicety: a second click would request the same page
+        // again and append it, duplicating every row on it.
+        if (moreInFlight.current || pagesTotal === null || pageNo >= pagesTotal) return;
+        moreInFlight.current = true;
+        setLoadingMore(true);
+        setMoreError(null);
+        const mine = requestToken.current;
+        const next = pageNo + 1;
+        const { data, error } = await listAppointments({
+            status: API_STATUS[statusF], page: next, page_size: PAGE_SIZE,
+        });
+        moreInFlight.current = false;
+        if (mine !== requestToken.current) { setLoadingMore(false); return; }
+        setLoadingMore(false);
+        if (error || !data?.items) {
+            // KEEP WHAT IS SHOWN. Those rows were read successfully; throwing
+            // them away to report a later failure destroys good data.
+            setMoreError(error?.message || "Could not load more appointments.");
+            return;
+        }
+        setAppointments(prev => {
+            // The backend pages with skip/limit, so a row inserted or removed
+            // between requests can shift the window and hand back something
+            // already on screen.
+            const seen = new Set(prev.map(a => a.id));
+            return [...prev, ...data.items.map(mapApiAppt)
+                .filter(a => !seen.has(a.id))];
+        });
+        setPageNo(next);
+        setPagesTotal(Number.isInteger(data.pages) ? data.pages : pagesTotal);
+        setListTotal(Number.isInteger(data.total) ? data.total : listTotal);
+    };
+
+    // THE STAT CARDS COME FROM THE SERVER'S `total`, NOT FROM COUNTING ROWS.
+    //
+    // Counting the loaded page was wrong twice over once the list pages: it
+    // reported the first page's tally as a total, and with the tab applied
+    // server-side it would have reported the CURRENT TAB's tally under every
+    // card. One bounded request per status reads the real figure without
+    // pulling an appointment history into the browser to count it.
+    useEffect(() => {
+        let cancelled = false;
+        Promise.all(["confirmed", "pending", "completed"].map(
+            status => listAppointments({ status, page_size: 1 })
+        )).then(results => {
+            if (cancelled) return;
+            const next = {};
+            ["confirmed", "pending", "completed"].forEach((status, i) => {
+                const { data, error } = results[i];
+                next[status] = (!error && Number.isInteger(data?.total))
+                    ? data.total : null;
+            });
+            setStatusTotals(next);
+        });
+        return () => { cancelled = true; };
+    }, []);
+
+    useEffect(() => { setLoading(true); reload(statusF); },
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [statusF]);
 
     // The clock, as state.
     //
@@ -1023,12 +1140,18 @@ function AppointmentsPage() {
         addNotif({ type: "appointment", title: "Marked as No Show", body: msg, time: "Just now" });
     };
 
+    // `today` is the exception: no filter exists for "today", so it is
+    // necessarily derived from the rows in hand. It is therefore labelled as a
+    // count over the loaded rows whenever more remain, rather than passed off
+    // as the day's complete agenda.
+    const listComplete = pagesTotal !== null && pageNo >= pagesTotal;
     const statCounts = {
         today: appointments.filter(a => a.at && _isToday(a.at) && !DID_NOT_HAPPEN.has(a.status)).length,
-        upcoming: appointments.filter(a => a.status === "Upcoming").length,
-        pending: appointments.filter(a => a.status === "Pending").length,
-        completed: appointments.filter(a => a.status === "Completed").length,
+        upcoming: statusTotals.confirmed,
+        pending: statusTotals.pending,
+        completed: statusTotals.completed,
     };
+    const statValue = (n) => (Number.isInteger(n) ? String(n) : "—");
 
     return (
         <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -1167,10 +1290,10 @@ function AppointmentsPage() {
 
                                 {/* ── Stat cards ──────────────────────── */}
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
-                                    <StatCard label="Today" value={statCounts.today} color="#38d8c4" bg="rgba(56,216,196,0.12)" border="rgba(56,216,196,0.30)" />
-                                    <StatCard label="Upcoming" value={statCounts.upcoming} color="#5ab3ff" bg="rgba(90,179,255,0.12)" border="rgba(90,179,255,0.30)" />
-                                    <StatCard label="Pending" value={statCounts.pending} color="#e8b84b" bg="rgba(232,184,75,0.12)" border="rgba(232,184,75,0.30)" />
-                                    <StatCard label="Completed" value={statCounts.completed} color="#3ec99a" bg="rgba(62,201,154,0.12)" border="rgba(62,201,154,0.30)" />
+                                    <StatCard label={listComplete ? "Today" : "Today (loaded)"} value={String(statCounts.today)} color="#38d8c4" bg="rgba(56,216,196,0.12)" border="rgba(56,216,196,0.30)" />
+                                    <StatCard label="Upcoming" value={statValue(statCounts.upcoming)} color="#5ab3ff" bg="rgba(90,179,255,0.12)" border="rgba(90,179,255,0.30)" />
+                                    <StatCard label="Pending" value={statValue(statCounts.pending)} color="#e8b84b" bg="rgba(232,184,75,0.12)" border="rgba(232,184,75,0.30)" />
+                                    <StatCard label="Completed" value={statValue(statCounts.completed)} color="#3ec99a" bg="rgba(62,201,154,0.12)" border="rgba(62,201,154,0.30)" />
                                 </div>
 
                                 {/* ── Working hours ───────────────────── */}
@@ -1206,7 +1329,8 @@ function AppointmentsPage() {
                                                     background: statusF === tab ? `${t.primary}22` : t.cardHi,
                                                     color: statusF === tab ? t.primary : t.textFaint,
                                                 }}>
-                                                    {appointments.filter(a => a.status === tab).length}
+                                                    {statusF === tab && Number.isInteger(listTotal)
+                                                        ? listTotal : "·"}
                                                 </span>
                                             )}
                                         </button>
@@ -1332,9 +1456,66 @@ function AppointmentsPage() {
                                             Loading appointments…
                                         </div>
                                     )}
-                                    {!loading && filtered.length === 0 && (
+                                    {!loading && filtered.length === 0 && !firstPageError && (
                                         <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 40, color: t.textMuted, fontSize: 14 }}>
                                             No appointments found for "{statusF}" filter.
+                                        </div>
+                                    )}
+
+                                    {/* FIRST-PAGE FAILURE. Distinct from an
+                                        empty list: one says there is nothing
+                                        to show, the other that we could not
+                                        find out. */}
+                                    {!loading && firstPageError && (
+                                        <div role="alert" style={{ gridColumn: "1 / -1", textAlign: "center", padding: 30, color: "#e8526a", fontSize: 13 }}>
+                                            {firstPageError} This is not the same as having
+                                            none — we could not read the list.
+                                            <div>
+                                                <button type="button" onClick={() => reload(statusF)} style={{
+                                                    marginTop: 10, minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                                                    border: `1px solid ${t.border}`, background: "transparent",
+                                                    color: t.text, fontSize: 12, fontWeight: 700,
+                                                    cursor: "pointer", fontFamily: "inherit",
+                                                }}>Retry appointments</button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* LATER-PAGE FAILURE. The rows above were
+                                        read successfully and stay. */}
+                                    {moreError && (
+                                        <div role="alert" style={{ gridColumn: "1 / -1", padding: "10px 12px", color: "#e8526a", fontSize: 12 }}>
+                                            {moreError} The appointments already shown are
+                                            unaffected.
+                                        </div>
+                                    )}
+
+                                    {/* END OF LIST, only when the SERVER says
+                                        so. A short page is not the signal:
+                                        rows can be removed between requests,
+                                        and "that is everything" would then be
+                                        a claim the server never made. */}
+                                    {!loading && !firstPageError && appointments.length > 0 && (
+                                        <div style={{ gridColumn: "1 / -1", textAlign: "center", paddingTop: 6 }}>
+                                            {!listComplete && (
+                                                <button type="button" onClick={loadMore} disabled={loadingMore}
+                                                    aria-busy={loadingMore || undefined}
+                                                    style={{
+                                                        minHeight: 40, padding: "9px 18px", borderRadius: 9,
+                                                        border: `1px solid ${t.border}`, background: "transparent",
+                                                        color: t.text, fontSize: 12, fontWeight: 700,
+                                                        cursor: loadingMore ? "wait" : "pointer",
+                                                        opacity: loadingMore ? 0.6 : 1, fontFamily: "inherit",
+                                                    }}>
+                                                    {loadingMore ? "Loading…" : "Load more appointments"}
+                                                </button>
+                                            )}
+                                            <div style={{ fontSize: 11, color: t.textFaint, marginTop: 8 }}>
+                                                {Number.isInteger(listTotal)
+                                                    ? `Showing ${appointments.length} of ${listTotal}`
+                                                    : `Showing ${appointments.length}`}
+                                                {listComplete ? " — that is all of them." : ""}
+                                            </div>
                                         </div>
                                     )}
                                 </div>

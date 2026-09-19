@@ -1648,6 +1648,10 @@ function PageReminders({ feed, setFeed, milestones = [], documents = [] }) {
 // Statuses a client may still call off. The server's transition table allows
 // cancellation from pending and confirmed only; everything else is terminal, so
 // offering the action there would be a button that always fails.
+// One page of appointments. The list pages now, so a first screen arrives
+// quickly and the rest is a click away rather than a silent truncation at 50.
+const APPT_PAGE_SIZE = 25;
+
 const CLIENT_CANCELLABLE = new Set(["pending", "confirmed"]);
 
 // The server refuses a client cancellation inside this window. Stated up front
@@ -2218,7 +2222,8 @@ function CancelAppointment({ appt, t, onReload, error, setError }) {
     );
 }
 
-function PageAppointments({ appointments, loading, t, onReload, cancelErrors, setCancelError, refreshError }) {
+function PageAppointments({ appointments, loading, t, onReload, cancelErrors, setCancelError, refreshError,
+                            onLoadMore, loadingMore, moreError, total, complete }) {
     const { T } = useLang();
     const statusStyle = {
         pending: { bg: `${t.warn}18`, color: t.warn, label: "⏳ Pending Confirmation" },
@@ -2377,6 +2382,46 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                     </Card>
                 );
             })}
+
+            {/* LATER-PAGE FAILURE. The appointments above were read
+                successfully and stay exactly where they are — a client
+                watching their own appointments vanish to report a partial
+                failure would reasonably conclude something had been
+                cancelled. */}
+            {moreError && (
+                <div role="alert" style={{
+                    padding: "10px 12px", borderRadius: 8,
+                    background: `${t.danger}0e`, border: `1px solid ${t.danger}33`,
+                    fontSize: 12, color: t.danger,
+                }}>
+                    {moreError} The appointments already shown are unaffected.
+                </div>
+            )}
+
+            {/* END OF LIST, only when the SERVER says so. A short page is not
+                the signal: rows can be removed between requests, and "that is
+                everything" would be a claim the server never made. */}
+            <div style={{ textAlign: "center", paddingTop: 4 }}>
+                {!complete && (
+                    <button type="button" onClick={onLoadMore} disabled={loadingMore}
+                        aria-busy={loadingMore || undefined}
+                        style={{
+                            minHeight: 44, padding: "10px 18px", borderRadius: 9,
+                            border: `1px solid ${t.border}`, background: "transparent",
+                            color: t.text, fontSize: 12, fontWeight: 700,
+                            cursor: loadingMore ? "wait" : "pointer",
+                            opacity: loadingMore ? 0.6 : 1, fontFamily: "inherit",
+                        }}>
+                        {loadingMore ? "Loading…" : "Load more appointments"}
+                    </button>
+                )}
+                <div style={{ fontSize: 11, color: t.textFaint, marginTop: 8 }}>
+                    {Number.isInteger(total)
+                        ? `Showing ${appointments.length} of ${total}`
+                        : `Showing ${appointments.length}`}
+                    {complete ? " — that is all of them." : ""}
+                </div>
+            </div>
         </div>
     );
 }
@@ -2406,6 +2451,18 @@ export default function Module7({ isDark }) {
     // Set when a READ fails. Distinct from a cancellation error: this one says
     // the list on screen may be out of date, not that an action was refused.
     const [apptRefreshError, setApptRefreshError] = useState(null);
+    // PAGING. Every caller used to ask for fifty and stop — which is the first
+    // fifty by the server's sort, not "all", so a client with a longer history
+    // saw a truncated diary with nothing saying so.
+    //
+    // `apptPages === null` means the server has not said yet, which is NOT the
+    // same as "one page": the list must never claim to be complete on that.
+    const [apptPage, setApptPage] = useState(1);
+    const [apptPages, setApptPages] = useState(null);
+    const [apptTotal, setApptTotal] = useState(null);
+    const [apptLoadingMore, setApptLoadingMore] = useState(false);
+    const [apptMoreError, setApptMoreError] = useState(null);
+    const apptMoreInFlight = useRef(false);
     const setCancelError = useCallback((id, message) => {
         setCancelErrors(prev => ({ ...prev, [id]: message }));
     }, []);
@@ -2437,7 +2494,9 @@ export default function Module7({ isDark }) {
     const reloadAppointments = useCallback(async () => {
         setApptLoading(true);
         try {
-            const { data, error } = await listAppointments({ page_size: 50 });
+            const { data, error } = await listAppointments({
+                page: 1, page_size: APPT_PAGE_SIZE,
+            });
 
             // THE CLIENT RESOLVES ON FAILURE; IT DOES NOT THROW.
             //
@@ -2464,7 +2523,15 @@ export default function Module7({ isDark }) {
             }
 
             setApiAppointments(items);
+            // PAGING METADATA, recorded from the response rather than guessed.
+            // `pages` is the server's own count; a short page is NOT treated as
+            // the end, because rows can be removed between requests and "that
+            // is everything" would then be a claim the server never made.
+            setApptPage(1);
+            setApptPages(Number.isInteger(data?.pages) ? data.pages : null);
+            setApptTotal(Number.isInteger(data?.total) ? data.total : null);
             setApptRefreshError(null);
+            setApptMoreError(null);
             return true;
         } catch {
             // Reached only if the client itself throws. Same rule: keep what is
@@ -2475,6 +2542,50 @@ export default function Module7({ isDark }) {
             setApptLoading(false);
         }
     }, []);
+
+    /** Append the next page of appointments.
+     *
+     * A FAILED LATER PAGE CHANGES NOTHING ALREADY ON SCREEN. Those rows were
+     * read successfully; discarding them to report a partial failure would
+     * destroy good data — and would look to the client like appointments
+     * disappearing.
+     */
+    const loadMoreAppointments = useCallback(async () => {
+        // The guard, not a nicety: a second click would request the same page
+        // again and append it, duplicating every row on it.
+        // A REF, NOT THE STATE. Two clicks in the same tick both read the
+        // state before React re-renders, so both pass the guard and both
+        // request the same page — appending it twice.
+        if (apptMoreInFlight.current) return false;
+        if (apptPages === null || apptPage >= apptPages) return false;
+
+        apptMoreInFlight.current = true;
+        setApptLoadingMore(true);
+        setApptMoreError(null);
+        const next = apptPage + 1;
+        const { data, error } = await listAppointments({
+            page: next, page_size: APPT_PAGE_SIZE,
+        });
+        apptMoreInFlight.current = false;
+        setApptLoadingMore(false);
+
+        const rows = Array.isArray(data?.items) ? data.items : null;
+        if (error || rows === null) {
+            setApptMoreError("Could not load more appointments.");
+            return false;
+        }
+        setApiAppointments(prev => {
+            // The backend pages with skip/limit, so a row inserted or removed
+            // between requests can shift the window and return one already
+            // shown. Appending blindly would display it twice.
+            const seen = new Set(prev.map(a => a?.id));
+            return [...prev, ...rows.filter(a => a?.id === undefined || !seen.has(a.id))];
+        });
+        setApptPage(next);
+        setApptPages(Number.isInteger(data.pages) ? data.pages : apptPages);
+        setApptTotal(Number.isInteger(data.total) ? data.total : apptTotal);
+        return true;
+    }, [apptLoadingMore, apptPage, apptPages, apptTotal]);
 
     // Load on mount and whenever the page switches to "appointments"
     useEffect(() => {
@@ -2523,7 +2634,10 @@ export default function Module7({ isDark }) {
     const pages = {
         overview: (props) => <PageOverview      {...props} activeCase={activeCase} feed={feed} hearings={apiHearings} milestones={allMilestones} />,
         appointments: (props) => <PageAppointments  {...props} appointments={apiAppointments} loading={apptLoading} onReload={reloadAppointments} cancelErrors={cancelErrors} setCancelError={setCancelError}
-            refreshError={apptRefreshError} />,
+            refreshError={apptRefreshError}
+            onLoadMore={loadMoreAppointments} loadingMore={apptLoadingMore}
+            moreError={apptMoreError} total={apptTotal}
+            complete={apptPages !== null && apptPage >= apptPages} />,
         timeline: (props) => <PageTimeline      {...props} milestones={allMilestones} />,
         documents: (props) => <PageDocuments     {...props} activeCaseId={activeCaseId} milestones={allMilestones} />,
         payments: (props) => <PagePayments      {...props} />,

@@ -1,5 +1,5 @@
 'use client';
-import React from "react";
+import React, { useState } from "react";
 import { formatPkt } from "@/lib/bookingTime.js";
 import { useT } from "./theme.js";
 import Ic from "./Ic.jsx";
@@ -32,13 +32,24 @@ const STitle = ({ icon, sub, children }) => {
 ══════════════════════════════════════════════════════ */
 const ModOverview = () => {
     const t = useT();
-    const { cases, appointments } = useCase();
+    const {
+        cases, appointments,
+        appointmentsComplete, appointmentsTotal, loadMoreAppointments,
+    } = useCase();
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [moreError, setMoreError] = useState(null);
 
     // NOT cases.length. A draft is a case the client has not confirmed at the
     // end of the intake, and counting one toward "N cases open" labels it with
     // the single status it is not.
     const activeCasesCount = activeCases(cases).length;
-    const apptCount = appointments.length;
+    // THE COUNT IS THE SERVER'S TOTAL WHERE WE HAVE IT.
+    //
+    // `appointments` is the FIRST PAGE of the shared cache, so counting it was
+    // counting fifty and calling it all of them. The context now carries the
+    // server's total; the loaded length is used only when it has not said.
+    const apptCount = Number.isInteger(appointmentsTotal)
+        ? appointmentsTotal : appointments.length;
     const nextAppt = appointments[0];
     const nextApptLabel = nextAppt
         ? formatPkt(nextAppt.scheduled_at, { month: "short", day: "numeric" })
@@ -175,6 +186,45 @@ const ModOverview = () => {
                             );
                         }) : (
                             <div style={{ fontSize: 13, color: t.textMuted, padding: "12px 0" }}>No upcoming appointments.</div>
+                        )}
+
+                        {/* LOADING THE REST IS THE USER'S CHOICE.
+                            The shared cache holds one page. Pulling an
+                            unbounded appointment history into memory on mount
+                            would be a cost every screen pays for one screen's
+                            benefit — so the rest is a click, and only when
+                            the server says there is more. */}
+                        {appointmentsComplete === false && (
+                            <div style={{ paddingTop: 8 }}>
+                                <button type="button"
+                                    disabled={loadingMore}
+                                    aria-busy={loadingMore || undefined}
+                                    onClick={async () => {
+                                        if (loadingMore) return;
+                                        setLoadingMore(true);
+                                        setMoreError(null);
+                                        const ok = await loadMoreAppointments?.();
+                                        setLoadingMore(false);
+                                        // A failed page changes nothing already
+                                        // loaded: the appointments on screen were
+                                        // read successfully.
+                                        if (!ok) setMoreError("Could not load more appointments.");
+                                    }}
+                                    style={{
+                                        minHeight: 40, padding: "9px 16px", borderRadius: 9,
+                                        border: `1px solid ${t.border}`, background: "transparent",
+                                        color: t.text, fontSize: 12, fontWeight: 700,
+                                        cursor: loadingMore ? "wait" : "pointer",
+                                        opacity: loadingMore ? 0.6 : 1, fontFamily: "inherit",
+                                    }}>
+                                    {loadingMore ? "Loading…" : "Load more appointments"}
+                                </button>
+                                {moreError && (
+                                    <div role="alert" style={{ fontSize: 11, color: t.danger, marginTop: 6 }}>
+                                        {moreError} The appointments already shown are unaffected.
+                                    </div>
+                                )}
+                            </div>
                         )}
                     </Card>
 

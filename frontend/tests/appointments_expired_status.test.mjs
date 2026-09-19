@@ -129,19 +129,16 @@ async function mountLawyer(items) {
          * counted it.
          */
         stat: (label) => {
-            // A StatCard renders its label then its value, so the card's whole
-            // text is exactly "Today3". Matched by splitting rather than by a
-            // pattern built in a template literal: `\d` inside one is not an
-            // escape JS recognises, so it silently becomes a literal "d" and
-            // the matcher looks for "Todayd+".
-            const text = [...container.querySelectorAll("div")]
-                .map(el => el.textContent.trim())
-                .find(txt => txt.startsWith(label)
-                          && txt.length > label.length
-                          && [...txt.slice(label.length)].every(
-                                 ch => ch >= "0" && ch <= "9"));
-            assert.ok(text, `no stat card labelled ${label}`);
-            return Number(text.slice(label.length));
+            // A StatCard renders its label then its value, so its whole text
+            // is "Today3" — or "Today (loaded)3" while the list is still
+            // paging, since the card says so rather than passing a partial
+            // count off as the day's complete agenda.
+            const pattern = new RegExp("^" + label + "[^0-9]*([0-9]+)$");
+            const hit = [...container.querySelectorAll("div")]
+                .map(el => el.textContent.trim().match(pattern))
+                .find(Boolean);
+            assert.ok(hit, `no stat card labelled ${label}`);
+            return Number(hit[1]);
         },
         unmount: async () => { await act(async () => root.unmount()); },
     };
