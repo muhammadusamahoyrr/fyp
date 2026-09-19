@@ -1,13 +1,109 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query, status
 
 from app.core.constants import CaseType, Province
-from app.dependencies import get_current_user, require_client, require_admin
+from app.dependencies import (
+    get_current_user,
+    require_admin,
+    require_client,
+    require_lawyer,
+)
 from app.schemas.lawyer import LawyerMatchResponse, LawyerReview, LawyerReviewPage
+from app.schemas.lawyer_availability import (
+    BookableSlotsResponse,
+    OwnAvailabilityResponse,
+    PublicAvailabilityResponse,
+    ReplaceAvailabilityRequest,
+)
 from app.schemas.common import PaginatedResponse, StatusResponse
 from app.schemas.user import UserProfileResponse
-from app.services import lawyer_service
+from app.services import lawyer_availability_service, lawyer_service
 
 router = APIRouter(prefix="/lawyers", tags=["lawyers"])
+
+
+# ── Working hours ─────────────────────────────────────────────────────────────
+#
+# `/me/...` is declared BEFORE `/{lawyer_id}/...` because FastAPI matches in
+# declaration order and "me" would otherwise be captured as a lawyer id — a
+# lawyer reading "their own" schedule would silently be asking for the schedule
+# of a lawyer whose id is the literal string "me".
+
+
+@router.get("/me/availability", response_model=OwnAvailabilityResponse)
+async def read_my_availability(current_user: dict = Depends(require_lawyer)):
+    """The caller's own schedule, reasons for days off included."""
+    return await lawyer_availability_service.read_own(
+        actor_id=current_user["_id"],
+        actor_role=current_user["role"],
+        lawyer_id=current_user["_id"],
+    )
+
+
+@router.put("/me/availability", response_model=OwnAvailabilityResponse)
+async def replace_my_availability(
+    body: ReplaceAvailabilityRequest,
+    current_user: dict = Depends(require_lawyer),
+):
+    """Replace the caller's whole schedule.
+
+    The lawyer is taken from the TOKEN. There is deliberately no path that
+    accepts a lawyer id to write to: a write that names its own subject is an
+    authorisation bug waiting for a caller to notice it.
+    """
+    return await lawyer_availability_service.replace_own(
+        actor_id=current_user["_id"],
+        actor_role=current_user["role"],
+        lawyer_id=current_user["_id"],
+        working_hours=[i.model_dump() for i in body.working_hours],
+        exceptions=[e.model_dump() for e in body.exceptions],
+    )
+
+
+@router.get("/{lawyer_id}/availability",
+            response_model=PublicAvailabilityResponse)
+async def read_lawyer_availability(
+    lawyer_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """A lawyer's configuration, for anyone entitled to book with them.
+
+    Returns `configured: false` and no times for a lawyer who has not set any.
+    It does NOT fall back to plausible office hours: this system does not get
+    to decide when somebody else works, and a default presented as a fact would
+    put a real person in front of a client at a time they never agreed to.
+    """
+    return await lawyer_availability_service.public_availability(lawyer_id)
+
+
+@router.get("/{lawyer_id}/bookable-slots",
+            response_model=BookableSlotsResponse)
+async def read_bookable_slots(
+    lawyer_id: str,
+    from_date: date = Query(..., alias="from", description="YYYY-MM-DD (PKT)"),
+    to_date: date | None = Query(None, alias="to"),
+    duration_minutes: int = Query(60, ge=30, le=180),
+    current_user: dict = Depends(get_current_user),
+):
+    """Times a client may actually book, computed on the server.
+
+        explicit working hours
+        − exception days
+        − slots held by pending and confirmed appointments
+        − times that have passed
+
+    ADVICE, NOT A RESERVATION. Two clients can be offered the same slot at the
+    same moment; the unique slot indexes decide between them at insert. This
+    exists so a client is not routinely offered times that will be refused, not
+    to replace the guarantee.
+    """
+    return await lawyer_availability_service.bookable_slots(
+        lawyer_id=lawyer_id,
+        from_date=from_date,
+        to_date=to_date,
+        duration_minutes=duration_minutes,
+    )
 
 
 @router.get("", response_model=PaginatedResponse[UserProfileResponse])

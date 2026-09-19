@@ -139,6 +139,16 @@ test.beforeEach(() => {
     api.__respond("listAppointments", { data: { items: [] } });
     api.__respond("listCases", { data: { items: [] } });
     api.__respond("getNotifications", { data: { items: [] } });
+    // The page now also loads the lawyer's working hours. Stubbed so these
+    // tests exercise the outcome queue rather than an unrelated error panel.
+    api.__respond("getMyWorkingHours", {
+        data: {
+            lawyer_id: "l1", configured: false, enforced: false,
+            timezone: "Asia/Karachi", working_hours: [], exceptions: [],
+            updated_at: null,
+        },
+        error: null, status: 200,
+    });
 });
 
 test.after(() => {

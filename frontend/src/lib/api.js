@@ -879,6 +879,49 @@ export async function markNoShow(id) {
   return apiFetch(`/appointments/${id}/no-show`, { method: 'PATCH' });
 }
 
+/** A lawyer's own working-hours configuration, as the public sees it.
+ *
+ * `configured: false` means they have not set any. It does NOT mean "closed",
+ * and it must never be rendered as a list of plausible office hours — nobody
+ * here is entitled to say when somebody else works.
+ */
+export async function getLawyerWorkingHours(lawyer_id) {
+  return apiFetch(`/lawyers/${lawyer_id}/availability`);
+}
+
+/** Times a client may actually book, computed on the server.
+ *
+ * working hours − days off − pending/confirmed appointments − past times.
+ * ADVICE, NOT A RESERVATION: the unique slot indexes still decide between two
+ * clients offered the same slot at the same moment.
+ */
+export async function getBookableSlots(lawyer_id, { from, to, duration_minutes } = {}) {
+  const params = new URLSearchParams({ from });
+  if (to) params.set('to', to);
+  if (duration_minutes) params.set('duration_minutes', String(duration_minutes));
+  return apiFetch(`/lawyers/${lawyer_id}/bookable-slots?${params.toString()}`);
+}
+
+/** The caller's own schedule, reasons for days off included. */
+export async function getMyWorkingHours() {
+  return apiFetch('/lawyers/me/availability');
+}
+
+/** Replace the caller's whole schedule.
+ *
+ * Wholesale, never patched: the rule that matters most — no two intervals on
+ * one weekday may overlap — is about the set as a whole.
+ */
+export async function saveMyWorkingHours({ working_hours, exceptions }) {
+  return apiFetch('/lawyers/me/availability', {
+    method: 'PUT',
+    body: JSON.stringify({
+      working_hours: working_hours || [],
+      exceptions: exceptions || [],
+    }),
+  });
+}
+
 export async function getLawyerAvailability(lawyer_id, date) {
   return apiFetch(`/appointments/availability/${lawyer_id}?date=${date}`);
 }

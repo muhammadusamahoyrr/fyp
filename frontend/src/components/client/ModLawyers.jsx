@@ -8,7 +8,7 @@ import { useCase } from "./CaseContext.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
-import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getLawyerAvailability, listCases, listEngagements, requestEngagement, cancelEngagement, acceptEngagementTerms, declineEngagementTerms, completeEngagement, terminateEngagement } from "@/lib/api.js";
+import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getBookableSlots, listCases, listEngagements, requestEngagement, cancelEngagement, acceptEngagementTerms, declineEngagementTerms, completeEngagement, terminateEngagement } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { hireableCases as hireable, isDraftCase } from "@/lib/caseStatus.js";
 import { readIntakeValue } from "@/lib/intakeStorage.js";
@@ -68,7 +68,23 @@ const ModLawyers = () => {
     const [apptDetails, setApptDetails] = useState("");
     const [apptMode, setApptMode] = useState("video");
     const [apptSubmitting, setApptSubmitting] = useState(false);
-    const [bookedSlots, setBookedSlots] = useState([]);
+    // THE SERVER DECIDES WHICH TIMES EXIST. This used to be a list of
+    // *booked* slots subtracted from six hardcoded times — 09:00, 10:00,
+    // 11:00, 14:00, 15:00, 16:00 — that were identical for every lawyer and
+    // every day of the week, so Sunday 09:00 was offered as readily as Tuesday
+    // 10:00. Those six times were not a schedule anybody had agreed to.
+    //
+    // `slotState` keeps FIVE outcomes apart, because collapsing any two of
+    // them tells the client something untrue:
+    //   idle         no date chosen yet
+    //   loading      we are asking
+    //   error        we could not ask — NOT the same as "no times"
+    //   unconfigured this lawyer has not published hours at all
+    //   ready        `slots` is what the server says is bookable
+    const [slotState, setSlotState] = useState("idle");
+    const [slots, setSlots] = useState([]);
+    const [slotNotice, setSlotNotice] = useState("");
+    const [slotsEnforced, setSlotsEnforced] = useState(false);
     const [sortBy, setSortBy] = useState("Rating: High to Low");
     const [filters, setFilters] = useState({
         specialization: "All",
@@ -342,33 +358,46 @@ const ModLawyers = () => {
         return () => { cancelled = true; };
     }, [selectedLawyer?._id]);
 
-    // Fetch booked slots when date or lawyer changes inside the booking modal
+    // Ask the server what is bookable whenever the date or the lawyer changes.
     useEffect(() => {
+        let cancelled = false;
         if (!apptDate || !apptLawyer?._id || apptLawyer._id.startsWith("api-")) {
-            setBookedSlots([]);
-            return;
+            setSlotState("idle"); setSlots([]); setSlotNotice("");
+            return () => { cancelled = true; };
         }
-        getLawyerAvailability(apptLawyer._id, apptDate).then(({ data }) => {
-            setBookedSlots(data?.booked_slots || []);
-        });
+        setSlotState("loading"); setSlots([]);
+        getBookableSlots(apptLawyer._id, { from: apptDate, duration_minutes: 60 })
+            .then(({ data, error }) => {
+                if (cancelled) return;
+                if (error || !data) {
+                    // NOT an empty day. `apiFetch` RESOLVES on failure, so an
+                    // unchecked `data?.days` here would render "no times
+                    // available" out of a network error — telling the client
+                    // this lawyer is busy when nobody managed to ask.
+                    setSlotState("error");
+                    setSlotNotice("");
+                    return;
+                }
+                setSlotsEnforced(Boolean(data.enforced));
+                setSlotNotice(data.message || "");
+                if (!data.configured) {
+                    setSlotState("unconfigured");
+                    setSlots([]);
+                    return;
+                }
+                const day = (data.days || [])[0] || { slots: [] };
+                setSlots(day.slots || []);
+                setSlotState("ready");
+            });
+        return () => { cancelled = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [apptDate, apptLawyer?._id]);
 
-    const isSlotBooked = (timeStr) => {
-        if (!apptDate || !bookedSlots.length) return false;
-        // Build UTC timestamp for the slot (local → ISO → UTC via Date)
-        // PKT wall-clock, not the browser's zone.
-        const slotStart = pktSlotToDate(apptDate, timeStr);
-        if (!slotStart) return false;
-        const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
-        return bookedSlots.some(b => {
-            // Ensure strings without 'Z' are treated as UTC (backend now always sends Z)
-            const ensureUtc = s => new Date(s.endsWith("Z") || s.includes("+") ? s : s + "Z");
-            const bStart = ensureUtc(b.start);
-            const bEnd = ensureUtc(b.end);
-            return slotStart < bEnd && slotEnd > bStart;
-        });
-    };
+    // `isSlotBooked` and its hour-long overlap arithmetic are gone. It assumed
+    // every appointment lasted exactly 60 minutes regardless of what was
+    // chosen, and it could only subtract from a hardcoded list. The server now
+    // returns what is bookable, computed against the real schedule, the real
+    // appointments and the real durations.
 
     const isSlotPast = (timeStr) => {
         if (!apptDate) return false;
@@ -571,7 +600,7 @@ const ModLawyers = () => {
         setApptTime("10:00");
         setApptDetails("");
         setApptMode("video");
-        setBookedSlots([]);
+        setSlotState("idle"); setSlots([]); setSlotNotice("");
         setShowApptModal(true);
     };
 
@@ -898,22 +927,71 @@ const ModLawyers = () => {
                             style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${apptDate ? t.primary : t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
                     </div>
 
-                    {/* Time */}
+                    {/* Time — whatever the SERVER says is bookable, never a
+                        hardcoded list. The heading says "requested" while
+                        enforcement is off, because a time the booking path will
+                        accept without checking the lawyer's hours is a request,
+                        not an availability guarantee. */}
                     <div style={{ marginBottom: 14 }}>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Preferred Time</label>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            {["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"].map(slot => {
-                                const booked = isSlotBooked(slot);
-                                const past = isSlotPast(slot);
-                                const unavailable = booked || past;
-                                return (
-                                    <button key={slot} disabled={unavailable} onClick={() => !unavailable && setApptTime(slot)}
-                                        style={{ padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${unavailable ? t.border : apptTime === slot ? t.primary : t.border}`, background: unavailable ? t.inputBg : apptTime === slot ? t.primaryGlow : "transparent", color: unavailable ? t.border : apptTime === slot ? t.primary : t.textMuted, fontSize: 12, fontWeight: 700, cursor: unavailable ? "not-allowed" : "pointer", transition: "all 0.15s", textDecoration: booked ? "line-through" : "none", opacity: unavailable ? 0.35 : 1 }}>
-                                        {slot}{past && !booked ? " ✕" : ""}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                        <label id="appt-time-label" style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>
+                            {slotsEnforced ? "Available Times (PKT)" : "Requested Time (PKT)"}
+                        </label>
+
+                        {slotState === "idle" && (
+                            <div style={{ fontSize: 12, color: t.textMuted }}>
+                                Choose a date to see times.
+                            </div>
+                        )}
+
+                        {slotState === "loading" && (
+                            <div role="status" style={{ fontSize: 12, color: t.textMuted }}>
+                                Checking this lawyer&apos;s availability…
+                            </div>
+                        )}
+
+                        {slotState === "error" && (
+                            <div role="alert" style={{ fontSize: 12, color: t.danger }}>
+                                We could not load this lawyer&apos;s availability. That is
+                                not the same as having none — please try another date or
+                                try again shortly.
+                            </div>
+                        )}
+
+                        {slotState === "unconfigured" && (
+                            <div style={{ fontSize: 12, color: t.textMuted }}>
+                                {slotNotice || "This lawyer has not set their working hours yet."}
+                            </div>
+                        )}
+
+                        {slotState === "ready" && slots.length === 0 && (
+                            <div style={{ fontSize: 12, color: t.textMuted }}>
+                                No times are available on this date. Try another day.
+                            </div>
+                        )}
+
+                        {slotState === "ready" && slots.length > 0 && (
+                            <div role="group" aria-labelledby="appt-time-label"
+                                style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                {slots.map(slot => {
+                                    const label = slot.local_time;
+                                    const chosen = apptTime === label;
+                                    return (
+                                        <button key={slot.start} type="button"
+                                            aria-pressed={chosen}
+                                            onClick={() => setApptTime(label)}
+                                            style={{ minHeight: 40, padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${chosen ? t.primary : t.border}`, background: chosen ? t.primaryGlow : "transparent", color: chosen ? t.primary : t.textMuted, fontSize: 12, fontWeight: 700, cursor: "pointer", transition: "all 0.15s", fontFamily: "inherit" }}>
+                                            {label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {slotState === "ready" && !slotsEnforced && slotNotice && (
+                            <div style={{ fontSize: 11, color: t.textFaint, marginTop: 6 }}>
+                                {slotNotice}
+                            </div>
+                        )}
                     </div>
 
                     {/* Notes */}

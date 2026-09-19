@@ -23,6 +23,7 @@ from app.core.exceptions import (
 from app.repositories.appointment_repo import AppointmentRepository
 from app.repositories.user_repo import UserRepository
 from app.services import appointment_expiry as expiry
+from app.services import lawyer_availability_service
 from app.services import appointment_transitions as transitions
 from app.services.appointment_slots import (
     alignment_error,
@@ -510,6 +511,20 @@ async def book_appointment(
     bad_duration = duration_error(duration_minutes)
     if bad_duration:
         raise AppValidationError(bad_duration)
+
+    # THE LAWYER'S OWN SCHEDULE, when the system is enforcing one.
+    #
+    # A no-op while `appointment_working_hours_enforced` is off, which is the
+    # default: every lawyer currently on the system signed up before schedules
+    # existed, and enforcing against an absent one would make all of them
+    # unbookable the moment this deployed.
+    #
+    # Placed BEFORE the idempotency replay on purpose. A retry of a request
+    # that is no longer acceptable must be refused rather than replayed out of
+    # the key — the original may have been booked while the flag was off, or
+    # before the lawyer narrowed their hours.
+    await lawyer_availability_service.assert_bookable(
+        lawyer_id, scheduled_at, duration_minutes)
 
     fingerprint = _booking_fingerprint(
         lawyer_id, case_id, scheduled_at, duration_minutes, mode, notes)

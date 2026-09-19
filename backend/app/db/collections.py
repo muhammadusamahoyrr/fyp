@@ -76,6 +76,17 @@ def get_password_reset_col() -> AsyncIOMotorCollection:
     return get_database()["password_reset_tokens"]
 
 
+def get_lawyer_availability_col() -> AsyncIOMotorCollection:
+    """One document per lawyer, `_id` = the lawyer's user id.
+
+    Its own collection rather than a field on the user: a schedule is replaced
+    wholesale, is read by clients who may not read a user document, and grows
+    its own indexes later. `_id` IS the owner, so a write cannot address
+    somebody else's row by accident.
+    """
+    return get_database()["lawyer_availability"]
+
+
 def get_appointments_col() -> AsyncIOMotorCollection:
     return get_database()["appointments"]
 

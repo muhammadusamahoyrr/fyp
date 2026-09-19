@@ -15,6 +15,8 @@ import {
     cancelAppointment as apiCancel,
     completeAppointment as apiComplete,
     listPendingOutcomes,
+    getMyWorkingHours,
+    saveMyWorkingHours,
     markNoShow as apiNoShow,
     setMeetingLink as apiSetMeetingLink,
 } from "@/lib/api.js";
@@ -298,6 +300,284 @@ function NeedsOutcome({ t, onRecorded }) {
                     {loadingMore ? "Loading…" : "Load more"}
                 </button>
             )}
+        </div>
+    );
+}
+
+/** The lawyer's own weekly working hours, and days off.
+ *
+ * WHY THIS EXISTS. Until now nothing in the product could answer "when does
+ * this lawyer work?". The client's booking form offered six hardcoded times,
+ * the same for every lawyer and every day, so Sunday 09:00 was offered as
+ * readily as Tuesday 10:00 — times nobody had agreed to.
+ *
+ * THE TIMEZONE IS STATED, ALWAYS. A weekly schedule is wall-clock: "Tuesdays
+ * from nine" means nine in Pakistan. A lawyer travelling, or a browser set to
+ * another zone, must not have to guess whose nine o'clock this is.
+ *
+ * SAVED WHOLESALE. The rule that matters most — no two intervals on one
+ * weekday may overlap — is about the set as a whole, so the server replaces
+ * the schedule rather than patching it, and this form sends all of it.
+ *
+ * It states plainly when nothing is saved. An empty schedule is NOT rendered
+ * as plausible office hours: this product does not get to decide when somebody
+ * else works.
+ */
+const WEEKDAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday",
+                        "Friday", "Saturday", "Sunday"];
+
+/** Every half-hour of the day, which is the only grid a start may land on.
+ *
+ * Not cosmetic: the overlap guarantee is a unique index over discrete
+ * half-hours, so an interval beginning at 09:15 would advertise starts the
+ * booking path must then refuse.
+ */
+const HALF_HOURS = Array.from({ length: 48 }, (_, i) => {
+    const h = String(Math.floor(i / 2)).padStart(2, "0");
+    return `${h}:${i % 2 ? "30" : "00"}`;
+});
+
+function WorkingHours({ t }) {
+    const [state, setState] = useState("loading");   // loading | ready | error
+    const [rows, setRows] = useState([]);
+    const [days, setDays] = useState([]);
+    const [configured, setConfigured] = useState(false);
+    const [enforced, setEnforced] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState("");
+    const [savedAt, setSavedAt] = useState("");
+
+    const load = useCallback(async () => {
+        setState("loading");
+        const { data, error } = await getMyWorkingHours();
+        if (error || !data) {
+            // NOT "no hours set". A failed read tells us nothing about the
+            // schedule, and rendering it as an empty one would invite the
+            // lawyer to overwrite hours they cannot currently see.
+            setState("error");
+            return;
+        }
+        setRows(data.working_hours || []);
+        setDays(data.exceptions || []);
+        setConfigured(Boolean(data.configured));
+        setEnforced(Boolean(data.enforced));
+        setState("ready");
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const addRow = () =>
+        setRows(prev => [...prev, { weekday: 0, start: "09:00", end: "17:00" }]);
+    const setRow = (index, patch) =>
+        setRows(prev => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+    const dropRow = (index) =>
+        setRows(prev => prev.filter((_, i) => i !== index));
+
+    const addDay = () => setDays(prev => [...prev, { date: "", reason: "" }]);
+    const setDay = (index, patch) =>
+        setDays(prev => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+    const dropDay = (index) =>
+        setDays(prev => prev.filter((_, i) => i !== index));
+
+    const save = async () => {
+        setSaving(true);
+        setSaveError("");
+        setSavedAt("");
+        const { data, error } = await saveMyWorkingHours({
+            working_hours: rows.map(r => ({
+                weekday: Number(r.weekday), start: r.start, end: r.end,
+            })),
+            // A day off with no date is an unfinished row, not an instruction.
+            exceptions: days
+                .filter(d => (d.date || "").trim())
+                .map(d => ({ date: d.date, reason: (d.reason || "").trim() || null })),
+        });
+        setSaving(false);
+        if (error || !data) {
+            // The server's message names the offending interval and says why —
+            // it is written for the person who has to fix it, so it is shown
+            // rather than replaced with something generic.
+            setSaveError(error?.message || "Could not save your working hours.");
+            return;
+        }
+        setRows(data.working_hours || []);
+        setDays(data.exceptions || []);
+        setConfigured(Boolean(data.configured));
+        setSavedAt(new Date().toISOString());
+    };
+
+    const box = (body, tone) => (
+        <div style={{
+            padding: "12px 14px", borderRadius: 10,
+            background: tone === "bad" ? "rgba(232,82,106,0.10)" : t.cardHi,
+            border: `1px solid ${tone === "bad" ? "rgba(232,82,106,0.35)" : t.border}`,
+            fontSize: 12, color: tone === "bad" ? "#e8526a" : t.textMuted,
+        }}>{body}</div>
+    );
+
+    if (state === "loading") return box("Loading your working hours…");
+    if (state === "error") {
+        return (
+            <div>
+                {box("We could not load your working hours. That is not the same as " +
+                     "having none — please try again before editing, so you do not " +
+                     "overwrite a schedule you cannot see.", "bad")}
+                <button onClick={load} style={{
+                    marginTop: 8, minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                    border: `1px solid ${t.border}`, background: "transparent",
+                    color: t.text, fontSize: 12, fontWeight: 700,
+                    cursor: "pointer", fontFamily: "inherit",
+                }}>Reload working hours</button>
+            </div>
+        );
+    }
+
+    const field = {
+        minHeight: 38, padding: "7px 10px", borderRadius: 8,
+        border: `1px solid ${t.border}`, background: t.inputBg,
+        color: t.text, fontSize: 12, fontFamily: "inherit",
+    };
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 12, color: t.textMuted }}>
+                All times are <strong style={{ color: t.text }}>Pakistan Standard
+                Time (PKT)</strong>, on the half hour.
+            </div>
+
+            {!configured && box(
+                "You have not set any working hours yet. Until you do, clients " +
+                "are told your availability is not configured — they are not " +
+                "shown guessed office hours.")}
+
+            {configured && !enforced && box(
+                "These hours are shown to clients, but booking does not enforce " +
+                "them yet, so a request outside them is still possible.")}
+
+            <fieldset style={{ border: "none", padding: 0, margin: 0 }}>
+                <legend style={{ fontSize: 12, fontWeight: 700, color: t.text, padding: 0, marginBottom: 8 }}>
+                    Weekly hours
+                </legend>
+                {rows.length === 0 && (
+                    <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 8 }}>
+                        No weekly hours yet.
+                    </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {rows.map((row, index) => (
+                        <div key={index} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <label style={{ fontSize: 11, color: t.textMuted }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>Day</span>
+                                <select aria-label={`Weekday for interval ${index + 1}`}
+                                    value={row.weekday}
+                                    onChange={e => setRow(index, { weekday: Number(e.target.value) })}
+                                    style={field}>
+                                    {WEEKDAY_LABELS.map((name, value) => (
+                                        <option key={value} value={value}>{name}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label style={{ fontSize: 11, color: t.textMuted }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>From</span>
+                                <select aria-label={`Start time for interval ${index + 1}`}
+                                    value={row.start}
+                                    onChange={e => setRow(index, { start: e.target.value })}
+                                    style={field}>
+                                    {HALF_HOURS.map(h => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                            </label>
+                            <label style={{ fontSize: 11, color: t.textMuted }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>To</span>
+                                <select aria-label={`End time for interval ${index + 1}`}
+                                    value={row.end}
+                                    onChange={e => setRow(index, { end: e.target.value })}
+                                    style={field}>
+                                    {HALF_HOURS.map(h => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                            </label>
+                            <button type="button" onClick={() => dropRow(index)}
+                                aria-label={`Remove interval ${index + 1}`}
+                                style={{ ...field, cursor: "pointer", color: t.textMuted, fontWeight: 700 }}>
+                                Remove
+                            </button>
+                        </div>
+                    ))}
+                </div>
+                <button type="button" onClick={addRow} style={{
+                    marginTop: 8, ...field, cursor: "pointer", fontWeight: 700,
+                }}>Add hours</button>
+            </fieldset>
+
+            <fieldset style={{ border: "none", padding: 0, margin: 0 }}>
+                <legend style={{ fontSize: 12, fontWeight: 700, color: t.text, padding: 0, marginBottom: 8 }}>
+                    Days off
+                </legend>
+                {days.length === 0 && (
+                    <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 8 }}>
+                        No days off listed.
+                    </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {days.map((day, index) => (
+                        <div key={index} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <label style={{ fontSize: 11, color: t.textMuted }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>Date</span>
+                                <input type="date" value={day.date || ""}
+                                    aria-label={`Date for day off ${index + 1}`}
+                                    onChange={e => setDay(index, { date: e.target.value })}
+                                    style={field} />
+                            </label>
+                            <label style={{ fontSize: 11, color: t.textMuted, flex: 1, minWidth: 160 }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>
+                                    Reason (private, optional)
+                                </span>
+                                <input type="text" value={day.reason || ""}
+                                    aria-label={`Reason for day off ${index + 1}`}
+                                    maxLength={200}
+                                    onChange={e => setDay(index, { reason: e.target.value })}
+                                    style={{ ...field, width: "100%", boxSizing: "border-box" }} />
+                            </label>
+                            <button type="button" onClick={() => dropDay(index)}
+                                aria-label={`Remove day off ${index + 1}`}
+                                style={{ ...field, cursor: "pointer", color: t.textMuted, fontWeight: 700 }}>
+                                Remove
+                            </button>
+                        </div>
+                    ))}
+                </div>
+                <button type="button" onClick={addDay} style={{
+                    marginTop: 8, ...field, cursor: "pointer", fontWeight: 700,
+                }}>Add day off</button>
+                <div style={{ fontSize: 11, color: t.textFaint, marginTop: 6 }}>
+                    Clients see the dates you are away, never the reason.
+                </div>
+            </fieldset>
+
+            {saveError && (
+                <div role="alert" style={{
+                    padding: "10px 12px", borderRadius: 8,
+                    background: "rgba(232,82,106,0.10)",
+                    border: "1px solid rgba(232,82,106,0.35)",
+                    fontSize: 12, color: "#e8526a",
+                }}>{saveError}</div>
+            )}
+            {savedAt && !saveError && (
+                <div role="status" style={{ fontSize: 12, color: "#3ec99a" }}>
+                    Working hours saved.
+                </div>
+            )}
+
+            <div>
+                <button type="button" onClick={save} disabled={saving} style={{
+                    minHeight: 40, padding: "9px 18px", borderRadius: 9,
+                    border: "1px solid rgba(56,216,196,0.55)",
+                    background: "rgba(56,216,196,0.14)", color: "#38d8c4",
+                    fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                    cursor: saving ? "wait" : "pointer", opacity: saving ? 0.6 : 1,
+                }}>
+                    {saving ? "Saving…" : "Save working hours"}
+                </button>
+            </div>
         </div>
     );
 }
@@ -891,6 +1171,14 @@ function AppointmentsPage() {
                                     <StatCard label="Upcoming" value={statCounts.upcoming} color="#5ab3ff" bg="rgba(90,179,255,0.12)" border="rgba(90,179,255,0.30)" />
                                     <StatCard label="Pending" value={statCounts.pending} color="#e8b84b" bg="rgba(232,184,75,0.12)" border="rgba(232,184,75,0.30)" />
                                     <StatCard label="Completed" value={statCounts.completed} color="#3ec99a" bg="rgba(62,201,154,0.12)" border="rgba(62,201,154,0.30)" />
+                                </div>
+
+                                {/* ── Working hours ───────────────────── */}
+                                <div>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>
+                                        Working hours
+                                    </div>
+                                    <WorkingHours t={t} />
                                 </div>
 
                                 {/* ── Needs outcome ───────────────────── */}

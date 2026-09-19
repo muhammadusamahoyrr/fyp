@@ -154,6 +154,22 @@ class Settings(BaseSettings):
     # When on, engine output is excluded from every analysis prompt until the
     # owning client reviews/corrects and confirms every OCR page. Confirmation
     # is hash-bound; only the separately stored confirmed value is analysed.
+    # ── LAWYER WORKING HOURS ──────────────────────────────────────────────────
+    # OFF by default, and narrowly scoped to BOOKING ACCEPTANCE.
+    #
+    # While off, booking behaves exactly as it did: any aligned future slot is
+    # accepted, because every lawyer currently on the system signed up without
+    # a schedule and turning this on for them would make them unbookable
+    # overnight. Availability is still computed and returned — but it is
+    # labelled unenforced, and a lawyer with no schedule is reported as
+    # unconfigured rather than given invented hours.
+    #
+    # While on, a booking is refused when the lawyer has no configured schedule,
+    # or when the requested time falls outside it. That is a real change to what
+    # the API accepts, which is why it is a switch somebody throws rather than a
+    # consequence of deploying.
+    appointment_working_hours_enforced: bool = False
+
     english_ocr_enabled: bool = False
     # Identifier of the reviewed benchmark/evidence used to approve production
     # activation. Development may exercise the feature without one; production
