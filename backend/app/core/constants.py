@@ -282,7 +282,15 @@ class NotificationType(str, Enum):
     # turned up.
     APPOINTMENT_NO_SHOW = "appointment_no_show"
     APPOINTMENT_EXPIRED = "appointment_expired"
+    # RESERVED, and still unused: the T-24h / T-1h reminders before a
+    # consultation. Kept distinct from the nudge below because the two say
+    # opposite things — one is "this is about to happen", the other is "this
+    # already happened and nobody recorded what came of it". A client filtering
+    # or muting reminders must not thereby mute a lawyer's outstanding work,
+    # and a single type would make the two indistinguishable for ever once
+    # rows carrying it exist.
     APPOINTMENT_REMINDER = "appointment_reminder"
+    APPOINTMENT_OUTCOME_NUDGE = "appointment_outcome_nudge"
     CAUSELIST_LISTED = "causelist_listed"
     PAYMENT_REQUESTED = "payment_requested"
     PAYMENT_RECEIVED = "payment_received"

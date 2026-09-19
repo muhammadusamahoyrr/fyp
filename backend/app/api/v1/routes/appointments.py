@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.constants import AppointmentStatus
@@ -5,6 +7,7 @@ from app.core.rate_limit import limiter
 from app.dependencies import get_current_user, require_client, require_lawyer
 from app.schemas.appointment import (
     AppointmentOut,
+    OutcomeQueueResponse,
     AvailabilityResponse,
     BookAppointmentRequest,
     CancelAppointmentRequest,
@@ -14,7 +17,7 @@ from app.schemas.appointment import (
     SetMeetingLinkRequest,
 )
 from app.schemas.common import PaginatedResponse, StatusResponse
-from app.services import appointment_service
+from app.services import appointment_outcomes, appointment_service
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
@@ -78,6 +81,39 @@ async def get_lawyer_availability(
 ):
     """Return already-booked time slots for a lawyer on a specific date."""
     return await appointment_service.get_availability(lawyer_id, date)
+
+
+@router.get("/outcomes/pending", response_model=OutcomeQueueResponse)
+async def pending_outcomes(
+    page_size: int = Query(default=25, ge=1, le=200),
+    after_end_at: datetime | None = Query(default=None),
+    after_id: str | None = Query(default=None),
+    cutoff: datetime | None = Query(default=None),
+    current_user: dict = Depends(require_lawyer),
+):
+    """Consultations this lawyer has finished and not yet reported on.
+
+    `require_lawyer`, and the lawyer is taken from the TOKEN — never from a
+    query parameter. The queue lists other people's consultations, so "whose
+    queue" is not a thing a caller may ask for; a `lawyer_id` parameter here
+    would be an authorisation bug wearing the clothes of a filter.
+
+    KEYSET, NOT A PAGE NUMBER. Rows leave this queue as outcomes are recorded,
+    and with an offset every departure shifts the rows behind it so the next
+    page steps over one nobody has looked at — hiding exactly what the queue
+    exists to surface. Pass `next_cursor` back whole: a partial cursor is
+    refused rather than silently restarting at the beginning.
+
+    Declared BEFORE `/{appointment_id}` for readability only; the two cannot
+    collide, since this path has two segments and that one has one.
+    """
+    return await appointment_outcomes.outstanding_outcomes_for_response(
+        lawyer_id=current_user["_id"],
+        page_size=page_size,
+        after_end_at=after_end_at,
+        after_id=after_id,
+        cutoff=cutoff,
+    )
 
 
 @router.get("/{appointment_id}", response_model=AppointmentOut)

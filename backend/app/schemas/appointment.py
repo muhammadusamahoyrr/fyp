@@ -273,6 +273,29 @@ class BookedSlot(BaseModel):
     duration_minutes: int
 
 
+class OutcomeQueueCursor(BaseModel):
+    """Where a scan of the outcome queue left off.
+
+    All three parts, always. `after_end_at` and `after_id` are the sort key in
+    full — `end_at` alone is not unique — and `cutoff` pins the scan to the
+    instant it began, so pages do not walk a moving edge. The server refuses a
+    partial cursor rather than silently restarting, so this is returned and
+    passed back whole.
+    """
+
+    after_end_at: datetime
+    after_id: str
+    cutoff: datetime
+
+
+class OutcomeQueueResponse(BaseModel):
+    """Consultations this lawyer has not recorded an outcome for."""
+
+    items: list[AppointmentOut] = Field(default_factory=list)
+    next_cursor: OutcomeQueueCursor | None = None
+    cutoff: datetime
+
+
 class AvailabilityResponse(BaseModel):
     lawyer_id: str
     date: str

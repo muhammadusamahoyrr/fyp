@@ -852,6 +852,29 @@ export async function completeAppointment(id, { lawyer_notes, meeting_link } = {
   });
 }
 
+/** Consultations this lawyer has finished and not recorded an outcome for.
+ *
+ * KEYSET, not a page number. Rows leave this queue as outcomes are recorded,
+ * so an offset would shift under the caller and the next page would step over
+ * a row nobody has seen. Pass `next_cursor` back WHOLE — it carries the sort
+ * position and the cutoff the scan started with, and the server refuses a
+ * partial one rather than silently restarting at the beginning.
+ *
+ * The lawyer is taken from the token; there is deliberately no way to ask for
+ * somebody else's queue.
+ */
+export async function listPendingOutcomes({ page_size, cursor } = {}) {
+  const params = new URLSearchParams();
+  if (page_size) params.set('page_size', String(page_size));
+  if (cursor) {
+    params.set('after_end_at', cursor.after_end_at);
+    params.set('after_id', cursor.after_id);
+    params.set('cutoff', cursor.cutoff);
+  }
+  const qs = params.toString();
+  return apiFetch(`/appointments/outcomes/pending${qs ? `?${qs}` : ''}`);
+}
+
 export async function markNoShow(id) {
   return apiFetch(`/appointments/${id}/no-show`, { method: 'PATCH' });
 }

@@ -244,6 +244,155 @@ class AppointmentRepository(BaseRepository):
         cursor = self.col.find(query).sort("_id", ASCENDING).limit(limit)
         return await cursor.to_list(length=limit)
 
+    async def find_outstanding_outcomes(
+        self,
+        lawyer_id: str,
+        cutoff: datetime,
+        limit: int,
+        after_end_at: datetime | None = None,
+        after_id: str | None = None,
+    ) -> list[dict]:
+        """One page of this lawyer's consultations that still need an outcome.
+
+        READ-ONLY, and LAWYER-SCOPED IN THE QUERY. The lawyer is a filter term
+        rather than something checked afterwards, for the same reason
+        `find_for_actor` puts the actor in the query: a check applied after the
+        read is a check that can be forgotten, and this is a list of other
+        people's consultations.
+
+        `cutoff` is passed IN rather than computed here. The grace period is
+        policy, and a repository that decided it would put the rule in a place
+        no test can vary and no caller can see.
+
+        `$lt`, so a row exactly at the cutoff is not yet outstanding.
+
+        KEYSET, NOT SKIP. The point of this queue is that rows LEAVE it — a
+        lawyer records an outcome and the row stops matching. With `skip` every
+        such departure shifts the offset and the next page silently jumps over
+        a row nobody has looked at: the very rows this is meant to surface are
+        the ones it would hide. A keyset cursor is anchored to a position in the
+        sort, not to a count of rows before it, so a departure cannot move it.
+
+        THE SORT IS `(end_at, _id)` AND THE CURSOR MATCHES IT. `end_at` alone is
+        not unique — two consultations can end at the same instant, which is
+        ordinary rather than exotic when both are booked on the half-hour grid —
+        and a cursor on a non-unique key either repeats rows or skips them at
+        every page boundary. `_id` is the tiebreak that makes the ordering
+        total.
+        """
+        query: dict = {
+            "lawyer_id": lawyer_id,
+            "status": AppointmentStatus.CONFIRMED.value,
+            "end_at": {"$lt": cutoff},
+        }
+        if after_end_at is not None and after_id is not None:
+            # Strictly after the cursor in `(end_at, _id)` order: a later
+            # `end_at`, or the same `end_at` and a later `_id`. Both halves keep
+            # the cutoff, so the page cannot wander past the queue's edge.
+            query["$and"] = [{"$or": [
+                {"end_at": {"$gt": after_end_at, "$lt": cutoff}},
+                {"end_at": after_end_at, "_id": {"$gt": after_id}},
+            ]}]
+        cursor = (self.col.find(query)
+                  .sort([("end_at", ASCENDING), ("_id", ASCENDING)])
+                  .limit(limit))
+        return await cursor.to_list(length=limit)
+
+    async def find_outcome_notice_candidates(
+        self,
+        cutoff: datetime,
+        floor: datetime,
+        limit: int,
+        *,
+        retries: bool = False,
+        retry_due_by: datetime | None = None,
+    ) -> list[dict]:
+        """Confirmed consultations whose lawyer has not been nudged yet.
+
+        TWO POPULATIONS, QUERIED SEPARATELY, and that is the anti-starvation
+        design rather than an optimisation.
+
+        A row that has been notified carries `outcome_notice_sent_at` and is
+        excluded here for ever, so a growing history of handled rows cannot
+        consume a later run's budget. A row whose send FAILED carries no such
+        mark — it must stay retryable — so it would otherwise sit at the front
+        of the queue on every run, ahead of newer rows, and a handful of
+        permanently failing rows would starve everything behind them.
+
+        `retries=False` returns only rows never attempted; `retries=True` only
+        rows that have been. The caller drains fresh rows first and spends what
+        is left on retries, so a new consultation is never waiting behind an
+        old failure, and an old failure is never abandoned.
+
+        `floor` is the activation boundary — rows that became due before the
+        feature was switched on. Excluding them is what stops a first run
+        notifying about every consultation in the system's history.
+        """
+        attempts = "outcome_notice_attempts"
+        query: dict = {
+            "status": AppointmentStatus.CONFIRMED.value,
+            "end_at": {"$lt": cutoff, "$gte": floor},
+            "outcome_notice_sent_at": {"$exists": False},
+            attempts: {"$exists": bool(retries)},
+        }
+        if retries and retry_due_by is not None:
+            # BACKOFF, expressed as a stored instant rather than as arithmetic
+            # over the attempt count. A recipient that cannot be reached is not
+            # attempted on every run for ever; the wait is computed once, when
+            # the attempt fails, so this query stays a plain range read.
+            query["outcome_notice_retry_after"] = {"$lte": retry_due_by}
+        sort = ([(attempts, ASCENDING), ("end_at", ASCENDING), ("_id", ASCENDING)]
+                if retries
+                else [("end_at", ASCENDING), ("_id", ASCENDING)])
+        cursor = self.col.find(query).sort(sort).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def mark_outcome_notice_sent(
+        self, appt_id: str, when: datetime,
+    ) -> None:
+        """Record that the lawyer has been nudged about this consultation.
+
+        WRITTEN ONLY AFTER A SUCCESSFUL SEND, which is what makes a failure
+        retryable: an unmarked row comes back next run. It is not a claim taken
+        before the work — a claim that outlived a crash would silence a
+        consultation nobody was ever told about.
+
+        This marks the NOTICE, not the appointment's outcome. The status is
+        untouched: only a person can say what happened at a consultation.
+        """
+        await self.col.update_one(
+            {"_id": appt_id},
+            {"$set": {"outcome_notice_sent_at": when},
+             "$unset": {"outcome_notice_attempts": "",
+                        "outcome_notice_last_attempt_at": "",
+                        "outcome_notice_retry_after": ""}},
+        )
+
+    async def record_outcome_notice_attempt(
+        self, appt_id: str, when: datetime, retry_after: datetime,
+    ) -> None:
+        """Count a failed attempt, without ever excluding the row.
+
+        The counter exists to ORDER retries behind fresh rows, not to give up
+        on them. Nothing here filters a row out on attempt count: a
+        consultation whose lawyer could not be reached is still a consultation
+        nobody has reported an outcome for.
+        """
+        await self.col.update_one(
+            {"_id": appt_id},
+            {"$inc": {"outcome_notice_attempts": 1},
+             "$set": {"outcome_notice_last_attempt_at": when,
+                      "outcome_notice_retry_after": retry_after}},
+        )
+
+    async def count_outstanding_outcomes(self, cutoff: datetime) -> int:
+        """How many confirmed consultations ended before `cutoff` with no
+        outcome recorded. A COUNT — no documents leave the database."""
+        return await self.col.count_documents({
+            "status": AppointmentStatus.CONFIRMED.value,
+            "end_at": {"$lt": cutoff},
+        })
+
     async def expire_pending(
         self, appt_id: str, expected_version: int,
     ) -> dict | None:

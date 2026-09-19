@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
     formatPkt, isPktToday, pktHourMinute, pktDayKey, pktHour,
     pktWeekDayKeys, pktToday, dayOfMonth,
@@ -14,6 +14,7 @@ import {
     confirmAppointment as apiConfirm,
     cancelAppointment as apiCancel,
     completeAppointment as apiComplete,
+    listPendingOutcomes,
     markNoShow as apiNoShow,
     setMeetingLink as apiSetMeetingLink,
 } from "@/lib/api.js";
@@ -127,6 +128,180 @@ function StatusBadge({ status }) {
 }
 
 // ── Stat card ─────────────────────────────────────────────────
+/** Consultations this lawyer has finished and never reported an outcome for.
+ *
+ * READ FROM THE SERVER, NOT FILTERED FROM THE PAGE. The list above fetches
+ * fifty appointments and never asks for a second page, so a filter over it
+ * would show a backlog that stops exactly where that page ends — and the whole
+ * point of this queue is the rows that have fallen off the end of a list
+ * nobody scrolls. It has its own endpoint, its own cursor, and its own paging.
+ *
+ * THREE STATES, KEPT APART. "Loading", "nothing to do" and "we could not ask"
+ * look identical if they share a branch, and the third silently becomes the
+ * second — a lawyer is told their queue is clear when in fact the request
+ * failed. `apiFetch` RESOLVES on failure with `{data: null, error}` rather than
+ * throwing, so an unchecked `data?.items || []` renders a confident empty list
+ * out of a network error. Each state is therefore its own branch here.
+ *
+ * Recording an outcome goes through the SAME guarded endpoints the cards above
+ * use, and the queue is then re-read from the server rather than patched
+ * locally: the server decides whether the transition happened, and a row that
+ * failed to move must stay in the queue.
+ */
+function NeedsOutcome({ t, onRecorded }) {
+    const [state, setState] = useState("loading");   // loading | ready | error
+    const [items, setItems] = useState([]);
+    const [cursor, setCursor] = useState(null);
+    const [busyId, setBusyId] = useState(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+
+    /** Re-read from the first page.
+     *
+     * Deliberately not an incremental patch of local state. A recorded outcome
+     * removes a row from the SERVER'S queue, and re-reading is the only way to
+     * see the queue the server now has — including the row that moved up from
+     * a page this client had not reached.
+     */
+    const load = useCallback(async () => {
+        setState("loading");
+        const { data, error } = await listPendingOutcomes({ page_size: 25 });
+        if (error || !data) {
+            // NOT an empty queue. Saying "nothing to do" here would tell a
+            // lawyer their record is clear on the strength of a failed read.
+            setState("error");
+            return;
+        }
+        setItems(data.items || []);
+        setCursor(data.next_cursor || null);
+        setState("ready");
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const loadMore = async () => {
+        if (!cursor || loadingMore) return;
+        setLoadingMore(true);
+        const { data, error } = await listPendingOutcomes({ page_size: 25, cursor });
+        setLoadingMore(false);
+        if (error || !data) return;          // the rows already shown stay
+        setItems(prev => [...prev, ...(data.items || [])]);
+        setCursor(data.next_cursor || null);
+    };
+
+    const record = async (id, action) => {
+        setBusyId(id);
+        const { error } = action === "complete"
+            ? await apiComplete(id)
+            : await apiNoShow(id);
+        setBusyId(null);
+        if (error) {
+            // The server refused — a stale row, or one already dealt with in
+            // another tab. Re-read rather than guess: the row may still belong
+            // in the queue, and removing it here would hide it for ever.
+            await load();
+            return;
+        }
+        await load();
+        if (onRecorded) onRecorded();
+    };
+
+    const card = (body) => (
+        <div style={{
+            padding: "14px 16px", borderRadius: 12, background: t.cardHi,
+            border: `1px solid ${t.border}`, fontSize: 13, color: t.textMuted,
+        }}>{body}</div>
+    );
+
+    if (state === "loading") return card("Checking for consultations that need an outcome…");
+
+    if (state === "error") {
+        return (
+            <div style={{
+                padding: "14px 16px", borderRadius: 12,
+                background: "rgba(232,82,106,0.10)",
+                border: "1px solid rgba(232,82,106,0.35)",
+            }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#e8526a" }}>
+                    Could not load outstanding outcomes
+                </div>
+                <div style={{ fontSize: 12, color: t.textMuted, marginTop: 4 }}>
+                    This is not the same as having none — the request failed, so
+                    we do not know. Try again.
+                </div>
+                <button onClick={load} style={{
+                    marginTop: 10, minHeight: 36, padding: "8px 14px",
+                    borderRadius: 8, border: `1px solid ${t.border}`,
+                    background: "transparent", color: t.text, fontSize: 12,
+                    fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                }}>Try again</button>
+            </div>
+        );
+    }
+
+    if (items.length === 0) {
+        return card("No consultations are waiting on an outcome.");
+    }
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {items.map(item => (
+                <div key={item.id} style={{
+                    padding: "12px 16px", borderRadius: 12, background: t.cardHi,
+                    border: `1px solid ${t.border}`, display: "flex",
+                    flexWrap: "wrap", gap: 10, alignItems: "center",
+                    justifyContent: "space-between",
+                }}>
+                    <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>
+                            {item.client_name || "Client"}
+                        </div>
+                        <div style={{ fontSize: 12, color: t.textMuted, marginTop: 2 }}>
+                            Ended {formatPkt(item.end_at, {
+                                day: "numeric", month: "short", year: "numeric",
+                                hour: "2-digit", minute: "2-digit",
+                            })}
+                        </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                            disabled={busyId === item.id}
+                            onClick={() => record(item.id, "complete")}
+                            style={{
+                                minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                                border: "1px solid rgba(62,201,154,0.55)",
+                                background: "rgba(62,201,154,0.14)", color: "#3ec99a",
+                                fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                                cursor: busyId === item.id ? "wait" : "pointer",
+                                opacity: busyId === item.id ? 0.6 : 1,
+                            }}>Completed</button>
+                        <button
+                            disabled={busyId === item.id}
+                            onClick={() => record(item.id, "no_show")}
+                            style={{
+                                minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                                border: "1px solid rgba(158,142,205,0.55)",
+                                background: "rgba(158,142,205,0.14)", color: "#9e8ecd",
+                                fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                                cursor: busyId === item.id ? "wait" : "pointer",
+                                opacity: busyId === item.id ? 0.6 : 1,
+                            }}>No Show</button>
+                    </div>
+                </div>
+            ))}
+            {cursor && (
+                <button onClick={loadMore} disabled={loadingMore} style={{
+                    minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                    border: `1px solid ${t.border}`, background: "transparent",
+                    color: t.textMuted, fontSize: 12, fontWeight: 700,
+                    fontFamily: "inherit", cursor: "pointer",
+                }}>
+                    {loadingMore ? "Loading…" : "Load more"}
+                </button>
+            )}
+        </div>
+    );
+}
+
 function StatCard({ label, value, color, bg, border }) {
     return (
         <div style={{
@@ -716,6 +891,14 @@ function AppointmentsPage() {
                                     <StatCard label="Upcoming" value={statCounts.upcoming} color="#5ab3ff" bg="rgba(90,179,255,0.12)" border="rgba(90,179,255,0.30)" />
                                     <StatCard label="Pending" value={statCounts.pending} color="#e8b84b" bg="rgba(232,184,75,0.12)" border="rgba(232,184,75,0.30)" />
                                     <StatCard label="Completed" value={statCounts.completed} color="#3ec99a" bg="rgba(62,201,154,0.12)" border="rgba(62,201,154,0.30)" />
+                                </div>
+
+                                {/* ── Needs outcome ───────────────────── */}
+                                <div>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>
+                                        Needs outcome
+                                    </div>
+                                    <NeedsOutcome t={t} onRecorded={reload} />
                                 </div>
 
                                 {/* ── Filter tabs ─────────────────────── */}

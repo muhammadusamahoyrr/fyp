@@ -130,6 +130,23 @@ APPOINTMENT_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
              "rather than record that it expired, destroying the record of a "
              "legal engagement to save a status write."),
     ),
+    # 5 — the outstanding-outcome queue's read.
+    IndexSpec(
+        collection=APPOINTMENTS,
+        name="appointment_confirmed_outcome",
+        keys=(("status", ASCENDING), ("end_at", ASCENDING), ("_id", ASCENDING)),
+        kind=QUERY,
+        partial_filter={"status": AppointmentStatus.CONFIRMED.value},
+        why=("QUERY, NOT CORRECTNESS. Nothing is wrong without it. It serves "
+             "services/appointment_outcomes.py, which lists the consultations "
+             "a lawyer has not reported an outcome for. Equality on `status`, "
+             "then the RANGE key `end_at`, then `_id` — which is here because "
+             "the queue is KEYSET-paginated on `(end_at, _id)` and the tiebreak "
+             "belongs in the index that serves the sort, or every page boundary "
+             "costs an in-memory sort of the rows sharing an `end_at`. Partial "
+             "on confirmed alone: completed and cancelled rows are the ones "
+             "that accumulate for ever, and the queue never asks about them."),
+    ),
 )
 
 
