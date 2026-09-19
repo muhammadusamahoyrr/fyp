@@ -104,6 +104,46 @@ async def acquire_period_lock(key: str, ttl_seconds: int) -> bool:
         return True
 
 
+async def acquire_period_lock_strict(key: str, ttl_seconds: int,
+                                     job: str) -> bool:
+    """Claim a recurring-period lock, FAILING CLOSED. Nothing else changes.
+
+    `acquire_period_lock` above fails OPEN in two ways — no Redis configured,
+    or Redis erroring — and returns True so the sweep runs anyway. That is the
+    right trade for an idempotent sweep whose worst duplicate outcome is wasted
+    work.
+
+    IT IS THE WRONG TRADE FOR SENDING MESSAGES TO PEOPLE. Every worker in a
+    deployment runs the scheduler loop; if the lock says yes to all of them
+    because Redis is unreachable, every worker dispatches the same batch. The
+    notification store's unique `logical_event_id` still collapses those into
+    one delivered notice — but the protection would be resting entirely on a
+    database constraint reached by N simultaneous writers, and the honest
+    behaviour when we cannot establish exclusivity is to skip the cycle. A
+    reminder arriving fifteen minutes later is nothing; a storm of duplicate
+    dispatch attempts is not.
+
+    Returns True ONLY when Redis affirmatively granted the claim.
+
+    The log carries the JOB NAME and the exception CLASS, never the exception:
+    driver messages carry URIs and credentials, and this runs unattended.
+    """
+    client = get_redis()
+    if client is None:
+        logger.info(
+            "appointment_lock_unavailable job=%s reason=redis_disabled", job)
+        return False
+    try:
+        import secrets
+        ok = await client.set(key, secrets.token_hex(8), nx=True,
+                              ex=ttl_seconds)
+        return bool(ok)
+    except Exception as exc:
+        logger.warning(
+            "appointment_lock_failed job=%s error=%s", job, type(exc).__name__)
+        return False
+
+
 @asynccontextmanager
 async def redis_lock(key: str, ttl_seconds: int = 30) -> AsyncIterator[bool]:
     """Best-effort distributed mutex for a critical section.

@@ -271,11 +271,38 @@ async def lifespan(app: FastAPI):
     # default cannot silently leave the outbox undrained. It no-ops while the
     # feature flag is off.
     scheduler_tasks.append(_asyncio.create_task(_documents_v2_relay()))
+
+    # APPOINTMENT NOTIFICATIONS: no task at all unless a flag is on.
+    #
+    # Deliberately not behind the `redis_enabled() or run_schedulers` gate
+    # above, and deliberately not a loop that wakes to find nothing to do.
+    # `appointment_scheduler_task()` returns None while both feature flags are
+    # false, so a default deployment has no appointment scheduler in existence
+    # — which is a stronger guarantee than one that exists and is trusted to
+    # keep deciding against acting.
+    #
+    # The logic lives in services/appointment_scheduler.py; this file only
+    # starts and stops it.
+    from app.services.appointment_scheduler import appointment_scheduler_task
+
+    appointment_task = appointment_scheduler_task()
     yield
     warmup_task.cancel()
     ws_subscriber_task.cancel()
     for task in scheduler_tasks:
         task.cancel()
+
+    # CANCELLED *AND AWAITED*. Cancellation only requests that a task stop; a
+    # task cancelled and never awaited can still be mid-dispatch when the
+    # process exits, and the loop closing underneath it is where "Task was
+    # destroyed but it is pending" comes from. Awaiting it means the cycle in
+    # flight has actually unwound before shutdown continues.
+    if appointment_task is not None:
+        appointment_task.cancel()
+        try:
+            await appointment_task
+        except _asyncio.CancelledError:
+            pass
 
     # Before Redis closes: threshold samples are batched, so up to
     # _FLUSH_EVERY-1 of them exist only in this process. Dropping them loses

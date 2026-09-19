@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -170,6 +172,43 @@ class Settings(BaseSettings):
     # consequence of deploying.
     appointment_working_hours_enforced: bool = False
 
+    # ── APPOINTMENT SCHEDULER ──────────────────────────────────────────────────
+    # Both OFF by default, and independently. The reminder and outcome-nudge
+    # mechanisms exist and are tested; nothing runs them until somebody turns
+    # one of these on, per environment, deliberately.
+    #
+    # Enabling either sends messages to real people, so the defaults here are
+    # the safety property — not a placeholder to be flipped by a deployment.
+    appointment_reminders_enabled: bool = False
+    appointment_outcome_nudges_enabled: bool = False
+
+    # THE ACTIVATION INSTANT FOR OUTCOME NUDGES, and it is deliberately not
+    # derivable from anything.
+    #
+    # A consultation is eligible for a nudge only if it became due at or after
+    # this moment, which is what stops a first run notifying about every
+    # unreported consultation in the product's history. Defaulting it to "when
+    # this process started" would make the blast radius a property of the last
+    # deployment — and a restart would silently move it, so a redeploy could
+    # re-open a window somebody had already closed.
+    #
+    # Naive values are REFUSED rather than assumed to be UTC: "2026-01-01
+    # 09:00" means different instants in different places, and guessing which
+    # decides how much history gets messaged.
+    appointment_outcome_nudges_activated_at: datetime | None = None
+
+    # How often the scheduler wakes. Bounded at both ends: too short is a
+    # thrash against the notification store, too long makes a T-1h reminder
+    # arrive after the consultation.
+    appointment_scheduler_interval_minutes: int = 15
+
+    # Per-cycle caps, passed to the services as their `limit`. Conservative:
+    # the first real run against an existing deployment meets the whole backlog
+    # at once, and a batch that messages everybody simultaneously is an
+    # incident whichever way the messages go.
+    appointment_reminder_batch: int = 100
+    appointment_outcome_nudge_batch: int = 25
+
     english_ocr_enabled: bool = False
     # Identifier of the reviewed benchmark/evidence used to approve production
     # activation. Development may exercise the feature without one; production
@@ -197,6 +236,57 @@ class Settings(BaseSettings):
     def validate_token_lifetime(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("token lifetimes must be positive")
+        return value
+
+    @field_validator("appointment_outcome_nudges_activated_at")
+    @classmethod
+    def _activation_must_be_aware(cls, value):
+        """Refuse a naive activation instant; normalise an aware one to UTC.
+
+        A naive timestamp is not a moment — it is a wall-clock reading whose
+        meaning depends on where it is read. Accepting one here would let the
+        same configuration line mean different amounts of message history in
+        different deployments.
+        """
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(
+                "appointment_outcome_nudges_activated_at must include a UTC "
+                "offset (e.g. 2026-10-01T00:00:00Z) — a naive timestamp does "
+                "not identify an instant, and this value decides how much "
+                "history gets notified")
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def _outcome_nudges_need_an_activation_instant(self):
+        """FAIL CLOSED. Enabling nudges without a fixed activation instant
+        would make the first run's scope whatever the clock happened to say."""
+        if (self.appointment_outcome_nudges_enabled
+                and self.appointment_outcome_nudges_activated_at is None):
+            raise ValueError(
+                "appointment_outcome_nudges_enabled requires "
+                "appointment_outcome_nudges_activated_at — without a fixed "
+                "instant the first run would decide for itself how much of "
+                "the backlog to notify")
+        return self
+
+    @field_validator("appointment_scheduler_interval_minutes")
+    @classmethod
+    def _interval_is_sane(cls, value):
+        if not 1 <= value <= 720:
+            raise ValueError(
+                "appointment_scheduler_interval_minutes must be between 1 and "
+                "720 — shorter thrashes the notification store, longer makes a "
+                "T-1h reminder arrive after the consultation")
+        return value
+
+    @field_validator("appointment_reminder_batch",
+                     "appointment_outcome_nudge_batch")
+    @classmethod
+    def _batch_is_sane(cls, value):
+        if not 1 <= value <= 500:
+            raise ValueError("batch caps must be between 1 and 500")
         return value
 
     @model_validator(mode="after")
