@@ -385,6 +385,50 @@ class AppointmentRepository(BaseRepository):
                       "outcome_notice_retry_after": retry_after}},
         )
 
+    async def find_due_reminders(
+        self,
+        earliest: datetime,
+        latest: datetime,
+        limit: int,
+        after_scheduled_at: datetime | None = None,
+        after_id: str | None = None,
+    ) -> list[dict]:
+        """Confirmed appointments starting in `(earliest, latest]`.
+
+        OPEN AT THE NEAR END, closed at the far end, so the two reminder
+        windows partition cleanly: an appointment exactly 23 hours away belongs
+        to neither rather than both.
+
+        KEYSET, on `(scheduled_at, _id)`. `scheduled_at` alone is not unique —
+        two consultations with different lawyers can start at the same instant,
+        which is ordinary on a half-hour grid — and a cursor on a non-unique
+        key repeats or skips rows at every page boundary. `_id` is the tiebreak
+        that makes the ordering total.
+        """
+        query: dict = {
+            "status": AppointmentStatus.CONFIRMED.value,
+            "scheduled_at": {"$gt": earliest, "$lte": latest},
+        }
+        if after_scheduled_at is not None and after_id is not None:
+            query["$and"] = [{"$or": [
+                {"scheduled_at": {"$gt": after_scheduled_at, "$lte": latest}},
+                {"scheduled_at": after_scheduled_at, "_id": {"$gt": after_id}},
+            ]}]
+        cursor = (self.col.find(query)
+                  .sort([("scheduled_at", ASCENDING), ("_id", ASCENDING)])
+                  .limit(limit))
+        return await cursor.to_list(length=limit)
+
+    async def count_due_reminders(
+        self, earliest: datetime, latest: datetime,
+    ) -> int:
+        """How many confirmed appointments start in that range. A COUNT — no
+        documents leave the database."""
+        return await self.col.count_documents({
+            "status": AppointmentStatus.CONFIRMED.value,
+            "scheduled_at": {"$gt": earliest, "$lte": latest},
+        })
+
     async def count_outstanding_outcomes(self, cutoff: datetime) -> int:
         """How many confirmed consultations ended before `cutoff` with no
         outcome recorded. A COUNT — no documents leave the database."""

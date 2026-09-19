@@ -147,6 +147,26 @@ APPOINTMENT_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
              "on confirmed alone: completed and cancelled rows are the ones "
              "that accumulate for ever, and the queue never asks about them."),
     ),
+    # 6 — the reminder sweep's read.
+    IndexSpec(
+        collection=APPOINTMENTS,
+        name="appointment_confirmed_reminder",
+        keys=(("status", ASCENDING), ("scheduled_at", ASCENDING),
+              ("_id", ASCENDING)),
+        kind=QUERY,
+        partial_filter={"status": AppointmentStatus.CONFIRMED.value},
+        why=("QUERY, NOT CORRECTNESS. Nothing is wrong without it, and it must "
+             "never block booking or startup — a missing performance index is "
+             "an outage for a reason that is not the reason. It serves "
+             "services/appointment_reminders.py, which selects confirmed "
+             "appointments starting inside the T-24h and T-1h windows. "
+             "Equality on `status`, then the RANGE key `scheduled_at`, then "
+             "`_id` — the keyset tiebreak, which belongs in the index serving "
+             "the sort or every page boundary costs an in-memory sort of the "
+             "rows sharing a start. Partial on confirmed: nothing else is ever "
+             "reminded about, and the completed and cancelled rows excluded "
+             "are the ones that accumulate for ever."),
+    ),
 )
 
 
