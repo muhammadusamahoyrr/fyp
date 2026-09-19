@@ -584,20 +584,6 @@ async def audit_reminders(now: datetime) -> dict:
 
     survey = await appointment_reminders.survey_due_reminders(now=now)
 
-    # The strict lock is what stops every worker dispatching the same batch. It
-    # cannot be exercised without taking a lock, which would suppress a real
-    # cycle for its whole TTL - so what is checked is that the scheduler is
-    # wired to the fail-closed acquirer at all, which is inspectable and is the
-    # thing most likely to be got wrong by a later edit.
-    from app.core import redis_client
-    from app.services import appointment_scheduler
-
-    strict_available = hasattr(redis_client, "acquire_period_lock_strict")
-    strict_wired = (
-        strict_available
-        and getattr(appointment_scheduler, "acquire_period_lock_strict", None)
-        is getattr(redis_client, "acquire_period_lock_strict", None))
-
     return {
         "due": {window: int(count) for window, count in survey["due"].items()},
         "due_total": int(survey["total"]),
@@ -606,8 +592,111 @@ async def audit_reminders(now: datetime) -> dict:
         "interval_minutes": int(
             getattr(settings, "appointment_scheduler_interval_minutes", 0)),
         "batch_size": int(getattr(settings, "appointment_reminder_batch", 0)),
-        "strict_lock_available": bool(strict_available),
-        "strict_lock_wired": bool(strict_wired),
+    }
+
+
+# ---------------------------------------------------------------------------
+# The strict-lock backend, shared by both dispatching jobs
+# ---------------------------------------------------------------------------
+
+# Bounded, and short. This runs against whatever the target environment points
+# at; an audit that hangs on an unreachable Redis is an audit nobody finishes.
+REDIS_PING_TIMEOUT_SECONDS = 3.0
+
+
+async def _open_redis(url: str):
+    """The audit's OWN client, never the application's shared one.
+
+    `get_redis()` caches a module global that the running application uses.
+    Populating it from here would leave the process holding a connection the
+    audit opened, and closing it afterwards would shut one the application was
+    relying on. A separate client is opened, pinged and closed.
+    """
+    from redis import asyncio as aioredis
+
+    return aioredis.from_url(
+        url,
+        socket_connect_timeout=REDIS_PING_TIMEOUT_SECONDS,
+        socket_timeout=REDIS_PING_TIMEOUT_SECONDS,
+    )
+
+
+async def _redis_reachable(url: str) -> bool:
+    """One bounded PING. Reads nothing, writes nothing, locks nothing.
+
+    A PING and not a lock acquisition, deliberately. Taking the real lock would
+    prove reachability and SUPPRESS A REAL CYCLE for the whole of its TTL - an
+    audit that silences the next batch of reminders to report that reminders
+    could be sent. Writing a throwaway key would be a write, from a tool whose
+    entire claim is that it performs none.
+    """
+    client = None
+    try:
+        client = await _open_redis(url)
+        await asyncio.wait_for(client.ping(), REDIS_PING_TIMEOUT_SECONDS)
+        return True
+    except Exception:
+        # Deliberately swallowed WITHOUT logging the exception. A Redis driver
+        # error carries the URL, and for a `rediss://` target that URL carries
+        # the token. The report says unreachable; it does not say why, because
+        # every available way of saying why names the host or the credential.
+        return False
+    finally:
+        if client is not None:
+            close = getattr(client, "aclose", None) or getattr(
+                client, "close", None)
+            if close is not None:
+                try:
+                    maybe = close()
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+                except Exception:
+                    pass
+
+
+async def audit_strict_lock() -> dict:
+    """Is the fail-closed lock wired, configured, and actually answering?
+
+    THREE SEPARATE QUESTIONS, reported separately because they fail
+    differently and only one of them is visible in the code:
+
+      wired       the scheduler calls the fail-closed acquirer rather than the
+                  fail-open one. A later edit swapping them back is the most
+                  likely regression and the least visible.
+      configured  REDIS_URL is set at all. Absent, `get_redis()` returns None
+                  and the strict lock returns False for every job, for ever -
+                  so the scheduler would run and never dispatch anything.
+      reachable   Redis answers. Configured-but-down produces exactly the same
+                  outcome as not configured, and an audit that checked only
+                  configuration would call it ready.
+
+    Reporting one boolean for all three would hide which of them to fix.
+    """
+    from app.core import redis_client
+    from app.core.config import settings
+    from app.services import appointment_scheduler
+
+    available = hasattr(redis_client, "acquire_period_lock_strict")
+    wired = bool(
+        available
+        and getattr(appointment_scheduler, "acquire_period_lock_strict", None)
+        is getattr(redis_client, "acquire_period_lock_strict", None))
+
+    url = getattr(settings, "redis_url", "") or ""
+    configured = bool(url)
+    # None rather than False when there is nothing to reach: "we did not ask"
+    # and "it did not answer" are different findings and get different codes.
+    reachable = await _redis_reachable(url) if configured else None
+
+    return {
+        "strict_lock_available": bool(available),
+        "strict_lock_wired": wired,
+        "backend_configured": configured,
+        "backend_reachable": reachable,
+        # Named so the report states what was done to the backend, not just
+        # what was concluded about it.
+        "probe": "ping",
+        "probe_timeout_seconds": REDIS_PING_TIMEOUT_SECONDS,
     }
 
 
@@ -861,6 +950,19 @@ def build_verdicts(sections: dict) -> dict:
     reminders = sections["reminders"]
     hours = sections["working_hours"]
     disputes = sections["disputes"]
+    locking = sections["strict_lock"]
+
+    # THE SAME LOCK BLOCKS BOTH JOBS. Without a reachable backend the
+    # fail-closed acquirer returns False every time, so the scheduler would
+    # wake on its interval, decline to dispatch, and report nothing wrong -
+    # a notification system that is silent and looks healthy.
+    lock_reasons: list[str] = []
+    if not locking["strict_lock_wired"]:
+        lock_reasons.append("scheduler_not_using_fail_closed_lock")
+    if not locking["backend_configured"]:
+        lock_reasons.append("strict_lock_backend_not_configured")
+    elif locking["backend_reachable"] is not True:
+        lock_reasons.append("strict_lock_backend_unreachable")
 
     out: dict = {}
 
@@ -897,28 +999,28 @@ def build_verdicts(sections: dict) -> dict:
         reasons=expiry_reasons,
         external=undecided)
 
-    # Outcome nudges.
-    nudge_reasons = []
+    # Outcome nudges. Same lock, so the same backend blocks them.
+    nudge_reasons = list(lock_reasons)
     if not queries["outcome_queue"]["present"]:
         nudge_reasons.append("missing_query_index:appointment_confirmed_outcome")
     if not nudges["activation_instant_configured"]:
         nudge_reasons.append("activation_instant_not_configured")
+    # A missing activation instant is a DECISION outstanding; a missing index
+    # or an absent lock backend is a machine NO. Only the latter two make this
+    # NOT_READY, and they are named apart for that reason.
+    blocking = [r for r in nudge_reasons
+                if not r.startswith("activation_instant_")]
     out["outcome_nudges_activation"] = _verdict(
-        not [r for r in nudge_reasons
-             if r.startswith("missing_query_index")],
+        not blocking,
         complete=True,
         reasons=nudge_reasons,
         external=not nudges["activation_instant_configured"])
 
     # Reminders.
-    reminder_reasons = []
+    reminder_reasons = list(lock_reasons)
     if not queries["reminder_scheduling"]["present"]:
         reminder_reasons.append(
             "missing_query_index:appointment_confirmed_reminder")
-    if not reminders["strict_lock_wired"]:
-        # A fail-open lock here means every worker dispatches the same batch to
-        # the same people at the same moment. It is a machine-verifiable NO.
-        reminder_reasons.append("scheduler_not_using_fail_closed_lock")
     out["reminders_activation"] = _verdict(
         not reminder_reasons, complete=True, reasons=reminder_reasons)
 
@@ -1002,6 +1104,10 @@ async def audit(db, endpoints: list[str], database: str,
         "pending_expiry": await audit_expiry(db, now),
         "outcome_nudges": await audit_outcome_nudges(now),
         "reminders": await audit_reminders(now),
+        # Shared infrastructure rather than a property of either job: both
+        # dispatchers take the same lock, so both are blocked by the same
+        # absent backend. Reported once, cited by both verdicts.
+        "strict_lock": await audit_strict_lock(),
         "working_hours": await audit_working_hours(db, now),
         "disputes": await audit_disputes(db, now, index_problems),
     }
@@ -1109,8 +1215,16 @@ def render(report: dict) -> str:
         f"{'ENABLED' if r['enabled'] else 'disabled'}")
     add(f"   interval / batch             : {r['interval_minutes']}m / "
         f"{r['batch_size']}")
+    add("")
+
+    lk = s["strict_lock"]
+    add("5b. STRICT LOCK BACKEND (probed with a bounded PING; nothing written)")
     add(f"   fail-closed lock wired       : "
-        f"{'yes' if r['strict_lock_wired'] else 'NO'}")
+        f"{'yes' if lk['strict_lock_wired'] else 'NO'}")
+    add(f"   backend configured           : "
+        f"{'yes' if lk['backend_configured'] else 'NO'}")
+    add(f"   backend reachable            : "
+        f"{'yes' if lk['backend_reachable'] is True else 'NO' if lk['backend_configured'] else 'not asked'}")
     add("")
 
     w = s["working_hours"]

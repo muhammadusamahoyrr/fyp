@@ -6,6 +6,16 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# The widest cadence the scheduler may ever run at, and the widest it may run
+# at WHILE REMINDERS ARE ENABLED. Two numbers because they answer two
+# questions: the first is "is this a scheduler at all", the second is "can it
+# still see a one-hour window". Named here so the validator, the scheduler and
+# the readiness audit all cite the same figure instead of three copies of 30.
+MAX_INTERVAL_MINUTES = 720
+REMINDER_WINDOW_MINUTES = 60
+MAX_REMINDER_INTERVAL_MINUTES = REMINDER_WINDOW_MINUTES // 2
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -274,12 +284,52 @@ class Settings(BaseSettings):
     @field_validator("appointment_scheduler_interval_minutes")
     @classmethod
     def _interval_is_sane(cls, value):
-        if not 1 <= value <= 720:
+        if not 1 <= value <= MAX_INTERVAL_MINUTES:
             raise ValueError(
                 "appointment_scheduler_interval_minutes must be between 1 and "
-                "720 — shorter thrashes the notification store, longer makes a "
-                "T-1h reminder arrive after the consultation")
+                f"{MAX_INTERVAL_MINUTES} — shorter thrashes the notification "
+                "store, longer makes a T-1h reminder arrive after the "
+                "consultation")
         return value
+
+    @model_validator(mode="after")
+    def _reminder_cadence_must_fit_the_shortest_window(self):
+        """A cadence wider than half the narrowest reminder window is a miss.
+
+        The T-1h window is ONE HOUR WIDE. A scheduler waking every 60 minutes
+        gets exactly one opportunity inside it if the phase happens to line up,
+        and none at all if it does not — an appointment can enter and leave the
+        window between two ticks. That failure is silent and it is invisible in
+        testing, because it depends on the offset between the wake-up phase and
+        somebody's booking time.
+
+        Capping at half the window guarantees at least two opportunities, so
+        one missed or skipped tick still leaves a chance to send. It is the
+        standard sampling argument and it is why the number is 30 rather than
+        60: 60 is the width at which coverage depends on luck.
+
+        IT APPLIES ONLY WHEN REMINDERS ARE ON. Outcome nudges chase a backlog
+        that is hours to days old and have no window to miss, so a deployment
+        running nudges alone keeps the full range — narrowing it there would be
+        a restriction with nothing behind it.
+
+        Checked HERE rather than in the loop. The loop reads this value once at
+        startup; a check inside it would report a misconfiguration only after
+        the process was already running on it, and only to a log nobody reads
+        until a reminder is missing.
+        """
+        if (self.appointment_reminders_enabled
+                and self.appointment_scheduler_interval_minutes
+                > MAX_REMINDER_INTERVAL_MINUTES):
+            raise ValueError(
+                "appointment_reminders_enabled requires "
+                "appointment_scheduler_interval_minutes <= "
+                f"{MAX_REMINDER_INTERVAL_MINUTES} (currently "
+                f"{self.appointment_scheduler_interval_minutes}) — the T-1h "
+                "reminder window is 60 minutes wide, so a wider cadence can "
+                "step over it entirely and the appointment goes unremind"
+                "ed with nothing in the logs to say so")
+        return self
 
     @field_validator("appointment_reminder_batch",
                      "appointment_outcome_nudge_batch")

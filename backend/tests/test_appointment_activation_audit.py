@@ -37,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.core.config import settings
 from app.core.constants import AppointmentStatus
 from app.db import appointment_activation_audit as audit
 from app.db.appointment_index_spec import (
@@ -210,6 +211,60 @@ def _spec(name: str):
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
+
+FAKE_REDIS_URL = "rediss://default:SUPERSECRETTOKEN@cache.example.net:6379"
+
+
+class _PingOnlyRedis:
+    """A Redis client that permits a PING and a close, and nothing else.
+
+    The audit's whole claim about this backend is that it probes without
+    touching it. `set`, `get`, `eval`, `delete` - and above all the `set(...,
+    nx=True)` that IS the lock - reach `__getattr__` and fail the test loudly,
+    so "it only pings" is enforced rather than reviewed.
+    """
+
+    def __init__(self, *, fail: bool = False):
+        self.pinged = 0
+        self.closed = 0
+        self._fail = fail
+
+    async def ping(self):
+        self.pinged += 1
+        if self._fail:
+            raise ConnectionError(
+                f"Error connecting to {FAKE_REDIS_URL}: auth token rejected")
+        return True
+
+    async def aclose(self):
+        self.closed += 1
+
+    def __getattr__(self, item):
+        raise AssertionError(
+            f"the audit called Redis.{item} - it may only PING and close")
+
+
+@pytest.fixture(autouse=True)
+def no_real_redis(monkeypatch):
+    """No test in this file may open a socket to a real Redis.
+
+    Autouse and unconditional. `audit()` probes the strict-lock backend on
+    every run, and this repository's configured `redis_url` points at a hosted
+    production instance - so without this the suite would ping it once per
+    test. The probe is read-only, which is not the point: a test suite does not
+    get to decide it may talk to production because the call is harmless.
+    """
+    clients: list[_PingOnlyRedis] = []
+
+    async def _open(url):
+        client = _PingOnlyRedis()
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(audit, "_open_redis", _open)
+    monkeypatch.setattr(settings, "redis_url", FAKE_REDIS_URL)
+    return clients
+
 
 @pytest.fixture
 async def healthy(app_indexes):
@@ -657,10 +712,10 @@ async def test_appointments_in_each_reminder_window_are_counted_not_sent(
 async def test_the_report_names_the_fail_closed_lock(healthy):
     """A fail-open lock means every worker dispatches the same batch at once."""
     report = await _run(healthy["db"], now=healthy["now"])
-    reminders = report["sections"]["reminders"]
+    locking = report["sections"]["strict_lock"]
 
-    assert reminders["strict_lock_available"] is True
-    assert reminders["strict_lock_wired"] is True
+    assert locking["strict_lock_available"] is True
+    assert locking["strict_lock_wired"] is True
 
 
 async def test_a_scheduler_on_the_fail_open_lock_is_a_machine_no(
@@ -673,10 +728,143 @@ async def test_a_scheduler_on_the_fail_open_lock_is_a_machine_no(
 
     report = await _run(healthy["db"], now=healthy["now"])
 
-    assert report["sections"]["reminders"]["strict_lock_wired"] is False
+    assert report["sections"]["strict_lock"]["strict_lock_wired"] is False
     assert _verdict(report, "reminders_activation") == audit.NOT_READY
     assert "scheduler_not_using_fail_closed_lock" in \
         report["verdicts"]["reminders_activation"]["reasons"]
+    # The same lock, so the same block.
+    assert _verdict(report, "outcome_nudges_activation") == audit.NOT_READY
+
+
+# ── 7b. The strict-lock backend ──────────────────────────────────────────────
+
+async def test_an_absent_redis_blocks_both_dispatching_features(
+        healthy, monkeypatch):
+    """No backend means the fail-closed lock returns False for ever.
+
+    The scheduler would wake on its interval, decline every job, and report
+    nothing wrong - a notification system that is silent and looks healthy.
+    Reporting the features as READY because the code is present would be
+    describing a deployment that cannot send anything.
+    """
+    monkeypatch.setattr(settings, "redis_url", "")
+
+    report = await _run(healthy["db"], now=healthy["now"])
+    locking = report["sections"]["strict_lock"]
+
+    assert locking["backend_configured"] is False
+    # None, not False: "we did not ask" is not "it did not answer".
+    assert locking["backend_reachable"] is None
+
+    for feature in ("reminders_activation", "outcome_nudges_activation"):
+        assert _verdict(report, feature) == audit.NOT_READY, feature
+        assert "strict_lock_backend_not_configured" in \
+            report["verdicts"][feature]["reasons"], feature
+
+
+async def test_an_unreachable_redis_blocks_both_dispatching_features(
+        healthy, monkeypatch):
+    """Configured-but-down produces exactly the outcome of not configured.
+
+    An audit that checked only configuration would call this ready, which is
+    the whole reason the two are separate questions.
+    """
+    async def _open(url):
+        return _PingOnlyRedis(fail=True)
+
+    monkeypatch.setattr(audit, "_open_redis", _open)
+
+    report = await _run(healthy["db"], now=healthy["now"])
+    locking = report["sections"]["strict_lock"]
+
+    assert locking["backend_configured"] is True
+    assert locking["backend_reachable"] is False
+
+    for feature in ("reminders_activation", "outcome_nudges_activation"):
+        assert _verdict(report, feature) == audit.NOT_READY, feature
+        assert "strict_lock_backend_unreachable" in \
+            report["verdicts"][feature]["reasons"], feature
+        assert "strict_lock_backend_not_configured" not in \
+            report["verdicts"][feature]["reasons"], feature
+
+
+async def test_a_reachable_redis_lets_both_features_through(healthy):
+    report = await _run(healthy["db"], now=healthy["now"])
+    locking = report["sections"]["strict_lock"]
+
+    assert locking["backend_configured"] is True
+    assert locking["backend_reachable"] is True
+    assert _verdict(report, "reminders_activation") == audit.READY
+
+
+async def test_the_probe_is_a_ping_and_nothing_else(healthy, no_real_redis):
+    """Never a lock, never a write.
+
+    Taking the real lock would prove reachability and SUPPRESS A REAL CYCLE for
+    its whole TTL - an audit that silences the next batch of reminders in order
+    to report that reminders could be sent. The fake raises on every other
+    attribute, so `set`, `eval` or `delete` fail this loudly.
+    """
+    await _run(healthy["db"], now=healthy["now"])
+
+    assert len(no_real_redis) == 1
+    assert no_real_redis[0].pinged == 1
+
+
+async def test_the_audits_redis_client_is_closed(healthy, no_real_redis):
+    """It opens its own client rather than the application's shared one, so it
+    is the only thing that may close it - and it must."""
+    await _run(healthy["db"], now=healthy["now"])
+
+    assert no_real_redis[0].closed == 1
+
+
+async def test_a_redis_client_that_fails_is_still_closed(healthy, monkeypatch):
+    opened: list[_PingOnlyRedis] = []
+
+    async def _open(url):
+        client = _PingOnlyRedis(fail=True)
+        opened.append(client)
+        return client
+
+    monkeypatch.setattr(audit, "_open_redis", _open)
+
+    await _run(healthy["db"], now=healthy["now"])
+
+    assert opened[0].closed == 1
+
+
+async def test_the_redis_token_never_reaches_the_output(healthy, monkeypatch):
+    """The driver's error carries the URL, and for `rediss://` that URL carries
+    the token. The report says unreachable; it never says why."""
+    async def _open(url):
+        return _PingOnlyRedis(fail=True)
+
+    monkeypatch.setattr(audit, "_open_redis", _open)
+
+    report = await _run(healthy["db"], now=healthy["now"])
+    rendered = audit.render(report)
+
+    for secret in ("SUPERSECRETTOKEN", "cache.example.net", FAKE_REDIS_URL,
+                   "auth token rejected", "ConnectionError"):
+        assert secret not in rendered, secret
+        assert secret not in str(report), secret
+
+
+async def test_a_redis_failure_is_not_logged_with_its_message(
+        healthy, monkeypatch, caplog):
+    async def _open(url):
+        return _PingOnlyRedis(fail=True)
+
+    monkeypatch.setattr(audit, "_open_redis", _open)
+
+    with caplog.at_level("DEBUG"):
+        await _run(healthy["db"], now=healthy["now"])
+
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    for secret in ("SUPERSECRETTOKEN", "cache.example.net",
+                   "auth token rejected"):
+        assert secret not in text, secret
 
 
 # ── 8. Working hours ─────────────────────────────────────────────────────────
@@ -1210,7 +1398,8 @@ async def test_the_json_report_has_a_stable_shape(healthy):
     assert report["schema_version"] == audit.SCHEMA_VERSION
     assert set(report["sections"]) == {
         "booking_correctness", "query_indexes", "pending_expiry",
-        "outcome_nudges", "reminders", "working_hours", "disputes"}
+        "outcome_nudges", "reminders", "strict_lock", "working_hours",
+        "disputes"}
     assert set(report["verdicts"]) == set(
         audit._FEATURE_VERDICTS) | {"overall_production_go"}
     assert set(report["manual_gates"]) == {n for n, _ in audit.MANUAL_GATES}

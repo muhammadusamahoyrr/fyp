@@ -98,14 +98,68 @@ def _interval_seconds() -> int:
     return int(getattr(settings, "appointment_scheduler_interval_minutes", 15)) * 60
 
 
-def _lock_ttl_seconds() -> int:
-    """Comfortably longer than a cycle, comfortably shorter than the interval.
+# THE ONE ORDERING EVERYTHING ELSE HERE DEPENDS ON:
+#
+#     job timeout  <  lock TTL  <  interval
+#
+# Read right to left, each gap pays for a different failure.
+#
+# TTL < interval: a claim that outlived its period would suppress the NEXT
+# one as well, so a single slow cycle silently halves the cadence.
+#
+# timeout < TTL: a job still running when its own lock expires is a job whose
+# exclusivity has quietly lapsed - a second worker can take the lock and start
+# the same batch while the first is still dispatching to the same people. The
+# timeout has to fire while the claim is still held.
+#
+# These are FRACTIONS of the interval rather than constants, so the ordering
+# holds at every cadence the settings allow instead of only at the default.
+_TTL_FRACTION = 0.8
+_TIMEOUT_FRACTION = 0.75        # of the TTL, so 0.6 of the interval
 
-    A TTL past the interval would let one worker's claim suppress the NEXT
-    period as well; a TTL shorter than a run would let a second worker start
-    the same batch while the first is still dispatching.
+# AN ABSOLUTE CEILING, because a proportion of a long cadence is not a budget.
+#
+# The fractions above keep the ordering correct at every cadence, and that is
+# all they do. They say nothing about whether the resulting number is a
+# sensible length of time to let a job run, and at the widest cadence the
+# settings allow - 720 minutes, which only an outcome-only deployment can use,
+# since reminders cap the interval at 30 - 0.6 of the interval is SEVEN HOURS
+# AND TWELVE MINUTES. Nothing either job does takes seven hours: a reminder
+# run sends at most `appointment_reminder_batch` notices and a nudge run at
+# most `appointment_outcome_nudge_batch`, both bounded in the low hundreds. A
+# job still going after five minutes is wedged, not busy, and the only thing a
+# seven-hour budget buys is seven hours of not finding out.
+#
+# It is a floor-free `min`, so it can only ever LOWER the timeout: the
+# `timeout < TTL < interval` ordering is preserved by construction rather than
+# by another calculation that could disagree with the first one.
+MAX_JOB_TIMEOUT_SECONDS = 300
+
+
+def _lock_ttl_seconds() -> int:
+    """Shorter than the interval at every valid cadence.
+
+    An earlier version was `max(interval * 0.8, 60)`, and the floor was the
+    bug: at a one-minute interval it returned 60 seconds, so TTL EQUALLED the
+    interval and the ordering above collapsed - one worker's claim covered the
+    whole of the next period. The floor is gone rather than lowered, because a
+    fraction of a validated interval never needs one: the smallest cadence the
+    settings permit is a minute, which leaves 48 seconds.
     """
-    return max(int(_interval_seconds() * 0.8), 60)
+    return int(_interval_seconds() * _TTL_FRACTION)
+
+
+def _job_timeout_seconds() -> int:
+    """How long one job may run before it is abandoned for this cycle.
+
+    Deterministic, derived, strictly inside the lock's lifetime, and never
+    longer than `MAX_JOB_TIMEOUT_SECONDS` however wide the cadence. Not
+    retried inside the same cycle: a job that just failed to finish in its
+    whole budget will not finish in the remainder, and the next cycle is
+    already the retry.
+    """
+    return min(int(_lock_ttl_seconds() * _TIMEOUT_FRACTION),
+               MAX_JOB_TIMEOUT_SECONDS)
 
 
 async def _index_ready(job: str) -> bool:
@@ -211,13 +265,31 @@ async def run_cycle(now: datetime | None = None) -> dict:
     one measures against.
     """
     now = now or datetime.now(timezone.utc)
+    timeout = _job_timeout_seconds()
     outcomes: dict = {}
     for job, runner in ((JOB_REMINDERS, run_reminders),
                         (JOB_OUTCOME_NUDGES, run_outcome_nudges)):
         try:
-            outcomes[job] = await runner(now)
+            # BOUNDED, and bounded around the WHOLE job rather than around the
+            # dispatch inside it: acquiring the lock and checking the index are
+            # network calls too, and a job wedged on either of those is just as
+            # stuck as one wedged on a send.
+            outcomes[job] = await asyncio.wait_for(runner(now), timeout)
         except asyncio.CancelledError:
+            # BEFORE the timeout clause, and it has to be: shutdown cancels
+            # this task, and a cancellation reported as a timeout would look
+            # like a hung job in the logs every time the application stops.
+            # CancelledError is a BaseException, so `except Exception` below
+            # would not catch it either - this clause is explicit so the
+            # ordering is deliberate rather than incidental.
             raise
+        except TimeoutError:
+            # Its own clause so the log says what actually happened, and so
+            # the NEXT job still runs: a reminder batch that wedges must not
+            # take the outcome nudges down with it.
+            logger.warning("appointment_scheduler_job_timeout job=%s error=%s",
+                           job, TimeoutError.__name__)
+            outcomes[job] = None
         except Exception as exc:
             # One job's failure is not the other's. Class only — a driver
             # message carries the URI it failed to reach.
@@ -228,26 +300,46 @@ async def run_cycle(now: datetime | None = None) -> dict:
 
 
 async def scheduler_loop() -> None:
-    """Wake on an interval and run a cycle. Survives a failing cycle.
+    """Run a cycle, THEN sleep. Survives a failing cycle.
 
-    A cycle that throws logs its exception CLASS and the loop continues: a
-    notification scheduler that dies on one bad batch stops silently, and
-    silence is indistinguishable from working.
+    THE FIRST CYCLE IS IMMEDIATE, and the previous order - sleep, then run -
+    was a real gap rather than a style choice. A deploy, a restart or a crash
+    recovery inside the T-1h window meant the first opportunity to send did
+    not arrive until a whole cadence later, by which time the appointment the
+    reminder was for may already have started. Rolling restarts made it worse:
+    every worker starts its own blind interval at once, so the entire fleet is
+    silent for the same first period.
+
+    Nothing is dispatched that would not have been dispatched anyway. The
+    windows, the lock and the `logical_event_id` decide that; this only
+    decides when the first look happens, and looking immediately is what a
+    restart should do.
+
+    The sleep sits OUTSIDE the cycle's error handling and is never skipped. A
+    failing cycle that looped straight back would become a hot loop hammering
+    the database and filling the log with the same line - which is how a
+    scheduler turns one bad batch into an outage.
     """
     interval = _interval_seconds()
     logger.info(
-        "appointment_scheduler_started interval_minutes=%s reminders=%s nudges=%s",
-        interval // 60, reminders_enabled(), outcome_nudges_enabled())
-    while True:
-        try:
+        "appointment_scheduler_started interval_minutes=%s reminders=%s "
+        "nudges=%s job_timeout_seconds=%s lock_ttl_seconds=%s",
+        interval // 60, reminders_enabled(), outcome_nudges_enabled(),
+        _job_timeout_seconds(), _lock_ttl_seconds())
+    try:
+        while True:
+            try:
+                await run_cycle()
+            except Exception as exc:
+                # CancelledError is a BaseException and passes straight through
+                # to the handler below, so shutdown is never mistaken for a
+                # failing cycle.
+                logger.warning("appointment_scheduler_cycle_failed error=%s",
+                               type(exc).__name__)
             await asyncio.sleep(interval)
-            await run_cycle()
-        except asyncio.CancelledError:
-            logger.info("appointment_scheduler_stopped")
-            raise
-        except Exception as exc:
-            logger.warning("appointment_scheduler_cycle_failed error=%s",
-                           type(exc).__name__)
+    except asyncio.CancelledError:
+        logger.info("appointment_scheduler_stopped")
+        raise
 
 
 def appointment_scheduler_task() -> asyncio.Task | None:
