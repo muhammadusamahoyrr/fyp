@@ -58,6 +58,72 @@ Required before step 6:
 
 ---
 
+## Before anything else: the read-only audit
+
+```
+export AAI_AUDIT_MONGO_URL='mongodb://.../'
+python -m app.db.appointment_activation_audit \
+    --database <NAME> --confirm-database <NAME> \
+    --confirm-endpoint <scheme://host[:port]>     # once per host
+```
+
+One pass, one report, covering everything in this document: booking
+correctness, the query indexes **per feature**, the pending-expiry population,
+the outcome backlog, the reminder windows, working-hours configuration, open
+disputes, and the state of every flag. Add `--json` for a machine-readable
+form.
+
+It changes nothing, and that is enforced rather than promised: the database
+handle it gives the production services it reuses forwards an allowlist of read
+operations and refuses everything else, including `$out` and `$merge`, which
+are writes reached through `aggregate`. There is no apply mode, no `--uri`, and
+nothing in `app/` imports it.
+
+**Its output carries no identifiers.** No appointment ids, names, emails,
+CNICs, notes, meeting links, client statements or support notes - counts, named
+gate results and sanitized problem codes only, so the report can go into a
+ticket as it stands. The endpoint is echoed as scheme, host and port; the
+credentials never are.
+
+It confirms the target before connecting, exactly as the backfill does, even
+though it only reads. A report is a claim about **one named environment**, and a
+claim about the wrong one is worse than no claim.
+
+### Reading the verdicts
+
+| Verdict | Means |
+|---|---|
+| `READY` | every machine-verifiable check for that feature passed |
+| `NOT_READY` | a machine-verifiable check failed - the only value that means something is wrong |
+| `UNVERIFIED_EXTERNAL` | the checks passed and a human decision is still outstanding |
+| `NOT_EVALUATED` | no conclusion - usually a scan that hit its page bound, so the counts are real but partial. **Not a pass.** |
+
+Exit codes: `0` every machine-verifiable check passed - `2` machine-verifiable
+NO-GO - `3` the audit did not run or could not finish.
+
+> **Exit 0 is not a GO, and the report says so on its last line.** It means
+> nothing the tool can check says no. `overall_production_go` can never come
+> back `READY` - the write freeze and a proven backup restore are invisible to
+> every query, since an idle database and a frozen one are indistinguishable,
+> and an untested backup looks exactly like a good one until the restore. Those
+> two remain `UNVERIFIED_EXTERNAL` until a person supplies the evidence, and
+> **no argument to the command marks any gate satisfied.**
+
+A missing **QUERY** index blocks only the one feature whose read it serves and
+never booking - refusing to serve bookings over a missing performance index
+would be an outage for a reason that is not the reason.
+
+One coupling is worth expecting rather than being surprised by: a missing
+**correctness** index on `appointment_disputes` turns `booking_rollout` red
+too. That is not a classification error. `assert_appointment_booking_ready()`
+refuses to start the service while any correctness index is missing across
+either collection, so booking genuinely cannot roll out until it is rebuilt.
+The verdict names the index that tripped it.
+
+Recommended: run it against a **restored clone** first, alongside step 4.
+
+---
+
 ## Sequence
 
 Steps 1–5 are reversible. Step 6 is the first irreversible one.
@@ -223,8 +289,13 @@ All six must be true, and `safe_to_activate` is their conjunction:
 6. **Enabling the pending-expiry sweep** — a separate decision with its own
    four prerequisites (E1–E4 above), all currently unmet. Creating the query
    index in step 7 does NOT enable anything.
-6. Acknowledgement that **`PATCH /appointments/{id}/confirm` now requires a
+7. Acknowledgement that **`PATCH /appointments/{id}/confirm` now requires a
    versioned body**; any non-UI client receives 422 until updated.
+8. **Activation instants, cadence and caps** for reminders and outcome nudges.
+   The nudge activation instant decides how much history gets notified, and the
+   scheduler refuses to enable nudges without one; the batch caps decide how
+   many people hear from us at once. The audit reports whether an instant is
+   configured, never its value.
 
 Recommended before scheduling: run step 4 against a **restored clone** of
 production to see real findings and real row counts, with no window open and
