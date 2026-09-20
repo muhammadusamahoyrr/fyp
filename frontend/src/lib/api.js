@@ -1141,6 +1141,80 @@ export async function listAgreements() {
   return apiFetch('/agreements');
 }
 
+// ─── Agreement drafts (Gate 3C routes) ───────────────────────────────────────
+//
+// A draft is the lawyer's private working copy. It reaches nobody until it is
+// SENT, and sending and signing are one call — the parked two-step wizard could
+// leave a counterparty holding an agreement its sender never signed.
+//
+// Three things travel with these calls that the older /agreements routes never
+// carried, and each exists to stop a specific failure:
+//
+//   expected_version       optimistic concurrency. Two tabs editing one draft
+//                          must not silently overwrite each other.
+//   expected_body_sha256   the digest of the wording the signer actually READ.
+//                          If a concurrent edit landed, it will not match and
+//                          the send is refused rather than binding them to text
+//                          they never saw.
+//   Idempotency-Key        a retry of a lost response must not send twice.
+
+export async function createDraft({ title, body_html, client_id, case_id }) {
+  return apiFetch('/agreements/drafts', {
+    method: 'POST',
+    body: JSON.stringify({ title, body_html, client_id, case_id }),
+  });
+}
+
+/* An edit. `expected_version` is REQUIRED — the server rejects the call
+   without it, and that is deliberate: a save that does not say what it
+   believed it was editing cannot be checked for conflicts.
+
+   A field that is absent OR null is left out of the payload entirely. Absent
+   already falls out of JSON.stringify, which drops undefined; NULL does not,
+   and `{"title": null}` is a 422 against a schema whose title has
+   min_length=1. Both spellings mean the same thing to a caller — "I am not
+   changing this" — so both are treated the same here rather than one of them
+   failing the save for a field the caller never meant to touch. */
+export async function updateDraft(agreementId, { expected_version, title, body_html }) {
+  return apiFetch(`/agreements/drafts/${encodeURIComponent(agreementId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      expected_version,
+      ...(title != null ? { title } : {}),
+      ...(body_html != null ? { body_html } : {}),
+    }),
+  });
+}
+
+export async function deleteDraft(agreementId) {
+  return apiFetch(`/agreements/drafts/${encodeURIComponent(agreementId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/* Sign and send, in one server-side transaction.
+ *
+ * `key` is minted once per INTENT (see idempotencyKey) and reused by every
+ * retry of that same send. A fresh key on a retry is a second agreement. */
+export async function sendDraft(
+  agreementId,
+  { expected_version, expected_body_sha256, method = 'typed', signature_data, consent },
+  key,
+) {
+  return apiFetch(`/agreements/drafts/${encodeURIComponent(agreementId)}/send`, {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      expected_version, expected_body_sha256, method, signature_data, consent,
+    }),
+  });
+}
+
+// The body digest lives in lib/agreementBody.js, not here. It is pure
+// computation rather than a request, and the test loader replaces this module
+// with spies for any component that imports it -- which would have made the
+// one value a signature record depends on unobservable in a mounted test.
+
 // ─── AI ──────────────────────────────────────────────────────────────────────
 // opts: { templateId?: "chat" | "case_context", context?: object, history?: array }
 // `context` is a whitelisted set of case fields (case_title, case_type, court,

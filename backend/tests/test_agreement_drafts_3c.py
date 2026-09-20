@@ -812,3 +812,44 @@ async def test_the_author_keeps_full_control_of_their_own_draft(world):
     await agreement_service.delete_draft(
         agreement_id=d["_id"], creator_id=LAWYER)
     assert await _row(d["_id"]) is None
+
+
+# -- Gate 3D: what the editor needs back from the API -----------------------
+
+def test_the_api_reports_the_version_the_editor_must_echo():
+    """`expected_version` is required on every edit and on the send, so the
+    caller has to be able to LEARN it.
+
+    Until `version` was added to `AgreementOut`, FastAPI filtered it out of
+    every response. A UI would have had to assume 1 at creation and count its
+    own saves -- a guess that holds only while nothing else writes, and that a
+    re-read could not repair, because the re-read dropped the field too. That
+    turns the first conflict into a dead end.
+    """
+    from app.schemas.agreement import AgreementOut
+
+    out = AgreementOut(**{
+        "_id": "A1", "title": "Retainer", "body_html": "Terms.",
+        "status": AgreementStatus.DRAFT.value, "created_by": LAWYER,
+        "version": 7, "parties": [],
+    })
+    assert out.version == 7
+    assert out.model_dump()["version"] == 7
+
+
+@pytest.mark.integration
+async def test_every_draft_response_carries_a_version(world):
+    """Create, edit and read all report it, so the editor never has to guess."""
+    from app.schemas.agreement import AgreementOut
+    from app.services import agreement_service
+
+    d = await _draft(await _case())
+    assert AgreementOut(**d).version == 1
+
+    edited = await agreement_service.update_draft(
+        agreement_id=d["_id"], creator_id=LAWYER,
+        expected_version=1, body_html="Revised.")
+    assert AgreementOut(**edited).version == 2
+
+    fetched = await agreement_service.get_agreement(d["_id"], LAWYER)
+    assert AgreementOut(**fetched).version == 2

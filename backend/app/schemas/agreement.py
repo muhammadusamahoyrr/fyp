@@ -87,6 +87,15 @@ class AgreementOut(BaseModel):
     parties: list[PartyOut] = Field(default_factory=list)
     status: str | None = None
     created_by: str | None = None
+    # REQUIRED BY THE EDITOR, not decoration. `update_draft` and
+    # `sign_and_send_draft` both demand `expected_version`, and until this was
+    # returned there was no way for a caller to learn it: the UI would have had
+    # to assume 1 and count its own saves. That guess survives exactly as long
+    # as nothing else writes -- a second tab, or a retry, desynchronises it, and
+    # since a re-read could not report the version either, the editor could
+    # never recover. Optimistic concurrency only works if the server states
+    # what the caller is holding.
+    version: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

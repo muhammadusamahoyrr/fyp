@@ -6,6 +6,7 @@ import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { listAgreements, signAgreement, declineAgreement } from "@/lib/api.js";
+import { DraftComposer } from "./DraftComposer.jsx";
 
 const STATUS_LABEL = { pending: "Pending", executed: "Executed", cancelled: "Cancelled", draft: "Draft" };
 const STATUS_BADGE = { Pending: "warn", Executed: "success", Cancelled: "danger", Draft: "gray" };
@@ -25,6 +26,13 @@ function mapAgreement(a, myId) {
         counterparts: parties.filter(p => p.user_id !== myId).map(p => p.full_name).join(" · "),
         eto: a.eto_classification,
         isEngagementLetter: !!a.engagement_id,
+        // Kept for the editor: `version` drives optimistic concurrency and
+        // `raw` is the untouched server copy, which is what the digest is
+        // taken over at send time. The mapped view is for DISPLAY; signing
+        // reads from the server's own object.
+        isDraft: a.status === "draft",
+        version: a.version,
+        raw: a,
     };
 }
 
@@ -43,6 +51,10 @@ export function AgreementsPage() {
     const [declineReason, setDeclineReason] = useState("");
     const [toast, setToast] = useState(null);
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
+    // `composing` is either "new" or the draft being edited. A draft never
+    // opens the signing modal: it has nothing to sign yet, and the only way to
+    // sign it is to send it.
+    const [composing, setComposing] = useState(null);
 
     const reload = useCallback(() => {
         listAgreements().then(({ data }) => {
@@ -78,19 +90,25 @@ export function AgreementsPage() {
     const closeModal = () => { setActive(null); setDeclineOpen(false); setDeclineReason(""); };
 
     const awaitingMe = items.filter(a => a.needsMySig);
+    // Only ever this lawyer's own: the server does not return anyone else's.
+    const drafts = items.filter(a => a.isDraft);
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 18, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-            <div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Agreements</div>
-                <div style={{ fontSize: 13, color: T.textMuted, marginTop: 3 }}>
-                    Engagement letters and contracts — signed electronically under ETO 2002
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Agreements</div>
+                    <div style={{ fontSize: 13, color: T.textMuted, marginTop: 3 }}>
+                        Engagement letters and contracts — signed electronically under ETO 2002
+                    </div>
                 </div>
+                <Btn variant="primary" onClick={() => setComposing("new")}>+ New agreement</Btn>
             </div>
 
             {/* Stats */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
                 {[
+                    { l: "Drafts", v: drafts.length, c: T.textMuted, ic: "📝" },
                     { l: "Awaiting My Signature", v: awaitingMe.length, c: awaitingMe.length ? T.warn : T.success, ic: "✍️" },
                     { l: "Pending Others", v: items.filter(a => a.status === "Pending" && !a.needsMySig).length, c: T.info, ic: "⏰" },
                     { l: "Executed", v: items.filter(a => a.status === "Executed").length, c: T.success, ic: "✅" },
@@ -115,11 +133,16 @@ export function AgreementsPage() {
                     <div style={{ padding: 40, textAlign: "center" }}>
                         <div style={{ fontSize: 32, marginBottom: 10 }}>📜</div>
                         <div style={{ fontSize: 14, color: T.textMuted }}>
-                            No agreements yet. Accepting a client's case request creates an engagement letter here automatically.
+                            No agreements yet. Accepting a client&apos;s case request creates an
+                            engagement letter here automatically — or write one yourself with
+                            &ldquo;New agreement&rdquo;.
                         </div>
                     </div>
                 ) : items.map((a, i) => (
-                    <div key={a.id} onClick={() => { setActive(a); setSignName(user?.full_name || ""); }} style={{
+                    <div key={a.id} onClick={() => {
+                        if (a.isDraft) { setComposing(a.raw); return; }
+                        setActive(a); setSignName(user?.full_name || "");
+                    }} style={{
                         display: "flex", alignItems: "center", gap: 14, padding: "14px 20px",
                         borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none",
                         cursor: "pointer", transition: "background .12s",
@@ -224,6 +247,14 @@ export function AgreementsPage() {
                         )}
                     </div>
                 </div>
+            )}
+
+            {composing && (
+                <DraftComposer
+                    draft={composing === "new" ? null : composing}
+                    onSaved={reload}
+                    onClose={(msg) => { setComposing(null); if (msg) showToast(msg); }}
+                />
             )}
 
             {toast && (
