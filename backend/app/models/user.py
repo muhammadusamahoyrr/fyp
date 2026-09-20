@@ -30,7 +30,11 @@ class UserDocument(BaseModel):
     full_name: str
     phone: str | None = None
     province: Province | None = None
-    cnic_encrypted: str | None = None  # AES-256 encrypted
+    # Fernet (AES-128-CBC + HMAC-SHA256), via core.security.encrypt_cnic.
+    # NOT AES-256: this comment said so for a long time and the claim spread
+    # from here into three UI strings that told users their signatures were
+    # AES-256 encrypted. Naming the real primitive is what stops it coming back.
+    cnic_encrypted: str | None = None
     avatar_url: str | None = None
     is_active: bool = True
     lawyer_profile: LawyerProfile | None = None

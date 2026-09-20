@@ -380,12 +380,18 @@ const PageTemplates = ({ onNavigate, onSelectTemplate }) => {
                         onMouseEnter={e => { e.currentTarget.style.border = `1px solid ${t.primary}`; e.currentTarget.style.boxShadow = t.shadowHover; }}
                         onMouseLeave={e => { e.currentTarget.style.border = `1px solid ${t.border}`; e.currentTarget.style.boxShadow = t.shadowCard; }}
                     >
-                        {tmpl.popular && (
+                        {/* The POPULAR badge is gone. Every template body is the
+                            withdrawal notice, and the backend refuses it at both
+                            create and sign -- so "Popular" was recommending the
+                            route most likely to waste the user's work. The badge
+                            now says what is actually true about the template. */}
+                        {tmpl.unreviewed && (
                             <div style={{
                                 position: "absolute", top: 16, right: 16, fontSize: 10, fontWeight: 800,
-                                letterSpacing: "0.6px", color: t.primary, background: t.primaryGlow,
-                                border: `1px solid ${t.primary}40`, borderRadius: 6, padding: "3px 8px"
-                            }}>POPULAR</div>
+                                letterSpacing: "0.6px", color: t.warn || "#f59e0b",
+                                background: `${t.warn || "#f59e0b"}18`,
+                                border: `1px solid ${t.warn || "#f59e0b"}40`, borderRadius: 6, padding: "3px 8px"
+                            }}>WITHDRAWN</div>
                         )}
                         <div style={{
                             width: 44, height: 44, borderRadius: 12, background: t.primaryGlow,
@@ -396,12 +402,25 @@ const PageTemplates = ({ onNavigate, onSelectTemplate }) => {
                             fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 8,
                             fontFamily: "'Sora','Inter',sans-serif"
                         }}>{tmpl.name}</div>
-                        <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.55, marginBottom: 20, flex: 1 }}>{tmpl.desc}</div>
+                        <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.55, marginBottom: 12, flex: 1 }}>{tmpl.desc}</div>
+                        {tmpl.unreviewed && (
+                            <div style={{
+                                fontSize: 11, color: t.textMuted, lineHeight: 1.5, marginBottom: 12,
+                                background: t.inputBg, borderRadius: 8, padding: "8px 10px",
+                            }}>
+                                The wording for this template was withdrawn pending review by a
+                                qualified Pakistani lawyer. You can start from it, but you must
+                                replace the notice with your own wording before it can be sent.
+                            </div>
+                        )}
+                        {/* Preview used to alert() the template's own name and
+                            nothing else. There is also nothing to preview: every
+                            template body is the withdrawal notice. */}
                         <div style={{ display: "flex", gap: 8 }}>
                             <Btn outline style={{ flex: 1, fontSize: 12, padding: "9px 0" }}
-                                onClick={() => alert(`Preview: ${tmpl.name}`)}>👁 Preview</Btn>
-                            <Btn primary style={{ flex: 1, fontSize: 12, padding: "9px 0" }}
-                                onClick={() => { onSelectTemplate(tmpl); onNavigate("create"); }}>✓ Use</Btn>
+                                onClick={() => { onSelectTemplate(tmpl); onNavigate("create"); }}>
+                                Start from this
+                            </Btn>
                         </div>
                     </Card>
                 ))}
@@ -411,16 +430,15 @@ const PageTemplates = ({ onNavigate, onSelectTemplate }) => {
 };
 
 // ── PAGE: CREATE AGREEMENT (4 steps) ─────────
-const TOOLBAR_ACTIONS = [
-    { label: "¶", title: "Paragraph" }, { label: "H1", title: "Heading 1", bold: true },
-    { label: "H2", title: "Heading 2" }, { label: "H3", title: "Heading 3" }, null,
-    { label: "B", title: "Bold" }, { label: "I", title: "Italic" }, { label: "U", title: "Underline" },
-    { label: "S", title: "Strikethrough" }, { label: "🖊", title: "Highlight" }, null,
-    { label: "≡", title: "Left" }, { label: "≡", title: "Center" }, { label: "≡", title: "Right" }, { label: "≡", title: "Justify" }, null,
-    { label: "•", title: "Bullet list" }, { label: "1.", title: "Numbered list" }, { label: "❝", title: "Quote" }, { label: "—", title: "Divider" },
-    { label: "⊞", title: "Table" }, null,
-    { label: "Tx", title: "Clear format" }, { label: "↩", title: "Undo" }, { label: "↪", title: "Redo" },
-];
+/* TOOLBAR_ACTIONS lived here: 24 formatting buttons -- bold, italic, headings,
+   alignment, lists, tables, undo, redo -- rendered above the editor. Not one of
+   them had an onClick. They hovered and did nothing.
+
+   They were also describing something the editor cannot do. The body is a plain
+   <textarea> producing plain text, stored in a field called `body_html`, so the
+   toolbar promised rich formatting in both directions and delivered it in
+   neither. A real editor is explicitly out of scope (see the product plan's
+   non-goals); the honest interim is a plain text box that looks like one. */
 
 const SIG_METHOD_MAP = { draw: "canvas", type: "typed", upload: "image_upload" };
 
@@ -518,9 +536,12 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                         <div style={{ fontSize: 12, color: t.textMuted, marginTop: 1 }}>{template?.name || "Custom"}</div>
                     </div>
                 </div>
-                <Btn outline style={{ fontSize: 12, padding: "9px 16px" }} onClick={() => alert("Draft saved!")}>
-                    💾 Save Draft
-                </Btn>
+                {/* "Save Draft" was here and it saved nothing -- it showed
+                    alert("Draft saved!") and the user then navigated away and
+                    lost the work. Worse than a dead button: it confirmed a
+                    persistence that does not exist. Removed rather than made
+                    inert, because a disabled Save Draft still promises the
+                    feature. Real draft persistence is Phase 3 (§3.4). */}
             </div>
 
             {/* Steps */}
@@ -539,26 +560,14 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                     </div>
                     {/* Editor */}
                     <Card style={{ padding: 0, overflow: "hidden" }}>
-                        {/* Toolbar */}
+                        {/* The formatting toolbar that used to sit here had no
+                            handlers on any of its 24 buttons. See the note at
+                            TOOLBAR_ACTIONS. */}
                         <div style={{
-                            display: "flex", alignItems: "center", gap: 1, padding: "8px 12px",
-                            borderBottom: `1px solid ${t.border}`, flexWrap: "wrap", background: t.surface
+                            padding: "8px 14px", borderBottom: `1px solid ${t.border}`,
+                            background: t.surface, fontSize: 11, color: t.textMuted,
                         }}>
-                            {TOOLBAR_ACTIONS.map((a, i) => a === null
-                                ? <div key={i} style={{ width: 1, height: 20, background: t.border, margin: "0 4px" }} />
-                                : (
-                                    <button key={i} title={a.title} style={{
-                                        width: 28, height: 28, borderRadius: 6, border: "none", background: "transparent",
-                                        color: a.bold ? t.text : t.textMuted, fontWeight: a.bold ? 700 : 400,
-                                        fontSize: a.label.length > 1 ? 10 : 13, cursor: "pointer", display: "flex",
-                                        alignItems: "center", justifyContent: "center", transition: "background 0.12s",
-                                        fontFamily: "'Inter',sans-serif",
-                                    }}
-                                        onMouseEnter={e => e.currentTarget.style.background = t.inputBg}
-                                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                                    >{a.label}</button>
-                                )
-                            )}
+                            Plain text. Formatting is not applied to the signed agreement.
                         </div>
                         {/* Body */}
                         <textarea value={body} onChange={e => setBody(e.target.value)}
@@ -669,11 +678,24 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                                 fontSize: 20, flexShrink: 0,
                             }}>🔒</div>
                             <div>
+                                {/* Two claims used to sit here, both unsupported:
+                                    "AES-256 encrypted" and "Compliant with
+                                    e-signature laws". Signatures are stored as
+                                    plaintext base64 (agreement_repo.update_party_
+                                    signature); the only encryption in the system
+                                    is Fernet/AES-128 over CNICs. And whether an
+                                    instrument complies with ETO 2002 is a legal
+                                    conclusion no lawyer has reviewed.
+                                    Telling someone their signature is encrypted
+                                    and legally compliant, in the panel where they
+                                    decide to sign, is the worst place in the
+                                    product to be wrong. What is left is true. */}
                                 <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 4 }}>
-                                    Legally binding
+                                    What we record
                                 </div>
                                 <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.6 }}>
-                                    AES-256 encrypted · Timestamped · Compliant with e-signature laws.
+                                    On submission, we record your account, timestamp, IP address,
+                                    and the agreement content hash.
                                 </div>
                             </div>
                         </div>
@@ -1016,9 +1038,12 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                         <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                             <span style={{ fontSize: 18 }}>🛡️</span>
                             <div>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Secure & Legally Binding</div>
+                                {/* Same two unsupported claims as the signature
+                                    panel above. See the note there. */}
+                                <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>What we record</div>
                                 <div style={{ fontSize: 12, color: t.textMuted, marginTop: 2 }}>
-                                    All signatures are encrypted with AES-256, timestamped, and comply with e-signature laws.
+                                    On submission, we record your account, timestamp, IP address,
+                                    and the agreement content hash.
                                 </div>
                             </div>
                         </div>
@@ -1443,27 +1468,18 @@ function ModAgreements() {
                         background: "transparent", color: t.textMuted, cursor: "pointer", fontSize: 14,
                         display: "flex", alignItems: "center", justifyContent: "center",
                     }}>☰</button>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <button style={{
-                            width: 32, height: 32, borderRadius: 8, border: "none",
-                            background: "transparent", color: t.textMuted, cursor: "pointer", fontSize: 16
-                        }}>🔍</button>
-                        <button style={{
-                            width: 32, height: 32, borderRadius: 8, border: "none",
-                            background: "transparent", color: t.textMuted, cursor: "pointer", fontSize: 16, position: "relative"
-                        }}>
-                            🔔
-                            <span style={{
-                                position: "absolute", top: 4, right: 4, width: 8, height: 8,
-                                borderRadius: "50%", background: t.primary, border: `2px solid ${t.surface}`
-                            }} />
-                        </button>
-                        <div style={{
-                            width: 34, height: 34, borderRadius: "50%", background: t.grad1,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 13, fontWeight: 700, color: "#1A2E35", cursor: "pointer"
-                        }}>JD</div>
-                    </div>
+                    {/* Three pieces of decorative chrome removed:
+
+                        - a search button with no handler;
+                        - a notification bell with no handler, rendering a
+                          PERMANENT unread dot -- a badge that was always on and
+                          therefore meant nothing. The real notification drawer
+                          lives in Dashboard.jsx and has real unread state;
+                        - an avatar hardcoded to "JD", shown to every user
+                          whoever they were.
+
+                        None of them did anything, and together they made a
+                        signing surface look like a mock-up. */}
                 </div>
 
                 {/* Page content */}
