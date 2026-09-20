@@ -948,6 +948,19 @@ async def get_agreement(agreement_id: str, requester_id: str) -> dict:
     if not agreement:
         raise NotFoundError("Agreement")
 
+    # A DRAFT IS PRIVATE TO ITS CREATOR, and is reported as NOT FOUND rather
+    # than FORBIDDEN. `create_draft` writes both parties into the row before it
+    # is sent, so party membership alone would let the counterparty read a
+    # half-written agreement that was never offered to them.
+    #
+    # 404 not 403: a 403 would confirm the id exists, which tells the
+    # counterparty a draft about them is being written. For something they are
+    # not entitled to know about yet, absence is the honest answer.
+    if agreement.get("status") == AgreementStatus.DRAFT.value:
+        if agreement.get("created_by") != requester_id:
+            raise NotFoundError("Agreement")
+        return agreement
+
     party_ids = {p["user_id"] for p in agreement.get("parties", [])}
     if requester_id not in party_ids and agreement.get("created_by") != requester_id:
         raise ForbiddenError("Access denied to this agreement")

@@ -519,3 +519,103 @@ async def test_audit_log_and_signature_data_never_cross_the_wire(world):
     assert "idempotency_receipts" not in wire
     for party in wire["parties"]:
         assert "signature_data" not in party
+
+
+# ── a draft is private to its author ────────────────────────────────────────
+
+@pytest.mark.integration
+async def test_a_draft_is_invisible_to_the_counterparty_in_the_list(world):
+    """THE leak this closes.
+
+    `create_draft` writes BOTH parties into the row so it is complete before
+    sending, and the list filter matched "party OR creator". So the client saw
+    the lawyer's unsent draft -- half-written wording, or wording abandoned
+    before sending -- as though it had been offered to them.
+    """
+    from app.services import agreement_service
+
+    case_id = await _case()
+    d = await _draft(case_id)
+
+    mine = await agreement_service.list_agreements(LAWYER)
+    theirs = await agreement_service.list_agreements(CLIENT)
+
+    assert d["_id"] in {a["id"] for a in mine}, "the author lost their own draft"
+    assert d["_id"] not in {a["id"] for a in theirs}, "counterparty saw a draft"
+
+
+@pytest.mark.integration
+async def test_a_draft_reads_as_not_found_for_the_counterparty(world):
+    """404, not 403.
+
+    A 403 confirms the id exists, which tells the counterparty a draft about
+    them is being written. For something they are not entitled to know about
+    yet, absence is the honest answer.
+    """
+    from app.core.exceptions import NotFoundError
+    from app.services import agreement_service
+
+    d = await _draft(await _case())
+
+    assert (await agreement_service.get_agreement(d["_id"], LAWYER))["_id"] == d["_id"]
+
+    with pytest.raises(NotFoundError):
+        await agreement_service.get_agreement(d["_id"], CLIENT)
+    with pytest.raises(NotFoundError):
+        await agreement_service.get_agreement(d["_id"], OTHER_LAWYER)
+
+
+@pytest.mark.integration
+async def test_once_sent_the_counterparty_can_see_and_fetch_it(world):
+    """The privacy rule must not outlive the draft: sending is what makes it
+    theirs to read."""
+    from app.services import agreement_service
+
+    d = await _draft(await _case())
+    await _send(d)
+
+    theirs = await agreement_service.list_agreements(CLIENT)
+    assert d["_id"] in {a["id"] for a in theirs}
+    fetched = await agreement_service.get_agreement(d["_id"], CLIENT)
+    assert fetched["status"] == AgreementStatus.PENDING.value
+
+
+@pytest.mark.integration
+async def test_there_is_exactly_one_draft_to_pending_transition(world):
+    """No second route to `pending` from a draft.
+
+    A second path would be a second place for the guards to be forgotten --
+    the version check, the body-hash check, the consent capture and the
+    idempotency receipt all live on `sign_and_send_draft`. This asserts on the
+    source so a new writer cannot appear unnoticed.
+    """
+    import inspect
+
+    from app.services import agreement_service
+
+    # A first version counted every `"status": AgreementStatus.PENDING.value`
+    # in the module and asserted the total. That could not tell a WRITE from a
+    # FILTER -- `submit_signature` and `decline_agreement` both match on
+    # `pending` -- so it was really asserting a line count, which any edit
+    # would break for no reason.
+    #
+    # The property that matters is narrower: exactly one function moves a row
+    # OUT of `draft` INTO `pending`. Such a function must mention both states.
+    movers = []
+    for name, fn in vars(agreement_service).items():
+        if not (inspect.isfunction(fn) or inspect.iscoroutinefunction(fn)):
+            continue
+        try:
+            src = inspect.getsource(fn)
+        except (OSError, TypeError):
+            continue
+        if ("AgreementStatus.DRAFT.value" in src
+                and '"status": AgreementStatus.PENDING.value' in src):
+            movers.append(name)
+
+    assert movers == ["sign_and_send_draft"], (
+        f"expected only sign_and_send_draft to move draft -> pending, got "
+        f"{movers}. A second path would be a second place to forget the "
+        "version check, the body-hash check, the consent capture and the "
+        "idempotency receipt."
+    )

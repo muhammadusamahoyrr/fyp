@@ -15,9 +15,28 @@ class AgreementRepository(BaseRepository):
         return await self.find_many({"parties.user_id": user_id})
 
     async def find_for_user(self, user_id: str) -> list[dict]:
-        """Agreements the user is a party to or created, newest first."""
+        """Agreements the user may see, newest first.
+
+        A DRAFT IS PRIVATE TO ITS CREATOR. Gate 3C's `create_draft` writes both
+        parties into `parties` so the row is complete before it is sent -- which
+        meant the old filter ("party OR creator") showed the counterparty an
+        unsent draft. They would have seen a lawyer's half-written retainer, and
+        any wording abandoned before sending, as though it had been offered to
+        them.
+
+        So drafts match only by `created_by`; everything else keeps the old
+        rule. `get_agreement` applies the same distinction for reads by id.
+        """
+        from app.core.constants import AgreementStatus
+
         return await self.find_many(
-            {"$or": [{"parties.user_id": user_id}, {"created_by": user_id}]},
+            {"$or": [
+                # Sent or finished: visible to every party, as before.
+                {"parties.user_id": user_id,
+                 "status": {"$ne": AgreementStatus.DRAFT.value}},
+                # Drafts: the author only.
+                {"created_by": user_id},
+            ]},
             sort=[("created_at", -1)],
         )
 
