@@ -125,16 +125,29 @@ async def park_in_transaction(session, logical_event_id: str,
     unit. Either the agreement transition and its notification event both land,
     or neither does.
 
-    A duplicate key is still SUCCESS, for the same reason as above: the event is
-    already queued and will be delivered once. That is what makes a transaction
-    retry (which `with_transaction` performs on transient errors) safe — the
-    retried attempt re-parks the same logical id and does not abort on itself.
+    A DUPLICATE KEY IS NOT SWALLOWED, and that is a deliberate reversal.
+
+    An earlier version caught `DuplicateKeyError` and returned, reasoning that
+    the logical id is deterministic so a retry re-parking the same event is
+    harmless. Two things are wrong with that.
+
+    First, a write error inside a MongoDB transaction is not something
+    application code can simply continue past: the transaction may already be
+    unable to commit, so "handling" it turns a clear failure here into a
+    confusing one at commit time.
+
+    Second, the premise is false. `with_transaction` ROLLS BACK a failed attempt
+    before retrying, so a retry never sees its own earlier park and no duplicate
+    arises from retrying. The deterministic id is what makes the retry produce
+    ONE row, not what makes a collision safe.
+
+    So a duplicate means something genuinely unexpected — a previously COMMITTED
+    transaction already parked this event, and this unit is repeating work that
+    is already done. Aborting is the safe answer; committing the rest of the
+    transition on top of a state that already exists is not. Fail closed.
     """
-    try:
-        await get_event_outbox_col().insert_one(
-            _event_doc(logical_event_id, destination, payload), session=session)
-    except DuplicateKeyError:
-        return   # already queued — a retry of this same unit, not a conflict
+    await get_event_outbox_col().insert_one(
+        _event_doc(logical_event_id, destination, payload), session=session)
 
 
 async def _claim(owner: str) -> dict | None:

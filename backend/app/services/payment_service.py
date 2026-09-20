@@ -110,8 +110,8 @@ async def _require_executed_engagement_letter(case_id: str, lawyer_id: str) -> N
     )
     if not eng:
         raise AppValidationError(
-            "No accepted engagement was found for this case, so there is no "
-            "agreed fee to bill against."
+            "Cannot raise a fee request: no billable engagement with an "
+            "executed letter exists for this case."
         )
 
     agreement_id = eng.get("agreement_id")
@@ -122,19 +122,43 @@ async def _require_executed_engagement_letter(case_id: str, lawyer_id: str) -> N
     status = (agreement or {}).get("status")
 
     if status != AgreementStatus.EXECUTED.value:
-        # Name the actual state: "not signed yet" and "never generated" need
-        # different actions from the lawyer, and a single vague error would send
-        # them chasing the wrong one.
-        detail = (
-            "the engagement letter has not been generated for this engagement"
-            if agreement is None else
-            f"the engagement letter is still '{status}' — it must be signed by "
-            "both you and the client"
-        )
-        raise AppValidationError(
-            f"Cannot raise a fee request: {detail}. The client has to agree to "
-            "the fee in writing before they can be billed for it."
-        )
+        # ONE MESSAGE PER STATE, because each needs a different action and a
+        # single vague error sends the lawyer chasing the wrong one.
+        #
+        # The old copy said the letter "must be signed by both you and the
+        # client" for EVERY non-executed state, including `cancelled` -- which
+        # `submit_signature` refuses permanently. It instructed the impossible.
+        #
+        # None of these suggest terminating the engagement. Declining a letter
+        # now reverses the engagement automatically, so by the time a lawyer
+        # reads the declined message there is nothing left to terminate.
+        if agreement is None:
+            detail = (
+                "no engagement letter is available for this engagement. "
+                "Billing is disabled; contact support."
+            )
+        elif status == AgreementStatus.PENDING.value:
+            detail = (
+                "the engagement letter is awaiting signatures. Both parties "
+                "must sign it before billing can begin."
+            )
+        elif status == AgreementStatus.CANCELLED.value:
+            # DEFENSIVE. A declined letter reverses its engagement out of
+            # RETAINED, so the lookup above should not have found it. Reaching
+            # here means a row predating that reversal, or one repaired by
+            # hand -- either way the lawyer needs the truth, not a retry.
+            detail = (
+                "the engagement letter was declined, so this engagement cannot "
+                "be billed. If both parties still wish to proceed, the client "
+                "must start a new engagement and both parties must sign the "
+                "new letter."
+            )
+        else:
+            detail = (
+                f"the engagement letter is in state '{status}' and is not "
+                "executed, so nothing can be billed against it."
+            )
+        raise AppValidationError(f"Cannot raise a fee request: {detail}")
 
 
 async def create_fee_request(lawyer_id: str, data: dict) -> dict:

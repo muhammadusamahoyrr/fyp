@@ -153,9 +153,16 @@ ENGAGEMENT_OPEN_STATUSES = (
     EngagementStatus.TERMS_PROPOSED.value,
 )
 
-# An engagement that became a real working relationship. Membership here is what
-# proves a client actually retained a lawyer, so it gates reviews and billing —
-# an engagement that has since ended still happened, and still counts.
+# An engagement that became a real working relationship. An engagement that has
+# since ended still happened, and still counts.
+#
+# NECESSARY BUT NO LONGER SUFFICIENT for either gate. Both billing
+# (`payment_service._require_executed_engagement_letter`) and reviews
+# (`engagement_repo.exists_executed_relationship`) now ALSO require the
+# engagement's letter to be `executed`. Membership here alone once implied both,
+# and that was the hole: a declined letter left the engagement `accepted`, so a
+# client could review — and a lawyer be told to chase — a relationship neither
+# party had signed.
 ENGAGEMENT_RETAINED_STATUSES = (
     EngagementStatus.ACCEPTED.value,
     EngagementStatus.COMPLETED.value,

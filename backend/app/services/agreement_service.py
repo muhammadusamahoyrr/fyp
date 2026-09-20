@@ -1,10 +1,17 @@
 import hashlib
+import logging
 import re
 import secrets
 from datetime import datetime, timezone
 
 from app.core.config import settings
-from app.core.constants import AgreementStatus, NotificationType, SignatureMethod
+from app.core.constants import (
+    AgreementStatus,
+    CaseStatus,
+    EngagementStatus,
+    NotificationType,
+    SignatureMethod,
+)
 from app.core.exceptions import (
     AppValidationError,
     ForbiddenError,
@@ -14,6 +21,8 @@ from app.core.exceptions import (
 from app.db.collections import get_agreements_col
 from app.repositories.agreement_repo import AgreementRepository
 from app.repositories.user_repo import UserRepository
+
+logger = logging.getLogger(__name__)
 
 agreement_repo = AgreementRepository()
 user_repo = UserRepository()
@@ -191,9 +200,19 @@ async def _run_in_transaction(operation):
     """Run `operation(session)` as one atomic unit, or refuse.
 
     `with_transaction` retries transient errors itself, so `operation` MUST be
-    idempotent -- it may run more than once. That is why every conditional
-    update inside filters on the state it expects, and why the outbox park
-    treats a duplicate key as success rather than a conflict.
+    safe to run more than once.
+
+    What "safe" means here is narrower than it first appears. A failed attempt
+    is ABORTED -- every write it made is rolled back -- before the body runs
+    again, so a retry never meets its own earlier writes and does not need to
+    recognise them. The conditional filters on each update are therefore not
+    self-retry protection; they guard against a change committed by SOMEBODY
+    ELSE between this transaction's read and its write.
+
+    The outbox park does NOT swallow a duplicate key (see
+    `event_outbox.park_in_transaction`). Because a retry rolls back first, a
+    duplicate can only mean a previously COMMITTED transaction already did this
+    work -- which is a reason to abort, not to continue.
     """
     from pymongo.errors import OperationFailure
 
@@ -579,9 +598,16 @@ async def _park_notification(session, agreement_id: str, event: str,
     """Queue one notification inside the caller's transaction.
 
     `logical_event_id` is derived, never random: the same transition for the
-    same recipient always produces the same id. That is what makes a
-    `with_transaction` retry safe -- the retry re-parks the identical id, the
-    duplicate key is treated as success, and the recipient is notified once.
+    same recipient always produces the same id. That is what makes the
+    RELAY's at-least-once delivery land exactly one notification --
+    `create_notification` dedups on it.
+
+    It is NOT what makes a transaction retry safe, and an earlier version of
+    this docstring said otherwise. A retried attempt does not collide with
+    itself: `with_transaction` aborts the failed attempt first, rolling back
+    its park. A duplicate here means a previously committed transaction already
+    parked this event, and `park_in_transaction` deliberately lets that surface
+    rather than swallowing it.
     """
     from app.services import event_outbox
 
@@ -596,6 +622,310 @@ async def _park_notification(session, agreement_id: str, event: str,
             "body": body,
             "data": {"agreement_id": agreement_id},
         },
+    )
+
+
+# ── Engagement-letter reversal (Phase 2) ─────────────────────────────────────
+#
+# Declining a LINKED engagement letter must reverse the engagement it belongs
+# to, or the system holds a cancelled letter beside an engagement that still
+# claims a lawyer and a case. Before this, `decline_agreement` read
+# `engagement_id` nowhere: the field was written at creation and acted on by
+# nothing, so a declined letter left the lawyer assigned, unable to invoice, and
+# told by the fee gate to get a `cancelled` letter signed -- which
+# `submit_signature` refuses permanently.
+#
+# Approved rules are R1-R8 in AGREEMENTS_REMEDIATION_PLAN.md Phase 2.
+
+DECLINE_SOURCE_ENGAGEMENT_LETTER = "engagement_letter"
+
+
+async def _linked_engagement(agreement: dict, user_id: str,
+                             session=None) -> dict | None:
+    """Validate the agreement -> engagement -> case chain, or return None.
+
+    Returns None for a generic agreement, which must decline exactly as before.
+
+    CALLED INSIDE THE TRANSACTION, with `session`, and that is the whole point.
+    An earlier version validated once as a preflight on a stale read, which left
+    a window: between the check and the write the engagement could be
+    re-pointed at a different letter, and the reversal would then end a
+    relationship its own parties never refused. Preflight remains useful for
+    fast, friendly errors, but the authoritative check is the one that runs
+    under the same session as the writes.
+
+    EVERY LINK IS CHECKED, and a broken one aborts the transaction rather than
+    producing a partial reversal. `engagement_id` on its own is a claim, not a
+    fact: the engagement may have been superseded, already ended, or may now
+    point at a DIFFERENT agreement.
+
+    Raises rather than silently skipping when the linkage is inconsistent. A
+    party's right to decline must not quietly produce a half-applied
+    cross-domain transition; the caller gets a refusal and nothing is written.
+    """
+    engagement_id = agreement.get("engagement_id")
+    if not engagement_id:
+        return None   # generic agreement -- existing behaviour, untouched
+
+    from app.db.collections import get_cases_col, get_engagements_col
+
+    eng = await get_engagements_col().find_one(
+        {"_id": engagement_id}, session=session)
+    if not eng:
+        # The letter outlived its engagement. That is the separate orphan
+        # defect (plan 2.0b), explicitly out of scope, and NOT something to
+        # repair from a decline. Refuse rather than guess.
+        logger.error(
+            "agreement %s names engagement %s, which does not exist; "
+            "refusing to decline rather than apply a partial reversal",
+            agreement["_id"], engagement_id,
+        )
+        raise AppValidationError(
+            "This engagement letter is not linked to a live engagement, so it "
+            "cannot be declined here. Nothing has been changed — please "
+            "contact support."
+        )
+
+    if eng.get("agreement_id") != agreement["_id"]:
+        # Superseded: the engagement has moved on to a different letter.
+        logger.error(
+            "agreement %s claims engagement %s, but that engagement points at "
+            "%s; refusing to reverse on a superseded letter",
+            agreement["_id"], engagement_id, eng.get("agreement_id"),
+        )
+        raise AppValidationError(
+            "This engagement letter has been superseded and can no longer be "
+            "declined. Nothing has been changed — open the engagement to see "
+            "its current letter."
+        )
+
+    # WHO declined, decided by identity rather than by role lookup: the
+    # engagement carries both ids, so this cannot disagree with the engagement.
+    #
+    # CHECKED BEFORE the ended-engagement early return below, and that order is
+    # deliberate. Previously an already-completed engagement returned None here
+    # first, so a requester who was a party to the LETTER but a stranger to the
+    # ENGAGEMENT was never checked at all -- they could cancel the letter of a
+    # relationship they had nothing to do with, purely because it had ended.
+    # Authorization does not lapse when a record does.
+    if user_id == eng.get("client_id"):
+        declined_by = "client"
+    elif user_id == eng.get("lawyer_id"):
+        declined_by = "lawyer"
+    else:
+        # A party to the agreement who is neither party to the engagement. The
+        # two documents disagree about who is involved; that is not a decline
+        # this code can reason about.
+        logger.error(
+            "user is a party to agreement %s but not to its engagement %s; "
+            "refusing to reverse",
+            agreement["_id"], engagement_id,
+        )
+        raise AppValidationError(
+            "You are not a party to the engagement behind this letter, so it "
+            "cannot be declined here. Nothing has been changed."
+        )
+
+    if eng.get("status") != EngagementStatus.ACCEPTED.value:
+        # completed / terminated / already declined. History is not rewritten:
+        # an engagement that already ended is not re-ended by a late decline.
+        # Reached only AFTER the identity check above, so an unauthorized
+        # requester is refused rather than quietly allowed through this door.
+        logger.info(
+            "agreement %s is linked to engagement %s in state %s; declining the "
+            "letter without reversing an engagement that already ended",
+            agreement["_id"], engagement_id, eng.get("status"),
+        )
+        return None
+
+    # THE CASE MUST EXIST. A missing case is a broken linkage, not a case that
+    # merely cannot be released: the engagement claims one, and an engagement
+    # pointing at nothing is a record this code cannot reason about. Failing
+    # atomically is the only safe answer -- the alternative is ending an
+    # engagement whose subject has vanished and reporting success.
+    case_id = eng.get("case_id")
+    case = (await get_cases_col().find_one({"_id": case_id}, session=session)
+            if case_id else None)
+    if not case:
+        logger.error(
+            "engagement %s names case %s, which does not exist; aborting the "
+            "decline rather than reversing against a missing case",
+            engagement_id, case_id,
+        )
+        raise AppValidationError(
+            "The case behind this engagement letter could not be found, so the "
+            "letter cannot be declined here. Nothing has been changed — please "
+            "contact support."
+        )
+
+    return {
+        "engagement_id": engagement_id,
+        "case_id": case_id,
+        "lawyer_id": eng.get("lawyer_id"),
+        "client_id": eng.get("client_id"),
+        "declined_by": declined_by,
+        # THE CASE'S DISPOSITION, read under this session rather than inferred
+        # from an update result. A zero-match release has two very different
+        # causes -- another lawyer holds the case, or nobody does -- and the
+        # counterparty notice must not conflate them.
+        "case_disposition": (
+            "ours" if case.get("lawyer_id") == eng.get("lawyer_id")
+            else "already_unassigned" if case.get("lawyer_id") is None
+            else "reassigned"
+        ),
+    }
+
+
+async def _reverse_engagement(session, linkage: dict, now, *,
+                              agreement_id: str, reason: str | None) -> dict:
+    """Engagement `accepted` -> `declined`, and release the case if it is ours.
+
+    Returns a STRUCTURED OUTCOME, not one boolean:
+
+        {"engagement_declined": bool, "case_disposition": str}
+
+    where `case_disposition` is one of `released`, `reassigned` or
+    `already_unassigned`. Two separate facts that a single flag conflated, and
+    the third value matters as much as the second: a release matching zero rows
+    does NOT mean another lawyer holds the case -- it may simply have no lawyer
+    at all. Saying "assigned elsewhere" in that situation is as wrong as saying
+    "open again" when somebody else really does hold it.
+
+    THE CONDITIONAL FILTERS ARE NOT FOR SELF-RETRY. `with_transaction` aborts a
+    failed attempt, rolling back every write it made, before running the body
+    again -- so a retry never meets its own earlier writes and never needs to
+    detect them. What the filters guard is a change committed by SOMEBODY ELSE
+    between this transaction's read and its write: another party declining
+    first, or the engagement being re-pointed at a different letter.
+    """
+    from app.db.collections import get_cases_col, get_engagements_col
+
+    moved = await get_engagements_col().update_one(
+        {
+            "_id": linkage["engagement_id"],
+            "status": EngagementStatus.ACCEPTED.value,
+            # THE BACKLINK IS PART OF THE FILTER, not only of the preflight.
+            # If the engagement was re-pointed at a different letter between
+            # validation and this write, the update matches nothing and the
+            # reversal does not happen -- which is what stops a superseded
+            # letter ending a live relationship.
+            "agreement_id": agreement_id,
+        },
+        {"$set": {
+            "status": EngagementStatus.DECLINED.value,
+            "declined_at": now,
+            "declined_by": linkage["declined_by"],
+            # The MACHINE discriminator, kept apart from the human reason so
+            # neither has to be parsed out of the other. `decline_reason` is
+            # shown to the counterparty; a sentinel there would be rendered to
+            # a person.
+            "decline_source": DECLINE_SOURCE_ENGAGEMENT_LETTER,
+            "decline_reason": reason,
+            "declined_agreement_id": agreement_id,
+            "updated_at": now,
+        }},
+        session=session,
+    )
+    if moved.modified_count == 0:
+        return {"engagement_declined": False,
+                "case_disposition": linkage["case_disposition"]
+                if linkage["case_disposition"] != "ours" else "reassigned"}
+
+    # RELEASE THE CASE, but only if it is still held by THIS lawyer. A case
+    # reassigned since must never be cleared by a late decline of a superseded
+    # engagement -- that would take a live matter away from a lawyer who has
+    # nothing to do with this letter. The filter is the guarantee.
+    #
+    # WHICH world we are in comes from the disposition read under this session
+    # in `_linked_engagement`, NOT from `modified_count`. A zero match is
+    # ambiguous on its own: it means "not ours", which is either "somebody
+    # else's" or "nobody's", and those produce different, non-interchangeable
+    # statements to the counterparty.
+    case_released = False
+    if linkage["case_disposition"] == "ours":
+        released = await get_cases_col().update_one(
+            {"_id": linkage["case_id"], "lawyer_id": linkage["lawyer_id"]},
+            {"$set": {
+                "lawyer_id": None,
+                "status": CaseStatus.OPEN.value,
+                "updated_at": now,
+            }},
+            session=session,
+        )
+        case_released = released.modified_count == 1
+
+    # The milestone belongs to the RELEASE, not to the decline. A case now run
+    # by another lawyer must not gain an entry about an engagement that is no
+    # longer its own -- that would put a stranger's history on their timeline.
+    if case_released:
+        await get_cases_col().update_one(
+            {"_id": linkage["case_id"]},
+            {"$push": {"milestones": {
+                "title": f"Engagement ended — letter declined by the {linkage['declined_by']}",
+                "description": reason or
+                "The engagement letter was declined, so the engagement did not proceed.",
+                "date": now,
+                "completed": True,
+                "completed_at": now,
+            }}},
+            session=session,
+        )
+
+    return {
+        "engagement_declined": True,
+        "case_disposition": (
+            "released" if case_released else linkage["case_disposition"]
+        ),
+    }
+
+
+def _decline_notice(decliner: str, title: str, reason: str | None,
+                    outcome: dict) -> str:
+    """What the counterparty is told, matched to what actually happened.
+
+    THREE SHAPES, because the reader's next action differs in each and a message
+    that overstates is worse than a terse one:
+
+    1. A generic agreement -- who declined, and why. Nothing else moved.
+    2. A reversed engagement whose case was RELEASED -- who declined, that the
+       engagement is over, that the case is open again, and that nothing can be
+       billed under it. ONLY this branch may say the case is open, and only this
+       branch may suggest starting a new engagement.
+    3. A reversed engagement whose case was NOT released. Truthful and neutral:
+       the engagement ended, the case's assignment was not changed. It does not
+       say WHY, because the two causes (another lawyer holds it; nobody holds
+       it) are different facts and neither is worth guessing at.
+
+    WHAT SHAPE 3 MUST NOT DO, and previously did:
+
+    * Say the case was "assigned elsewhere". That was inferred from a release
+      matching zero rows, which is also what an ALREADY-UNASSIGNED case
+      produces. It would tell a client a stranger had taken their matter when
+      in fact nobody had.
+    * Tell the client to start a new engagement. While another lawyer holds the
+      case, `request_engagement` refuses with "this case already has a lawyer
+      assigned" -- so the instruction fails the moment it is followed.
+
+    None of them suggests terminating the engagement: the reversal already ended
+    it, so that route is neither available nor needed.
+    """
+    said = f"{decliner} declined \"{title}\"."
+    because = f" Reason: {reason}" if reason else ""
+    if not outcome.get("engagement_declined"):
+        return said + because
+
+    if outcome.get("case_disposition") == "released":
+        return (
+            said + because +
+            " The engagement has ended and the case is open again, so you can "
+            "engage another lawyer. No fees can be raised under this "
+            "engagement. To work together after all, the client must start a "
+            "new engagement and both parties must sign the new letter."
+        )
+    return (
+        said + because +
+        " The engagement has ended. The case's current assignment was not "
+        "changed. No fees can be raised under this engagement."
     )
 
 
@@ -651,68 +981,22 @@ async def decline_agreement(
 
     clean_reason = (reason or "").strip() or None
 
+    # PREFLIGHT ONLY. Run without a session so an obviously broken linkage is
+    # refused quickly and cheaply -- but its answer is NOT trusted by the
+    # transaction, which revalidates everything under its own session below.
+    # Between this call and the writes the engagement can be re-pointed at
+    # another letter, and only the in-transaction check sees that.
+    await _linked_engagement(agreement, user_id)
+
     # As with signing, the checks above are pre-flight on a stale read. The
     # guarantee is the filter on the conditional update inside the transaction:
     # between that read and this write the last signature may have landed and
     # executed the agreement, and declining an executed instrument must lose
     # that race rather than overwrite it.
     async def _txn(session):
-        col = get_agreements_col()
-        now = datetime.now(timezone.utc)
-
-        current = await col.find_one({"_id": agreement_id}, session=session)
-        if not current:
-            raise _TransitionConflict("This agreement no longer exists.")
-        digest = current.get("body_sha256") or body_digest(current.get("body_html", ""))
-        parties = current.get("parties", [])
-        title = current.get("title", "Agreement")
-        decliner = next((p.get("full_name") for p in parties
-                         if p["user_id"] == user_id), "A party")
-
-        # Status change and audit entry in ONE conditional write, filtered on
-        # `pending`. Two writes meant a crash between them could cancel the
-        # agreement with no record of who refused it or why.
-        moved = await col.update_one(
-            {"_id": agreement_id, "status": AgreementStatus.PENDING.value},
-            {
-                "$set": {"status": AgreementStatus.CANCELLED.value,
-                         "updated_at": now},
-                "$push": {"audit_log": {
-                    "action": "declined",
-                    "actor_id": user_id,
-                    "timestamp": now,
-                    "ip_address": ip_address,
-                    "reason": clean_reason,
-                    "body_sha256": digest,
-                }},
-            },
-            session=session,
-        )
-        if moved.modified_count == 0:
-            status = (current or {}).get("status")
-            raise _TransitionConflict(
-                "This agreement is already fully executed and cannot be declined"
-                if status == AgreementStatus.EXECUTED.value else
-                "This agreement has already been declined"
-                if status == AgreementStatus.CANCELLED.value else
-                "This agreement changed while you were declining it. Reload it "
-                "and check its current state before trying again."
-            )
-
-        # Parked in-transaction, for the same reason as signing: a counterparty
-        # who is never told the deal is off is the failure this closes.
-        for party in parties:
-            if party["user_id"] == user_id:
-                continue
-            await _park_notification(
-                session, agreement_id, f"declined:{user_id}", party["user_id"],
-                NotificationType.AGREEMENT_DECLINED,
-                "Agreement declined",
-                f"{decliner} declined \"{title}\"."
-                + (f" Reason: {clean_reason}" if clean_reason else ""),
-            )
-
-        return await col.find_one({"_id": agreement_id}, session=session)
+        return await _decline_in_transaction(
+            session, agreement_id=agreement_id, user_id=user_id,
+            reason=clean_reason, ip_address=ip_address)
 
     try:
         result = await _run_in_transaction(_txn)
@@ -721,3 +1005,125 @@ async def decline_agreement(
 
     await _drain_soon()
     return result
+
+
+async def _decline_in_transaction(session, *, agreement_id: str, user_id: str,
+                                  reason: str | None, ip_address: str | None) -> dict:
+    """The whole decline, as ONE callback, runnable inside a caller's session.
+
+    INTERNAL -- underscore-prefixed because it takes an open session and
+    performs no post-commit work. `decline_agreement` is the public entry point.
+    The name is reached into by the retry test, which drives the REAL body
+    across two real transactions (execute-and-abort, then execute-and-commit)
+    rather than approximating a retry by calling one inner helper twice inside
+    a single transaction -- which is not what `with_transaction` does and proved
+    the wrong property.
+
+    IT CARRIES ITS OWN COMPLETE AUTHORIZATION CONTRACT and does not lean on
+    `decline_agreement`'s preflight for any of it. A callback that is safe only
+    because of what its usual caller checked first is one refactor away from
+    being unsafe, and it is directly invocable by tests today. Every guard is
+    re-asserted here, against rows read with THIS session:
+
+      * the agreement exists;
+      * the requester is a party to it NOW, not merely at preflight time;
+      * for a linked letter, the requester is a party to the ENGAGEMENT too
+        (`_linked_engagement`), including when that engagement has already
+        ended;
+      * the agreement is still `pending` (enforced by the update filter).
+
+    Every one of those raises before any write, so a refusal leaves no agreement
+    change, no audit entry and no outbox row.
+
+    `reason` arrives already cleaned. Everything here must be safe to run more
+    than once: `with_transaction` rolls a failed attempt back and runs it again.
+    """
+    col = get_agreements_col()
+    now = datetime.now(timezone.utc)
+
+    current = await col.find_one({"_id": agreement_id}, session=session)
+    if not current:
+        raise _TransitionConflict("This agreement no longer exists.")
+
+    # AUTHORIZATION, RE-ASSERTED UNDER THIS SESSION, BEFORE ANY WRITE.
+    #
+    # `decline_agreement` checks party membership on a stale pre-transaction
+    # read. Between that check and here the party list can change -- a party
+    # removed from the agreement must not still be able to end it -- and this
+    # callback can also be invoked directly. Fail closed on the current row.
+    parties = current.get("parties", [])
+    if user_id not in {p["user_id"] for p in parties}:
+        logger.error(
+            "user is not a party to agreement %s at transaction time; refusing",
+            agreement_id,
+        )
+        raise ForbiddenError("You are not a party to this agreement")
+
+    digest = current.get("body_sha256") or body_digest(current.get("body_html", ""))
+    title = current.get("title", "Agreement")
+    decliner = next((p.get("full_name") for p in parties
+                     if p["user_id"] == user_id), "A party")
+
+    # THE AUTHORITATIVE LINKAGE CHECK, under this session and on the row
+    # this transaction actually read. The preflight above answered from a
+    # snapshot that may already be stale; this one cannot be. Raising here
+    # aborts the whole transaction, so a broken chain leaves no agreement
+    # write, no audit entry and no outbox row.
+    linkage = await _linked_engagement(current, user_id, session=session)
+
+    # Status change and audit entry in ONE conditional write, filtered on
+    # `pending`. Two writes meant a crash between them could cancel the
+    # agreement with no record of who refused it or why.
+    moved = await col.update_one(
+        {"_id": agreement_id, "status": AgreementStatus.PENDING.value},
+        {
+            "$set": {"status": AgreementStatus.CANCELLED.value,
+                     "updated_at": now},
+            "$push": {"audit_log": {
+                "action": "declined",
+                "actor_id": user_id,
+                "timestamp": now,
+                "ip_address": ip_address,
+                "reason": reason,
+                "body_sha256": digest,
+            }},
+        },
+        session=session,
+    )
+    if moved.modified_count == 0:
+        status = (current or {}).get("status")
+        raise _TransitionConflict(
+            "This agreement is already fully executed and cannot be declined"
+            if status == AgreementStatus.EXECUTED.value else
+            "This agreement has already been declined"
+            if status == AgreementStatus.CANCELLED.value else
+            "This agreement changed while you were declining it. Reload it "
+            "and check its current state before trying again."
+        )
+
+    # THE CROSS-DOMAIN HALF. Same transaction as the agreement write above,
+    # which is the entire point: a party's right to decline must not be able
+    # to leave the agreement cancelled while the engagement still claims a
+    # lawyer and a case.
+    outcome = {"engagement_declined": False, "case_released": False}
+    if linkage:
+        outcome = await _reverse_engagement(
+            session, linkage, now,
+            agreement_id=agreement_id, reason=reason,
+        )
+
+    # Parked in-transaction, for the same reason as signing: a counterparty
+    # who is never told the deal is off is the failure this closes.
+    body = _decline_notice(decliner, title, reason, outcome)
+    for party in parties:
+        if party["user_id"] == user_id:
+            continue
+        await _park_notification(
+            session, agreement_id, f"declined:{user_id}", party["user_id"],
+            NotificationType.AGREEMENT_DECLINED,
+            "Engagement ended — letter declined"
+            if outcome["engagement_declined"] else "Agreement declined",
+            body,
+        )
+
+    return await col.find_one({"_id": agreement_id}, session=session)

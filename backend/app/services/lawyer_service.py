@@ -688,7 +688,12 @@ async def submit_review(
     # Relationship guard: only a client who has actually worked with this lawyer
     # may review — an accepted engagement OR a completed appointment. Blocks
     # rating spam from users with no real relationship.
-    has_engagement  = await engagement_repo.exists_accepted(client_id, lawyer_id)
+    # An EXECUTED engagement letter, not merely an accepted engagement. A
+    # declined letter now reverses its engagement, but an accepted engagement
+    # whose letter is still pending is also not yet a relationship anybody
+    # agreed to in writing -- and before this it could be reviewed.
+    has_engagement  = await engagement_repo.exists_executed_relationship(
+        client_id, lawyer_id)
     has_appointment = await appointment_repo.exists_completed(client_id, lawyer_id)
     if not (has_engagement or has_appointment):
         raise ForbiddenError("You can only review a lawyer you have worked with")

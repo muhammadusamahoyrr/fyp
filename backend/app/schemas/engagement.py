@@ -91,6 +91,18 @@ class EngagementOut(BaseModel):
     terminated_at: datetime | None = None
     terminated_by: str | None = None
     termination_reason: str | None = None
+    # Letter-decline reversal (plan Phase 2 R2). EXPOSED, not internal: a
+    # client looking at a declined engagement needs to know WHEN it ended and
+    # WHY, and the UI already renders `decline_reason`/`declined_by` for the
+    # pre-acceptance decline. Without these three, a letter-decline and a
+    # terms-decline are indistinguishable on the wire, and the second is the
+    # one that never claimed a case.
+    #
+    # `decline_source` is the machine discriminator ("engagement_letter"), kept
+    # apart from `decline_reason` above, which holds what a person typed.
+    declined_at: datetime | None = None
+    decline_source: str | None = None
+    declined_agreement_id: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     responded_at: datetime | None = None

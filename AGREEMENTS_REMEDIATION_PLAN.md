@@ -411,6 +411,179 @@ PDF lands rather than after.
 
 ---
 
+## Phase 2 — Gate 1: state map and design decision (ANALYSIS ONLY)
+
+**Written 2026-09-20. Nothing implemented. Stops here for review.**
+
+### 2.G1.1 The complete transition map, as the code actually behaves
+
+Every arrow below was read off the source, not the docstrings.
+
+**Engagement lifecycle** (`engagement_service`)
+
+| From | Event | To | Case effect | Letter effect |
+|---|---|---|---|---|
+| — | `request_engagement` | `requested` | `open` → `pending_lawyer` | — |
+| `requested` | `propose_terms` | `terms_proposed` | none (deliberate) | — |
+| `terms_proposed` | `accept_terms` | `accepted` | claim: `lawyer_id` set, → `in_progress` | letter created **`pending`** |
+| `terms_proposed` | `decline_terms` (client) | `declined` | `_reopen_case`: → `open` | — |
+| `requested`/`terms_proposed` | `decline_engagement` (lawyer) | `declined` | `_reopen_case` | — |
+| `requested`/`terms_proposed` | `cancel_engagement` (client) | `cancelled` | `_reopen_case` | — |
+| `terms_proposed` | accept loses the case race | `cancelled` | — | — |
+| `accepted` | `complete_engagement` | `completed` | → `closed`, **lawyer stays on the case** | — |
+| `accepted` | `terminate_engagement` | `terminated` | released: `lawyer_id` → None, → `open` | — |
+
+**Letter lifecycle** (`agreement_service`)
+
+| From | Event | To | Engagement effect | Case effect |
+|---|---|---|---|---|
+| — | `create_pending_engagement_letter` | `pending` | — | — |
+| `pending` | both parties sign | `executed` | **none** | **none** |
+| `pending` | either party declines | `cancelled` | **NONE ← THE DEFECT** | **NONE** |
+
+`decline_agreement` reads `engagement_id` nowhere. The field is written at
+`agreement_service.py:142` and acted on by nothing.
+
+### 2.G1.2 What the stranded state actually does to each consumer
+
+Four consumers read engagement status. After a declined letter the engagement
+is still `accepted`, so:
+
+| Consumer | Reads | Result after a declined letter | Correct? |
+|---|---|---|---|
+| **Fee gate** `payment_service:106` | `status ∈ RETAINED` | engagement FOUND, letter `cancelled` ≠ `executed` → **refuses** | Refusal right, **message wrong** |
+| **Review gate** `exists_accepted` → `lawyer_service:691` | `status ∈ RETAINED` | client **may review** a lawyer whose letter was refused | **No** — no agreed representation |
+| **New request** `request_engagement:86` | `case.lawyer_id` | `ConflictError` — **client cannot engage anyone else** | **No** |
+| **Unique index** `uniq_pending_engagement` | `status ∈ OPEN` | `accepted` not in OPEN, so no index conflict | n/a |
+
+**The fee-gate message is the sharpest edge.** `payment_service:129` says *"the
+engagement letter is still 'cancelled' — it must be signed by both you and the
+client"*, and `submit_signature` refuses a `cancelled` agreement permanently.
+The lawyer is instructed to do the one thing the system will never allow.
+
+**Correction to the earlier write-up: the state is escapable.**
+`terminate_engagement` accepts any `accepted` engagement from either party and
+releases the case. So a stuck pair is not permanently trapped — but nothing
+tells them, the fee-gate error points the wrong way, and escaping requires the
+lawyer to "terminate" a representation that arguably never began. The defect is
+a misdirection plus a wrong state, not an inescapable deadlock. That is less
+severe than stated and should be reported that way.
+
+### 2.G1.3 The required terminal state — decision needed
+
+The new state must satisfy four constraints, all derived from §2.G1.2:
+
+1. **NOT in `ENGAGEMENT_RETAINED_STATUSES`** — no signed letter means no agreed
+   fee, so it must fall out of both the billing gate and the review gate.
+2. **NOT in `ENGAGEMENT_OPEN_STATUSES`** — the negotiation is over, and adding
+   it would make the `uniq_pending_engagement` partial index reject a fresh
+   request on the same case.
+3. **Terminal** — no transition out, like `declined` and `cancelled`.
+4. **Distinguishable in audit** from "client declined the terms", because the
+   cause and the timing differ.
+
+Every existing terminal status already satisfies 1–3. Only 4 is open.
+
+| Option | Cost | Assessment |
+|---|---|---|
+| **A. `declined` + `declined_by` / `decline_reason`** *(recommended)* | No enum change, no index change, no consumer change. Fields already exist and `decline_terms` already sets them. | Closest meaning: somebody refused. Widens `declined` to include post-acceptance refusals — low risk, no consumer distinguishes by timing. |
+| **B. `cancelled` + `cancelled_reason`** | Same zero cost. | `cancelled` already carries two meanings (client withdrew; lost the case race). A third weakens it further. |
+| **C. New `letter_declined`** | Enum value, both status tuples re-checked, index partial re-created, migration. | Most explicit, most expensive. §7.2 already argued against multiplying terminal states. |
+
+**Recommendation: A**, with `declined_by: "lawyer"|"client"` and a distinct
+`decline_source` of `"engagement_letter"` so reporting can separate the two
+causes without a fifth state.
+
+> **Corrected.** An earlier draft of this paragraph put the discriminator in
+> `decline_reason`. That field holds the reason a PERSON typed and is rendered
+> to the counterparty, so a sentinel there would either be shown to them or
+> force every reader to know which values are prose. R2 is authoritative: the
+> machine value lives in `decline_source`, the human text in `decline_reason`.
+
+### 2.G1.4 Activation model — a revision of this plan's own §2
+
+The original §2 proposed an `awaiting_signatures` state: the engagement would
+not become `accepted` until the letter executed. **Reading the code, that is
+the more expensive and riskier of the two designs, and I no longer recommend
+it.**
+
+| | **Option A — reverse on decline** *(recommended)* | **Option B — `awaiting_signatures`** |
+|---|---|---|
+| `accept_terms` | unchanged | rewritten; its two-step atomic claim ordering is load-bearing and carefully argued |
+| Case claim | at acceptance, as today | deferred until the letter executes |
+| New race | none | **yes** — the case sits unclaimed while the letter is pending, so a second lawyer can take it mid-signature |
+| Enum / index / gates | untouched | new value, both tuples, partial index, both gates |
+| Window where case is claimed but letter unsigned | exists today, and the fee gate already refuses billing in it | eliminated |
+
+The window Option B removes is **already safe**: the fee gate refuses billing
+whenever the letter is not `executed`. Only the *decline* path is broken. Option
+A fixes exactly that and leaves the atomic claim alone.
+
+**Proposed rule (Option A):** a letter moving `pending` → `cancelled` moves its
+engagement `accepted` → `declined` and releases the case
+(`lawyer_id` → None, → `open`), reusing the rollback already written at
+`engagement_service.py:366-380`. An `executed` letter is never touched by
+anything.
+
+> **NOT a Gate 2 rule.** "A terminated engagement voids a still-`pending`
+> letter" appeared here as though it were part of this change. It is the
+> OPPOSITE arrow — engagement→letter rather than letter→engagement — with its
+> own authorization question (who may void, and does a client's termination
+> cancel a lawyer's copy?). **Deferred to Phase 3.** Gate 2 implements
+> letter→engagement only.
+
+### 2.G1.5 Migration and cleanup for existing stranded records
+
+**Current production scope: zero.** The census
+(`scripts/engagement_letter_reconcile.py`, read-only) reports 0 retained
+engagements and 0 engagements at *any* status. The 6 orphaned letters it found
+are §2.0b — a different defect, out of Phase 2 scope, and not to be repaired by
+this work.
+
+The migration is still specified, because the scope is a property of this
+database today and not of the code.
+
+**Detection.** Engagements with `status ∈ RETAINED` whose `agreement_id`
+resolves to an agreement with `status == "cancelled"`. `pending` letters are
+counted but **not** reconciled — a pending letter may still be signed, and
+retiring it is expiry (§C1), a separate decision.
+
+**Classification before action.** For each hit, record `created_at`,
+`created_by`, the case's current `lawyer_id`, and whether the case still
+exists. Rows whose case is gone, or whose case has since been claimed by a
+*different* lawyer, are reported and skipped — not repaired. A reconciliation
+that clobbers a live reassignment creates the incident it was written to clear.
+
+**Action per row.** Inside one transaction: engagement → `declined` with
+`decline_source: "engagement_letter"` (and `decline_reason` carrying the human
+reason from the letter's audit entry, or null), `declined_by` taken from that
+same entry; case released only when it is still held by *that* lawyer; both
+parties notified through the outbox, parked in the same transaction.
+
+**Idempotency.** Every write conditional on the state the census observed, so a
+second run matches nothing. A row that moved in between is skipped, not forced.
+
+**Never touched.** `executed` letters, in any circumstance. Cases held by
+another lawyer. Anything in §2.0b.
+
+**Reporting.** Before and after counts, both stated even when zero — "we fixed
+it before anyone hit it" is only credible if the looking is on record.
+
+### 2.G1.6 Open questions — ALL ANSWERED 2026-09-20
+
+1. **Terminal state** — ✅ Option A. Reuse `declined`; no new status. (R1)
+2. **Activation model** — ✅ Option A. Reverse on decline; `awaiting_signatures`
+   rejected and every instruction for it voided. (R4)
+3. **Review rights** — ✅ Removed. Eligibility now requires an **executed**
+   letter, which is stricter than the mechanical consequence of R1: an accepted
+   engagement whose letter is merely *pending* is also not reviewable. No
+   representation was agreed until both parties signed. (R5)
+4. **Fee-gate copy** — ✅ Four state-specific messages, in §2.G2.3. It must NOT
+   point at `terminate_engagement`: after the automatic reversal that
+   transition is neither available nor needed. (R6)
+
+---
+
 ## Phase 2 — The engagement desync
 
 **Estimated 2 days. This is producing broken states in the current build.**
@@ -434,26 +607,78 @@ instructs the lawyer to do the one thing the system will never allow. There is
 representation without an engagement letter, no way to invoice, and no state
 that explains it.
 
-### The rule to enforce
+### The rule to enforce — APPROVED 2026-09-20
 
-One rule, chosen deliberately, applied in both directions:
+> **SUPERSEDED: `awaiting_signatures`.** An earlier draft of this section
+> proposed deferring activation — acceptance would move the engagement to a new
+> `awaiting_signatures` state and the case would not be claimed until the letter
+> executed. **That design is rejected.** It would rewrite `accept_terms`, whose
+> two-step atomic claim ordering is load-bearing, and it introduces a race the
+> current code does not have: the case sits unclaimed while the letter is
+> pending, so a second lawyer can take it mid-signature. The window it removes
+> is already safe, because the fee gate refuses billing whenever the letter is
+> not `executed`. Only the DECLINE path was ever broken.
+>
+> Every `awaiting_signatures` instruction elsewhere in this document is void.
+> The rules below are the approved ones.
 
-- The engagement is **not active** until its letter is executed. Acceptance of
-  terms moves it to `awaiting_signatures`, not `accepted`.
-- **Letter executed** → engagement becomes `accepted`, case assignment
-  activates.
-- **Letter declined or expired** → engagement is cancelled and the case is
-  released back to `pending_lawyer`, reusing the rollback already written at
-  `engagement_service.py:366-380`.
-- **Engagement terminated** → any still-pending letter is voided.
-- An **executed** letter is a historical record and is never deleted, whatever
-  later happens to the engagement.
+**R1 — Reuse `declined`.** No `letter_declined` status is added. Every existing
+terminal status already satisfies the three mechanical constraints (not in
+`RETAINED`, not in `OPEN`, terminal); only audit distinguishability was open,
+and fields solve that more cheaply than an enum value plus an index rebuild.
 
-This is a contract change. `ENGAGEMENT_RETAINED_STATUSES` and the fee gate's
-"ended engagements still count" reasoning (`payment_service.py:100-105`) must be
-re-read against the new `awaiting_signatures` state before any code moves —
-that comment exists because scoping the gate wrongly once already stranded a
-lawyer who finished a matter before invoicing.
+**R2 — Metadata written on the reversal.**
+
+| Field | Value |
+|---|---|
+| `declined_by` | `"client"` or `"lawyer"`, from comparing the requester against the engagement's own ids |
+| `declined_at` | server time of the transition |
+| `decline_source` | `"engagement_letter"` — the machine discriminator |
+| `decline_reason` | the human reason the decliner typed, or null. **Never a sentinel** — it is shown to the other party |
+| `declined_agreement_id` | the letter that was refused |
+
+`decline_source` and `decline_reason` are deliberately separate fields. Putting
+a machine sentinel in `decline_reason` would either be rendered to a person or
+force every reader to know which values are real prose.
+
+**R3 — The accept-terms case claim is unchanged.** It stays exactly as written.
+
+**R4 — A declined pending letter reverses the engagement**, in one transaction:
+
+- agreement `pending` → `cancelled`
+- engagement `accepted` → `declined`, with the R2 metadata
+- case `lawyer_id` → null **only if still assigned to that engagement's lawyer**
+- case status → `open`
+
+**R5 — Review eligibility requires an EXECUTED engagement letter.** An accepted
+engagement whose letter is still pending is not yet a reviewable relationship.
+
+**R6 — Never instruct the user to terminate.** The reversal is automatic, and
+after it `terminate_engagement` is neither available (the engagement is no
+longer `accepted`) nor necessary. Earlier copy that pointed there is removed.
+
+**R7 — The six orphaned letters stay out of scope** (§2.0b). Not deleted, not
+modified, not repaired by this work.
+
+**R8 — Reconciliation `--apply` stays disabled.** The census found zero
+engagements at every status, so there is nothing to reconcile and no reason to
+ship a mutating path.
+
+**Unchanged from the earlier draft, and still true:** an `executed` letter is a
+historical record and is never touched, whatever later happens to the
+engagement.
+
+**A terminated engagement voiding a still-pending letter is a PHASE 3 arrow**,
+not a Gate 2 rule and not an R1–R8 obligation. It runs engagement→letter, the
+opposite direction to everything here, and raises its own authorization
+question. Gate 2 implements letter→engagement only; nothing in this phase
+inspects an engagement's termination to act on its letter.
+
+`ENGAGEMENT_RETAINED_STATUSES` and the fee gate's "ended engagements still
+count" reasoning (`payment_service.py:100-105`) are unaffected by R1–R8: no
+status joins or leaves either tuple. What changes is that the fee gate now
+distinguishes *why* a letter is not executed, and that review eligibility reads
+the letter rather than the engagement alone.
 
 ### 2.0 Census result — run 2026-09-20 ✅
 
@@ -519,10 +744,20 @@ a retained status whose linked agreement is not `executed`, grouped by agreement
 status (`cancelled`, `pending`, missing entirely). Each row is a lawyer who may
 be unable to invoice today.
 
-**Step 2 — reconciliation script.** Applies the new rule to exactly the rows the
-census found: release the case, cancel the engagement, notify both parties.
-Tombstone-first and re-runnable, following the pattern `intake_deletion.py` and
-`document_deletion.py` already use. Executed letters are never touched.
+**Step 2 — reconciliation script. SPECIFIED, NOT SHIPPED.** `--apply` is
+disabled and stays disabled: the census found **zero engagements at every
+status**, so there is nothing to reconcile and no reason to carry a mutating
+path (R8).
+
+Were it ever needed, it would apply the same rule the live code applies: move
+the engagement `accepted` → **`declined`** — not `cancelled`, per R1 — with the
+R2 metadata, release the case only when it is still held by that engagement's
+lawyer, and notify both parties through the outbox.
+
+**Only `cancelled` letters are in scope.** A `pending` letter is counted by the
+census and **not reconciled**: it may still be signed, and retiring one is
+expiry (§C1), a separate decision with its own approval. Executed letters are
+never touched.
 
 **Name it `scripts/engagement_letter_reconcile.py`.** Do **not** name it
 `agreement_report.py` — that already exists and is the *annotator* agreement
@@ -533,15 +768,49 @@ Report the census number whichever way it comes out. Zero affected rows means
 the defect was real but never triggered, which is a result worth stating, not a
 reason to say nothing.
 
-**Phase 2 gate:** declining an engagement letter releases the case and cancels
-the engagement; the lawyer sees why; a completed engagement whose letter was
-executed can still be billed; the census returns zero after reconciliation.
+**Phase 2 gate:** declining an engagement letter moves its engagement to
+`declined` and releases the case when that engagement's lawyer still holds it;
+the lawyer is told why, in copy matched to what actually happened; a completed
+engagement whose letter was executed can still be billed; and the census
+reports **zero stranded rows with `--apply` never run** — nothing was
+reconciled, because there was nothing to reconcile.
 
 ---
 
 ## Phase 3 — Make the module do its job
 
 **Estimated 4 days. Nothing here starts before Phases 1 and 2 land.**
+
+### 3.0 The reverse arrow — a terminated engagement voids its pending letter
+
+**Deferred here from Gate 2**, where it was mistakenly written as though it were
+part of the same change. It is not: Gate 2 runs letter→engagement, this runs
+engagement→letter, and the direction is what makes it a different problem.
+
+Open questions it must answer, none of which Gate 2 addresses:
+
+- **Who may void?** Either party can terminate an engagement. Does a client's
+  termination cancel a letter the lawyer has already signed?
+- **What if the letter executed first?** An executed letter is immutable, so a
+  termination arriving after full execution voids nothing — it ends a
+  relationship that was properly formed, which is `terminated`, not `cancelled`.
+- **Idempotency and atomicity**, to the same standard as Gate 2: one
+  transaction, conditional filters, outbox parked inside.
+
+Until it lands, a terminated engagement can leave a `pending` letter behind.
+That is benign — the fee gate refuses a non-executed letter, and the case is
+already released by `terminate_engagement` — but it is untidy and should not be
+mistaken for the Gate 2 defect, which was neither benign nor self-resolving.
+
+**Tests, moved here from the Phase 2 matrix:**
+
+- engagement terminated → its still-`pending` letter is voided;
+- an **executed** letter survives engagement termination untouched, and the
+  engagement ends as `terminated` rather than anything letter-derived;
+- termination by each party in turn, since who may void is an open question
+  above;
+- one transaction, conditional filters, outbox parked inside — the same
+  atomicity and idempotency standard Gate 2 was held to.
 
 ### 3.1 The lawyer cannot author an agreement
 
@@ -690,10 +959,34 @@ a status filter. **Re-assert it when §3.4 introduces drafts**: a draft is a
 legitimate leftover row, so a status-filtered version of this assertion will
 start passing for the wrong reason at exactly the moment it stops being true.
 
-**Phase 2** — engagement letter declined → case released, engagement cancelled;
-letter executed → engagement active; engagement terminated → pending letter
-voided; executed letter survives engagement termination; the fee gate against
-each of these.
+**Phase 2** — the letter→engagement decline reversal, and the gates that read
+it. As implemented:
+
+- *Reversal* — a declined letter moves its engagement `accepted` → `declined`
+  with the R2 metadata; the case is released only when still held by that
+  engagement's lawyer; an already-ended engagement is not rewritten; a generic
+  agreement touches no engagement or case.
+- *Linkage* — missing engagement, missing case, superseded backlink and a
+  backlink changed between preflight and the transaction each abort everything.
+- *Authorization* — the callback carries its own contract: a non-party cannot
+  invoke it directly, a requester removed from the parties after preflight is
+  refused, and an agreement-party/engagement-party mismatch is refused even
+  when the engagement has already completed or terminated.
+- *Review and fee gates* — eligibility and billing both require an **executed**
+  letter; the four state-specific fee-gate messages; an ended engagement with an
+  executed letter stays billable.
+- *Concurrency and retry* — concurrent sign vs decline resolves to one coherent
+  terminal state; a full-callback retry across two real transactions duplicates
+  no audit entry, milestone or outbox row; a duplicate park fails closed.
+- *Notification* — the released branch alone says the case is open again and
+  suggests a new engagement; reassigned and already-unassigned cases get
+  truthful neutral copy and no impossible instruction.
+
+> **Not Phase 2, and deliberately absent from the list above.** "Letter executed
+> → engagement active" belongs to the rejected `awaiting_signatures` activation
+> model — the engagement is already `accepted` before the letter executes, so
+> there is no activation to test. "Terminated engagement → pending letter
+> voided" is the opposite arrow and moved to §3.0 with its tests.
 
 **Phase 3** — full status-transition matrix; withdraw vs decline notification
 copy; PDF hash and evidence-certificate contents; route-level authorization

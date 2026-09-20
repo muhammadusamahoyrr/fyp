@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.core.constants import CaseStatus, EngagementStatus
+from app.core.constants import AgreementStatus, CaseStatus, EngagementStatus
 from app.core.exceptions import (
     AppValidationError,
     ConflictError,
@@ -372,6 +372,28 @@ async def _accepted(p) -> str:
     return eid
 
 
+async def _execute_letter(engagement_id: str) -> None:
+    """Mark the engagement letter executed.
+
+    Review eligibility requires an EXECUTED letter (plan Phase 2 R5): an
+    accepted engagement whose letter is still pending is not yet a relationship
+    anybody agreed to in writing. `accept_terms` leaves the letter PENDING, so
+    the tests below sign it before asserting on eligibility.
+
+    Set directly rather than driven through two `submit_signature` calls: those
+    need a transactional Mongo, and what these tests are about is the ENDED
+    engagement still counting, not the signing mechanics -- which
+    test_agreement_phase1.py covers on a replica set.
+    """
+    from app.db.collections import get_agreements_col, get_engagements_col
+
+    eng = await get_engagements_col().find_one({"_id": engagement_id})
+    await get_agreements_col().update_one(
+        {"_id": eng["agreement_id"]},
+        {"$set": {"status": AgreementStatus.EXECUTED.value}},
+    )
+
+
 @pytest.mark.parametrize("who", ["client_id", "lawyer_id"])
 async def test_either_party_can_terminate(parties, who):
     eid = await _accepted(parties)
@@ -508,8 +530,10 @@ async def test_a_completed_engagement_still_counts_as_having_retained(parties):
     eid = await _accepted(parties)
     await engagement_service.complete_engagement(
         eid, parties["client_id"], note="All finished.", one_sided=True)
+    await _execute_letter(eid)
 
-    assert await repo.exists_accepted(parties["client_id"], parties["lawyer_id"])
+    assert await repo.exists_executed_relationship(
+        parties["client_id"], parties["lawyer_id"])
 
 
 async def test_a_terminated_engagement_still_counts_as_having_retained(parties):
@@ -519,8 +543,10 @@ async def test_a_terminated_engagement_still_counts_as_having_retained(parties):
     eid = await _accepted(parties)
     await engagement_service.terminate_engagement(
         eid, parties["client_id"], "Poor communication.")
+    await _execute_letter(eid)
 
-    assert await repo.exists_accepted(parties["client_id"], parties["lawyer_id"])
+    assert await repo.exists_executed_relationship(
+        parties["client_id"], parties["lawyer_id"])
 
 
 async def test_a_merely_requested_engagement_does_not_count(parties):
@@ -528,7 +554,8 @@ async def test_a_merely_requested_engagement_does_not_count(parties):
 
     repo = EngagementRepository()
     await _request(parties)
-    assert not await repo.exists_accepted(parties["client_id"], parties["lawyer_id"])
+    assert not await repo.exists_executed_relationship(
+        parties["client_id"], parties["lawyer_id"])
 
 
 # ── every "is this engagement live?" check must know the new state ──────────

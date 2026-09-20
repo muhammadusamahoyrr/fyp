@@ -43,8 +43,12 @@ class TestTheGate:
         _patch(monkeypatch, _eng(), {"_id": "a1", "status": AgreementStatus.PENDING.value})
         with pytest.raises(AppValidationError) as exc:
             await ps._require_executed_engagement_letter("c1", "L1")
-        assert "pending" in str(exc.value)
-        assert "agree to the fee in writing" in str(exc.value)
+        # Copy changed in Phase 2; the REFUSAL is what this test protects.
+        # The old wording said the letter "must be signed by both you and the
+        # client" for every non-executed state, including `cancelled`, which
+        # cannot be signed -- so each state now names its own action.
+        assert "awaiting signatures" in str(exc.value)
+        assert "both parties must sign" in str(exc.value).lower()
 
     async def test_a_missing_letter_blocks_billing(self, monkeypatch):
         """engagement_service wraps letter generation in `except Exception: pass`,
@@ -53,7 +57,8 @@ class TestTheGate:
         _patch(monkeypatch, _eng(agreement_id=None), None)
         with pytest.raises(AppValidationError) as exc:
             await ps._require_executed_engagement_letter("c1", "L1")
-        assert "not been generated" in str(exc.value)
+        assert "no engagement letter is available" in str(exc.value)
+        assert "contact support" in str(exc.value).lower()
 
     async def test_a_dangling_agreement_id_blocks_billing(self, monkeypatch):
         """An id pointing at nothing is not consent either."""
@@ -65,7 +70,7 @@ class TestTheGate:
         _patch(monkeypatch, None, None)
         with pytest.raises(AppValidationError) as exc:
             await ps._require_executed_engagement_letter("c1", "L1")
-        assert "No accepted engagement" in str(exc.value)
+        assert "no billable engagement with an executed letter" in str(exc.value)
 
     async def test_the_two_failure_modes_say_different_things(self, monkeypatch):
         """'not signed yet' and 'never generated' need different actions from

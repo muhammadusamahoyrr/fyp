@@ -5,9 +5,10 @@ from pymongo import DESCENDING
 from app.core.constants import (
     ENGAGEMENT_OPEN_STATUSES,
     ENGAGEMENT_RETAINED_STATUSES,
+    AgreementStatus,
     EngagementStatus,
 )
-from app.db.collections import get_engagements_col
+from app.db.collections import get_agreements_col, get_engagements_col
 from app.repositories.base import BaseRepository
 
 
@@ -50,21 +51,52 @@ class EngagementRepository(BaseRepository):
             "status": EngagementStatus.ACCEPTED.value,
         })
 
-    async def exists_accepted(self, client_id: str, lawyer_id: str) -> bool:
-        """True if this client ever actually retained this lawyer.
+    async def exists_executed_relationship(self, client_id: str, lawyer_id: str) -> bool:
+        """True if this client retained this lawyer under an EXECUTED letter.
 
-        Used to gate reviews. Matches ended engagements too: a relationship that
-        finished, or that one side walked out of, is still a relationship the
-        client lived through — and it is the completed ones a client is most
-        likely to have something worth saying about. Scoping this to `accepted`
-        alone would have silently removed the right to review the moment the
-        engagement gained an exit.
+        Renamed from `exists_accepted`, which had become misleading in two
+        directions at once: it matched more than `accepted` (every retained
+        status), and it did not check the thing that makes the relationship
+        real — an engagement letter both parties actually signed.
+
+        Still matches ENDED engagements. A relationship that finished, or that
+        one side walked out of, is still a relationship the client lived
+        through, and the completed ones are what a client most wants to write
+        about. Scoping to `accepted` alone would remove the right to review the
+        moment an engagement gained an exit.
+
+        What it now ALSO requires is `agreement.status == executed`. An accepted
+        engagement whose letter is still PENDING is not yet a reviewable
+        relationship — nobody has agreed anything in writing — and one whose
+        letter was DECLINED never became a relationship at all. Before this, a
+        declined letter left the engagement `accepted`, so a client could review
+        a lawyer who had refused to sign.
+
+        ONE aggregation rather than a query per engagement: `$lookup` joins the
+        letters and `$limit: 1` stops at the first qualifying pair, so a client
+        with a long engagement history costs no more than one with a single
+        engagement.
         """
-        return bool(await self.find_one({
-            "client_id": client_id,
-            "lawyer_id": lawyer_id,
-            "status": {"$in": list(ENGAGEMENT_RETAINED_STATUSES)},
-        }))
+        pipeline = [
+            {"$match": {
+                "client_id": client_id,
+                "lawyer_id": lawyer_id,
+                "status": {"$in": list(ENGAGEMENT_RETAINED_STATUSES)},
+                # An engagement with no letter cannot qualify; excluding it here
+                # keeps those rows out of the join entirely.
+                "agreement_id": {"$ne": None},
+            }},
+            {"$lookup": {
+                "from": get_agreements_col().name,
+                "localField": "agreement_id",
+                "foreignField": "_id",
+                "as": "letter",
+            }},
+            {"$match": {"letter.status": AgreementStatus.EXECUTED.value}},
+            {"$limit": 1},
+            {"$project": {"_id": 1}},
+        ]
+        return bool(await self.col.aggregate(pipeline).to_list(length=1))
 
     async def claim_transition(
         self,
