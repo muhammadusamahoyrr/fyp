@@ -502,6 +502,9 @@ causes without a fifth state.
 
 ### 2.G1.4 Activation model — a revision of this plan's own §2
 
+*(The comparison below is the ANALYSIS THAT REJECTED `awaiting_signatures`.
+Option B is recorded so the reasoning survives, not as a live alternative.)*
+
 The original §2 proposed an `awaiting_signatures` state: the engagement would
 not become `accepted` until the letter executed. **Reading the code, that is
 the more expensive and riskier of the two designs, and I no longer recommend
@@ -777,6 +780,481 @@ reconciled, because there was nothing to reconcile.
 
 ---
 
+## Phase 3 — Gate 1: design and code survey (ANALYSIS ONLY)
+
+**Written 2026-09-20 against the tree at `b506a00`. NO BEHAVIOR IMPLEMENTED.**
+No backend, frontend, schema, migration or test file was changed for this gate;
+only this document. Every line reference below was re-read from the current
+files rather than carried over from earlier drafts.
+
+### 3.G1.1 Reverse lifecycle arrow — termination with a pending letter
+
+**Verified current behaviour.** `terminate_engagement`
+(`engagement_service.py:759`) requires `status == accepted` (`:776`), sets
+`terminated` with `terminated_at` / `terminated_by` / `termination_reason`
+(`:789`), releases the case with a filter scoped to that lawyer (`:801-805`),
+and writes a milestone (`:812`). **It never reads or writes the agreement.** So
+a termination while the letter is `pending` leaves that letter pending forever.
+
+**Severity: low, unlike the Gate 2 defect.** The residue is inert — the fee gate
+already refuses a non-executed letter, and the case is released by `:801`. This
+is tidiness, not a stuck state, and must not be argued for as though it were.
+
+**Who may terminate / who is recorded.** Unchanged: either party, no handshake
+(`:768-771`), with `_party_of` deciding the actor. The letter-void actor must be
+that same value — the engagement is authoritative about who is involved, and
+re-deriving it from the agreement's party list could disagree.
+
+**Pending letter outcome — recommend `cancelled`, not a new value.** The letter
+never became binding, so `cancelled` is exactly right; it is already terminal,
+already non-executed to the fee gate, and already rendered as "Rejected" by both
+UIs. A `withdrawn` value would need a fifth status for no observable difference.
+Distinguish the cause in fields, using the ONE cancellation model defined in
+§3.G1.10. **No enum change.**
+
+**Executed letters stay immutable.** The void must filter on
+`status == pending`; an executed letter simply does not match, and the
+engagement ends as `terminated` — a properly formed relationship that later
+ended, which is not a letter-derived state.
+
+**Transaction boundary.** One transaction spanning: engagement → `terminated`
+(conditional on `accepted`), case release (conditional on that lawyer), case
+milestone, agreement → `cancelled` (conditional on `pending`) **plus its audit
+entry with `body_sha256`**, and the outbox park. Today's four writes at
+`:789`–`:812` are **not** transactional — see §3.G1.7 B1.
+
+**Notifications.** The non-terminating party, as now. Copy must not say the
+letter was "declined": nobody refused it. *"The engagement was ended by the
+{party}, so the engagement letter is no longer awaiting signature."*
+
+**Concurrency.**
+- *Termination vs first signature* — both may commit; the letter is still
+  `pending`, so the void wins and the signature is discarded with it. Acceptable.
+- *Termination vs final signature* — the dangerous one. If the signature commits
+  first the letter is `executed` and the void must match nothing; the
+  `status == pending` filter is the guarantee, not a pre-read.
+- *Duplicate termination* — the `accepted` filter already makes the second a
+  no-op; the void must be gated on the same `modified_count` so it cannot fire
+  twice.
+
+**Verdict: existing statuses suffice.** No new status for this arrow.
+
+### 3.G1.2 Lawyer agreement authoring
+
+**Backend capability already exists; the UI does not.**
+`POST /agreements` (`agreements.py:15-18`) depends only on `get_current_user` —
+no role guard. `AgreementsPage.jsx:8` imports only `listAgreements`,
+`signAgreement`, `declineAgreement`.
+
+**Authorization today is insufficient, and this is the gate's main security
+finding.** `_create_agreement` (`agreement_service.py:331-335`) validates only
+that every `party_id` resolves to a registered user, plus ≥2 parties. There is
+**no relationship check and no rate limit**, so any authenticated user can name
+any `user_id` and push an `AGREEMENT_CREATED` notification at them.
+
+Mitigated today only by the park flag: `create_user_agreement` refuses while
+`agreements_diy_builder_enabled` is false. **Unparking without fixing this
+re-opens it**, so the relationship rule is a prerequisite for §3.1, not a
+companion to it.
+
+**Defining "client" — NARROWED BY DECISION.** This gate recommended *"an
+executed engagement, OR an active assigned case"*.
+
+> **SUPERSEDED by product decision D2** (`AGREEMENTS_PRODUCT_PLAN.md` §3). Only
+> the case-based limb survives. **A historical executed engagement is not
+> permission to contact someone** — it would let a lawyer reach a client years
+> after a finished matter, which is cold outreach with extra steps. The
+> `exists_executed_relationship` helper stays where it belongs, gating REVIEWS;
+> it is not an authoring credential.
+
+The implemented rule is D2's: lawyer authoring only; exactly two parties;
+mandatory `case_id`; the case exists; `case.lawyer_id == authenticated lawyer`;
+`case.client_id == selected client`.
+
+**`case_id` selection and validation.** The lawyer picks from their own assigned
+cases; the server re-validates that `case.lawyer_id == creator`. Never trust the
+submitted id. `_create_agreement` already accepts `case_id` but
+`agreements.py:23-25` does not pass it — see §3.G1.7 B2.
+
+**Interaction with the parked builder.** Lawyer authoring must NOT reuse
+`create_user_agreement`: that function is gated by design. A third named
+producer — `create_lawyer_agreement` — keeps the client wizard parked while the
+lawyer path ships. Withdrawn templates are irrelevant here: a lawyer supplies
+their own wording, and `is_unreviewed_template` still guards the marker.
+
+### 3.G1.3 Draft/send lifecycle
+
+**`AgreementStatus.DRAFT` is declared (`constants.py:113`) and unreachable.**
+The only writer is `models/agreement.py:31`, a Pydantic model nothing persists
+through. Creating is currently sending.
+
+**Recommended state machine — four live states, no new terminal values:**
+
+```
+draft ──send──► pending ──all sign──► executed        (terminal, immutable)
+  │                │
+delete          ├──counterparty declines──► cancelled (terminal)
+(row removed)   ├──creator withdraws──────► cancelled (terminal)
+                └──deadline passes────────► cancelled (terminal)
+```
+
+`withdrawn` and `expired` are **fields, not statuses** — carried in
+`cancellation_source`, per the single model in §3.G1.10. This is the §7.2
+argument applied again: three terminal values already carry every distinction
+consumers need, and each new one is a migration plus a branch in every reader.
+
+**Operations.** `POST /agreements/drafts` (create), `PATCH .../drafts/{id}`
+(update, draft-only), `DELETE .../drafts/{id}` (creator-only, draft-only),
+`POST .../{id}/send`. Send is where `body_sha256` is computed and frozen.
+
+**Immutable after send:** `body_html`, `body_format`, `body_sha256`, `parties`,
+`case_id`, `engagement_id`. A `PATCH` against a non-draft must 409.
+
+**Idempotency.** `Idempotency-Key` on create and on send, using
+`documents_v2.py:47`'s validator — the mechanism Phase 1 adopted. A concurrent
+update-and-send is resolved by the send's `status == draft` filter: the update
+either lands before the freeze or is refused.
+
+**Withdraw vs decline.** Separate *operations* with separate audit actions and
+separate notification copy, converging on one status. Gate 2 already proved the
+notice must match the actor.
+
+### 3.G1.4 Case linkage and timeline
+
+**Validation.** `case_id` must exist and the creator must be a party to it
+(`client_id` or `lawyer_id`). `engagement_id` may only be set by the internal
+producer (`create_pending_engagement_letter`), never from a request body — that
+is what Gate 2's backlink check assumes.
+
+**Milestone writers today:** `engagement_service.py:420` (engaged), `:740`
+(completed), `:812` (terminated); `agreement_service.py:863` (letter declined,
+release-gated); `case_service.py:357` (lawyer-only, **no UI calls it** — see
+§3.G1.7 I1). Phase 3 adds at most two: *letter sent* and *letter executed*.
+
+**Case deleted / reassigned / closed / released.** Gate 2's answers extend
+unchanged: a missing case is broken linkage and aborts; a reassigned case is
+never written to; a closed case still accepts an executed record. A released
+case is the normal post-decline state.
+
+**Generic case-linked agreements: yes, allowed** — a retainer for a matter with
+no engagement is legitimate. `engagement_id` stays null, so Gate 2's reversal
+never triggers. The two links are independent and must stay so.
+
+### 3.G1.5 Executed PDF and signature evidence
+
+**Route.** `GET /agreements/{id}/pdf`, parties-only, `status == executed` only.
+Follow `documents.py:174`'s `FileResponse` pattern.
+
+**Evidence available today:** `body_sha256` (row + every audit entry),
+`actor_id`, `timestamp`, `ip_address`, `signature_method`, per-party
+`eto_classification`, and the raw `signature_data`.
+
+**Missing today:** a version/revision number, an explicit consent
+acknowledgement, session/authentication assurance, user-agent, and a download
+audit event.
+
+**Signature rendering without JSON exposure.** Already correct and must stay:
+`agreement_service.py:415` strips `signature_data` from the list path, and
+`PartyOut` (`schemas/agreement.py:42`) omits the field so it cannot serialise.
+The PDF renderer must read the blob **server-side from the row**, never via the
+API models. *(Note: `PartyOut`'s docstring says "STRICT (no extra)" but the class
+sets no `model_config`; the effect is right by omission, not by strictness —
+§3.G1.7 I2.)*
+
+**Canonical hash.** The PDF must print the same `body_sha256` the row holds, and
+`normalise_body` guarantees it is platform-stable. With drafts, the hash is
+frozen at **send**, and the PDF must cite the sent version.
+
+**Trusted proxy / IP.** `request.client.host` behind a proxy records the proxy.
+A `trusted_hosts` / `X-Forwarded-For` policy is needed **before** an IP appears
+on an evidence certificate, or the document asserts a false fact.
+
+**Download audit + metric.** One event per download (agreement id, requester,
+timestamp) — this is the only way the product plan's adoption metric (% of
+executed agreements downloaded) becomes reportable.
+
+**Facts, not conclusions.** The certificate states what was recorded. It must
+not assert enforceability; that wording is Phase 4.1, counsel-gated.
+
+### 3.G1.6 Dependency-ordered implementation gates
+
+| Gate | Scope | Depends on | Files likely to change | Migration / index | API contract | Tests |
+|---|---|---|---|---|---|---|
+| **3A** | Reverse arrow (§3.G1.1) | Gate 2 only | `engagement_service.py`, `agreement_service.py` | none (fields only) | none | backend: void, executed-immutable, 3 concurrency cases, duplicate terminate |
+| **3B** | Authorization + `case_id` wiring (§3.G1.2, §3.G1.4) | — | `agreements.py`, `agreement_service.py`, `schemas/agreement.py` | none | **breaking**: unrelated `party_ids` now 403 | backend: relationship matrix, case-party validation, rate limit |
+| **3C** | Draft/send lifecycle (§3.G1.3) | 3B | routes, service, schemas, `constants.py` | index on `(created_by, status)` | **additive**: 4 new endpoints | backend: state machine, immutability-after-send, idempotent send, concurrent update/send |
+| **3D** | Lawyer authoring UI | 3B, 3C | `AgreementsPage.jsx`, `lib/api.js` | none | none | frontend: counterparty scoping, draft editing |
+| **3E** | PDF + evidence (§3.G1.5) | 3C (version), 3B | new `agreement_pdf.py`, routes | download-audit collection | **additive** | backend: authz, hash match, no blob in JSON, audit row |
+| **3F** | Chores | — | pagination, rate limit, delete `models/agreement.py`, rename `test_agreement.py` | none | pagination is **breaking** for list | regression |
+
+**3A and 3B are independent and both reviewable alone.** 3B is the security
+gate and should go first if only one ships.
+
+### 3.G1.7 Defects found during inspection
+
+**Blockers for the items that depend on them:**
+
+- **B1 — `terminate_engagement` is not transactional.** Four separate writes at
+  `engagement_service.py:789-812`. A crash between them leaves an engagement
+  `terminated` with the case still assigned — the mirror of the Gate 2 defect,
+  in code Gate 2 did not touch. **Must be fixed as part of 3A**, not after.
+- **B2 — the create route drops `case_id`.** `agreement_service._create_agreement`
+  accepts it; `agreements.py:23-25` never passes it, so every wizard-created
+  agreement is unlinked. Prerequisite for 3B/3C.
+- **B3 — no relationship check or rate limit on create** (§3.G1.2). Masked by
+  the park flag; unparking without this re-opens arbitrary-user notification.
+
+**Improvements, explicitly NOT Phase 3 scope expansion:**
+
+- **I1** — `case_service.add_milestone:357` is lawyer-only and reachable from no
+  UI; the lawyer cannot curate the timeline the client reads.
+- **I2** — `PartyOut`'s "STRICT (no extra)" docstring describes a `model_config`
+  the class does not set. No leak today; fix the comment or set `extra="forbid"`.
+- **I3** — `AgreementStatus.DRAFT` and `models/agreement.py` are dead. 3C uses
+  the former; the latter should be deleted (3F).
+
+### 3.G1.8 Decisions requiring approval before implementation
+
+1. ~~**"Client" definition** — executed engagement **or** active assigned
+   case?~~ **CLOSED — decided as D2**: the case-based test only. A historical
+   executed engagement grants nothing.
+2. **Withdraw/expire as fields, not statuses** — confirm, keeping three terminal
+   values.
+3. **Case-linked generic agreements** — allowed, as recommended?
+4. **Rate limit** on create: `10/hour` per creator, matching the earlier §3.8
+   proposal?
+5. **Trusted-proxy policy** — needed before any IP reaches a PDF. Product and
+   deployment decision, not engineering alone.
+
+### 3.G1.9 Risks and migration implications
+
+- **3B is a breaking API change.** Existing rows with unrelated parties stay
+  readable; only new creates are refused. No data migration, but any client
+  relying on arbitrary `party_ids` breaks — none exists today, because the only
+  caller is parked.
+- **3C touches the status field's meaning.** Adding `draft` makes a previously
+  unreachable value reachable; every reader filtering `status == pending` must
+  be re-checked, including Gate 2's reversal and both gates.
+- **Phase 1's "no leftover row" test must be re-asserted** once drafts exist —
+  already flagged in the Phase 1 matrix, and 3C is the moment it comes due.
+- **3E's evidence certificate is partly counsel-gated** (Phase 4.1). Ship the
+  factual document; leave legal characterisation out.
+
+**No behavior was implemented for this gate.** The only file changed is this
+one.
+
+---
+
+### 3.G1.10 ONE cancellation metadata model
+
+Earlier drafts used `void_source` in one place and `cancelled_reason` in
+another. **Both are withdrawn.** One model, used everywhere:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `status` | enum | Stays **`cancelled`**. No new terminal status, ever, for any of these causes. |
+| `cancellation_source` | enum | Machine-readable: `declined`, `withdrawn`, `expired`, `engagement_terminated` |
+| `cancellation_reason` | string, optional | Human prose, shown to the counterparty. **Never a sentinel.** |
+| `cancelled_at` | datetime | Server time |
+| `cancelled_by` | user id, **nullable** | Null for system actions (expiry) |
+
+`cancellation_source` and `cancellation_reason` stay separate for the reason
+Gate 2 established: one is read by code, the other by a person.
+
+**COMPATIBILITY — Gate 2 already stores different field names.** The shipped
+reversal writes `declined_by`, `declined_at`, `decline_source`,
+`decline_reason`, `declined_agreement_id` on the ENGAGEMENT
+(`agreement_service.py:816-824`). Those are not the names above.
+
+Consequences, stated plainly:
+
+- **No consumer may assume `cancellation_source` is always present** until a
+  backfill decision is made and executed.
+- A reader wanting "why was this cancelled" must, for now, handle both shapes.
+- **This pass does NOT implement the migration.** The decision — backfill,
+  dual-read, or adopt-forward-only — is owner-level and belongs with the gate
+  that first needs it (3C).
+
+The engagement-side fields and the agreement-side model are different records
+and need not be unified; only the AGREEMENT adopts the table above.
+
+### 3.G1.11 Rate limiting at the abuse boundary
+
+An earlier note put the limit on *create*; another left it to chores. Resolved:
+
+**The abuse boundary is SIGN-AND-SEND**, because that is the operation that
+causes a notification to reach another human. Creating or editing a private
+draft harms nobody.
+
+| Operation | Limit | Why |
+|---|---|---|
+| `POST .../{id}/send` | **`10/hour`** per authenticated user *(starting point, decision D6)* | Reaches another person |
+| `PATCH .../drafts/{id}` | **no limit** | Autosave; throttling it loses the lawyer's work |
+| `POST /agreements/drafts` | active-draft **cap**, not a rate limit *(decision D7)* | Bounds storage without blocking a burst of legitimate drafting |
+
+**Infrastructure verified.** `core/rate_limit.py:52` constructs a SlowAPI
+`Limiter` with `key_func=_user_or_ip` (`:8`) — already per-authenticated-user,
+with an IP fallback. The decorator pattern is in use at
+`appointments.py:45,122,257` and `intake.py:40,46`. No new infrastructure; the
+final placement is confirmed against this when 3C lands.
+
+### 3.G1.12 Automated expiry — deferred to its own gate
+
+`cancellation_source = "expired"` is **reserved in the enum and nothing more.**
+
+Expiry is NOT part of 3C and must not be described as ready. Before it can be
+built it needs, at minimum: an `expires_at` field; a decision on **who sets it**
+(sender at send time, a system default, or both); a scheduler or worker to sweep
+it; conditional transition semantics (`pending` → `cancelled` only); audit and
+outbox rows like every other transition; replay safety so a restart cannot
+re-expire or double-notify; and tests.
+
+The appointment expiry work is the precedent — including its hard lesson that a
+sweep and its guard must ship behind **one** flag, or a half-enabled state
+becomes reachable.
+
+### 3.G1.13 Gate order, corrected
+
+**3A precedes 3B, and the reason is exposure, not severity of concept.**
+
+- **3A is live today.** `terminate_engagement` (`engagement_service.py:759`)
+  runs four non-transactional writes (`:789`, `:801`, `:812`) on a path any
+  party can invoke right now. A crash between them leaves an engagement
+  `terminated` with its case still assigned — the Gate 2 defect's mirror, in
+  code Gate 2 did not touch.
+- **3B's defect is masked.** Unauthorized create is real
+  (`agreement_service.py:331-335`) but unreachable: `create_user_agreement`
+  refuses while the builder is parked. It becomes live the moment authoring
+  ships — which is why 3B must precede 3D, and why 3D is the first
+  externally-visible change.
+
+Final order: **3A → 3B → 3C → 3D → 3E → 3F**, with automated expiry as a
+separate later gate. 3A and 3B remain independently reviewable.
+
+### 3.G1.14 Termination safety invariants (gate 3A)
+
+**Termination is a SAFETY EXIT and must never be blocked by the agreement
+side.** A client wanting out of a representation cannot be held there because a
+letter row is missing, corrupt or superseded. This inverts Gate 2's rule, and
+the inversion is deliberate: declining is an action *about* the letter, so a
+broken letter link aborts it; terminating is an action about the *engagement*,
+so a broken letter link must not.
+
+Invariants:
+
+1. One transaction covers: engagement `accepted` → `terminated`; conditional
+   case release; **release-gated** milestone; audit entry; durable outbox park;
+   and conditional cancellation of the correctly-linked pending letter.
+2. **Executed letters are never modified.** The letter update filters on
+   `status == pending`; an executed letter matches nothing.
+3. **Missing or superseded letter linkage does not block termination.** It
+   completes and records an anomaly (logged, and a field on the engagement) so
+   the orphan is discoverable rather than silent.
+4. A case already unassigned or reassigned is **not mutated** — no field, no
+   milestone. Reuse Gate 2's structured case disposition (`released` /
+   `reassigned` / `already_unassigned`).
+5. **Messages must not say the case is open when it was not released.** Same
+   rule, same reason, as Gate 2's notice.
+6. **Replace the direct `_notify` call with a transactional outbox park.**
+   `terminate_engagement:820` currently notifies directly. Adding a park beside
+   it would double-send; the direct call is removed, not supplemented.
+
+### 3.G1.15 Draft concurrency and atomic sign-and-send (gate 3C)
+
+**Phase 3 must not repeat the parked wizard's two-call create-then-sign
+design** (`ModAgreements.jsx:1051-1066`), which could leave a pending agreement
+its creator never signed.
+
+**Versioning.**
+
+- Drafts carry an integer `version`, starting at **1**.
+- `PATCH` requires `expected_version`.
+- Its conditional update filters on `{_id, status: draft, version:
+  expected_version}` and `$inc`s the version.
+- A stale write matches nothing → **409**, never a silent overwrite.
+
+**SIGN-AND-SEND is one call and one transaction.** It requires
+`expected_version` **and** `expected_body_sha256`, and in a single transaction:
+
+1. freezes the reviewed body, parties and case linkage;
+2. verifies the hash matches what the signer actually reviewed;
+3. captures the creator's signature and an explicit consent acknowledgement;
+4. writes the audit entry;
+5. transitions `draft` → `pending`;
+6. parks notifications;
+7. creates or replays the idempotency receipt.
+
+The hash check is the point: without it a concurrent edit could be signed
+unseen.
+
+**The internal producer keeps its own path.** `create_pending_engagement_letter`
+still creates an UNSIGNED pending letter — a different system flow with a
+different contract (Phase 1 §1.1c). Sign-and-send must not absorb it.
+
+**Durable idempotency.**
+
+- Key scoped to **actor + operation**.
+- Stored with a canonical payload **fingerprint**.
+- Same key + same fingerprint → **replays the committed result**.
+- Same key + different fingerprint → **409**, never a silent alias.
+- The fingerprint binds: draft id, expected version, body hash, parties, case
+  id, signature payload (or its hash), and the consent fields.
+
+### 3.G1.16 Executed document and evidence (gate 3E)
+
+**MAY include:** the agreement body; the immutable version and `body_sha256`;
+party and signer identities; signature capture method (`canvas` / `typed` /
+`image_upload`, as neutral description); server-recorded timestamps; and neutral
+audit facts.
+
+**MUST NOT include:** legal enforceability conclusions; ETO "advanced
+signature" classifications (Phase 4.1, counsel-gated); **IP-address evidence
+until trusted-proxy handling is configured and tested** (decision D8 — without
+it the document may assert the proxy's address as the signer's); or raw
+signature data in ordinary agreement/list API responses.
+
+**Raw signature material stays server-side.** It is read from the row by the
+renderer and exposed only through the narrowly-authorized executed-document
+path. The existing protections stay: stripped at `agreement_service.py:415`,
+and absent from `PartyOut` (`schemas/agreement.py:42`) so it cannot serialise.
+
+**Every successful download writes an audit event** (agreement id, requester,
+timestamp). The product plan's adoption metric has no other source.
+
+---
+
+## Phase 3 implementation contract
+
+**Invariants an implementation must not violate.** If a change requires
+breaking one, it needs a plan amendment first, not a workaround.
+
+1. **Executed agreements are immutable.** No later event modifies one.
+2. **No new terminal status.** `cancelled` plus `cancellation_source`.
+3. **Never write another lawyer's case.** No field, no milestone, no status.
+4. **Never claim a case is open unless it was actually released** in that
+   transaction.
+5. **One transaction per cross-domain transition**, with the outbox park inside
+   it, and fail closed where transactions are unavailable.
+6. **Conditional filters carry the whole precondition.** A pre-read is never
+   the guarantee.
+7. **Authorization is re-asserted inside the transaction**, on rows read with
+   that session — never inherited from a caller's preflight.
+8. **`engagement_id` is never accepted from an external caller.**
+9. **`case_id` is mandatory for lawyer-authored agreements**, and validated as
+   `case.lawyer_id == creator` and `case.client_id == counterparty`.
+10. **Exactly two parties** for lawyer-authored agreements.
+11. **Termination is never blocked** by a missing or superseded letter link.
+12. **No two-call create-then-sign.** Sign-and-send is one atomic call.
+13. **Raw signature data never appears** in ordinary JSON responses.
+14. **No IP on an evidence document** until D8 is settled.
+15. **No legal or enforceability claim** without counsel-approved wording.
+16. **Phase 3 must not unpark Product B.** Lawyer authoring uses its own
+    producer and never reads `agreements_diy_builder_enabled`.
+17. **A durability mechanism is not finished until something reads it back**
+    — the §1.1g lesson.
+
+---
+
 ## Phase 3 — Make the module do its job
 
 **Estimated 4 days. Nothing here starts before Phases 1 and 2 land.**
@@ -815,9 +1293,19 @@ mistaken for the Gate 2 defect, which was neither benign nor self-resolving.
 ### 3.1 The lawyer cannot author an agreement
 
 The backend already allows it — `POST /agreements` has no role guard
-(`agreements.py:15`, only `get_current_user`). This is purely a missing UI, and
-it is the module's central use case: a lawyer cannot send a retainer, an
-addendum, or any custom agreement to their own client.
+(`agreements.py:15`, only `get_current_user`).
+
+> **SUPERSEDED — "purely a missing UI".** This section originally called lawyer
+> authoring a UI-only gap. Gate 1 disproved that: the route has no role guard,
+> no relationship check, no rate limit, and does not even pass `case_id`
+> (§3.G1.7 B2, B3). Shipping a UI on top of that endpoint would expose an
+> arbitrary-user agreement/notification vector that is currently masked only by
+> the park flag. **Authoring is gate 3D and depends on 3B**, which builds the
+> authorization primitives first.
+
+The UI gap is real, and the capability matters -- it is the module's central
+use case: a lawyer cannot send a retainer, an addendum, or any custom agreement
+to their own client. But the UI is the LAST step, not the only one.
 
 **Action:** add a create flow to `AgreementsPage.jsx`, with the counterparty
 scoped to the lawyer's own clients via `listCases`.
@@ -868,8 +1356,12 @@ it.
 (counterparty), with distinct notification copy. Record both through the
 existing audit-plus-digest path.
 
-Terminal states after this phase: `declined`, `withdrawn`, `expired`. Three, not
-four — see §7.2.
+> **SUPERSEDED.** This originally read: *"Terminal states after this phase:
+> `declined`, `withdrawn`, `expired`."* Those were proposed as STATUSES. They
+> are not: the status stays `cancelled`, and the cause is carried in
+> `cancellation_source` — see §3.G1.10. Adding two terminal statuses would be a
+> migration plus a branch in every consumer, for no distinction the field does
+> not already make.
 
 ### 3.6 Signature evidence
 
@@ -893,6 +1385,10 @@ in your own gallery.
 - Paginated list with server-side status/search filters; a light list response
   that does not ship full bodies.
 - Max party count, duplicate-party rejection, whitespace-normalised title/body.
+- **SUPERSEDED — rate limit placement.** The line below put the limit on
+  *create*. That is the wrong boundary once drafts exist: autosave `PATCH`
+  would be throttled while the actual abuse vector (sending a notification to
+  another person) went unlimited. See §3.G1.11. Original text follows.
 - Rate limit on create — `@limiter.limit("10/hour")`. This module is one of the
   few endpoints that pushes a notification to an arbitrary user id, and it
   currently has no relationship check and no limit.
@@ -1009,13 +1505,19 @@ previous code let whoever signed last overwrite the agreement's legal
 characterisation. Do not reintroduce the pattern this module already learned
 from. Derive it for display.
 
-### 7.2 Four terminal states — reduced to three
+### 7.2 Four terminal states — reduced to three, then to ONE
 
 The review proposed `declined`, `voided`, `expired` and `cancelled` without
-saying what `cancelled` means that the other three do not. Three suffice:
-`declined` (counterparty refused), `withdrawn` (creator pulled it), `expired`
-(deadline passed). Each extra state is a migration over live rows and another
-branch in every consumer.
+saying what `cancelled` means that the other three do not. Each extra state is a
+migration over live rows and another branch in every consumer.
+
+> **SUPERSEDED by §3.G1.10.** This section originally concluded with three
+> terminal STATUSES: *"`declined` (counterparty refused), `withdrawn` (creator
+> pulled it), `expired` (deadline passed)."* Gate 1 took the same argument one
+> step further and found that **none** of them needs to be a status. The status
+> is `cancelled`; the cause lives in `cancellation_source ∈ {declined,
+> withdrawn, expired, engagement_terminated}`. Do not implement the three-status
+> version.
 
 ### 7.3 The transactions hedge — unnecessary
 

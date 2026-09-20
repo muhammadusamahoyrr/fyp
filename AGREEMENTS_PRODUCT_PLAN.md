@@ -50,6 +50,27 @@ That is why a defect in either surfaces as "the agreements module is broken."
 **This document's central recommendation is to separate them and fund them
 differently.**
 
+### Product C — Lawyer-authored, case-linked agreements (Phase 3, gate 3D)
+
+**A third thing, and NOT a revival of Product B.** Phase 3 introduces a lawyer's
+ability to author an agreement for a client on a case they already hold — a
+retainer, an addendum, a scope variation.
+
+It is separated from the parked wizard on every axis that matters:
+
+| | **Product B — client DIY wizard (parked)** | **Product C — lawyer authoring (Phase 3)** |
+|---|---|---|
+| Who authors | Any client | KYC-verified lawyer only *(decision D5)* |
+| Counterparty | Chosen from a directory of lawyers | The one client on the named case |
+| Case link | None | **Mandatory** and server-validated |
+| Content | Six withdrawn templates | The lawyer's own wording |
+| Flag | `agreements_diy_builder_enabled` — stays **off** | Independent; does **not** read that flag |
+
+**Phase 3 must not unpark Product B.** A concrete guard: lawyer authoring gets
+its own producer (`create_lawyer_agreement`), never `create_user_agreement`,
+which is gated by design. Anything that makes the client wizard reachable is out
+of Phase 3 scope by definition.
+
 ---
 
 ## 2. What is wrong today, in user terms
@@ -206,9 +227,63 @@ Currently: any authenticated user can send a signature request naming any
 registered user id, with no shared case, no engagement, and no rate limit. That
 is a spam and harassment vector in a product that handles legal matters.
 
-**Recommendation:** require an existing relationship — a shared case or
-engagement — with an exception for a lawyer sending to their own client. This is
-a product rule, and it needs your decision because it forecloses cold outreach.
+> **SUPERSEDED wording.** This decision originally read: *"require an existing
+> relationship — a shared case or engagement."* That is too vague to implement
+> and too broad to be safe: "an engagement" would let a lawyer contact somebody
+> years after a finished matter, and "a shared case" did not say who had to be
+> on it. Replaced by the exact rule below.
+
+**DECIDED — the initial counterparty rule, stated exactly:**
+
+1. **Lawyer authoring only.** No client-authored agreements while Product B is
+   parked.
+2. **Exactly two parties**: the authenticated lawyer plus one client.
+3. **`case_id` is mandatory** — there is no case-less lawyer-authored agreement.
+4. The case must **exist**.
+5. `case.lawyer_id` **must equal** the authenticated lawyer.
+6. `case.client_id` **must equal** the selected client.
+7. **A historical executed engagement is NOT permission to contact someone.**
+   Rules 4–6 are the whole test; a finished matter grants nothing on its own.
+   *(This narrows the Gate 1 recommendation, which had offered "executed
+   engagement OR active assigned case" as alternatives — remediation §3.G1.2.
+   Only the case-based limb survives.)*
+8. **Out of scope:** client-to-client agreements, lawyer-to-unrelated-user,
+   and cold outreach of any kind.
+9. Lawyer-authored **generic** case agreements are allowed with
+   `engagement_id = None`. The case link and the engagement link are
+   independent.
+10. **`engagement_id` is internal.** It is set only by the system-generated
+    engagement-letter producer and must never be accepted from an external
+    caller — Gate 2's backlink validation assumes exactly this.
+
+Rules 4–6 together mean the client is reachable *because of this case*, not
+because of history. That is the property that forecloses cold outreach.
+
+### D5 — Must a lawyer be KYC-verified to author an agreement? **OPEN**
+
+**Not invented here — the evidence, then the question.**
+
+The agreements module enforces **no KYC check at all** today. Every other
+lawyer-acting surface does:
+
+| Surface | Line |
+|---|---|
+| Engagement acceptance | `engagement_service.py:58` |
+| Appointment booking | `appointment_service.py:492` |
+| Document review | `document_service.py:649` |
+| Document transitions | `document_transitions.py:277` |
+| Lawyer directory listing | `user_repo.py:90` |
+
+Five enforcement points, no exceptions — so requiring it here would be
+*consistent*, not novel. But no written product rule says "every lawyer action
+requires KYC", and agreements has run without it, so the code does not settle
+it either way.
+
+**Recommendation: require it**, on the strength of those five. Authoring a
+binding instrument is at least as consequential as reviewing a document.
+
+**This is an owner decision, not an engineering conclusion.** Recorded as open
+in §9 rather than assumed in a gate.
 
 ### D3 — Do we ship any ETO 2002 classification before counsel reviews it?
 
@@ -256,6 +331,58 @@ as a background wish.
 - Signature encryption at rest. Real, worth doing, but **not a substitute for
   removing the claim** — and the claim must go first because it is free.
 - Client-to-client agreements. Gated behind D1 and D2.
+
+---
+
+## 4b. Delivery status as of 2026-09-20 (`b506a00`)
+
+The releases below were planned before any of them shipped. This section records
+what actually happened, so the plan can be read as a record rather than only as
+an intention. **R1 and R2 did not ship whole** — parts were superseded, parts
+deferred by the D1 park decision.
+
+### ✅ Shipped
+
+| Item | Release | Evidence |
+|---|---|---|
+| Four false claims removed (2× AES-256, 2× e-signature compliance) | R0 | `test_no_unsupported_claims.py`, 9 tests |
+| Fake controls removed (draft-save, preview, dead chrome, 24-button toolbar) | R0 | same guard, path-scoped |
+| Sign/decline made transactional, fail-closed | R1 | `test_agreement_phase1.py`, 20 tests |
+| Notification parked **inside** the transaction; outbox drainer added | R1 | `test_agreement_phase1.py` |
+| Plain-text body: normalise, refuse control chars, stable hash | R1 | `test_agreement_phase1.py` |
+| Decline-letter → engagement reversal, conditional case release | R2 | `test_agreement_phase2.py`, 27 tests |
+| Review **and** billing now require an *executed* letter | R2 | `test_review_and_fee_gates.py`, 18 tests |
+| Four state-specific fee-gate messages | R2 | `test_review_and_fee_gates.py` |
+
+### ⚠️ Superseded (planned, then deliberately not built)
+
+| Item | Why |
+|---|---|
+| `awaiting_signatures` activation model | Rejected after code analysis — see the R2 note below and remediation §2.G1.4 |
+| Atomic **create-and-sign** for the client wizard | Serves only the parked builder (D1). Returns as gate 3C's *sign-and-send*, for the **lawyer** flow |
+| Idempotency payload fingerprinting | Same reason; returns in 3C with a fuller contract |
+
+### ⏸ Deferred because the DIY builder is parked (D1)
+
+Client-side template authoring, template preview, client-chosen counterparties.
+None of this is abandoned; none of it is scheduled. Reviving it needs
+counsel-approved templates, not a deployment.
+
+### ⬜ Still outstanding
+
+Transactional termination + pending-letter cancellation (3A) · lawyer/case/client
+authorization primitives and `case_id` plumbing (3B) · versioned drafts and
+atomic sign-and-send (3C) · lawyer authoring UI (3D) · executed PDF and download
+audit (3E) · chores (3F) · automated expiry (separate later gate).
+
+### 📋 Census outcome — reported, not repaired
+
+The reconciliation census found **zero engagements at every status**, so no
+reconciliation was applied and `--apply` remains disabled. It did find **six
+orphaned engagement letters — one of them `executed`** — whose engagement and
+case rows are both gone. These are **reported and deliberately unrepaired**,
+pending retention-policy work. Deleting a signed instrument is not a
+reconciliation script's decision.
 
 ---
 
@@ -316,9 +443,37 @@ this assertion will start passing for the wrong reason.
 
 ### R2 — "Lawyers never get stuck" · 2 days · after R1
 
-An engagement becomes active only when its letter is executed. A declined or
-expired letter cancels the engagement and releases the case. A terminated
-engagement voids any pending letter. Executed letters remain permanent records.
+> ### ⚠️ SUPERSEDED — the original R2 lifecycle
+>
+> This release was first specified as: *"An engagement becomes active only when
+> its letter is executed. A declined or expired letter cancels the engagement
+> and releases the case. A terminated engagement voids any pending letter."*
+>
+> **The activation half of that was rejected** after reading the code. Deferring
+> activation (the `awaiting_signatures` model) would have rewritten
+> `accept_terms`, whose two-step atomic claim is what stops two lawyers taking
+> one case — and it would have left the case *unclaimed* while the letter was
+> pending, opening a competing-lawyer race the system does not have today. The
+> window it removed was already safe, because billing is blocked on the letter
+> regardless. Engineering rationale: `AGREEMENTS_REMEDIATION_PLAN.md` §2.G1.4.
+>
+> The cancellation half was kept, and shipped.
+
+**The lifecycle, as built:**
+
+- **Acceptance claims the case** and produces the engagement letter in
+  `pending`. This is the atomic case-claim operation and is not deferred.
+- **Billing stays blocked** until that letter is `executed` — acceptance alone
+  never makes a matter billable.
+- **Declining the pending letter reverses the acceptance**: the engagement
+  becomes `declined` and the case is released *only if* that engagement's
+  lawyer still holds it. ✅ Shipped.
+- **Terminating an accepted engagement** must be transactional and must
+  conditionally cancel its correctly-linked pending letter. ⬜ **Outstanding —
+  gate 3A.** Termination works today but is not transactional, and does not
+  touch the letter.
+- **Executed letters are permanent records** and are never modified by any
+  later engagement event.
 
 **R2 opens with a census, not with code.** The fix above only governs *new*
 data. Every engagement stranded by this defect before the fix ships stays
@@ -377,15 +532,26 @@ when D4 has an owner and a date.
 
 ## 6. Success metrics
 
-| Metric | Now | Measured by | Target |
+Every row names a measurement source that exists or is scheduled. Rows whose
+source was never built are marked **NO SOURCE** rather than given a number.
+
+| Metric | Measured value | Source | Status |
 |---|---|---|---|
-| Cases assigned with no executed engagement letter | **unmeasured** | R2 census | 0 after R2 |
-| Fee requests blocked by an unreachable letter state | **unmeasured** | R2 census | 0 after R2 |
-| Agreements in `pending` never signed by their creator | **unmeasured** | R1 counter | 0 after R1 |
-| Duplicate agreements per idempotency key | n/a — no keys exist | R1 counter | 0 after R1 |
-| Executed agreements downloaded at least once | 0% — no endpoint | R3 download log | reported from R3 |
-| Agreements authored by lawyers | 0 | R3 | >0 |
-| False claims in the signing flow | **4** | R0 guard test | **0** after R0 |
+| False claims in the signing flow | **4 → 0** | `test_no_unsupported_claims.py` | ✅ measured, guarded |
+| Stranded engagements (retained + non-executed letter) | **0** | `engagement_letter_reconcile.py` census, run 2026-09-20 | ✅ measured |
+| Engagements at any status | **0** | same census | ✅ measured — and why "0 stranded" means *unexercised*, not *safe* |
+| Orphaned engagement letters | **6, one `executed`** | same census, reverse check | ✅ measured; unrepaired by design |
+| Concurrent sign/decline yields one terminal state | pass | `test_agreement_phase2.py` | ✅ test-evidenced |
+| Review requires an executed letter | pass | `test_review_and_fee_gates.py` matrix | ✅ test-evidenced |
+| Agreements in `pending` never signed by their creator | **NO SOURCE** | — | ⚠️ the R1 "counter" was never built; only the atomic path was. With the wizard parked this shape is unreachable, so the metric is **retired**, not pending |
+| Duplicate agreements per idempotency key | **NO SOURCE** | — | ⚠️ idempotency deferred with the wizard; returns with gate 3C |
+| Executed agreements downloaded at least once | **NO SOURCE** | gate 3E download-audit event | ⬜ planned |
+| Agreements authored by lawyers | **0** — capability does not exist | gate 3D | ⬜ planned |
+
+> **Correction.** Earlier drafts of this table carried R1/R2 "counters" as
+> though they had shipped. They did not: R1 shipped the *atomic path*, and the
+> census — not a counter — is what produced the R2 numbers. Two rows are
+> therefore marked NO SOURCE above rather than left implying data exists.
 
 "Unmeasured" is the honest entry, not "0" and not "unknown, >0 possible" —
 writing a number nobody counted is the same class of error as the AES-256
@@ -457,3 +623,60 @@ a stronger product than a contract builder that cannot build contracts.
 practising Pakistani lawyer unblocks agreements templates, the ETO wording, and
 the 10 CPC particulars simultaneously. It is the highest-leverage hour available
 to this project and it is not an engineering task.
+
+
+---
+
+## 9. Cross-plan traceability
+
+One row per product decision or outcome, mapped to the engineering gate that
+implements it and the evidence that proves it. **Product decisions live in this
+document; gates, invariants and tests live in
+`AGREEMENTS_REMEDIATION_PLAN.md`.** Where the two disagree, the code decides,
+and whichever document was wrong gets a SUPERSEDED note rather than a silent
+edit.
+
+| # | Product decision / outcome | Gate | Status | Evidence |
+|---|---|---|---|---|
+| 1 | No false security or legal claim reaches a user | R0 / Phase 0 | ✅ shipped | `test_no_unsupported_claims.py` (9) |
+| 2 | One click never produces two binding instruments | R1 / Phase 1 | ✅ shipped | `test_agreement_phase1.py` (20) |
+| 3 | A notification cannot be lost to a crash after commit | R1 / Phase 1 | ✅ shipped | in-transaction park + ungated relay |
+| 4 | Agreement body is plain text, never silently rewritten | R1 / Phase 1 | ✅ shipped | `normalise_body` tests |
+| 5 | Declining a letter reverses the engagement | R2 / Phase 2 | ✅ shipped | `test_agreement_phase2.py` (27) |
+| 6 | Billing requires an executed letter | R2 / Phase 2 | ✅ shipped | `test_review_and_fee_gates.py` (18) |
+| 7 | Reviewing requires an executed letter | R2 / Phase 2 | ✅ shipped | eligibility matrix |
+| 8 | Engagement activates only after execution | — | ⚠️ **superseded** | rejected; remediation §2.G1.4 |
+| 9 | DIY client builder parked (D1) | — | ⏸ deferred | `agreements_diy_builder_enabled` off, service-enforced |
+| 10 | Terminating an engagement is atomic and cancels its pending letter | **3A** | ⬜ outstanding | live integrity defect — remediation §3.G1.7 B1 |
+| 11 | Counterparty rule: lawyer + one client + mandatory validated case (D2) | **3B** | ⬜ outstanding | remediation §3.G1.2 |
+| 12 | `case_id` reaches persistence and is authorized | **3B** | ⬜ outstanding | remediation §3.G1.7 B2 |
+| 13 | Drafts are versioned; send is one atomic idempotent call | **3C** | ⬜ outstanding | remediation §3.G1.3 |
+| 14 | A lawyer can author an agreement for their client | **3D** | ⬜ outstanding | first point the capability is user-visible |
+| 15 | Either party can obtain the executed document | **3E** | ⬜ outstanding | download-audit event feeds metric row 9 |
+| 16 | Download adoption is measurable | **3E** | ⬜ outstanding | no source until 3E ships |
+| 17 | Automated expiry (`cancellation_source="expired"`) | later gate | ⬜ deferred | reserved only; no scheduler specified |
+| 18 | Lawyer KYC required to author (D5) | **3B** | ❓ **owner decision** | five precedents, no written rule — §3 D5 |
+| 19 | Counsel-approved template registry | Phase 4.3 | 🔒 counsel-blocked | D4 unowned |
+| 20 | ETO classification wording | Phase 4.1 | 🔒 counsel-blocked | neutral labels until reviewed |
+| 21 | Evidence-certificate legal conclusions | Phase 4 | 🔒 counsel-blocked | factual PDF in 3E is **not** blocked |
+| 22 | Signature encryption at rest | Phase 4.2 | 🔒 counsel/eng | claim already removed in R0 |
+| 23 | Six orphaned letters | retention work | ⬜ reported, unrepaired | census output; out of Phase 3 scope |
+
+---
+
+## 10. Open owner decisions
+
+Genuinely unresolved product or security choices. **None of these is settled by
+engineering analysis**, and none should be read as decided because a gate
+mentions it.
+
+| # | Decision | Why it is open | Blocks |
+|---|---|---|---|
+| **D5** | Must a lawyer be KYC-verified to author an agreement? | Five other surfaces enforce KYC; agreements enforces none, and no written rule covers it. Consistency argues yes, but that is an inference, not a policy. | 3B |
+| **D6** | Rate-limit ceiling for sign-and-send | `10/hour` per authenticated user is a starting point, not a measured figure. Too low blocks a busy firm; too high leaves the abuse boundary wide. | 3C |
+| **D7** | Active-draft cap per lawyer | Drafts are cheap but unbounded. A cap needs a number somebody owns. | 3C |
+| **D8** | Trusted-proxy / `X-Forwarded-For` policy | Until configured, a recorded IP may be the proxy's. **No IP may appear on an evidence document before this is settled** — the document would assert a false fact. Deployment + product, not engineering alone. | 3E |
+| **D4** | Who owns securing reviewing counsel, by when? | Still unowned. Blocks templates, ETO wording and certificate conclusions — three backlogs, one conversation. | Phase 4 |
+
+Two previously-open items are now **closed**: D1 (park the builder) and D2 (the
+counterparty rule, stated exactly in §3).
