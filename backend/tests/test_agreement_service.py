@@ -31,6 +31,23 @@ from app.services.agreement_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _diy_builder_enabled(monkeypatch):
+    """These tests exercise the USER creation path, which is parked by default.
+
+    `agreements_diy_builder_enabled` is False in production because every
+    bundled template is withdrawn, so `create_user_agreement` refuses outright.
+    That refusal has its own tests; the ones here are about what the creation
+    path DOES once it is allowed to run -- digests, party validation, the
+    withdrawn-boilerplate guard.
+
+    Turning the flag on keeps both properties under test: that parking refuses,
+    and that nothing else broke while it was parked.
+    """
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "agreements_diy_builder_enabled", True)
+
+
 def _party(uid: str, method: str | None = None, signed: bool = True) -> dict:
     return {"user_id": uid, "full_name": uid.title(), "signed": signed,
             "signature_method": method}
@@ -181,7 +198,17 @@ def test_party_out_drops_the_raw_signature_blob():
 # ── service behaviour (needs Mongo) ──────────────────────────────────────────
 
 @pytest.fixture
-async def two_users(mongo):
+async def two_users(mongo_transactional):
+    """Depends on `mongo_transactional`, not `mongo`, ON PURPOSE.
+
+    Every integration test in this file drives sign or decline, and those run
+    inside a transaction and FAIL CLOSED where transactions are unavailable. On
+    a standalone mongod they would fail with a 503 rather than tell you why --
+    a red suite that says nothing about the code. The fixture skips instead,
+    naming the reason and how to get a replica set.
+    """
+    mongo = mongo_transactional
+
     from app.db.collections import get_users_col
 
     users = [
@@ -196,7 +223,7 @@ async def two_users(mongo):
 async def _make(parties, creator="AG-ALICE", body="<p>Original terms</p>"):
     from app.services import agreement_service
 
-    return await agreement_service.create_agreement(
+    return await agreement_service.create_user_agreement(
         title="Test Agreement", body_html=body,
         parties=[{"user_id": p} for p in parties], creator_id=creator)
 

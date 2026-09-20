@@ -273,7 +273,13 @@ const PageDashboard = ({ onNavigate }) => {
             {/* Quick actions */}
             <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
                 {[
-                    { ico: "📄", title: "Create Agreement", sub: "Start from a template or scratch", page: "templates" },
+                    // "Create Agreement" is dropped while the builder is parked
+                    // rather than shown and redirected: a card that advertises a
+                    // feature and then lands somewhere else is its own small lie,
+                    // and this module has just had several removed.
+                    ...(DIY_BUILDER_ENABLED ? [
+                        { ico: "📄", title: "Create Agreement", sub: "Start from a template or scratch", page: "templates" },
+                    ] : []),
                     { ico: "✍️", title: "Sign Agreement", sub: "Review and sign pending documents", page: "all" },
                 ].map(a => (
                     <div key={a.title} onClick={() => onNavigate(a.page)} style={{
@@ -310,7 +316,9 @@ const PageDashboard = ({ onNavigate }) => {
                     <div style={{ padding: "28px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>Loading…</div>
                 ) : agmts.length === 0 ? (
                     <div style={{ padding: "28px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>
-                        No agreements yet — create one, or hire a lawyer to receive an engagement letter here.
+                        {DIY_BUILDER_ENABLED
+                            ? "No agreements yet — create one, or hire a lawyer to receive an engagement letter here."
+                            : "No agreements yet. When you hire a lawyer, their engagement letter appears here for you to sign."}
                     </div>
                 ) : agmts.slice(0, 4).map((a, i) => (
                     <div key={a.id} onClick={() => onNavigate("all")} style={{
@@ -1358,13 +1366,37 @@ const AgmtIc = ({ name, s = 18, c = "currentColor" }) => {
     return icons[name] || null;
 };
 
+/* THE DIY CONTRACT BUILDER IS PARKED. Mirrors the backend's
+   `agreements_diy_builder_enabled`, which is the real enforcement -- this only
+   decides whether to show a door that the server would slam.
+
+   Every template was withdrawn (the wording was US contract boilerplate,
+   unsuitable to sign in Pakistan) and the server refuses any body still
+   carrying the withdrawal notice, at create AND at sign. So while this is off
+   the builder has no success case: the wizard's only outcome is a refusal on
+   the last click, after four steps of the user's work.
+
+   BOTH SIDES MUST BE FLIPPED TOGETHER, and the backend must be flipped first --
+   turning this on alone just restores the wasted-work path. Enabling either
+   needs counsel-reviewed templates, not a deployment.
+
+   WHAT STAYS VISIBLE, ALWAYS: Dashboard and All Agreements. Engagement letters
+   from a lawyer the client hired live in this same list, and an agreement
+   somebody is already a party to must never become unreachable because a
+   different feature was parked. */
+const DIY_BUILDER_ENABLED =
+    (typeof process !== "undefined" &&
+        process.env?.NEXT_PUBLIC_AGREEMENTS_DIY_ENABLED === "true") || false;
+
 // ── SIDEBAR NAV ──────────────────────────────
 const Sidebar = ({ page, onNavigate, collapsed }) => {
     const t = useTheme();
     const links = [
         { id: "dashboard", ico: "dashboard", label: "Dashboard" },
-        { id: "templates", ico: "templates", label: "Templates" },
-        { id: "create", ico: "create", label: "Create" },
+        ...(DIY_BUILDER_ENABLED ? [
+            { id: "templates", ico: "templates", label: "Templates" },
+            { id: "create", ico: "create", label: "Create" },
+        ] : []),
         { id: "all", ico: "all", label: "All Agreements" },
     ];
     return (
@@ -1446,7 +1478,13 @@ function ModAgreements() {
     const [selectedTemplate, setSelectedTemplate] = useState(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-    const navigate = (p) => setPage(p);
+    /* Parked pages are unreachable by ROUTE, not merely unlinked. Removing the
+       sidebar entries alone would leave `create` reachable from the dashboard's
+       own call-to-action and from any stale state, landing the user in a wizard
+       whose last click the server refuses. */
+    const navigate = (p) =>
+        setPage(!DIY_BUILDER_ENABLED && (p === "create" || p === "templates")
+            ? "all" : p);
 
     return (
         <div style={{
@@ -1485,10 +1523,10 @@ function ModAgreements() {
                 {/* Page content */}
                 <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
                     {page === "dashboard" && <PageDashboard onNavigate={navigate} />}
-                    {page === "templates" && (
+                    {DIY_BUILDER_ENABLED && page === "templates" && (
                         <PageTemplates onNavigate={navigate} onSelectTemplate={t => setSelectedTemplate(t)} />
                     )}
-                    {page === "create" && (
+                    {DIY_BUILDER_ENABLED && page === "create" && (
                         <PageCreate template={selectedTemplate} onNavigate={navigate} onDone={() => navigate("all")} />
                     )}
                     {page === "all" && <PageAllAgreements onNavigate={navigate} />}

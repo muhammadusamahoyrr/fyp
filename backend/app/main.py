@@ -148,6 +148,42 @@ async def _provenance_relay():
             logging.getLogger(__name__).exception("Provenance relay sweep failed")
 
 
+async def _event_outbox_relay():
+    """Drain `event_outbox` on an interval, UNCONDITIONALLY.
+
+    WHY THIS EXISTS SEPARATELY FROM `_documents_v2_relay`.
+
+    That relay also drains this outbox — but it returns immediately while
+    `documents_v2` is off, which is the default. So before this loop existed,
+    `event_outbox` had no drainer at all in a default deployment. That was
+    harmless only for as long as nothing parked into it.
+
+    Agreement sign/decline now park their notification events inside the same
+    transaction as the state change, which is what closes the commit-then-crash
+    gap. That guarantee is worth nothing if the queue is never drained: the
+    notification would simply never arrive, which is a worse failure than the
+    best-effort delivery it replaced, and a silent one.
+
+    So this is ungated, for the reason the provenance relay is ungated: a
+    config default must never be able to leave an outbox undrained. Every step
+    in `drain_once` is lease/CAS-guarded, so running it here AND in the v2 relay
+    is safe, and there is no leader election to get wrong.
+    """
+    import asyncio
+    import logging
+    from app.services.event_outbox import drain_once
+
+    interval = getattr(settings, "provenance_relay_seconds", 30)
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            await drain_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("Event outbox relay sweep failed")
+
+
 async def _documents_v2_relay():
     """Drive all DOCUMENTS_V2 background work on an interval: materialise pending
     transition events, drain the notification outbox, reconcile stuck
@@ -304,6 +340,12 @@ async def lifespan(app: FastAPI):
     # default cannot silently leave the outbox undrained. It no-ops while the
     # feature flag is off.
     scheduler_tasks.append(_asyncio.create_task(_documents_v2_relay()))
+
+    # EVENT OUTBOX relay: ungated, and NOT covered by the v2 relay above, which
+    # returns immediately while DOCUMENTS_V2 is off. Agreement transitions park
+    # their notifications here transactionally; an undrained queue would turn
+    # that guarantee into silently undelivered mail. See _event_outbox_relay.
+    scheduler_tasks.append(_asyncio.create_task(_event_outbox_relay()))
 
     # APPOINTMENT NOTIFICATIONS: no task at all unless a flag is on.
     #

@@ -67,26 +67,36 @@ _DISPATCH: dict[str, Callable[[dict], Awaitable[None]]] = {
 }
 
 
+def _event_doc(logical_event_id: str, destination: str, payload: dict) -> dict:
+    now = _now()
+    return {
+        "_id": str(logical_event_id),
+        "destination": destination,
+        "payload": payload,
+        "status": STATUS_PENDING,
+        "attempts": 0,
+        "lease_owner": None,
+        "lease_expires_at": None,
+        "next_attempt_at": now,
+        "retry_until": now + timedelta(seconds=_RETRY_WINDOW_SECONDS),
+        "error_class": None,   # only ever a class name, never a raw message
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 async def park(logical_event_id: str, destination: str, payload: dict) -> bool:
     """Enqueue one event. Idempotent on `logical_event_id` (the _id): parking the
     same event twice is a duplicate-key, which is success — it will be delivered
-    once. Never raises."""
+    once. Never raises.
+
+    For a park that must be atomic with the state change it announces, use
+    `park_in_transaction` instead — this one's swallow-and-return-False is
+    exactly wrong inside a transaction.
+    """
     try:
-        now = _now()
-        await get_event_outbox_col().insert_one({
-            "_id": str(logical_event_id),
-            "destination": destination,
-            "payload": payload,
-            "status": STATUS_PENDING,
-            "attempts": 0,
-            "lease_owner": None,
-            "lease_expires_at": None,
-            "next_attempt_at": now,
-            "retry_until": now + timedelta(seconds=_RETRY_WINDOW_SECONDS),
-            "error_class": None,   # only ever a class name, never a raw message
-            "created_at": now,
-            "updated_at": now,
-        })
+        await get_event_outbox_col().insert_one(
+            _event_doc(logical_event_id, destination, payload))
         return True
     except DuplicateKeyError:
         return True   # already enqueued — will be delivered once
@@ -96,6 +106,35 @@ async def park(logical_event_id: str, destination: str, payload: dict) -> bool:
         logger.error("event_outbox: could not park %s (%s)",
                      logical_event_id, type(exc).__name__)
         return False
+
+
+async def park_in_transaction(session, logical_event_id: str,
+                              destination: str, payload: dict) -> None:
+    """Park an event inside a caller's transaction. RAISES on failure.
+
+    WHY A SEPARATE FUNCTION, AND WHY IT RAISES.
+
+    `park` above is the fire-and-forget form: it swallows every error and
+    returns False, so a caller that has already committed is not taken down by
+    a queue problem. That behaviour is correct there and catastrophic here.
+    Inside a transaction, a swallowed failure would let the state change commit
+    with no event parked — the exact crash-gap that moving the enqueue inside
+    the transaction exists to close, reintroduced silently.
+
+    So this one raises, and the caller's `with_transaction` aborts the whole
+    unit. Either the agreement transition and its notification event both land,
+    or neither does.
+
+    A duplicate key is still SUCCESS, for the same reason as above: the event is
+    already queued and will be delivered once. That is what makes a transaction
+    retry (which `with_transaction` performs on transient errors) safe — the
+    retried attempt re-parks the same logical id and does not abort on itself.
+    """
+    try:
+        await get_event_outbox_col().insert_one(
+            _event_doc(logical_event_id, destination, payload), session=session)
+    except DuplicateKeyError:
+        return   # already queued — a retry of this same unit, not a conflict
 
 
 async def _claim(owner: str) -> dict | None:

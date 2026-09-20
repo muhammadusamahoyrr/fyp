@@ -492,3 +492,40 @@ async def app_indexes(mongo):
     """
     await ensure_app_indexes(mongo)
     return mongo
+
+
+@pytest.fixture
+async def mongo_transactional(mongo):
+    """A database that genuinely supports multi-document transactions, or a skip.
+
+    WHY THIS EXISTS
+
+    Agreement sign and decline run inside `session.with_transaction` and FAIL
+    CLOSED when transactions are unavailable -- they refuse rather than fall
+    back to the four separate writes whose interleaving they exist to prevent.
+
+    Production is Atlas, which is a replica set, so transactions are available
+    there. `mongo` above connects to a local `mongodb://localhost:27017`, which
+    is ordinarily a STANDALONE, where transactions raise. A test asserting
+    atomic behaviour against a standalone would test the refusal path and prove
+    nothing about the transactional one.
+
+    SKIPS, LOUDLY, AND DOES NOT PRETEND. The alternative -- mocking the session
+    so the body runs without a transaction -- would assert the code's happy path
+    while removing the only property under test. A skip with a reason is honest
+    about the gap; a green test that verified nothing would not be.
+
+    To run these locally, point AAI_TEST_MONGO_URL at a single-node replica set:
+
+        mongod --replSet rs0 --dbpath <dir> --port 27018
+        mongosh --port 27018 --eval 'rs.initiate()'
+        AAI_TEST_MONGO_URL=mongodb://localhost:27018/?replicaSet=rs0 pytest ...
+    """
+    hello = await mongo.client.admin.command("hello")
+    if not (hello.get("setName") or hello.get("msg") == "isdbgrid"):
+        pytest.skip(
+            "multi-document transactions need a replica set or mongos; this "
+            "connection is a standalone. Set AAI_TEST_MONGO_URL to a "
+            "replica-set URI to run the agreement transaction tests."
+        )
+    return mongo

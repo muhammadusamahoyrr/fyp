@@ -191,7 +191,56 @@ passes and would fail if any string were restored.
 ## Phase 1 — Integrity
 
 **Estimated 3 days. Backend and frontend verified separately.**
-**Status: NOT STARTED — blocked on product decision D1.**
+**Status: D1 answered — PARK. §1.1c, §1.1d, §1.1e, §1.1g and the park flag
+IMPLEMENTED 2026-09-20. §1.1a (idempotency fingerprint) and the atomic
+create-and-sign remain, and are deliberately deferred: per §1.1f they serve the
+wizard path, which is now parked.**
+
+### What landed
+
+- **Park flag** `agreements_diy_builder_enabled` (off). Enforced in the
+  SERVICE, not only the route, so an internal caller cannot walk past it.
+  Frontend mirror `NEXT_PUBLIC_AGREEMENTS_DIY_ENABLED` gates the sidebar, the
+  dashboard call-to-action and the page routes — parked pages are unreachable
+  by route, not merely unlinked. Listing, viewing, signing and declining stay
+  available to everyone.
+- **Plain text** (§1.1d): `normalise_body` canonicalises line endings so the
+  same wording hashes identically on Windows and Linux, and REFUSES unsafe
+  control characters rather than stripping them. `body_format` stamped. No
+  `nh3`.
+- **Two named producers** (§1.1c): `create_user_agreement` (gated) and
+  `create_pending_engagement_letter` (never gated — it gates billing).
+- **Transactional sign and decline** (§1.1b): one conditional write per
+  transition, audit entry and status in the same write, notification parked
+  **inside** the transaction, **fail closed** where transactions are
+  unavailable. `_run_in_transaction` refuses rather than degrading.
+- **Outbox drainer** (§1.1g): ungated `_event_outbox_relay` in `main.py`.
+
+### Verification
+
+| Run | Result |
+|---|---|
+| Targeted baseline, committed Phase 0, standalone | 296 pass / 0 fail |
+| Same 296 after Phase 1, replica set | 296 pass / 0 fail — no regressions |
+| New `test_agreement_phase1.py`, replica set | 20 pass |
+| Agreement suites, standalone | skip cleanly, with a reason and a fix |
+
+### Two things this phase did not anticipate
+
+**The test suite had no transactions to test with.** `conftest.py:197` connects
+to a standalone, so the first run of the transactional code turned 10 existing
+sign/decline tests red with a 503 — the fail-closed path working exactly as
+designed, and proving nothing about the transactional one. Fixed by a
+`mongo_transactional` fixture that skips with an actionable reason, and by
+standing up a throwaway single-node replica set to actually run them. **A
+fail-closed guarantee needs an environment where the open path exists, or the
+only branch under test is the refusal.**
+
+**Parking changed what the existing tests were asserting.** With the flag off,
+every test that created an agreement through the user path began exercising the
+refusal instead of the thing it was written for. They now enable the flag
+explicitly via an autouse fixture, which keeps both properties under test: that
+parking refuses, and that nothing else broke while it was parked.
 
 ### Design corrections adopted before implementation
 
@@ -254,6 +303,33 @@ Tests must use a replica-set fixture or an explicit mocked transaction
 boundary. Production must **fail closed** if transactions are unavailable —
 never silently degrade to non-transactional writes, which would reintroduce the
 exact race this phase exists to close.
+
+*Confirmed during implementation:* `tests/conftest.py:197` connects to
+`mongodb://localhost:27017` — a **standalone**, so transactions are
+unavailable in the suite as it stands. A replica-set fixture that skips (with a
+named reason, never silently) is therefore required before the transactional
+tests can mean anything.
+
+**1.1g The event outbox had no drainer — found during implementation.**
+
+Moving the notification enqueue inside the transaction (§1.1b) is only half a
+fix. `event_outbox` is documented as *"DORMANT until DOCUMENTS_V2; no scheduler
+drains it yet"*, and the one relay that calls `drain_once` —
+`_documents_v2_relay` — returns immediately while `documents_v2` is off, which
+is the default.
+
+So parking events there without a drainer would have replaced best-effort
+delivery that mostly works with durable queuing that **never delivers**: a
+worse failure than the crash gap being closed, and a silent one.
+
+`main.py` now runs `_event_outbox_relay()`, ungated, for the same reason the
+provenance relay is ungated — *a config default must never be able to leave an
+outbox undrained*. `drain_once` is lease/CAS-guarded, so it running in both
+relays is safe.
+
+**This is the general shape to watch for in the rest of Phase 1:** a durability
+mechanism is not finished when the write is durable, only when something reads
+it back out.
 
 **1.1f Sequencing against D1.**
 If the DIY builder is being parked, do not spend this phase building atomic

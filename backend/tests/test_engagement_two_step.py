@@ -324,7 +324,7 @@ async def test_a_failed_letter_leaves_no_engagement_and_no_claim(parties, monkey
     async def boom(**kw):
         raise RuntimeError("agreement service down")
 
-    monkeypatch.setattr(agreement_service, "create_agreement", boom)
+    monkeypatch.setattr(agreement_service, "create_pending_engagement_letter", boom)
 
     eid = await _request(parties)
     await engagement_service.propose_terms(eid, parties["lawyer_id"], TERMS)
@@ -344,7 +344,7 @@ async def test_the_client_can_retry_after_a_failed_letter(parties, monkeypatch):
     from app.services import agreement_service
 
     calls = {"n": 0}
-    real = agreement_service.create_agreement
+    real = agreement_service.create_pending_engagement_letter
 
     async def flaky(**kw):
         calls["n"] += 1
@@ -352,7 +352,7 @@ async def test_the_client_can_retry_after_a_failed_letter(parties, monkeypatch):
             raise RuntimeError("transient")
         return await real(**kw)
 
-    monkeypatch.setattr(agreement_service, "create_agreement", flaky)
+    monkeypatch.setattr(agreement_service, "create_pending_engagement_letter", flaky)
 
     eid = await _request(parties)
     await engagement_service.propose_terms(eid, parties["lawyer_id"], TERMS)

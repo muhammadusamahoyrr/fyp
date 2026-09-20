@@ -245,6 +245,31 @@ class Settings(BaseSettings):
     # event. The sweep refuses anything above its own DEFAULT_LIMIT of 200.
     appointment_expiry_batch: int = 50
 
+    # ── DIY CONTRACT BUILDER ──────────────────────────────────────────────────
+    # OFF. This parks the client-facing agreement wizard -- the NDA / lease /
+    # employment template gallery and the create flow behind it.
+    #
+    # WHY IT IS PARKED AND NOT MERELY HIDDEN. All six templates were withdrawn
+    # because the wording was United States contract boilerplate, unsuitable to
+    # sign in Pakistan, and the backend already refuses any body still carrying
+    # the withdrawal notice. So the builder cannot currently produce a valid
+    # agreement at all: every path through it ends in a refusal, after four
+    # steps of the user's work. Writing replacement templates is legal work
+    # blocked on counsel, not engineering work.
+    #
+    # WHAT IT DOES NOT GATE, and must not. Engagement letters are a different
+    # product sharing the same collection and UI: they are generated when a
+    # client accepts a lawyer's fee terms, and they gate all billing. They are
+    # created by `create_pending_engagement_letter` from inside
+    # engagement_service, NOT through the HTTP route, so this flag leaves them
+    # untouched. Listing, viewing, signing and declining stay available to
+    # everyone whatever this is set to -- an agreement somebody is already a
+    # party to must never become unreachable because a feature was parked.
+    #
+    # Turning it on requires counsel-reviewed templates first
+    # (AGREEMENTS_PRODUCT_PLAN.md D1 / Phase 4.3), not just a deployment.
+    agreements_diy_builder_enabled: bool = False
+
     english_ocr_enabled: bool = False
     # Identifier of the reviewed benchmark/evidence used to approve production
     # activation. Development may exercise the feature without one; production

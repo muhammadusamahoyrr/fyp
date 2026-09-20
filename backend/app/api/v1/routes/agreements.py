@@ -17,7 +17,15 @@ async def create_agreement(
     body: AgreementCreate,
     current_user: dict = Depends(get_current_user),
 ):
-    return await agreement_service.create_agreement(
+    """Create an agreement the user has drafted themselves.
+
+    This route is the DIY contract builder's only entry point, and it is parked
+    behind `agreements_diy_builder_enabled` (403 while off). Engagement letters
+    do NOT come through here — they are created inside `engagement_service` via
+    `create_pending_engagement_letter`, so hiring a lawyer and signing their
+    letter keep working whatever this flag is set to.
+    """
+    return await agreement_service.create_user_agreement(
         title=body.title,
         body_html=body.body_html,
         parties=[p.model_dump() for p in body.party_ids],

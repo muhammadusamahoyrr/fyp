@@ -351,7 +351,12 @@ async def accept_terms(engagement_id: str, client_id: str) -> dict:
             fee_type=fee_type,
             scope_note=scope_note,
         )
-        agreement = await agreement_service.create_agreement(
+        # The INTERNAL producer, deliberately not the route's entry point. This
+        # letter is created UNSIGNED and awaits both parties; the external
+        # wizard path signs on creation. Separate names keep that difference
+        # explicit, and keep engagement letters working while the DIY builder
+        # is parked behind `agreements_diy_builder_enabled`.
+        agreement = await agreement_service.create_pending_engagement_letter(
             title=f"Engagement Letter — {(case or {}).get('title', 'Case')} ({(case or {}).get('case_number', '')})",
             body_html=letter,
             parties=[{"user_id": lawyer_id}, {"user_id": client_id}],

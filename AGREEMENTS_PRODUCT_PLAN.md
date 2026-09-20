@@ -173,7 +173,22 @@ whose purpose is to be producible as evidence cannot be produced.
 Engineering cost varies by a factor of three depending on these. **Answer these
 before any code is written.**
 
-### D1 — Do we keep the DIY contract builder?
+### D1 — Do we keep the DIY contract builder? **ANSWERED: PARK (2026-09-20)**
+
+Implemented as option B. `agreements_diy_builder_enabled` is off, enforced in
+the service layer as well as the route; the frontend mirror hides the templates
+gallery, the create wizard, the dashboard call-to-action and the sidebar
+entries. Listing, viewing, signing and declining are untouched, so engagement
+letters — the load-bearing half — keep working exactly as before.
+
+Reversible: flip the backend flag first, then the frontend one. Turning it on
+still requires counsel-reviewed templates (§4.3), not a deployment.
+
+Consequence for R3, as forecast: the atomic create-and-sign work is **deferred**,
+since it serves only the parked wizard. Transactional, idempotent sign and
+decline shipped anyway — engagement letters depend on them.
+
+*Original options, for the record:*
 
 | Option | Cost | Consequence |
 |---|---|---|
