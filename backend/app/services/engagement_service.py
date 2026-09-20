@@ -6,6 +6,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.constants import (
     ENGAGEMENT_OPEN_STATUSES,
+    AgreementStatus,
     CaseStatus,
     EngagementStatus,
     NotificationType,
@@ -26,6 +27,11 @@ logger = logging.getLogger(__name__)
 engagement_repo = EngagementRepository()
 case_repo = CaseRepository()
 user_repo = UserRepository()
+
+# The machine-readable cause written onto a letter cancelled because its
+# engagement ended. One cancellation model across the module -- plan
+# §3.G1.10 -- kept apart from `cancellation_reason`, which holds human prose.
+CANCELLATION_SOURCE_ENGAGEMENT_TERMINATED = "engagement_terminated"
 
 _FEE_TYPE_LABELS = {
     "fixed": "fixed fee",
@@ -784,46 +790,221 @@ async def terminate_engagement(engagement_id: str, user_id: str, reason: str) ->
             "shown to the other party."
         )
 
-    now = datetime.now(timezone.utc)
     reason = reason.strip()
-    await engagement_repo.set_status(
-        engagement_id,
-        EngagementStatus.TERMINATED.value,
-        {
+    client_name, lawyer_name = await _party_names(eng)
+    ender = lawyer_name if party == "lawyer" else client_name
+
+    # ONE TRANSACTION. Before gate 3A this was four independent writes -- status,
+    # case release, milestone, notify -- so a crash between them left an
+    # engagement `terminated` with its case still assigned, and a client still
+    # holding a lawyer who believed they had withdrawn. That is the Gate 2
+    # defect's mirror, in the code Gate 2 did not touch.
+    async def _txn(session):
+        return await _terminate_in_transaction(
+            session, engagement_id=engagement_id, expected=eng, party=party,
+            reason=reason, ender=ender,
+        )
+
+    from app.services.agreement_service import (
+        _run_in_transaction,
+        _TransitionConflict,
+    )
+    try:
+        await _run_in_transaction(_txn)
+    except _TransitionConflict as conflict:
+        raise AppValidationError(conflict.message) from conflict
+
+    # Post-commit only: prompt delivery. The relay in main.py is the guarantee.
+    try:
+        from app.services import event_outbox
+        await event_outbox.drain_once()
+    except Exception:
+        pass
+
+    return await _public_engagement(engagement_id)
+
+
+async def _terminate_in_transaction(session, *, engagement_id: str, expected: dict,
+                                    party: str, reason: str, ender: str) -> None:
+    """Terminate, release, cancel the pending letter, notify -- atomically.
+
+    TERMINATION IS A SAFETY EXIT AND MUST NOT BE BLOCKED BY THE AGREEMENT SIDE.
+    This inverts the rule Gate 2 applies to declining, deliberately: declining
+    is an action ABOUT a letter, so a broken letter link aborts it; terminating
+    is an action about the ENGAGEMENT, and a client who wants out of a
+    representation cannot be held there because a letter row is missing,
+    superseded or corrupt. A broken link records an anomaly and the termination
+    completes.
+    """
+    from app.db.collections import (
+        get_agreements_col,
+        get_cases_col,
+        get_engagements_col,
+    )
+    from app.services import event_outbox
+
+    now = datetime.now(timezone.utc)
+    case_id = expected["case_id"]
+    lawyer_id = expected["lawyer_id"]
+
+    # 1. The engagement, conditional on the state the preflight saw. A second
+    #    terminate, or a concurrent completion, matches nothing and loses.
+    moved = await get_engagements_col().update_one(
+        {"_id": engagement_id, "status": EngagementStatus.ACCEPTED.value},
+        {"$set": {
+            "status":             EngagementStatus.TERMINATED.value,
             "terminated_at":      now,
             "terminated_by":      party,
             "termination_reason": reason,
+            "responded_at":       now,
+            "updated_at":         now,
+        }},
+        session=session,
+    )
+    if moved.modified_count == 0:
+        from app.services.agreement_service import _TransitionConflict
+        raise _TransitionConflict(
+            "This engagement is no longer active, so it cannot be terminated. "
+            "Reload it to see its current state."
+        )
+
+    # 2. The case. Read the disposition under this session rather than inferring
+    #    it from a zero match, which cannot tell "somebody else holds it" from
+    #    "nobody does" -- the distinction Gate 2 learned to make.
+    case = await get_cases_col().find_one({"_id": case_id}, session=session)
+    if case is None:
+        disposition = "missing"
+    elif case.get("lawyer_id") == lawyer_id:
+        disposition = "released"
+    elif case.get("lawyer_id") is None:
+        disposition = "already_unassigned"
+    else:
+        disposition = "reassigned"
+
+    if disposition == "released":
+        await get_cases_col().update_one(
+            {"_id": case_id, "lawyer_id": lawyer_id},
+            {"$set": {"lawyer_id": None,
+                      "status": CaseStatus.OPEN.value,
+                      "updated_at": now}},
+            session=session,
+        )
+        # The milestone belongs to the RELEASE. A case now run by another
+        # lawyer must not gain an entry about an engagement that is not its own.
+        await get_cases_col().update_one(
+            {"_id": case_id},
+            {"$push": {"milestones": {
+                "title": f"Engagement ended by the {party}",
+                "description": reason,
+                "date": now,
+                "completed": True,
+                "completed_at": now,
+            }}},
+            session=session,
+        )
+
+    # 3. The pending letter. Cancelled only when the link is sound AND it is
+    #    still pending -- an EXECUTED letter matches nothing and survives
+    #    untouched, because a properly formed instrument is not unmade by the
+    #    relationship later ending.
+    anomaly = await _cancel_pending_letter(
+        session, expected=expected, engagement_id=engagement_id,
+        party=party, reason=reason, now=now,
+    )
+    if anomaly:
+        # Discoverable rather than silent. The termination still stands.
+        await get_engagements_col().update_one(
+            {"_id": engagement_id},
+            {"$set": {"letter_anomaly": anomaly, "letter_anomaly_at": now}},
+            session=session,
+        )
+        logger.error(
+            "engagement %s terminated with a broken letter link (%s); "
+            "termination completed and the anomaly recorded",
+            engagement_id, anomaly,
+        )
+
+    # 4. The notification, parked INSIDE this transaction. The direct `_notify`
+    #    call that used to live here is REPLACED, not supplemented -- keeping
+    #    both would double-send.
+    recipient = _other_party_id(expected, party)
+    title = _quoted((case or {}).get("title", "the case"))
+    body = (
+        f"{ender} ended the engagement for {title}. Reason: {reason}"
+        + (" Your case is open again and you can engage another lawyer."
+           if disposition == "released" and party == "lawyer" else "")
+    )
+    logical_id = f"engagement:{engagement_id}:terminated:{recipient}"
+    await event_outbox.park_in_transaction(
+        session, logical_id, "notifications",
+        {
+            "logical_event_id": logical_id,
+            "recipient_id": recipient,
+            "ntype": NotificationType.ENGAGEMENT_TERMINATED.value,
+            "title": "Engagement ended",
+            "body": body,
+            "data": {"engagement_id": engagement_id, "case_id": case_id},
         },
     )
 
-    # Release the case. Scoped to this lawyer so a concurrent reassignment
-    # cannot be undone by a late termination of a superseded engagement.
-    await case_repo.update_one(
-        {"_id": eng["case_id"], "lawyer_id": eng["lawyer_id"]},
-        {"$set": {
-            "lawyer_id":  None,
-            "status":     CaseStatus.OPEN.value,
-            "updated_at": now,
-        }},
-    )
 
-    client_name, lawyer_name = await _party_names(eng)
-    case = await case_repo.find_by_id(eng["case_id"])
-    await case_repo.add_milestone(eng["case_id"], {
-        "title": f"Engagement ended by the {party}",
-        "description": reason,
-        "date": now,
-        "completed": True,
-        "completed_at": now,
-    })
-    await _notify(
-        _other_party_id(eng, party),
-        NotificationType.ENGAGEMENT_TERMINATED,
-        "Engagement ended",
-        f"{lawyer_name if party == 'lawyer' else client_name} ended the engagement for "
-        f"{_quoted((case or {}).get('title', 'the case'))}. Reason: {reason}"
-        + ("" if party == "client" else
-           " Your case is open again and you can engage another lawyer."),
-        {"engagement_id": engagement_id, "case_id": eng["case_id"]},
+async def _cancel_pending_letter(session, *, expected: dict, engagement_id: str,
+                                 party: str, reason: str, now) -> str | None:
+    """Cancel this engagement's still-pending letter. Returns an anomaly, or None.
+
+    Anomalies are REPORTED, never raised: see `_terminate_in_transaction`. The
+    return values are `no_letter`, `letter_missing` and `letter_superseded`;
+    an executed or already-cancelled letter is NOT an anomaly, merely nothing
+    to do.
+    """
+    from app.db.collections import get_agreements_col
+    from app.services.agreement_service import body_digest
+
+    agreement_id = expected.get("agreement_id")
+    if not agreement_id:
+        # An engagement that never got a letter. `accept_terms` rolls back when
+        # generation fails, so this is rare -- but it is a linkage fact worth
+        # recording, not a reason to refuse somebody their exit.
+        return "no_letter"
+
+    letter = await get_agreements_col().find_one(
+        {"_id": agreement_id}, session=session)
+    if letter is None:
+        return "letter_missing"
+    if letter.get("engagement_id") != engagement_id:
+        # Points at a different engagement: superseded. Cancelling it would end
+        # a letter belonging to somebody else's relationship.
+        return "letter_superseded"
+
+    digest = letter.get("body_sha256") or body_digest(letter.get("body_html", ""))
+
+    # Conditional on `pending`. An executed letter does not match and is left
+    # exactly as it is; an already-cancelled one does not match either, so no
+    # second audit entry is appended.
+    await get_agreements_col().update_one(
+        {"_id": agreement_id, "status": AgreementStatus.PENDING.value},
+        {
+            "$set": {
+                "status": AgreementStatus.CANCELLED.value,
+                # The one cancellation model -- plan §3.G1.10.
+                "cancellation_source": CANCELLATION_SOURCE_ENGAGEMENT_TERMINATED,
+                "cancellation_reason": reason,
+                "cancelled_at": now,
+                "cancelled_by": expected["client_id"] if party == "client"
+                else expected["lawyer_id"],
+                "updated_at": now,
+            },
+            "$push": {"audit_log": {
+                "action": "cancelled",
+                "actor_id": expected["client_id"] if party == "client"
+                else expected["lawyer_id"],
+                "timestamp": now,
+                "ip_address": None,
+                "reason": reason,
+                "note": "engagement terminated",
+                "body_sha256": digest,
+            }},
+        },
+        session=session,
     )
-    return await _public_engagement(engagement_id)
+    return None

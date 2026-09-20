@@ -871,6 +871,14 @@ The implemented rule is D2's: lawyer authoring only; exactly two parties;
 mandatory `case_id`; the case exists; `case.lawyer_id == authenticated lawyer`;
 `case.client_id == selected client`.
 
+**Plus D5, decided 2026-09-20: the lawyer must be KYC-verified, checked at BOTH
+create and send.** Two checkpoints because they are separated in time — a draft
+authored while verified may be sent after an admin revokes that verification
+(`user_service.py:312` clears `kyc_verified`). Checking only at create lets a
+de-verified lawyer send a binding instrument; checking only at send lets them
+build drafts they can never use. The existing helper at `lawyer_service.py:359`
+reads the same field the five precedent surfaces read.
+
 **`case_id` selection and validation.** The lawyer picks from their own assigned
 cases; the server re-validates that `case.lawyer_id == creator`. Never trust the
 submitted id. `_create_agreement` already accepts `case_id` but
@@ -1259,7 +1267,34 @@ breaking one, it needs a plan amendment first, not a workaround.
 
 **Estimated 4 days. Nothing here starts before Phases 1 and 2 land.**
 
-### 3.0 The reverse arrow — a terminated engagement voids its pending letter
+### 3.0 The reverse arrow — a terminated engagement voids its pending letter ✅ IMPLEMENTED
+
+**Gate 3A, 2026-09-20.** `terminate_engagement` now runs one transaction
+covering: engagement `accepted`→`terminated` (conditional); case release
+(conditional on that lawyer); release-gated milestone; pending-letter
+cancellation under the §3.G1.10 model with an audit entry carrying
+`body_sha256`; and the outbox park. The direct `_notify` is **replaced**, not
+supplemented.
+
+Broken letter links (`no_letter`, `letter_missing`, `letter_superseded`) record
+an anomaly and the termination completes — termination is a safety exit.
+`scripts/engagement_letter_reconcile.py` reads those anomalies back
+(`_letter_anomalies`), so the field is surfaced rather than written into a void.
+
+**Two things this gate did not anticipate:**
+
+*The rollback test was proved, not assumed.* Removing the transaction wrapper
+was verified to make `test_a_failure_on_the_last_write_rolls_back_every_earlier_one`
+FAIL with `engagement not rolled back`, then the wrapper was restored and the
+test passed again. A rollback assertion that cannot fail is decoration.
+
+*The anomaly field had no reader.* It was written and surfaced nowhere — the
+same "durable but unread" shape as the outbox before §1.1g gave it a drainer. A
+record nobody can see is a comment. The census now reports it.
+
+15 tests, all on a real replica set, no mocked transaction boundary.
+
+#### Original analysis, for the record
 
 **Deferred here from Gate 2**, where it was mistakenly written as though it were
 part of the same change. It is not: Gate 2 runs letter→engagement, this runs

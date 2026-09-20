@@ -60,7 +60,7 @@ It is separated from the parked wizard on every axis that matters:
 
 | | **Product B — client DIY wizard (parked)** | **Product C — lawyer authoring (Phase 3)** |
 |---|---|---|
-| Who authors | Any client | KYC-verified lawyer only *(decision D5)* |
+| Who authors | Any client | KYC-verified lawyer only (**D5**, decided) |
 | Counterparty | Chosen from a directory of lawyers | The one client on the named case |
 | Case link | None | **Mandatory** and server-validated |
 | Content | Six withdrawn templates | The lawyer's own wording |
@@ -259,7 +259,22 @@ is a spam and harassment vector in a product that handles legal matters.
 Rules 4–6 together mean the client is reachable *because of this case*, not
 because of history. That is the property that forecloses cold outreach.
 
-### D5 — Must a lawyer be KYC-verified to author an agreement? **OPEN**
+### D5 — Must a lawyer be KYC-verified to author an agreement? **DECIDED: YES**
+
+**Decision, 2026-09-20: a lawyer must be KYC-verified to author OR send an
+agreement, and the check runs at BOTH points.**
+
+Two checkpoints rather than one, because they are separated in time. A draft
+authored while verified may be sent weeks later, by which time an admin may have
+rejected or revoked that verification (`user_service.py:312` clears
+`kyc_verified`). Checking only at create would let a de-verified lawyer send a
+binding instrument; checking only at send would let them accumulate drafts they
+can never use. Neither failure is acceptable, and the check is cheap.
+
+Implemented in **gate 3B** as part of the authorization primitives. Engineering
+detail: `AGREEMENTS_REMEDIATION_PLAN.md` §3.G1.2.
+
+*Evidence and reasoning that led here:*
 
 **Not invented here — the evidence, then the question.**
 
@@ -282,8 +297,8 @@ it either way.
 **Recommendation: require it**, on the strength of those five. Authoring a
 binding instrument is at least as consequential as reviewing a document.
 
-**This is an owner decision, not an engineering conclusion.** Recorded as open
-in §9 rather than assumed in a gate.
+**This was an owner decision, not an engineering conclusion** — and it has now
+been made, in favour of consistency with the five precedents above.
 
 ### D3 — Do we ship any ETO 2002 classification before counsel reviews it?
 
@@ -655,7 +670,7 @@ edit.
 | 15 | Either party can obtain the executed document | **3E** | ⬜ outstanding | download-audit event feeds metric row 9 |
 | 16 | Download adoption is measurable | **3E** | ⬜ outstanding | no source until 3E ships |
 | 17 | Automated expiry (`cancellation_source="expired"`) | later gate | ⬜ deferred | reserved only; no scheduler specified |
-| 18 | Lawyer KYC required to author (D5) | **3B** | ❓ **owner decision** | five precedents, no written rule — §3 D5 |
+| 18 | Lawyer KYC required to author **and** send (D5) | **3B** | ✅ **decided** — outstanding to build | §3 D5; checked at create and at send |
 | 19 | Counsel-approved template registry | Phase 4.3 | 🔒 counsel-blocked | D4 unowned |
 | 20 | ETO classification wording | Phase 4.1 | 🔒 counsel-blocked | neutral labels until reviewed |
 | 21 | Evidence-certificate legal conclusions | Phase 4 | 🔒 counsel-blocked | factual PDF in 3E is **not** blocked |
@@ -672,11 +687,11 @@ mentions it.
 
 | # | Decision | Why it is open | Blocks |
 |---|---|---|---|
-| **D5** | Must a lawyer be KYC-verified to author an agreement? | Five other surfaces enforce KYC; agreements enforces none, and no written rule covers it. Consistency argues yes, but that is an inference, not a policy. | 3B |
 | **D6** | Rate-limit ceiling for sign-and-send | `10/hour` per authenticated user is a starting point, not a measured figure. Too low blocks a busy firm; too high leaves the abuse boundary wide. | 3C |
 | **D7** | Active-draft cap per lawyer | Drafts are cheap but unbounded. A cap needs a number somebody owns. | 3C |
 | **D8** | Trusted-proxy / `X-Forwarded-For` policy | Until configured, a recorded IP may be the proxy's. **No IP may appear on an evidence document before this is settled** — the document would assert a false fact. Deployment + product, not engineering alone. | 3E |
 | **D4** | Who owns securing reviewing counsel, by when? | Still unowned. Blocks templates, ETO wording and certificate conclusions — three backlogs, one conversation. | Phase 4 |
 
-Two previously-open items are now **closed**: D1 (park the builder) and D2 (the
-counterparty rule, stated exactly in §3).
+Three previously-open items are now **closed**: D1 (park the builder), D2 (the
+counterparty rule, stated exactly in §3) and **D5 (KYC required to author or
+send — checked at both points)**.

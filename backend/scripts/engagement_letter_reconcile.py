@@ -142,7 +142,38 @@ async def census() -> dict:
         "stranded": [a for a in affected if a["reconcilable"]],
         "orphans": await _orphan_letters(),
         "engagement_totals": await status_breakdown(),
+        "letter_anomalies": await _letter_anomalies(),
     }
+
+
+async def _letter_anomalies() -> list[dict]:
+    """Engagements terminated with a broken letter link (gate 3A).
+
+    WHY THIS IS HERE. `terminate_engagement` records `letter_anomaly` when it
+    ends an engagement whose letter is absent, missing or superseded --
+    deliberately completing the termination rather than trapping somebody in a
+    representation they want out of.
+
+    Before this function, NOTHING read that field back. It was written and never
+    surfaced anywhere, which is precisely the "durable but unread" failure the
+    event outbox had before it got a drainer (plan section 1.1g). A field that
+    records an anomaly nobody can see is not a record, it is a comment.
+
+    Read-only, like the rest of this script. Each row is a pointer for a human,
+    not work for a machine.
+    """
+    rows = await get_engagements_col().find(
+        {"letter_anomaly": {"$exists": True, "$ne": None}},
+        {"_id": 1, "letter_anomaly": 1, "letter_anomaly_at": 1, "status": 1,
+         "agreement_id": 1, "case_id": 1, "lawyer_id": 1, "terminated_at": 1},
+    ).to_list(length=None)
+    return [
+        {"engagement_id": r["_id"], "anomaly": r["letter_anomaly"],
+         "recorded_at": r.get("letter_anomaly_at"),
+         "engagement_status": r.get("status"),
+         "agreement_id": r.get("agreement_id"), "case_id": r.get("case_id")}
+        for r in rows
+    ]
 
 
 async def _orphan_letters() -> list[dict]:
@@ -296,6 +327,32 @@ def _print_orphans(report: dict) -> None:
     print("  real retained records vs historical fixture residue.")
 
 
+def _print_anomalies(report: dict) -> None:
+    """Surface `letter_anomaly`, which nothing else reads."""
+    rows = report.get("letter_anomalies") or []
+    print("")
+    print(f"TERMINATION LETTER ANOMALIES : {len(rows)}")
+    if not rows:
+        print("  None. Every terminated engagement had a sound letter link.")
+        return
+
+    counts = Counter(r["anomaly"] for r in rows)
+    for kind, n in sorted(counts.items()):
+        print(f"    {kind:<20} {n}")
+    for r in rows:
+        print(f"  - engagement {r['engagement_id']} [{r['engagement_status']}] "
+              f"{r['anomaly']}")
+        print(f"      letter={r['agreement_id']} case={r['case_id']} "
+              f"recorded={r['recorded_at']}")
+
+    print("")
+    print("  These terminations COMPLETED BY DESIGN. Termination is a safety")
+    print("  exit and is never blocked by the agreement side -- a client who")
+    print("  wants out of a representation cannot be held there because a")
+    print("  letter row is missing. The anomaly is recorded so the broken link")
+    print("  is discoverable rather than silent. Reported, not repaired.")
+
+
 def _print_totals(report: dict) -> None:
     totals = report.get("engagement_totals") or {}
     print(f"\nEngagements in the collection, ALL statuses : {totals.get('total', 0)}")
@@ -316,6 +373,7 @@ def _print_census(report: dict) -> None:
         print("could not have found the defect even if it were occurring.")
         print("'Clean' would then mean UNEXERCISED, not verified safe.")
         _print_orphans(report)
+        _print_anomalies(report)
         return
 
     print("\nLetter state breakdown:")
@@ -341,6 +399,7 @@ def _print_census(report: dict) -> None:
         print("triggered in practice -- report this, do not omit it.")
 
     _print_orphans(report)
+    _print_anomalies(report)
 
 
 async def main() -> int:
