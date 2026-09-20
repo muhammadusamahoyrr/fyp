@@ -943,23 +943,52 @@ async def list_agreements(user_id: str) -> list[dict]:
     return out
 
 
+def _refuse_if_someone_elses_draft(agreement: dict, user_id: str) -> None:
+    """A DRAFT IS INVISIBLE TO EVERYONE EXCEPT ITS AUTHOR.
+
+    `create_draft` writes BOTH parties into the row so it is complete before
+    sending, so party membership alone is not authorisation while the row is
+    still a draft -- the counterparty would otherwise reach half-written
+    wording, or wording abandoned before sending, that was never offered to
+    them.
+
+    404, NOT 403. A 403 confirms the id exists, which tells the counterparty a
+    draft about them is being written. For something they are not entitled to
+    know about yet, absence is the honest answer, and the response must be
+    indistinguishable from a wrong id.
+
+    SAYS NOTHING ABOUT THE AUTHOR. A first version of this helper also refused
+    the author, which broke reading your own draft -- reading and ACTING are
+    different rules. The author may read and edit freely; what they may not do
+    is sign or decline a draft, and that belongs to the action paths
+    (`_refuse_draft_action`), not here.
+    """
+    if (agreement.get("status") == AgreementStatus.DRAFT.value
+            and agreement.get("created_by") != user_id):
+        raise NotFoundError("Agreement")
+
+
+def _refuse_draft_action(agreement: dict, user_id: str) -> None:
+    """Signing or declining a DRAFT, layered on top of the visibility rule.
+
+    A stranger gets the 404 above. The AUTHOR gets a real explanation: they
+    know the draft exists, so "not found" about their own row would be its own
+    lie -- and the action they want is `send`, which signs and sends together.
+    """
+    _refuse_if_someone_elses_draft(agreement, user_id)
+    if agreement.get("status") == AgreementStatus.DRAFT.value:
+        raise AppValidationError(
+            "This is still a draft and has not been sent. Send it to sign it "
+            "-- signing and sending happen together."
+        )
+
+
 async def get_agreement(agreement_id: str, requester_id: str) -> dict:
     agreement = await agreement_repo.find_by_id(agreement_id)
     if not agreement:
         raise NotFoundError("Agreement")
 
-    # A DRAFT IS PRIVATE TO ITS CREATOR, and is reported as NOT FOUND rather
-    # than FORBIDDEN. `create_draft` writes both parties into the row before it
-    # is sent, so party membership alone would let the counterparty read a
-    # half-written agreement that was never offered to them.
-    #
-    # 404 not 403: a 403 would confirm the id exists, which tells the
-    # counterparty a draft about them is being written. For something they are
-    # not entitled to know about yet, absence is the honest answer.
-    if agreement.get("status") == AgreementStatus.DRAFT.value:
-        if agreement.get("created_by") != requester_id:
-            raise NotFoundError("Agreement")
-        return agreement
+    _refuse_if_someone_elses_draft(agreement, requester_id)
 
     party_ids = {p["user_id"] for p in agreement.get("parties", [])}
     if requester_id not in party_ids and agreement.get("created_by") != requester_id:
@@ -978,6 +1007,15 @@ async def submit_signature(
     agreement = await agreement_repo.find_by_id(agreement_id)
     if not agreement:
         raise NotFoundError("Agreement")
+
+    # THE DRAFT GUARD RUNS FIRST, before the party check can pass.
+    #
+    # The counterparty IS in `parties` while a row is still a draft, so they
+    # used to clear that check, clear the executed/cancelled checks (status is
+    # `draft`, neither of those), and only fail inside the transaction -- where
+    # the message said "this agreement changed while you were signing it",
+    # confirming the id exists.
+    _refuse_draft_action(agreement, user_id)
 
     party_ids = {p["user_id"] for p in agreement.get("parties", [])}
     if user_id not in party_ids:
@@ -1502,6 +1540,9 @@ async def decline_agreement(
     if not agreement:
         raise NotFoundError("Agreement")
 
+    # Same leak, same guard: declining a draft id must not confirm it exists.
+    _refuse_draft_action(agreement, user_id)
+
     party_ids = {p["user_id"] for p in agreement.get("parties", [])}
     if user_id not in party_ids:
         raise ForbiddenError("You are not a party to this agreement")
@@ -1588,6 +1629,9 @@ async def _decline_in_transaction(session, *, agreement_id: str, user_id: str,
     # read. Between that check and here the party list can change -- a party
     # removed from the agreement must not still be able to end it -- and this
     # callback can also be invoked directly. Fail closed on the current row.
+    # Re-asserted under this session, like every other guard in this callback.
+    _refuse_draft_action(current, user_id)
+
     parties = current.get("parties", [])
     if user_id not in {p["user_id"] for p in parties}:
         logger.error(

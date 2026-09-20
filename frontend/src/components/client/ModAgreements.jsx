@@ -1132,7 +1132,13 @@ const PageAllAgreements = ({ onNavigate }) => {
     const [declineOpen, setDeclineOpen] = useState(false);
     const [declineReason, setDeclineReason] = useState("");
     const [declineBusy, setDeclineBusy] = useState(false);
-    const filters = ["All", "Signed", "Pending", "Rejected", "Draft"];
+    // No "Draft" tab. A draft belongs to the lawyer who is writing it and is
+    // invisible to the client until it is sent, so this tab could only ever be
+    // empty for a client -- and before the server started filtering drafts out
+    // of `GET /agreements`, it would have shown the client the lawyer's unsent
+    // wording. Only a verified lawyer can create a draft (`create_draft`);
+    // every agreement a client can reach starts at `pending`.
+    const filters = ["All", "Signed", "Pending", "Rejected"];
     const filtered = agmts.filter(a =>
         (filter === "All" || a.status === filter) &&
         a.name.toLowerCase().includes(search.toLowerCase())

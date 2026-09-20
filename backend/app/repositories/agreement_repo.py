@@ -11,8 +11,12 @@ class AgreementRepository(BaseRepository):
     async def find_by_id(self, agreement_id: str) -> dict | None:
         return await self.find_one({"_id": agreement_id})
 
-    async def find_by_party(self, user_id: str) -> list[dict]:
-        return await self.find_many({"parties.user_id": user_id})
+    # `find_by_party` was removed here. It returned
+    # `find_many({"parties.user_id": user_id})` with NO draft filter, and
+    # nothing called it -- so it was a dead, ready-made copy of exactly the leak
+    # `find_for_user` below had to be fixed for. The next person needing "the
+    # agreements for this user" would have found it first and reintroduced the
+    # bug. Use `find_for_user`, which knows drafts are private.
 
     async def find_for_user(self, user_id: str) -> list[dict]:
         """Agreements the user may see, newest first.

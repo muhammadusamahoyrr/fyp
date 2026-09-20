@@ -619,3 +619,196 @@ async def test_there_is_exactly_one_draft_to_pending_transition(world):
         "version check, the body-hash check, the consent capture and the "
         "idempotency receipt."
     )
+
+
+# -- one test per surface that authorises by party membership ---------------
+#
+# `create_draft` writes BOTH parties into the row, so party membership is not
+# authorisation while the row is a draft. Each surface below was checked; the
+# ones that were vulnerable are marked.
+
+@pytest.mark.integration
+async def test_signing_someone_elses_draft_does_not_reveal_it_exists(world):
+    """WAS VULNERABLE.
+
+    The counterparty is in `parties`, so they cleared the party check, cleared
+    the executed/cancelled checks (the status is `draft`, neither of those) and
+    only failed inside the transaction -- with "this agreement changed while
+    you were signing it", which confirms the id exists.
+
+    It must now be indistinguishable from a wrong id.
+    """
+    from app.core.exceptions import NotFoundError
+    from app.services import agreement_service
+
+    d = await _draft(await _case())
+
+    with pytest.raises(NotFoundError):
+        await agreement_service.submit_signature(
+            agreement_id=d["_id"], user_id=CLIENT,
+            method="typed", signature_data="The Client", ip_address=None)
+
+    # Identical outcome for an id that genuinely does not exist.
+    with pytest.raises(NotFoundError):
+        await agreement_service.submit_signature(
+            agreement_id="NO-SUCH-AGREEMENT", user_id=CLIENT,
+            method="typed", signature_data="The Client", ip_address=None)
+
+    row = await _row(d["_id"])
+    assert row["status"] == AgreementStatus.DRAFT.value
+    assert not any(p["signed"] for p in row["parties"])
+
+
+@pytest.mark.integration
+async def test_declining_someone_elses_draft_does_not_reveal_it_exists(world):
+    """WAS VULNERABLE. Same shape as signing."""
+    from app.core.exceptions import NotFoundError
+    from app.services import agreement_service
+
+    d = await _draft(await _case())
+
+    with pytest.raises(NotFoundError):
+        await agreement_service.decline_agreement(
+            agreement_id=d["_id"], user_id=CLIENT,
+            reason="No thanks", ip_address=None)
+    with pytest.raises(NotFoundError):
+        await agreement_service.decline_agreement(
+            agreement_id="NO-SUCH-AGREEMENT", user_id=CLIENT,
+            reason="No thanks", ip_address=None)
+
+    row = await _row(d["_id"])
+    assert row["status"] == AgreementStatus.DRAFT.value
+    assert row["audit_log"] == [] or all(
+        a["action"] != "declined" for a in row["audit_log"])
+
+
+@pytest.mark.integration
+async def test_the_author_gets_a_real_explanation_not_a_404(world):
+    """The author knows the draft exists; telling them "not found" about their
+    own row would be its own lie. They are told to send it instead."""
+    from app.core.exceptions import AppValidationError
+    from app.services import agreement_service
+
+    d = await _draft(await _case())
+
+    with pytest.raises(AppValidationError) as exc:
+        await agreement_service.submit_signature(
+            agreement_id=d["_id"], user_id=LAWYER,
+            method="typed", signature_data="Adv Verified", ip_address=None)
+    assert "still a draft" in str(exc.value).lower()
+
+
+@pytest.mark.integration
+async def test_no_notification_or_outbox_event_exists_before_send(world):
+    """A draft reaches nobody. Nothing may be queued or delivered until send."""
+    from app.db.collections import get_event_outbox_col, get_notifications_col
+
+    d = await _draft(await _case())
+
+    assert await get_event_outbox_col().count_documents(
+        {"payload.data.agreement_id": d["_id"]}) == 0
+    assert await get_event_outbox_col().count_documents(
+        {"payload.recipient_id": CLIENT}) == 0
+    assert await get_notifications_col().count_documents(
+        {"user_id": CLIENT, "payload.agreement_id": d["_id"]}) == 0
+
+    # Sending is what creates the first one.
+    await _send(d)
+    assert await get_event_outbox_col().count_documents(
+        {"_id": f"agreement:{d['_id']}:sent:{CLIENT}"}) == 1
+
+
+@pytest.mark.integration
+async def test_the_fee_gate_never_sees_a_draft_as_a_letter(world):
+    """NOT VULNERABLE, pinned anyway.
+
+    Engagement letters are created directly as `pending` by
+    `create_pending_engagement_letter`, never through the draft path, and the
+    gate requires `executed`. A draft can therefore never satisfy it -- but the
+    gate reads an agreement by id, so the property is worth holding.
+    """
+    from app.core.exceptions import AppValidationError
+    from app.db.collections import get_engagements_col
+    from app.services import payment_service
+
+    case_id = await _case()
+    d = await _draft(case_id)
+
+    # An engagement pointed at a DRAFT: contrived, and must still refuse.
+    now = datetime.now(timezone.utc)
+    await get_engagements_col().insert_one({
+        "_id": secrets.token_urlsafe(12), "case_id": case_id,
+        "client_id": CLIENT, "lawyer_id": LAWYER, "status": "accepted",
+        "agreement_id": d["_id"], "created_at": now, "updated_at": now,
+    })
+
+    with pytest.raises(AppValidationError):
+        await payment_service._require_executed_engagement_letter(case_id, LAWYER)
+
+
+@pytest.mark.integration
+async def test_a_draft_does_not_make_a_relationship_reviewable(world):
+    """NOT VULNERABLE, pinned. Review eligibility requires an EXECUTED letter."""
+    from app.db.collections import get_engagements_col
+    from app.repositories.engagement_repo import EngagementRepository
+
+    case_id = await _case()
+    d = await _draft(case_id)
+    now = datetime.now(timezone.utc)
+    await get_engagements_col().insert_one({
+        "_id": secrets.token_urlsafe(12), "case_id": case_id,
+        "client_id": CLIENT, "lawyer_id": LAWYER, "status": "completed",
+        "agreement_id": d["_id"], "created_at": now, "updated_at": now,
+    })
+
+    assert await EngagementRepository().exists_executed_relationship(
+        CLIENT, LAWYER) is False
+
+
+@pytest.mark.integration
+async def test_the_draft_cap_counts_only_the_authors_own_drafts(world):
+    """The one server-side count over agreements. Scoped to `created_by`, so it
+    is the author's own number and never a badge derived from someone else's
+    unsent work."""
+    import inspect
+
+    from app.services import agreement_service
+
+    src = inspect.getsource(agreement_service.create_draft)
+    assert '"created_by": creator_id' in src
+    assert '"status": AgreementStatus.DRAFT.value' in src
+
+
+def test_no_repository_helper_returns_agreements_without_a_draft_filter():
+    """`find_by_party` was a dead, ready-made copy of this leak.
+
+    It returned every agreement naming a user, drafts included, and nothing
+    called it -- so the next person wanting "agreements for this user" would
+    have found it first. Removed; this stops it coming back.
+    """
+    import inspect
+
+    from app.repositories.agreement_repo import AgreementRepository
+
+    assert not hasattr(AgreementRepository, "find_by_party")
+    src = inspect.getsource(AgreementRepository.find_for_user)
+    assert "DRAFT" in src, "the surviving lookup lost its draft filter"
+
+
+@pytest.mark.integration
+async def test_the_author_keeps_full_control_of_their_own_draft(world):
+    """The privacy rule must not lock the author out of their own work."""
+    from app.services import agreement_service
+
+    d = await _draft(await _case())
+
+    assert (await agreement_service.get_agreement(d["_id"], LAWYER))["_id"] == d["_id"]
+    assert d["_id"] in {a["id"]
+                        for a in await agreement_service.list_agreements(LAWYER)}
+    edited = await agreement_service.update_draft(
+        agreement_id=d["_id"], creator_id=LAWYER,
+        expected_version=1, body_html="Revised wording.")
+    assert edited["version"] == 2
+    await agreement_service.delete_draft(
+        agreement_id=d["_id"], creator_id=LAWYER)
+    assert await _row(d["_id"]) is None
