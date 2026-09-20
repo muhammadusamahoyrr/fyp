@@ -21,6 +21,7 @@ import { createGeneration, newAttempt } from "@/lib/attempt.js";
 import { createSocketOwner } from "@/lib/socket.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import Ic from "./Ic.jsx";
+import LawyerMatchPanel from "./LawyerMatchPanel.jsx";
 import { Badge, Tooltip } from "@/components/shared/shared.jsx";
 /* Shared with both lawyer AI surfaces so the three cannot describe the same
    backend fields differently — the client used to drop `source` and `url`
@@ -439,6 +440,11 @@ const ModChatbot = () => {
                     // otherwise impossible on this surface.
                     requestId: msg.request_id || "",
                     matchedLawyers: msg.suggest_lawyer ? (msg.matched_lawyers || []) : [],
+                    // The service's verdict travels with the list: ranked
+                    // candidates and a browsing listing look identical once the
+                    // kind is dropped, and the UI then has to guess.
+                    matchResultKind: msg.match_result_kind || "",
+                    matchNotice: msg.match_notice || "",
                     suggestLawyer: !!msg.suggest_lawyer,
                 }]);
 
@@ -454,6 +460,8 @@ const ModChatbot = () => {
                     refs: [],
                     isClarification: true,
                     matchedLawyers: msg.matched_lawyers || [],
+                    matchResultKind: msg.match_result_kind || "",
+                    matchNotice: msg.match_notice || "",
                 }]);
 
             } else if (msg.type === "error") {
@@ -1529,64 +1537,14 @@ const ModChatbot = () => {
                                                 {m.requestId && <RequestId id={m.requestId} t={t} />}
                                             </div>
                                         )}
-                                        {/* Lawyer connect card — shown on HITL or max_attempts */}
-                                        {m.matchedLawyers?.length > 0 && (
-                                            <div style={{
-                                                marginTop: 12,
-                                                background: t.mode === "dark" ? "rgba(0,196,159,0.07)" : "rgba(0,196,159,0.06)",
-                                                border: `1.5px solid ${t.primary}`,
-                                                borderRadius: 14, padding: "14px 16px",
-                                            }}>
-                                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                                                    <Ic n="scale" s={15} c={t.primary} />
-                                                    <span style={{ fontSize: 12.5, fontWeight: 700, color: t.primary }}>
-                                                        {m.suggestLawyer ? "AI reached its limit — consult a lawyer" : "Connect with a lawyer for personalized advice"}
-                                                    </span>
-                                                </div>
-                                                <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 12 }}>
-                                                    {m.matchedLawyers.map((l, li) => (
-                                                        <div key={li} style={{
-                                                            background: t.surface,
-                                                            border: `1px solid ${t.border}`,
-                                                            borderRadius: 10, padding: "9px 12px",
-                                                            display: "flex", justifyContent: "space-between",
-                                                            alignItems: "center", gap: 8,
-                                                        }}>
-                                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                                <div style={{ fontWeight: 700, fontSize: 13, color: t.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                                                    {l.full_name}
-                                                                </div>
-                                                                <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>
-                                                                    {l.province} · {Math.round((l.match_score || 0) * 100)}% match
-                                                                    {l.rating > 0 && ` · ★ ${l.rating.toFixed(1)}`}
-                                                                </div>
-                                                                {l.specializations?.length > 0 && (
-                                                                    <div style={{ fontSize: 11, color: t.textDim, marginTop: 2 }}>
-                                                                        {l.specializations.slice(0, 2).join(" · ")}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                                <button
-                                                    onClick={() => router.push("/lawyers")}
-                                                    style={{
-                                                        width: "100%", padding: "9px 0",
-                                                        background: t.primary,
-                                                        color: t.mode === "dark" ? "#1A2E35" : "#fff",
-                                                        border: "none", borderRadius: 10,
-                                                        fontSize: 12.5, fontWeight: 700,
-                                                        cursor: "pointer", fontFamily: "'Inter',sans-serif",
-                                                        transition: "opacity 0.2s",
-                                                    }}
-                                                    onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
-                                                    onMouseLeave={e => e.currentTarget.style.opacity = "1"}
-                                                >
-                                                    Book Consultation →
-                                                </button>
-                                            </div>
-                                        )}
+                                        {/* Lawyer connect card — shown on HITL or max_attempts.
+                                            Extracted so it can be mounted and asserted on without a
+                                            WebSocket harness; see LawyerMatchPanel.jsx. */}
+                                        <LawyerMatchPanel
+                                            message={m}
+                                            theme={t}
+                                            onBook={() => router.push("/lawyers")}
+                                        />
                                         <div style={{ fontSize: 10, color: t.textFaint, marginTop: 5, textAlign: m.role === "user" ? "right" : "left" }}>
                                             {m.time}
                                             {m.role === "ai" && !m.isError && !m.isClarification && m.text && (

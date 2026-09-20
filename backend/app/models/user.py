@@ -15,8 +15,11 @@ class LawyerProfile(BaseModel):
     total_reviews: int = 0
     availability: bool = True
     bio: str | None = None
-    # 384-dim embedding stored as list — used for cosine similarity matching
-    specialization_embedding: list[float] | None = None
+    # No `specialization_embedding`. It was a 384-dim vector from the pre-Chroma
+    # design, written as None at registration and never populated or read —
+    # lawyer matching runs on 768-dim e5 vectors held in `lawyers_collection`.
+    # The strips in user_service/admin_service/lawyer_service stay, because
+    # documents written before this still carry the key.
 
 
 class UserDocument(BaseModel):

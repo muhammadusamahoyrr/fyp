@@ -134,6 +134,14 @@ def test_deactivated_account_is_refused(wire):
     assert ws.closed_with == 4003
 
 
+def test_non_client_role_is_refused_from_client_chat(wire):
+    wire["user"] = {"_id": "u1", "is_active": True, "role": "lawyer"}
+    ws = FakeWebSocket()
+    run(ws)
+    assert ws.accepted is False
+    assert ws.closed_with == 4003
+
+
 def test_another_users_session_is_refused(wire, monkeypatch):
     """A session belongs to the client who created it — ownership is enforced.
 

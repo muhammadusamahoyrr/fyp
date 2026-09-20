@@ -213,7 +213,12 @@ def test_every_mutating_route_forwards_the_acting_user():
 
     source = inspect.getsource(admin_routes)
     for call in ("process_kyc", "create_user", "update_user",
-                 "reset_user_password", "delete_user", "update_case_status"):
+                 "reset_user_password", "delete_user", "update_case_status",
+                 # The retention sweep is the most destructive action an admin
+                 # has: it erases a client's evidence. The guard only covers
+                 # what it is told to, so a route added without a line here is
+                 # a route this test silently stops speaking for.
+                 "purge_intake_retention"):
         start = source.index(f"admin_service.{call}(")
         assert "actor=current_user" in source[start:start + 280], (
             f"{call} does not record which admin performed it")

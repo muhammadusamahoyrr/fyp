@@ -221,7 +221,6 @@ async def seed():
                 "availability":            l["availability"],
                 "bio":                     l["bio"],
                 "experience_years":        l["experience_years"],
-                "specialization_embedding": None,
             },
             "created_at": NOW,
             "updated_at": NOW,

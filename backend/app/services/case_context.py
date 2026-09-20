@@ -15,6 +15,7 @@ import re
 
 from app.ai.jurisdiction import UNSPECIFIED, normalise
 from app.core.constants import CaseType
+from app.services.evidence_coverage import coverage_line
 
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
 _CNIC = re.compile(r"\b\d{5}-?\d{7}-?\d\b")
@@ -41,6 +42,15 @@ def build_case_context(case: dict) -> dict:
         "province": normalise(case.get("province")),
         "case_number": case.get("case_number"),
         "summary": summary,
+        # The summary's own caveat travels WITH it. `ai_summary` was written
+        # from whatever evidence could be read, and a bundle read down to its
+        # cover sheet produces a confident paragraph either way — so a model
+        # drafting from this must be told how much of the evidence it stands on.
+        #
+        # A case with no snapshot predates coverage tracking. That renders as
+        # UNKNOWN, never as complete: absence of a limitation record is not
+        # evidence that there was no limitation.
+        "evidence_coverage": coverage_line(case.get("ai_evidence_coverage")),
     }
 
 
@@ -54,6 +64,7 @@ def context_block(ctx: dict) -> str:
         f"province: {ctx.get('province')}\n"
         f"case_number: {ctx.get('case_number') or ''}\n"
         f"summary: {ctx.get('summary') or ''}\n"
+        f"evidence_coverage: {ctx.get('evidence_coverage') or 'unknown'}\n"
         "--- END CASE CONTEXT ---"
     )
 

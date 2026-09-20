@@ -34,9 +34,15 @@ class CaseDocument(BaseModel):
     description: str
     milestones: list[Milestone] = []
     hearing_dates: list[Hearing] = []
-    # 384-dim embedding used for lawyer matching
-    case_embedding: list[float] | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    # When the matter ended, and the instant the case-data retention period
+    # counts from. Null means the case is live OR that it closed before this
+    # field existed — both are treated as "not eligible", so nothing can expire
+    # on a closure date the system never actually recorded.
+    #
+    # Deliberately not `updated_at`: a dormant but OPEN case must never expire,
+    # and an inactivity clock would delete the evidence for a live matter.
+    closed_at: datetime | None = None
 
     model_config = {"populate_by_name": True}

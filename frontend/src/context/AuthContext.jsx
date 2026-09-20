@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { setToken, clearToken, authLogout, bootstrapAuth, broadcastLogout, getMe } from '@/lib/api';
 import { clearActiveSessions } from '@/lib/conversations.js';
+import { clearAllIntakeValues } from '@/lib/intakeStorage.js';
 
 const AuthCtx = createContext(null);
 
@@ -58,6 +59,10 @@ export function AuthProvider({ children }) {
     // user id already stops the next account from reading them, but leaving
     // the value behind records what someone was reading on a shared machine.
     clearActiveSessions();
+    // Intake token + converted case id. These outlived sign-out entirely: the
+    // next account inherited the token, and ModIntake only starts a session
+    // when it finds none, so that account could not begin an intake at all.
+    clearAllIntakeValues();
     setUser(null);
   }, []);
 

@@ -23,7 +23,11 @@ function Card({ children, style = {}, className = "", onClick, hover = true }) {
     );
 }
 
-function Btn({ children, variant = "primary", size = "md", onClick, style = {}, disabled = false, full = false }) {
+// `title` is passed through rather than dropped: a button that is disabled
+// without saying why reads as broken. Every disabled state in this file is a
+// rule the server enforces, so the tooltip is the only place the rule is
+// visible before the user clicks.
+function Btn({ children, variant = "primary", size = "md", onClick, style = {}, disabled = false, full = false, title }) {
     const { t } = useTheme();
     const [hov, setHov] = useState(false);
     const vs = {
@@ -38,7 +42,7 @@ function Btn({ children, variant = "primary", size = "md", onClick, style = {}, 
     const ss = { sm: { p: "6px 13px", fs: 13 }, md: { p: "9px 17px", fs: 14 }, lg: { p: "12px 24px", fs: 15 } };
     const v = vs[variant] || vs.primary, s = ss[size] || ss.md;
     return (
-        <button disabled={disabled} onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+        <button disabled={disabled} title={title} onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
             style={{
                 display: "inline-flex", alignItems: "center", gap: 7, justifyContent: "center", borderRadius: 9,
                 fontWeight: 600, transition: "all .18s ease", width: full ? "100%" : undefined,

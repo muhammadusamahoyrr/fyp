@@ -106,6 +106,55 @@ _COUNCIL = {
 
 # Fills every province x case-type cell the original 8 personas left empty,
 # and doubles up Punjab, which carries most of the real case volume.
+# ── Office locations ─────────────────────────────────────────────────────────
+#
+# Six of the roster get a real, publicly identifiable office address. The rest
+# deliberately do not, and that asymmetry is the point: it exercises both halves
+# of the location-precision rule in one dataset.
+#
+#   with an address    -> lat/lng present -> `_inject_coords` reports "exact"
+#                         -> the profile offers "Get Directions"
+#   without an address -> no lat/lng      -> "approximate" (province centre plus
+#                         an invented offset) -> directions are NOT offered
+#
+# THE COORDINATES ARE PINNED, NOT INVENTED, AND NOT LOOKED UP AT RUN TIME.
+#
+# Each pair below was resolved once, on 2026-09-10, by passing the address
+# beside it to `app.utils.geocoding.geocode_address` — the same Nominatim client
+# the application uses when a lawyer saves an address — and recording what came
+# back. Every result was checked to fall within 0.08 degrees of its city centre
+# before being written here.
+#
+# Pinning matters for two separate reasons:
+#
+#   * Nothing may geocode during a seed run or at startup. A demo that depends
+#     on a third-party service being reachable is a demo that fails in the room.
+#   * "Do not fabricate coordinates and call them exact" is the whole safety
+#     rule this data has to respect. `exact` means "this really is where the
+#     address is", so the number has to come from resolving the address. A
+#     plausible-looking number typed by hand would be the precise defect the
+#     precision flag exists to prevent, reintroduced as seed data.
+#
+# To re-derive: pass each address to `geocode_address` and compare. Addresses
+# are area-level (a markaz, a court, a commercial avenue), not street numbers,
+# because an area resolves stably and a fictional street number would not
+# resolve at all — or worse, would resolve to somebody's actual house.
+OFFICES: dict[str, dict] = {
+    "Kamran Aziz Malik":    {"address": "Jinnah Avenue, Blue Area, Islamabad",
+                             "lat": 33.723619, "lng": 73.081890},
+    "Hina Tariq":           {"address": "F-8 Markaz, Islamabad",
+                             "lat": 33.711542, "lng": 73.039640},
+    "Junaid Iqbal Qureshi": {"address": "G-9 Markaz, Islamabad",
+                             "lat": 33.689496, "lng": 73.030215},
+    "Usman Javed Rana":     {"address": "Saddar, Rawalpindi",
+                             "lat": 33.597885, "lng": 73.050101},
+    "Bilal Ahmed Sheikh":   {"address": "Lahore High Court, Mall Road, Lahore",
+                             "lat": 31.563723, "lng": 74.314805},
+    "Ayesha Kamal":         {"address": "Gulberg III, Lahore",
+                             "lat": 31.516208, "lng": 74.351410},
+}
+
+
 ROSTER = [
     # ── Punjab: a second specialist per case type ────────────────────────────
     dict(full_name="Bilal Ahmed Sheikh", province="punjab", specs=["criminal"],
@@ -246,7 +295,15 @@ def _doc(entry: dict, pw_hash: str, now: datetime) -> dict:
             "availability": entry["avail"],
             "bio": entry["bio"],
             "experience_years": entry["exp"],
-            "specialization_embedding": None,
+            # Office address and its resolved coordinates, for the six lawyers
+            # who have one. Spread with `**` so a lawyer NOT in OFFICES gets no
+            # address and no lat/lng at all — which is what makes the matcher
+            # report them as `approximate` and the profile withhold directions.
+            # Writing null coordinates instead would be indistinguishable at a
+            # glance and behave the same, but an absent key states the fact
+            # plainly: this lawyer has no known office, rather than one whose
+            # location happens to be null.
+            **OFFICES.get(entry["full_name"], {}),
         },
         "created_at": now,
         "updated_at": now,

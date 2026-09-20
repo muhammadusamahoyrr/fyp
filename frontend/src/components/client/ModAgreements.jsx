@@ -6,7 +6,7 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { createAgreement, signAgreement, listAgreements, searchLawyers } from "@/lib/api.js";
+import { createAgreement, signAgreement, declineAgreement, listAgreements, searchLawyers } from "@/lib/api.js";
 
 /* ══════════════════════════════════════════════════════
    MODULE: AGREEMENTS — 5-Step Wizard
@@ -1093,6 +1093,12 @@ const PageAllAgreements = ({ onNavigate }) => {
     const [viewing, setViewing] = useState(null);       // mapped agreement being viewed
     const [signName, setSignName] = useState("");
     const [signBusy, setSignBusy] = useState(false);
+    // Declining ends the agreement for everyone and cannot be undone, so it is
+    // deliberately two steps: reveal, then confirm. A single button beside
+    // "Sign" is one mis-click away from cancelling a contract.
+    const [declineOpen, setDeclineOpen] = useState(false);
+    const [declineReason, setDeclineReason] = useState("");
+    const [declineBusy, setDeclineBusy] = useState(false);
     const filters = ["All", "Signed", "Pending", "Rejected", "Draft"];
     const filtered = agmts.filter(a =>
         (filter === "All" || a.status === filter) &&
@@ -1108,6 +1114,18 @@ const PageAllAgreements = ({ onNavigate }) => {
         toast.show(data?.status === "executed" ? "🎉 Agreement fully executed!" : "✅ Signed — awaiting the other party", "success", 4000);
         setViewing(null);
         setSignName("");
+        reload();
+    };
+
+    const doDecline = async () => {
+        setDeclineBusy(true);
+        const { error } = await declineAgreement(viewing.id, declineReason);
+        setDeclineBusy(false);
+        if (error) { toast.show("❌ " + (error.message || "Failed to decline"), "danger"); return; }
+        toast.show("Agreement declined — the other party has been notified", "info", 4000);
+        setViewing(null);
+        setDeclineOpen(false);
+        setDeclineReason("");
         reload();
     };
     return (
@@ -1256,6 +1274,45 @@ const PageAllAgreements = ({ onNavigate }) => {
                                 <div style={{ fontSize: 10.5, color: t.textMuted, marginTop: 8, lineHeight: 1.5 }}>
                                     Your typed signature is recorded with a timestamp and classified under the Electronic Transactions Ordinance 2002.
                                 </div>
+
+                                {!declineOpen ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setDeclineOpen(true)}
+                                        style={{ marginTop: 12, background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, color: t.textMuted, textDecoration: "underline" }}
+                                    >
+                                        I do not want to sign this
+                                    </button>
+                                ) : (
+                                    <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${t.border}` }}>
+                                        <div style={{ fontSize: 11, fontWeight: 700, color: t.danger, textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 8 }}>
+                                            Decline — this ends the agreement and cannot be undone
+                                        </div>
+                                        <Input
+                                            placeholder="Reason (optional — the other party will see this)"
+                                            value={declineReason}
+                                            maxLength={2000}
+                                            onChange={e => setDeclineReason(e.target.value)}
+                                            style={{ width: "100%" }}
+                                        />
+                                        <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                                            <Btn
+                                                disabled={declineBusy}
+                                                onClick={doDecline}
+                                                style={{ padding: "10px 18px", background: t.danger, color: "#fff", borderColor: t.danger }}
+                                            >
+                                                {declineBusy ? "Declining…" : "Confirm decline"}
+                                            </Btn>
+                                            <Btn
+                                                disabled={declineBusy}
+                                                onClick={() => { setDeclineOpen(false); setDeclineReason(""); }}
+                                                style={{ padding: "10px 18px" }}
+                                            >
+                                                Keep reviewing
+                                            </Btn>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

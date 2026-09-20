@@ -1,10 +1,20 @@
 import logging
 
 from pymongo import ASCENDING, DESCENDING, IndexModel
+from pymongo.errors import OperationFailure
 
-from app.core.constants import AppointmentStatus, EngagementStatus
+from app.core.constants import (
+    ENGAGEMENT_OPEN_STATUSES,
+    AppointmentStatus,
+    EngagementStatus,
+)
+from app.db.appointment_index_spec import (
+    ALL_INDEX_REQUIREMENTS,
+    APPOINTMENT_INDEX_REQUIREMENTS,
+)
 from app.db.collections import (
     get_agreements_col,
+    get_auth_sessions_col,
     get_answer_provenance_col,
     get_appointments_col,
     get_cases_col,
@@ -45,6 +55,11 @@ from app.db.v2_index_spec import (
 
 logger = logging.getLogger(__name__)
 
+# MongoDB server error codes for "an index of this name already exists,
+# but not with these options".
+_INDEX_OPTIONS_CONFLICT = 85
+_INDEX_KEY_SPECS_CONFLICT = 86
+
 
 async def _create_from_spec(col, collection_name: str) -> None:
     """Create this collection's V2 indexes from the single manifest.
@@ -72,17 +87,65 @@ async def _create_from_spec(col, collection_name: str) -> None:
                 spec.collection, spec.name, type(exc).__name__)
 
 
-async def _try_unique_partial(col, keys, name: str, status_value: str | None = None) -> None:
+async def _try_unique_partial(
+    col, keys, name: str, status_value=None, filter_expression: dict | None = None,
+) -> None:
     """Create a unique index. When `status_value` is given it's a partial-unique
     index scoped to that `status`; when omitted it's a plain unique index. If
     legacy duplicates already exist, log and skip rather than crash startup — the
-    operator can dedupe and restart to enforce it."""
+    operator can dedupe and restart to enforce it.
+
+    `status_value` may be one status or several. Several matters for engagements:
+    the guard has to cover every state in which a negotiation is still open, and
+    that stopped being a single value the moment `terms_proposed` existed. A
+    filter naming only `requested` would let a client hold a proposal from one
+    lawyer and a fresh request to another at the same time — two lawyers each
+    believing they were about to take the case.
+    """
     kwargs: dict = {"unique": True, "name": name}
-    if status_value is not None:
-        kwargs["partialFilterExpression"] = {"status": status_value}
+    if filter_expression is not None:
+        # An explicit partial filter, for guards that are not scoped by status.
+        kwargs["partialFilterExpression"] = filter_expression
+    elif status_value is not None:
+        statuses = (
+            [status_value] if isinstance(status_value, str) else list(status_value)
+        )
+        # $in needs MongoDB 6.0+ in a partial filter; equality is used for the
+        # single-status case so those indexes keep working anywhere.
+        kwargs["partialFilterExpression"] = (
+            {"status": statuses[0]} if len(statuses) == 1
+            else {"status": {"$in": statuses}}
+        )
     try:
         await col.create_indexes([IndexModel(keys, **kwargs)])
-    except Exception:
+        return
+    except OperationFailure as exc:
+        # An index of this NAME already exists with different options. That is a
+        # definition change, not a data problem, and it is the dangerous case:
+        # MongoDB refuses the create and leaves the OLD index in place, so a
+        # deployment that widened a guard would keep enforcing the narrow one
+        # with nothing but a log line saying "existing duplicates?" — a message
+        # that sends the operator looking for the wrong thing entirely.
+        #
+        # Dropping and recreating is safe here because these indexes are
+        # constraints, not query plans: the window between them is measured in
+        # milliseconds, and the alternative is a constraint that silently does
+        # not hold for as long as the deployment lives.
+        if exc.code not in (_INDEX_OPTIONS_CONFLICT, _INDEX_KEY_SPECS_CONFLICT):
+            raise
+        try:
+            await col.drop_index(name)
+            await col.create_indexes([IndexModel(keys, **kwargs)])
+            logger.info("Redefined unique index %s", name)
+            return
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not redefine unique index %s — the previous definition "
+                "is still in force. Check for rows that violate the new one, "
+                "then drop and recreate it.", name,
+            )
+            return
+    except Exception:  # noqa: BLE001
         logger.warning(
             "Could not create unique index %s (existing duplicates?). "
             "Dedupe the collection and restart to enforce it.", name,
@@ -197,6 +260,130 @@ async def enforce_v2_correctness_indexes() -> list[IndexProblem]:
         "commands, or disable DOCUMENTS_V2.")
 
 
+# ── APPOINTMENT INDEX VALIDATION ──────────────────────────────────────────────
+#
+# Separate from the V2 machinery above, and unconditional, because appointments
+# are ALREADY LIVE and have no flag to hide behind. See
+# `appointment_index_spec` for why that difference matters.
+
+
+class MissingAppointmentIndexes(RuntimeError):
+    """A constraint the booking path depends on is not in force."""
+
+
+async def create_appointment_correctness_indexes() -> None:
+    """Build the appointment correctness indexes. EXPLICIT CALLERS ONLY.
+
+    Deliberately not part of `create_all_indexes`, and therefore not part of
+    normal application startup. Two reasons, and the second is the important
+    one:
+
+    1. Building a unique index on a live collection FAILS when the data already
+       violates it, and succeeds — expensively — when it does not. Neither
+       belongs in the path that also has to bring the app up.
+
+    2. A startup that creates these indexes is a startup that REPAIRS
+       correctness state as a side effect of being restarted. That is the
+       behaviour this whole phase exists to remove. The moment a deploy can
+       silently establish the guarantee, nobody can tell from the outside
+       whether it held yesterday, and a restart becomes a way to paper over a
+       collection that was never checked.
+
+    So creation is an operator step, run knowingly inside the write freeze,
+    after the preflight is clean and the backfill has been approved. Tests call
+    it directly for the same reason: explicitly, on a database they own.
+
+    Not `_try_unique_partial`: that helper ends in a bare
+    `except -> warning -> return`, so a collection carrying duplicates would
+    leave the index absent while every reader believes the guarantee holds.
+    Here a failure raises, and the caller is a person who can act on it.
+    """
+    # GROUPED BY THE COLLECTION EACH SPEC NAMES.
+    #
+    # This used to build every declared spec on `appointments`, which was
+    # indistinguishable from correct while every spec happened to be for that
+    # collection — and silently wrong the moment one was not: the index would
+    # be created on the wrong collection while `validate_appointment_indexes`,
+    # which has always honoured `spec.collection`, reported it missing on the
+    # right one. The two halves are now reading the same field.
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    by_collection: dict[str, list] = {}
+    for spec in ALL_INDEX_REQUIREMENTS:
+        by_collection.setdefault(spec.collection, []).append(spec.model())
+    for collection, models in sorted(by_collection.items()):
+        await db[collection].create_indexes(models)
+
+
+async def validate_appointment_indexes() -> list[IndexProblem]:
+    """Every appointment requirement that is not satisfied. Reads only.
+
+    An empty list means overlap and idempotency are genuinely enforced. A
+    non-empty one means the booking code is writing as though they are.
+    """
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    problems: list[IndexProblem] = []
+
+    collections = sorted({s.collection for s in ALL_INDEX_REQUIREMENTS})
+    info_by_collection: dict[str, dict] = {}
+    for collection in collections:
+        try:
+            info_by_collection[collection] = await db[collection].index_information()
+        except Exception as exc:  # noqa: BLE001
+            # The class, never the message: a driver connection error carries
+            # the host, the port and sometimes the credentials.
+            problems.append(IndexProblem(
+                CODE_UNREADABLE, collection, "*", kind=CORRECTNESS,
+                message=("index metadata could not be read "
+                         f"(error_class={type(exc).__name__}); check database "
+                         "connectivity and the application's read permissions")))
+
+    for spec in ALL_INDEX_REQUIREMENTS:
+        info = info_by_collection.get(spec.collection)
+        if info is None:
+            continue   # already reported as unreadable
+        problem = evaluate(spec, info)
+        if problem is not None:
+            problems.append(problem)
+
+    return problems
+
+
+async def enforce_appointment_correctness_indexes() -> list[IndexProblem]:
+    """Raise when a booking guarantee is not actually in force.
+
+    UNCONDITIONAL — there is no flag, and no "nothing depends on it yet" state.
+    Every booking that runs while one of these is missing may be a double
+    booking, and nothing in the system will say so: the write succeeds, the two
+    appointments look normal, and the collision is discovered by whoever turns
+    up to the second one.
+
+    Refusing to start is the lesser failure, and it is loud. This is NOT wired
+    into application startup by this change — see the activation sequence in
+    the preflight module, which requires the backfill to have run first. Wiring
+    it in before then would refuse to boot for a reason the operator has not
+    yet been given the chance to fix.
+
+    Every part of the message is generated from the SPECIFICATION and the
+    problem codes — a fixed vocabulary, a collection name, an index name. No
+    Mongo response body reaches it, so it is safe to log, to return from a
+    readiness probe, and to paste into a ticket.
+    """
+    problems = await validate_appointment_indexes()
+    if not problems:
+        return []
+
+    detail = "; ".join(str(p) for p in problems)
+    raise MissingAppointmentIndexes(
+        "Appointment correctness indexes are not in place, so overlap and "
+        "idempotency are NOT enforced: " + detail
+        + ". Run `python -m app.db.appointment_slot_preflight` for the exact "
+        "commands and the state of the data.")
+
+
 async def create_all_indexes() -> None:
     await _users_indexes()
     await _cases_indexes()
@@ -218,6 +405,7 @@ async def create_all_indexes() -> None:
     await _checkpoint_indexes()
     await _provenance_indexes()
     await _documents_v2_indexes()
+    await _ocr_revision_indexes()
 
 
 async def _provenance_indexes() -> None:
@@ -299,6 +487,9 @@ async def _documents_v2_indexes() -> None:
     await get_deletion_tombstones_col().create_indexes([
         IndexModel([("document_id", ASCENDING)]),
         IndexModel([("started_at", DESCENDING)]),
+        # The collection is shared between deletion paths. `kind` is what lets
+        # an intake tombstone be found without reading every V2 revision's.
+        IndexModel([("kind", ASCENDING)]),
     ])
 
     # The V2 query indexes, taken from the one manifest rather than restated.
@@ -346,6 +537,20 @@ async def _users_indexes() -> None:
         IndexModel([("lawyer_profile.kyc_verified", ASCENDING)]),
         IndexModel([("lawyer_profile.specializations", ASCENDING)]),
         IndexModel([("is_active", ASCENDING)]),
+        # `find_lawyers` — every lawyer search, both match pools and the general
+        # listing — filters on all four of these and then sorts by rating. With
+        # only the single-field indexes above, Mongo could use one of them and
+        # then sort the remainder in memory on every request. Key order is
+        # equality fields first, sort key last, which is what lets the index
+        # satisfy the sort instead of just the filter.
+        IndexModel([
+            ("role", ASCENDING),
+            ("is_active", ASCENDING),
+            ("lawyer_profile.kyc_verified", ASCENDING),
+            ("province", ASCENDING),
+            ("lawyer_profile.specializations", ASCENDING),
+            ("lawyer_profile.rating", DESCENDING),
+        ], name="lawyer_match_pool"),
     ])
 
     # One bar number, one lawyer. Until now nothing stopped two accounts
@@ -394,11 +599,43 @@ async def _cases_indexes() -> None:
         IndexModel([("case_number", ASCENDING)], unique=True),
         IndexModel([("client_id", ASCENDING)]),
         IndexModel([("lawyer_id", ASCENDING)]),
+        IndexModel([("client_id", ASCENDING), ("status", ASCENDING)]),
         IndexModel([("status", ASCENDING)]),
         IndexModel([("case_type", ASCENDING)]),
         IndexModel([("province", ASCENDING)]),
         IndexModel([("created_at", DESCENDING)]),
+        # Also the lookup `convert_to_case` does on every resumed conversion.
+        # There was no index on `intake_id` at all, so finding the case an
+        # intake already produced was a collection scan.
+        IndexModel([("intake_id", ASCENDING)]),
+        # Retention. Both selectors lead on `status` because that clause is what
+        # excludes every live case, and it must do so from the index rather than
+        # after a scan — a retention sweep that walks the whole collection is
+        # one an operator will be tempted to run less often than the policy
+        # says.
+        IndexModel([("status", ASCENDING), ("closed_at", ASCENDING)]),
+        IndexModel([("status", ASCENDING), ("created_at", ASCENDING)]),
     ])
+    # ONE case per intake, enforced by the database.
+    #
+    # `convert_to_case` takes an atomic claim and pins the case to the intake
+    # the moment it exists, which closes the window that produced duplicates.
+    # It cannot close the last one: a hard kill between the insert and the pin
+    # leaves a case the retry cannot find. This index is what makes a second
+    # case structurally impossible rather than merely unlikely.
+    #
+    # `$type: "string"` rather than `$ne: null` because partial filters do not
+    # support `$ne` — and it is the right test anyway. Cases created outside
+    # intake carry `intake_id: None`, and every one of them would collide with
+    # every other under a naive unique index.
+    #
+    # If duplicates predate this, creation is logged and skipped rather than
+    # raised: this runs in the startup lifespan, and a legacy row must not stop
+    # the application booting. Run `scripts/_intake_id_census.py` to find them.
+    await _try_unique_partial(
+        col, [("intake_id", ASCENDING)], "uniq_case_per_intake",
+        filter_expression={"intake_id": {"$exists": True, "$type": "string"}},
+    )
 
 
 async def _intakes_indexes() -> None:
@@ -407,6 +644,17 @@ async def _intakes_indexes() -> None:
         IndexModel([("session_token", ASCENDING)], unique=True),
         IndexModel([("client_id", ASCENDING)]),
         IndexModel([("completed", ASCENDING)]),
+        # "Which intake should this client resume?" — their own, newest first.
+        # The plain `client_id` index would make the sort an in-memory pass over
+        # every intake they have ever started.
+        IndexModel([("client_id", ASCENDING), ("updated_at", DESCENDING)]),
+        IndexModel([("client_id", ASCENDING), ("completed", ASCENDING),
+                    ("updated_at", DESCENDING)]),
+        IndexModel([("client_id", ASCENDING), ("completed", ASCENDING),
+                    ("case_id", ASCENDING), ("updated_at", DESCENDING)]),
+        # Retention: the unconverted sweep orders the whole collection by idle
+        # time, with no client to narrow it first.
+        IndexModel([("updated_at", ASCENDING)]),
     ])
 
 
@@ -540,12 +788,15 @@ async def _appointments_indexes() -> None:
         IndexModel([("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)]),
         IndexModel([("created_at", DESCENDING)]),
     ])
-    # Atomic guard: at most one PENDING appointment per lawyer + exact start time.
-    # Closes the concurrent-booking race (two requests both passing has_conflict).
-    await _try_unique_partial(
-        col, [("lawyer_id", ASCENDING), ("scheduled_at", ASCENDING)],
-        "uniq_pending_slot", AppointmentStatus.PENDING.value,
-    )
+
+    # THE CORRECTNESS INDEXES ARE NOT CREATED HERE. See
+    # `create_appointment_correctness_indexes` below for why, and for the
+    # explicit call that does create them.
+    #
+    # `uniq_pending_slot` is also no longer created: exact-start only, and
+    # scoped to PENDING so confirming an appointment released its slot. It is
+    # not dropped here either — dropping an index during application startup is
+    # an operator's decision, and the preflight prints the command.
 
 
 async def _engagements_indexes() -> None:
@@ -557,11 +808,14 @@ async def _engagements_indexes() -> None:
         IndexModel([("status", ASCENDING)]),
         IndexModel([("created_at", DESCENDING)]),
     ])
-    # Atomic guard: at most one open (REQUESTED) engagement per case.
-    # Closes the duplicate-pending-request race.
+    # Atomic guard: at most one OPEN engagement per case, where open means the
+    # negotiation is still live — requested or terms_proposed. Closes the
+    # duplicate-pending-request race, and now also the window the two-step flow
+    # opened: a proposal sitting with one lawyer must block a fresh request to
+    # another, or both are told the case is theirs to take.
     await _try_unique_partial(
         col, [("case_id", ASCENDING)],
-        "uniq_pending_engagement", EngagementStatus.REQUESTED.value,
+        "uniq_pending_engagement", ENGAGEMENT_OPEN_STATUSES,
     )
 
 
@@ -605,11 +859,25 @@ async def _auth_indexes() -> None:
     await get_refresh_blocklist_col().create_indexes([
         IndexModel([("token", ASCENDING)], unique=True),
         IndexModel([("created_at", ASCENDING)], expireAfterSeconds=7 * 24 * 3600),
+        IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
+    ])
+    await get_auth_sessions_col().create_indexes([
+        IndexModel([("user_id", ASCENDING), ("status", ASCENDING),
+                    ("last_used_at", DESCENDING)]),
+        # Session rows contain no token, only a hash of the current token id.
+        IndexModel([("current_refresh_hash", ASCENDING)], unique=True),
+        IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
     ])
     # Password reset tokens — TTL 1 hour
     await get_password_reset_col().create_indexes([
         IndexModel([("token", ASCENDING)], unique=True),
         IndexModel([("email", ASCENDING)]),
+        IndexModel(
+            [("email", ASCENDING), ("active_slot", ASCENDING)],
+            unique=True,
+            name="uniq_active_password_reset_email",
+            partialFilterExpression={"active_slot": True},
+        ),
         IndexModel([("created_at", ASCENDING)], expireAfterSeconds=3600),
     ])
     # WebSocket auth tickets — multi-worker-safe one-time-use store.
@@ -618,3 +886,17 @@ async def _auth_indexes() -> None:
     await get_ws_tickets_col().create_indexes([
         IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
     ])
+
+async def _ocr_revision_indexes() -> None:
+    """Immutable OCR readings.
+
+    The unique index is the idempotency guarantee itself, not an optimisation:
+    two concurrent retries of the same page both see "absent" and both insert,
+    and this is what makes the second one fail instead of storing a duplicate
+    reading of the same bytes.
+    """
+    from app.db.collections import get_ocr_revisions_col
+    from app.repositories.ocr_revision_repo import index_models
+
+    col = get_ocr_revisions_col()
+    await col.create_indexes(index_models())

@@ -1,0 +1,46 @@
+{
+  "approval_affected_documents": 0,
+  "blocked_documents": 0,
+  "blocking_condition_occurrences": {},
+  "caveat": "counts from a live database drift while people use it. Adequate for sizing a policy decision; NOT a migration plan, and no substitute for a snapshot and a manifest.",
+  "database": "attorney_ai",
+  "document_revisions": 0,
+  "document_revisions_empty": true,
+  "generated_at": "2026-09-06T02:30:49.282273+00:00",
+  "is_a_dry_run": false,
+  "legacy_documents_surveyed": 19,
+  "outcomes": {
+    "draft_with_file": 17,
+    "submitted_reviewable": 2
+  },
+  "path_flags": {},
+  "read_only_credential": {
+    "roles": [
+      "read"
+    ],
+    "verified": true
+  },
+  "requires_owner_approval": {},
+  "review_status": {
+    "None": 17,
+    "submitted": 2
+  },
+  "source_states": {
+    "readable": 19
+  },
+  "supported_legacy_statuses": [
+    "",
+    "None",
+    "approved",
+    "draft",
+    "none",
+    "pending",
+    "rejected",
+    "returned",
+    "submitted"
+  ],
+  "tool": "v2_estate_survey",
+  "unblocked_documents": 19,
+  "uri_source": "environment (V2_SURVEY_URI)",
+  "v2_documents_excluded": 0
+}

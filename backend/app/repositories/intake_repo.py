@@ -1,4 +1,6 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+from pymongo import ASCENDING, DESCENDING, ReturnDocument
 
 from app.db.collections import get_intakes_col
 from app.repositories.base import BaseRepository
@@ -23,9 +25,35 @@ class IntakeRepository(BaseRepository):
         ).sort("created_at", -1).limit(limit)
         return [doc async for doc in cursor]
 
+    async def find_latest_for_draft_cases(
+        self, client_id: str, case_ids: list[str]
+    ) -> dict | None:
+        if not case_ids:
+            return None
+        return await self.col.find_one(
+            {"client_id": client_id, "completed": True,
+             "case_id": {"$in": case_ids}},
+            sort=[("updated_at", DESCENDING)],
+        )
+
+    async def find_latest_unfinished(self, client_id: str) -> dict | None:
+        return await self.col.find_one(
+            {
+                "client_id": client_id,
+                "completed": {"$ne": True},
+                "$or": [
+                    {"step1.province": {"$type": "string"}},
+                    {"step3.incident_description": {"$type": "string"}},
+                ],
+            },
+            sort=[("updated_at", DESCENDING)],
+        )
+
     async def update_step(self, token: str, step: int, data: dict) -> bool:
         return await self.update_one(
-            {"session_token": token},
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": {"$exists": False},
+             "conversion_claimed_at": {"$exists": False}},
             {
                 "$set": {
                     f"step{step}": data,
@@ -36,35 +64,301 @@ class IntakeRepository(BaseRepository):
             },
         )
 
-    async def save_ai_structured_case(self, token: str, ai_data: dict) -> bool:
+    async def save_ai_structured_case(
+        self, token: str, ai_data: dict, owner: str
+    ) -> bool:
         return await self.update_one(
-            {"session_token": token},
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": owner},
             {"$set": {"ai_structured_case": ai_data, "updated_at": datetime.now(timezone.utc)}},
+        )
+
+    async def save_evidence_review_state(
+        self, token: str, statuses: list[dict], owner: str
+    ) -> bool:
+        """Persist the extraction/OCR review checkpoint under the claim fence."""
+        return await self.update_one(
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": owner},
+            {"$set": {
+                "evidence_review_state": list(statuses),
+                "updated_at": datetime.now(timezone.utc),
+            }},
         )
 
     async def save_clarification_qa(self, token: str, qa_list: list) -> bool:
         return await self.update_one(
-            {"session_token": token},
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": {"$exists": False},
+             "conversion_claimed_at": {"$exists": False}},
             {"$set": {"clarification_qa": qa_list, "updated_at": datetime.now(timezone.utc)}},
         )
 
-    async def add_evidence_file(self, token: str, file_meta: dict) -> bool:
+    async def add_evidence_file(
+        self, token: str, file_meta: dict, max_files: int, max_total: int
+    ) -> bool:
         return await self.update_one(
-            {"session_token": token},
+            {
+                "session_token": token,
+                "completed": {"$ne": True},
+                "conversion_claim_owner": {"$exists": False},
+                "conversion_claimed_at": {"$exists": False},
+                "$expr": {"$and": [
+                    {"$lt": [
+                        {"$size": {"$ifNull": ["$evidence_files", []]}},
+                        max_files,
+                    ]},
+                    {"$lte": [
+                        {"$add": [
+                            {"$sum": {"$map": {
+                                "input": {"$ifNull": ["$evidence_files", []]},
+                                "as": "f",
+                                "in": {"$ifNull": ["$$f.size", 0]},
+                            }}},
+                            int(file_meta.get("size") or 0),
+                        ]},
+                        max_total,
+                    ]},
+                ]},
+            },
             {
                 "$push": {"evidence_files": file_meta},
                 "$set":  {"updated_at": datetime.now(timezone.utc)},
             },
         )
 
-    async def mark_completed(self, token: str, case_id: str) -> bool:
-        return await self.update_one(
-            {"session_token": token},
+    async def claim_conversion(
+        self, token: str, stale_after: timedelta, owner: str
+    ) -> int | None:
+        """Take exclusive ownership of converting this intake. Atomic.
+
+        The guard lives in the FILTER, so the server evaluates "not already
+        completed, not already claimed" inside the same operation that writes
+        the claim. Of two concurrent /convert calls for one token, exactly one
+        receives the incremented fencing epoch; the loser receives ``None``
+        and creates nothing.
+
+        A read-then-write cannot do this: both readers see `completed: False`
+        before either writes, and both go on to bill an LLM run and open a
+        case.
+
+        A claim older than `stale_after` is takeable, so a worker that died
+        mid-conversion does not lock the client out of their own intake
+        forever. Downstream writes bind both the owner and epoch, preventing a
+        reclaimed stale worker from publishing after it loses the lease.
+        """
+        now = datetime.now(timezone.utc)
+        claimed = await self.col.find_one_and_update(
+            {
+                "session_token": token,
+                "completed": {"$ne": True},
+                # Evidence deletion removes the source and its derived OCR as
+                # one logical operation.  Conversion must not snapshot the
+                # intake between those two steps.
+                "evidence_deletion_claim": {"$exists": False},
+                "$or": [
+                    {"conversion_claim_expires_at": {"$lte": now}},
+                    {"$and": [
+                        {"conversion_claim_owner": {"$exists": False}},
+                        {"conversion_claimed_at": {"$exists": False}},
+                    ]},
+                    {"$and": [
+                        {"conversion_claim_owner": {"$exists": False}},
+                        {"conversion_claimed_at": {"$lt": now - stale_after}},
+                    ]},
+                ],
+            },
             {
                 "$set": {
-                    "completed": True,
-                    "case_id": case_id,
-                    "updated_at": datetime.now(timezone.utc),
-                }
+                    "conversion_claim_owner": owner,
+                    "conversion_claimed_at": now,
+                    "conversion_claim_expires_at": now + stale_after,
+                    "updated_at": now,
+                },
+                "$inc": {"conversion_epoch": 1},
+            },
+            projection={"conversion_epoch": 1},
+            return_document=ReturnDocument.AFTER,
+        )
+        return int(claimed["conversion_epoch"]) if claimed else None
+
+    async def claim_evidence_deletion(
+        self, token: str, file_id: str
+    ) -> bool:
+        """Fence conversion before deleting a source and its derived OCR.
+
+        A marker for the same file is deliberately reclaimable.  If a process
+        dies after deleting OCR but before pulling the source entry, the
+        client's retry can finish the operation instead of leaving the intake
+        permanently wedged.  A different deletion waits until this one ends.
+        """
+        now = datetime.now(timezone.utc)
+        claimed = await self.col.find_one_and_update(
+            {
+                "session_token": token,
+                "completed": {"$ne": True},
+                "conversion_claim_owner": {"$exists": False},
+                "conversion_claimed_at": {"$exists": False},
+                "evidence_files.file_id": file_id,
+                "$or": [
+                    {"evidence_deletion_claim": {"$exists": False}},
+                    {"evidence_deletion_claim.file_id": file_id},
+                ],
+            },
+            {"$set": {
+                "evidence_deletion_claim": {
+                    "file_id": file_id,
+                    "claimed_at": now,
+                },
+                "updated_at": now,
+            }},
+            projection={"_id": 1},
+            return_document=ReturnDocument.AFTER,
+        )
+        return claimed is not None
+
+    async def release_evidence_deletion(self, token: str, file_id: str) -> bool:
+        """Release a deletion marker when no destructive step completed."""
+        return await self.update_one(
+            {"session_token": token,
+             "evidence_deletion_claim.file_id": file_id},
+            {"$unset": {"evidence_deletion_claim": ""},
+             "$set": {"updated_at": datetime.now(timezone.utc)}},
+        )
+
+    async def renew_conversion(
+        self, token: str, owner: str, ttl: timedelta
+    ) -> bool:
+        now = datetime.now(timezone.utc)
+        return await self.update_one(
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": owner},
+            {"$set": {"conversion_claim_expires_at": now + ttl,
+                      "updated_at": now}},
+        )
+
+    async def release_conversion(self, token: str, owner: str) -> bool:
+        """Hand the claim back after a failed attempt so a retry can proceed.
+
+        Deliberately does NOT clear `case_id`: a case that was already opened
+        stays pinned to the intake, and the retry resumes on it instead of
+        opening a second one.
+        """
+        now = datetime.now(timezone.utc)
+        return await self.update_one(
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": owner},
+            {"$unset": {"conversion_claim_owner": "",
+                        "conversion_claimed_at": "",
+                        "conversion_claim_expires_at": ""},
+             "$set": {"updated_at": now}},
+        )
+
+    async def attach_case(self, token: str, case_id: str, owner: str) -> bool:
+        """Record the case on the intake the moment it exists.
+
+        Written BEFORE the slow AI analysis rather than after it, because
+        everything between case creation and `mark_completed` can fail. Without
+        this write, that failure leaves a real case that the intake has no
+        record of, and the client's retry opens another one.
+        """
+        now = datetime.now(timezone.utc)
+        return await self.update_one(
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": owner},
+            {"$set": {"case_id": case_id, "updated_at": now}},
+        )
+
+    async def remove_evidence_file(self, token: str, file_id: str) -> bool:
+        """Drop one evidence entry from the intake.
+
+        `$pull` rather than read-modify-write: two deletes arriving together
+        would otherwise each write back the list they read, and the second would
+        restore the entry the first removed. The extraction/OCR checkpoint is
+        pruned in the SAME update; leaving it behind makes a refresh restore a
+        review for a file the client already deleted.
+        """
+        return await self.update_one(
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": {"$exists": False},
+             "conversion_claimed_at": {"$exists": False},
+             "evidence_deletion_claim.file_id": file_id,
+             "evidence_files.file_id": file_id},
+            {
+                "$pull": {
+                    "evidence_files": {"file_id": file_id},
+                    "evidence_review_state": {"file_id": file_id},
+                },
+                "$unset": {"evidence_deletion_claim": ""},
+                "$set":  {"updated_at": datetime.now(timezone.utc)},
             },
         )
+
+    async def mark_completed(
+        self,
+        token: str,
+        case_id: str,
+        owner: str,
+        *,
+        ai_case_type: str | None = None,
+        user_case_type: str | None = None,
+        type_was_corrected: bool | None = None,
+    ) -> bool:
+        """Close the intake, and keep what the conversion decided.
+
+        The classification is stored, not just used, so that a replayed
+        /convert can return the same answer the first call did instead of a
+        thinner one.
+        """
+        fields: dict = {
+            "completed": True,
+            "case_id": case_id,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if ai_case_type is not None:
+            fields["ai_case_type"] = ai_case_type
+        if user_case_type is not None:
+            fields["user_case_type"] = user_case_type
+        if type_was_corrected is not None:
+            fields["type_was_corrected"] = type_was_corrected
+        return await self.update_one(
+            {"session_token": token, "completed": {"$ne": True},
+             "conversion_claim_owner": owner},
+            {"$set": fields, "$unset": {
+                "conversion_claim_owner": "",
+                "conversion_claimed_at": "",
+                "conversion_claim_expires_at": "",
+            }},
+        )
+
+    # ── retention ───────────────────────────────────────────────────────────
+
+    async def find_expired_unconverted(self, cutoff: datetime, limit: int) -> list[dict]:
+        """Intakes never bound to a case, untouched since `cutoff`.
+
+        UNCONVERTED means no `case_id`, not `completed: False`. `attach_case`
+        writes the case id BEFORE the analysis finishes, precisely so a crash
+        mid-conversion leaves a findable case — so an intake can carry a case id
+        while still incomplete, and that one is the case's to govern, not this
+        sweep's. Testing `completed` here would hand a half-converted intake to
+        the 365-day rule and destroy the evidence behind a real case.
+
+        Missing and null are both unconverted; a case id is always a string.
+        """
+        return await self.find_many(
+            {
+                "case_id": {"$not": {"$type": "string"}},
+                "updated_at": {"$type": "date", "$lt": cutoff},
+            },
+            limit=limit,
+            sort=[("updated_at", ASCENDING)],
+        )
+
+    async def delete_intake_row(self, intake_id: str) -> bool:
+        """Remove one intake document. The LAST step of a deletion.
+
+        By itself this is not the deletion — the evidence bytes go first, and a
+        tombstone naming them is written before either. Called out of that order
+        it orphans files nothing points at any more.
+        """
+        return await self.delete_one({"_id": intake_id})

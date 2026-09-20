@@ -4,11 +4,14 @@ import { useTheme } from "./theme.js";
 import { Card, Btn, Label, Input, Divider } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
-import { changePassword, authLogout, mySubscription, billingPlans, subscribePlan, cancelSubscription, mockPay } from "@/lib/api.js";
+import { useAuth } from "@/context/AuthContext.jsx";
+import SessionsPanel from "@/components/shared/SessionsPanel.jsx";
+import { changePassword, mySubscription, billingPlans, subscribePlan, cancelSubscription, mockPay } from "@/lib/api.js";
 
 function SettingsPage() {
     const { t } = useTheme();
     const toast = useToast();
+    const { logout } = useAuth();
     const [pwd, setPwd] = useState({ current: "", newPwd: "", confirm: "" });
     const [saving, setSaving] = useState(false);
     const [sub, setSub] = useState(null);
@@ -59,14 +62,15 @@ function SettingsPage() {
         if (error) {
             toast.show("❌ " + (error.message || "Password change failed"), "danger");
         } else {
-            toast.show("✅ Password updated successfully", "success");
+            toast.show("✅ Password updated. Please sign in again.", "success");
             setPwd({ current: "", newPwd: "", confirm: "" });
+            await logout();
+            window.location.assign("/login");
         }
     };
 
     const handleSignOut = async () => {
-        await authLogout();
-        try { localStorage.removeItem("aai-role"); } catch { }
+        await logout();
         // Hard redirect: clears all in-memory app state along with the session
         window.location.assign("/login");
     };
@@ -102,6 +106,14 @@ function SettingsPage() {
                             {saving ? "Updating…" : "Update Password"}
                         </Btn>
                     </div>
+                </Card>
+
+                <Card className="fade-up s2" style={{ padding: 18 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                        <Icon d={I.shield} size={14} style={{ color: t.primary }} />
+                        <div className="serif" style={{ fontSize: 14, fontWeight: 600, color: t.text }}>Active Sessions</div>
+                    </div>
+                    <SessionsPanel t={t} onSignedOut={logout} />
                 </Card>
 
                 <Card className="fade-up s2" style={{ padding: 18 }}>

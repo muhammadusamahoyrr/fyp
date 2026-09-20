@@ -1,0 +1,114 @@
+{
+  "benchmark_attempt": {
+    "aggregates": null,
+    "environment": {
+      "platform": {
+        "executable": "~\\Desktop\\attorney-ai\\backend\\venv\\Scripts\\python.exe",
+        "machine": "AMD64",
+        "os": "Windows",
+        "os_release": "11",
+        "os_version": "10.0.26200",
+        "python_implementation": "CPython",
+        "python_version": "3.12.10"
+      },
+      "tesseract": {
+        "available": false,
+        "languages_missing": [
+          "eng",
+          "urd",
+          "osd"
+        ],
+        "version": null
+      }
+    },
+    "generated_utc": "2026-09-12T11:45:49.549773+00:00",
+    "harness_version": "1.0.0",
+    "measured": false,
+    "reasons": [
+      "tesseract binary not available on PATH",
+      "missing language packs: eng, urd, osd"
+    ],
+    "results": null,
+    "schema": "ocr_benchmark_report/1",
+    "status": "NOT_RUN_ENGINE_UNAVAILABLE",
+    "thresholds": {
+      "evaluated": false,
+      "failures": [],
+      "passed": null,
+      "reason": "thresholds are not frozen; no release verdict can be given"
+    }
+  },
+  "capability_probe": {
+    "docker": {
+      "cli_available": true,
+      "cli_path": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.EXE",
+      "cli_version": "29.3.1",
+      "daemon_available": false,
+      "daemon_error": "exit_1",
+      "daemon_version": null
+    },
+    "engine_blockers": [
+      "tesseract binary not available on PATH",
+      "missing language packs: eng, urd, osd"
+    ],
+    "engine_ready_for_benchmark": false,
+    "platform": {
+      "executable": "~\\Desktop\\attorney-ai\\backend\\venv\\Scripts\\python.exe",
+      "machine": "AMD64",
+      "os": "Windows",
+      "os_release": "11",
+      "os_version": "10.0.26200",
+      "python_implementation": "CPython",
+      "python_version": "3.12.10"
+    },
+    "python_packages": {
+      "pillow": {
+        "available": true,
+        "import_error": null,
+        "version": "10.4.0"
+      },
+      "pypdf": {
+        "available": true,
+        "import_error": null,
+        "version": "6.14.2"
+      },
+      "pypdfium2": {
+        "available": true,
+        "import_error": null,
+        "version": "5.8.0"
+      },
+      "pytesseract": {
+        "available": false,
+        "import_error": "ModuleNotFoundError",
+        "version": null
+      },
+      "python_docx": {
+        "available": true,
+        "import_error": null,
+        "version": "1.2.0"
+      }
+    },
+    "schema": "ocr_capability_probe/1",
+    "tesseract": {
+      "available": false,
+      "found_off_path_not_invocable": [],
+      "languages_missing": [
+        "eng",
+        "urd",
+        "osd"
+      ],
+      "languages_present": [],
+      "languages_required": [
+        "eng",
+        "urd",
+        "osd"
+      ],
+      "notes": [
+        "No Tesseract binary on PATH."
+      ],
+      "on_path": false,
+      "path": null,
+      "version": null
+    }
+  }
+}

@@ -67,8 +67,36 @@ def get_refresh_blocklist_col() -> AsyncIOMotorCollection:
     return get_database()["refresh_token_blocklist"]
 
 
+def get_auth_sessions_col() -> AsyncIOMotorCollection:
+    """Per-login refresh-token families and device-session state."""
+    return get_database()["auth_sessions"]
+
+
 def get_password_reset_col() -> AsyncIOMotorCollection:
     return get_database()["password_reset_tokens"]
+
+
+def get_appointment_disputes_col() -> AsyncIOMotorCollection:
+    """A client's report that an appointment's record is wrong.
+
+    ITS OWN COLLECTION, deliberately. A dispute holds a client's free-text
+    account of what happened and, later, a support officer's private note —
+    neither of which belongs on the appointment document, where every existing
+    reader would have to be trusted to strip them. Keeping them apart means the
+    appointment response cannot leak them by omission.
+    """
+    return get_database()["appointment_disputes"]
+
+
+def get_lawyer_availability_col() -> AsyncIOMotorCollection:
+    """One document per lawyer, `_id` = the lawyer's user id.
+
+    Its own collection rather than a field on the user: a schedule is replaced
+    wholesale, is read by clients who may not read a user document, and grows
+    its own indexes later. `_id` IS the owner, so a write cannot address
+    somebody else's row by accident.
+    """
+    return get_database()["lawyer_availability"]
 
 
 def get_appointments_col() -> AsyncIOMotorCollection:
@@ -203,3 +231,9 @@ def get_deletion_tombstones_col() -> AsyncIOMotorCollection:
     """Written BEFORE any destructive retention step, so an interrupted deletion
     is resumable and an erased artifact still leaves an audit residue."""
     return get_database()["deletion_tombstones"]
+
+def get_ocr_revisions_col() -> AsyncIOMotorCollection:
+    """Immutable OCR readings. One row per (owner, file, page, source bytes,
+    engine build, config) — inserted, never updated, so what was read and what
+    produced it stay answerable after the fact."""
+    return get_database()["ocr_revisions"]

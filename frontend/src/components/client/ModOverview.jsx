@@ -1,9 +1,11 @@
 'use client';
-import React from "react";
+import React, { useState } from "react";
+import { formatPkt } from "@/lib/bookingTime.js";
 import { useT } from "./theme.js";
 import Ic from "./Ic.jsx";
 import { Card, Badge } from "@/components/shared/shared.jsx";
 import { useCase } from "@/components/shared/CaseContext.jsx";
+import { activeCases } from "@/lib/caseStatus.js";
 
 const STATUS_BADGE = {
     active: "success",
@@ -30,13 +32,27 @@ const STitle = ({ icon, sub, children }) => {
 ══════════════════════════════════════════════════════ */
 const ModOverview = () => {
     const t = useT();
-    const { cases, appointments } = useCase();
+    const {
+        cases, appointments,
+        appointmentsComplete, appointmentsTotal, loadMoreAppointments,
+    } = useCase();
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [moreError, setMoreError] = useState(null);
 
-    const activeCasesCount = cases.length;
-    const apptCount = appointments.length;
+    // NOT cases.length. A draft is a case the client has not confirmed at the
+    // end of the intake, and counting one toward "N cases open" labels it with
+    // the single status it is not.
+    const activeCasesCount = activeCases(cases).length;
+    // THE COUNT IS THE SERVER'S TOTAL WHERE WE HAVE IT.
+    //
+    // `appointments` is the FIRST PAGE of the shared cache, so counting it was
+    // counting fifty and calling it all of them. The context now carries the
+    // server's total; the loaded length is used only when it has not said.
+    const apptCount = Number.isInteger(appointmentsTotal)
+        ? appointmentsTotal : appointments.length;
     const nextAppt = appointments[0];
     const nextApptLabel = nextAppt
-        ? new Date(nextAppt.scheduled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        ? formatPkt(nextAppt.scheduled_at, { month: "short", day: "numeric" })
         : null;
 
     // Only tiles backed by a real number get a bar, and the bar is derived from
@@ -148,8 +164,8 @@ const ModOverview = () => {
                         <STitle icon="cal" sub="Events & deadlines">Upcoming</STitle>
                         {upcomingAppts.length > 0 ? upcomingAppts.map((a, i) => {
                             const apptDate = new Date(a.scheduled_at);
-                            const label = apptDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                            const time = apptDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+                            const label = formatPkt(apptDate, { month: "short", day: "numeric" });
+                            const time = formatPkt(apptDate, { hour: "2-digit", minute: "2-digit" });
                             const accentColor = a.mode === "court" ? t.danger : a.mode === "video" ? t.info : t.primary;
                             const title = a.mode === "court" ? "Court Hearing"
                                 : a.mode === "video" ? "Video Meeting"
@@ -170,6 +186,45 @@ const ModOverview = () => {
                             );
                         }) : (
                             <div style={{ fontSize: 13, color: t.textMuted, padding: "12px 0" }}>No upcoming appointments.</div>
+                        )}
+
+                        {/* LOADING THE REST IS THE USER'S CHOICE.
+                            The shared cache holds one page. Pulling an
+                            unbounded appointment history into memory on mount
+                            would be a cost every screen pays for one screen's
+                            benefit — so the rest is a click, and only when
+                            the server says there is more. */}
+                        {appointmentsComplete === false && (
+                            <div style={{ paddingTop: 8 }}>
+                                <button type="button"
+                                    disabled={loadingMore}
+                                    aria-busy={loadingMore || undefined}
+                                    onClick={async () => {
+                                        if (loadingMore) return;
+                                        setLoadingMore(true);
+                                        setMoreError(null);
+                                        const ok = await loadMoreAppointments?.();
+                                        setLoadingMore(false);
+                                        // A failed page changes nothing already
+                                        // loaded: the appointments on screen were
+                                        // read successfully.
+                                        if (!ok) setMoreError("Could not load more appointments.");
+                                    }}
+                                    style={{
+                                        minHeight: 40, padding: "9px 16px", borderRadius: 9,
+                                        border: `1px solid ${t.border}`, background: "transparent",
+                                        color: t.text, fontSize: 12, fontWeight: 700,
+                                        cursor: loadingMore ? "wait" : "pointer",
+                                        opacity: loadingMore ? 0.6 : 1, fontFamily: "inherit",
+                                    }}>
+                                    {loadingMore ? "Loading…" : "Load more appointments"}
+                                </button>
+                                {moreError && (
+                                    <div role="alert" style={{ fontSize: 11, color: t.danger, marginTop: 6 }}>
+                                        {moreError} The appointments already shown are unaffected.
+                                    </div>
+                                )}
+                            </div>
                         )}
                     </Card>
 

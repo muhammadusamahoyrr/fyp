@@ -48,10 +48,18 @@ function _requestSiblingToken(ms = 150) {
   if (!bc) return Promise.resolve(null);
   return new Promise((resolve) => {
     let done = false;
-    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    let timer = null;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      const index = _tokenWaiters.indexOf(finish);
+      if (index >= 0) _tokenWaiters.splice(index, 1);
+      resolve(v);
+    };
     _tokenWaiters.push(finish);
     try { bc.postMessage({ type: 'token-request' }); } catch { finish(null); }
-    setTimeout(() => finish(null), ms);
+    timer = setTimeout(() => finish(null), ms);
   });
 }
 
@@ -201,16 +209,29 @@ let _refreshPromise = null;
 async function _tryRefresh() {
   if (_refreshPromise) return _refreshPromise;
   _refreshPromise = (async () => {
+    const tokenBeingReplaced = accessToken;
     try {
       const res = await fetch(`${BASE}/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
       });
       if (res.ok) {
         const body = await res.json();
         setToken(body.access_token);   // sets in-memory + broadcasts to siblings
         return true;
+      }
+      // Another tab may have won the server's atomic refresh claim. Accept only
+      // a different token; the stale token would only trigger another 401.
+      if (tokenBeingReplaced) {
+        const sibling = await _requestSiblingToken(250);
+        if (sibling && sibling !== tokenBeingReplaced) {
+          accessToken = sibling;
+          return true;
+        }
       }
       return false;
     } catch {
@@ -279,6 +300,16 @@ export async function intakeConvert(sessionToken, { language = "en", urgency = n
   });
 }
 
+// The intake this client should be put back into, or null.
+//
+// Asked when the browser holds no token: sign-out clears it, clearing site data
+// clears it, and a second device never had it. After conversion that token was
+// the only route to a draft case awaiting confirmation, so losing it left a
+// case its owner could never confirm.
+export async function getResumableIntake() {
+  return apiFetch('/intake/resumable');
+}
+
 export async function intakeGet(sessionToken) {
   return apiFetch(`/intake/${sessionToken}`);
 }
@@ -287,6 +318,23 @@ export async function uploadIntakeEvidence(sessionToken, file) {
   const formData = new FormData();
   formData.append('file', file);
   return apiFetchMultipart(`/intake/${sessionToken}/evidence`, formData);
+}
+
+export async function getIntakeOcrReview(sessionToken, fileId) {
+  return apiFetch(`/intake/${sessionToken}/evidence/${fileId}/ocr`);
+}
+
+export async function confirmIntakeOcrPage(
+  sessionToken, fileId, revisionId,
+  { source_sha256, text_sha256, confirmed_text },
+) {
+  return apiFetch(
+    `/intake/${sessionToken}/evidence/${fileId}/ocr/${revisionId}/confirm`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ source_sha256, text_sha256, confirmed_text }),
+    },
+  );
 }
 
 // answer = null on first call (get Q1); answer = string on second call (get Q2 or done)
@@ -359,6 +407,15 @@ export async function updateCase(caseId, updates) {
   return apiFetch(`/cases/${caseId}`, {
     method: 'PATCH',
     body: JSON.stringify(updates),
+  });
+}
+
+// Promote the client's draft case to open. The end of the intake.
+// Idempotent: a second press returns the same already-open case.
+export async function confirmCase(caseId, caseType = null) {
+  return apiFetch(`/cases/${caseId}/confirm`, {
+    method: 'PATCH',
+    body: JSON.stringify({ case_type: caseType }),
   });
 }
 
@@ -467,9 +524,16 @@ export async function submitReview(lawyer_id, stars, comment) {
   });
 }
 
+export async function getLawyerReviews(lawyer_id, { page = 1, page_size = 10 } = {}) {
+  const p = new URLSearchParams();
+  p.set('page', page);
+  p.set('page_size', page_size);
+  return apiFetch(`/lawyers/${lawyer_id}/reviews?${p}`);
+}
+
 // ── Appointments ─────────────────────────────────────────────────────────────
 
-export async function bookAppointment({ lawyer_id, case_id, scheduled_at, duration_minutes, mode, notes }) {
+export async function bookAppointment({ lawyer_id, case_id, scheduled_at, duration_minutes, mode, notes, idempotency_key }) {
   return apiFetch('/appointments', {
     method: 'POST',
     body: JSON.stringify({
@@ -479,6 +543,10 @@ export async function bookAppointment({ lawyer_id, case_id, scheduled_at, durati
       duration_minutes: duration_minutes || 60,
       mode: mode || 'video',
       notes: notes || null,
+      // Identifies ONE booking intent across retries, so a dropped response
+      // does not become a second appointment. Omitted rather than sent as null
+      // when absent: the server indexes this field only when it is a string.
+      ...(idempotency_key ? { idempotency_key } : {}),
     }),
   });
 }
@@ -496,8 +564,25 @@ export async function getAppointment(id) {
   return apiFetch(`/appointments/${id}`);
 }
 
-export async function confirmAppointment(id) {
-  return apiFetch(`/appointments/${id}/confirm`, { method: 'PATCH' });
+export async function setMeetingLink(id, meeting_link) {
+  return apiFetch(`/appointments/${id}/meeting-link`, {
+    method: 'PATCH',
+    body: JSON.stringify({ meeting_link }),
+  });
+}
+
+export async function confirmAppointment(id, { schedule_version, meeting_link } = {}) {
+  return apiFetch(`/appointments/${id}/confirm`, {
+    method: 'PATCH',
+    // The schedule the lawyer was SHOWN. Required by the server: a client can
+    // move a pending request while the page is open, and the status stays
+    // PENDING throughout, so without this the confirmation would accept a time
+    // the lawyer never saw.
+    // The joining link belongs here, not at completion — a link that
+    // arrives once the consultation is over is not a joining link.
+    body: JSON.stringify({ schedule_version,
+      ...(meeting_link ? { meeting_link } : {}) }),
+  });
 }
 
 // ─── Documents ────────────────────────────────────────────────────────────────
@@ -740,6 +825,19 @@ export async function deleteDocDraft(id) {
   return apiFetch(`/documents/drafts/${id}`, { method: 'DELETE' });
 }
 
+export async function rescheduleAppointment(id, { scheduled_at, schedule_version }) {
+  return apiFetch(`/appointments/${id}/reschedule`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      scheduled_at,
+      // The schedule the client was looking at. Sent so a write composed
+      // against a time they have since moved away from is refused rather than
+      // applied — including A -> B -> A, where the time alone is identical.
+      ...(Number.isInteger(schedule_version) ? { schedule_version } : {}),
+    }),
+  });
+}
+
 export async function cancelAppointment(id, reason) {
   return apiFetch(`/appointments/${id}/cancel`, {
     method: 'PATCH',
@@ -754,17 +852,130 @@ export async function completeAppointment(id, { lawyer_notes, meeting_link } = {
   });
 }
 
+/** Consultations this lawyer has finished and not recorded an outcome for.
+ *
+ * KEYSET, not a page number. Rows leave this queue as outcomes are recorded,
+ * so an offset would shift under the caller and the next page would step over
+ * a row nobody has seen. Pass `next_cursor` back WHOLE — it carries the sort
+ * position and the cutoff the scan started with, and the server refuses a
+ * partial one rather than silently restarting at the beginning.
+ *
+ * The lawyer is taken from the token; there is deliberately no way to ask for
+ * somebody else's queue.
+ */
+export async function listPendingOutcomes({ page_size, cursor } = {}) {
+  const params = new URLSearchParams();
+  if (page_size) params.set('page_size', String(page_size));
+  if (cursor) {
+    params.set('after_end_at', cursor.after_end_at);
+    params.set('after_id', cursor.after_id);
+    params.set('cutoff', cursor.cutoff);
+  }
+  const qs = params.toString();
+  return apiFetch(`/appointments/outcomes/pending${qs ? `?${qs}` : ''}`);
+}
+
 export async function markNoShow(id) {
   return apiFetch(`/appointments/${id}/no-show`, { method: 'PATCH' });
 }
 
-export async function getLawyerAvailability(lawyer_id, date) {
-  return apiFetch(`/appointments/availability/${lawyer_id}?date=${date}`);
+/** A lawyer's own working-hours configuration, as the public sees it.
+ *
+ * `configured: false` means they have not set any. It does NOT mean "closed",
+ * and it must never be rendered as a list of plausible office hours — nobody
+ * here is entitled to say when somebody else works.
+ */
+/** Report that an appointment's record is wrong.
+ *
+ * FILING CHANGES NOTHING. The appointment keeps whatever status it has; this
+ * opens a case for support. An identical retry returns the existing report
+ * rather than filing a second one; a retry saying something different is a
+ * 409.
+ */
+export async function openAppointmentDispute(appointment_id, { category, statement }) {
+  return apiFetch(`/appointments/${appointment_id}/disputes`, {
+    method: 'POST',
+    body: JSON.stringify({ category, statement }),
+  });
+}
+
+/** Reports this client has filed about one appointment. Never carries the
+ * private support note. */
+export async function listAppointmentDisputes(appointment_id) {
+  return apiFetch(`/appointments/${appointment_id}/disputes`);
+}
+
+/** Support queue: open reports, oldest first, paginated server-side. */
+export async function listOpenDisputes({ page, page_size } = {}) {
+  const params = new URLSearchParams();
+  if (page) params.set('page', String(page));
+  if (page_size) params.set('page_size', String(page_size));
+  const qs = params.toString();
+  return apiFetch(`/admin/appointment-disputes${qs ? `?${qs}` : ''}`);
+}
+
+/** Decide a report. `expected_version` is required: two officers working the
+ * same queue must not silently overwrite each other's decision. */
+export async function resolveDispute(dispute_id, {
+  expected_version, decision, resolution_explanation, support_note,
+}) {
+  return apiFetch(`/admin/appointment-disputes/${dispute_id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      expected_version, decision, resolution_explanation,
+      support_note: support_note || null,
+    }),
+  });
+}
+
+export async function getLawyerWorkingHours(lawyer_id) {
+  return apiFetch(`/lawyers/${lawyer_id}/availability`);
+}
+
+/** Times a client may actually book, computed on the server.
+ *
+ * working hours − days off − pending/confirmed appointments − past times.
+ * ADVICE, NOT A RESERVATION: the unique slot indexes still decide between two
+ * clients offered the same slot at the same moment.
+ */
+export async function getBookableSlots(lawyer_id, { from, to, duration_minutes } = {}) {
+  const params = new URLSearchParams({ from });
+  if (to) params.set('to', to);
+  if (duration_minutes) params.set('duration_minutes', String(duration_minutes));
+  return apiFetch(`/lawyers/${lawyer_id}/bookable-slots?${params.toString()}`);
+}
+
+/** The caller's own schedule, reasons for days off included. */
+export async function getMyWorkingHours() {
+  return apiFetch('/lawyers/me/availability');
+}
+
+/** Replace the caller's whole schedule.
+ *
+ * Wholesale, never patched: the rule that matters most — no two intervals on
+ * one weekday may overlap — is about the set as a whole.
+ */
+export async function saveMyWorkingHours({ working_hours, exceptions }) {
+  return apiFetch('/lawyers/me/availability', {
+    method: 'PUT',
+    body: JSON.stringify({
+      working_hours: working_hours || [],
+      exceptions: exceptions || [],
+    }),
+  });
 }
 
 // ─── Engagements (hire a lawyer) ─────────────────────────────────────────────
-// Client requests → lawyer accepts/declines → case is linked. The only path
-// that assigns a lawyer to a case.
+//
+//   client requests → lawyer proposes terms → CLIENT accepts → case is linked
+//                                           ↘ client declines
+//   accepted → complete (handshake) | terminate (either party, with a reason)
+//
+// Client acceptance is the only path that assigns a lawyer to a case. It used
+// to be the lawyer's `accept` call, which set the fee and took the case at
+// once — so the client saw the price for the first time from inside a
+// relationship they could not leave. `acceptEngagement` is gone rather than
+// deprecated; keeping it would keep that gap open.
 
 export async function requestEngagement({ case_id, lawyer_id, message }) {
   return apiFetch('/engagements', {
@@ -778,14 +989,45 @@ export async function listEngagements({ status } = {}) {
   return apiFetch(`/engagements${qs}`);
 }
 
-export async function acceptEngagement(engagement_id, { fee_amount, fee_type, scope_note } = {}) {
-  return apiFetch(`/engagements/${engagement_id}/accept`, {
+// Lawyer: answer a request with a price. Claims nothing.
+export async function proposeEngagementTerms(engagement_id, { fee_amount, fee_type, scope_note } = {}) {
+  return apiFetch(`/engagements/${engagement_id}/propose-terms`, {
     method: 'PATCH',
     body: JSON.stringify({
-      fee_amount: fee_amount ?? null,
-      fee_type: fee_type || null,
+      fee_amount,
+      fee_type,
       scope_note: scope_note || null,
     }),
+  });
+}
+
+// Client: agree to the proposed terms. THIS assigns the lawyer.
+export async function acceptEngagementTerms(engagement_id) {
+  return apiFetch(`/engagements/${engagement_id}/accept-terms`, { method: 'PATCH' });
+}
+
+// Client: refuse the proposed terms; the case goes back on the market.
+export async function declineEngagementTerms(engagement_id, reason) {
+  return apiFetch(`/engagements/${engagement_id}/decline-terms`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason: reason || null }),
+  });
+}
+
+// Either party. Without `one_sided` the first call proposes and the second
+// (from the other party) confirms.
+export async function completeEngagement(engagement_id, { note, one_sided } = {}) {
+  return apiFetch(`/engagements/${engagement_id}/complete`, {
+    method: 'PATCH',
+    body: JSON.stringify({ note: note || null, one_sided: !!one_sided }),
+  });
+}
+
+// Either party, no confirmation, reason required.
+export async function terminateEngagement(engagement_id, reason) {
+  return apiFetch(`/engagements/${engagement_id}/terminate`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
   });
 }
 
@@ -798,6 +1040,22 @@ export async function declineEngagement(engagement_id, reason) {
 
 export async function cancelEngagement(engagement_id) {
   return apiFetch(`/engagements/${engagement_id}/cancel`, { method: 'PATCH' });
+}
+
+// Read back an uploaded evidence file, saving it the way every other download
+// in this file does. Served through the API, not a static path, so the
+// ownership check cannot be bypassed by guessing a filename.
+export async function downloadIntakeEvidence(sessionToken, fileId, filename = 'evidence') {
+  const { data: res, error } = await apiFetch(
+    `/intake/${sessionToken}/evidence/${fileId}`, { returnResponse: true });
+  if (error) return { error: error.message || 'Download failed' };
+  return _saveBlob(res, filename);
+}
+
+// Remove an uploaded file — record AND bytes. The ✕ used to filter a React
+// array and leave the file on the server for ever.
+export async function deleteIntakeEvidence(sessionToken, fileId) {
+  return apiFetch(`/intake/${sessionToken}/evidence/${fileId}`, { method: 'DELETE' });
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -829,8 +1087,46 @@ export async function signAgreement(agreement_id, method, signature_data) {
   });
 }
 
+// The counterpart to signAgreement. Without it a party could only sign or
+// ignore: the backend has supported refusal since AgreementStatus.CANCELLED
+// existed, and the UI rendered a "Rejected" filter for a state nothing could
+// reach. A legal product that lets someone commit but not refuse is one-sided.
+//
+// `reason` is optional and bounded at 2000 chars server-side (AgreementDecline).
+export async function declineAgreement(agreement_id, reason = null) {
+  const trimmed = typeof reason === 'string' ? reason.trim() : '';
+  return apiFetch(`/agreements/${agreement_id}/decline`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: trimmed || null }),
+  });
+}
+
 export async function getAgreement(agreement_id) {
   return apiFetch(`/agreements/${agreement_id}`);
+}
+
+// ─── Active sessions ──────────────────────────────────────────────────────────
+//
+// The backend has listed and revoked sessions all along and nothing called it,
+// so "sign out everywhere" — the control that matters after a device is lost or
+// a password is exposed — existed and was unreachable from the UI.
+
+export async function listSessions() {
+  return apiFetch('/auth/sessions');
+}
+
+export async function revokeSession(session_id) {
+  return apiFetch(`/auth/sessions/${encodeURIComponent(session_id)}`, {
+    method: 'DELETE',
+  });
+}
+
+// Ends every session including this one, and the server clears the refresh
+// cookie. The caller is responsible for sending the user back to the login
+// screen — see SessionsPanel, which does not try to keep the page usable
+// afterwards.
+export async function revokeAllSessions() {
+  return apiFetch('/auth/sessions/revoke-all', { method: 'POST' });
 }
 
 // ─── Lawyer Profile ───────────────────────────────────────────────────────────

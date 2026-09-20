@@ -14,9 +14,7 @@ async def _send(to: str, subject: str, html: str) -> bool:
     configured; raises on a real delivery failure so callers can decide
     whether the operation must fail loudly."""
     if not settings.smtp_user:
-        logger.warning(
-            "SMTP not configured — email %r to %s was NOT sent", subject, to
-        )
+        logger.warning("SMTP not configured; email was not sent")
         return False
 
     msg = MIMEMultipart("alternative")
@@ -34,8 +32,10 @@ async def _send(to: str, subject: str, html: str) -> bool:
             password=settings.smtp_password,
             start_tls=True,
         )
-    except Exception:
-        logger.exception("Email delivery FAILED: %r to %s", subject, to)
+    except Exception as exc:
+        # Recipient addresses are personal data and SMTP errors can expose host
+        # details. Callers need the exception; logs need only a safe category.
+        logger.error("Email delivery failed; error_type=%s", type(exc).__name__)
         raise
     return True
 

@@ -1,6 +1,25 @@
 from pathlib import Path
 
+from datetime import datetime, timezone
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# The widest cadence the scheduler may ever run at, and the widest it may run
+# at WHILE REMINDERS ARE ENABLED. Two numbers because they answer two
+# questions: the first is "is this a scheduler at all", the second is "can it
+# still see a one-hour window". Named here so the validator, the scheduler and
+# the readiness audit all cite the same figure instead of three copies of 30.
+MAX_INTERVAL_MINUTES = 720
+REMINDER_WINDOW_MINUTES = 60
+MAX_REMINDER_INTERVAL_MINUTES = REMINDER_WINDOW_MINUTES // 2
+
+# Mirrors `appointment_expiry_sweep.DEFAULT_LIMIT`. Stated as a number rather
+# than imported because `app.core.config` must not import a service -- every
+# service reads settings, and the cycle would be immediate. The test suite
+# asserts the two agree, so the duplication cannot drift silently.
+MAX_EXPIRY_BATCH = 200
 
 
 class Settings(BaseSettings):
@@ -74,6 +93,13 @@ class Settings(BaseSettings):
     # Cause-list scheduler
     causelist_check_hours: int = 6
 
+    # Lawyer vector-index reconciliation sweep. Declared HERE, not read straight
+    # off the environment: settings is a pydantic model, so `getattr(settings,
+    # "lawyer_reconcile_hours", 6)` on an undeclared name silently returns the
+    # default forever and the operator's env var is ignored with no error. The
+    # sweep is cheap when the index already agrees, so 6h is a fine default.
+    lawyer_reconcile_hours: int = 6
+
     # Citator ingest streaming (Redis Streams; requires Redis 5.0+, and the
     # XAUTOCLAIM-based recovery of dead consumers needs 6.2+). Consumer-group
     # names are fixed in code (parse/embed); these only tune throughput/recovery.
@@ -123,6 +149,253 @@ class Settings(BaseSettings):
     # nothing is destroyed until this is explicitly turned on. Deletion is
     # tombstone-first and crash-safe (services/document_deletion.py).
     documents_v2_deletion_enabled: bool = False
+
+    # Retention DELETION for intakes and their uploaded evidence — its own
+    # switch, deliberately not shared with the V2 one above. The two stores hold
+    # different things and were approved separately; one flag would mean turning
+    # on evidence destruction as a side effect of a documents decision.
+    #
+    # Off by default: the planner reports counts and the admin route is dry-run,
+    # but nothing is destroyed until this is explicitly turned on. Deletion is
+    # tombstone-first and crash-safe (services/intake_deletion.py).
+    intake_deletion_enabled: bool = False
+
+    # ── LOCAL ENGLISH OCR ─────────────────────────────────────────────────────
+    # OFF by default. When off, nothing
+    # spawns an OCR engine, no revision is written, and extraction behaves
+    # byte-for-byte as it did before.
+    #
+    # The flag gates the RUN, not the storage schema: rows already written stay
+    # readable, because turning a feature off must not make existing records
+    # unreadable.
+    #
+    # When on, engine output is excluded from every analysis prompt until the
+    # owning client reviews/corrects and confirms every OCR page. Confirmation
+    # is hash-bound; only the separately stored confirmed value is analysed.
+    # ── LAWYER WORKING HOURS ──────────────────────────────────────────────────
+    # OFF by default, and narrowly scoped to BOOKING ACCEPTANCE.
+    #
+    # While off, booking behaves exactly as it did: any aligned future slot is
+    # accepted, because every lawyer currently on the system signed up without
+    # a schedule and turning this on for them would make them unbookable
+    # overnight. Availability is still computed and returned — but it is
+    # labelled unenforced, and a lawyer with no schedule is reported as
+    # unconfigured rather than given invented hours.
+    #
+    # While on, a booking is refused when the lawyer has no configured schedule,
+    # or when the requested time falls outside it. That is a real change to what
+    # the API accepts, which is why it is a switch somebody throws rather than a
+    # consequence of deploying.
+    appointment_working_hours_enforced: bool = False
+
+    # ── APPOINTMENT SCHEDULER ──────────────────────────────────────────────────
+    # Both OFF by default, and independently. The reminder and outcome-nudge
+    # mechanisms exist and are tested; nothing runs them until somebody turns
+    # one of these on, per environment, deliberately.
+    #
+    # Enabling either sends messages to real people, so the defaults here are
+    # the safety property — not a placeholder to be flipped by a deployment.
+    appointment_reminders_enabled: bool = False
+    appointment_outcome_nudges_enabled: bool = False
+
+    # THE ACTIVATION INSTANT FOR OUTCOME NUDGES, and it is deliberately not
+    # derivable from anything.
+    #
+    # A consultation is eligible for a nudge only if it became due at or after
+    # this moment, which is what stops a first run notifying about every
+    # unreported consultation in the product's history. Defaulting it to "when
+    # this process started" would make the blast radius a property of the last
+    # deployment — and a restart would silently move it, so a redeploy could
+    # re-open a window somebody had already closed.
+    #
+    # Naive values are REFUSED rather than assumed to be UTC: "2026-01-01
+    # 09:00" means different instants in different places, and guessing which
+    # decides how much history gets messaged.
+    appointment_outcome_nudges_activated_at: datetime | None = None
+
+    # How often the scheduler wakes. Bounded at both ends: too short is a
+    # thrash against the notification store, too long makes a T-1h reminder
+    # arrive after the consultation.
+    appointment_scheduler_interval_minutes: int = 15
+
+    # Per-cycle caps, passed to the services as their `limit`. Conservative:
+    # the first real run against an existing deployment meets the whole backlog
+    # at once, and a batch that messages everybody simultaneously is an
+    # incident whichever way the messages go.
+    appointment_reminder_batch: int = 100
+    appointment_outcome_nudge_batch: int = 25
+
+    # THE EXPIRY MECHANISM. OFF, and the only flag here whose effect on a
+    # client is irreversible: expiring a request terminates it, and there is
+    # no transition out of EXPIRED.
+    #
+    # ONE FLAG, TWO CONSUMERS. It gates the sweep that retires lapsed requests
+    # AND the confirmation path's refusal to accept one. They have to move
+    # together: a sweep with no confirmation guard lets a lawyer confirm a
+    # request the next sweep is about to retire, and a confirmation guard with
+    # no sweep leaves a lapsed request neither confirmable nor expired --
+    # stuck, still holding its slots, with no explanation for either party.
+    # Two flags would make that second state reachable by setting one of them.
+    appointment_expiry_enabled: bool = False
+
+    # Deliberately smaller than the reminder and nudge caps. Each item here is
+    # a request being terminated and a client being told so; the first
+    # applying run against an existing deployment meets the whole history of
+    # unanswered requests at once, and a cap is what stops that being one
+    # event. The sweep refuses anything above its own DEFAULT_LIMIT of 200.
+    appointment_expiry_batch: int = 50
+
+    english_ocr_enabled: bool = False
+    # Identifier of the reviewed benchmark/evidence used to approve production
+    # activation. Development may exercise the feature without one; production
+    # may not turn it on with an untraceable "someone tested it" assertion.
+    english_ocr_benchmark_id: str = ""
+
+    @field_validator("secret_key")
+    @classmethod
+    def validate_jwt_secret(cls, value: str) -> str:
+        if len(value) < 32 or value.lower().startswith("change-this"):
+            raise ValueError("SECRET_KEY must be a non-placeholder value of at least 32 characters")
+        return value
+
+    @field_validator("algorithm")
+    @classmethod
+    def validate_jwt_algorithm(cls, value: str) -> str:
+        # This application uses one symmetric key. Refusing algorithm drift is
+        # safer than accepting an arbitrary value from deployment config.
+        if value != "HS256":
+            raise ValueError("ALGORITHM must be HS256")
+        return value
+
+    @field_validator("access_token_expire_minutes", "refresh_token_expire_days")
+    @classmethod
+    def validate_token_lifetime(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("token lifetimes must be positive")
+        return value
+
+    @field_validator("appointment_outcome_nudges_activated_at")
+    @classmethod
+    def _activation_must_be_aware(cls, value):
+        """Refuse a naive activation instant; normalise an aware one to UTC.
+
+        A naive timestamp is not a moment — it is a wall-clock reading whose
+        meaning depends on where it is read. Accepting one here would let the
+        same configuration line mean different amounts of message history in
+        different deployments.
+        """
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(
+                "appointment_outcome_nudges_activated_at must include a UTC "
+                "offset (e.g. 2026-10-01T00:00:00Z) — a naive timestamp does "
+                "not identify an instant, and this value decides how much "
+                "history gets notified")
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def _outcome_nudges_need_an_activation_instant(self):
+        """FAIL CLOSED. Enabling nudges without a fixed activation instant
+        would make the first run's scope whatever the clock happened to say."""
+        if (self.appointment_outcome_nudges_enabled
+                and self.appointment_outcome_nudges_activated_at is None):
+            raise ValueError(
+                "appointment_outcome_nudges_enabled requires "
+                "appointment_outcome_nudges_activated_at — without a fixed "
+                "instant the first run would decide for itself how much of "
+                "the backlog to notify")
+        return self
+
+    @field_validator("appointment_scheduler_interval_minutes")
+    @classmethod
+    def _interval_is_sane(cls, value):
+        if not 1 <= value <= MAX_INTERVAL_MINUTES:
+            raise ValueError(
+                "appointment_scheduler_interval_minutes must be between 1 and "
+                f"{MAX_INTERVAL_MINUTES} — shorter thrashes the notification "
+                "store, longer makes a T-1h reminder arrive after the "
+                "consultation")
+        return value
+
+    @model_validator(mode="after")
+    def _reminder_cadence_must_fit_the_shortest_window(self):
+        """A cadence wider than half the narrowest reminder window is a miss.
+
+        The T-1h window is ONE HOUR WIDE. A scheduler waking every 60 minutes
+        gets exactly one opportunity inside it if the phase happens to line up,
+        and none at all if it does not — an appointment can enter and leave the
+        window between two ticks. That failure is silent and it is invisible in
+        testing, because it depends on the offset between the wake-up phase and
+        somebody's booking time.
+
+        Capping at half the window guarantees at least two opportunities, so
+        one missed or skipped tick still leaves a chance to send. It is the
+        standard sampling argument and it is why the number is 30 rather than
+        60: 60 is the width at which coverage depends on luck.
+
+        IT APPLIES ONLY WHEN REMINDERS ARE ON. Outcome nudges chase a backlog
+        that is hours to days old and have no window to miss, so a deployment
+        running nudges alone keeps the full range — narrowing it there would be
+        a restriction with nothing behind it.
+
+        Checked HERE rather than in the loop. The loop reads this value once at
+        startup; a check inside it would report a misconfiguration only after
+        the process was already running on it, and only to a log nobody reads
+        until a reminder is missing.
+        """
+        if (self.appointment_reminders_enabled
+                and self.appointment_scheduler_interval_minutes
+                > MAX_REMINDER_INTERVAL_MINUTES):
+            raise ValueError(
+                "appointment_reminders_enabled requires "
+                "appointment_scheduler_interval_minutes <= "
+                f"{MAX_REMINDER_INTERVAL_MINUTES} (currently "
+                f"{self.appointment_scheduler_interval_minutes}) — the T-1h "
+                "reminder window is 60 minutes wide, so a wider cadence can "
+                "step over it entirely and the appointment goes unremind"
+                "ed with nothing in the logs to say so")
+        return self
+
+    @field_validator("appointment_reminder_batch",
+                     "appointment_outcome_nudge_batch")
+    @classmethod
+    def _batch_is_sane(cls, value):
+        if not 1 <= value <= 500:
+            raise ValueError("batch caps must be between 1 and 500")
+        return value
+
+    @field_validator("appointment_expiry_batch")
+    @classmethod
+    def _expiry_batch_is_conservative(cls, value):
+        """A tighter bound than the other caps, and not by preference.
+
+        `expire_lapsed_requests` refuses a limit above its own DEFAULT_LIMIT,
+        so a larger value here would be accepted by settings and then rejected
+        at the moment the sweep ran -- a misconfiguration that only appears
+        once the feature is switched on, in a scheduled job, to a log.
+        """
+        if not 1 <= value <= MAX_EXPIRY_BATCH:
+            raise ValueError(
+                "appointment_expiry_batch must be between 1 and "
+                f"{MAX_EXPIRY_BATCH} -- each row is somebody's request being "
+                "terminated, and the sweep refuses a larger limit anyway")
+        return value
+
+    @model_validator(mode="after")
+    def validate_production_transport(self):
+        if self.app_env.lower() == "production" and not self.frontend_url.startswith("https://"):
+            raise ValueError("FRONTEND_URL must use HTTPS in production")
+        if (
+            self.app_env.lower() == "production"
+            and self.english_ocr_enabled
+            and not self.english_ocr_benchmark_id.strip()
+        ):
+            raise ValueError(
+                "ENGLISH_OCR_BENCHMARK_ID is required when English OCR is "
+                "enabled in production"
+            )
+        return self
 
 
 settings = Settings()

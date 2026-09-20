@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr
 
 from app.core.constants import UserRole
@@ -35,3 +37,20 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+
+class AuthSessionItem(BaseModel):
+    session_id: str
+    current: bool
+    user_agent: str = ""
+    created_at: datetime | None = None
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+
+
+class AuthSessionList(BaseModel):
+    items: list[AuthSessionItem]
+
+
+class SessionsRevoked(BaseModel):
+    revoked: int

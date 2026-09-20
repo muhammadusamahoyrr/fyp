@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -76,23 +77,38 @@ def _create_token(data: dict[str, Any], expires_delta: timedelta) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
-def create_access_token(user_id: str, role: str) -> str:
-    return _create_token(
-        {"sub": user_id, "role": role, "type": "access"},
-        timedelta(minutes=settings.access_token_expire_minutes),
-    )
+def create_access_token(user_id: str, role: str, session_id: str | None = None) -> str:
+    payload = {
+        "sub": user_id,
+        "role": role,
+        "type": "access",
+        # Per-token identity makes revoking one browser session precise even
+        # when two tokens are minted inside the same JWT timestamp second.
+        "jti": secrets.token_urlsafe(8),
+    }
+    if session_id:
+        payload["sid"] = session_id
+    return _create_token(payload, timedelta(minutes=settings.access_token_expire_minutes))
 
 
-def create_refresh_token(user_id: str) -> str:
+def create_refresh_token(
+    user_id: str,
+    session_id: str | None = None,
+    token_id: str | None = None,
+) -> str:
     # `jti` makes every refresh token unique. Without it the payload is
     # {sub, type, exp, iat} where exp/iat are whole seconds, so rotating twice
     # inside one second minted a byte-identical token — which refresh() had just
     # blocklisted by value, handing the user a "new" token that was already
     # revoked. Only refresh tokens need this: they are the ones revoked by value.
-    return _create_token(
-        {"sub": user_id, "type": "refresh", "jti": secrets.token_urlsafe(8)},
-        timedelta(days=settings.refresh_token_expire_days),
-    )
+    payload = {
+        "sub": user_id,
+        "type": "refresh",
+        "jti": token_id or secrets.token_urlsafe(16),
+    }
+    if session_id:
+        payload["sid"] = session_id
+    return _create_token(payload, timedelta(days=settings.refresh_token_expire_days))
 
 
 def decode_token(token: str) -> dict[str, Any] | None:
@@ -100,6 +116,19 @@ def decode_token(token: str) -> dict[str, Any] | None:
         return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
     except JWTError:
         return None
+
+
+# New revocation rows store only a one-way lookup key. Reads also try the raw
+# value so rows written by older releases remain effective until their TTL.
+TOKEN_STORAGE_PREFIX = "sha256:"
+
+
+def token_storage_key(token: str) -> str:
+    return TOKEN_STORAGE_PREFIX + hashlib.sha256(token.encode()).hexdigest()
+
+
+def token_lookup_keys(token: str) -> list[str]:
+    return [token_storage_key(token), token]
 
 
 # Field on the user document holding the moment every token issued before it

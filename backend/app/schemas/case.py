@@ -43,6 +43,19 @@ class CaseCreate(BaseModel):
 class CaseUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
+    # The last intake step asks the client to "Confirm your case category", and
+    # until now their answer went nowhere — it set React state and the button
+    # beside it made no request at all, so the UI and the stored case could
+    # disagree about the category permanently. Typed as the enum so a category
+    # that does not exist cannot be stored.
+    case_type: CaseType | None = None
+
+
+class CaseConfirm(BaseModel):
+    """The client's final, authoritative category selection."""
+
+    model_config = ConfigDict(extra="forbid")
+    case_type: CaseType | None = None
 
 
 class MessageAdd(BaseModel):

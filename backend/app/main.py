@@ -51,6 +51,7 @@ from app.core.exceptions import (
     rate_limit_handler,
 )
 from app.core.rate_limit import RateLimitStateDefault, limiter
+from app.db.appointment_slot_preflight import assert_appointment_booking_ready
 from app.db.chroma import close_chroma, connect_chroma
 from app.db.indexes import (
     create_all_indexes,
@@ -82,6 +83,40 @@ async def _causelist_scheduler():
             raise
         except Exception:
             logging.getLogger(__name__).exception("Cause-list scheduler sweep failed")
+
+
+async def _lawyer_index_reconciler():
+    """Reconcile `lawyers_collection` against MongoDB on an interval (default 6h).
+
+    Every write to that index is fire-and-forget, because none of the actions
+    that trigger one — approving KYC, editing a profile, accepting a case —
+    should fail because an index is unavailable. That is the right trade, and
+    its cost is drift: a lawyer approved while Chroma was down is never indexed,
+    and nothing in the request path can ever notice. This is the thing that
+    notices.
+
+    Gated and locked exactly like the cause-list sweep: every worker runs the
+    loop, a Redis period-lock makes each sweep single-fire, and the TTL sits
+    well under the interval so a dead worker's claim frees itself. Sleeps FIRST
+    so a restart loop cannot turn into a re-embedding storm on a box with no GPU.
+    """
+    import asyncio
+    import logging
+    from app.core.redis_client import acquire_period_lock
+
+    interval = settings.lawyer_reconcile_hours * 3600
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            if await acquire_period_lock("lock:scheduler:lawyer_index",
+                                         ttl_seconds=55 * 60):
+                from app.ai.lawyer_embeddings import reconcile_index
+                await reconcile_index()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Lawyer index reconciliation sweep failed")
 
 
 async def _provenance_relay():
@@ -181,6 +216,55 @@ async def lifespan(app: FastAPI):
     # because from that point the missing index is not a slow query, it is a
     # guarantee that silently is not held.
     await enforce_v2_correctness_indexes()
+
+    # Appointments have no feature flag, so this is fail-closed and
+    # unconditional.
+    #
+    # The booking path writes `occupied_slots` and relies on the unique indexes
+    # from the first request after deploy. There is no "not ready yet" state it
+    # can survive: a booking accepted while the guarantee is absent is one
+    # nobody discovers is wrong until two people arrive for it.
+    #
+    # This checks the DATA as well as the indexes, because a valid index over
+    # rows that carry no slots enforces nothing while reporting itself healthy.
+    # It repairs nothing — index creation, the obsolete-index drop and the
+    # backfill are operator steps, so that restarting can never become a way to
+    # establish correctness state quietly.
+    await assert_appointment_booking_ready()
+
+    # APPOINTMENT EXPIRY: refuse to start when it is enabled and not ready.
+    #
+    # PLACED HERE, BEFORE EVERY `create_task` BELOW, AND THAT POSITION IS THE
+    # POINT. It used to sit further down, next to the appointment scheduler it
+    # belongs to, which read well and was wrong: by then the warmup task, the
+    # WebSocket subscriber, the cause-list scheduler, the lawyer index
+    # reconciler and both relays already existed. A guard that raises there
+    # aborts `lifespan` BEFORE `yield`, so the cleanup after `yield` never
+    # runs - every one of those tasks is left orphaned against a loop that is
+    # shutting down, which is where "Task was destroyed but it is pending"
+    # comes from, on top of whatever each was half way through.
+    #
+    # Nothing has been started yet at this line. Failing here is a clean
+    # refusal: the database is connected, the indexes are checked, and no
+    # background work exists to leak.
+    #
+    # After `connect_db`, `create_all_indexes` and the booking gate, because
+    # two of its three checks read from the database.
+    #
+    # COSTS NOTHING WHEN THE FLAG IS OFF, which is every deployment today: it
+    # returns before any Redis probe, index read or appointment query. That is
+    # a requirement rather than an optimisation, since this runs on every boot.
+    #
+    # It does NOT replace the scheduler's per-cycle checks. This catches a
+    # deployment that was never ready; those catch one that STOPS being ready -
+    # an index dropped during maintenance, a legacy row arriving from a
+    # restore, Redis going away an hour after boot.
+    from app.services.appointment_scheduler import (
+        assert_appointment_expiry_activation_ready,
+    )
+
+    await assert_appointment_expiry_activation_ready()
+
     connect_chroma()
     from app.services.notification_service import set_ws_manager
     from app.websockets.manager import notification_manager
@@ -200,6 +284,10 @@ async def lifespan(app: FastAPI):
     if redis_enabled() or settings.run_schedulers:
         scheduler_tasks = [
             _asyncio.create_task(_causelist_scheduler()),
+            # Behind the same gate as the cause-list sweep: it holds a Redis
+            # period-lock, and unlike the outbox relays its work is not
+            # lease-guarded, so it must not run on every worker at once.
+            _asyncio.create_task(_lawyer_index_reconciler()),
         ]
 
     # The provenance relay is NOT behind that gate.
@@ -216,11 +304,41 @@ async def lifespan(app: FastAPI):
     # default cannot silently leave the outbox undrained. It no-ops while the
     # feature flag is off.
     scheduler_tasks.append(_asyncio.create_task(_documents_v2_relay()))
+
+    # APPOINTMENT NOTIFICATIONS: no task at all unless a flag is on.
+    #
+    # Deliberately not behind the `redis_enabled() or run_schedulers` gate
+    # above, and deliberately not a loop that wakes to find nothing to do.
+    # `appointment_scheduler_task()` returns None while ALL THREE appointment
+    # flags are false - reminders, outcome nudges and expiry - so a default
+    # deployment has no appointment scheduler in existence
+    # — which is a stronger guarantee than one that exists and is trusted to
+    # keep deciding against acting.
+    #
+    # The logic lives in services/appointment_scheduler.py; this file only
+    # starts and stops it.
+    from app.services.appointment_scheduler import appointment_scheduler_task
+
+    # The expiry activation guard has ALREADY RUN, far above, before the first
+    # `create_task`. See the comment there for why it cannot live here.
+    appointment_task = appointment_scheduler_task()
     yield
     warmup_task.cancel()
     ws_subscriber_task.cancel()
     for task in scheduler_tasks:
         task.cancel()
+
+    # CANCELLED *AND AWAITED*. Cancellation only requests that a task stop; a
+    # task cancelled and never awaited can still be mid-dispatch when the
+    # process exits, and the loop closing underneath it is where "Task was
+    # destroyed but it is pending" comes from. Awaiting it means the cycle in
+    # flight has actually unwound before shutdown continues.
+    if appointment_task is not None:
+        appointment_task.cancel()
+        try:
+            await appointment_task
+        except _asyncio.CancelledError:
+            pass
 
     # Before Redis closes: threshold samples are batched, so up to
     # _FLUSH_EVERY-1 of them exist only in this process. Dropping them loses

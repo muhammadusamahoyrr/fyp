@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.dependencies import get_current_user, require_lawyer
 from app.schemas.case import (
+    CaseConfirm,
     CaseCreate,
     CaseOut,
     CaseUpdate,
@@ -56,9 +57,32 @@ async def update_case(
     body: CaseUpdate,
     current_user: dict = Depends(get_current_user),
 ):
-    updates = body.model_dump(exclude_none=True)
+    # mode="json" so `case_type` arrives as the plain string the rest of the
+    # code compares and stores, not as a CaseType member that only behaves like
+    # one because the enum happens to subclass str.
+    updates = body.model_dump(mode="json", exclude_none=True)
     return await case_service.update_case(
         case_id, updates, current_user["_id"], current_user["role"]
+    )
+
+
+@router.patch("/{case_id}/confirm", response_model=CaseOut)
+async def confirm_case(
+    case_id: str,
+    body: CaseConfirm = CaseConfirm(),
+    current_user: dict = Depends(get_current_user),
+):
+    """Promote the client's draft case to open.
+
+    The end of the intake. Until this call the case exists only so the analysis
+    had something real to run against — it cannot be sent to a lawyer, matched,
+    or booked against. Safe to call twice: a second press returns the same
+    already-open case rather than an error.
+    """
+    return await case_service.confirm_case(
+        case_id,
+        current_user["_id"],
+        body.case_type.value if body.case_type is not None else None,
     )
 
 

@@ -1,0 +1,272 @@
+/**
+ * How much of an uploaded file the analysis actually read — in words.
+ *
+ * One place, because this wording is a promise. The UI previously showed a file
+ * name and a size, which said nothing about whether the analysis had seen the
+ * document or only its cover sheet. A client who is told "3 of 5 pages produced
+ * no text" knows what to retype; one who is told nothing assumes it was read.
+ *
+ * SEVEN STATES, KEPT APART ON PURPOSE
+ *
+ *   pending         not analysed yet — extraction runs at conversion
+ *   complete        the whole document was read
+ *   partial         some of it reached the analysis, some did not
+ *   unreadable      none of it did
+ *   storage_only    kept and downloadable, but no extractor can ever read it
+ *   legacy_encoding read, but the text decoded to nothing usable
+ *   error           the upload itself failed
+ *
+ * Collapsing any two of these loses something the client needs. `storage_only`
+ * is not `unreadable`: nothing is wrong with the file and re-uploading the same
+ * format will not help. `pending` is not `complete`: nothing has been read yet.
+ * `error` is not `unreadable`: the bytes never arrived at all.
+ * `legacy_encoding` is not `unreadable` either: the file has a perfectly good
+ * text layer, it is simply written in a legacy non-Unicode Urdu encoding. The
+ * remedy is the part that differs — typed text or an English translation, and
+ * NOT a scan, which cannot help while Urdu OCR is unavailable.
+ *
+ * TWO THINGS THIS DELIBERATELY NEVER SAYS
+ *
+ * 1. That a page is a scan. We cannot tell a scanned page from a blank one, and
+ *    a label that guesses is worse than one that admits the gap.
+ * 2. That a file is fine before extraction has run.
+ */
+
+export const TONE_OK = "ok";
+export const TONE_WARN = "warn";
+export const TONE_BAD = "bad";
+export const TONE_NEUTRAL = "neutral";
+
+export const STATE_PENDING = "pending";
+export const STATE_COMPLETE = "complete";
+export const STATE_PARTIAL = "partial";
+export const STATE_UNREADABLE = "unreadable";
+export const STATE_STORAGE_ONLY = "storage_only";
+export const STATE_LEGACY_ENCODING = "legacy_encoding";
+export const STATE_ERROR = "error";
+
+/** Every state a file can be shown in. Used by tests to prove none collapse. */
+export const ALL_STATES = [
+    STATE_PENDING, STATE_COMPLETE, STATE_PARTIAL,
+    STATE_UNREADABLE, STATE_STORAGE_ONLY, STATE_LEGACY_ENCODING, STATE_ERROR,
+];
+
+/**
+ * What the client is told about a legacy Urdu encoding, in one place.
+ *
+ * Deliberately does NOT suggest a scan or a photo. Urdu OCR is not available,
+ * so a scan of this document would be exactly as unreadable as the original —
+ * advising one sends the client away to do work that cannot help them.
+ */
+export const LEGACY_ENCODING_MESSAGE =
+    "This document uses an unsupported legacy Urdu text encoding. Urdu OCR is "
+    + "not currently available. Please provide typed text or an English "
+    + "translation.";
+
+/**
+ * A counter, or null when it is genuinely unknown.
+ *
+ * `Number(null)` is 0, so passing a missing counter straight into Number turns
+ * "we could not determine the page count" into a confident zero — and a page
+ * count of 0 against a total of 5 renders as "5 of 5 pages produced no text",
+ * which is a definite claim manufactured out of an absence.
+ */
+function num(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
+
+/** Pages that yielded nothing, as a phrase, or "" when unknown or all yielded. */
+function unreadPages(ef) {
+    const total = num(ef?.pages_total);
+    const withText = num(ef?.pages_with_text);
+    if (total === null || withText === null) return "";
+    if (total <= 0 || withText >= total) return "";
+    // Pages whose text did not decode are NOT blank pages, and saying they
+    // "produced no text" points the client at the wrong remedy.
+    const untrusted = num(ef?.pages_text_untrusted) || 0;
+    const blank = Math.max(0, total - withText - untrusted);
+    const bits = [];
+    if (blank > 0) {
+        bits.push(`${blank} of ${total} page${total === 1 ? "" : "s"} produced no text`);
+    }
+    if (untrusted > 0) {
+        bits.push(`${untrusted} of ${total} page${total === 1 ? "" : "s"} `
+            + "use an unsupported legacy Urdu text encoding");
+    }
+    return bits.join(" · ");
+}
+
+function detailFor(ef) {
+    const bits = [];
+    const unread = unreadPages(ef);
+    if (unread) bits.push(unread);
+
+    const skipped = num(ef?.pages_skipped);
+    if (skipped !== null && skipped > 0) bits.push(`${skipped} not processed`);
+    const failed = num(ef?.pages_failed);
+    if (failed !== null && failed > 0) bits.push(`${failed} could not be read`);
+    for (const note of ef?.limitations || []) {
+        if (typeof note === "string" && note.startsWith("unsupported_part:")) {
+            bits.push(`${note.slice("unsupported_part:".length)} not read`);
+        }
+    }
+    return bits.join(" · ");
+}
+
+/**
+ * @returns {{state: string, tone: string, title: string, detail: string}}
+ *   Always an object — every file is in exactly one of the six states.
+ */
+export function extractionLabel(ef) {
+    // Checked before anything else: a file whose upload failed has no bytes on
+    // the server, so nothing downstream applies to it.
+    if (ef?.error) {
+        return {
+            state: STATE_ERROR, tone: TONE_BAD, title: "Upload failed",
+            detail: typeof ef.error === "string" ? ef.error : "",
+        };
+    }
+    if (ef?.uploading) {
+        return {
+            state: STATE_PENDING, tone: TONE_NEUTRAL, title: "Uploading…",
+            detail: "",
+        };
+    }
+    if (ef?.ocr_review_required) {
+        return {
+            state: STATE_PENDING, tone: TONE_WARN,
+            title: "Extracted text needs your review",
+            detail: "it will not be used in the analysis until you confirm it",
+        };
+    }
+    // Known at upload, before any extraction: the format can never be read.
+    if (ef?.analysis_support === "storage_only") {
+        return {
+            state: STATE_STORAGE_ONLY, tone: TONE_WARN,
+            title: "Stored, not analysed",
+            detail: typeof ef.notice === "string" && ef.notice
+                ? ef.notice
+                : "this format cannot be read for analysis",
+        };
+    }
+
+    const status = ef?.extraction_status;
+    // ONE contract for truncation. The live upload response and a restored
+    // intake describe it with different field names; both mean the analysis was
+    // shown less than was extracted, so both resolve here rather than at each
+    // call site.
+    const truncated = Boolean(ef?.prompt_truncated ?? ef?.truncated);
+
+    if (!status) {
+        return {
+            state: STATE_PENDING, tone: TONE_NEUTRAL, title: "Not analysed yet",
+            detail: "",
+        };
+    }
+
+    switch (status) {
+        case "readable":
+            // The extractor read the whole document — but the ANALYSIS may still
+            // have been shown only the beginning of it. Those are two different
+            // facts and the optimistic one must not win: a truncated file that
+            // says "Read in full" is a false success, and it is the one state a
+            // client would never think to question.
+            if (truncated) {
+                return {
+                    state: STATE_PARTIAL, tone: TONE_WARN,
+                    title: "Read in full, but shortened for the analysis",
+                    detail: "the analysis saw only the beginning of this file",
+                };
+            }
+            return { state: STATE_COMPLETE, tone: TONE_OK, title: "Read in full", detail: "" };
+
+        case "storage_only":
+            // Reported by the analysis as well as at upload now, so the state
+            // survives a refresh instead of decaying into "could not be read".
+            return {
+                state: STATE_STORAGE_ONLY, tone: TONE_WARN,
+                title: "Stored, not analysed",
+                detail: typeof ef?.notice === "string" && ef.notice
+                    ? ef.notice
+                    : "this format cannot be read for analysis",
+            };
+
+        case "partially_read":
+            return {
+                state: STATE_PARTIAL, tone: TONE_WARN, title: "Partially read",
+                detail: detailFor(ef) || "some of this document could not be read",
+            };
+
+        case "omitted_limit":
+            // Extracted fine; the analysis simply had no room for it. Fixable by
+            // removing another file, unlike anything else in this list — so it
+            // must not be collapsed into "could not be read".
+            return {
+                state: STATE_PARTIAL, tone: TONE_WARN,
+                title: "Not included in the analysis",
+                detail: "the analysis reached its length limit",
+            };
+
+        case "unextractable_encoding":
+            // NOT "could not be read", and never "Read status unknown". The
+            // file is fine and was read; its text is in an encoding we cannot
+            // decode, and only one remedy exists.
+            return {
+                state: STATE_LEGACY_ENCODING, tone: TONE_BAD,
+                title: "Unsupported legacy Urdu encoding",
+                detail: LEGACY_ENCODING_MESSAGE,
+            };
+
+        case "missing":
+            return {
+                state: STATE_UNREADABLE, tone: TONE_BAD, title: "File not found",
+                detail: "it is recorded but missing from storage",
+            };
+
+        case "invalid_path":
+            return {
+                state: STATE_UNREADABLE, tone: TONE_BAD,
+                title: "Could not be read", detail: "",
+            };
+
+        case "unreadable":
+            return {
+                state: STATE_UNREADABLE, tone: TONE_BAD, title: "Could not be read",
+                detail: detailFor(ef) || "no text could be extracted from this file",
+            };
+
+        default:
+            // An unknown status is reported as unknown. Guessing here would mean
+            // inventing a reassurance for a state we do not understand.
+            return {
+                state: STATE_UNREADABLE, tone: TONE_WARN,
+                title: "Read status unknown", detail: "",
+            };
+    }
+}
+
+/** True when the analysis did not see all of this file's readable content. */
+export function isIncomplete(ef) {
+    const { state } = extractionLabel(ef);
+    return state === STATE_PARTIAL || state === STATE_UNREADABLE
+        || state === STATE_STORAGE_ONLY || state === STATE_LEGACY_ENCODING;
+}
+
+/**
+ * Files the client should be told about on the ANALYSIS screen.
+ *
+ * `pending` is excluded: nothing has been analysed yet, so there is no gap to
+ * report. `error` is excluded too — the file never reached the server, so it is
+ * not a hole in the evidence the analysis used.
+ */
+export function incompleteFiles(files) {
+    return (Array.isArray(files) ? files : []).filter(isIncomplete);
+}
+
+/** True once extraction has run for this file, whatever the outcome. */
+export function isAnalysed(ef) {
+    const { state } = extractionLabel(ef);
+    return state !== STATE_PENDING && state !== STATE_ERROR;
+}

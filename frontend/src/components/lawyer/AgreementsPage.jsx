@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { listAgreements, signAgreement } from "@/lib/api.js";
+import { listAgreements, signAgreement, declineAgreement } from "@/lib/api.js";
 
 const STATUS_LABEL = { pending: "Pending", executed: "Executed", cancelled: "Cancelled", draft: "Draft" };
 const STATUS_BADGE = { Pending: "warn", Executed: "success", Cancelled: "danger", Draft: "gray" };
@@ -36,6 +36,11 @@ export function AgreementsPage() {
     const [active, setActive] = useState(null);
     const [signName, setSignName] = useState("");
     const [busy, setBusy] = useState(false);
+    // Same two-step guard as the client screen. The backend authorises decline
+    // by PARTY, not by role -- a lawyer is a party and may refuse -- so the
+    // destructive path needs the same protection here.
+    const [declineOpen, setDeclineOpen] = useState(false);
+    const [declineReason, setDeclineReason] = useState("");
     const [toast, setToast] = useState(null);
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
 
@@ -57,6 +62,20 @@ export function AgreementsPage() {
         setActive(null);
         reload();
     };
+
+    const doDecline = async () => {
+        setBusy(true);
+        const { error } = await declineAgreement(active.id, declineReason);
+        setBusy(false);
+        if (error) { showToast("❌ " + (error.message || "Failed to decline")); return; }
+        showToast("Agreement declined — the other party has been notified");
+        setActive(null);
+        setDeclineOpen(false);
+        setDeclineReason("");
+        reload();
+    };
+
+    const closeModal = () => { setActive(null); setDeclineOpen(false); setDeclineReason(""); };
 
     const awaitingMe = items.filter(a => a.needsMySig);
 
@@ -127,7 +146,7 @@ export function AgreementsPage() {
 
             {/* Detail / sign modal */}
             {active && (
-                <div onClick={() => setActive(null)} style={{
+                <div onClick={closeModal} style={{
                     position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.6)",
                     display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
                 }}>
@@ -143,7 +162,7 @@ export function AgreementsPage() {
                                 <div style={{ fontSize: 11, color: T.textMuted }}>{active.eto || "Awaiting first signature"}</div>
                             </div>
                             <Badge type={STATUS_BADGE[active.status] || "gray"}>{active.status}</Badge>
-                            <button onClick={() => setActive(null)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: T.textMuted, fontSize: 14 }}>✕</button>
+                            <button onClick={closeModal} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: T.textMuted, fontSize: 14 }}>✕</button>
                         </div>
 
                         <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
@@ -174,6 +193,33 @@ export function AgreementsPage() {
                                 <div style={{ fontSize: 10.5, color: T.textFaint, marginTop: 7, lineHeight: 1.5 }}>
                                     Recorded with timestamp and IP in the audit log; classified under the Electronic Transactions Ordinance 2002.
                                 </div>
+
+                                {!declineOpen ? (
+                                    <button type="button" onClick={() => setDeclineOpen(true)}
+                                        style={{ marginTop: 11, background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, color: T.textMuted, textDecoration: "underline", fontFamily: "inherit" }}>
+                                        I do not want to sign this
+                                    </button>
+                                ) : (
+                                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+                                        <div style={{ fontSize: 10.5, fontWeight: 700, color: T.danger, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>
+                                            Decline — this ends the agreement and cannot be undone
+                                        </div>
+                                        <input value={declineReason} maxLength={2000}
+                                            onChange={e => setDeclineReason(e.target.value)}
+                                            placeholder="Reason (optional — the other party will see this)"
+                                            style={{ width: "100%", height: 38, border: `1px solid ${T.border}`, borderRadius: 9, background: T.inputBg, color: T.text, fontSize: 13, padding: "0 12px", outline: "none", fontFamily: "inherit" }} />
+                                        <div style={{ display: "flex", gap: 9, marginTop: 9 }}>
+                                            <button type="button" disabled={busy} onClick={doDecline}
+                                                style={{ background: T.danger, border: `1px solid ${T.danger}`, borderRadius: 9, padding: "9px 15px", cursor: "pointer", fontSize: 12.5, color: "#fff", fontWeight: 700, fontFamily: "inherit" }}>
+                                                {busy ? "Declining…" : "Confirm decline"}
+                                            </button>
+                                            <button type="button" disabled={busy} onClick={() => { setDeclineOpen(false); setDeclineReason(""); }}
+                                                style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 9, padding: "9px 15px", cursor: "pointer", fontSize: 12.5, color: T.text, fontFamily: "inherit" }}>
+                                                Keep reviewing
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

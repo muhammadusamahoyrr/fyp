@@ -6,8 +6,24 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "./CaseContext.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge, Tooltip } from "@/components/shared/shared.jsx";
-import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence } from "@/lib/api.js";
+import { intakeStart, intakeSaveStep, intakeConvert, intakeGet, intakeClarify, transcribeAudio, uploadIntakeEvidence, confirmCase, deleteIntakeEvidence, downloadIntakeEvidence, getResumableIntake, getIntakeOcrReview, confirmIntakeOcrPage } from "@/lib/api.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
+import { useAuth } from "@/context/AuthContext.jsx";
+import { readIntakeValue, writeIntakeValue, clearIntakeValue } from "@/lib/intakeStorage.js";
+import { escapeHtml } from "@/lib/escapeHtml.js";
+import { extractionLabel, incompleteFiles, TONE_OK, TONE_WARN, TONE_BAD, TONE_NEUTRAL } from "@/lib/extractionStatus.js";
+
+/* One colour per tone, so a new state cannot arrive looking like a reassurance
+ * simply because nobody added it to a ternary. */
+const EXTRACTION_TONE_COLOUR = {
+    [TONE_OK]: null,          // falls back to the muted body colour
+    [TONE_WARN]: "#b45309",
+    [TONE_BAD]: "#b91c1c",
+    [TONE_NEUTRAL]: null,
+};
+const EXTRACTION_TONE_ICON = {
+    [TONE_OK]: "✓", [TONE_WARN]: "⚠", [TONE_BAD]: "✕", [TONE_NEUTRAL]: "•",
+};
 
 // Encode Float32 PCM as 16-bit mono WAV (no ffmpeg on backend)
 function _pcmToWav(samples, sampleRate) {
@@ -90,6 +106,17 @@ const GROUNDING_NOTE = {
     pipeline_failed: "Automated analysis was unavailable for this case. Please have a qualified lawyer review your situation.",
     unparseable: "The analysis could not be verified. Please confirm these steps with a qualified lawyer.",
     no_actions: "No specific steps were produced for this case.",
+    // A statute was named that does NOT appear in the law found for this case.
+    // The generic "not verified" note below would badly undersell that: it
+    // reads as a missing check, when what happened is that a citation may be
+    // invented. This is the one status a reader most needs stated plainly.
+    citations_unverified: "One or more laws cited here could not be matched to any legislation found for your case, and may not exist as stated. Do not rely on these citations — have a qualified lawyer check them.",
+    // The verifier passed the analysis but its own per-step assessment
+    // contradicted that, so the pass was withdrawn.
+    claims_disagree: "The verification of these steps was inconsistent, so they are being treated as unverified. Please confirm them with a qualified lawyer.",
+    // Nothing in the analysis rested on a law section that could be resolved,
+    // so there was nothing to check it against.
+    no_bound_citations: "These steps could not be tied to any specific law section, so they have not been checked. Please confirm them with a qualified lawyer.",
     unverified: "These steps have not been verified against Pakistani law. Please confirm them with a qualified lawyer.",
 };
 
@@ -114,6 +141,15 @@ const ModIntake = () => {
     const { T }  = useLang();
     const isMobile = useIsMobile();
     const { completeIntake, addNotification } = useCase();
+    const { user } = useAuth();
+    const userId = user?._id || user?.id || null;
+
+    // Every remembered intake value is keyed by the signed-in user. See
+    // intakeStorage.js for why a shared key left the NEXT account unable to
+    // start an intake at all.
+    const scopedGet    = (name)        => readIntakeValue(name, userId);
+    const scopedSet    = (name, value) => writeIntakeValue(name, userId, value);
+    const scopedRemove = (name)        => clearIntakeValue(name, userId);
     const [step, setStep] = useState(1);
 
     // ── Core intake fields ─────────────────────────────────────────
@@ -125,9 +161,19 @@ const ModIntake = () => {
 
     // ── Backend session ────────────────────────────────────────────
     const [intakeToken, setIntakeToken] = useState(null);
+    const [intakeBootError, setIntakeBootError] = useState("");
+    const [intakeBooting, setIntakeBooting] = useState(false);
+    const intakeBootInFlight = useRef(null);
     const [intakeSubmitting, setIntakeSubmitting] = useState(false);
     const [converting, setConverting] = useState(false);
+    // Whether the draft has been promoted. Drives the final screen, which
+    // must not claim a case is ready while it is still a draft.
+    const [caseConfirmed, setCaseConfirmed] = useState(false);
     const [caseId, setCaseId] = useState(null);
+    // The category the CASE currently holds, as opposed to the one selected in
+    // the UI. Keeping them apart is what lets the final step tell an actual
+    // change from a confirmation and skip a pointless write.
+    const [convertedCaseType, setConvertedCaseType] = useState(null);
 
     // ── AI output ─────────────────────────────────────────────────
     const [aiStructured, setAiStructured] = useState(null);
@@ -149,6 +195,12 @@ const ModIntake = () => {
     const [hasEvidence, setHasEvidence]       = useState(false);
     const [evidenceDesc, setEvidenceDesc]     = useState("");
     const [evidenceFiles, setEvidenceFiles]   = useState([]); // [{file_id,filename,size,content_type,uploading,error}]
+    const [ocrReviewRequired, setOcrReviewRequired] = useState(false);
+    const [ocrReviewPages, setOcrReviewPages] = useState([]);
+    const [ocrReviewLoading, setOcrReviewLoading] = useState(false);
+    const [ocrConfirming, setOcrConfirming] = useState(null);
+    const [ocrReviewError, setOcrReviewError] = useState("");
+    const [ocrReviewFileIds, setOcrReviewFileIds] = useState([]);
     const fileInputRef                        = useRef(null);
     const [desiredOutcome, setDesiredOutcome] = useState("");
 
@@ -163,18 +215,135 @@ const ModIntake = () => {
     ];
     const completedSteps = Math.max(0, step - 1);
     const progress = (completedSteps / steps.length) * 100;
+    const ocrReviewComplete = ocrReviewFileIds.length > 0
+        && ocrReviewPages.length > 0
+        && ocrReviewFileIds.every(fileId =>
+            ocrReviewPages.some(page => page.file_id === fileId)
+        )
+        && ocrReviewPages.every(page => page.confirmed === true);
+
+    // ── Evidence removal, on the SERVER ────────────────────────────
+    //
+    // The ✕ used to do `setEvidenceFiles(prev => prev.filter(...))` and nothing
+    // else. The row vanished, the file stayed on disk and on the intake for
+    // ever, the per-intake quota still counted it, and the AI analysis still
+    // described it as uploaded. The client had every reason to believe it was
+    // gone.
+    const [removingFile, setRemovingFile] = useState(null);
+
+    const loadOcrReview = async (token, files) => {
+        const ids = (files || []).map(f => f.file_id).filter(Boolean);
+        setOcrReviewFileIds(ids);
+        setOcrReviewError("");
+        setOcrReviewLoading(true);
+        const responses = await Promise.all(
+            ids.map(fileId => getIntakeOcrReview(token, fileId))
+        );
+        if (responses.some(result => result.error)) {
+            setOcrReviewError("Could not load the extracted text.");
+            toast.show("Could not load the extracted text. Try again.", "error");
+            setOcrReviewLoading(false);
+            return false;
+        }
+        const pagesByFile = responses.map(({ data }, index) =>
+            (Array.isArray(data) ? data : [])
+                .filter(page => page?.file_id === ids[index])
+                .map(page => ({
+                    ...page,
+                    draft_text: page.confirmed_text ?? page.text ?? "",
+                }))
+        );
+        if (ids.length > 0 && pagesByFile.some(pages => pages.length === 0)) {
+            setOcrReviewError("One or more extracted files has no current review pages.");
+            toast.show(
+                "One or more extracted files has no current review pages. Reload the intake before continuing.",
+                "error",
+            );
+            setOcrReviewPages([]);
+            setOcrReviewLoading(false);
+            return false;
+        }
+        const pages = pagesByFile.flat();
+        setOcrReviewPages(pages);
+        setOcrReviewLoading(false);
+        return true;
+    };
+
+    const confirmOcrPage = async page => {
+        setOcrConfirming(page.revision_id);
+        const { error } = await confirmIntakeOcrPage(
+            intakeToken,
+            page.file_id,
+            page.revision_id,
+            {
+                source_sha256: page.source_sha256,
+                text_sha256: page.text_sha256,
+                confirmed_text: page.draft_text,
+            },
+        );
+        setOcrConfirming(null);
+        if (error) {
+            toast.show(error?.message || "Could not confirm this page. Reload and try again.", "error");
+            return;
+        }
+        setOcrReviewPages(prev => prev.map(p =>
+            p.revision_id === page.revision_id
+                ? { ...p, confirmed: true, review_state: "confirmed", confirmed_text: p.draft_text }
+                : p
+        ));
+    };
+
+    const removeEvidence = async (ef) => {
+        // A row that never reached the server (a failed upload) has nothing to
+        // delete; drop it locally.
+        if (!intakeToken || ef.error || !ef.file_id) {
+            setEvidenceFiles(prev => prev.filter(x => x.file_id !== ef.file_id));
+            return;
+        }
+        setRemovingFile(ef.file_id);
+        const { error } = await deleteIntakeEvidence(intakeToken, ef.file_id);
+        setRemovingFile(null);
+        if (error) {
+            toast.show(error.message || "Could not remove that file. Please try again.", "error", 3500);
+            return;   // keep the row: the file is still there
+        }
+        setEvidenceFiles(prev => prev.filter(x => x.file_id !== ef.file_id));
+        toast.show("File removed.", "success", 2000);
+    };
+
+    const downloadEvidence = async (ef) => {
+        if (!intakeToken || !ef.file_id) return;
+        const result = await downloadIntakeEvidence(
+            intakeToken, ef.file_id, ef.filename
+        );
+        if (result?.error) {
+            toast.show(result.error || "Could not download that file.", "error", 3500);
+        }
+    };
 
     // ── Export helpers ─────────────────────────────────────────────
+    //
+    // EVERY value below goes through esc(). The print view is built as a string
+    // and handed to document.write(), so an unescaped value is markup: a
+    // description containing an <img onerror> tag executed in a popup that
+    // shares this origin — able to read the intake token out of localStorage
+    // and call the API as the signed-in client.
+    //
+    // The client's own description is the obvious source, but not the only one:
+    // the AI summary, the law list and each citation's note are model output
+    // derived from retrieved corpus text, and none of it is trusted markup.
+    const esc = escapeHtml;
+
     const _buildPrintHTML = () => {
         const caseTypeLabel = CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput;
         const provinceLabel = PROVINCES.find(p => p.value === province)?.label || province;
         const date = new Date().toLocaleDateString("en-PK", { year: "numeric", month: "long", day: "numeric" });
 
         const laws = aiStructured?.applicable_laws?.length
-            ? aiStructured.applicable_laws.map((l, i) => `<li>${i + 1}. ${l}</li>`).join("")
+            ? aiStructured.applicable_laws.map((l, i) => `<li>${i + 1}. ${esc(l)}</li>`).join("")
             : "<li>Not available</li>";
         const actions = aiStructured?.recommended_actions?.length
-            ? aiStructured.recommended_actions.map((a, i) => `<li>${i + 1}. ${a}</li>`).join("")
+            ? aiStructured.recommended_actions.map((a, i) => `<li>${i + 1}. ${esc(a)}</li>`).join("")
             : "<li>Not available</li>";
 
         return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
@@ -201,22 +370,22 @@ const ModIntake = () => {
 <div class="header">
   <div><div class="brand">Attorney.AI</div><h1>Legal Case Summary</h1></div>
   <div class="meta">
-    <div>Case ID: ${caseId ? `…${caseId.slice(-8)}` : "Pending"}</div>
-    <div>Date: ${date}</div>
+    <div>Case ID: ${caseId ? `…${esc(caseId.slice(-8))}` : "Pending"}</div>
+    <div>Date: ${esc(date)}</div>
     <div>Status: Ready</div>
   </div>
 </div>
 
 <h2>Case Details</h2>
 <div class="grid">
-  <div class="field"><div class="field-label">Case Type</div><div class="field-value">${caseTypeLabel}</div></div>
-  <div class="field"><div class="field-label">Province</div><div class="field-value">${provinceLabel}</div></div>
-  <div class="field"><div class="field-label">Your Role</div><div class="field-value">${role || "Not specified"}</div></div>
-  <div class="field"><div class="field-label">Urgency</div><div class="field-value">${urgency}</div></div>
+  <div class="field"><div class="field-label">Case Type</div><div class="field-value">${esc(caseTypeLabel)}</div></div>
+  <div class="field"><div class="field-label">Province</div><div class="field-value">${esc(provinceLabel)}</div></div>
+  <div class="field"><div class="field-label">Your Role</div><div class="field-value">${esc(role || "Not specified")}</div></div>
+  <div class="field"><div class="field-label">Urgency</div><div class="field-value">${esc(urgency)}</div></div>
 </div>
 
 <h2>Case Summary</h2>
-<div class="summary">${aiStructured?.summary || description || "Not available"}</div>
+<div class="summary">${esc(aiStructured?.summary || description || "Not available")}</div>
 
 <h2>Applicable Laws</h2>
 <ul>${laws}</ul>
@@ -224,10 +393,10 @@ const ModIntake = () => {
 <h2>Recommended Actions</h2>
 <ul>${actions}</ul>
 ${aiStructured?.grounding_status && aiStructured.grounding_status !== "grounded"
-                ? `<p class="disclaimer" style="margin-top:8px">⚠️ ${GROUNDING_NOTE[aiStructured.grounding_status] || GROUNDING_NOTE.unverified}</p>`
+                ? `<p class="disclaimer" style="margin-top:8px">⚠️ ${esc(GROUNDING_NOTE[aiStructured.grounding_status] || GROUNDING_NOTE.unverified)}</p>`
                 : ""}
 
-${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${aiStructured.risk_level}">${aiStructured.risk_level} risk</span>` : ""}
+${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${esc(aiStructured.risk_level)}">${esc(aiStructured.risk_level)} risk</span>` : ""}
 
 <div class="disclaimer">
   <strong>Disclaimer:</strong> This case summary is generated by an AI system for general informational purposes only and does not constitute legal advice. Please consult a qualified Pakistani lawyer before taking any legal action.
@@ -291,20 +460,41 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
         window.location.href = `mailto:?subject=${subject}&body=${body}`;
     };
 
-    const canGoToStep = (target) => {
-        if (target <= step) return true;
-        if (target === 2) return !!role && !!province;
-        if (target >= 3) return !!role && !!province;
-        return false;
+    // What each step forward actually requires. Steps 3+ used to need only
+    // role + province, the same as step 2, so the stepper let a client jump
+    // straight from the first screen to the last and reach a "Case Intake
+    // Complete" screen with no description, no analysis and no case in the
+    // database — the Case ID simply read "Pending".
+    //
+    // Going BACK is always allowed; only moving ahead of your own progress is
+    // gated.
+    const stepBlocker = (target) => {
+        // A CONVERTED intake cannot be edited. `save_step` refuses a completed
+        // intake, so walking back to the questionnaire ends in "Intake already
+        // completed" — an error about a screen the stepper invited them onto.
+        // Once a case exists, the earlier steps are history.
+        if (caseId && target < 4) {
+            return "This case has already been analysed — its details can no longer be edited here";
+        }
+        if (target <= step) return null;
+        if (!role) return "Please select your role first";
+        if (!province) return "Please select your province";
+        if (target >= 3 && !(description.trim() || voiceTranscript.trim()))
+            return "Please describe your legal issue before continuing";
+        if (target >= 4 && !caseId)
+            return "Your case is still being prepared — finish step 3 first";
+        // Step 5 is the confirmation screen. Reaching it is safe: the case
+        // remains a draft until its final button atomically saves the chosen
+        // category and promotes it to open.
+        return null;
     };
 
+    const canGoToStep = (target) => stepBlocker(target) === null;
+
     const tryGoToStep = (target) => {
-        if (canGoToStep(target)) {
-            setStep(target);
-        } else {
-            if (!role) toast.show("Please select your role first", "warn", 2500);
-            else if (!province) toast.show("Please select your province", "warn", 2500);
-        }
+        const blocker = stepBlocker(target);
+        if (blocker) toast.show(blocker, "warn", 2500);
+        else setStep(target);
     };
 
     useEffect(() => {
@@ -318,22 +508,180 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
         }
     }, [step]);
 
-    // Start or resume intake session on mount
-    useEffect(() => {
-        const saved = typeof window !== "undefined" && localStorage.getItem("aai-intake-token");
-        if (saved) {
-            setIntakeToken(saved);
-        } else {
-            intakeStart().then(({ data, error }) => {
-                if (data?.session_token) {
-                    setIntakeToken(data.session_token);
-                    localStorage.setItem("aai-intake-token", data.session_token);
-                } else if (error) {
-                    console.warn("Intake start failed:", error);
-                }
-            });
+    // Put the form back the way the client left it.
+    //
+    // The token was the ONLY thing a refresh restored, so the browser held a
+    // session pointing at a half-filled intake and showed every field blank.
+    // The answers were on the server the whole time; nothing asked for them.
+    //
+    // Only fills fields that are still empty. A restore that overwrote what the
+    // client is currently typing would be a worse bug than the one it fixes —
+    // this effect can run after the user has already started.
+    const restoreFromServer = (data) => {
+        const steps = data?.steps || {};
+        const s1 = steps["1"] || {};
+        const s2 = steps["2"] || {};
+        const s3 = steps["3"] || {};
+        const s4 = steps["4"] || {};
+        const s5 = steps["5"] || {};
+
+        if (s1.party_role) setRole(r => r || (s1.party_role === "plaintiff" ? "Plaintiff" : "Defendant"));
+        if (s1.province) setProvince(p => p || s1.province);
+        if (s2.case_type) setCaseTypeInput(c => c || s2.case_type);
+        if (s2.urgency) setUrgency(u => (u === "medium" ? s2.urgency : u));
+        if (s3.incident_description) setDescription(d => d || s3.incident_description);
+        if (typeof s4.has_evidence === "boolean") setHasEvidence(h => h || s4.has_evidence);
+        if (s4.evidence_description) setEvidenceDesc(e => e || s4.evidence_description);
+        if (s5.desired_outcome) setDesiredOutcome(o => o || s5.desired_outcome);
+
+        // Uploaded files, so the ✕ and the list describe what the SERVER holds
+        // rather than what this page happens to remember having sent.
+        if (Array.isArray(data?.evidence_files) && data.evidence_files.length) {
+            setEvidenceFiles(prev => (prev.length ? prev : data.evidence_files));
         }
-    }, []);
+
+        // Clarification is an ordered Q&A list; rounds are positions in it.
+        const qa = Array.isArray(data?.clarification_qa) ? data.clarification_qa : [];
+        if (qa.length) {
+            const setQ = [setClarifyQ1, setClarifyQ2, setClarifyQ3, setClarifyQ4];
+            const setA = [setClarifyA1, setClarifyA2, setClarifyA3, setClarifyA4];
+            qa.slice(0, 4).forEach((entry, i) => {
+                if (entry?.q) setQ[i](v => v || entry.q);
+                if (entry?.a) setA[i](v => v || entry.a);
+            });
+            // The round to resume on is the first unanswered question, or done.
+            const firstOpen = qa.findIndex(e => !e?.a);
+            if (firstOpen === -1) {
+                setClarifyDone(true);
+                setClarifyRound(5);
+            } else {
+                setClarifyRound(r => r || Math.min(firstOpen + 1, 4));
+            }
+        }
+    };
+
+    // Start or resume intake session on mount.
+    //
+    // Waits for the user id: the storage key contains it, so reading before
+    // sign-in resolves would miss a resumable token and mint a second session.
+    // Everything needed to put the client back into an intake, from one
+    // response. Shared by the token path and the server-resume path below, so
+    // the two cannot drift into restoring different things.
+    const adoptIntake = (data) => {
+        // Case data wins over historical step 2 input. The AI may have
+        // corrected it, or the client may have confirmed an override later.
+        if (data.case_type) {
+            setCaseTypeInput(data.case_type);
+            setConvertedCaseType(data.case_type);
+        } else if (data.ai_case_type) {
+            setConvertedCaseType(data.ai_case_type);
+        }
+        if (data.case_id) {
+            setCaseId(data.case_id);
+            scopedSet("aai-case-id", data.case_id);
+            // The CASE says whether it was confirmed; the intake only says a
+            // case was produced. Without this a refresh would offer to confirm
+            // an already-open case.
+            if (data.case_status && data.case_status !== "draft") {
+                setCaseConfirmed(true);
+            }
+        }
+        if (data.ai_structured_case?.summary &&
+            data.ai_structured_case.summary !== "pending") {
+            setAiStructured(data.ai_structured_case);
+        }
+        restoreFromServer(data);
+
+        if (data.ocr_review_required) {
+            setOcrReviewRequired(true);
+            const reviewFiles = (data.evidence_files || []).filter(
+                f => f.ocr_review_required
+            );
+            void loadOcrReview(data.session_token, reviewFiles);
+        }
+
+        // WHERE they were, not just WHAT they typed.
+        //
+        // `current_step` was returned by the API and read by nothing, so a
+        // refresh mid-intake restored every answer and then showed step 1 — the
+        // client had to click forward through screens they had already
+        // completed, re-reading their own answers to work out where they were.
+        //
+        // Capped at 3 for an unfinished intake: step 4 is the analysis screen
+        // and needs a case, which only conversion produces.
+        if (data.completed) {
+            setStep(s => (s < 4 ? 4 : s));
+        } else {
+            const at = Number(data.current_step) || 1;
+            setStep(s => (s > 1 ? s : Math.min(Math.max(at, 1), 3)));
+        }
+    };
+
+    // ASK THE SERVER, then start fresh only if it has nothing.
+    //
+    // Resuming used to depend entirely on the token in this browser's storage.
+    // Sign-out clears it, clearing site data clears it, and a second device
+    // never had it — and after conversion that token is the only route to a
+    // draft case awaiting confirmation. So signing out between converting and
+    // confirming left a real case its owner could never confirm and this screen
+    // could never find. The server knows which intakes are unfinished.
+    const resumeOrStart = async () => {
+        if (intakeBootInFlight.current) return intakeBootInFlight.current;
+        const work = (async () => {
+            setIntakeBooting(true);
+            setIntakeBootError("");
+            const { data: resumable, error: resumeError } = await getResumableIntake();
+            if (resumeError) {
+                // Unknown is not empty. Starting here would create another
+                // intake precisely when the server failed to tell us whether
+                // one already exists.
+                setIntakeBootError("Could not check your saved intake. Try again when your connection is stable.");
+                return;
+            }
+            if (resumable?.session_token) {
+                setIntakeToken(resumable.session_token);
+                scopedSet("aai-intake-token", resumable.session_token);
+                adoptIntake(resumable);
+                return;
+            }
+            const { data: started, error } = await intakeStart();
+            if (started?.session_token) {
+                setIntakeToken(started.session_token);
+                scopedSet("aai-intake-token", started.session_token);
+            } else if (error) {
+                setIntakeBootError("Could not start an intake. Please try again.");
+            }
+        })().finally(() => {
+            setIntakeBooting(false);
+            intakeBootInFlight.current = null;
+        });
+        intakeBootInFlight.current = work;
+        return work;
+    };
+
+    useEffect(() => {
+        if (!userId) return;
+        const saved = scopedGet("aai-intake-token");
+        if (!saved) {
+            resumeOrStart();
+            return;
+        }
+        setIntakeToken(saved);
+        intakeGet(saved).then(({ data, error }) => {
+            if (error || !data) {
+                // The token is unusable — expired, or belonging to nobody this
+                // account can see. Drop it and ASK THE SERVER rather than
+                // starting fresh: an unusable token in storage is exactly the
+                // situation where an unfinished intake is most likely to exist.
+                scopedRemove("aai-intake-token");
+                setIntakeToken(null);
+                resumeOrStart();
+                return;
+            }
+            adoptIntake(data);
+        });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userId]);
 
     // Trigger clarify fetch whenever step 3 is reached via tab navigation
     // (handleStep2Continue sets clarifyLoading=true before its own fetch, so this
@@ -355,8 +703,22 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
         if (!role)     { toast.show("Please select your role first", "warn", 2500); return; }
         if (!province) { toast.show("Please select your province", "warn", 2500); return; }
         if (intakeToken) {
-            const { error } = await intakeSaveStep(intakeToken, 1, { province });
-            if (error) toast.show("Could not save — check your connection and try again.", "error", 3000);
+            // party_role goes with it. The Plaintiff/Defendant choice drove the
+            // whole first screen and then lived only in React state — it was
+            // never sent anywhere, so nothing downstream could tell which side
+            // of the dispute the client was on.
+            const { error } = await intakeSaveStep(intakeToken, 1, {
+                province,
+                party_role: role.toLowerCase(),
+            });
+            // STOP. This used to warn and advance anyway, so a client whose save
+            // failed carried on through the whole questionnaire while the server
+            // held none of it — and the loss only surfaced at conversion, as a
+            // "steps not completed" error about a step they had filled in.
+            if (error) {
+                toast.show("Could not save — check your connection and try again.", "error", 3500);
+                return;
+            }
         }
         setStep(2);
     };
@@ -379,7 +741,14 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                 incident_date: null,
                 incident_location: null,
             });
-            if (r2.error || r3.error) toast.show("Could not save — check your connection and try again.", "error", 3000);
+            // Same rule as step 1: the description is the single most important
+            // thing the client types, and advancing without it stored means the
+            // AI analysis later runs on nothing.
+            if (r2.error || r3.error) {
+                toast.show("Could not save — check your connection and try again.", "error", 3500);
+                setClarifyLoading(false);
+                return;
+            }
         }
         setStep(3);
         // P2 — fetch Q1 immediately after entering step 3
@@ -432,7 +801,10 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
 
     // ── Step 3 → 4: save remaining steps, convert, fetch AI ───────
     const handleConvertAndSummarise = async () => {
-        if (caseId) { setStep(4); return; } // already converted
+        if (caseId && aiStructured && !ocrReviewRequired) {
+            setStep(4);
+            return;
+        }
 
         if (!intakeToken) {
             toast.show("Questionnaire complete", "success");
@@ -446,7 +818,19 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
         // convert_to_case reads clarification_qa and appends Q&A to the description itself.
         const lastAnswer = clarifyA4.trim() || clarifyA3.trim() || clarifyA2.trim();
         if (intakeToken && lastAnswer) {
-            await intakeClarify(intakeToken, lastAnswer);
+            // The result was discarded. `convert_to_case` folds the stored Q&A
+            // into the text it analyses, so a failure here meant the analysis
+            // ran without the client's final answer — and nothing said so. They
+            // had just typed it, so its absence is invisible to them.
+            const { error: clarifyErr } = await intakeClarify(intakeToken, lastAnswer);
+            if (clarifyErr) {
+                toast.show(
+                    "Could not save your last answer — check your connection and try again.",
+                    "error", 4000,
+                );
+                setConverting(false);
+                return;   // do NOT analyse without it
+            }
         }
         const r4 = await intakeSaveStep(intakeToken, 4, {
             has_evidence: hasEvidence,
@@ -478,11 +862,38 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
             return; // do not advance to step 4 on failure
         }
 
+        if (converted?.ocr_review_required) {
+            setOcrReviewRequired(true);
+            const loaded = await loadOcrReview(
+                savedToken,
+                Array.isArray(converted.ocr_files) ? converted.ocr_files : [],
+            );
+            setConverting(false);
+            if (loaded) {
+                toast.show(
+                    "Review the extracted text before AI analysis continues.",
+                    "info", 5000,
+                );
+            }
+            return;
+        }
+
         if (converted?.case_id) {
             setCaseId(converted.case_id);
-            localStorage.setItem("aai-case-id", converted.case_id);
-            localStorage.removeItem("aai-intake-token");
-            setIntakeToken(null);
+            setConvertedCaseType(converted.ai_case_type || null);
+            scopedSet("aai-case-id", converted.case_id);
+            // THE TOKEN STAYS until the client confirms.
+            //
+            // It used to be cleared here, at conversion. That was safe while
+            // conversion was the last step — but confirmation now happens
+            // afterwards, on the next screen, and the token is the only thing
+            // that can reopen the intake. Clearing it here meant a refresh
+            // between the two started a brand-new intake and left the draft
+            // unreachable AND unconfirmable: a case the client owns, that
+            // nothing in the UI can ever promote, for the life of the account.
+            //
+            // `scopedRemove` moved to handleSubmit, where the intake is
+            // genuinely finished.
 
             // If AI corrected the case type, update UI and notify user
             if (converted.type_was_corrected && converted.ai_case_type) {
@@ -493,7 +904,6 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                     "info", 5000
                 );
             }
-
             // Fetch the AI-structured case data
             const { data: intake } = await intakeGet(savedToken);
             if (intake?.ai_structured_case?.summary && intake.ai_structured_case.summary !== "pending") {
@@ -501,14 +911,59 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
             }
         }
 
+        setOcrReviewRequired(false);
         setConverting(false);
         toast.show("✅ Case analysis complete", "success", 3000);
         setStep(4);
     };
 
+    // ── Step 4: confirm the draft ──────────────────────────────────
+    //
+    // This button used to show "✅ Case saved!" and advance the screen. It
+    // called nothing: the case had been created and made live back at step 3,
+    // so the subtitle inviting the client to "review and confirm before saving"
+    // described a save that had already happened and a confirmation with
+    // nothing to confirm.
+    //
+    // The case is now created as a DRAFT, and this is the call that makes it
+    // real. Until it lands the case cannot be sent to a lawyer, matched, or
+    // booked against.
+    const handleContinueToCategory = () => {
+        if (!caseId) {
+            // No case to confirm — the conversion never completed. Advancing
+            // would show a "complete" screen for something that does not exist.
+            toast.show("Your case is not ready yet — go back and finish step 3.", "warn", 3500);
+            return;
+        }
+        // The next screen is where the client confirms the authoritative
+        // category. Opening the case here allowed matching to observe the old
+        // AI category before the client's final choice was persisted.
+        setStep(5);
+    };
+
     // ── Final submit (Step 5) ──────────────────────────────────────
     const handleSubmit = async () => {
         setIntakeSubmitting(true);
+
+        if (!caseId || !caseTypeInput) {
+            toast.show("Choose a case category before confirming.", "warn", 3000);
+            setIntakeSubmitting(false);
+            return;
+        }
+
+        // One backend CAS stores the category and opens the case. There is no
+        // interval in which an open case still carries the superseded type.
+        const { error } = await confirmCase(caseId, caseTypeInput);
+        if (error) {
+            toast.show(error.message || "Could not confirm your case. Please try again.", "error", 4000);
+            setIntakeSubmitting(false);
+            return;
+        }
+        setConvertedCaseType(caseTypeInput);
+        setCaseConfirmed(true);
+        scopedRemove("aai-intake-token");
+        setIntakeToken(null);
+
         completeIntake({
             role,
             caseType:    caseTypeInput,
@@ -525,8 +980,21 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
             time: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
             desc: `Case structured — ${role} · ${CASE_TYPES.find(c => c.value === caseTypeInput)?.label || caseTypeInput} · ${province}`,
         });
-        toast.show("Case submitted for attorney review!", "success", 3000);
-        setTimeout(() => toast.show("You'll hear from us within 2 hours", "info", 2000), 3000);
+        // WHAT ACTUALLY HAPPENED, not what sounds finished.
+        //
+        // This said "Case submitted for attorney review!" followed by "You'll
+        // hear from us within 2 hours". Conversion creates an OPEN case. It
+        // assigns no lawyer, notifies no lawyer, and starts no clock — there is
+        // nobody reviewing it and no two-hour commitment behind it. A client who
+        // believed that would wait instead of choosing a lawyer, which is the
+        // one action that actually moves their matter forward.
+        toast.show("Case confirmed — you can now choose a lawyer.", "success", 3000);
+        setTimeout(
+            () => toast.show(
+                "Next: choose a lawyer to send it to — nobody is reviewing it yet.",
+                "info", 4500),
+            3000,
+        );
         setIntakeSubmitting(false);
     };
 
@@ -648,6 +1116,14 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
 
     return (
         <div>
+            {intakeBootError && (
+                <Card style={{ padding: 16, marginBottom: 16, border: `1px solid ${t.danger}55` }}>
+                    <div style={{ color: t.danger, fontSize: 13, marginBottom: 10 }}>{intakeBootError}</div>
+                    <BtnOutline disabled={intakeBooting} onClick={resumeOrStart}>
+                        {intakeBooting ? "Checking…" : "Try again"}
+                    </BtnOutline>
+                </Card>
+            )}
             {/* Compact horizontal stepper */}
             <div style={{ display: "flex", alignItems: "center", marginBottom: 28, padding: "12px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, gap: 0 }}>
                 {steps.map((s, i) => {
@@ -757,9 +1233,17 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                         {/* Top nav bar */}
                         <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
                             <BtnOutline onClick={() => setStep(1)} style={{ fontSize: 13, padding: "8px 16px", border: "none" }}>← Back</BtnOutline>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 20, border: `1.5px solid ${t.warn}40`, background: `${t.warn}15`, color: t.warn, fontSize: 12, fontWeight: 700 }}>
-                                📁 Case AIQ-2026-0042
-                            </div>
+                            {/* The REAL case reference, or nothing.
+                                This was a hardcoded file number, shown to every
+                                client on every intake, on a screen where no case
+                                exists yet. A fabricated reference on a legal
+                                record is not decoration: a client could quote it
+                                to a court or to a lawyer. */}
+                            {caseId && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 20, border: `1.5px solid ${t.warn}40`, background: `${t.warn}15`, color: t.warn, fontSize: 12, fontWeight: 700 }}>
+                                    📁 Case …{caseId.slice(-8)}
+                                </div>
+                            )}
                             <div style={{ flex: 1 }}></div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <span style={{ fontSize: 12, fontWeight: 600, color: t.textMuted, whiteSpace: "nowrap" }}>{T("Urgency", "فوری نوعیت")}</span>
@@ -916,7 +1400,10 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                         >
                                             <Ic n="file" s={15} c={t.primary} />
                                             <span style={{ fontSize: 12, fontWeight: 700, color: t.primary }}>{T("Upload Files", "فائلیں اپ لوڈ کریں")}</span>
-                                            <span style={{ fontSize: 11, color: t.textMuted }}>PDF, Word, JPG, PNG · max 10 MB each</span>
+                                            {/* The REAL limits. This said "max 10 MB each" only, so a client hit
+     the file-count or total-size cap with no warning that either
+     existed — the caption described the one limit it knew about. */}
+                                            <span style={{ fontSize: 11, color: t.textMuted }}>PDF, Word, JPG, PNG · max 10 MB each · up to 12 files, 40 MB total</span>
                                         </div>
                                         {/* Uploaded file list */}
                                         {evidenceFiles.length > 0 && (
@@ -924,6 +1411,9 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                                 {evidenceFiles.map(ef => {
                                                     const icon = ef.content_type?.startsWith("image/") ? "🖼️" : ef.content_type === "application/pdf" ? "📄" : "📝";
                                                     const kb   = ef.size ? `${(ef.size / 1024).toFixed(0)} KB` : "";
+                                                    // Absent until the intake has been converted — extraction runs
+                                                    // then, and before that there is nothing honest to claim.
+                                                    const read = extractionLabel(ef);
                                                     return (
                                                         <div key={ef.file_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 8, background: ef.error ? "#fef2f2" : t.inputBg, border: `1px solid ${ef.error ? "#fca5a5" : t.border}` }}>
                                                             <span style={{ fontSize: 15 }}>{icon}</span>
@@ -932,10 +1422,31 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                                                     {ef.filename}
                                                                 </div>
                                                                 <div style={{ fontSize: 10, color: t.textMuted }}>{ef.error || (ef.uploading ? "Uploading…" : kb)}</div>
+                                                                {/* Uploading and upload-failure already have the line above;
+                                                                    this covers the other five states, including the
+                                                                    storage-only one that is known before any extraction runs
+                                                                    and the legacy-Urdu-encoding one, which carries its own
+                                                                    remedy in the detail line. */}
+                                                                {!ef.uploading && !ef.error && (
+                                                                    <div data-testid={`extraction-${ef.file_id}`} data-state={read.state} style={{ fontSize: 10, marginTop: 2, whiteSpace: "normal", color: EXTRACTION_TONE_COLOUR[read.tone] || t.textMuted, fontWeight: read.tone === TONE_OK || read.tone === TONE_NEUTRAL ? 400 : 600 }}>
+                                                                        {EXTRACTION_TONE_ICON[read.tone] || "•"} {read.title}
+                                                                        {read.detail ? ` — ${read.detail}` : ""}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                             {ef.uploading && <div style={{ width: 12, height: 12, border: `2px solid ${t.primary}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />}
+                                                            {!ef.uploading && !ef.error && (
+                                                                <button
+                                                                    title="Download"
+                                                                    onClick={() => downloadEvidence(ef)}
+                                                                    style={{ background: "none", border: "none", cursor: "pointer", color: t.textMuted, fontSize: 13, lineHeight: 1, padding: 2 }}>⭳</button>
+                                                            )}
                                                             {!ef.uploading && (
-                                                                <button onClick={() => setEvidenceFiles(prev => prev.filter(x => x.file_id !== ef.file_id))} style={{ background: "none", border: "none", cursor: "pointer", color: t.textMuted, fontSize: 14, lineHeight: 1, padding: 2 }}>✕</button>
+                                                                <button
+                                                                    title="Remove"
+                                                                    disabled={removingFile === ef.file_id}
+                                                                    onClick={() => removeEvidence(ef)}
+                                                                    style={{ background: "none", border: "none", cursor: "pointer", color: t.textMuted, fontSize: 14, lineHeight: 1, padding: 2, opacity: removingFile === ef.file_id ? 0.4 : 1 }}>✕</button>
                                                             )}
                                                         </div>
                                                     );
@@ -980,7 +1491,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                         <BtnOutline onClick={() => setStep(2)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
                         <div style={{ flex: 1 }} />
                         {/* "Next Question" for rounds 1-3; "Complete & Continue" on round 4 or when done */}
-                        {(clarifyRound >= 1 && clarifyRound <= 3) && !clarifyDone ? (
+                        {!ocrReviewRequired && (clarifyRound >= 1 && clarifyRound <= 3) && !clarifyDone ? (
                             <BtnPrimary
                                 disabled={clarifyLoading || !getCurrentAnswer().trim()}
                                 onClick={handleClarifyNext}
@@ -990,18 +1501,101 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                             </BtnPrimary>
                         ) : (
                             <BtnPrimary
-                                disabled={converting || clarifyLoading || (clarifyRound === 4 && !clarifyA4.trim())}
+                                disabled={converting || clarifyLoading || ocrReviewLoading
+                                    || (ocrReviewRequired && !ocrReviewComplete)
+                                    || (!ocrReviewRequired && clarifyRound === 4 && !clarifyA4.trim())}
                                 onClick={handleConvertAndSummarise}
                                 style={{ fontSize: 13, padding: "8px 18px", opacity: converting ? 0.7 : 1 }}
                             >
-                                {converting ? "Analysing case…" : clarifyLoading ? "Thinking…" : "Complete & Continue →"}
+                                {converting ? "Analysing case…"
+                                    : ocrReviewLoading ? "Loading extracted text…"
+                                    : ocrReviewRequired ? "Continue analysis →"
+                                    : clarifyLoading ? "Thinking…" : "Complete & Continue →"}
                             </BtnPrimary>
                         )}
                     </div>
                     <div>
-                        <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI Follow-up Questions</div>
-                        <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>Our AI has analysed your case and identified the most important missing facts.</div>
+                        <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>
+                            {ocrReviewRequired ? "Review Extracted Text" : "AI Follow-up Questions"}
+                        </div>
+                        <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>
+                            {ocrReviewRequired
+                                ? "OCR can misread names, dates and amounts. Compare each page with the original and correct it before confirming."
+                                : "Our AI has analysed your case and identified the most important missing facts."}
+                        </div>
                     </div>
+
+                    {ocrReviewRequired && (
+                        <Card data-testid="ocr-review" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+                            <div style={{ padding: "10px 12px", borderRadius: 9, background: "#fffbeb", border: "1px solid #fcd34d", color: "#78350f", fontSize: 12, lineHeight: 1.55 }}>
+                                The text below was generated automatically and has not been used in your case analysis. Confirming means it matches the original page; it does not mean the document itself is legally valid.
+                            </div>
+                            {ocrReviewLoading && <div style={{ fontSize: 13, color: t.textMuted }}>Loading extracted text…</div>}
+                            {!ocrReviewLoading && ocrReviewError && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                    <span role="alert" style={{ flex: 1, color: "#b91c1c", fontSize: 12 }}>
+                                        {ocrReviewError} Your intake has not advanced.
+                                    </span>
+                                    <BtnOutline
+                                        onClick={() => loadOcrReview(
+                                            intakeToken,
+                                            ocrReviewFileIds.map(file_id => ({ file_id })),
+                                        )}
+                                        style={{ fontSize: 11, padding: "6px 10px" }}
+                                    >
+                                        Try loading again
+                                    </BtnOutline>
+                                </div>
+                            )}
+                            {!ocrReviewLoading && ocrReviewPages.map(page => {
+                                const file = evidenceFiles.find(f => f.file_id === page.file_id);
+                                return (
+                                    <div key={page.revision_id} style={{ border: `1px solid ${t.border}`, borderRadius: 10, padding: 14 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
+                                            <div style={{ flex: 1, fontSize: 12, fontWeight: 700, color: t.text }}>
+                                                {file?.filename || "Evidence file"} · page {Number(page.page_number)}
+                                            </div>
+                                            {file && (
+                                                <BtnOutline onClick={() => downloadEvidence(file)} style={{ fontSize: 11, padding: "5px 9px" }}>
+                                                    Open original
+                                                </BtnOutline>
+                                            )}
+                                            <Badge type={page.confirmed ? "success" : "warn"}>
+                                                {page.confirmed ? "Confirmed" : "Needs review"}
+                                            </Badge>
+                                        </div>
+                                        <textarea
+                                            aria-label={`Extracted text page ${Number(page.page_number)}`}
+                                            value={page.draft_text}
+                                            disabled={page.confirmed}
+                                            onChange={e => setOcrReviewPages(prev => prev.map(p =>
+                                                p.revision_id === page.revision_id
+                                                    ? { ...p, draft_text: e.target.value }
+                                                    : p
+                                            ))}
+                                            style={{ width: "100%", minHeight: 150, resize: "vertical", background: t.inputBg, color: t.text, border: `1px solid ${t.border}`, borderRadius: 8, padding: 10, fontFamily: "inherit", fontSize: 12, lineHeight: 1.6 }}
+                                        />
+                                        {!page.confirmed && (
+                                            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                                                <BtnPrimary
+                                                    disabled={Boolean(ocrConfirming)}
+                                                    onClick={() => confirmOcrPage(page)}
+                                                    style={{ fontSize: 12, padding: "7px 12px" }}
+                                                >
+                                                    {ocrConfirming === page.revision_id ? "Confirming…" : "Confirm this page"}
+                                                </BtnPrimary>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                            {ocrReviewComplete && (
+                                <div style={{ color: "#15803d", fontSize: 12, fontWeight: 700 }}>
+                                    ✓ All extracted pages are confirmed. Continue analysis when ready.
+                                </div>
+                            )}
+                        </Card>
+                    )}
 
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 14 }}>
                         <div>
@@ -1177,7 +1771,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                     <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", background: t.card, border: `1px solid ${t.border}`, borderRadius: 12 }}>
                         <BtnOutline onClick={() => setStep(3)} style={{ fontSize: 13, padding: "8px 16px" }}>← Back</BtnOutline>
                         <div style={{ flex: 1 }} />
-                        <BtnPrimary onClick={() => { toast.show("✅ Case saved!", "success"); setStep(5); }} style={{ fontSize: 13, padding: "8px 18px" }}>{T("Confirm & Save Case →", "تصدیق کریں اور کیس محفوظ کریں ←")}</BtnPrimary>
+                        <BtnPrimary onClick={handleContinueToCategory} style={{ fontSize: 13, padding: "8px 18px" }}>{T("Continue to Category →", "درجہ بندی کی طرف جائیں ←")}</BtnPrimary>
                     </div>
                     <div>
                         <div style={{ fontFamily: "'Fraunces',serif", fontSize: 24, fontWeight: 600, color: t.text, marginBottom: 4 }}>AI-Generated <em>Case Summary</em></div>
@@ -1204,6 +1798,50 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: t.primary, marginBottom: 10 }}>📋 Case Summary</div>
                                             <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.7 }}>{aiStructured.summary}</div>
                                         </div>
+
+                                        {/* WHAT THE ANALYSIS DID NOT SEE.
+                                            Shown beside the summary, not on the upload screen, because
+                                            this is the screen where the client decides whether to trust
+                                            the analysis. The previous wording — "some uploaded files
+                                            could not be read" — was true but unactionable: it never said
+                                            which file, or how much of it, so a bundle read down to its
+                                            cover sheet looked the same as one missing a blurred photo. */}
+                                        {(() => {
+                                            const records = Array.isArray(aiStructured.evidence_extraction) ? aiStructured.evidence_extraction : [];
+                                            if (!records.length) return null;
+                                            const nameOf = id => (evidenceFiles.find(f => f.file_id === id) || {}).filename || "an uploaded file";
+                                            const gaps = incompleteFiles(records.map(r => ({ ...r, extraction_status: r.status })));
+                                            if (!gaps.length) {
+                                                return (
+                                                    <div style={{ padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}`, fontSize: 12, color: t.textMuted }}>
+                                                        ✓ All {records.length} uploaded file(s) were read in full and included in this analysis.
+                                                    </div>
+                                                );
+                                            }
+                                            return (
+                                                <div data-testid="evidence-gaps" style={{ padding: "12px 14px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fcd34d", fontSize: 12, color: "#78350f" }}>
+                                                    <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                                                        ⚠ This analysis did not see all of your evidence
+                                                    </div>
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                                        {gaps.map(g => {
+                                                            const label = extractionLabel(g);
+                                                            return (
+                                                                <div key={g.file_id}>
+                                                                    <strong>{nameOf(g.file_id)}</strong> — {label.title}
+                                                                    {label.detail ? ` (${label.detail})` : ""}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    <div style={{ marginTop: 7, lineHeight: 1.6 }}>
+                                                        Anything above was not part of the analysis. Type those details into
+                                                        your description, upload a text-based copy, or continue knowing they
+                                                        were left out.
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
 
                                         {/* Applicable Laws */}
                                         {aiStructured.applicable_laws?.length > 0 && (
@@ -1366,9 +2004,9 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                         <div style={{ flex: 1 }} />
                         <BtnPrimary
                             disabled={intakeSubmitting}
-                            onClick={() => { if (!intakeSubmitting) { toast.show("🎉 Case fully structured!"); handleSubmit(); } }}
+                            onClick={() => { if (!intakeSubmitting) handleSubmit(); }}
                             style={{ fontSize: 13, padding: "8px 18px", opacity: intakeSubmitting ? 0.7 : 1 }}>
-                            {intakeSubmitting ? "Submitting…" : "🎉 Complete Case Intake →"}
+                            {intakeSubmitting ? "Confirming…" : "Confirm Category & Open Case →"}
                         </BtnPrimary>
                     </div>
                     <div>
@@ -1411,8 +2049,16 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                             <Card style={{ padding: 20, border: `1px solid ${t.primary}50`, background: t.primaryGlow, textAlign: "center" }}>
                                 <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-                                <div style={{ fontFamily: "'Fraunces',serif", fontSize: 18, fontWeight: 600, color: t.primary, marginBottom: 6 }}>{T("Case Intake Complete", "کیس کی درخواست مکمل")}</div>
-                                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>{T("Your case is structured and ready for review", "آپ کا کیس ترتیب پا چکا ہے اور جائزے کے لیے تیار ہے")}</div>
+                                <div style={{ fontFamily: "'Fraunces',serif", fontSize: 18, fontWeight: 600, color: t.primary, marginBottom: 6 }}>{T(caseConfirmed ? "Case Intake Complete" : "Ready to Confirm", "کیس کی تصدیق")}</div>
+                                {/* "ready for review" implies somebody is about to review it. Nothing
+     is: conversion creates an open case and stops. The next move is the
+     client's, and saying so is the difference between them choosing a
+     lawyer today and waiting for a call that was never scheduled. */}
+                                <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 20 }}>
+                                    {caseConfirmed
+                                        ? T("Your case is open. Choose a lawyer to send it to — it has not been sent to anyone yet.", "آپ کا کیس کھل چکا ہے۔ اسے بھیجنے کے لیے وکیل منتخب کریں — ابھی یہ کسی کو نہیں بھیجا گیا۔")
+                                        : T("Review the category, then confirm it to open your case. Until confirmation succeeds, this remains a draft and cannot be matched or sent.", "درجہ بندی کا جائزہ لیں، پھر کیس کھولنے کے لیے اس کی تصدیق کریں۔ کامیاب تصدیق تک یہ مسودہ رہے گا اور اسے میچ یا بھیجا نہیں جا سکتا۔")}
+                                </div>
                                 <div style={{ textAlign: "left" }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>Case ID</span>
@@ -1428,15 +2074,17 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${a
                                         <span style={{ color: t.text, fontWeight: 600 }}>{PROVINCES.find(p => p.value === province)?.label || province}</span>
                                     </div>
                                     <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                        <span style={{ color: t.textMuted }}>Status</span><Badge type="success">Ready</Badge>
+                                        <span style={{ color: t.textMuted }}>Status</span><Badge type={caseConfirmed ? "success" : "warn"}>{caseConfirmed ? "Open" : "Draft"}</Badge>
                                     </div>
                                 </div>
                                 <BtnPrimary
+                                    disabled={!caseConfirmed}
                                     onClick={() => {
+                                        if (!caseConfirmed) return;
                                         const dest = caseId ? `/lawyers?case_id=${caseId}` : "/lawyers";
                                         router.push(dest);
                                     }}
-                                    style={{ width: "100%", marginTop: 20, padding: 14, fontSize: 14 }}
+                                    style={{ width: "100%", marginTop: 20, padding: 14, fontSize: 14, opacity: caseConfirmed ? 1 : 0.55 }}
                                 >{T("Find a Lawyer →", "وکیل تلاش کریں ←")}</BtnPrimary>
                             </Card>
 

@@ -37,6 +37,7 @@ from reportlab.graphics.barcode.qr import QrCodeWidget
 from reportlab.graphics.shapes import Drawing
 
 from app.core.config import settings
+from app.services import citation_format
 
 
 def _qr_flowable(url: str, size_cm: float = 2.6) -> Drawing:
@@ -717,6 +718,19 @@ def petition_22a(doc_id: str, f: dict) -> Path:
     return out
 
 
+_CPC = "Code of Civil Procedure 1908"
+_PECA = "Prevention of Electronic Crimes Act, 2016"
+
+# The offences this complaint form is for, with what each one is. Structured
+# rather than written out, so the citation and its gloss cannot drift apart and
+# the gloss can never end up inside the section list.
+_PECA_DEFAULT_OFFENCES = (
+    ("20", "offences against the dignity of a natural person"),
+    ("21", "offences against the modesty of a natural person"),
+    ("24", "cyberstalking"),
+)
+
+
 def fia_cybercrime(doc_id: str, f: dict) -> Path:
     """Complaint to the FIA Cybercrime Wing (NR3C) under PECA 2016."""
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -747,11 +761,49 @@ def fia_cybercrime(doc_id: str, f: dict) -> Path:
         story += [P("Particulars of the accused (if known):", s["heading"]), P(f["accused_details"], s["body"]), Spacer(1, 0.2 * cm)]
     if f.get("evidence_list"):
         story += [P("Evidence available (screenshots, URLs, numbers, transaction records):", s["heading"]), P(f["evidence_list"], s["body"]), Spacer(1, 0.2 * cm)]
+    # CANONICAL CITATION, NOT PROSE.
+    #
+    # This used to read "sections 20 — offences against dignity, 21 — offences
+    # against modesty, and 24 — cyberstalking". The glosses sat between the
+    # section numbers and broke the list apart, so the citation checker parsed
+    # NOTHING and the complaint was recorded as citing no authority at all --
+    # while an intake-supplied `offence_sections` in a different shape parsed
+    # fine. Two templates, two spellings, one of them invisible.
+    #
+    # Both paths now go through `citation_format`, which emits the one form the
+    # parser is tested against; the glosses move after the citation, where they
+    # inform the reader without interrupting it. An operator's phrasing in
+    # `offence_sections` is normalised rather than trusted, so how someone types
+    # a field can never decide whether the citation is checkable.
+    # THREE BRANCHES, AND THE HEDGING IS LOAD-BEARING.
+    #
+    # "such as" is restored on the default. This form cannot know which offences
+    # the facts make out, and an earlier version of this fix dropped the hedge —
+    # turning an illustration into an assertion that the conduct constitutes
+    # offences under three named provisions. That is a stronger claim than a
+    # generated complaint is entitled to make.
+    #
+    # An intake field that is NOT a section list is printed verbatim. Falling
+    # back to the default sections would put provisions into a complaint the
+    # complainant never named — and `section_list` returns None rather than
+    # scraping digits out of prose, so "he sent 500 messages" can never become
+    # section 500.
+    supplied_raw = str(f.get("offence_sections") or "").strip()
+    supplied = citation_format.section_list(supplied_raw)
+    #
+    # No esc() here: this P is not raw=True, so it escapes the whole string
+    # itself. Escaping first would double-escape the complainant's own words.
+    if supplied:
+        offences = f"under {citation_format.cite(_PECA, supplied)}"
+    elif supplied_raw:
+        offences = f"under the {_PECA}, including {supplied_raw}"
+    else:
+        offences = (
+            f'under the {_PECA} ("PECA"), such as '
+            + citation_format.cite_with_glosses("PECA", _PECA_DEFAULT_OFFENCES))
     story += [
         P(
-            "The above conduct constitutes one or more offences under the Prevention of Electronic Crimes Act, 2016"
-            + (f", including {f['offence_sections']}" if f.get("offence_sections") else
-               " (such as sections 20 — offences against dignity, 21 — offences against modesty, and 24 — cyberstalking)")
+            f"The above conduct constitutes one or more offences {offences}"
             + ". It is respectfully requested that this complaint be registered, the material preserved and secured, "
             "and an enquiry/investigation initiated in accordance with law. The complainant requests that their "
             "identity be treated confidentially to the extent the law allows.", s["body"]),
@@ -1535,9 +1587,19 @@ def wakalatnama_checklist(doc_id: str, f: dict) -> Path:
                 "pleader and filed in Court, or until the client or the pleader dies, "
                 "or until all proceedings in the suit are ended so far as regards the "
                 "client.", s["body"]),
+              # NAMED IN FULL, not "of the Code". Referring back to a statute
+              # already named is good drafting and unreadable to a citation
+              # checker, which has no anaphora — it simply dropped both
+              # sections, and the sheet reported no authority for them.
+              #
+              # The "or" is Rule 4(3)'s own word and is left exactly as it
+              # stands: the rule lists ALTERNATIVE applications, and rewriting
+              # it to "sections 144 and 152" would misstate the provision to
+              # suit the parser. The parser was taught "or" instead — see
+              # _SECTION_SEP. Only the anaphora was changed.
               P("Rule 4(3) treats the following as still being proceedings in the "
                 "suit: an application for review of judgment; an application under "
-                "section 144 or section 152 of the Code; any appeal from a decree or "
+                f"section 144 or section 152 of the {_CPC}; any appeal from a decree or "
                 "order; and applications for copies or return of documents, or refund "
                 "of monies paid into Court.", s["small"])]
 

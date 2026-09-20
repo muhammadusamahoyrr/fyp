@@ -48,6 +48,19 @@ class CaseStatus(str, Enum):
     DISMISSED = "dismissed"
 
 
+# The matter is over. Retention reads this: `closed_at` is stamped on entering
+# one of these and cleared on leaving, and the case-data period runs from it.
+#
+# Defined once because two copies would drift, and a drifted copy here means a
+# case that is over by one module's reckoning and live by another's — the clock
+# either never starts or never stops, and neither failure is visible until the
+# data is gone or kept for ever.
+TERMINAL_CASE_STATUSES = frozenset({
+    CaseStatus.CLOSED.value,
+    CaseStatus.DISMISSED.value,
+})
+
+
 class IntakeStep(int, Enum):
     ONE = 1
     TWO = 2
@@ -104,10 +117,50 @@ class AgreementStatus(str, Enum):
 
 
 class EngagementStatus(str, Enum):
+    """The lifecycle of one client-lawyer engagement.
+
+        requested ──lawyer proposes terms──► terms_proposed
+                                                  │
+                          client accepts ◄────────┴────────► client declines
+                                  │                                │
+                                  ▼                                ▼
+                              accepted                         declined
+                             │        │
+                    complete │        │ terminate
+                             ▼        ▼
+                        completed   terminated
+
+    `terms_proposed` is the state this enum existed without, and its absence was
+    the whole defect: the lawyer set a fee and claimed the case in a single
+    call, so the client first learned the price from a relationship they were
+    already in and could not leave. Nothing is claimed until `accepted`, and
+    `accepted` is now a state with exits rather than an absorbing one.
+    """
+
     REQUESTED = "requested"
+    TERMS_PROPOSED = "terms_proposed"
     ACCEPTED = "accepted"
     DECLINED = "declined"
     CANCELLED = "cancelled"
+    COMPLETED = "completed"
+    TERMINATED = "terminated"
+
+
+# An engagement that is still being negotiated: a lawyer has been asked, and
+# neither side has walked away. One per case — see `uniq_pending_engagement`.
+ENGAGEMENT_OPEN_STATUSES = (
+    EngagementStatus.REQUESTED.value,
+    EngagementStatus.TERMS_PROPOSED.value,
+)
+
+# An engagement that became a real working relationship. Membership here is what
+# proves a client actually retained a lawyer, so it gates reviews and billing —
+# an engagement that has since ended still happened, and still counts.
+ENGAGEMENT_RETAINED_STATUSES = (
+    EngagementStatus.ACCEPTED.value,
+    EngagementStatus.COMPLETED.value,
+    EngagementStatus.TERMINATED.value,
+)
 
 
 class EngagementFeeType(str, Enum):
@@ -192,9 +245,16 @@ class NotificationType(str, Enum):
     CASE_MESSAGE = "case_message"
     LAWYER_ASSIGNED = "lawyer_assigned"
     ENGAGEMENT_REQUESTED = "engagement_requested"
+    # The client-facing half of the two-step flow. Terms arriving is the moment
+    # a client first sees a price, so it is the one notification in this group
+    # they must not miss.
+    ENGAGEMENT_TERMS_PROPOSED = "engagement_terms_proposed"
     ENGAGEMENT_ACCEPTED = "engagement_accepted"
     ENGAGEMENT_DECLINED = "engagement_declined"
     ENGAGEMENT_CANCELLED = "engagement_cancelled"
+    ENGAGEMENT_COMPLETION_PROPOSED = "engagement_completion_proposed"
+    ENGAGEMENT_COMPLETED = "engagement_completed"
+    ENGAGEMENT_TERMINATED = "engagement_terminated"
     HEARING_SCHEDULED = "hearing_scheduled"
     DOCUMENT_READY = "document_ready"
     DOCUMENT_SUBMITTED = "document_submitted"
@@ -213,7 +273,32 @@ class NotificationType(str, Enum):
     APPOINTMENT_CONFIRMED = "appointment_confirmed"
     APPOINTMENT_CANCELLED = "appointment_cancelled"
     APPOINTMENT_COMPLETED = "appointment_completed"
+    # Its own type, not a reuse of CANCELLED. A no-show and a cancellation are
+    # different facts with different consequences: a cancellation is an
+    # appointment called off, a no-show is one the client did not attend, and
+    # only the second bears on them. The lawyer's page already learned this
+    # distinction the hard way — it rendered `no_show` as "Cancelled" and told
+    # a lawyer their client had called off when in fact the client had not
+    # turned up.
+    APPOINTMENT_NO_SHOW = "appointment_no_show"
+    APPOINTMENT_EXPIRED = "appointment_expired"
+    # RESERVED, and still unused: the T-24h / T-1h reminders before a
+    # consultation. Kept distinct from the nudge below because the two say
+    # opposite things — one is "this is about to happen", the other is "this
+    # already happened and nobody recorded what came of it". A client filtering
+    # or muting reminders must not thereby mute a lawyer's outstanding work,
+    # and a single type would make the two indistinguishable for ever once
+    # rows carrying it exist.
     APPOINTMENT_REMINDER = "appointment_reminder"
+    APPOINTMENT_OUTCOME_NUDGE = "appointment_outcome_nudge"
+    # The client hears the outcome of the report they filed. Its own type: a
+    # client filtering appointment reminders must not thereby silence the
+    # answer to a complaint they raised.
+    APPOINTMENT_DISPUTE_RESOLVED = "appointment_dispute_resolved"
+    # And the lawyer hears only when an appointment's RECORD was administratively
+    # corrected — never that a report exists, which would tell them a client
+    # complained about them whatever the outcome.
+    APPOINTMENT_RECORD_CORRECTED = "appointment_record_corrected"
     CAUSELIST_LISTED = "causelist_listed"
     PAYMENT_REQUESTED = "payment_requested"
     PAYMENT_RECEIVED = "payment_received"
@@ -231,6 +316,11 @@ class AppointmentStatus(str, Enum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
     NO_SHOW = "no_show"
+    # An unanswered request that stopped holding its slot. Terminal, and its
+    # own thing: nobody cancelled it, so reusing CANCELLED would force
+    # `cancelled_by` to name an actor who does not exist and would make "did my
+    # lawyer decline?" unanswerable from the record.
+    EXPIRED = "expired"
 
 
 class AppointmentMode(str, Enum):

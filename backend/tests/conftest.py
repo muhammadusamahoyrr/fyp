@@ -11,6 +11,7 @@ Test tiers (see pytest.ini markers):
 """
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -100,6 +101,61 @@ def _isolate_test_database():
         settings.db_name = original
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_upload_root(tmp_path_factory):
+    """Point every file the suite generates at a throwaway directory.
+
+    The same failure as `_isolate_test_database`, one layer down. Tests call the
+    real `generate_pdf`, which writes to `{upload_root}/docs` -- in a developer
+    checkout that is the live upload directory. One run of the V2 suites left
+    320 files there: 302 `legacy-<hex>.pdf` fixtures plus the wakalatnama and
+    guardianship samples, indistinguishable by name from real client documents
+    and growing on every run. Found while verifying the DOCUMENTS_V2 migration,
+    where a directory that should have been static had gained 305 files.
+
+    Nothing was corrupted -- the writes are all new filenames, never overwrites
+    -- but a test suite has no business writing into the directory the
+    application serves, and a census of that directory cannot be trusted while
+    it does.
+
+    THREE MODULES SNAPSHOT THE SETTING AT IMPORT, so repointing `settings`
+    alone would miss them: `pdf_generator.UPLOADS_DIR`,
+    `intake_service._EVIDENCE_DIR` and `file_handler.UPLOADS_ROOT` are all
+    module-level constants evaluated once. `artifact_store` resolves it per
+    call and needs only the setting. Each is patched to match.
+
+    Autouse and session-scoped for the reason given above: an opt-in guard
+    protects only the tests that remember to opt in, which is the property that
+    failed here.
+    """
+    from app.core.config import settings
+
+    root = tmp_path_factory.mktemp("upload_root")
+    original = settings.upload_root
+    settings.upload_root = str(root)
+
+    # (module path, attribute, value) -- patched only if the module imports.
+    patched: list[tuple[object, str, object]] = []
+    for module_path, attribute, value in (
+        ("app.services.pdf_generator", "UPLOADS_DIR", root / "docs"),
+        ("app.services.intake_service", "_EVIDENCE_DIR", root / "evidence"),
+        ("app.utils.file_handler", "UPLOADS_ROOT", root),
+    ):
+        try:
+            module = importlib.import_module(module_path)
+        except Exception:                   # optional extras may not install
+            continue
+        patched.append((module, attribute, getattr(module, attribute)))
+        setattr(module, attribute, value)
+
+    try:
+        yield root
+    finally:
+        settings.upload_root = original
+        for module, attribute, value in patched:
+            setattr(module, attribute, value)
+
+
 @pytest.fixture
 async def mongo():
     """Connect Mongo for an integration test, or skip it if unreachable.
@@ -173,6 +229,7 @@ async def mongo():
     )
 
     await ensure_v2_indexes(db)
+    await ensure_ocr_indexes(db)
 
     try:
         yield db
@@ -252,6 +309,20 @@ async def ensure_v2_indexes(db) -> None:
                 raise
 
 
+async def ensure_ocr_indexes(db) -> None:
+    """Install OCR correctness indexes from the production declaration.
+
+    The OCR repository handles a duplicate-key race as the idempotent retry
+    path. Without the unique index that path is never exercised: two identical
+    readings are both stored successfully. Building the test index from the
+    same ``index_models`` function as application startup prevents the fixture
+    from drifting into a different contract.
+    """
+    from app.repositories.ocr_revision_repo import index_models
+
+    await db["ocr_revisions"].create_indexes(index_models())
+
+
 @pytest.fixture
 def stub_grader_llm():
     """Stub retrieval_grader_node's LLM at its real seam: get_fast_llm().
@@ -294,3 +365,130 @@ def stub_grader_llm():
         return state
 
     return _install
+
+
+# ── Application indexes on the test database ─────────────────────────────────
+#
+# `ensure_v2_indexes` above covers the DOCUMENTS_V2 collections only. Everything
+# else `create_all_indexes()` declares — the unique constraints on payment
+# events, case numbers, pending appointments, pending engagements, reviews,
+# emails, bar numbers — was absent from the test database entirely, because
+# `create_all_indexes()` runs at application startup and a test never performs
+# one. So a guarantee enforced in production by an index was enforced in tests
+# by nothing, and a test asserting a duplicate is refused would let the
+# duplicate through and pass.
+
+_APP_INDEXES_BUILT: set[str] = set()
+
+
+async def ensure_app_indexes(db) -> None:
+    """Create every application index on the TEST database, from production.
+
+    Calls `create_all_indexes()` itself rather than restating what it builds.
+    A second list would be a copy of production that nothing keeps in step, and
+    the moment the two drifted the tests would be proving a constraint the
+    application does not actually have — which is the failure this exists to
+    remove, reintroduced one layer up.
+
+    `_try_unique_partial` LOGS AND CONTINUES when a unique index cannot be
+    created, which is right for a production deployment carrying legacy
+    duplicates: refusing to start would be worse than running unenforced. In a
+    test it is the exact hazard being fixed — a silently absent constraint that
+    every later assertion then passes without. So the warning is captured and
+    promoted to a hard failure here, and nowhere else.
+
+    Built once per database per session: the operation is idempotent but not
+    free, and the test database persists across tests within a run.
+    """
+    if db.name in _APP_INDEXES_BUILT:
+        return
+
+    import logging
+
+    from app.db import indexes as _indexes
+
+    captured: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record)
+
+    handler = _Capture()
+    _indexes.logger.addHandler(handler)
+    try:
+        await _indexes.create_all_indexes()
+    finally:
+        _indexes.logger.removeHandler(handler)
+
+    skipped = [r.getMessage() for r in captured
+               if "Could not create" in r.getMessage()]
+    if skipped:
+        raise RuntimeError(
+            "index creation was skipped on the test database, so the "
+            "constraints below are NOT in force and any test relying on them "
+            "would pass without them:\n  " + "\n  ".join(skipped)
+        )
+
+    # Superseded appointment indexes, dropped ON THE TEST DATABASE ONLY.
+    #
+    # `_appointments_indexes` no longer CREATES `uniq_pending_slot`, but a test
+    # database built by an earlier run still carries it — and it is not inert.
+    # Being unique on (lawyer_id, scheduled_at) and scoped to PENDING, it
+    # refuses writes the new indexes allow: a second PENDING booking at the
+    # same lawyer and instant. Tests would then be measuring a database
+    # enforcing a rule the code no longer has.
+    #
+    # Production does this through the operator-run preflight command, inside
+    # the write freeze, never automatically: dropping an index is irreversible
+    # without another build. Here the drop is safe and necessary, and it is the
+    # test-side equivalent of the rollout step.
+    from app.db.appointment_index_spec import OBSOLETE_INDEXES
+
+    for collection, index_name, _why in OBSOLETE_INDEXES:
+        try:
+            await db[collection].drop_index(index_name)
+        except Exception:  # noqa: BLE001 - absent is the expected state
+            pass
+
+    # The appointment correctness indexes are created EXPLICITLY, because
+    # production no longer creates them at startup.
+    #
+    # That is the point of the split: a deploy that builds these would repair
+    # correctness state as a side effect of restarting, and nobody could then
+    # tell whether the guarantee held yesterday. Tests need the same indexes
+    # production will have, so they ask for them by name — the way an operator
+    # does, on a database they own.
+    await _indexes.create_appointment_correctness_indexes()
+
+    # CREATION IS NOT THE SAME CHECK AS VALIDATION.
+    #
+    # The block above catches an index that was not created. It cannot catch
+    # one that WAS created and is wrong — the classic case being an index left
+    # over from an earlier definition, which Mongo keeps in place while
+    # refusing the new options. The appointment overlap guards are now the
+    # mechanism preventing double-booking rather than a nicety, so the fixture
+    # asks the canonical specification whether what exists is what was
+    # specified, instead of assuming a silent create means a correct index.
+    problems = await _indexes.validate_appointment_indexes()
+    if problems:
+        raise RuntimeError(
+            "appointment correctness indexes are not valid on the test "
+            "database, so overlap and idempotency are NOT enforced and any "
+            "test relying on them would pass without them:\n  "
+            + "\n  ".join(str(p) for p in problems)
+        )
+
+    _APP_INDEXES_BUILT.add(db.name)
+
+
+@pytest.fixture
+async def app_indexes(mongo):
+    """Opt in to the real application indexes for this test.
+
+    Opt-in rather than autouse, deliberately and for now: switching the whole
+    suite onto production constraints at once changes what every existing
+    integration test is allowed to write, and that belongs in its own change
+    with its own measurement — not smuggled in beside new tests.
+    """
+    await ensure_app_indexes(mongo)
+    return mongo

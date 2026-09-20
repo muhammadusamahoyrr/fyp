@@ -102,14 +102,25 @@ def test_no_actions_does_not_append_a_caution():
 
 
 def test_judge_failure_is_not_grounded(monkeypatch):
-    """An LLM outage must not read as a clean bill of health."""
+    """An LLM outage must not read as a clean bill of health.
+
+    The analysis carries a citation that BINDS to the retrieved chunk, so this
+    turn genuinely reaches the judge. Without one the node now stops earlier —
+    correctly, since there would be nothing for a judge to check — and the
+    outage this test is about could never occur.
+    """
     import app.ai.nodes.intake_hallucination_node as node
 
     def _boom(*a, **k):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr(node, "get_structured_llm", _boom)
-    out = intake_hallucination_node({"answer": _analysis(), "reranked_chunks": [_chunk()]})
+    out = intake_hallucination_node({
+        "answer": _analysis(law_citations=[
+            {"evidence_id": "1", "statute": "PPC 1860", "section": "302",
+             "note": "murder"}]),
+        "reranked_chunks": [_chunk()],
+    })
 
     assert out["is_grounded"] is False
     assert out["grounding_status"] == "judge_failed"

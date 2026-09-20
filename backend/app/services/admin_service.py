@@ -2,7 +2,12 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from app.core.constants import KycStatus, NotificationType
+from app.core.constants import (
+    TERMINAL_CASE_STATUSES,
+    CaseStatus,
+    KycStatus,
+    NotificationType,
+)
 from app.core.exceptions import AppValidationError, ConflictError, NotFoundError
 from app.core.security import TOKENS_VALID_FROM, hash_password, password_change_cutoff
 from app.db.collections import (
@@ -253,8 +258,16 @@ async def get_analytics() -> dict:
     for ct in ["civil", "criminal", "constitutional", "family"]:
         cases_by_type[ct] = await cases_col.count_documents({"case_type": ct})
 
+    # Derived from the enum, not hand-listed.
+    #
+    # The hand-written list was exactly `CaseStatus` minus `DRAFT`, because it
+    # predated drafts existing. `total_cases` counts every row, so the breakdown
+    # silently stopped summing to the total the moment intake began producing
+    # unconfirmed drafts — and the missing count was invisible rather than wrong,
+    # which is worse. Reading the enum means a future status cannot go unreported
+    # the same way.
     cases_by_status: dict[str, int] = {}
-    for st in ["open", "in_progress", "pending_lawyer", "closed", "dismissed"]:
+    for st in [s.value for s in CaseStatus]:
         cases_by_status[st] = await cases_col.count_documents({"status": st})
 
     return {
@@ -348,8 +361,13 @@ async def update_user(user_id: str, data: dict, actor: dict | None = None) -> di
     # through the closure path — so keep the vector store honest here too.
     # Everything in that collection is someone a client can be shown.
     if user.get("role") == "lawyer" or updated.get("role") == "lawyer":
-        from app.ai.lawyer_embeddings import forget_lawyers
+        from app.ai.lawyer_embeddings import forget_lawyers, schedule_embed
         lp = updated.get("lawyer_profile") or {}
+        was_matchable = (
+            user.get("role") == "lawyer"
+            and user.get("is_active", True)
+            and (user.get("lawyer_profile") or {}).get("kyc_verified")
+        )
         still_matchable = (
             updated.get("role") == "lawyer"
             and updated.get("is_active", True)
@@ -357,6 +375,14 @@ async def update_user(user_id: str, data: dict, actor: dict | None = None) -> di
         )
         if not still_matchable:
             forget_lawyers([user_id])
+        elif not was_matchable:
+            # The other half of the same rule, and it was missing. Deactivating
+            # a lawyer dropped their vector; REACTIVATING them put nothing back,
+            # so they returned verified, active and searchable in MongoDB while
+            # permanently absent from semantic matching — until they happened to
+            # edit their bio or an admin remembered the manual embed endpoint.
+            # A membership rule that only ever removes is not a membership rule.
+            schedule_embed(user_id)
 
     return _safe_user(updated)
 
@@ -451,10 +477,29 @@ async def update_case_status(case_id: str, status: str, actor: dict | None = Non
     case = await case_repo.find_by_id(case_id)
     if not case:
         raise NotFoundError("Case")
-    await case_repo.update_one(
-        {"_id": case_id},
-        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
-    )
+
+    now = datetime.now(timezone.utc)
+    changes: dict = {"status": status, "updated_at": now}
+
+    # The retention clock. This is the only path that can both end a matter and
+    # revive one, so both edges are handled here.
+    #
+    # ENTERING terminal stamps the closure instant. LEAVING it clears the stamp
+    # — a reopened case that kept its old `closed_at` would keep counting down
+    # while somebody was actively working it, and expire mid-matter.
+    #
+    # Terminal → terminal (closed → dismissed) is neither edge and is left
+    # alone. The matter ended once; re-labelling how it ended does not reopen
+    # it, and re-stamping would let a status toggle silently restart a
+    # twelve-year clock.
+    was_terminal = case.get("status") in TERMINAL_CASE_STATUSES
+    now_terminal = status in TERMINAL_CASE_STATUSES
+    if now_terminal and not was_terminal:
+        changes["closed_at"] = now
+    elif was_terminal and not now_terminal:
+        changes["closed_at"] = None
+
+    await case_repo.update_one({"_id": case_id}, {"$set": changes})
     await _audit(actor, "case.status_changed", case_id,
                  {"from": case.get("status"), "to": status})
 
@@ -505,4 +550,41 @@ async def list_lawyers_monitoring() -> list[dict]:
             "completed_cases": completed_map.get(lawyer_id, 0),
             "is_active": lw.get("is_active", False),
         })
+    return result
+
+
+async def purge_intake_retention(
+    *,
+    dry_run: bool = True,
+    limit: int | None = None,
+    actor: dict | None = None,
+) -> dict:
+    """Run the intake retention sweep as an administrator, and record who did.
+
+    Here rather than in `intake_deletion` so that auditing stays where every
+    other privileged action's auditing lives, and the retention service stays
+    free of it: the sweep is meant to be callable by something other than an
+    admin — a scheduled job has no acting user to record — and a service that
+    demanded one would have to be given a fake.
+
+    `intake_deletion.purge` owns every safety decision. This adds the audit
+    line and nothing else: the dry-run default, the configuration flag and the
+    per-record legal-hold re-read are all enforced there, and passing through
+    this function cannot relax any of them.
+    """
+    from app.services.intake_deletion import purge
+
+    result = await purge(limit, dry_run=dry_run)
+    totals = result.get("totals") or {}
+    await _audit(
+        actor, "retention.intakes_purge", None,
+        {
+            "dry_run": dry_run,
+            "enabled": result.get("enabled"),
+            "eligible": totals.get("eligible"),
+            "deleted": totals.get("deleted"),
+            "held_skipped": totals.get("held_skipped"),
+            "failed": totals.get("failed"),
+        },
+    )
     return result

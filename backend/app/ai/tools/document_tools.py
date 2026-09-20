@@ -18,7 +18,6 @@ caller's file, the lookup simply finds nothing.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from pathlib import Path
@@ -32,55 +31,91 @@ logger = logging.getLogger(__name__)
 _MAX_CHARS = 12_000
 
 
-def _extract_text_sync(path: Path) -> str:
-    """Extract text from a PDF, DOCX or plain-text file. Blocking — call in a thread."""
-    suffix = path.suffix.lower()
-
-    if suffix == ".pdf":
-        from pypdf import PdfReader
-        reader = PdfReader(str(path))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
-
-    if suffix == ".docx":
-        import docx
-        return "\n".join(p.text for p in docx.Document(str(path)).paragraphs)
-
-    if suffix in (".txt", ".md"):
-        return path.read_text(encoding="utf-8", errors="replace")
-
-    raise ValueError(f"unsupported file type '{suffix}'")
+# `_extract_text_sync` was removed with this change rather than kept as a
+# wrapper. It returned a bare string, which is precisely the shape that made the
+# original defect possible: a caller holding only text cannot know whether it is
+# the whole document. `app.ai.extraction.extract_file` is the single extraction
+# entry point now, and it always returns the completeness alongside the text.
 
 
-async def _read_file(path_str: str) -> dict:
-    path = Path(path_str)
-    if not path.exists():
-        return {"error": "The file is recorded but missing from storage."}
+def _public_extraction(result, text: str) -> dict:
+    """The model-facing view of one extraction.
 
-    try:
-        text = await asyncio.to_thread(_extract_text_sync, path)
-    except ValueError as exc:
-        return {"error": str(exc)}
-    except Exception as exc:
-        logger.exception("text extraction failed for %s", path)
-        return {"error": f"Could not read the file: {exc}"}
+    BACKWARD COMPATIBLE ON PURPOSE. `text`, `chars`, `truncated`, `note` and
+    `error` keep their old meanings, because the tool description the model was
+    trained against promises them and two callers already read them. Everything
+    new is additive, and the one thing that CHANGED is that a partially-read
+    document now says so instead of looking identical to a fully-read one.
+    """
+    from app.ai.extraction import COMPLETE, NONE, message_for
+
+    if result.error_code and not text.strip():
+        out = {"error": message_for(result.error_code),
+               "extraction": result.as_dict()}
+        if result.completeness == NONE:
+            out["hint"] = ("Ask the user to type the key details, or to upload a "
+                           "text-based PDF.")
+        return out
 
     stripped = text.strip()
-    if not stripped:
-        # Overwhelmingly a phone photo of an FIR, or a scanned PDF with no text
-        # layer. There is no OCR in the stack, so say so rather than returning ""
-        # and letting the model narrate an empty document.
-        return {
-            "error": "This file has no readable text layer — it is most likely a scan or photo.",
-            "hint": "Ask the user to type the key details, or to upload a text-based PDF.",
-        }
-
     truncated = len(stripped) > _MAX_CHARS
-    return {
+    out = {
         "text": stripped[:_MAX_CHARS],
         "chars": len(stripped),
         "truncated": truncated,
-        **({"note": f"Only the first {_MAX_CHARS} characters are shown."} if truncated else {}),
+        "extraction": result.as_dict(),
     }
+    if truncated:
+        out["note"] = f"Only the first {_MAX_CHARS} characters are shown."
+
+    if result.completeness != COMPLETE:
+        # The whole point of this milestone. The model is told, in the same
+        # breath as the text, that the text is not all of the document — and is
+        # told what to do about it, because "some of this is missing" without an
+        # instruction reads as a hedge rather than a constraint.
+        out["incomplete"] = True
+        out["completeness"] = result.completeness
+        out["warning"] = _incompleteness_sentence(result)
+        out["hint"] = ("Do not assume the missing parts are unimportant. Say "
+                       "which pages could not be read and ask the user to type "
+                       "those details.")
+    return out
+
+
+def _incompleteness_sentence(result) -> str:
+    """Plain words for what was missed. No page is called a scan."""
+    bits = []
+    if result.pages_total and result.pages_with_text < result.pages_total:
+        unread = result.pages_total - result.pages_with_text
+        bits.append(f"{unread} of {result.pages_total} pages produced no text")
+    if result.pages_skipped:
+        bits.append(f"{result.pages_skipped} pages were not processed")
+    if result.pages_failed:
+        bits.append(f"{result.pages_failed} pages could not be read")
+    if any(p.images_present for p in result.page_reports):
+        # Deliberately hedged. We saw an image reference; we cannot know whether
+        # it held text, and claiming either way is the mistake this replaces.
+        bits.append("some pages contain images whose contents cannot be read")
+    for note in result.limitations:
+        if note.startswith("unsupported_part:"):
+            bits.append(f"{note.split(':', 1)[1]} were not read")
+    if not bits:
+        bits.append("this document may not have been read in full")
+    return ("Only part of this document could be read: "
+            + "; ".join(bits) + ".")
+
+
+async def _read_file(path_str: str, *, owner_id: str = "", file_id: str = "f") -> dict:
+    """Read one file through the bounded child-process runner.
+
+    No longer `asyncio.to_thread`: that shares the interpreter-wide executor
+    with everything else and cannot actually stop work it has given up waiting
+    for. See `app.ai.extraction_runner`.
+    """
+    from app.ai.extraction_runner import extract_one
+
+    result, text = await extract_one(path_str, file_id=file_id, owner_id=owner_id)
+    return _public_extraction(result, text)
 
 
 # The tools that read ONE user's private files.
@@ -131,9 +166,15 @@ def build_document_tools(user_id: str, role: str = "client") -> list[BaseTool]:
     async def _list_my_documents() -> list[dict]:
         try:
             sessions = await intake_repo.find_evidence_by_client(user_id)
-        except Exception as exc:
+        except Exception:
+            # The exception is LOGGED, never returned. Interpolating it put the
+            # driver's own message — which can quote a connection string, a
+            # namespace or a document fragment — straight into text the model
+            # sees and may repeat back to the client.
             logger.exception("list_my_documents failed")
-            return [{"error": f"Could not list your documents: {exc}"}]
+            return [{"error": "Your documents could not be listed right now.",
+                     "hint": "Do not claim to have read anything. Say the list "
+                             "could not be retrieved."}]
 
         files: list[dict] = []
         for session in sessions:
@@ -153,14 +194,16 @@ def build_document_tools(user_id: str, role: str = "client") -> list[BaseTool]:
         # ever fetched, so a file_id belonging to anyone else simply is not found.
         try:
             sessions = await intake_repo.find_evidence_by_client(user_id)
-        except Exception as exc:
+        except Exception:
             logger.exception("read_document lookup failed")
-            return {"error": f"Could not open the document: {exc}"}
+            return {"error": "This document could not be opened right now.",
+                    "hint": "Do not invent its contents. Say it could not be opened."}
 
         for session in sessions:
             for meta in session.get("evidence_files", []):
                 if meta.get("file_id") == file_id:
-                    result = await _read_file(meta.get("path", ""))
+                    result = await _read_file(meta.get("path", ""),
+                                              owner_id=user_id, file_id=file_id)
                     result["filename"] = meta.get("filename")
                     return result
 

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone
@@ -6,7 +5,12 @@ from datetime import datetime, timezone
 from pymongo.errors import DuplicateKeyError
 
 from app.core.constants import CaseStatus
-from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
+from app.core.exceptions import (
+    AppValidationError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+)
 from app.repositories.case_repo import CaseRepository
 from app.repositories.user_repo import UserRepository
 
@@ -23,30 +27,49 @@ def _gen_case_number() -> str:
 def _public_case(case: dict | None) -> dict | None:
     """Strip internal-only fields before a case leaves the API.
 
-    ``case_embedding`` is a ~384-dim matching vector — never for the client,
-    and heavy to ship (esp. in the wholesale-cached /cases list). The response
-    models use ``extra="allow"`` for pass-through, so this MUST be removed here
-    or it would leak straight back out."""
+    ``case_embedding`` is no longer written — nothing ever read it, so both the
+    field and the embedding that produced it are gone (see the removal note on
+    ``create_case``). This strip stays for the cases ALREADY carrying one: the
+    response models use ``extra="allow"`` for pass-through, so without it a
+    legacy document would ship its vector straight back out, and it is heavy in
+    the wholesale-cached /cases list. Safe to delete once the field has been
+    unset from the collection."""
     if not case:
         return case
     case = dict(case)
     case.pop("case_embedding", None)
+    case.pop("intake_conversion_owner", None)
+    case.pop("intake_conversion_epoch", None)
     return case
 
 
-async def _embed_case(case_id: str, description: str) -> None:
-    try:
-        from app.ai.pipelines.retriever import _embeddings
-        emb = _embeddings()
-        vector = await asyncio.to_thread(emb.embed_query, f"query: {description[:512]}")
-        await case_repo.set_embedding(case_id, vector)
-    except Exception:
-        # Non-critical — matching falls back to MongoDB scoring — but log it so
-        # a persistent embedding failure is visible, not silently swallowed.
-        logger.exception("Case embedding failed for %s", case_id)
+def _is_intake_collision(exc: DuplicateKeyError) -> bool:
+    """Did this duplicate come from `uniq_case_per_intake`?
+
+    Read off the index NAME where the driver reports it, and fall back to the
+    key pattern. Matching on the error message text would break the first time
+    MongoDB rephrased it, and the consequence of guessing wrong here is a
+    misleading instruction to a client who cannot act on it either way.
+    """
+    details = getattr(exc, "details", None) or {}
+    if "uniq_case_per_intake" in str(details.get("errmsg", "")):
+        return True
+    return "intake_id" in (details.get("keyPattern") or {})
 
 
-async def create_case(client_id: str, data: dict) -> dict:
+async def create_case(client_id: str, data: dict,
+                      status: str = CaseStatus.OPEN.value) -> dict:
+    """Open a case. `status` lets intake create it as a DRAFT.
+
+    Intake needs a real `case_id` before the client has confirmed anything —
+    the analysis pipeline is bound to one, and provenance records it — so the
+    case has to exist early. It previously existed as OPEN, which meant the
+    client was told to "review and confirm" a case that was already live, and
+    the confirm button had nothing left to do.
+
+    A draft is a case that exists for the analysis and for nothing else. See
+    `assert_not_draft` for the boundary.
+    """
     case_id = secrets.token_urlsafe(16)
     doc = {
         "_id": case_id,
@@ -56,32 +79,192 @@ async def create_case(client_id: str, data: dict) -> dict:
         "intake_id": data.get("intake_id"),
         "case_type": data["case_type"],
         "province": data["province"],
-        "status": CaseStatus.OPEN.value,
+        "status": status,
         "title": data["title"],
         "description": data["description"],
         "milestones": [],
         "hearing_dates": [],
-        "case_embedding": None,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
-    # Retry on case_number collision (unique index — extremely rare but handled)
+
+    # Optional intake-derived fields, copied only when the caller supplied
+    # them. This used to be a closed literal, so `user_selected_type` and
+    # `type_was_corrected` — which intake conversion has always passed, and
+    # whose whole purpose is auditing an AI reclassification — were built and
+    # then dropped on the floor here. Anything not in this list is still
+    # ignored, so a caller cannot inject arbitrary keys onto a case.
+    for field in (
+        "user_selected_type",
+        "type_was_corrected",
+        "party_role",
+        "desired_outcome",
+        "urgency",
+        "has_evidence",
+        "evidence_count",
+        "intake_conversion_owner",
+        "intake_conversion_epoch",
+    ):
+        if field in data:
+            doc[field] = data[field]
+    # Retry on case_number collision (unique index — extremely rare but handled).
+    #
+    # The retry is for `case_number` ONLY. `uniq_case_per_intake` can also raise
+    # DuplicateKeyError here, and a new case number does nothing about that — so
+    # a caller hitting it burned five attempts and was told "could not generate a
+    # unique case number, please try again", which is both false and an
+    # instruction to repeat something that cannot succeed. The two collisions
+    # mean opposite things: one is bad luck, the other is "this intake already
+    # has a case, go and find it".
     for attempt in range(5):
         doc["case_number"] = _gen_case_number()
         try:
             await case_repo.insert(doc)
             break
-        except DuplicateKeyError:
+        except DuplicateKeyError as exc:
+            if _is_intake_collision(exc):
+                raise ConflictError(
+                    "This intake has already produced a case. Reload the page to "
+                    "continue with it."
+                ) from exc
             if attempt == 4:
                 raise AppValidationError("Could not generate a unique case number — please try again")
             continue
 
-    # Schedule embedding for lawyer matching (non-blocking)
-    description = data.get("description", "")
-    if description:
-        asyncio.create_task(_embed_case(case_id, description))
+    # No case embedding is computed here any more.
+    #
+    # `_embed_case` ran a CPU-bound e5 inference on every case creation — on a
+    # machine with no GPU — to store a 384-dim vector of the client's own
+    # description on the case. Nothing ever read it: `match_lawyers_for_case`
+    # embeds the description fresh at query time through
+    # `query_similar_lawyers`, and the 384 dimensions date the field to the
+    # pre-Chroma design (matching runs on 768-dim e5). So it cost work at
+    # creation and retained a derived representation of the client's account of
+    # their problem, indefinitely, for no feature.
 
     return _public_case(doc)
+
+
+
+# ── Draft cases ──────────────────────────────────────────────────────────────
+#
+# A draft exists so the intake analysis has a real `case_id` to run against and
+# to record in provenance. It is NOT a case anyone else may act on: no lawyer
+# may be asked for it, no match may be computed from it, nothing may be booked
+# against it. Those are three separate call sites, so the rule lives in one
+# function rather than as three copies that drift.
+
+
+def is_draft(case: dict | None) -> bool:
+    return bool(case) and case.get("status") == CaseStatus.DRAFT.value
+
+
+def assert_not_draft(case: dict | None, action: str) -> None:
+    """Refuse an action on a case the client has not confirmed yet.
+
+    The message names what the client has to do, because they CAN fix this —
+    unlike most 422s, the remedy is one button away on a screen they were just
+    looking at.
+    """
+    if is_draft(case):
+        raise AppValidationError(
+            f"This case is still a draft, so it cannot {action} yet. "
+            "Confirm it at the end of the intake first."
+        )
+
+
+async def confirm_case(
+    case_id: str,
+    client_id: str,
+    case_type: str | None = None,
+) -> dict:
+    """Promote a draft to open. The client's confirmation, made real.
+
+    ATOMIC AND IDEMPOTENT, in that order.
+
+    Atomic because the conditional update is what decides: two clicks race
+    here, and only the one that finds the case still `draft` performs the
+    transition. Idempotent because the loser — and every later retry — must not
+    be an error: the client pressed a button twice, and the outcome they asked
+    for has happened.
+
+    Scoped to the owner in the same filter as the status, so an authorization
+    check cannot pass while the write lands on someone else's case.
+    """
+    case = await case_repo.find_by_id(case_id)
+    if not case:
+        raise NotFoundError("Case")
+    if case.get("client_id") != client_id:
+        raise ForbiddenError("Case does not belong to you")
+
+    if case.get("status") == CaseStatus.OPEN.value:
+        # A same-payload retry is idempotent. A different category is a new
+        # edit and must not be smuggled through a replayed confirmation.
+        if case_type is not None and case_type != case.get("case_type"):
+            raise ConflictError(
+                "This case is already confirmed with a different category."
+            )
+        return _public_case(case)
+
+    if not is_draft(case):
+        # Closed, dismissed, in progress — a draft is the ONLY thing that may
+        # become open this way, and naming the current state says why.
+        raise AppValidationError(
+            f"Only a draft case can be confirmed — this one is "
+            f"'{case.get('status')}'."
+        )
+
+    now = datetime.now(timezone.utc)
+    updates = {
+        "status": CaseStatus.OPEN.value,
+        "confirmed_at": now,
+        "updated_at": now,
+    }
+    if case_type is not None:
+        updates.update({
+            "case_type": case_type,
+            "case_type_source": "client",
+            "case_type_changed_by": client_id,
+            "case_type_changed_at": now,
+        })
+
+    promoted = await case_repo.update_one(
+        {"_id": case_id, "client_id": client_id,
+         "status": CaseStatus.DRAFT.value},
+        {"$set": updates},
+    )
+    if not promoted:
+        # Lost the race to a concurrent press. Whatever it achieved is the
+        # answer only when it achieved the SAME requested state. Two tabs can
+        # submit different category choices at once; silently returning the
+        # winner to the loser would tell both callers their own choice was
+        # accepted. Re-read and apply the same payload check as the ordinary
+        # already-open replay path.
+        current = await case_repo.find_by_id(case_id)
+        if not current:
+            raise NotFoundError("Case")
+        if case_type is not None and case_type != current.get("case_type"):
+            raise ConflictError(
+                "This case was concurrently confirmed with a different category."
+            )
+        return _public_case(current)
+
+    # MATCHING IS NOT RUN HERE, and `matched_lawyers` is no longer written.
+    #
+    # Confirmation used to schedule a full semantic match — an embedding pass and
+    # a vector query, CPU-bound on a deployment with no GPU — and cache the
+    # result on the case. Nothing ever read that field. Every surface that shows
+    # matched lawyers calls `lawyer_service.match_lawyers_for_case` for itself:
+    # `/lawyers/match` (ModLawyers) and the chat socket, each from its own
+    # request. So the cost was paid on every confirmation to populate a column
+    # with no reader, and it was about to be paid again on every category change
+    # to keep that column correct.
+    #
+    # Matching is a QUERY, answered when someone asks. The same reasoning that
+    # removed `case_embedding` from `create_case`: derived data with no reader is
+    # cost and staleness, not a feature.
+    logger.info("case %s confirmed by client %s", case_id, client_id)
+    return _public_case(await case_repo.find_by_id(case_id))
 
 
 async def get_case(case_id: str, requester_id: str, requester_role: str) -> dict:
@@ -138,11 +321,35 @@ async def update_case(
 
     # Defense-in-depth: the schema already excludes them, but never allow
     # assignment/status writes through the generic PATCH.
-    updates = {k: v for k, v in updates.items() if k in {"title", "description"}}
+    updates = {k: v for k, v in updates.items() if k in {"title", "description", "case_type"}}
     if not updates:
         return _public_case(case)
 
+    # A category change is a client overriding the pipeline's verified
+    # classification, so it is recorded rather than silently applied. Without
+    # this the AI's answer would be overwritten in place and the case would
+    # claim a classification the pipeline never made.
+    new_type = updates.get("case_type")
+    if new_type is not None and new_type != case.get("case_type"):
+        updates["case_type_source"]     = "client"
+        updates["case_type_changed_by"] = requester_id
+        updates["case_type_changed_at"] = datetime.now(timezone.utc)
+        # Only on the FIRST override. `ai_case_type` means "what the pipeline
+        # decided", so a second change must not record the first change as the
+        # machine's answer — checked against the stored case, not against this
+        # update, which never contains the key.
+        if "ai_case_type" not in case:
+            updates["ai_case_type"] = case.get("case_type")
+
     updates["updated_at"] = datetime.now(timezone.utc)
+
+    # No cached matches to invalidate any more.
+    #
+    # A category change used to leave `matched_lawyers` holding results computed
+    # for the category the client had just rejected, so this cleared and rebuilt
+    # it. Nothing read that field, so both the staleness and the rebuild were
+    # work in service of a column with no reader — matching is computed live on
+    # request, where it always sees the current category by construction.
     await case_repo.update_one({"_id": case_id}, {"$set": updates})
     return _public_case(await case_repo.find_by_id(case_id))
 

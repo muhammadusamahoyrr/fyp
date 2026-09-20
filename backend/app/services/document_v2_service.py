@@ -86,6 +86,17 @@ async def _require_case_access(actor_id: str, case_id: str | None) -> None:
                         str(case.get("lawyer_id") or "")):
         raise ForbiddenError("That case does not belong to you")
 
+    # OWNERSHIP IS NOT THE ONLY QUESTION. A draft is the client's own case, so
+    # the check above passes — but a draft exists so the intake analysis has a
+    # real id to run against, and for nothing else. Binding a legal document to
+    # one produces a filing that names a case its owner has not confirmed, and
+    # that the engagement and matching paths already refuse to touch.
+    #
+    # Standalone drafting (case_id None) returned above, so this only ever
+    # refuses a document being pinned to an unconfirmed case.
+    from app.services.case_service import assert_not_draft
+    assert_not_draft(case, "have documents created against it")
+
 
 async def create_document(
     *, client_id: str, case_id: str | None, template_type: str, title: str,
@@ -211,6 +222,109 @@ async def _await_terminal(document_id: str, idempotency_key: str,
         "This document is still being generated — try again in a moment.")
 
 
+#: Why a select CAS missed. `promote` guards on five conditions at once and
+#: returns one None for all of them, so the reason has to be re-derived from the
+#: row afterwards. Each maps to a different correct answer, which is exactly why
+#: collapsing them produced a wrong one.
+LOST_REVISION_MISSING = "revision_missing"      # row deleted underneath us
+LOST_TAKEOVER_COMPLETED = "takeover_completed"  # someone else finished it
+LOST_TAKEOVER_PENDING = "takeover_pending"      # someone else is mid-render
+LOST_LEASE_EXPIRED = "lease_expired"            # still ours, but the lease lapsed
+LOST_UNCLASSIFIED = "unclassified"              # guard held for an unmodelled reason
+
+
+def _as_utc(value):
+    """A stored datetime as an aware UTC one, or None.
+
+    Mongo hands back NAIVE datetimes on this client, while `_now()` is aware, and
+    comparing the two raises `TypeError`. Nothing hit that before because the
+    only lease comparison lived inside the `promote` query, where the server does
+    it -- so the first Python-side comparison of a lease deadline is here, and it
+    would have turned this diagnosis into a fresh 500.
+    """
+    if value is None or not hasattr(value, "tzinfo"):
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+async def _classify_lost_promotion(revision_id: str, worker_id: str,
+                                   fence: int) -> tuple[str, dict | None]:
+    """Why did the select CAS miss, and what does the row look like now?
+
+    The CAS requires `_id`, `status == pending`, `lease_owner`, `fence` and a
+    live `lease_expires_at` simultaneously. Re-reading tells us which of those
+    stopped holding. It is a diagnosis after the fact and therefore inherently
+    racy -- the row can move again between the CAS and this read -- so it
+    classifies the reason for the RESPONSE and the log, never for a write.
+
+    Returns the reason code and the row (None when the row is gone).
+    """
+    current = await revision_repo.find_by_id(revision_id)
+    if current is None:
+        return LOST_REVISION_MISSING, None
+    if current.get("status") in _TERMINAL_STATUSES:
+        return LOST_TAKEOVER_COMPLETED, current
+    if current.get("lease_owner") != worker_id or current.get("fence") != fence:
+        return LOST_TAKEOVER_PENDING, current
+    expires = _as_utc(current.get("lease_expires_at"))
+    if expires is not None and expires <= _now():
+        return LOST_LEASE_EXPIRED, current
+    return LOST_UNCLASSIFIED, current
+
+
+async def _await_terminal_revision(revision_id: str) -> dict:
+    """Bounded wait for one revision to reach a terminal state.
+
+    The by-id twin of `_await_terminal`, for the lost-CAS path where the
+    idempotency key belongs to this worker's attempt rather than the winner's.
+
+    A revision that disappears mid-wait is a 404: the document or its history was
+    deleted, and the honest answer is that there is nothing to return. A revision
+    still pending at the deadline is a 503 -- "unknown, retry" -- which is the
+    truthful answer for work another worker has not finished, and is retryable
+    with the same idempotency key.
+    """
+    deadline = asyncio.get_running_loop().time() + _AWAIT_TERMINAL_SECONDS
+    while asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(_AWAIT_POLL_SECONDS)
+        current = await revision_repo.find_by_id(revision_id)
+        if current is None:
+            raise NotFoundError("Document revision")
+        if current.get("status") in _TERMINAL_STATUSES:
+            return current
+    raise ServiceUnavailableError(
+        "This document is still being generated — try again in a moment.")
+
+
+async def _resolve_lost_promotion(revision_id: str, worker_id: str,
+                                  fence: int) -> dict:
+    """Turn a lost select CAS into a documented result or a typed error.
+
+    READ-ONLY WITH RESPECT TO THE REVISION. Fencing is preserved by never
+    writing here: this worker already lost the CAS, so it must not promote,
+    fail, re-lease or re-point anything. It reports; the winner decides.
+    """
+    reason, current = await _classify_lost_promotion(revision_id, worker_id, fence)
+
+    if reason == LOST_REVISION_MISSING:
+        # Deleted during generation. NOT re-created: resurrecting a row the
+        # owner deleted would be the worst possible reading of "be helpful".
+        logger.info("v2 %s: revision gone during generation", revision_id)
+        raise NotFoundError("Document revision")
+
+    if reason == LOST_TAKEOVER_COMPLETED:
+        # Somebody else's result, and it is the authoritative one. Returned as
+        # it stands -- including `failed`, which is a real terminal outcome and
+        # not something to retry behind the caller's back.
+        return current
+
+    # Still pending: stolen mid-render, or our own lease lapsed and the
+    # reconciler has not picked it up yet. Either way the work is genuinely in
+    # flight, so wait briefly and then say so.
+    logger.info("v2 %s: awaiting another actor (%s)", revision_id, reason)
+    return await _await_terminal_revision(revision_id)
+
+
 async def generate_revision(
     *, document_id: str, template_type: str, fields: dict, idempotency_key: str,
     worker_id: str | None = None,
@@ -274,6 +388,16 @@ async def generate_revision(
         # stolen it, in which case failing it would clobber its re-render.
         await revision_repo.mark_failed(revision_id, worker_id, fence)
         raise
+
+    # THE RESULT CONTRACT. A caller gets a TERMINAL revision or a typed error --
+    # never None, and never a pending row dressed up as a finished one.
+    #
+    # `_render_and_select` returns None when it lost the select CAS, and could
+    # previously return the live row, which may still be pending. Both reached
+    # the route, where the projection did `rev["_id"]` and a lost race became a
+    # TypeError -- a 500 for an outcome the system had fully anticipated.
+    if result is None or result.get("status") not in _TERMINAL_STATUSES:
+        return await _resolve_lost_promotion(revision_id, worker_id, fence)
     return result
 
 
@@ -365,10 +489,18 @@ async def _render_and_select_inner(
             "field_shape": shape,
         })
     if promoted is None:
-        # Lost the lease (a steal advanced the fence). This worker's final is an
-        # orphan; the current owner/reconciler will produce the winner.
-        logger.info("v2 %s: lost lease at select; another actor will finish", revision_id)
-        return await revision_repo.find_by_id(revision_id)
+        # Lost the select CAS. This worker's final is an orphan; the current
+        # owner or the reconciler will produce the winner.
+        #
+        # Returns None rather than the row, because the row at this instant may
+        # be PENDING — another worker mid-render — and handing that back is how a
+        # half-written revision came to be presented as a finished one. The
+        # request path resolves this through `_resolve_lost_promotion`; the
+        # reconciler already treats a falsy result as "not finalized".
+        reason, _ = await _classify_lost_promotion(revision_id, worker_id, fence)
+        logger.info("v2 %s: lost select CAS (%s); another actor will finish",
+                    revision_id, reason)
+        return None
 
     # 5. Repoint the document forward (idempotent).
     await revision_repo.repoint_document(document_id, revision_id, version)

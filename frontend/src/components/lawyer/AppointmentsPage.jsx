@@ -1,32 +1,74 @@
 'use client';
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import {
+    formatPkt, isPktToday, pktHourMinute, pktDayKey, pktHour,
+    pktWeekDayKeys, pktToday, dayOfMonth,
+} from "@/lib/bookingTime.js";
 import { useTheme } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
-import { Card, Btn, Input, Sel } from "./components.jsx";
+import { Card, Btn } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import {
     listAppointments,
     confirmAppointment as apiConfirm,
     cancelAppointment as apiCancel,
     completeAppointment as apiComplete,
+    listPendingOutcomes,
+    getMyWorkingHours,
+    saveMyWorkingHours,
+    markNoShow as apiNoShow,
+    setMeetingLink as apiSetMeetingLink,
 } from "@/lib/api.js";
 
 // ============================================================
 // APPOINTMENTS PAGE
 // ============================================================
 
+// How often the page re-reads the clock. Time-based controls (Accept, No Show,
+// Done) each become available or unavailable at an instant the server also
+// knows about, and nothing else on the page would trigger a re-render when
+// that instant arrives — so without this a lawyer sits in front of a stale
+// button until some unrelated state change happens to repaint it.
+//
+// Thirty seconds is chosen against the cost of being wrong, not for precision:
+// every one of these controls is re-validated by the server, so the only
+// consequence of a late tick is a button that turns on up to half a minute
+// after it could have.
+export const CLOCK_TICK_MS = 30000;
+
+/** An appointment's end, preferring the server's stored value.
+ *
+ * `end_at` is authoritative — the backend compares against that stored field
+ * when deciding whether a consultation may be completed. The duration
+ * arithmetic is only for a response that does not carry it (a row written
+ * before the field existed, or a malformed payload), and it is a reconstruction
+ * rather than a cross-check: where the two disagree, the server's value is the
+ * one the server will enforce.
+ */
+export function endOf(a) {
+    if (!a) return null;
+    if (a.end_at) {
+        const parsed = new Date(a.end_at);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    if (!a.scheduled_at) return null;
+    const start = new Date(a.scheduled_at);
+    if (Number.isNaN(start.getTime())) return null;
+    return new Date(start.getTime() + (a.duration_minutes || 0) * 60000);
+}
+
 const CAL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const CAL_HOURS = ["9:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
 
-// Current week (Mon–Sun) as Date objects — calendar shows real appointments in this window
-const _weekDates = (() => {
-    const now = new Date();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-    return CAL_DAYS.map((_, i) => { const d = new Date(monday); d.setDate(monday.getDate() + i); return d; });
-})();
-const _isToday = (d) => d.toDateString() === new Date().toDateString();
+// Current week (Mon-Sun) as PAKISTAN day keys. A calendar column is a calendar
+// day, not an instant — building these from the browser's `new Date()` put the
+// column headers on one clock and the appointments inside them on another.
+const _weekDayKeys = pktWeekDayKeys();
+// A PAKISTAN day, not the browser's. Display was fixed first; grouping and
+// the "Today" tally read the same instant through a different clock and so
+// could still disagree with the card right next to them.
+const _isToday = (d) => isPktToday(d);
 
 // ── Status badge styles — high contrast, clearly visible ─────
 const STATUS_STYLES = {
@@ -34,10 +76,44 @@ const STATUS_STYLES = {
     Pending: { bg: "rgba(232,184,75,0.18)", color: "#e8b84b", border: "rgba(232,184,75,0.55)", dot: "#e8b84b" },
     Completed: { bg: "rgba(62,201,154,0.18)", color: "#3ec99a", border: "rgba(62,201,154,0.55)", dot: "#3ec99a" },
     Cancelled: { bg: "rgba(232,82,106,0.18)", color: "#e8526a", border: "rgba(232,82,106,0.55)", dot: "#e8526a" },
+    // Distinct from Cancelled on purpose. A cancellation is an appointment that
+    // was called off; a no-show is one the client failed to attend. Without its
+    // own entry the badge falls through to `STATUS_STYLES.Upcoming` below and a
+    // no-show would render in the teal reserved for a live upcoming booking.
+    "No Show": { bg: "rgba(158,142,205,0.18)", color: "#9e8ecd", border: "rgba(158,142,205,0.55)", dot: "#9e8ecd" },
+    // A request that lapsed before it was answered. Muted and grey, because it
+    // is over and nobody acted: it is not a cancellation (no one called it
+    // off), not a no-show (nobody failed to attend), and emphatically not
+    // Upcoming, which is what it would render as without an entry here.
+    Expired: { bg: "rgba(148,158,175,0.16)", color: "#94a2af", border: "rgba(148,158,175,0.5)", dot: "#94a2af" },
+    // A status this build does not know — a newer server, or a row written by
+    // something else. Shown as itself rather than dressed up as one of the
+    // above; see the fallback in `StatusBadge`.
+    Unknown: { bg: "rgba(148,158,175,0.12)", color: "#94a2af", border: "rgba(148,158,175,0.4)", dot: "#94a2af" },
 };
 
+// Statuses that mean the appointment did not take place. Grouped because the
+// "today" and calendar views must exclude both: a no-show is no more a session
+// on the day's schedule than a cancellation is. They were already excluded when
+// `no_show` was mislabelled "Cancelled"; naming the set keeps that true now that
+// the two are distinct.
+// Expired belongs here for the same reason: an unanswered request that lapsed
+// is not a session on the day's schedule, and counting it as one would tell a
+// lawyer their day is busier than it is.
+const DID_NOT_HAPPEN = new Set(["Cancelled", "No Show", "Expired"]);
+
+
 function StatusBadge({ status }) {
-    const s = STATUS_STYLES[status] || STATUS_STYLES.Upcoming;
+    // Neutral, not Upcoming — but DEFENCE IN DEPTH ONLY, and worth being
+    // straight about: this branch is currently unreachable. The single caller
+    // passes a status produced by `mapApiAppt`, whose range is
+    // closed and every member of which has an entry above, including its own
+    // "Unknown" fallback. That mapper is where the real fix lives.
+    //
+    // It stays because the two lines have to agree, and the failure if they
+    // ever stop agreeing is a row wearing the teal reserved for a live
+    // booking — the one reading a lawyer acts on.
+    const s = STATUS_STYLES[status] || STATUS_STYLES.Unknown;
     return (
         <span style={{
             display: "inline-flex", alignItems: "center", gap: 5,
@@ -54,6 +130,463 @@ function StatusBadge({ status }) {
 }
 
 // ── Stat card ─────────────────────────────────────────────────
+/** Consultations this lawyer has finished and never reported an outcome for.
+ *
+ * READ FROM THE SERVER, NOT FILTERED FROM THE PAGE. The list above fetches
+ * fifty appointments and never asks for a second page, so a filter over it
+ * would show a backlog that stops exactly where that page ends — and the whole
+ * point of this queue is the rows that have fallen off the end of a list
+ * nobody scrolls. It has its own endpoint, its own cursor, and its own paging.
+ *
+ * THREE STATES, KEPT APART. "Loading", "nothing to do" and "we could not ask"
+ * look identical if they share a branch, and the third silently becomes the
+ * second — a lawyer is told their queue is clear when in fact the request
+ * failed. `apiFetch` RESOLVES on failure with `{data: null, error}` rather than
+ * throwing, so an unchecked `data?.items || []` renders a confident empty list
+ * out of a network error. Each state is therefore its own branch here.
+ *
+ * Recording an outcome goes through the SAME guarded endpoints the cards above
+ * use, and the queue is then re-read from the server rather than patched
+ * locally: the server decides whether the transition happened, and a row that
+ * failed to move must stay in the queue.
+ */
+function NeedsOutcome({ t, onRecorded }) {
+    const [state, setState] = useState("loading");   // loading | ready | error
+    const [items, setItems] = useState([]);
+    const [cursor, setCursor] = useState(null);
+    const [busyId, setBusyId] = useState(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+
+    /** Re-read from the first page.
+     *
+     * Deliberately not an incremental patch of local state. A recorded outcome
+     * removes a row from the SERVER'S queue, and re-reading is the only way to
+     * see the queue the server now has — including the row that moved up from
+     * a page this client had not reached.
+     */
+    const load = useCallback(async () => {
+        setState("loading");
+        const { data, error } = await listPendingOutcomes({ page_size: 25 });
+        if (error || !data) {
+            // NOT an empty queue. Saying "nothing to do" here would tell a
+            // lawyer their record is clear on the strength of a failed read.
+            setState("error");
+            return;
+        }
+        setItems(data.items || []);
+        setCursor(data.next_cursor || null);
+        setState("ready");
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const loadMore = async () => {
+        if (!cursor || loadingMore) return;
+        setLoadingMore(true);
+        const { data, error } = await listPendingOutcomes({ page_size: 25, cursor });
+        setLoadingMore(false);
+        if (error || !data) return;          // the rows already shown stay
+        setItems(prev => [...prev, ...(data.items || [])]);
+        setCursor(data.next_cursor || null);
+    };
+
+    const record = async (id, action) => {
+        setBusyId(id);
+        const { error } = action === "complete"
+            ? await apiComplete(id)
+            : await apiNoShow(id);
+        setBusyId(null);
+        if (error) {
+            // The server refused — a stale row, or one already dealt with in
+            // another tab. Re-read rather than guess: the row may still belong
+            // in the queue, and removing it here would hide it for ever.
+            await load();
+            return;
+        }
+        await load();
+        if (onRecorded) onRecorded();
+    };
+
+    const card = (body) => (
+        <div style={{
+            padding: "14px 16px", borderRadius: 12, background: t.cardHi,
+            border: `1px solid ${t.border}`, fontSize: 13, color: t.textMuted,
+        }}>{body}</div>
+    );
+
+    if (state === "loading") return card("Checking for consultations that need an outcome…");
+
+    if (state === "error") {
+        return (
+            <div style={{
+                padding: "14px 16px", borderRadius: 12,
+                background: "rgba(232,82,106,0.10)",
+                border: "1px solid rgba(232,82,106,0.35)",
+            }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#e8526a" }}>
+                    Could not load outstanding outcomes
+                </div>
+                <div style={{ fontSize: 12, color: t.textMuted, marginTop: 4 }}>
+                    This is not the same as having none — the request failed, so
+                    we do not know. Try again.
+                </div>
+                <button onClick={load} style={{
+                    marginTop: 10, minHeight: 36, padding: "8px 14px",
+                    borderRadius: 8, border: `1px solid ${t.border}`,
+                    background: "transparent", color: t.text, fontSize: 12,
+                    fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                }}>Try again</button>
+            </div>
+        );
+    }
+
+    if (items.length === 0) {
+        return card("No consultations are waiting on an outcome.");
+    }
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {items.map(item => (
+                <div key={item.id} style={{
+                    padding: "12px 16px", borderRadius: 12, background: t.cardHi,
+                    border: `1px solid ${t.border}`, display: "flex",
+                    flexWrap: "wrap", gap: 10, alignItems: "center",
+                    justifyContent: "space-between",
+                }}>
+                    <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>
+                            {item.client_name || "Client"}
+                        </div>
+                        <div style={{ fontSize: 12, color: t.textMuted, marginTop: 2 }}>
+                            Ended {formatPkt(item.end_at, {
+                                day: "numeric", month: "short", year: "numeric",
+                                hour: "2-digit", minute: "2-digit",
+                            })}
+                        </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                            disabled={busyId === item.id}
+                            onClick={() => record(item.id, "complete")}
+                            style={{
+                                minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                                border: "1px solid rgba(62,201,154,0.55)",
+                                background: "rgba(62,201,154,0.14)", color: "#3ec99a",
+                                fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                                cursor: busyId === item.id ? "wait" : "pointer",
+                                opacity: busyId === item.id ? 0.6 : 1,
+                            }}>Completed</button>
+                        <button
+                            disabled={busyId === item.id}
+                            onClick={() => record(item.id, "no_show")}
+                            style={{
+                                minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                                border: "1px solid rgba(158,142,205,0.55)",
+                                background: "rgba(158,142,205,0.14)", color: "#9e8ecd",
+                                fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                                cursor: busyId === item.id ? "wait" : "pointer",
+                                opacity: busyId === item.id ? 0.6 : 1,
+                            }}>No Show</button>
+                    </div>
+                </div>
+            ))}
+            {cursor && (
+                <button onClick={loadMore} disabled={loadingMore} style={{
+                    minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                    border: `1px solid ${t.border}`, background: "transparent",
+                    color: t.textMuted, fontSize: 12, fontWeight: 700,
+                    fontFamily: "inherit", cursor: "pointer",
+                }}>
+                    {loadingMore ? "Loading…" : "Load more"}
+                </button>
+            )}
+        </div>
+    );
+}
+
+/** The lawyer's own weekly working hours, and days off.
+ *
+ * WHY THIS EXISTS. Until now nothing in the product could answer "when does
+ * this lawyer work?". The client's booking form offered six hardcoded times,
+ * the same for every lawyer and every day, so Sunday 09:00 was offered as
+ * readily as Tuesday 10:00 — times nobody had agreed to.
+ *
+ * THE TIMEZONE IS STATED, ALWAYS. A weekly schedule is wall-clock: "Tuesdays
+ * from nine" means nine in Pakistan. A lawyer travelling, or a browser set to
+ * another zone, must not have to guess whose nine o'clock this is.
+ *
+ * SAVED WHOLESALE. The rule that matters most — no two intervals on one
+ * weekday may overlap — is about the set as a whole, so the server replaces
+ * the schedule rather than patching it, and this form sends all of it.
+ *
+ * It states plainly when nothing is saved. An empty schedule is NOT rendered
+ * as plausible office hours: this product does not get to decide when somebody
+ * else works.
+ */
+// One page of appointments. Smaller than the old fixed 50 because the list
+// now pages: a first screen should arrive quickly, and the rest is a click
+// away rather than a silent truncation.
+const PAGE_SIZE = 25;
+
+const WEEKDAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday",
+                        "Friday", "Saturday", "Sunday"];
+
+/** Every half-hour of the day, which is the only grid a start may land on.
+ *
+ * Not cosmetic: the overlap guarantee is a unique index over discrete
+ * half-hours, so an interval beginning at 09:15 would advertise starts the
+ * booking path must then refuse.
+ */
+const HALF_HOURS = Array.from({ length: 48 }, (_, i) => {
+    const h = String(Math.floor(i / 2)).padStart(2, "0");
+    return `${h}:${i % 2 ? "30" : "00"}`;
+});
+
+function WorkingHours({ t }) {
+    const [state, setState] = useState("loading");   // loading | ready | error
+    const [rows, setRows] = useState([]);
+    const [days, setDays] = useState([]);
+    const [configured, setConfigured] = useState(false);
+    const [enforced, setEnforced] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState("");
+    const [savedAt, setSavedAt] = useState("");
+
+    const load = useCallback(async () => {
+        setState("loading");
+        const { data, error } = await getMyWorkingHours();
+        if (error || !data) {
+            // NOT "no hours set". A failed read tells us nothing about the
+            // schedule, and rendering it as an empty one would invite the
+            // lawyer to overwrite hours they cannot currently see.
+            setState("error");
+            return;
+        }
+        setRows(data.working_hours || []);
+        setDays(data.exceptions || []);
+        setConfigured(Boolean(data.configured));
+        setEnforced(Boolean(data.enforced));
+        setState("ready");
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const addRow = () =>
+        setRows(prev => [...prev, { weekday: 0, start: "09:00", end: "17:00" }]);
+    const setRow = (index, patch) =>
+        setRows(prev => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+    const dropRow = (index) =>
+        setRows(prev => prev.filter((_, i) => i !== index));
+
+    const addDay = () => setDays(prev => [...prev, { date: "", reason: "" }]);
+    const setDay = (index, patch) =>
+        setDays(prev => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+    const dropDay = (index) =>
+        setDays(prev => prev.filter((_, i) => i !== index));
+
+    const save = async () => {
+        setSaving(true);
+        setSaveError("");
+        setSavedAt("");
+        const { data, error } = await saveMyWorkingHours({
+            working_hours: rows.map(r => ({
+                weekday: Number(r.weekday), start: r.start, end: r.end,
+            })),
+            // A day off with no date is an unfinished row, not an instruction.
+            exceptions: days
+                .filter(d => (d.date || "").trim())
+                .map(d => ({ date: d.date, reason: (d.reason || "").trim() || null })),
+        });
+        setSaving(false);
+        if (error || !data) {
+            // The server's message names the offending interval and says why —
+            // it is written for the person who has to fix it, so it is shown
+            // rather than replaced with something generic.
+            setSaveError(error?.message || "Could not save your working hours.");
+            return;
+        }
+        setRows(data.working_hours || []);
+        setDays(data.exceptions || []);
+        setConfigured(Boolean(data.configured));
+        setSavedAt(new Date().toISOString());
+    };
+
+    const box = (body, tone) => (
+        <div style={{
+            padding: "12px 14px", borderRadius: 10,
+            background: tone === "bad" ? "rgba(232,82,106,0.10)" : t.cardHi,
+            border: `1px solid ${tone === "bad" ? "rgba(232,82,106,0.35)" : t.border}`,
+            fontSize: 12, color: tone === "bad" ? "#e8526a" : t.textMuted,
+        }}>{body}</div>
+    );
+
+    if (state === "loading") return box("Loading your working hours…");
+    if (state === "error") {
+        return (
+            <div>
+                {box("We could not load your working hours. That is not the same as " +
+                     "having none — please try again before editing, so you do not " +
+                     "overwrite a schedule you cannot see.", "bad")}
+                <button onClick={load} style={{
+                    marginTop: 8, minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                    border: `1px solid ${t.border}`, background: "transparent",
+                    color: t.text, fontSize: 12, fontWeight: 700,
+                    cursor: "pointer", fontFamily: "inherit",
+                }}>Reload working hours</button>
+            </div>
+        );
+    }
+
+    const field = {
+        minHeight: 38, padding: "7px 10px", borderRadius: 8,
+        border: `1px solid ${t.border}`, background: t.inputBg,
+        color: t.text, fontSize: 12, fontFamily: "inherit",
+    };
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 12, color: t.textMuted }}>
+                All times are <strong style={{ color: t.text }}>Pakistan Standard
+                Time (PKT)</strong>, on the half hour.
+            </div>
+
+            {!configured && box(
+                "You have not set any working hours yet. Until you do, clients " +
+                "are told your availability is not configured — they are not " +
+                "shown guessed office hours.")}
+
+            {configured && !enforced && box(
+                "These hours are shown to clients, but booking does not enforce " +
+                "them yet, so a request outside them is still possible.")}
+
+            <fieldset style={{ border: "none", padding: 0, margin: 0 }}>
+                <legend style={{ fontSize: 12, fontWeight: 700, color: t.text, padding: 0, marginBottom: 8 }}>
+                    Weekly hours
+                </legend>
+                {rows.length === 0 && (
+                    <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 8 }}>
+                        No weekly hours yet.
+                    </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {rows.map((row, index) => (
+                        <div key={index} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <label style={{ fontSize: 11, color: t.textMuted }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>Day</span>
+                                <select aria-label={`Weekday for interval ${index + 1}`}
+                                    value={row.weekday}
+                                    onChange={e => setRow(index, { weekday: Number(e.target.value) })}
+                                    style={field}>
+                                    {WEEKDAY_LABELS.map((name, value) => (
+                                        <option key={value} value={value}>{name}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label style={{ fontSize: 11, color: t.textMuted }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>From</span>
+                                <select aria-label={`Start time for interval ${index + 1}`}
+                                    value={row.start}
+                                    onChange={e => setRow(index, { start: e.target.value })}
+                                    style={field}>
+                                    {HALF_HOURS.map(h => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                            </label>
+                            <label style={{ fontSize: 11, color: t.textMuted }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>To</span>
+                                <select aria-label={`End time for interval ${index + 1}`}
+                                    value={row.end}
+                                    onChange={e => setRow(index, { end: e.target.value })}
+                                    style={field}>
+                                    {HALF_HOURS.map(h => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                            </label>
+                            <button type="button" onClick={() => dropRow(index)}
+                                aria-label={`Remove interval ${index + 1}`}
+                                style={{ ...field, cursor: "pointer", color: t.textMuted, fontWeight: 700 }}>
+                                Remove
+                            </button>
+                        </div>
+                    ))}
+                </div>
+                <button type="button" onClick={addRow} style={{
+                    marginTop: 8, ...field, cursor: "pointer", fontWeight: 700,
+                }}>Add hours</button>
+            </fieldset>
+
+            <fieldset style={{ border: "none", padding: 0, margin: 0 }}>
+                <legend style={{ fontSize: 12, fontWeight: 700, color: t.text, padding: 0, marginBottom: 8 }}>
+                    Days off
+                </legend>
+                {days.length === 0 && (
+                    <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 8 }}>
+                        No days off listed.
+                    </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {days.map((day, index) => (
+                        <div key={index} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <label style={{ fontSize: 11, color: t.textMuted }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>Date</span>
+                                <input type="date" value={day.date || ""}
+                                    aria-label={`Date for day off ${index + 1}`}
+                                    onChange={e => setDay(index, { date: e.target.value })}
+                                    style={field} />
+                            </label>
+                            <label style={{ fontSize: 11, color: t.textMuted, flex: 1, minWidth: 160 }}>
+                                <span style={{ display: "block", marginBottom: 2 }}>
+                                    Reason (private, optional)
+                                </span>
+                                <input type="text" value={day.reason || ""}
+                                    aria-label={`Reason for day off ${index + 1}`}
+                                    maxLength={200}
+                                    onChange={e => setDay(index, { reason: e.target.value })}
+                                    style={{ ...field, width: "100%", boxSizing: "border-box" }} />
+                            </label>
+                            <button type="button" onClick={() => dropDay(index)}
+                                aria-label={`Remove day off ${index + 1}`}
+                                style={{ ...field, cursor: "pointer", color: t.textMuted, fontWeight: 700 }}>
+                                Remove
+                            </button>
+                        </div>
+                    ))}
+                </div>
+                <button type="button" onClick={addDay} style={{
+                    marginTop: 8, ...field, cursor: "pointer", fontWeight: 700,
+                }}>Add day off</button>
+                <div style={{ fontSize: 11, color: t.textFaint, marginTop: 6 }}>
+                    Clients see the dates you are away, never the reason.
+                </div>
+            </fieldset>
+
+            {saveError && (
+                <div role="alert" style={{
+                    padding: "10px 12px", borderRadius: 8,
+                    background: "rgba(232,82,106,0.10)",
+                    border: "1px solid rgba(232,82,106,0.35)",
+                    fontSize: 12, color: "#e8526a",
+                }}>{saveError}</div>
+            )}
+            {savedAt && !saveError && (
+                <div role="status" style={{ fontSize: 12, color: "#3ec99a" }}>
+                    Working hours saved.
+                </div>
+            )}
+
+            <div>
+                <button type="button" onClick={save} disabled={saving} style={{
+                    minHeight: 40, padding: "9px 18px", borderRadius: 9,
+                    border: "1px solid rgba(56,216,196,0.55)",
+                    background: "rgba(56,216,196,0.14)", color: "#38d8c4",
+                    fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                    cursor: saving ? "wait" : "pointer", opacity: saving ? 0.6 : 1,
+                }}>
+                    {saving ? "Saving…" : "Save working hours"}
+                </button>
+            </div>
+        </div>
+    );
+}
+
 function StatCard({ label, value, color, bg, border }) {
     return (
         <div style={{
@@ -71,240 +604,170 @@ function StatCard({ label, value, color, bg, border }) {
     );
 }
 
-// ── Join Call modal ───────────────────────────────────────────
-function JoinCallModal({ apt, onClose, t }) {
+// ── Video consultation modal ──────────────────────────────────
+/** What a lawyer sees for a video consultation.
+ *
+ * THIS USED TO INVENT A ROOM. It displayed
+ * `https://meet.attorney.ai/room/{id}-{firstname}` — a host this product does
+ * not own and a room nobody had created — listed the platform as
+ * "Zoom / Google Meet", and gave Copy and Launch buttons with no handlers at
+ * all. A lawyer could read that URL to a client over the phone and both would
+ * arrive nowhere.
+ *
+ * Now it shows the STORED link or says there is none, and every control does
+ * what it says. Nothing here claims a provider: the link is whatever the
+ * lawyer pasted, which is the only thing anyone actually knows about it.
+ */
+function JoinCallModal({ apt, onClose, onSaveLink, t }) {
+    const [link, setLink] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const [copied, setCopied] = useState(false);
+
+    const stored = apt.meetingLink || null;
+
+    const copy = async () => {
+        try {
+            await navigator.clipboard.writeText(stored);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            // Clipboard access can be refused outright. Saying so beats a
+            // button that silently does nothing — which is what the previous
+            // Copy button did in every browser.
+            setError("Could not copy — select the link and copy it manually.");
+        }
+    };
+
+    const save = async () => {
+        if (busy) return;
+        const value = link.trim();
+        if (!value) { setError("Paste the joining link first."); return; }
+        if (!/^https:\/\/.+\..+/i.test(value)) {
+            // Mirrors the server's rule so the common mistake is caught before
+            // a round trip. The server is still the authority.
+            setError("The link must start with https:// and include a host.");
+            return;
+        }
+        setBusy(true);
+        setError(null);
+        const { error: err } = await onSaveLink(apt.id, value);
+        setBusy(false);
+        if (err) { setError(err.message || "Could not save the link."); return; }
+        setLink("");
+    };
+
+    const row = { display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${t.border}20` };
+
     return (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
-            <div onClick={e => e.stopPropagation()} style={{
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)", padding: 16 }} onClick={onClose}>
+            <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Video consultation" style={{
                 background: t.card, border: `1px solid ${t.primary}40`,
-                borderRadius: 18, padding: 30, width: 400,
+                borderRadius: 18, padding: 26, width: "100%", maxWidth: 420,
                 boxShadow: `0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px ${t.primary}20`,
             }}>
-                {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
                     <div style={{
                         width: 44, height: 44, borderRadius: 12,
                         background: `${t.primary}20`, border: `1.5px solid ${t.primary}50`,
                         display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20,
                     }}>📹</div>
                     <div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>Join Video Call</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>Video consultation</div>
                         <div style={{ fontSize: 12, color: t.textMuted }}>with {apt.client}</div>
                     </div>
-                    <button onClick={onClose} style={{ marginLeft: "auto", background: "none", border: "none", color: t.textMuted, cursor: "pointer", fontSize: 18 }}>✕</button>
+                    <button type="button" onClick={onClose} aria-label="Close" style={{ marginLeft: "auto", background: "none", border: "none", color: t.textMuted, cursor: "pointer", fontSize: 18, minHeight: 44, minWidth: 44 }}>✕</button>
                 </div>
 
-                {/* Meeting info */}
-                <div style={{ background: t.cardHi, borderRadius: 12, padding: "14px 16px", marginBottom: 18 }}>
-                    {[
-                        ["📋 Purpose", apt.purpose],
-                        ["📅 Date", apt.date],
-                        ["⏰ Time", `${apt.time} · ${apt.duration}`],
-                        ["🔗 Platform", "Zoom / Google Meet"],
-                    ].map(([k, v]) => (
-                        <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${t.border}20` }}>
+                <div style={{ background: t.cardHi, borderRadius: 12, padding: "12px 16px", marginBottom: 16 }}>
+                    {/* No "Platform" row. This product does not know which
+                        service the link belongs to, and the old one asserted
+                        "Zoom / Google Meet" regardless. */}
+                    {[["📅 Date", apt.date], ["⏰ Time", `${apt.time} · ${apt.duration}`]].map(([k, v]) => (
+                        <div key={k} style={row}>
                             <span style={{ fontSize: 12, color: t.textFaint }}>{k}</span>
                             <span style={{ fontSize: 12, fontWeight: 600, color: t.text }}>{v}</span>
                         </div>
                     ))}
                 </div>
 
-                {/* Meeting link */}
-                <div style={{
-                    display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
-                    borderRadius: 10, background: `${t.primary}10`, border: `1px solid ${t.primary}30`,
-                    marginBottom: 18,
-                }}>
-                    <span style={{ fontSize: 12, color: t.primary, fontFamily: "monospace", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        https://meet.attorney.ai/room/{apt.id}-{apt.client.split(" ")[0].toLowerCase()}
-                    </span>
-                    <button style={{
-                        padding: "4px 10px", borderRadius: 7, border: "none",
-                        background: t.primary, color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                        fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                    }}>Copy</button>
-                </div>
-
-                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <button onClick={onClose} style={{
-                        padding: "10px", borderRadius: 10, border: `1px solid ${t.border}`,
-                        background: "transparent", color: t.textMuted,
-                        fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
-                    }}>Cancel</button>
-                    <button style={{
-                        padding: "10px", borderRadius: 10, border: "none",
-                        background: `linear-gradient(135deg,${t.primary},#22a898)`,
-                        color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                        fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                        boxShadow: `0 4px 14px ${t.primary}50`,
-                    }}>📹 Launch Call</button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// Appointments are held in list state as display strings ("Mar 15, 2026",
-// "10:00 AM"), but the modal uses native date/time pickers, which require
-// ISO values. These convert across that boundary in both directions.
-const toISODate = (display) => {
-    if (!display) return "";
-    if (/^\d{4}-\d{2}-\d{2}$/.test(display)) return display;
-    const d = new Date(display);
-    if (Number.isNaN(d.getTime())) return "";
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-const fromISODate = (iso) => {
-    if (!iso) return "";
-    const [y, m, d] = iso.split("-").map(Number);
-    if (!y || !m || !d) return iso;
-    return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-};
-const toISOTime = (display) => {
-    if (!display) return "";
-    if (/^\d{2}:\d{2}$/.test(display)) return display;
-    const m = display.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-    if (!m) return "";
-    let h = Number(m[1]);
-    const ampm = m[3]?.toUpperCase();
-    if (ampm === "PM" && h !== 12) h += 12;
-    if (ampm === "AM" && h === 12) h = 0;
-    return `${String(h).padStart(2, "0")}:${m[2]}`;
-};
-const fromISOTime = (iso) => {
-    if (!iso) return "";
-    const [h, min] = iso.split(":").map(Number);
-    if (Number.isNaN(h)) return iso;
-    const ampm = h >= 12 ? "PM" : "AM";
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    return `${String(h12).padStart(2, "0")}:${String(min).padStart(2, "0")} ${ampm}`;
-};
-
-// ── Schedule / New Appointment modal ─────────────────────────
-function ScheduleModal({ apt, onClose, onConfirm, t }) {
-    const isNew = !apt;
-    const [form, setForm] = useState({
-        client: apt?.client || "",
-        purpose: apt?.purpose || "",
-        date: toISODate(apt?.date),
-        time: toISOTime(apt?.time),
-        duration: apt?.duration || "30 min",
-        type: apt?.type || "In-Person",
-    });
-    const f = (k) => (v) => setForm(prev => ({ ...prev, [k]: v }));
-
-    const Field = ({ label, children }) => (
-        <div style={{ marginBottom: 14 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: "rgba(180,210,225,0.7)", textTransform: "uppercase", letterSpacing: "0.07em", display: "block", marginBottom: 6 }}>{label}</label>
-            {children}
-        </div>
-    );
-    const inp = {
-        width: "100%", padding: "9px 12px", borderRadius: 9,
-        border: `1px solid ${t.border}`, background: t.cardHi,
-        color: t.text, fontSize: 13, outline: "none",
-        boxSizing: "border-box", fontFamily: "inherit",
-        transition: "border-color .15s",
-        // Tells the browser to render native date/time picker chrome (the
-        // calendar/clock glyph) for this theme, so it isn't a black-on-black icon.
-        colorScheme: t.mode === "dark" ? "dark" : "light",
-    };
-
-    return (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
-            <div onClick={e => e.stopPropagation()} style={{
-                background: t.card, border: `1px solid ${t.primary}35`,
-                borderRadius: 18, padding: 28, width: 420,
-                boxShadow: `0 20px 60px rgba(0,0,0,0.4)`,
-            }}>
-                {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-                    <div style={{
-                        width: 38, height: 38, borderRadius: 10,
-                        background: `${t.primary}18`, border: `1.5px solid ${t.primary}45`,
-                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
-                    }}>{isNew ? "📅" : "🕐"}</div>
-                    <div>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>
-                            {isNew ? "Schedule New Appointment" : "Reschedule Appointment"}
-                        </div>
-                        <div style={{ fontSize: 11, color: t.textMuted }}>
-                            {isNew ? "Book a new consultation" : `Update time for ${apt.client}`}
-                        </div>
+                {error && (
+                    <div role="alert" style={{ marginBottom: 12, fontSize: 12, color: t.danger, fontWeight: 600 }}>
+                        {error}
                     </div>
-                    <button onClick={onClose} style={{ marginLeft: "auto", background: "none", border: "none", color: t.textMuted, cursor: "pointer", fontSize: 18 }}>✕</button>
-                </div>
+                )}
 
-                {isNew && (
+                {stored ? (
                     <>
-                        <Field label="Client Name">
-                            <input value={form.client} onChange={e => f("client")(e.target.value)}
-                                placeholder="e.g. Ahmed Raza Khan" style={inp}
-                                onFocus={e => e.target.style.borderColor = t.primary}
-                                onBlur={e => e.target.style.borderColor = t.border} />
-                        </Field>
-                        <Field label="Purpose / Case">
-                            <input value={form.purpose} onChange={e => f("purpose")(e.target.value)}
-                                placeholder="e.g. Property Dispute Consultation" style={inp}
-                                onFocus={e => e.target.style.borderColor = t.primary}
-                                onBlur={e => e.target.style.borderColor = t.border} />
-                        </Field>
+                        <div style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
+                            borderRadius: 10, background: `${t.primary}10`,
+                            border: `1px solid ${t.primary}30`, marginBottom: 16, flexWrap: "wrap",
+                        }}>
+                            <span style={{ fontSize: 12, color: t.primary, fontFamily: "monospace", flex: "1 1 180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {stored}
+                            </span>
+                            <button type="button" onClick={copy} style={{
+                                padding: "8px 12px", minHeight: 44, borderRadius: 7, border: "none",
+                                background: t.primary, color: t.mode === "dark" ? "#0b1c22" : "#fff",
+                                fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                            }}>{copied ? "Copied" : "Copy"}</button>
+                        </div>
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                            <button type="button" onClick={onClose} style={{
+                                padding: "10px", minHeight: 44, borderRadius: 10, border: `1px solid ${t.border}`,
+                                background: "transparent", color: t.textMuted,
+                                fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+                            }}>Close</button>
+                            {/* A real anchor to the stored link. The old
+                                "Launch Call" button had no handler at all. */}
+                            <a href={stored} target="_blank" rel="noreferrer" style={{
+                                padding: "10px", minHeight: 44, borderRadius: 10,
+                                background: `linear-gradient(135deg,${t.primary},#22a898)`,
+                                color: t.mode === "dark" ? "#0b1c22" : "#fff",
+                                fontSize: 13, fontWeight: 700, cursor: "pointer",
+                                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                textDecoration: "none", boxShadow: `0 4px 14px ${t.primary}50`,
+                            }}>📹 Open link</a>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
+                            <strong style={{ color: t.text }}>No joining link yet.</strong>{" "}
+                            This product does not host video calls — paste the link
+                            from whichever service you are using, and your client
+                            will see it on their appointment.
+                        </div>
+                        <input
+                            type="url"
+                            value={link}
+                            onChange={e => setLink(e.target.value)}
+                            placeholder="https://…"
+                            disabled={busy}
+                            aria-label="Joining link"
+                            style={{
+                                width: "100%", minHeight: 44, padding: "10px 12px",
+                                borderRadius: 9, border: `1px solid ${t.border}`,
+                                background: t.inputBg, color: t.text,
+                                fontSize: 13, fontFamily: "inherit", marginBottom: 12,
+                            }} />
+                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                            <button type="button" onClick={onClose} disabled={busy} style={{
+                                padding: "10px", minHeight: 44, borderRadius: 10, border: `1px solid ${t.border}`,
+                                background: "transparent", color: t.textMuted,
+                                fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+                            }}>Close</button>
+                            <button type="button" onClick={save} disabled={busy} aria-busy={busy} style={{
+                                padding: "10px", minHeight: 44, borderRadius: 10, border: "none",
+                                background: `linear-gradient(135deg,${t.primary},#22a898)`,
+                                color: t.mode === "dark" ? "#0b1c22" : "#fff",
+                                fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                                cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
+                            }}>{busy ? "Saving…" : "Save link"}</button>
+                        </div>
                     </>
                 )}
-
-                {!isNew && (
-                    <div style={{
-                        padding: "10px 14px", borderRadius: 10, marginBottom: 14,
-                        background: `${t.primary}10`, border: `1px solid ${t.primary}25`,
-                    }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{apt.purpose}</div>
-                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>with {apt.client}</div>
-                    </div>
-                )}
-
-                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <Field label="Date">
-                        <input type="date" value={form.date} onChange={e => f("date")(e.target.value)}
-                            style={inp}
-                            onFocus={e => e.target.style.borderColor = t.primary}
-                            onBlur={e => e.target.style.borderColor = t.border} />
-                    </Field>
-                    <Field label="Time">
-                        <input type="time" value={form.time} onChange={e => f("time")(e.target.value)}
-                            style={inp}
-                            onFocus={e => e.target.style.borderColor = t.primary}
-                            onBlur={e => e.target.style.borderColor = t.border} />
-                    </Field>
-                </div>
-
-                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <Field label="Duration">
-                        <select value={form.duration} onChange={e => f("duration")(e.target.value)} style={{ ...inp, cursor: "pointer" }}>
-                            {["30 min", "45 min", "60 min", "90 min"].map(d => <option key={d}>{d}</option>)}
-                        </select>
-                    </Field>
-                    <Field label="Meeting Type">
-                        <select value={form.type} onChange={e => f("type")(e.target.value)} style={{ ...inp, cursor: "pointer" }}>
-                            {["In-Person", "Video Call", "Phone Call"].map(tp => <option key={tp}>{tp}</option>)}
-                        </select>
-                    </Field>
-                </div>
-
-                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 6 }}>
-                    <button onClick={onClose} style={{
-                        padding: "8px 10px", borderRadius: 8,
-                        border: `1px solid ${t.border}`, background: "transparent",
-                        color: t.textMuted, fontSize: 12, fontWeight: 600,
-                        fontFamily: "inherit", cursor: "pointer",
-                    }}>Cancel</button>
-                    <button onClick={() => onConfirm(form)} style={{
-                        padding: "8px 10px", borderRadius: 8, border: "none",
-                        background: `linear-gradient(135deg,${t.primary},#22a898)`,
-                        color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                        fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                        boxShadow: `0 4px 14px ${t.primary}50`,
-                    }}>✓ {isNew ? "Book Appointment" : "Confirm Reschedule"}</button>
-                </div>
             </div>
         </div>
     );
@@ -317,15 +780,47 @@ function AppointmentsPage() {
     const toast = useToast();
     const [viewMode, setViewMode] = useState("list");
     const [statusF, setStatusF] = useState("All");
+    // PAGING STATE, kept beside the list rather than inside it.
+    //
+    // Every caller used to ask for `page_size: 50` and stop. Fifty is not
+    // "all" — it is the first fifty by the server's sort — so a lawyer with a
+    // longer history saw a truncated diary with nothing saying so.
+    //
+    // `pagesTotal === null` means the server has not told us yet; it is NOT
+    // the same as "one page", and the list must not claim to be complete on
+    // that basis.
+    const [pageNo, setPageNo] = useState(1);
+    const [pagesTotal, setPagesTotal] = useState(null);
+    const [listTotal, setListTotal] = useState(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [moreError, setMoreError] = useState(null);
+    const [firstPageError, setFirstPageError] = useState(null);
+    // Per-status totals, read from the server rather than counted from the
+    // rows on screen. `null` means "not known", which is not zero.
+    const [statusTotals, setStatusTotals] = useState({});
     const [search, setSearch] = useState("");
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [scheduleModal, setScheduleModal] = useState(undefined); // undefined=closed, null=new, apt=reschedule
+    // Read once at mount rather than called inline during render, so every
+    // control on a single paint is decided against ONE instant. Calling
+    // `Date.now()` per button would let two buttons on the same row disagree
+    // about whether a boundary had passed.
+    const [now, setNow] = useState(() => Date.now());
     const [joinModal, setJoinModal] = useState(null);
-    const tabs = ["All", "Upcoming", "Pending", "Completed", "Cancelled"];
+    // "No Show" earns a tab because it is now its own status. The tab filter is
+    // an exact match on the display status, so without one a no-show would be
+    // reachable under "All" and nowhere else — it would simply disappear from
+    // every filtered view the moment it was marked.
+    // "Expired" earns a tab on the same reasoning as "No Show": the filter is
+    // an exact match on the display status, so a status without a tab is
+    // reachable under "All" and nowhere else.
+    const tabs = ["All", "Upcoming", "Pending", "Completed", "Cancelled", "No Show", "Expired"];
 
+    // The tab is applied server-side (see `reload`), so this is the search box
+    // only. Filtering a partial page locally would show "3 Completed" when the
+    // server holds forty, and a tab that silently means "of the rows we
+    // happen to have loaded" is the failure this milestone is about.
     const filtered = appointments.filter(a =>
-        (statusF === "All" || a.status === statusF) &&
         (a.client.toLowerCase().includes(search.toLowerCase()) ||
             a.purpose.toLowerCase().includes(search.toLowerCase()))
     );
@@ -335,53 +830,266 @@ function AppointmentsPage() {
         .sort((x, y) => x.at - y.at)[0];
     const bookedToday = new Set(
         appointments
-            .filter(a => a.at && _isToday(a.at) && a.status !== "Cancelled")
-            .map(a => `${String(a.at.getHours()).padStart(2, "0")}:${String(a.at.getMinutes()).padStart(2, "0")}`)
+            .filter(a => a.at && _isToday(a.at) && !DID_NOT_HAPPEN.has(a.status))
+            .map(a => pktHourMinute(a.at))
     );
 
     const mapApiAppt = (a) => ({
         id: a.id,
+        // The STORED joining link, or null. The modal used to construct a
+        // meet.attorney.ai URL from the id and the client's first name — a host
+        // this product does not own and a room nobody had created.
+        meetingLink: a.meeting_link || null,
+        // Carried through so Accept can pin the schedule the lawyer was shown.
+        // Dropping it here was the gap: the row rendered correctly and the one
+        // field that makes the confirmation safe never reached the handler.
+        scheduleVersion: Number.isInteger(a.schedule_version) ? a.schedule_version : null,
         at: a.scheduled_at ? new Date(a.scheduled_at) : null,
+        // When the consultation is over. The server will not accept a
+        // completion before this instant, so the row has to carry it — the
+        // display `duration` beside it is the string "30 min" and cannot be
+        // compared to anything.
+        //
+        // `end_at` is the AUTHORITATIVE value: the server stores it on the
+        // appointment and decides completion against that stored field, so
+        // recomputing it here could only ever disagree with the authority. The
+        // arithmetic below is a FALLBACK for a response that lacks it — a
+        // legacy row written before the field, or a malformed payload — and it
+        // is a guess, not a second opinion. Where both exist, `end_at` wins.
+        endAt: endOf(a),
         client: a.client_name || "Client",
         initials: (a.client_name || "??").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
         purpose: a.notes || "Consultation",
-        date: new Date(a.scheduled_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-        time: new Date(a.scheduled_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        // Rendered in PKT, not the browser's zone. The stored instant used to
+        // come back from Mongo without an offset, which JS then read as LOCAL
+        // time — so an appointment displayed correctly when it was created and
+        // five hours early after a refresh, and the lawyer and the client could
+        // read two different clock faces off the same row.
+        date: formatPkt(a.scheduled_at, { month: "short", day: "numeric", year: "numeric" }),
+        time: formatPkt(a.scheduled_at, { hour: "2-digit", minute: "2-digit" }),
         duration: `${a.duration_minutes} min`,
         type: a.mode === "video" ? "Video Call" : a.mode === "phone" ? "Phone Call" : "In-Person",
-        status: ({ confirmed: "Upcoming", pending: "Pending", completed: "Completed", cancelled: "Cancelled", no_show: "Cancelled" })[a.status] || "Pending",
+        // `no_show` is NOT "Cancelled". It was mapped that way, which told the
+        // lawyer their own client had cancelled when in fact the client did not
+        // turn up — a different fact, and the only one of the two that is the
+        // client's fault. The client's own view (ModTracking) has always shown
+        // "No Show" correctly, so the two sides of one appointment disagreed.
+        // `expired` is mapped explicitly, and the fallback no longer lies.
+        // Defaulting an unrecognised status to "Pending" put lapsed requests
+        // in the Pending tab wearing Accept and Decline — controls the server
+        // answers with a 409, on a request nobody can act on any more.
+        status: ({ confirmed: "Upcoming", pending: "Pending", completed: "Completed", cancelled: "Cancelled", no_show: "No Show", expired: "Expired" })[a.status] || "Unknown",
         caseId: a.case_id,
     });
 
+    // One loader, reused by the effect and by every handler that has to
+    // re-read after the server refused something.
+    // Display tab -> the status the SERVER understands. "All" sends none.
+    const API_STATUS = {
+        Upcoming: "confirmed", Pending: "pending", Completed: "completed",
+        Cancelled: "cancelled", "No Show": "no_show", Expired: "expired",
+    };
+
+    // Only the newest request may write. A tab changed while a request is in
+    // flight would otherwise have the older answer land on top of the newer
+    // one, showing rows from a filter the lawyer has already left.
+    const requestToken = useRef(0);
+    // A REF, NOT THE `loadingMore` STATE. Two clicks in the same tick both read
+    // the state before React has re-rendered, so both pass the guard and both
+    // request the same page — appending it twice. A ref updates synchronously,
+    // which is the only thing that can stop re-entry within one tick.
+    const moreInFlight = useRef(false);
+
+    const reload = async (tab = statusF) => {
+        const mine = ++requestToken.current;
+        try {
+            const { data, error } = await listAppointments({
+                status: API_STATUS[tab], page: 1, page_size: PAGE_SIZE,
+            });
+            if (mine !== requestToken.current) return;
+            // The client resolves on failure rather than throwing, so an error
+            // here is a value. Keep whatever is on screen: an empty list would
+            // read as "no appointments" when the read simply failed.
+            if (error || !data?.items) {
+                setFirstPageError(
+                    error?.message || "Could not load appointments.");
+                return;
+            }
+            setAppointments(data.items.map(mapApiAppt));
+            setPageNo(1);
+            setPagesTotal(Number.isInteger(data.pages) ? data.pages : null);
+            setListTotal(Number.isInteger(data.total) ? data.total : null);
+            setFirstPageError(null);
+            setMoreError(null);
+        } catch {
+            // Same rule.
+        } finally {
+            if (mine === requestToken.current) setLoading(false);
+        }
+    };
+
+    /** Append the next page. */
+    const loadMore = async () => {
+        // The guard, not a nicety: a second click would request the same page
+        // again and append it, duplicating every row on it.
+        if (moreInFlight.current || pagesTotal === null || pageNo >= pagesTotal) return;
+        moreInFlight.current = true;
+        setLoadingMore(true);
+        setMoreError(null);
+        const mine = requestToken.current;
+        const next = pageNo + 1;
+        const { data, error } = await listAppointments({
+            status: API_STATUS[statusF], page: next, page_size: PAGE_SIZE,
+        });
+        moreInFlight.current = false;
+        if (mine !== requestToken.current) { setLoadingMore(false); return; }
+        setLoadingMore(false);
+        if (error || !data?.items) {
+            // KEEP WHAT IS SHOWN. Those rows were read successfully; throwing
+            // them away to report a later failure destroys good data.
+            setMoreError(error?.message || "Could not load more appointments.");
+            return;
+        }
+        setAppointments(prev => {
+            // The backend pages with skip/limit, so a row inserted or removed
+            // between requests can shift the window and hand back something
+            // already on screen.
+            const seen = new Set(prev.map(a => a.id));
+            return [...prev, ...data.items.map(mapApiAppt)
+                .filter(a => !seen.has(a.id))];
+        });
+        setPageNo(next);
+        setPagesTotal(Number.isInteger(data.pages) ? data.pages : pagesTotal);
+        setListTotal(Number.isInteger(data.total) ? data.total : listTotal);
+    };
+
+    // THE STAT CARDS COME FROM THE SERVER'S `total`, NOT FROM COUNTING ROWS.
+    //
+    // Counting the loaded page was wrong twice over once the list pages: it
+    // reported the first page's tally as a total, and with the tab applied
+    // server-side it would have reported the CURRENT TAB's tally under every
+    // card. One bounded request per status reads the real figure without
+    // pulling an appointment history into the browser to count it.
     useEffect(() => {
-        listAppointments({ page_size: 50 }).then(({ data }) => {
-            if (data?.items) setAppointments(data.items.map(mapApiAppt));
-            setLoading(false);
-        }).catch(() => setLoading(false));
+        let cancelled = false;
+        Promise.all(["confirmed", "pending", "completed"].map(
+            status => listAppointments({ status, page_size: 1 })
+        )).then(results => {
+            if (cancelled) return;
+            const next = {};
+            ["confirmed", "pending", "completed"].forEach((status, i) => {
+                const { data, error } = results[i];
+                next[status] = (!error && Number.isInteger(data?.total))
+                    ? data.total : null;
+            });
+            setStatusTotals(next);
+        });
+        return () => { cancelled = true; };
     }, []);
+
+    useEffect(() => { setLoading(true); reload(statusF); },
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [statusF]);
+
+    // The clock, as state.
+    //
+    // Three controls below turn on or off at an instant — an appointment
+    // starting, ending, or slipping into the past. React has no reason to
+    // re-render when that instant arrives, so the buttons were correct only
+    // until the moment they mattered, and a lawyer watching the page would see
+    // No Show still greyed out after the client failed to appear.
+    //
+    // The cleanup is not a formality: this interval holds a closure over
+    // component state, so leaving it running after unmount means setting state
+    // on a dead component on every tick, for as long as the tab is open.
+    useEffect(() => {
+        const id = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+        return () => clearInterval(id);
+    }, []);
+
+    // Each of these mirrors a rule the server enforces, evaluated against the
+    // single `now` above. They answer "may this be done yet", never "is this
+    // the right kind of appointment" — the status gate is the surrounding JSX,
+    // and keeping the two separate is what stopped Done and No Show from
+    // inheriting each other's conditions.
+    //
+    // A row with no usable time is treated as NOT actionable. The alternative
+    // is offering a control whose precondition cannot be evaluated, which is
+    // how these buttons behaved before they were gated at all.
+    const startedAt = (apt) => (apt.at ? apt.at.getTime() : null);
+    const endedAt = (apt) => (apt.endAt ? apt.endAt.getTime() : null);
+
+    const canAccept = (apt) => startedAt(apt) !== null && now < startedAt(apt);
+    const canNoShow = (apt) => startedAt(apt) !== null && now >= startedAt(apt);
+    const canComplete = (apt) => endedAt(apt) !== null && now >= endedAt(apt);
+
+    const whyNotAccept = (apt) => (canAccept(apt) ? undefined
+        : startedAt(apt) === null ? "This appointment has no scheduled time"
+        : "This time has already passed — cancel the request instead");
+    const whyNotNoShow = (apt) => (canNoShow(apt) ? undefined
+        : startedAt(apt) === null ? "This appointment has no scheduled time"
+        : "Available once the appointment has started");
+    const whyNotComplete = (apt) => (canComplete(apt) ? undefined
+        : endedAt(apt) === null ? "This appointment has no end time"
+        : "Available once the consultation has ended");
 
     const handleAccept = async (id) => {
         const apt = appointments.find(a => a.id === id);
-        console.log("🔍 Confirming appointment:", id, apt?.client);
 
-        const result = await apiConfirm(id);
-        console.log("📡 API Response:", result);
-
-        const { error } = result;
-        if (error) {
-            console.error("❌ Confirmation failed:", error);
-            const errMsg = error.message || "Could not confirm appointment";
-            toast.show(errMsg, "danger", 4000);
-            addNotif({ type: "appointment", title: "Failed to Confirm", body: errMsg, time: "Just now" });
+        // THE VERSION DISPLAYED WHEN ACCEPT WAS CLICKED, not one read fresh.
+        //
+        // Confirming is agreeing to a TIME. The client may move a pending
+        // request while this page sits open, and the status stays PENDING
+        // throughout — so re-reading the version here would defeat the pin: it
+        // would agree to whatever the appointment says now, which is exactly
+        // the time the lawyer has not seen.
+        if (!Number.isInteger(apt?.scheduleVersion)) {
+            // Nothing safe to send. Reload rather than guess a version.
+            toast.show("Reload this page before accepting — its details are out of date.",
+                       "warn", 4000);
+            await reload();
             return;
         }
 
-        console.log("✅ Appointment confirmed successfully");
-        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "Upcoming" } : a));
+        const { error, status } = await apiConfirm(id, {
+            schedule_version: apt.scheduleVersion,
+        });
+
+        if (error) {
+            const errMsg = error.message || "Could not confirm appointment";
+            toast.show(errMsg, "danger", 4000);
+            addNotif({ type: "appointment", title: "Failed to Confirm", body: errMsg, time: "Just now" });
+            // A 409 means the request moved underneath us — most often the
+            // client changed the time. The row must be re-read so the lawyer
+            // sees what they would actually be accepting, and NOT marked
+            // Upcoming: reporting success for a confirmation that did not
+            // happen is how a lawyer ends up holding a slot nobody agreed to.
+            if (status === 409) await reload();
+            return;
+        }
+
+        // Re-read rather than patching local state: the server owns the
+        // outcome, and the confirmed row carries the version any later action
+        // has to pin against.
+        await reload();
         const msg = `✅ Appointment confirmed with ${apt?.client}`;
         toast.show(msg, "success", 3000);
         addNotif({ type: "appointment", title: "Appointment Accepted", body: msg, time: "Just now" });
     };
+
+    const handleSaveMeetingLink = async (id, link) => {
+        const result = await apiSetMeetingLink(id, link);
+        if (!result.error) {
+            await reload();
+            // Keep the modal open on the refreshed row so the lawyer sees the
+            // stored link rather than the one they typed.
+            setJoinModal(prev => (prev && prev.id === id
+                ? { ...prev, meetingLink: link } : prev));
+            toast.show("Joining link saved — your client can see it now.", "success", 3000);
+        }
+        return result;
+    };
+
     const handleReject = async (id) => {
         const apt = appointments.find(a => a.id === id);
         const { error } = await apiCancel(id);
@@ -410,33 +1118,40 @@ function AppointmentsPage() {
         toast.show(msg, "success", 3000);
         addNotif({ type: "appointment", title: "Appointment Completed", body: msg, time: "Just now" });
     };
-    const confirmSchedule = (raw) => {
-        // Native pickers give ISO values — store the display strings the list renders.
-        const form = { ...raw, date: fromISODate(raw.date), time: fromISOTime(raw.time) };
-        if (scheduleModal === null) {
-            // New appointment
-            const newApt = {
-                id: Date.now(), client: form.client, purpose: form.purpose,
-                date: form.date, time: form.time, duration: form.duration,
-                type: form.type, status: "Upcoming",
-                initials: form.client.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
-            };
-            setAppointments(prev => [newApt, ...prev]);
-            addNotif({ type: "appointment", title: "Appointment Booked", body: `Booked ${form.client} for ${form.date}`, time: "Just now" });
-        } else {
-            setAppointments(prev => prev.map(a => a.id === scheduleModal.id
-                ? { ...a, date: form.date, time: form.time, duration: form.duration, type: form.type, status: "Upcoming" } : a));
-            addNotif({ type: "appointment", title: "Rescheduled", body: `${scheduleModal.client} → ${form.date} ${form.time}`, time: "Just now" });
+    const handleNoShow = async (id) => {
+        // Uses the existing PATCH /appointments/{id}/no-show. The endpoint, the
+        // API client function and the NO_SHOW status all already existed; the
+        // lawyer — the only person who can record a no-show — simply had no way
+        // to reach them.
+        const apt = appointments.find(a => a.id === id);
+        const { error } = await apiNoShow(id);
+        if (error) {
+            // The server allows this only on a CONFIRMED appointment, so a
+            // stale card (one already completed or cancelled in another tab)
+            // lands here. Say what the server said and leave the row alone.
+            const errMsg = error.message || "Could not mark as no-show";
+            toast.show(errMsg, "danger", 4000);
+            addNotif({ type: "appointment", title: "Failed", body: errMsg, time: "Just now" });
+            return;
         }
-        setScheduleModal(undefined);
+        setAppointments(prev => prev.map(a => a.id === id ? { ...a, status: "No Show" } : a));
+        const msg = `${apt?.client || "The client"} did not attend`;
+        toast.show(msg, "warn", 3000);
+        addNotif({ type: "appointment", title: "Marked as No Show", body: msg, time: "Just now" });
     };
 
+    // `today` is the exception: no filter exists for "today", so it is
+    // necessarily derived from the rows in hand. It is therefore labelled as a
+    // count over the loaded rows whenever more remain, rather than passed off
+    // as the day's complete agenda.
+    const listComplete = pagesTotal !== null && pageNo >= pagesTotal;
     const statCounts = {
-        today: appointments.filter(a => a.at && _isToday(a.at) && a.status !== "Cancelled").length,
-        upcoming: appointments.filter(a => a.status === "Upcoming").length,
-        pending: appointments.filter(a => a.status === "Pending").length,
-        completed: appointments.filter(a => a.status === "Completed").length,
+        today: appointments.filter(a => a.at && _isToday(a.at) && !DID_NOT_HAPPEN.has(a.status)).length,
+        upcoming: statusTotals.confirmed,
+        pending: statusTotals.pending,
+        completed: statusTotals.completed,
     };
+    const statValue = (n) => (Number.isInteger(n) ? String(n) : "—");
 
     return (
         <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -444,16 +1159,9 @@ function AppointmentsPage() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
                     {/* ── Modals ──────────────────────────────────── */}
-                    {scheduleModal !== undefined && (
-                        <ScheduleModal
-                            apt={scheduleModal}
-                            onClose={() => setScheduleModal(undefined)}
-                            onConfirm={confirmSchedule}
-                            t={t}
-                        />
-                    )}
                     {joinModal && (
-                        <JoinCallModal apt={joinModal} onClose={() => setJoinModal(null)} t={t} />
+                        <JoinCallModal apt={joinModal} onClose={() => setJoinModal(null)}
+                            onSaveLink={handleSaveMeetingLink} t={t} />
                     )}
 
                     {/* ── Header ──────────────────────────────────── */}
@@ -462,23 +1170,6 @@ function AppointmentsPage() {
                             <div style={{ fontSize: 22, fontWeight: 700, color: t.text, fontFamily: "Georgia,serif" }}>Appointments</div>
                             <div style={{ fontSize: 13, color: t.textMuted, marginTop: 3 }}>Manage consultations and client meetings</div>
                         </div>
-                        {/* Schedule button — opens new appointment modal */}
-                        <button
-                            onClick={() => setScheduleModal(null)}
-                            style={{
-                                display: "inline-flex", alignItems: "center", gap: 8,
-                                padding: "10px 22px", borderRadius: 12, border: "none",
-                                background: `linear-gradient(135deg,${t.primary},#22a898)`,
-                                color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                                fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                                boxShadow: `0 4px 16px ${t.primary}50`,
-                                transition: "opacity .15s, transform .15s",
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                            onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
-                        >
-                            + Schedule
-                        </button>
                     </div>
 
                     {/* ── Enhanced Filter row ──────────────────────────────── */}
@@ -599,10 +1290,26 @@ function AppointmentsPage() {
 
                                 {/* ── Stat cards ──────────────────────── */}
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
-                                    <StatCard label="Today" value={statCounts.today} color="#38d8c4" bg="rgba(56,216,196,0.12)" border="rgba(56,216,196,0.30)" />
-                                    <StatCard label="Upcoming" value={statCounts.upcoming} color="#5ab3ff" bg="rgba(90,179,255,0.12)" border="rgba(90,179,255,0.30)" />
-                                    <StatCard label="Pending" value={statCounts.pending} color="#e8b84b" bg="rgba(232,184,75,0.12)" border="rgba(232,184,75,0.30)" />
-                                    <StatCard label="Completed" value={statCounts.completed} color="#3ec99a" bg="rgba(62,201,154,0.12)" border="rgba(62,201,154,0.30)" />
+                                    <StatCard label={listComplete ? "Today" : "Today (loaded)"} value={String(statCounts.today)} color="#38d8c4" bg="rgba(56,216,196,0.12)" border="rgba(56,216,196,0.30)" />
+                                    <StatCard label="Upcoming" value={statValue(statCounts.upcoming)} color="#5ab3ff" bg="rgba(90,179,255,0.12)" border="rgba(90,179,255,0.30)" />
+                                    <StatCard label="Pending" value={statValue(statCounts.pending)} color="#e8b84b" bg="rgba(232,184,75,0.12)" border="rgba(232,184,75,0.30)" />
+                                    <StatCard label="Completed" value={statValue(statCounts.completed)} color="#3ec99a" bg="rgba(62,201,154,0.12)" border="rgba(62,201,154,0.30)" />
+                                </div>
+
+                                {/* ── Working hours ───────────────────── */}
+                                <div>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>
+                                        Working hours
+                                    </div>
+                                    <WorkingHours t={t} />
+                                </div>
+
+                                {/* ── Needs outcome ───────────────────── */}
+                                <div>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>
+                                        Needs outcome
+                                    </div>
+                                    <NeedsOutcome t={t} onRecorded={reload} />
                                 </div>
 
                                 {/* ── Filter tabs ─────────────────────── */}
@@ -622,7 +1329,8 @@ function AppointmentsPage() {
                                                     background: statusF === tab ? `${t.primary}22` : t.cardHi,
                                                     color: statusF === tab ? t.primary : t.textFaint,
                                                 }}>
-                                                    {appointments.filter(a => a.status === tab).length}
+                                                    {statusF === tab && Number.isInteger(listTotal)
+                                                        ? listTotal : "·"}
                                                 </span>
                                             )}
                                         </button>
@@ -669,14 +1377,19 @@ function AppointmentsPage() {
                                             {/* Action buttons */}
                                             <div style={{ display: "flex", gap: 8 }}>
                                                 {apt.status === "Pending" && (<>
-                                                    <Btn variant="success" size="sm" style={{ flex: 1 }} onClick={() => handleAccept(apt.id)}>
+                                                    {/* The server refuses to confirm a slot that has
+                                                        already passed — it would only produce a confirmed
+                                                        row for a meeting that cannot happen. Reject stays
+                                                        enabled, because clearing the stale request is the
+                                                        action that remains. */}
+                                                    <Btn variant="success" size="sm" style={{ flex: 1 }}
+                                                        disabled={!canAccept(apt)}
+                                                        title={whyNotAccept(apt)}
+                                                        onClick={() => handleAccept(apt.id)}>
                                                         <Icon d={I.check} size={12} /> Accept
                                                     </Btn>
                                                     <Btn variant="danger" size="sm" style={{ flex: 1 }} onClick={() => handleReject(apt.id)}>
                                                         <Icon d={I.x} size={12} /> Reject
-                                                    </Btn>
-                                                    <Btn variant="accent" size="sm" onClick={() => setScheduleModal(apt)}>
-                                                        <Icon d={I.calendar} size={12} />
                                                     </Btn>
                                                 </>)}
 
@@ -692,34 +1405,48 @@ function AppointmentsPage() {
                                                                 fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
                                                                 boxShadow: `0 3px 10px ${t.primary}45`,
                                                             }}>
-                                                            📹 Join Call
+                                                            {/* The label follows the DATA. A video
+                                                                appointment with no stored link has
+                                                                nothing to join, and saying "Join Call"
+                                                                would promise a room that does not
+                                                                exist. */}
+                                                            {apt.meetingLink ? "📹 Join Call" : "📹 Add joining link"}
                                                         </button>
                                                     ) : (
                                                         <Btn variant="primary" size="sm" style={{ flex: 1 }}>
                                                             <Icon d={I.map} size={12} /> View Details
                                                         </Btn>
                                                     )}
-                                                    <Btn variant="success" size="sm" onClick={() => handleComplete(apt.id)}>
+                                                    {/* Both of these are offered on Upcoming only, because
+                                                        that is the display status for `confirmed` and the
+                                                        server accepts neither outcome on anything else.
+
+                                                        They are now ALSO gated on the clock, which reverses
+                                                        an earlier decision here. That note said the server
+                                                        had no "is it past?" rule and that inventing one
+                                                        client-side would refuse actions the API allowed.
+                                                        The server has those rules now — an outcome cannot
+                                                        be declared for a meeting that has not happened — so
+                                                        the choice is no longer between gating and not
+                                                        gating. It is between a disabled button and a button
+                                                        that always fails. */}
+                                                    <Btn variant="success" size="sm"
+                                                        disabled={!canComplete(apt)}
+                                                        title={whyNotComplete(apt)}
+                                                        onClick={() => handleComplete(apt.id)}>
                                                         <Icon d={I.check} size={12} /> Done
                                                     </Btn>
-                                                    <Btn variant="accent" size="sm" onClick={() => setScheduleModal(apt)}>
-                                                        <Icon d={I.clock} size={12} /> Reschedule
+                                                    <Btn variant="secondary" size="sm"
+                                                        disabled={!canNoShow(apt)}
+                                                        title={whyNotNoShow(apt)}
+                                                        onClick={() => handleNoShow(apt.id)}>
+                                                        No Show
                                                     </Btn>
                                                     <Btn variant="danger" size="sm" onClick={() => handleReject(apt.id)}>
                                                         <Icon d={I.x} size={12} />
                                                     </Btn>
                                                 </>)}
 
-                                                {apt.status === "Completed" && (
-                                                    <Btn variant="secondary" size="sm" style={{ flex: 1 }}>
-                                                        <Icon d={I.eye} size={12} /> View Summary
-                                                    </Btn>
-                                                )}
-                                                {apt.status === "Cancelled" && (
-                                                    <Btn variant="accent" size="sm" style={{ flex: 1 }} onClick={() => setScheduleModal(apt)}>
-                                                        <Icon d={I.calendar} size={12} /> Reschedule
-                                                    </Btn>
-                                                )}
                                             </div>
                                         </Card>
                                     ))}
@@ -729,9 +1456,66 @@ function AppointmentsPage() {
                                             Loading appointments…
                                         </div>
                                     )}
-                                    {!loading && filtered.length === 0 && (
+                                    {!loading && filtered.length === 0 && !firstPageError && (
                                         <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 40, color: t.textMuted, fontSize: 14 }}>
                                             No appointments found for "{statusF}" filter.
+                                        </div>
+                                    )}
+
+                                    {/* FIRST-PAGE FAILURE. Distinct from an
+                                        empty list: one says there is nothing
+                                        to show, the other that we could not
+                                        find out. */}
+                                    {!loading && firstPageError && (
+                                        <div role="alert" style={{ gridColumn: "1 / -1", textAlign: "center", padding: 30, color: "#e8526a", fontSize: 13 }}>
+                                            {firstPageError} This is not the same as having
+                                            none — we could not read the list.
+                                            <div>
+                                                <button type="button" onClick={() => reload(statusF)} style={{
+                                                    marginTop: 10, minHeight: 36, padding: "8px 14px", borderRadius: 8,
+                                                    border: `1px solid ${t.border}`, background: "transparent",
+                                                    color: t.text, fontSize: 12, fontWeight: 700,
+                                                    cursor: "pointer", fontFamily: "inherit",
+                                                }}>Retry appointments</button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* LATER-PAGE FAILURE. The rows above were
+                                        read successfully and stay. */}
+                                    {moreError && (
+                                        <div role="alert" style={{ gridColumn: "1 / -1", padding: "10px 12px", color: "#e8526a", fontSize: 12 }}>
+                                            {moreError} The appointments already shown are
+                                            unaffected.
+                                        </div>
+                                    )}
+
+                                    {/* END OF LIST, only when the SERVER says
+                                        so. A short page is not the signal:
+                                        rows can be removed between requests,
+                                        and "that is everything" would then be
+                                        a claim the server never made. */}
+                                    {!loading && !firstPageError && appointments.length > 0 && (
+                                        <div style={{ gridColumn: "1 / -1", textAlign: "center", paddingTop: 6 }}>
+                                            {!listComplete && (
+                                                <button type="button" onClick={loadMore} disabled={loadingMore}
+                                                    aria-busy={loadingMore || undefined}
+                                                    style={{
+                                                        minHeight: 40, padding: "9px 18px", borderRadius: 9,
+                                                        border: `1px solid ${t.border}`, background: "transparent",
+                                                        color: t.text, fontSize: 12, fontWeight: 700,
+                                                        cursor: loadingMore ? "wait" : "pointer",
+                                                        opacity: loadingMore ? 0.6 : 1, fontFamily: "inherit",
+                                                    }}>
+                                                    {loadingMore ? "Loading…" : "Load more appointments"}
+                                                </button>
+                                            )}
+                                            <div style={{ fontSize: 11, color: t.textFaint, marginTop: 8 }}>
+                                                {Number.isInteger(listTotal)
+                                                    ? `Showing ${appointments.length} of ${listTotal}`
+                                                    : `Showing ${appointments.length}`}
+                                                {listComplete ? " — that is all of them." : ""}
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -740,24 +1524,40 @@ function AppointmentsPage() {
                             {/* ── Right sidebar ──────────────────────── */}
                             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                                 <Card style={{ padding: 16 }}>
+                                    {/* WAS AN INVENTED WORKING DAY.
+                                        Sixteen hardcoded half-hours from 09:00
+                                        to 16:30 were rendered as BUTTONS: the
+                                        unbooked ones enabled, coloured like an
+                                        action and carrying a pointer cursor,
+                                        with no onClick anywhere. They looked
+                                        bookable, did nothing, and asserted a
+                                        working day nobody had configured —
+                                        this product has no availability
+                                        schedule, so "not booked" is not
+                                        "free", and Sunday looked as open as
+                                        Tuesday.
+
+                                        What remains is only what the data
+                                        says: the hours that actually have an
+                                        appointment today, as read-only text. */}
                                     <div style={{ fontSize: 12, fontWeight: 700, color: t.textFaint, letterSpacing: "0.1em", textTransform: "uppercase", textAlign: "center", marginBottom: 12 }}>
-                                        TODAY'S SCHEDULE
+                                        TODAY'S BOOKED HOURS
                                     </div>
                                     <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 14 }}>
-                                        {["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30"].map(slot => {
-                                            const booked = bookedToday.has(slot);
-                                            return (
-                                                <button key={slot} disabled={booked} style={{
-                                                    padding: "6px 4px", borderRadius: 7, fontSize: 11, fontWeight: 500,
-                                                    border: `1px solid ${booked ? t.border : t.borderHi}`,
-                                                    background: booked ? t.cardHi : t.primaryGlow2,
-                                                    color: booked ? t.textFaint : t.primary,
-                                                    cursor: booked ? "not-allowed" : "pointer",
-                                                    textDecoration: booked ? "line-through" : "none",
-                                                }}>{slot}</button>
-                                            );
-                                        })}
+                                        {[...bookedToday].sort().map(slot => (
+                                            <span key={slot} style={{
+                                                padding: "6px 4px", borderRadius: 7, fontSize: 11,
+                                                fontWeight: 600, textAlign: "center",
+                                                border: `1px solid ${t.border}`,
+                                                background: t.cardHi, color: t.text,
+                                            }}>{slot}</span>
+                                        ))}
                                     </div>
+                                    {bookedToday.size === 0 && (
+                                        <div style={{ fontSize: 12, color: t.textMuted, textAlign: "center", marginBottom: 14 }}>
+                                            Nothing booked today.
+                                        </div>
+                                    )}
                                     <div style={{ borderRadius: 10, background: t.primaryGlow2, border: `1px solid ${t.primary}30`, padding: 14, textAlign: "center" }}>
                                         <div style={{ fontSize: 11, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 4 }}>Next Meeting</div>
                                         <div style={{ fontSize: 20, fontWeight: 700, color: t.text, fontFamily: "Georgia,serif" }}>{nextApt ? nextApt.client : "No upcoming meeting"}</div>
@@ -765,24 +1565,6 @@ function AppointmentsPage() {
                                     </div>
                                 </Card>
 
-                                <Card style={{ padding: 16 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.textFaint, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>
-                                        Quick Actions
-                                    </div>
-                                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                                        <button onClick={() => setScheduleModal(null)} style={{
-                                            display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7,
-                                            width: "100%", padding: "9px 0", borderRadius: 9, border: "none",
-                                            background: `linear-gradient(135deg,${t.primary},#22a898)`,
-                                            color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                                            fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                                            boxShadow: `0 3px 10px ${t.primary}40`,
-                                        }}>+ New Appointment</button>
-                                        <Btn variant="secondary" full size="sm">
-                                            <Icon d={I.clock} size={13} /> Block Time
-                                        </Btn>
-                                    </div>
-                                </Card>
                             </div>
                         </div>
                     ) : (
@@ -797,7 +1579,7 @@ function AppointmentsPage() {
                                                 {CAL_DAYS.map((d, i) => (
                                                     <th key={d} style={{ padding: "10px 6px", borderBottom: `1px solid ${t.border}`, borderRight: `1px solid ${t.border}`, background: t.surface, textAlign: "center", minWidth: 95 }}>
                                                         <div style={{ fontSize: 10, color: t.textFaint, fontWeight: 600, textTransform: "uppercase" }}>{d} Day</div>
-                                                        <div style={{ fontSize: 18, fontWeight: 700, color: _isToday(_weekDates[i]) ? t.primary : t.text, marginTop: 1 }}>{_weekDates[i].getDate()}</div>
+                                                        <div style={{ fontSize: 18, fontWeight: 700, color: _weekDayKeys[i] === pktToday() ? t.primary : t.text, marginTop: 1 }}>{dayOfMonth(_weekDayKeys[i])}</div>
                                                     </th>
                                                 ))}
                                             </tr>
@@ -808,9 +1590,9 @@ function AppointmentsPage() {
                                                     <td style={{ padding: "6px 8px", fontSize: 11, color: t.textFaint, borderRight: `1px solid ${t.border}`, borderBottom: `1px solid ${t.border}`, fontWeight: 500, textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{hr}</td>
                                                     {CAL_DAYS.map((_, di) => {
                                                         const evs = appointments.filter(a =>
-                                                            a.at && a.status !== "Cancelled" &&
-                                                            a.at.toDateString() === _weekDates[di].toDateString() &&
-                                                            a.at.getHours() === parseInt(hr)
+                                                            a.at && !DID_NOT_HAPPEN.has(a.status) &&
+                                                            pktDayKey(a.at) === _weekDayKeys[di] &&
+                                                            pktHour(a.at) === parseInt(hr)
                                                         );
                                                         return (
                                                             <td key={di} style={{ padding: 3, borderRight: `1px solid ${t.border}`, borderBottom: `1px solid ${t.border}`, verticalAlign: "top", height: 50 }}>

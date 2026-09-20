@@ -1,3 +1,5 @@
+import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -9,7 +11,6 @@ from app.core.exceptions import (
     AuthError,
     ConflictError,
     NotFoundError,
-    ServiceUnavailableError,
 )
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
@@ -19,16 +20,66 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    token_storage_key,
     token_predates_password_change,
     verify_password,
 )
 from app.db.collections import get_password_reset_col, get_refresh_blocklist_col
 from app.repositories.user_repo import UserRepository
 from app.schemas.auth import RegisterRequest
+from app.services import auth_sessions
 from app.utils.email import send_password_reset_email
 from app.utils.validators import PASSWORD_POLICY, validate_password_strength
 
 user_repo = UserRepository()
+logger = logging.getLogger(__name__)
+
+_BLOCKLIST_FALLBACK_TTL = timedelta(days=7)
+_RESET_TOKEN_PREFIX = "sha256:"
+
+
+def _reset_token_key(token: str) -> str:
+    """Return the one-way lookup key stored for a reset bearer secret."""
+    return _RESET_TOKEN_PREFIX + hashlib.sha256(token.encode()).hexdigest()
+
+
+def _revocation_record(token: str, payload: dict) -> dict:
+    """Build a blocklist row which expires when its JWT expires.
+
+    New rows intentionally omit ``created_at``. Deployed databases still have
+    the original seven-day TTL on that field; writing an access-token row with
+    a back-dated value would make that legacy index delete the revocation
+    immediately. The old index continues cleaning old rows, while the precise
+    ``expires_at`` index owns all new rows.
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        expires_at = datetime.fromtimestamp(float(payload["exp"]), timezone.utc)
+    except (KeyError, TypeError, ValueError, OSError):
+        expires_at = now + _BLOCKLIST_FALLBACK_TTL
+    return {
+        "token": token_storage_key(token),
+        "token_type": payload.get("type"),
+        "expires_at": expires_at,
+    }
+
+
+async def _revoke_idempotently(token: str | None, expected_type: str) -> None:
+    """Revoke a valid JWT; repeated and concurrent revocations succeed."""
+    if not token:
+        return
+    payload = decode_token(token)
+    if not payload or payload.get("type") != expected_type:
+        return
+    try:
+        await get_refresh_blocklist_col().update_one(
+            {"token": token_storage_key(token)},
+            {"$setOnInsert": _revocation_record(token, payload)},
+            upsert=True,
+        )
+    except DuplicateKeyError:
+        # Another worker won the same unique-token upsert.
+        return
 
 
 async def register(data: RegisterRequest) -> dict:
@@ -64,7 +115,6 @@ async def register(data: RegisterRequest) -> dict:
             "total_reviews": 0,
             "availability": True,
             "bio": None,
-            "specialization_embedding": None,
         } if data.role.value == "lawyer" else None,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
@@ -81,7 +131,7 @@ async def register(data: RegisterRequest) -> dict:
     return doc
 
 
-async def login(email: str, password: str) -> dict:
+async def login(email: str, password: str, *, user_agent: str = "") -> dict:
     user = await user_repo.find_by_email(email)
 
     # Same work whatever the address turns out to be. Guarding this behind
@@ -105,8 +155,21 @@ async def login(email: str, password: str) -> dict:
     if not user or not password_ok or not user.get("is_active"):
         raise AuthError("Invalid email or password")
 
-    access_token = create_access_token(user["_id"], user["role"])
-    refresh_token = create_refresh_token(user["_id"])
+    session_id = auth_sessions.new_session_id()
+    refresh_token_id = auth_sessions.new_token_id()
+    refresh_token = create_refresh_token(
+        user["_id"], session_id, refresh_token_id)
+    refresh_payload = decode_token(refresh_token) or {}
+    expires_at = datetime.fromtimestamp(
+        float(refresh_payload["exp"]), timezone.utc)
+    await auth_sessions.create(
+        session_id=session_id,
+        user_id=user["_id"],
+        refresh_token_id=refresh_token_id,
+        expires_at=expires_at,
+        user_agent=user_agent,
+    )
+    access_token = create_access_token(user["_id"], user["role"], session_id)
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -115,14 +178,10 @@ async def login(email: str, password: str) -> dict:
     }
 
 
-async def refresh(refresh_token: str) -> dict:
+async def refresh(refresh_token: str, access_token: str | None = None) -> dict:
     payload = decode_token(refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise AuthError("Invalid refresh token")
-
-    blocked = await get_refresh_blocklist_col().find_one({"token": refresh_token})
-    if blocked:
-        raise AuthError("Refresh token revoked")
 
     user = await user_repo.find_by_id(payload["sub"])
     if not user or not user.get("is_active"):
@@ -133,24 +192,63 @@ async def refresh(refresh_token: str) -> dict:
     if token_predates_password_change(payload, user):
         raise AuthError("Session ended by a password change — please sign in again")
 
-    # Rotate: blocklist old token, issue fresh pair
-    await get_refresh_blocklist_col().insert_one(
-        {"token": refresh_token, "created_at": datetime.now(timezone.utc)}
-    )
+    session_id = payload.get("sid")
+    token_id = payload.get("jti")
+    if session_id and token_id:
+        next_token_id = auth_sessions.new_token_id()
+        next_refresh = create_refresh_token(
+            user["_id"], session_id, next_token_id)
+        next_payload = decode_token(next_refresh) or {}
+        await auth_sessions.rotate(
+            session_id=session_id,
+            user_id=user["_id"],
+            presented_token_id=token_id,
+            next_token_id=next_token_id,
+            next_expires_at=datetime.fromtimestamp(
+                float(next_payload["exp"]), timezone.utc),
+        )
+    else:
+        # Rollout compatibility: cookies minted before token families existed
+        # have no sid. They retain the old atomic one-use rotation until expiry.
+        try:
+            await get_refresh_blocklist_col().insert_one(
+                _revocation_record(refresh_token, payload)
+            )
+        except DuplicateKeyError:
+            raise AuthError("Refresh token revoked")
+        next_refresh = create_refresh_token(user["_id"])
+
+    # Retire the access token being replaced as part of this session's rotation.
+    await _revoke_idempotently(access_token, "access")
     return {
-        "access_token":  create_access_token(user["_id"], user["role"]),
-        "refresh_token": create_refresh_token(user["_id"]),
+        "access_token": create_access_token(
+            user["_id"], user["role"], session_id),
+        "refresh_token": next_refresh,
     }
 
 
-async def logout(refresh_token: str) -> None:
+async def logout(refresh_token: str | None, access_token: str | None = None) -> None:
     # Only blocklist valid JWTs — prevents collection flooding with garbage strings
-    payload = decode_token(refresh_token)
-    if not payload or payload.get("type") != "refresh":
-        return
-    await get_refresh_blocklist_col().insert_one(
-        {"token": refresh_token, "created_at": datetime.now(timezone.utc)}
+    for token in (refresh_token, access_token):
+        payload = decode_token(token) if token else None
+        if payload and payload.get("sid") and payload.get("sub"):
+            await auth_sessions.revoke(
+                payload["sid"], payload["sub"], reason="logout")
+    await _revoke_idempotently(refresh_token, "refresh")
+    await _revoke_idempotently(access_token, "access")
+
+
+async def logout_all(user_id: str) -> int:
+    """End every token family and invalidate rollout-era sid-less tokens."""
+    count = await auth_sessions.revoke_all(user_id)
+    await user_repo.update_one(
+        {"_id": user_id, "is_active": True},
+        {"$set": {
+            TOKENS_VALID_FROM: password_change_cutoff(),
+            "updated_at": datetime.now(timezone.utc),
+        }},
     )
+    return count
 
 
 async def forgot_password(email: str) -> None:
@@ -158,31 +256,45 @@ async def forgot_password(email: str) -> None:
     if not user:
         return  # silent — don't leak whether email exists
 
-    # Delete any existing reset tokens for this email before creating a new one
-    await get_password_reset_col().delete_many({"email": email.lower()})
-
     reset_token = secrets.token_urlsafe(32)
-    await get_password_reset_col().insert_one(
-        {
-            "token": reset_token,
-            "email": email.lower(),
-            "created_at": datetime.now(timezone.utc),
-        }
-    )
+    token_key = _reset_token_key(reset_token)
     try:
-        await send_password_reset_email(email, reset_token)
-    except Exception:
-        # Delivery failed for a real account — tell the user instead of letting
-        # them wait for an email that will never arrive. (Doesn't leak account
-        # existence: the failure is on our SMTP side, not tied to the address.)
-        raise ServiceUnavailableError("Could not send the reset email — please try again later")
+        await get_password_reset_col().insert_one(
+            {
+                "token": token_key,
+                "email": email.lower(),
+                "active_slot": True,
+                "created_at": datetime.now(timezone.utc),
+            }
+        )
+    except DuplicateKeyError:
+        # One active link per account. This avoids a delete/insert race where
+        # two requests email different secrets and the later write silently
+        # invalidates the first message the user receives.
+        return
+    try:
+        delivered = await send_password_reset_email(email, reset_token)
+        if not delivered:
+            raise RuntimeError("email_not_configured")
+    except Exception as exc:
+        # Existing and unknown accounts keep the same public response even
+        # during an SMTP outage. Remove only the token created by this request.
+        await get_password_reset_col().delete_one({"token": token_key})
+        logger.warning(
+            "Password reset email was not delivered; error_type=%s",
+            type(exc).__name__,
+        )
 
 
 async def reset_password(token: str, new_password: str) -> None:
     if not validate_password_strength(new_password):
         raise AppValidationError(PASSWORD_POLICY)
 
-    record = await get_password_reset_col().find_one({"token": token})
+    # Atomic consumption is the single-use guarantee. The raw-token alternative
+    # keeps links issued by the previous release usable during their one-hour TTL.
+    record = await get_password_reset_col().find_one_and_delete(
+        {"token": {"$in": [_reset_token_key(token), token]}}
+    )
     if not record:
         raise AuthError("Invalid or expired reset token")
 
@@ -195,7 +307,6 @@ async def reset_password(token: str, new_password: str) -> None:
     if created_at is not None and created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
     if created_at and (datetime.now(timezone.utc) - created_at) > timedelta(hours=1):
-        await get_password_reset_col().delete_one({"token": token})
         raise AuthError("Invalid or expired reset token")
 
     user = await user_repo.find_by_email(record["email"])
@@ -215,4 +326,5 @@ async def reset_password(token: str, new_password: str) -> None:
             }
         },
     )
-    await get_password_reset_col().delete_one({"token": token})
+    await auth_sessions.revoke_all_best_effort(
+        user["_id"], reason="password_reset")

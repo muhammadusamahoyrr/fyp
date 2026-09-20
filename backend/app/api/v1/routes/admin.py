@@ -12,9 +12,15 @@ from app.schemas.admin import (
     LawyerMonitoringItem,
 )
 from app.schemas.case import CaseOut
+from app.schemas.appointment_dispute import (
+    DisputeQueue,
+    DisputeSupportView,
+    ResolveDisputeRequest,
+)
 from app.schemas.common import PaginatedResponse, StatusResponse
 from app.schemas.user import UserProfileResponse
 from app.services import admin_service
+from app.services import appointment_disputes
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -34,6 +40,56 @@ async def process_kyc(
         lawyer_id, body.approved, body.rejection_reason, actor=current_user)
     action = "approved" if body.approved else "rejected"
     return StatusResponse(success=True, message=f"KYC {action}")
+
+
+@router.get("/appointment-disputes", response_model=DisputeQueue)
+async def list_appointment_disputes(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    current_user: dict = Depends(require_admin),
+):
+    """Open reports awaiting a decision, oldest first.
+
+    Paginated server-side. A support queue that silently showed the first fifty
+    would be a queue whose tail is never worked — and the oldest complaint is
+    the one that has been waiting longest.
+    """
+    return await appointment_disputes.list_open(page=page, page_size=page_size)
+
+
+@router.get("/appointment-disputes/{dispute_id}",
+            response_model=DisputeSupportView)
+async def read_appointment_dispute(
+    dispute_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """The full support view, including the private note."""
+    return await appointment_disputes.get_for_support(dispute_id)
+
+
+@router.patch("/appointment-disputes/{dispute_id}",
+              response_model=DisputeSupportView)
+async def resolve_appointment_dispute(
+    dispute_id: str,
+    body: ResolveDisputeRequest,
+    current_user: dict = Depends(require_admin),
+):
+    """Decide a report.
+
+    `expected_version` is required. Two officers working the same queue will
+    sometimes decide one complaint at the same moment; the pin makes the loser
+    re-read rather than silently overwrite a decision a client has already been
+    told about.
+    """
+    return await appointment_disputes.resolve_dispute(
+        dispute_id=dispute_id,
+        actor_id=current_user["_id"],
+        actor_role=current_user["role"],
+        expected_version=body.expected_version,
+        decision=body.decision,
+        explanation=body.resolution_explanation,
+        support_note=body.support_note,
+    )
 
 
 @router.get("/analytics/overview", response_model=AnalyticsOverview)
@@ -188,6 +244,32 @@ async def retention_plan(current_user: dict = Depends(require_admin)):
     from app.services.retention import plan
 
     return await plan()
+
+
+@router.post("/retention/intakes/purge")
+async def purge_intakes(
+    dry_run: bool = Query(True),
+    limit: int | None = Query(None, ge=1),
+    current_user: dict = Depends(require_admin),
+):
+    """Apply the intake retention policy. DRY RUN BY DEFAULT.
+
+    TWO INDEPENDENT SWITCHES have to agree before anything is destroyed: this
+    call must pass `dry_run=false`, AND `intake_deletion_enabled` must be on in
+    configuration. Either left alone and the sweep counts eligible records and
+    destroys nothing.
+
+    That is deliberate rather than belt-and-braces. A dry-run default protects
+    against the mistyped call; the configuration flag protects against the
+    correctly typed one made against the wrong environment. The first observable
+    effect of a wrong retention number is that a client's evidence is gone, and
+    no single mistake should be enough to produce it.
+
+    A legal hold is re-read per record immediately before destruction, so a hold
+    placed after this sweep started still protects.
+    """
+    return await admin_service.purge_intake_retention(
+        dry_run=dry_run, limit=limit, actor=current_user)
 
 
 @router.get("/retention/holds")

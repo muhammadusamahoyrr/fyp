@@ -183,6 +183,25 @@ def augment_query(question: str, context: Optional[dict]) -> str:
 
 # Provenance -----------------------------------------------------------------
 
+def _utc_iso(value: datetime) -> str:
+    """One representation for an instant, whatever zone it arrives in.
+
+    A datetime read from Mongo used to be naive and is now aware (the client
+    decodes `tz_aware=True, tzinfo=utc`). Both mean the same instant and must
+    serialise identically, or the audit surface appears to change on the day
+    that flip deploys while nothing about the case has changed.
+
+    Naive input is treated as LEGACY UTC — which is what it always was, since
+    every writer in this codebase writes `datetime.now(timezone.utc)`. That
+    leniency is for values already inside the system. It is deliberately NOT the
+    rule at the appointment API boundary, where a naive timestamp is a client
+    that never said what it meant and is refused (see schemas/appointment.py).
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
 def context_fingerprint(context: Optional[dict]) -> Optional[str]:
     """Stable hash of the context that was used. Never the facts themselves.
 
@@ -192,16 +211,35 @@ def context_fingerprint(context: Optional[dict]) -> Optional[str]:
     """
     if not context:
         return None
+
+    def _default(value):
+        # DEFENSIVE. `_approved_case_context` builds a whitelist of six fields
+        # through `str(...)` plus `next_hearing() -> str`, so no datetime
+        # reaches here on the production AI route today. It is normalised anyway
+        # so that a seventh field which IS a datetime cannot silently make every
+        # fingerprint depend on how the driver happened to decode a zone.
+        if isinstance(value, datetime):
+            return _utc_iso(value)
+        return str(value)
+
     canonical = json.dumps(context, sort_keys=True, separators=(",", ":"),
-                           ensure_ascii=True, default=str)
+                           ensure_ascii=True, default=_default)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
 def record_version(case: Optional[dict]) -> Optional[str]:
-    """The case record's own version marker — updated_at, as an ISO string."""
+    """The case record's own version marker — updated_at, as an ISO string.
+
+    Normalised to UTC because this value IS read straight off the Mongo record,
+    so it is the one here that the decoding change actually reaches. It is
+    written into provenance and displayed; nothing compares it, so normalising
+    changes a representation in the audit surface and invalidates nothing. Note
+    that this normalisation is itself a one-time format change on the day it
+    deploys — harmless for that same reason, but not a free move.
+    """
     if not case:
         return None
     value = case.get("updated_at") or case.get("created_at")
     if isinstance(value, datetime):
-        return value.isoformat()
+        return _utc_iso(value)
     return str(value) if value else None

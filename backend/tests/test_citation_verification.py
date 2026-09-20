@@ -378,3 +378,247 @@ def test_an_order_rule_and_a_section_of_the_same_number_are_different(index):
     canon = {c.canonical for c in checks}
     assert "CPC 1908 Order VII Rule 1" in canon
     assert len(checks) == 2
+
+
+# ── regression: two parser defects found during the DOCUMENTS_V2 migration ────
+#
+# Both turned a real citation into "nothing to check". That is the most
+# dangerous output this module can produce: the summary still reports everything
+# as checked, so absence from the report reads as approval. Found by re-running
+# citation verification over the 19 migrated revisions — one of them cited
+# "sections 20 and 24 PECA" and was recorded as citing no authority at all.
+
+
+# Defect 1 — a citation to a statute outside the corpus was DROPPED, not
+# surfaced. UNVERIFIABLE is the correct verdict, and NOT_IN_CORPUS would be
+# wrong: absence from a statute we do not hold is not evidence of fabrication.
+
+@pytest.mark.parametrize("text,expected_section", [
+    ("an offence under section 20 of the Prevention of Electronic Crimes Act 2016", "20"),
+    ("an offence under Section 20 of the Prevention of Electronic Crimes Act 2016", "20"),
+    ("registered under section 17 of the Registration Act, 1908", "17"),
+    ("under section 15 of the Payment of Wages Act 1936", "15"),
+    ("under section 9 of the Overseas Pakistanis Property Act, 2024", "9"),
+])
+def test_a_statute_we_do_not_hold_is_surfaced_not_dropped(text, expected_section, index):
+    """The whole defect: these parsed to zero citations, so a draft resting on
+    an Act the corpus lacks reported no authorities at all."""
+    (check,) = verify_statutes(text, index=index)
+    assert check.status == UNVERIFIABLE
+    assert check.canonical.endswith(f"s.{expected_section}")
+
+
+def test_an_unheld_statute_is_never_accused_of_fabrication(index):
+    """UNVERIFIABLE, not NOT_IN_CORPUS. Flagging a real provision of an Act we
+    do not hold is the false accusation this module exists to avoid."""
+    (check,) = verify_statutes(
+        "under section 20 of the Prevention of Electronic Crimes Act 2016",
+        index=index)
+    assert check.status != NOT_IN_CORPUS
+    assert check.is_flag is False
+
+
+def test_lowercase_section_is_not_a_reason_to_miss_a_citation(index):
+    """`_NAMED_ACT` carried no re.I, so only a capitalised 'Section' matched —
+    and legal prose overwhelmingly writes it lowercase."""
+    lower = parse_statute_citations(
+        "under section 12 of the Companies Act 2017", index)
+    upper = parse_statute_citations(
+        "under Section 12 of the Companies Act 2017", index)
+    assert len(lower) == len(upper) == 1
+    assert lower[0].statute == upper[0].statute
+
+
+def test_the_statute_name_is_still_case_sensitive(index):
+    """The marker was made case-insensitive; the NAME must not be. Under a
+    blanket re.I the name group's [A-Z] stops requiring Capitalised Words and
+    ordinary prose like 'of the act' becomes a citation."""
+    assert parse_statute_citations(
+        "under section 12 of the companies act 2017", index) == []
+
+
+def test_a_comma_before_the_year_does_not_split_one_statute_in_two(index):
+    """'Registration Act, 1908' and 'Registration Act 1908' are one Act. Left
+    as written they double-count an authority nobody cited twice."""
+    cites = parse_statute_citations(
+        "under section 17 of the Registration Act, 1908 and section 17 of the "
+        "Registration Act 1908", index)
+    assert len(cites) == 1
+
+
+@pytest.mark.parametrize("text", [
+    "including sections 20 and 24 PECA",
+    "an offence under section 20 of PECA 2016",
+    "u/s 9 ATA",
+])
+def test_an_acronym_for_an_unheld_statute_is_seen(text, index):
+    """'sections 20 and 24 PECA' was the citation that exposed this. The named
+    act pattern cannot see it — there is no '... Act 2016' spelled out."""
+    checks = verify_statutes(text, index=index)
+    assert checks, "the citation vanished from the report entirely"
+    assert all(c.status == UNVERIFIABLE for c in checks)
+
+
+def test_the_peca_citation_that_started_this(index):
+    """Verbatim from a migrated fia_cybercrime revision, which the checker
+    recorded as citing no authority whatsoever."""
+    checks = verify_statutes(
+        "offences under the Prevention of Electronic Crimes Act, 2016, "
+        "including sections 20 and 24 PECA.", index=index)
+    sections = {c.canonical.rsplit("s.", 1)[-1] for c in checks}
+    assert {"20", "24"} <= sections
+    assert all(c.status == UNVERIFIABLE for c in checks)
+
+
+# Defect 2 — plural section lists. Dropping every member was bad; dropping ONE
+# member was worse, because the report then looked complete.
+
+@pytest.mark.parametrize("text,expected", [
+    ("under sections 302 and 324 of the PPC 1860", {"302", "324"}),
+    ("under section 302 and section 324 of the PPC 1860", {"302", "324"}),
+    ("under sections 302, 324 and 337 of the PPC 1860", {"302", "324", "337"}),
+    ("under sections 302 & 324 of the PPC 1860", {"302", "324"}),
+    ("u/s 302 PPC", {"302"}),
+    ("u/s 302 and 324 PPC", {"302", "324"}),
+    ("U/S 302 PPC", {"302"}),
+    ("PPC sections 302 and 324", {"302", "324"}),
+])
+def test_every_section_in_a_list_is_captured(text, expected, index):
+    cites = parse_statute_citations(text, index)
+    assert {c.section for c in cites} == expected
+    assert all(c.statute == "PPC 1860" for c in cites)
+
+
+def test_no_member_of_a_list_is_silently_discarded(index):
+    """'section 302 and section 324' used to return ONLY 324 — one verified
+    result, zero problems, and an unchecked provision in the draft."""
+    checks = verify_statutes(
+        "punishable under section 302 and section 324 of the PPC 1860",
+        index=index)
+    assert len(checks) == 2
+    assert {c.canonical for c in checks} == {"PPC 1860 s.302", "PPC 1860 s.324"}
+    assert all(c.status == VERIFIED for c in checks)
+
+
+def test_a_list_member_that_is_absent_is_still_flagged(index):
+    """The list must not dilute the flag: s.999 is absent from a dense statute
+    and has to survive being written alongside two real sections."""
+    checks = verify_statutes(
+        "under sections 302, 999 and 324 of the PPC 1860", index=index)
+    by_section = {c.canonical: c.status for c in checks}
+    assert by_section["PPC 1860 s.302"] == VERIFIED
+    assert by_section["PPC 1860 s.324"] == VERIFIED
+    assert by_section["PPC 1860 s.999"] == NOT_IN_CORPUS
+
+
+def test_a_lettered_section_survives_a_list(index):
+    """489-F must stay whole. Splitting a list must not reopen the worst bug in
+    this stack, where 489-F verified as the unrelated s.489."""
+    cites = parse_statute_citations(
+        "under sections 302 and 489-F of the PPC 1860", index)
+    assert {c.section for c in cites} == {"302", "489-F"}
+
+
+def test_prose_after_a_number_does_not_become_a_phantom_citation(index):
+    """'Section 5 and 10 years' must not manufacture a citation to s.10. The
+    statute anchor is what prevents it, so the guard is worth pinning."""
+    assert parse_statute_citations(
+        "Section 5 and 10 years imprisonment under the PPC 1860", index) == []
+
+
+def test_a_statute_year_is_never_read_as_a_list_member(index):
+    """The list separator must not let 'PPC 1860' contribute s.1860."""
+    cites = parse_statute_citations("under sections 302 and 324 of the PPC 1860",
+                                    index)
+    assert "1860" not in {c.section for c in cites}
+
+
+def test_single_section_parsing_is_unchanged(index):
+    """The list pattern subsumes the single-section one; a list of one must
+    still parse exactly as before."""
+    (cite,) = parse_statute_citations("under section 302 of the PPC 1860", index)
+    assert (cite.statute, cite.section, cite.unit) == ("PPC 1860", "302", "section")
+
+
+# ── regression: the "or" list, found by the template citation survey ─────────
+#
+# A third shape, found by asking what the GENERATORS actually print rather than
+# what someone thought to feed the parser. `wakalatnama_checklist` printed "an
+# application under section 144 or section 152 of the Code" and both sections
+# were lost — the separator admitted "and" but not "or", and "of the Code" is an
+# anaphoric reference a checker cannot resolve.
+#
+# The template now names the statute in full; the parser now reads "or". Both
+# halves were needed: either alone still loses the citation.
+
+@pytest.mark.parametrize("text,expected", [
+    ("an application under section 144 or section 152 of the CPC 1908",
+     {"144", "152"}),
+    ("under sections 144 or 152 of the CPC 1908", {"144", "152"}),
+    ("under section 302, 324 or 337 of the PPC 1860", {"302", "324", "337"}),
+])
+def test_an_alternative_list_keeps_every_member(text, expected, index):
+    """Pleadings coordinate alternatives as readily as conjunctions. "or" is a
+    closed conjunction, not a licence to read prose between numbers."""
+    assert {c.section for c in parse_statute_citations(text, index)} == expected
+
+
+def test_or_does_not_widen_the_separator_into_prose(index):
+    """The guard that keeps "or" safe: a statute anchor must still follow the
+    list, so intervening words cannot manufacture a member."""
+    assert parse_statute_citations(
+        "Section 5 or 10 years imprisonment under the PPC 1860", index) == []
+
+
+def test_an_anaphoric_statute_reference_is_not_resolved(index):
+    """"of the Code" means the Code named earlier in the document. That is good
+    drafting and unreadable here — the checker has no anaphora, and guessing
+    would attribute a section to whichever statute happened to be nearby.
+
+    Pinned so nobody "fixes" it by guessing. The correct fix is the one applied
+    to wakalatnama_checklist: name the statute in full at the citation.
+    """
+    assert parse_statute_citations(
+        "an application under section 144 or section 152 of the Code", index) == []
+
+
+# ── regression: the gloss list that started the template audit ───────────────
+
+def test_a_gloss_between_section_numbers_breaks_the_list(index):
+    """THE ORIGINAL DEFECT, pinned as a known limitation rather than fixed.
+
+    "sections 20 — offences against dignity, 21 — ..., and 24 — ..." is what
+    fia_cybercrime used to print, and it parses to nothing. Teaching the parser
+    to read a gloss between list members would be an arms race against our own
+    drafting: the next flourish becomes the next blind spot.
+
+    The fix is on the producing side — `citation_format.cite_with_glosses` puts
+    the glosses after the citation — and `test_template_citation_binding.py`
+    proves no template prints the broken shape any more. This test records that
+    the prose form remains unreadable, so a future reader knows it is a decision
+    and not an oversight.
+    """
+    prose = ("sections 20 — offences against dignity, 21 — offences "
+             "against modesty, and 24 — cyberstalking, of the PPC 1860")
+    assert len(parse_statute_citations(prose, index)) < 3
+
+
+def test_the_canonical_gloss_form_is_fully_readable(index):
+    """The replacement must carry every member — otherwise the fix trades one
+    silent loss for another."""
+    from app.services.citation_format import cite_with_glosses
+
+    canonical = cite_with_glosses("PPC 1860", [
+        ("302", "murder"), ("324", "attempt to murder"), ("337", "hurt")])
+    assert {c.section for c in parse_statute_citations(canonical, index)} == \
+        {"302", "324", "337"}
+
+
+def test_glosses_survive_in_the_output_they_are_just_moved(index):
+    """The reader must not lose the explanation. It moves after the citation,
+    it does not disappear."""
+    from app.services.citation_format import cite_with_glosses
+
+    out = cite_with_glosses("PPC 1860", [("302", "murder")])
+    assert "murder" in out
+    assert out.startswith("section 302 of the PPC 1860")

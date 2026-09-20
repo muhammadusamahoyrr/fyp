@@ -6,6 +6,7 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import { useCase } from "./CaseContext.jsx";
+import { confirmedCases } from "@/lib/caseStatus.js";
 import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
 import MyDocumentsPanel from "./MyDocumentsPanel.jsx";
 import FieldReview from "./FieldReview.jsx";
@@ -86,7 +87,10 @@ function _byCategory(items) {
 const ModDocuments = () => {
     const t = useT();
     const toast = useToast();
-    const { cases, casesReady, casesError, casesReloading, reloadCases } = useCase();
+    const { cases: allCases, casesReady, casesError, casesReloading, reloadCases } = useCase();
+    // A draft has not been confirmed by the client, so it must not be offered
+    // as something to generate a legal document against.
+    const cases = confirmedCases(allCases);
 
     /* ── State ── */
     const [step, setStep] = useState(0);                       // 0–4

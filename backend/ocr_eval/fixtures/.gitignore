@@ -1,0 +1,14 @@
+# Real legal documents and their transcripts never enter version control.
+# Allow-list, not a block-list: a new file type must be added deliberately
+# rather than inheriting an exemption someone wrote for something else.
+*
+!.gitignore
+!README.md
+
+# Sub-directories are where documents actually land, so they stay ignored —
+# but their README must be committed, or a fresh clone has a drop folder with
+# no instructions and no statement of the de-identification requirement.
+# READMEs ONLY. Nothing here re-admits a document.
+!*/
+*/*
+!*/README.md

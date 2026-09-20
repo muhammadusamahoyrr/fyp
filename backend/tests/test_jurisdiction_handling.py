@@ -215,21 +215,28 @@ def test_provincial_law_is_a_material_share_of_the_corpus(chroma):
     assert provincial > 1000, f"expected substantial provincial law, got {counts}"
 
 
-def test_unknown_jurisdiction_now_reaches_provincial_statutes(chroma):
-    """The end-to-end proof, on the query that exposed the bug."""
-    from app.ai.pipelines.retriever import build_retriever
+def test_unknown_jurisdiction_now_reaches_provincial_statutes(chroma, monkeypatch):
+    """The corpus proof, on the query that exposed the bug.
+
+    BM25 is enough to exercise the province policy against the real corpus.
+    Disabling the dense half deliberately keeps this test from downloading a
+    model from Hugging Face when the local cache is cold.
+    """
+    from app.ai.pipelines import retriever
+    monkeypatch.setattr(retriever, "_HF_AVAILABLE", False)
     q = "Can a tenant be evicted without notice from a rented shop?"
 
-    docs = build_retriever("civil", "unknown").invoke(q)
+    docs = retriever.build_retriever("civil", "unknown").invoke(q)
     statutes = {d.metadata.get("statute", "") for d in docs}
     assert any("Punjab" in s for s in statutes), (
         f"unknown jurisdiction still cannot see provincial law: {statutes}")
 
 
-def test_a_stated_province_still_narrows(chroma):
+def test_a_stated_province_still_narrows(chroma, monkeypatch):
     """The fix must not turn every query into an all-jurisdictions search."""
-    from app.ai.pipelines.retriever import build_retriever
-    docs = build_retriever("civil", "federal").invoke(
+    from app.ai.pipelines import retriever
+    monkeypatch.setattr(retriever, "_HF_AVAILABLE", False)
+    docs = retriever.build_retriever("civil", "federal").invoke(
         "Can a tenant be evicted without notice from a rented shop?")
     provinces = {d.metadata.get("province", "federal") for d in docs}
     assert provinces <= {"federal"}, f"federal query leaked other provinces: {provinces}"
