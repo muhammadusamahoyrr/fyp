@@ -240,6 +240,14 @@ def _current_status(appt: dict) -> AppointmentStatus:
             "This appointment is in a state this version cannot act on.")
 
 
+# The exact words a lawyer sees when they accept a request that ran out.
+#
+# It names the REQUEST and not the appointment, and it does not say who let it
+# lapse. The lawyer did not do anything wrong by being slow -- the deadline is
+# the product's, not theirs -- and the client is not told about it here at all.
+APPOINTMENT_EXPIRED_MESSAGE = "This appointment request has expired."
+
+
 async def _transition(
     appt: dict,
     target: AppointmentStatus,
@@ -247,6 +255,7 @@ async def _transition(
     user_role: str,
     extra: dict | None = None,
     expected_version: int | None = None,
+    require_unexpired: bool = False,
 ) -> dict:
     """Validate and atomically apply one state change.
 
@@ -273,7 +282,8 @@ async def _transition(
     actor_filter = _actor_filter(user_id, user_role)
     updated = await appt_repo.compare_and_set(
         appt_id, [source], target, actor_filter, extra,
-        expected_version=expected_version)
+        expected_version=expected_version,
+        require_unexpired=require_unexpired)
     if updated is not None:
         return updated
 
@@ -288,6 +298,18 @@ async def _transition(
             appt_id, user_role, "vanished_or_not_a_party")
         raise ForbiddenError(_APPT_DENIED)
     current_status = _current_status(current)
+    # THE DEADLINE, CHECKED AGAIN ON THE ROW THE DATABASE JUST RETURNED.
+    #
+    # The CAS carried a server-time clause, so it can match nothing for a
+    # reason no other branch here covers: the deadline passed between the
+    # service's check and the write. Without this the lawyer would be told the
+    # request had been modified by someone else, which is both untrue and
+    # unactionable. Checked before the version branch because a lapsed request
+    # is lapsed whatever its version says.
+    if (require_unexpired
+            and current_status is source
+            and expiry.stored_has_lapsed(current)):
+        raise ConflictError(APPOINTMENT_EXPIRED_MESSAGE)
     if (expected_version is not None
             and current_status is source
             and schedule_version_of(current) != expected_version):
@@ -746,6 +768,23 @@ async def confirm_appointment(
     caller has to supply the version it actually saw.
     """
     appt = await _load_for_actor(appt_id, lawyer_id, "lawyer")
+
+    # ENFORCED TWICE, ON PURPOSE, and the two are not redundant.
+    #
+    # This one exists for the MESSAGE. The CAS below can refuse the write, but
+    # a filter that matches nothing cannot explain itself, and the lawyer would
+    # get a generic conflict for a situation with a specific and simple cause.
+    #
+    # The CAS one exists for the TRUTH. This check reads a row fetched a moment
+    # ago and compares it against this process's clock; the deadline can pass
+    # in between, and another host's clock may disagree with this one. Only the
+    # write, filtered on the database's own clock, actually decides.
+    #
+    # Both are gated on the same flag as the sweep, so while expiry is off a
+    # lapsed request is confirmable exactly as it is today.
+    if expiry.expiry_enabled() and expiry.stored_has_lapsed(appt):
+        raise ConflictError(APPOINTMENT_EXPIRED_MESSAGE)
+
     if meeting_link:
         _assert_link_allowed(appt)
     # Written in the SAME atomic update as the status. A link attached by a
@@ -754,7 +793,8 @@ async def confirm_appointment(
     extra = {"meeting_link": meeting_link} if meeting_link else None
     updated = await _transition(
         appt, AppointmentStatus.CONFIRMED, lawyer_id, "lawyer", extra,
-        expected_version=expected_version)
+        expected_version=expected_version,
+        require_unexpired=expiry.expiry_enabled())
 
     lawyer_name = await _name_for_notice(
         lawyer_id, "Lawyer", appt_id=appt_id, transition="confirm")

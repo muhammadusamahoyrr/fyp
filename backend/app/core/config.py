@@ -15,6 +15,12 @@ MAX_INTERVAL_MINUTES = 720
 REMINDER_WINDOW_MINUTES = 60
 MAX_REMINDER_INTERVAL_MINUTES = REMINDER_WINDOW_MINUTES // 2
 
+# Mirrors `appointment_expiry_sweep.DEFAULT_LIMIT`. Stated as a number rather
+# than imported because `app.core.config` must not import a service -- every
+# service reads settings, and the cycle would be immediate. The test suite
+# asserts the two agree, so the duplication cannot drift silently.
+MAX_EXPIRY_BATCH = 200
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -219,6 +225,26 @@ class Settings(BaseSettings):
     appointment_reminder_batch: int = 100
     appointment_outcome_nudge_batch: int = 25
 
+    # THE EXPIRY MECHANISM. OFF, and the only flag here whose effect on a
+    # client is irreversible: expiring a request terminates it, and there is
+    # no transition out of EXPIRED.
+    #
+    # ONE FLAG, TWO CONSUMERS. It gates the sweep that retires lapsed requests
+    # AND the confirmation path's refusal to accept one. They have to move
+    # together: a sweep with no confirmation guard lets a lawyer confirm a
+    # request the next sweep is about to retire, and a confirmation guard with
+    # no sweep leaves a lapsed request neither confirmable nor expired --
+    # stuck, still holding its slots, with no explanation for either party.
+    # Two flags would make that second state reachable by setting one of them.
+    appointment_expiry_enabled: bool = False
+
+    # Deliberately smaller than the reminder and nudge caps. Each item here is
+    # a request being terminated and a client being told so; the first
+    # applying run against an existing deployment meets the whole history of
+    # unanswered requests at once, and a cap is what stops that being one
+    # event. The sweep refuses anything above its own DEFAULT_LIMIT of 200.
+    appointment_expiry_batch: int = 50
+
     english_ocr_enabled: bool = False
     # Identifier of the reviewed benchmark/evidence used to approve production
     # activation. Development may exercise the feature without one; production
@@ -337,6 +363,23 @@ class Settings(BaseSettings):
     def _batch_is_sane(cls, value):
         if not 1 <= value <= 500:
             raise ValueError("batch caps must be between 1 and 500")
+        return value
+
+    @field_validator("appointment_expiry_batch")
+    @classmethod
+    def _expiry_batch_is_conservative(cls, value):
+        """A tighter bound than the other caps, and not by preference.
+
+        `expire_lapsed_requests` refuses a limit above its own DEFAULT_LIMIT,
+        so a larger value here would be accepted by settings and then rejected
+        at the moment the sweep ran -- a misconfiguration that only appears
+        once the feature is switched on, in a scheduled job, to a log.
+        """
+        if not 1 <= value <= MAX_EXPIRY_BATCH:
+            raise ValueError(
+                "appointment_expiry_batch must be between 1 and "
+                f"{MAX_EXPIRY_BATCH} -- each row is somebody's request being "
+                "terminated, and the sweep refuses a larger limit anyway")
         return value
 
     @model_validator(mode="after")

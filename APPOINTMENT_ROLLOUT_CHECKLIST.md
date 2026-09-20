@@ -136,7 +136,7 @@ Steps 1–5 are reversible. Step 6 is the first irreversible one.
 | 4 | Preflight — inspect | `python -m app.db.appointment_slot_preflight` | read-only |
 | 5 | Resolve every reported row, then dry run | `python -m app.db.appointment_backfill_cli --database <NAME>` | read-only |
 | 6 | **Backfill — apply** | `python -m app.db.appointment_backfill_cli --database <NAME> --apply --confirm-database <NAME> --confirm-endpoint <scheme://host[:port]> --booking-writes-frozen` | **NO — restore only** |
-| 7 | Create the four indexes | `createIndex` × 4 (below) | yes — drop them |
+| 7 | Create every declared index | `recommended_create` from the preflight (below) | yes — drop them |
 | 8 | Validate | `validate_appointment_indexes()` must return `[]` | read-only |
 | 9 | **Drop the obsolete index** | `db.appointments.dropIndex("uniq_pending_slot")` | **NO — rebuild only** |
 | 10 | Preflight again | `safe_to_activate` must be `true` | read-only |
@@ -190,51 +190,155 @@ describes.
 A "vanished row" in particular may mean a second writer was active — which
 would mean the freeze was not actually in force.
 
-### Step 7, verbatim
+### Step 7 — take the commands from the preflight, not from this file
+
+**Do not retype an index list.** The canonical registry is
+`backend/app/db/appointment_index_spec.py` (`ALL_INDEX_REQUIREMENTS`), and the
+read-only preflight emits the exact `createIndex` command for every declared
+index that is missing or wrong:
+
+```
+python -m app.db.appointment_slot_preflight
+```
+
+Run **every** command it prints under `recommended_create`, then step 8. An
+earlier version of this checklist hardcoded four commands while the registry
+declared eight — a subset that looked complete, and would have left the
+outcome-queue, reminder and dispute indexes unbuilt.
+
+It **creates nothing**. Neither does the activation audit. Both print commands
+for a person to read, decide on and run: an index build on a live collection is
+a capacity event, a drop is irreversible without another build, and a tool that
+fixed things itself would destroy the evidence used to approve the fix.
+
+#### What the registry declares today — 8 indexes
+
+**CORRECTNESS — absent, the system is WRONG, and the application refuses to
+start.** `assert_appointment_booking_ready()` runs at startup and fails closed
+on any of these, across BOTH collections:
+
+| index | collection |
+|---|---|
+| `uniq_appointment_lawyer_slot` | `appointments` |
+| `uniq_appointment_client_slot` | `appointments` |
+| `uniq_appointment_idempotency` | `appointments` |
+| `uniq_active_appointment_dispute` | `appointment_disputes` |
+
+> The dispute index is on `appointment_disputes` and still blocks startup. It
+> is not an appointments index and it is not optional: without it two racing
+> submissions both pass a pre-check and one appointment ends up with two live
+> complaints, which support then adjudicates twice. Expect `booking_rollout` to
+> read NOT_READY while it is missing — that is correct, not a mis-classification.
+
+**QUERY — performance only. Nothing stored is wrong without them, and they
+must never stop the application booting.** Each blocks only the one feature
+whose read it serves:
+
+| index | collection |
+|---|---|
+| `appointment_pending_expiry` | `appointments` |
+| `appointment_confirmed_outcome` | `appointments` |
+| `appointment_confirmed_reminder` | `appointments` |
+| `appointment_dispute_queue` | `appointment_disputes` |
+
+> One exception, and only while expiry is ENABLED:
+> `appointment_pending_expiry` is additionally a startup activation
+> prerequisite — `assert_appointment_expiry_activation_ready()` refuses to boot
+> without it. With the expiry flag off (the default) it is not consulted at
+> startup at all.
+
+**Capacity sign-off is required before running these.**
+4 UNIQUE builds on live collections — 3 on
+`appointments` and 1 on `appointment_disputes` — plus
+4 non-unique ones. The unique builds can fail outright on existing
+data; that is what steps 4–6 exist to prevent. The non-unique ones cannot fail
+that way, but they still cost IO on a live collection.
+
+#### Verbatim, generated from the registry
+
+Reproduced for convenience and **verified against `ALL_INDEX_REQUIREMENTS` by a
+test**, so this block cannot drift into a subset again. The preflight's output
+remains the authority — it prints only what is actually missing.
 
 ```
 db.appointments.createIndex({"lawyer_id": 1, "occupied_slots": 1}, {name: "uniq_appointment_lawyer_slot", unique: true, partialFilterExpression: {"status": {"$in": ["pending", "confirmed"]}}})
 db.appointments.createIndex({"client_id": 1, "occupied_slots": 1}, {name: "uniq_appointment_client_slot", unique: true, partialFilterExpression: {"status": {"$in": ["pending", "confirmed"]}}})
 db.appointments.createIndex({"client_id": 1, "idempotency_key": 1}, {name: "uniq_appointment_idempotency", unique: true, partialFilterExpression: {"idempotency_key": {"$type": "string"}}})
 db.appointments.createIndex({"status": 1, "expires_at": 1}, {name: "appointment_pending_expiry", partialFilterExpression: {"status": "pending"}})
+db.appointments.createIndex({"status": 1, "end_at": 1, "_id": 1}, {name: "appointment_confirmed_outcome", partialFilterExpression: {"status": "confirmed"}})
+db.appointments.createIndex({"status": 1, "scheduled_at": 1, "_id": 1}, {name: "appointment_confirmed_reminder", partialFilterExpression: {"status": "confirmed"}})
+db.appointment_disputes.createIndex({"active_key": 1}, {name: "uniq_active_appointment_dispute", unique: true, partialFilterExpression: {"active_key": {"$type": "string"}}})
+db.appointment_disputes.createIndex({"status": 1, "created_at": 1, "_id": 1}, {name: "appointment_dispute_queue"})
 ```
 
-The fourth is a **QUERY** index, not a correctness one. Nothing is wrong
-without it and no guarantee depends on it — it exists so the pending-expiry
-sweep is a range read rather than a collection scan. It is listed here because
-`indexes_valid` (step 8, and gate one at step 10) checks every DECLARED index,
-so leaving it out fails that gate. It is not unique, so unlike the three above
-it cannot fail the build on existing data.
+**The expiry sweep is WIRED and OFF, and is still NOT part of this rollout.**
+`services/appointment_scheduler.py` runs it as its third job and `main.py`
+creates that scheduler — but only when `appointment_expiry_enabled` is true,
+and it is false by default in every deployment. With all three appointment
+flags off, no scheduler task exists at all.
 
-**The expiry sweep itself is dormant and is NOT part of this rollout.** Nothing
-calls `services/appointment_expiry_sweep.py`; it is not registered in
-`main.py`. Turning it on is a separate, later decision with its own
-prerequisites, listed below. The mechanism is **not activation-ready**, and
-this index existing does not make it so.
+Turning it on is a separate, later decision with its own prerequisites, listed
+below. Building this index does not activate anything.
 
 ---
 
 ## Prerequisites before the expiry sweep may be enabled
 
-Separate from, and later than, everything above. **All are unmet. NO-GO.**
+Separate from, and later than, everything above.
+**E2 is met in code; E1, E3 and E4 are unmet. Production remains NO-GO.**
+
+E2 being implemented changes nothing operationally on its own: the deadline
+guard and the sweep share one flag, and that flag is off. It is recorded as met
+so that nobody re-implements it, not to suggest the sweep may be enabled.
 
 | # | Prerequisite | Why it blocks | State |
 |---|---|---|---|
-| E1 | The four indexes above exist and `safe_to_activate` is true | Until then a lapsed request is the only thing holding its slots, and releasing one under the old `uniq_pending_slot` frees an hour the replacement guarantee is not in place to re-protect | **unmet** |
-| E2 | **Deadline-guarded confirmation** | `confirm` does not check the deadline today, and that is correct while nothing expires. Once a sweep runs, the two race: a lawyer can confirm a request the next sweep was about to retire, and which one wins is a matter of timing rather than policy. Both CAS filters pin `status: pending`, so one loses cleanly — but the outcome is arbitrary | **unmet — not implemented** |
+| E1 | **Every index the canonical registry declares** is built and valid, and the preflight reports `safe_to_activate` — verified by `validate_appointment_indexes()` returning no problems, not by counting commands in this file | Until then a lapsed request is the only thing holding its slots, and releasing one under the old `uniq_pending_slot` frees an hour the replacement guarantee is not in place to re-protect. `appointment_pending_expiry` is additionally a startup prerequisite once the expiry flag is on | **unmet** |
+| E2 | **Deadline-guarded confirmation** | Was the race that made a sweep unsafe: a lawyer could confirm a request the next sweep was about to retire, with the winner decided by timing rather than policy | **MET IN CODE — not activated** |
 | E3 | **Explicit approval for rows that already exist** | Appointments booked before `expires_at` existed are out of the sweep's scope by construction. Deciding what happens to them is a separate decision about real people's requests, and it must be taken against real numbers from `survey_legacy_pending()` — which counts and writes nothing | **unmet — approval not sought** |
 | E4 | A decision on cadence and burst size | The first applying run against an existing deployment meets the whole history of unanswered requests at once. `DEFAULT_LIMIT` bounds one run; nobody has chosen how often it runs | **unmet** |
 
-**E2 is not a defect to fix now.** Adding a deadline filter to `confirm` while
-the sweep is dormant would leave a lapsed request neither confirmable nor
-expired — stuck, slots still held, with no explanation for either party. The
-current behaviour is right for the current state; it is the ORDER of the two
-changes that matters, and E2 must land with or before activation, never after.
+**How E2 was resolved.** The danger was never the deadline check itself but
+the ORDER of two changes: a confirmation guard without a sweep leaves a lapsed
+request neither confirmable nor expirable — stuck, slots still held,
+unexplained to both parties — and a sweep without the guard leaves the race.
+Both are now gated on ONE flag, `appointment_expiry.expiry_enabled()`, so
+neither state is reachable. While the flag is off, confirmation behaves exactly
+as it always has.
+
+The deadline is enforced twice, and the two are not redundant:
+
+- a **service check** raises `This appointment request has expired.` — a CAS
+  filter that matches nothing cannot explain itself, and this refuses before
+  any write is attempted;
+- the **CAS itself** requires `expires_at > $$NOW`, evaluated on the DATABASE's
+  clock — which still decides correctly when the deadline passes between the
+  read and the write, and when two application hosts disagree about the time.
+
+`expires_at <= now` counts as expired, and the policy's `>=`, the sweep query's
+`$lte` and the CAS's `$gt` are asserted to agree.
+
+**Two activation guards, and neither replaces the other:**
+
+- `assert_appointment_expiry_activation_ready()` runs at **startup**, before
+  any background task is created, and refuses to boot when expiry is enabled
+  and the lock backend is unconfigured or unreachable, the
+  `appointment_pending_expiry` index is invalid, or any PENDING row lacks a
+  usable stored `expires_at`. Sanitized reason codes only. **With the flag off
+  it performs no Redis probe, no index read and no query.**
+- the scheduler re-checks the index and the deadlines **every cycle**, because
+  an index can be dropped during maintenance and a legacy row can arrive from a
+  restore long after a boot that passed.
+
+**A row with no stored `expires_at` blocks activation and is never guessed at.**
+Nothing derives a deadline for enforcement; a derived one would terminate a
+real request on evidence invented after the fact. That population is E3.
 
 **What is safe to run now:** `survey_legacy_pending()` and
 `expire_lapsed_requests()` without `apply=True`. Both read and count only. A
 bare `expire_lapsed_requests()` writes nothing and notifies nobody by design —
-expiring requires `apply=True` spelled out at the call site.
+expiring requires `apply=True` spelled out at the call site. The read-only
+activation audit reports the same population without writing anything.
 
 **Step 6 must precede step 7, and not only for tidiness.** Rows with no
 `occupied_slots` all index as `occupied_slots: null`, so two slotless active
@@ -249,7 +353,7 @@ fails outright. Observed while testing the CLI, not deduced.
 |---|---|---|
 | 1–5 | Un-freeze. Nothing was written. | A closed booking window |
 | 6 | **Restore from the step-3 backup.** No in-place undo exists. | Whatever the rehearsal measured |
-| 7–8 | Drop the four new indexes; the old app ignores them. | An index build's worth of IO |
+| 7–8 | Drop the newly created indexes; the old app ignores them. | An index build's worth of IO |
 | **After 9** | `uniq_pending_slot` is gone. Rolling back to the old app leaves **weaker** overlap protection than before the window, until it is rebuilt. | See below |
 | 11 | Redeploy the previous app. | A deploy cycle |
 
@@ -284,11 +388,14 @@ All six must be true, and `safe_to_activate` is their conjunction:
 2. Backup taken and **restore rehearsed** (blocking, above).
 3. Authorisation for step 6 — irreversible write.
 4. Authorisation for step 9 — irreversible drop.
-5. Capacity sign-off: three unique index builds on a live collection,
-   plus one non-unique query index.
+5. Capacity sign-off for every index the canonical registry declares —
+   currently 4 unique builds and 4 non-unique ones.
+   Take the list from the preflight, never from a count written here.
 6. **Enabling the pending-expiry sweep** — a separate decision with its own
-   four prerequisites (E1–E4 above), all currently unmet. Creating the query
-   index in step 7 does NOT enable anything.
+   prerequisites (E1–E4 above). **E2 is met in code; E1, E3 and E4 are not.**
+   Creating the query index in step 7 does NOT enable anything, and neither
+   does E2 being implemented: the sweep and the confirmation guard share one
+   flag, and it is off.
 7. Acknowledgement that **`PATCH /appointments/{id}/confirm` now requires a
    versioned body**; any non-UI client receives 422 until updated.
 8. **Activation instants, cadence and caps** for reminders and outcome nudges.

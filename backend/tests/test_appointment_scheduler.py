@@ -61,7 +61,9 @@ def config():
             "appointment_outcome_nudges_activated_at",
             "appointment_scheduler_interval_minutes",
             "appointment_reminder_batch",
-            "appointment_outcome_nudge_batch")
+            "appointment_outcome_nudge_batch",
+            "appointment_expiry_enabled",
+            "appointment_expiry_batch")
     saved = {k: getattr(settings, k, None) for k in keys}
 
     def _set(**values):
@@ -135,14 +137,24 @@ async def test_no_task_is_created_when_both_flags_are_off(config, calls):
     assert scheduler.appointment_scheduler_task() is None
 
 
-async def test_a_cycle_with_both_flags_off_dispatches_nothing(config, calls):
+async def test_a_cycle_with_every_flag_off_dispatches_nothing(config, calls):
+    """EVERY job, enumerated from the scheduler rather than listed here.
+
+    Written this way after adding the third one: a hand-written pair silently
+    stops covering whatever is added next, and "the cycle does nothing while
+    the flags are off" is exactly the assertion that must keep covering all of
+    them.
+    """
     config(appointment_reminders_enabled=False,
-           appointment_outcome_nudges_enabled=False)
+           appointment_outcome_nudges_enabled=False,
+           appointment_expiry_enabled=False)
 
     result = await scheduler.run_cycle(NOW)
 
-    assert result == {scheduler.JOB_REMINDERS: None,
-                      scheduler.JOB_OUTCOME_NUDGES: None}
+    assert result == {job: None for job in scheduler.LOCK_KEYS}
+    assert set(result) == {scheduler.JOB_REMINDERS,
+                           scheduler.JOB_OUTCOME_NUDGES,
+                           scheduler.JOB_EXPIRY}
     assert calls["reminders"] == []
     assert calls["nudges"] == []
     assert calls["locks"] == [], "a lock was taken for a disabled job"
@@ -283,12 +295,24 @@ def test_the_activation_instant_is_never_derived_from_process_start():
 
 async def test_the_scheduler_uses_the_fail_closed_lock():
     """Not `acquire_period_lock`, which returns True when Redis is missing or
-    erroring — that would let every worker dispatch the same batch."""
+    erroring - that would let every worker dispatch the same batch.
+
+    Asserted by IDENTITY rather than by the text of the import line. The
+    earlier version matched
+    `from app.core.redis_client import acquire_period_lock_strict` verbatim
+    and broke the moment that import gained a second name and wrapped in
+    parentheses - a formatting change, with the guarantee untouched. What
+    matters is which function the module actually holds, and that a reference
+    to the fail-open one never appears in its body.
+    """
     import inspect
 
+    from app.core import redis_client
+
+    assert scheduler.acquire_period_lock_strict is \
+        redis_client.acquire_period_lock_strict
+
     source = inspect.getsource(scheduler)
-    assert "acquire_period_lock_strict" in source
-    assert "from app.core.redis_client import acquire_period_lock_strict" in source
     body = "\n".join(line for line in source.splitlines()
                      if not line.lstrip().startswith("#"))
     assert "acquire_period_lock(" not in body
@@ -530,14 +554,39 @@ async def test_a_cancelled_cycle_propagates_rather_than_being_swallowed(config, 
 
 # ── 7. What must never be here ───────────────────────────────────────────────
 
-def test_the_expiry_sweep_is_not_wired():
-    """The one mechanism whose effect a client cannot undo — it terminates
-    pending requests — and whose own prerequisites are unmet."""
+def test_the_expiry_sweep_is_wired_but_cannot_run_by_default():
+    """This assertion used to be that expiry was ABSENT from this module.
+
+    That was the right contract while the confirmation path had no deadline
+    guard: a sweep without one lets a lawyer accept a request the next sweep
+    is about to retire. Now that both are gated on one flag, the sweep belongs
+    here - and what has to be asserted instead is that being present is not
+    the same as being able to run.
+    """
     import inspect
 
     source = inspect.getsource(scheduler)
-    assert "appointment_expiry" not in source
-    assert "expire_lapsed_requests" not in source
+    assert "expire_lapsed_requests" in source
+    assert scheduler.JOB_EXPIRY in scheduler.LOCK_KEYS
+    assert scheduler.JOB_INDEXES[scheduler.JOB_EXPIRY] == \
+        "appointment_pending_expiry"
+
+    # Wired, and off.
+    from app.core.config import Settings
+    assert Settings().appointment_expiry_enabled is False
+
+
+def test_the_expiry_lock_key_is_not_shared_with_the_notification_jobs():
+    """Sharing a key would let a reminder run in progress silently suppress
+    the sweep for a whole period - and a lapsed request keeps holding its
+    slots until something retires it."""
+    keys = list(scheduler.LOCK_KEYS.values())
+
+    assert len(set(keys)) == len(keys)
+    assert scheduler.LOCK_KEYS[scheduler.JOB_EXPIRY] not in (
+        scheduler.LOCK_KEYS[scheduler.JOB_REMINDERS],
+        scheduler.LOCK_KEYS[scheduler.JOB_OUTCOME_NUDGES],
+    )
 
 
 def test_working_hours_enforcement_is_not_touched():

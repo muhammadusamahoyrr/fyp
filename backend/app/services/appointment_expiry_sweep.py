@@ -1,16 +1,27 @@
-"""Retire booking requests nobody answered. NOT SCHEDULED, AND FAILS CLOSED.
+"""Retire booking requests nobody answered. SCHEDULED, FLAGGED OFF, FAIL-CLOSED.
 
-THIS MODULE IS DORMANT ON PURPOSE.
+WIRED, AND DISABLED BY DEFAULT.
 
-Nothing calls it. It is not registered in `main.py` alongside
-`_causelist_scheduler` and the relays, and it must not be until the
-prerequisites in APPOINTMENT_ROLLOUT_CHECKLIST.md are met — which include, as
-well as the Phase 3 correctness indexes, a deadline-guarded confirmation path
-and explicit approval for touching rows that already exist.
+`services/appointment_scheduler.py` runs this as its third job, and `main.py`
+creates that scheduler — but only when a flag is on. With
+`appointment_expiry_enabled` false, which is the default and every deployment
+today, no task exists at all and this module is never reached.
 
-Until those hold, a lapsed row is still the only thing holding its slots, and
-retiring it under the old, weak `uniq_pending_slot` would free hours that the
-current guarantee is not yet in place to re-protect.
+Switching the flag on is gated four ways, and each refuses before anything is
+written: the startup guard (`assert_appointment_expiry_activation_ready`)
+refuses to boot unless the lock backend answers, the
+`appointment_pending_expiry` index is valid, and no PENDING row lacks a usable
+stored deadline; and every cycle re-checks the last two, because an index can
+be dropped during maintenance and a legacy row can arrive from a restore long
+after a boot that passed.
+
+What remains unmet is operational, not code: E1 (the correctness indexes built
+and validated in production), E3 (explicit approval for rows that predate
+`expires_at`) and E4 (cadence and burst size). See
+APPOINTMENT_ROLLOUT_CHECKLIST.md — until E1 holds, a lapsed row is still the
+only thing holding its slots, and retiring it under the old, weak
+`uniq_pending_slot` would free hours the current guarantee is not yet in place
+to re-protect.
 
 FAILING CLOSED IS THE POINT OF THE SIGNATURE
 
@@ -49,15 +60,22 @@ and a client may reschedule in between — which moves the deadline and bumps th
 version, so the stale expiry matches nothing. A sweep must never be the reason
 a request the client just moved into next week disappears.
 
-AND IT IS THE ONLY ENFORCEMENT POINT. `confirm` deliberately does NOT reject a
-lapsed request today: while the sweep is dormant, such a filter would make a
-row neither confirmable nor expired — a request stuck with no explanation for
-either party, its slots still held. That is the correct behaviour NOW and a
-prerequisite to change LATER: enabling the sweep without a deadline-guarded
-confirmation leaves a window in which a lawyer confirms a request the next
-sweep was about to retire. The two CAS filters both pin `status: pending`, so
-one of them loses cleanly — but which one wins is then a matter of timing
-rather than of policy.
+AND IT IS NO LONGER THE ONLY ENFORCEMENT POINT. `confirm` now refuses a lapsed
+request too — checked once in the service for a usable message, and once more
+in the CAS against the DATABASE's clock via `$$NOW`, which is what still
+decides correctly when the deadline passes between the read and the write.
+
+BOTH ARE GATED ON THE SAME FLAG, `appointment_expiry.expiry_enabled`, and that
+is the whole design. Either one alone is a broken state: a sweep without the
+confirmation guard leaves a window in which a lawyer accepts a request the
+next sweep was about to retire, with the winner decided by timing rather than
+policy; a confirmation guard without the sweep leaves a lapsed request neither
+confirmable nor expirable — stuck, slots still held, unexplained to both
+parties. One flag makes both of those unreachable.
+
+When the two do race, both writes pin `status: pending` and the schedule
+version, and the confirmation additionally pins the server-time deadline, so
+whichever lands second matches nothing. Exactly one winner, by construction.
 """
 from __future__ import annotations
 

@@ -965,10 +965,6 @@ export async function saveMyWorkingHours({ working_hours, exceptions }) {
   });
 }
 
-export async function getLawyerAvailability(lawyer_id, date) {
-  return apiFetch(`/appointments/availability/${lawyer_id}?date=${date}`);
-}
-
 // ─── Engagements (hire a lawyer) ─────────────────────────────────────────────
 //
 //   client requests → lawyer proposes terms → CLIENT accepts → case is linked

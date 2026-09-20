@@ -13,6 +13,7 @@ caching / rate-limiting.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
@@ -102,6 +103,119 @@ async def acquire_period_lock(key: str, ttl_seconds: int) -> bool:
         # risks a duplicate sweep; the sweeps themselves are idempotent.
         logger.exception("acquire_period_lock(%s) failed — running anyway", key)
         return True
+
+
+# ── Readiness, as opposed to locking ────────────────────────────────────────
+#
+# ONE HELPER, TWO CALLERS: the appointment startup guard and the read-only
+# activation audit. They ask the same question - "will the fail-closed lock be
+# able to do anything?" - and two implementations of it would eventually
+# disagree, with the audit reporting ready while startup refused, or worse the
+# other way round.
+#
+# The reason codes live here too, for the same reason: the guard is in
+# `app/services` and the audit is in `app/db`, and nothing in `app/` may
+# import the audit (a test asserts that, so startup can never reach it). A
+# shared constant in `app/core` is the only place both can name without
+# creating that edge.
+STRICT_LOCK_NOT_CONFIGURED = "strict_lock_backend_not_configured"
+STRICT_LOCK_UNREACHABLE = "strict_lock_backend_unreachable"
+
+# Short, because this sits in the boot path. An unreachable Redis must make
+# startup fail quickly, not hang a deployment for a minute per worker.
+READINESS_TIMEOUT_SECONDS = 3.0
+
+
+async def open_probe_client(url: str):
+    """A ONE-OFF client for a readiness probe. Never the shared one.
+
+    `get_redis()` caches a module global the running application uses.
+    Populating it from a probe would leave the process holding a connection
+    the probe opened, and closing it afterwards would shut one the application
+    depends on. So the probe owns its client completely and disposes of it.
+    """
+    # Imported here, not at module scope, matching `get_redis` above: this
+    # module must stay importable in an environment without the driver.
+    import redis.asyncio as aioredis
+
+    return aioredis.from_url(
+        url,
+        socket_connect_timeout=READINESS_TIMEOUT_SECONDS,
+        socket_timeout=READINESS_TIMEOUT_SECONDS,
+    )
+
+
+async def redis_reachable(url: str, *, timeout: float | None = None,
+                          open_client=None) -> bool:
+    """Does Redis answer? One bounded PING. Reads nothing, writes nothing.
+
+    A PING AND NOT A LOCK ACQUISITION, deliberately. Taking the real lock
+    would prove reachability and SUPPRESS A REAL CYCLE for the whole of its
+    TTL - a readiness check that silences the next batch of notifications in
+    order to report that notifications could be sent. Writing a throwaway key
+    would be a write, from a check whose entire claim is that it performs
+    none.
+
+    Returns False rather than raising, and WITHOUT LOGGING THE FAILURE. Every
+    available way of saying why names something that must not be said: a
+    driver error carries the URL, and a `rediss://` URL carries the token. The
+    caller reports unreachable; it does not report the reason.
+
+    `open_client` exists so a test can supply a client without a socket. It is
+    not a production seam.
+    """
+    # AN ALLOWLIST OF OPERATIONAL FAILURES, not a blanket `except Exception`.
+    #
+    # Only these mean "Redis did not answer". Everything else - a NameError, a
+    # typo'd attribute, a client object that is not one, a bad argument -
+    # is a defect in this code or its configuration, and an earlier version of
+    # this function proved why that distinction matters: `asyncio` was not in
+    # scope, the NameError was swallowed, and the helper reported Redis
+    # unreachable on every single call. A bug wearing an infrastructure
+    # costume is worse than a crash, because the crash gets fixed.
+    #
+    # `RedisError` is the driver's own base and covers authentication,
+    # connection and protocol failures; `OSError` covers the socket layer and,
+    # since 3.3, the builtin `TimeoutError` that `asyncio.TimeoutError` aliases
+    # in 3.11+. The timeout is named anyway so the intent survives a version
+    # change that unpicks that relationship.
+    #
+    # IMPORTED HERE, AND NOT GUARDED. If the driver is absent this raises
+    # ImportError and startup fails loudly - which is correct. A missing
+    # driver is not an unreachable Redis, and reporting it as one would send
+    # somebody to check a server that was never the problem.
+    from redis.exceptions import RedisError
+
+    operational = (RedisError, OSError, asyncio.TimeoutError)
+
+    opener = open_client or open_probe_client
+    client = None
+    try:
+        client = await opener(url)
+        await asyncio.wait_for(
+            client.ping(), timeout or READINESS_TIMEOUT_SECONDS)
+        return True
+    except operational:
+        # A genuine connection, authentication or timeout failure. Returned as
+        # False and deliberately not logged: every way of saying why names the
+        # host or the credential.
+        return False
+    finally:
+        # CLOSED ON BOTH PATHS. A probe that leaked a connection per boot would
+        # be a slow exhaustion of the very backend it was checking. Narrowed
+        # for the same reason as above: a driver failing to close is
+        # operational and best-effort; an AttributeError here is a defect and
+        # must not be hidden by a `finally` that swallows everything.
+        if client is not None:
+            close = getattr(client, "aclose", None) or getattr(
+                client, "close", None)
+            if close is not None:
+                try:
+                    maybe = close()
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+                except operational:
+                    pass
 
 
 async def acquire_period_lock_strict(key: str, ttl_seconds: int,

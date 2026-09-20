@@ -62,23 +62,32 @@ class AppointmentRepository(BaseRepository):
         lawyer_id: str,
         scheduled_at: datetime,
         duration_minutes: int,
-        exclude_id: str | None = None,
     ) -> bool:
-        """
-        True if the lawyer already has an active appointment that overlaps
-        the [scheduled_at, scheduled_at + duration) window.
+        """A FRIENDLY EARLY ERROR, not the overlap guarantee.
+
+        True if the lawyer already has an active appointment overlapping the
+        [scheduled_at, scheduled_at + duration) window. It races by
+        construction - two bookings can both read "no conflict" and both
+        proceed - and that is fine, because the unique multikey indexes on
+        `occupied_slots` are what actually decide. This exists so the common
+        case gets a clear message instead of a duplicate-key error.
+
+        IT NO LONGER TAKES `exclude_id`. That parameter was added for a
+        reschedule path that was never built this way: rescheduling does not
+        call this at all, it relies on the indexes directly (see
+        `test_appointment_reschedule.py`, "the unique index, not
+        `has_conflict` - which this path never calls"). No caller in the
+        application or the tests ever passed it, so it was a branch that could
+        not be reached and an argument that could only be supplied by mistake.
         """
         end_dt = scheduled_at + timedelta(minutes=duration_minutes)
-        q: dict = {
+        return bool(await self.find_one({
             "lawyer_id": lawyer_id,
             "status": {"$in": _ACTIVE},
             # existing.start < new.end  AND  existing.end > new.start
             "scheduled_at": {"$lt": end_dt},
             "end_at": {"$gt": scheduled_at},
-        }
-        if exclude_id:
-            q["_id"] = {"$ne": exclude_id}
-        return bool(await self.find_one(q))
+        }))
 
     async def booked_slots_on_date(
         self,
@@ -108,6 +117,35 @@ class AppointmentRepository(BaseRepository):
         that returns a row the caller may not see.
         """
         return await self.find_one({"_id": appt_id, **actor_filter})
+
+    @staticmethod
+    def unexpired_filter() -> dict:
+        """Match only a row whose stored deadline has not passed, BY SERVER TIME.
+
+        `$$NOW` is the MONGO server's clock, not this process's. That is the
+        whole point of doing it here as well as in the service: the service
+        reads the row, decides, and writes, and between the decision and the
+        write the deadline can pass. Worse, an application host with a skewed
+        clock would answer the question differently from the sweep running on
+        another host -- and the two answers decide whether somebody's
+        consultation happens. One clock settles it, and it is the clock that
+        both the sweep's query and this filter are compared against.
+
+        `$lte` semantics: not-expired means the deadline is STRICTLY in the
+        future, so `expires_at == now` is expired. That matches `has_lapsed`,
+        `stored_has_lapsed` and `find_lapsed_pending`; all four have to agree
+        or a row one of them retires is a row another would still confirm.
+
+        A row whose `expires_at` is MISSING OR NOT A DATE passes this filter.
+        Enforcing on an absent deadline would mean refusing a lawyer's
+        confirmation because of a field their client's booking never wrote --
+        an inference, and the wrong direction for one. Those rows block
+        ACTIVATION instead; the audit refuses while any of them exist.
+        """
+        return {"$expr": {"$or": [
+            {"$ne": [{"$type": "$expires_at"}, "date"]},
+            {"$gt": ["$expires_at", "$$NOW"]},
+        ]}}
 
     @staticmethod
     def version_filter(expected: int) -> dict:
@@ -475,6 +513,7 @@ class AppointmentRepository(BaseRepository):
         actor_filter: dict,
         extra: dict | None = None,
         expected_version: int | None = None,
+        require_unexpired: bool = False,
     ) -> dict | None:
         """Move an appointment to `status`, but only from `expected`.
 
@@ -508,9 +547,13 @@ class AppointmentRepository(BaseRepository):
         # land on a time the lawyer never saw.
         version = ({} if expected_version is None
                    else self.version_filter(expected_version))
+        # OPT-IN, and only the confirmation path asks for it. A cancellation
+        # of a lapsed request must still succeed: refusing it would leave the
+        # client unable to withdraw a request nobody can accept.
+        unexpired = self.unexpired_filter() if require_unexpired else {}
         return await self.col.find_one_and_update(
             {"_id": appt_id, "status": {"$in": expected_values},
-             **actor_filter, **version},
+             **actor_filter, **version, **unexpired},
             update,
             return_document=ReturnDocument.AFTER,
         )

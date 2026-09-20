@@ -232,6 +232,39 @@ async def lifespan(app: FastAPI):
     # establish correctness state quietly.
     await assert_appointment_booking_ready()
 
+    # APPOINTMENT EXPIRY: refuse to start when it is enabled and not ready.
+    #
+    # PLACED HERE, BEFORE EVERY `create_task` BELOW, AND THAT POSITION IS THE
+    # POINT. It used to sit further down, next to the appointment scheduler it
+    # belongs to, which read well and was wrong: by then the warmup task, the
+    # WebSocket subscriber, the cause-list scheduler, the lawyer index
+    # reconciler and both relays already existed. A guard that raises there
+    # aborts `lifespan` BEFORE `yield`, so the cleanup after `yield` never
+    # runs - every one of those tasks is left orphaned against a loop that is
+    # shutting down, which is where "Task was destroyed but it is pending"
+    # comes from, on top of whatever each was half way through.
+    #
+    # Nothing has been started yet at this line. Failing here is a clean
+    # refusal: the database is connected, the indexes are checked, and no
+    # background work exists to leak.
+    #
+    # After `connect_db`, `create_all_indexes` and the booking gate, because
+    # two of its three checks read from the database.
+    #
+    # COSTS NOTHING WHEN THE FLAG IS OFF, which is every deployment today: it
+    # returns before any Redis probe, index read or appointment query. That is
+    # a requirement rather than an optimisation, since this runs on every boot.
+    #
+    # It does NOT replace the scheduler's per-cycle checks. This catches a
+    # deployment that was never ready; those catch one that STOPS being ready -
+    # an index dropped during maintenance, a legacy row arriving from a
+    # restore, Redis going away an hour after boot.
+    from app.services.appointment_scheduler import (
+        assert_appointment_expiry_activation_ready,
+    )
+
+    await assert_appointment_expiry_activation_ready()
+
     connect_chroma()
     from app.services.notification_service import set_ws_manager
     from app.websockets.manager import notification_manager
@@ -276,8 +309,9 @@ async def lifespan(app: FastAPI):
     #
     # Deliberately not behind the `redis_enabled() or run_schedulers` gate
     # above, and deliberately not a loop that wakes to find nothing to do.
-    # `appointment_scheduler_task()` returns None while both feature flags are
-    # false, so a default deployment has no appointment scheduler in existence
+    # `appointment_scheduler_task()` returns None while ALL THREE appointment
+    # flags are false - reminders, outcome nudges and expiry - so a default
+    # deployment has no appointment scheduler in existence
     # — which is a stronger guarantee than one that exists and is trusted to
     # keep deciding against acting.
     #
@@ -285,6 +319,8 @@ async def lifespan(app: FastAPI):
     # starts and stops it.
     from app.services.appointment_scheduler import appointment_scheduler_task
 
+    # The expiry activation guard has ALREADY RUN, far above, before the first
+    # `create_task`. See the comment there for why it cannot live here.
     appointment_task = appointment_scheduler_task()
     yield
     warmup_task.cancel()

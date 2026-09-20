@@ -81,13 +81,33 @@ async def list_appointments(
     )
 
 
-@router.get("/availability/{lawyer_id}", response_model=AvailabilityResponse)
+@router.get("/availability/{lawyer_id}", response_model=AvailabilityResponse,
+            deprecated=True)
 async def get_lawyer_availability(
     lawyer_id: str,
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     current_user: dict = Depends(get_current_user),
 ):
-    """Return already-booked time slots for a lawyer on a specific date."""
+    """DEPRECATED. Use `GET /lawyers/{lawyer_id}/bookable-slots` instead.
+
+    This answers "which times are already TAKEN", which was only ever half the
+    question. A client cannot book from it: it says nothing about when the
+    lawyer works, so the caller had to supply candidate times from somewhere -
+    and the only place that existed was a hardcoded list in the UI, which is
+    how Sunday 09:00 came to be bookable.
+
+    `/lawyers/{lawyer_id}/bookable-slots` answers the whole question on the
+    server: explicit working hours, minus exception days, minus slots already
+    held, minus times that have passed. It supersedes this endpoint entirely.
+
+    MARKED DEPRECATED RATHER THAN DELETED. It is a public contract, this
+    application is no longer the only possible caller, and the appointment
+    module already ships one breaking change in this cycle (`confirm` now
+    requires a versioned body). Two at once turns "one client needs updating"
+    into "we broke integrations". `deprecated=True` puts it in the OpenAPI
+    schema as such, which is the notice; removal is a later, separate
+    decision.
+    """
     return await appointment_service.get_availability(lawyer_id, date)
 
 

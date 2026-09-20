@@ -585,10 +585,22 @@ async def test_legacy_pending_rows_are_counted_and_left_alone(healthy):
     assert after["status"] == AppointmentStatus.PENDING.value
     assert "expires_at" not in after
 
-    # And an undecided population is reported as needing a human, not as broken.
-    assert _verdict(report, "expiry_activation") == audit.UNVERIFIED_EXTERNAL
-    assert "legacy_rows_awaiting_policy" in \
-        report["verdicts"]["expiry_activation"]["reasons"]
+    # A ROW WITH NO STORED DEADLINE IS A MACHINE NO, not a decision pending.
+    #
+    # The scheduler refuses to run the sweep while any exists, so calling this
+    # UNVERIFIED_EXTERNAL would describe the feature as "awaiting approval"
+    # when switching it on actually produces a job that declines every cycle.
+    # The decision about those rows is still owed - and still reported - but
+    # it is no longer the only thing standing in the way.
+    assert _verdict(report, "expiry_activation") == audit.NOT_READY
+    reasons = report["verdicts"]["expiry_activation"]["reasons"]
+    assert "pending_rows_without_a_stored_deadline" in reasons
+    assert "legacy_rows_awaiting_policy" in reasons
+
+    assert expiry["deadlines_missing"] == 1
+    assert expiry["deadlines_malformed"] == 0
+    # The baseline pending row still carries its own deadline.
+    assert expiry["deadlines_valid"] == 1
 
 
 async def test_pending_rows_past_their_start_and_deadline_are_counted(healthy):

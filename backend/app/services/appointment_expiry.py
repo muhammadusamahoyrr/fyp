@@ -107,6 +107,59 @@ def deadline_of(appt: dict) -> datetime | None:
     return deadline_for(created, start)
 
 
+def stored_deadline_of(appt: dict) -> datetime | None:
+    """The deadline this row actually CARRIES. Never derived.
+
+    `deadline_of` falls back to computing a deadline from `created_at` and
+    `scheduled_at`, which is right for a survey that has to say something
+    about every row. It is wrong everywhere a deadline is ENFORCED.
+
+    A derived deadline is an inference about a request booked before the field
+    existed, and acting on it means terminating a real appointment -- or
+    refusing a lawyer's confirmation of one -- on evidence this system made up
+    after the fact. So enforcement reads only what was written at booking, and
+    a row without it is handled by blocking ACTIVATION rather than by
+    guessing: see the activation audit, which refuses while any pending row
+    lacks one.
+    """
+    stored = appt.get("expires_at")
+    return _as_utc(stored) if isinstance(stored, datetime) else None
+
+
+def stored_has_lapsed(appt: dict, now: datetime | None = None) -> bool:
+    """Has the STORED deadline passed?
+
+    `>=`, matching `has_lapsed` and the sweep's `$lte` query: the deadline is
+    the instant the request stops holding its slot, so that instant is already
+    too late. All three have to agree, or a row one of them selects is a row
+    another refuses to act on.
+
+    A row with no stored deadline is NOT lapsed. "Cannot tell" must never read
+    as "expire it", and here it must never read as "refuse the lawyer either".
+    """
+    deadline = stored_deadline_of(appt)
+    if deadline is None:
+        return False
+    return (now or datetime.now(timezone.utc)) >= deadline
+
+
+def expiry_enabled() -> bool:
+    """Is the expiry mechanism switched on for this process?
+
+    THE SINGLE SOURCE OF TRUTH for both consumers -- the sweep that retires
+    lapsed requests and the confirmation path that refuses them. It lives here,
+    beside the deadline policy, so neither can be enabled without the other.
+
+    Read at CALL TIME and imported lazily. A module-level snapshot could not be
+    changed without a restart, would make this module depend on settings just
+    to be imported, and would let a test exercise only whichever branch was
+    true when the module first loaded.
+    """
+    from app.core.config import settings
+
+    return bool(getattr(settings, "appointment_expiry_enabled", False))
+
+
 def has_lapsed(appt: dict, now: datetime | None = None) -> bool:
     """Is this request past its deadline?
 

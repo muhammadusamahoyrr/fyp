@@ -462,6 +462,7 @@ async def audit_expiry(db, now: datetime) -> dict:
     second implementation of that policy is a second answer to "was this
     request still open".
     """
+    from app.core.config import settings
     from app.services import appointment_expiry_sweep
 
     pending = AppointmentStatus.PENDING.value
@@ -474,6 +475,22 @@ async def audit_expiry(db, now: datetime) -> dict:
         {"status": pending, "scheduled_at": {"$lt": now}})
 
     legacy = await appointment_expiry_sweep.survey_legacy_pending(now=now)
+
+    # THE THREE STATES A STORED DEADLINE CAN BE IN, counted apart.
+    #
+    # Rolling them into one "rows without a usable deadline" number would hide
+    # the difference between a row that predates the field -- expected, and a
+    # decision somebody still owes -- and a row whose `expires_at` is a string
+    # or a number, which is corruption and a different conversation entirely.
+    # `$type: "date"` is asked of the database rather than inferred in Python
+    # so the answer is the same one the enforcement filter gets.
+    deadlines_valid = await col.count_documents(
+        {"status": pending, "expires_at": {"$type": "date"}})
+    deadlines_missing = await col.count_documents(
+        {"status": pending, "expires_at": {"$exists": False}})
+    deadlines_malformed = await col.count_documents(
+        {"status": pending,
+         "expires_at": {"$exists": True, "$not": {"$type": "date"}}})
 
     buckets = _empty_buckets()
     scanned = 0
@@ -530,6 +547,14 @@ async def audit_expiry(db, now: datetime) -> dict:
         # what to do with these rows, so it reports the question as open
         # whenever the population is non-empty and defers to the manual gate.
         "legacy_treatment_undecided": bool(legacy["scanned"]),
+        # What the ENFORCEMENT path will see, asked the way it asks.
+        "deadlines_valid": int(deadlines_valid),
+        "deadlines_missing": int(deadlines_missing),
+        "deadlines_malformed": int(deadlines_malformed),
+        "deadlines_unusable": int(deadlines_missing + deadlines_malformed),
+        "enabled": bool(
+            getattr(settings, "appointment_expiry_enabled", False)),
+        "batch_size": int(getattr(settings, "appointment_expiry_batch", 0)),
     }
 
 
@@ -622,36 +647,23 @@ async def _open_redis(url: str):
 
 
 async def _redis_reachable(url: str) -> bool:
-    """One bounded PING. Reads nothing, writes nothing, locks nothing.
+    """One bounded PING, via the shared readiness helper.
 
-    A PING and not a lock acquisition, deliberately. Taking the real lock would
-    prove reachability and SUPPRESS A REAL CYCLE for the whole of its TTL - an
-    audit that silences the next batch of reminders to report that reminders
-    could be sent. Writing a throwaway key would be a write, from a tool whose
-    entire claim is that it performs none.
+    DELEGATED RATHER THAN IMPLEMENTED HERE. The appointment startup guard asks
+    exactly the same question, and two implementations of "is the strict lock
+    backend usable" would eventually disagree - this report saying ready while
+    startup refuses, or worse the other way round. `redis_reachable` also owns
+    the rules that matter: a PING and never a lock acquisition, a bounded
+    timeout, the client closed on both paths, and no logging of a failure whose
+    every description would name the host or the token.
+
+    `_open_redis` is still passed in so this module keeps its own seam: the
+    audit's tests substitute a client that raises on anything but PING.
     """
-    client = None
-    try:
-        client = await _open_redis(url)
-        await asyncio.wait_for(client.ping(), REDIS_PING_TIMEOUT_SECONDS)
-        return True
-    except Exception:
-        # Deliberately swallowed WITHOUT logging the exception. A Redis driver
-        # error carries the URL, and for a `rediss://` target that URL carries
-        # the token. The report says unreachable; it does not say why, because
-        # every available way of saying why names the host or the credential.
-        return False
-    finally:
-        if client is not None:
-            close = getattr(client, "aclose", None) or getattr(
-                client, "close", None)
-            if close is not None:
-                try:
-                    maybe = close()
-                    if asyncio.iscoroutine(maybe):
-                        await maybe
-                except Exception:
-                    pass
+    from app.core.redis_client import redis_reachable
+
+    return await redis_reachable(
+        url, timeout=REDIS_PING_TIMEOUT_SECONDS, open_client=_open_redis)
 
 
 async def audit_strict_lock() -> dict:
@@ -986,15 +998,29 @@ def build_verdicts(sections: dict) -> dict:
                  + [f"missing_correctness_index:{p['name']}"
                     for p in booking["correctness_problems"]]))
 
-    # Expiry.
-    expiry_reasons = []
+    # Expiry. The sweep takes the SAME strict lock as the other two jobs, so
+    # an absent or unreachable backend blocks it for the same reason.
+    expiry_reasons = list(lock_reasons)
     if not queries["pending_expiry"]["present"]:
         expiry_reasons.append("missing_query_index:appointment_pending_expiry")
+    if expiry["deadlines_missing"]:
+        expiry_reasons.append("pending_rows_without_a_stored_deadline")
+    if expiry["deadlines_malformed"]:
+        expiry_reasons.append("pending_rows_with_a_malformed_deadline")
     undecided = expiry["legacy_treatment_undecided"]
     if undecided:
         expiry_reasons.append("legacy_rows_awaiting_policy")
+
+    # A ROW WITHOUT A USABLE STORED DEADLINE IS A MACHINE NO, not a decision
+    # awaiting a human. The scheduler refuses to run the sweep while any
+    # exists, so reporting UNVERIFIED_EXTERNAL here would describe a feature
+    # as "waiting for approval" when in fact switching it on produces a job
+    # that declines every cycle. `legacy_rows_awaiting_policy` stays external
+    # because it genuinely is a decision; these two are not.
+    blocking = [r for r in expiry_reasons
+                if r != "legacy_rows_awaiting_policy"]
     out["expiry_activation"] = _verdict(
-        not [r for r in expiry_reasons if r.startswith("missing_query_index")],
+        not blocking,
         complete=expiry["missing_expires_at_complete"] and not expiry["age_truncated"],
         reasons=expiry_reasons,
         external=undecided)
@@ -1194,6 +1220,12 @@ def render(report: dict) -> str:
     add(f"   unassessable legacy rows     : {e['legacy_unassessable']}")
     add(f"   already past their start     : {e['already_past_scheduled_start']}")
     add(f"   age (disjoint buckets)       : {e['age_buckets']}")
+    add(f"   stored deadline valid        : {e['deadlines_valid']}")
+    add(f"   stored deadline missing      : {e['deadlines_missing']}")
+    add(f"   stored deadline malformed    : {e['deadlines_malformed']}")
+    add(f"   expiry flag                  : "
+        f"{'ENABLED' if e['enabled'] else 'disabled'}")
+    add(f"   expiry batch                 : {e['batch_size']}")
     if e["legacy_treatment_undecided"]:
         add("   legacy-row treatment is UNDECIDED - see the manual gates")
     add("")
