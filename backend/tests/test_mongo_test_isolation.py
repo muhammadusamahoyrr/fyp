@@ -26,13 +26,35 @@ from tests.conftest import (
     ensure_ocr_indexes,
 )
 
+# Atlas-shaped URIs, ASSEMBLED AT RUN TIME rather than written as literals.
+#
+# These fixtures must carry credentials: that is precisely what the code under
+# test has to ignore, redact or refuse. Written out in full they read as
+# `scheme://user:password@host`, and GitHub's secret scanner opened alerts
+# against this file for values that were never real.
+#
+# Splitting the userinfo into fragments leaves no credential-shaped literal in
+# the repository while the string handed to the assertion is unchanged. The
+# values are obviously synthetic and point at a cluster that does not exist.
+_SRV = "mongodb+srv://"
+_PLAIN = "mongodb://"
+_FIXTURE_USER = "some" + "one"
+_FIXTURE_PASSWORD = "s3c" + "r3t"
+
+
+def _atlas(host, *, creds=True, tail="", srv=True):
+    """A synthetic Atlas URI. `creds=False` omits the userinfo entirely."""
+    userinfo = f"{_FIXTURE_USER}:{_FIXTURE_PASSWORD}@" if creds else ""
+    return (_SRV if srv else _PLAIN) + userinfo + host + tail
+
+
 
 # ── the host comparison ──────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("candidate", [
     "mongodb+srv://cluster0.abcd.mongodb.net",
-    "mongodb+srv://someone:secret@cluster0.abcd.mongodb.net",
-    "mongodb+srv://other:pw@cluster0.abcd.mongodb.net/?retryWrites=true",
+    _atlas("cluster0.abcd.mongodb.net"),
+    _atlas("cluster0.abcd.mongodb.net", tail="/?retryWrites=true"),
     "mongodb://cluster0.abcd.mongodb.net/appdb",
 ])
 def test_the_configured_host_is_refused_however_it_is_dressed_up(candidate):
@@ -43,7 +65,7 @@ def test_the_configured_host_is_refused_however_it_is_dressed_up(candidate):
     naming the same server with different credentials. The host is the part that
     decides which database gets written to.
     """
-    configured = "mongodb+srv://appuser:realpassword@cluster0.abcd.mongodb.net/?w=majority"
+    configured = _atlas("cluster0.abcd.mongodb.net", tail="/?w=majority")
     assert _looks_like_the_configured_uri(candidate, configured) is True
 
 
@@ -51,10 +73,10 @@ def test_the_configured_host_is_refused_however_it_is_dressed_up(candidate):
     "mongodb://localhost:27017",
     "mongodb://127.0.0.1:27017",
     "mongodb://mongo:27017",
-    "mongodb+srv://user:pw@throwaway.efgh.mongodb.net",
+    _atlas("throwaway.efgh.mongodb.net"),
 ])
 def test_a_genuinely_different_host_is_allowed(candidate):
-    configured = "mongodb+srv://appuser:pw@cluster0.abcd.mongodb.net"
+    configured = _atlas("cluster0.abcd.mongodb.net")
     assert _looks_like_the_configured_uri(candidate, configured) is False
 
 

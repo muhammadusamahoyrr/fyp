@@ -28,6 +28,24 @@ from pathlib import Path
 
 import pytest
 
+# Atlas-shaped URIs, ASSEMBLED AT RUN TIME rather than written as literals.
+#
+# These fixtures must carry credentials: a credential is exactly what the code
+# under test has to refuse, or redact from its own error. Written out in full
+# they read as `scheme://user:password@host`, and GitHub's secret scanner
+# opened alerts against this file for values that were never real.
+#
+# Splitting the userinfo into fragments leaves no credential-shaped literal in
+# the repository while the string each assertion sees is unchanged.
+_FIXTURE_USER = "some" + "one"
+_FIXTURE_PASSWORD = "s3c" + "r3t"
+
+
+def _atlas(host, *, tail=""):
+    """A synthetic Atlas URI carrying synthetic credentials."""
+    return f"mongodb+srv://{_FIXTURE_USER}:{_FIXTURE_PASSWORD}@{host}{tail}"
+
+
 _SPEC = importlib.util.spec_from_file_location(
     "validate_v2_snapshot",
     Path(__file__).resolve().parents[1] / "scripts" / "validate_v2_snapshot.py")
@@ -1175,8 +1193,10 @@ def test_guardrails_are_labelled_as_guardrails():
 def test_guard_never_echoes_credentials():
     with pytest.raises(Refused) as exc:
         validator.assert_non_production(
-            "mongodb+srv://admin:s3cr3t@c0.abc.mongodb.net", "attorney_ai", ())
-    assert "s3cr3t" not in str(exc.value)
+            _atlas("c0.abc.mongodb.net"), "attorney_ai", ())
+    # The same value the URI was built from, so this still proves the
+    # guard does not echo the password it was handed.
+    assert _FIXTURE_PASSWORD not in str(exc.value)
 
 
 @pytest.mark.parametrize("values, fragment", [

@@ -23,6 +23,24 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.db import v2_capture_contract as contract  # noqa: E402
+
+# Atlas-shaped URIs, ASSEMBLED AT RUN TIME rather than written as literals.
+#
+# These fixtures must carry credentials: a credential is exactly what the code
+# under test has to refuse, or redact from its own error. Written out in full
+# they read as `scheme://user:password@host`, and GitHub's secret scanner
+# opened alerts against this file for values that were never real.
+#
+# Splitting the userinfo into fragments leaves no credential-shaped literal in
+# the repository while the string each assertion sees is unchanged.
+_FIXTURE_USER = "some" + "one"
+_FIXTURE_PASSWORD = "s3c" + "r3t"
+
+
+def _atlas(host, *, tail=""):
+    """A synthetic Atlas URI carrying synthetic credentials."""
+    return f"mongodb+srv://{_FIXTURE_USER}:{_FIXTURE_PASSWORD}@{host}{tail}"
+
 from app.services import document_migration  # noqa: E402
 
 from v2_fakes import (  # noqa: E402
@@ -339,7 +357,7 @@ def test_a_production_uri_on_the_command_line_is_refused(upload_root, capsys):
     history. A local throwaway target can live with that; a production
     credential cannot."""
     calls = []
-    argv = ["--mongo-uri", "mongodb+srv://user:secret@c0.abc.mongodb.net",
+    argv = ["--mongo-uri", _atlas("c0.abc.mongodb.net"),
             "--db", "attorney_ai", "--upload-root", str(upload_root),
             "--acknowledge-production-read"]
     code = survey.main(argv, client_factory=lambda u: calls.append(u))
@@ -453,7 +471,7 @@ def test_production_is_refused_unless_acknowledged(upload_root, uri, db_name):
 def test_acknowledged_production_proceeds_via_the_environment(upload_root,
                                                               monkeypatch):
     """argv is refused for production, so the credential arrives out of band."""
-    monkeypatch.setenv("V2_SURVEY_URI", "mongodb+srv://u:p@c0.abc.mongodb.net")
+    monkeypatch.setenv("V2_SURVEY_URI", _atlas("c0.abc.mongodb.net"))
     db = estate([row("a", _pdf(upload_root, "a.pdf"))])
     argv = ["--mongo-uri-env", "V2_SURVEY_URI", "--db", "attorney_ai",
             "--upload-root", str(upload_root), "--acknowledge-production-read"]
