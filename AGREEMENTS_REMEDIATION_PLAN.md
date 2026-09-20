@@ -919,7 +919,39 @@ producer — `create_lawyer_agreement` — keeps the client wizard parked while 
 lawyer path ships. Withdrawn templates are irrelevant here: a lawyer supplies
 their own wording, and `is_unreviewed_template` still guards the marker.
 
-### 3.G1.3 Draft/send lifecycle
+### 3.G1.3 Draft/send lifecycle — IMPLEMENTED (gate 3C)
+
+**2026-09-20.** `draft` is reachable at last: it was declared in the enum and
+written by nothing.
+
+- `create_draft` / `update_draft` / `delete_draft` / `sign_and_send_draft`,
+  routed at `POST|PATCH|DELETE /agreements/drafts[/{id}]` and
+  `POST /agreements/drafts/{id}/send`. **Product C is now reachable.**
+- **Versioning**: drafts start at 1; every edit `$inc`s it; `PATCH` requires
+  `expected_version` and a stale write is a 409, never a silent merge.
+- **Sign-and-send is ONE call and ONE transaction**: freeze body, verify the
+  reviewed digest, capture signature + explicit consent, audit, transition,
+  park the outbox event, write the idempotency receipt. Fails closed.
+- **`body_sha256` is null on a draft** and stamped only at send. The digest is
+  the record of what was SIGNED; stamping a mutable draft would invite reading
+  it as evidence.
+- **Idempotency**: key scoped by actor and operation, stored with a canonical
+  fingerprint binding draft, version, body hash, parties, case, signature hash
+  and consent. Same key + same payload replays; different payload is 409.
+- **D5 and D2 re-checked at SEND**, not inherited from create — verification
+  can be revoked and a case reassigned in between.
+- **D6**: `10/hour` on send only. Autosave `PATCH` is deliberately unlimited.
+- **D7**: `MAX_ACTIVE_DRAFTS_PER_LAWYER = 20`, counting `draft` rows only.
+- Sent agreements refuse edit and delete.
+
+**All nine guards proved able to fail** — disabled one at a time, each test
+required red, then restored and required green, with both source files verified
+byte-identical afterwards.
+
+**Still NOT gated by `agreements_diy_builder_enabled`**, tested explicitly. The
+client wizard stays parked.
+
+#### Original design, for the record
 
 **`AgreementStatus.DRAFT` is declared (`constants.py:113`) and unreachable.**
 The only writer is `models/agreement.py:31`, a Pydantic model nothing persists

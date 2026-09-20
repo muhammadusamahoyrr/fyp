@@ -1,15 +1,24 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
-from app.dependencies import get_current_user
+from app.core.rate_limit import limiter
+from app.dependencies import get_current_user, require_lawyer
 from app.schemas.agreement import (
     AgreementCreate,
+    DraftCreate,
+    DraftSignAndSend,
+    DraftUpdate,
     AgreementDecline,
     AgreementOut,
     SignatureSubmit,
 )
 from app.services import agreement_service
 
+from app.schemas.common import StatusResponse
+
 router = APIRouter(prefix="/agreements", tags=["agreements"])
+
+# D6: sends only. See the note on the send route.
+_LIMIT_SEND = "10/hour"
 
 
 @router.post("", response_model=AgreementOut)
@@ -85,5 +94,97 @@ async def decline_agreement(
         agreement_id=agreement_id,
         user_id=current_user["_id"],
         reason=body.reason,
+        ip_address=ip,
+    )
+
+
+# ── Gate 3C: lawyer draft lifecycle ──────────────────────────────────────────
+#
+# These are the first routes that reach `create_lawyer_agreement`'s family, and
+# they are deliberately NOT behind `agreements_diy_builder_enabled`. That flag
+# parks the CLIENT wizard (Product B), whose templates are withdrawn; this is
+# Product C, a lawyer writing their own wording for a client on their own case.
+# Reading that flag here would re-couple two products parking exists to separate.
+#
+# `require_lawyer` is the coarse gate; the service re-checks KYC (D5) and the
+# case relationship (D2) on BOTH create and send, because drafting and sending
+# are separated in time and either can lapse in between.
+
+@router.post("/drafts", response_model=AgreementOut, status_code=201)
+async def create_draft(
+    body: DraftCreate,
+    current_user: dict = Depends(require_lawyer),
+):
+    return await agreement_service.create_draft(
+        title=body.title,
+        body_html=body.body_html,
+        client_id=body.client_id,
+        creator_id=current_user["_id"],
+        case_id=body.case_id,
+    )
+
+
+@router.patch("/drafts/{agreement_id}", response_model=AgreementOut)
+async def update_draft(
+    agreement_id: str,
+    body: DraftUpdate,
+    current_user: dict = Depends(require_lawyer),
+):
+    """Autosave. DELIBERATELY NOT RATE-LIMITED (D6).
+
+    The abuse boundary is sending, not editing: a draft reaches nobody.
+    Throttling autosave would lose the lawyer's work for no safety gain.
+    """
+    return await agreement_service.update_draft(
+        agreement_id=agreement_id,
+        creator_id=current_user["_id"],
+        expected_version=body.expected_version,
+        title=body.title,
+        body_html=body.body_html,
+    )
+
+
+@router.delete("/drafts/{agreement_id}", response_model=StatusResponse)
+async def delete_draft(
+    agreement_id: str,
+    current_user: dict = Depends(require_lawyer),
+):
+    await agreement_service.delete_draft(
+        agreement_id=agreement_id, creator_id=current_user["_id"])
+    return {"status": "deleted"}
+
+
+@router.post("/drafts/{agreement_id}/send", response_model=AgreementOut)
+@limiter.limit(_LIMIT_SEND)
+async def sign_and_send_draft(
+    agreement_id: str,
+    body: DraftSignAndSend,
+    request: Request,
+    current_user: dict = Depends(require_lawyer),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    """Sign and send in ONE call.
+
+    The parked wizard did this in two -- create, then sign -- and a failure
+    between them left the counterparty holding an agreement its sender never
+    signed, with a retry that made a second one. This is one transaction.
+
+    RATE LIMITED HERE AND ONLY HERE (D6): this is the operation that reaches
+    another person.
+    """
+    if not idempotency_key:
+        raise HTTPException(status_code=422, detail={
+            "code": "missing_idempotency_key",
+            "message": "The Idempotency-Key header is required."})
+    ip = request.client.host if request.client else None
+    return await agreement_service.sign_and_send_draft(
+        agreement_id=agreement_id,
+        creator_id=current_user["_id"],
+        expected_version=body.expected_version,
+        expected_body_sha256=body.expected_body_sha256,
+        method=body.method.value,
+        signature_data=body.signature_data,
+        consent=body.consent,
+        idempotency_key=idempotency_key,
         ip_address=ip,
     )

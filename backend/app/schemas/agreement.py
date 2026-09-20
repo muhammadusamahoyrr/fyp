@@ -89,3 +89,54 @@ class AgreementOut(BaseModel):
     created_by: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+# ── Gate 3C: draft lifecycle ─────────────────────────────────────────────────
+#
+# All four forbid unknown fields, for the reason AgreementCreate does: a field
+# the server silently drops is data loss the caller never learns about.
+
+class DraftCreate(BaseModel):
+    """A lawyer's private draft. Case and client are both mandatory: the case
+    IS the authorisation (product plan D2), so there is no case-less draft."""
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., min_length=1, max_length=_MAX_TITLE)
+    body_html: str = Field(..., min_length=1, max_length=_MAX_BODY)
+    client_id: str = Field(..., min_length=1)
+    case_id: str = Field(..., min_length=1)
+
+
+class DraftUpdate(BaseModel):
+    """An edit. ``expected_version`` is REQUIRED, not optional.
+
+    Optimistic concurrency only works if the caller states what it believed it
+    was editing. Without it two tabs silently overwrite each other and the
+    lawyer signs a body they never saw.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(..., ge=1)
+    title: str | None = Field(default=None, min_length=1, max_length=_MAX_TITLE)
+    body_html: str | None = Field(default=None, min_length=1, max_length=_MAX_BODY)
+
+
+class DraftSignAndSend(BaseModel):
+    """One call: freeze, sign, send.
+
+    ``expected_body_sha256`` is the anti-race guarantee -- it is the digest of
+    the text the signer actually read. If a concurrent edit landed, it will not
+    match and the send is refused rather than binding them to wording they
+    never saw.
+
+    ``consent`` must be explicitly true. A signature captured without a recorded
+    intent to sign is weaker evidence than one with it, and the flag costs
+    nothing.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(..., ge=1)
+    expected_body_sha256: str = Field(..., min_length=64, max_length=64)
+    method: SignatureMethod
+    signature_data: str = Field(..., min_length=1, max_length=_MAX_SIGNATURE)
+    consent: bool

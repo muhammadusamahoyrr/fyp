@@ -14,6 +14,7 @@ from app.core.constants import (
 )
 from app.core.exceptions import (
     AppValidationError,
+    ConflictError,
     ForbiddenError,
     NotFoundError,
     ServiceUnavailableError,
@@ -341,6 +342,364 @@ async def _authorise_case_link(case_id: str, creator_id: str,
             "Every party must be on the case this agreement is attached to."
         )
     return case
+
+
+# ── Gate 3C: the draft lifecycle ─────────────────────────────────────────────
+#
+# THE DESIGN THIS REPLACES. The parked wizard created and signed in TWO network
+# calls (ModAgreements.jsx). If the second failed, the counterparty had already
+# been notified of an agreement its sender never signed, and the UI invited a
+# retry that made a second one. Gate 3C must not repeat that: sign-and-send is
+# one call and one transaction.
+#
+# Statuses are unchanged -- `draft` was already declared and unreachable, and
+# nothing new joins the enum. Cancellation causes live in `cancellation_source`
+# (plan section 3.G1.10), never in new terminal statuses.
+
+# D7: active drafts per lawyer. A NAMED CONSTANT so the number has one home and
+# changing it is one edit. Counts `draft` rows only -- deleting a draft frees a
+# slot, so this bounds live work rather than lifetime output.
+MAX_ACTIVE_DRAFTS_PER_LAWYER = 20
+
+_DRAFT_CAP_REFUSAL = (
+    f"You already have {MAX_ACTIVE_DRAFTS_PER_LAWYER} unsent drafts. Send or "
+    "delete one before starting another."
+)
+
+
+def _draft_fingerprint(*, draft_id: str, expected_version: int,
+                       body_sha256: str, parties: list[str], case_id: str | None,
+                       signature_data: str, consent: bool) -> str:
+    """Canonical fingerprint of a sign-and-send request.
+
+    Binds everything that decides WHAT is being sent, so a retry carrying the
+    same key but a different payload is a conflict rather than a silent alias:
+    the draft, the version the sender believed they were signing, the exact body
+    hash they reviewed, the parties, the case, the signature and the consent.
+
+    The signature is hashed rather than included -- it is base64 image data, and
+    a fingerprint is not a place to keep a copy of it.
+    """
+    from app.services import document_transitions as tx
+
+    return tx.canonical_body_hash({
+        "draft_id": draft_id,
+        "expected_version": expected_version,
+        "body_sha256": body_sha256,
+        "parties": sorted(parties),
+        "case_id": case_id,
+        "signature_sha256": hashlib.sha256(
+            (signature_data or "").encode("utf-8")).hexdigest(),
+        "consent": bool(consent),
+    })
+
+
+async def create_draft(*, title: str, body_html: str, client_id: str,
+                       creator_id: str, case_id: str) -> dict:
+    """A private draft. Nobody is notified; nothing is binding.
+
+    Authorisation is the SAME as sending (D5 + D2), checked here as well as at
+    send. Letting an unauthorised lawyer accumulate drafts they can never send
+    would be a worse experience than refusing at the door, and it would put
+    their wording in a record they had no right to create.
+    """
+    from app.db.collections import get_agreements_col
+
+    await _require_verified_lawyer(creator_id)
+    await _require_case_relationship(case_id, lawyer_id=creator_id,
+                                     client_id=client_id)
+    if client_id == creator_id:
+        raise AppValidationError("An agreement needs two different parties.")
+
+    live = await get_agreements_col().count_documents({
+        "created_by": creator_id, "status": AgreementStatus.DRAFT.value})
+    if live >= MAX_ACTIVE_DRAFTS_PER_LAWYER:
+        raise AppValidationError(_DRAFT_CAP_REFUSAL)
+
+    body = normalise_body(body_html)
+    if is_unreviewed_template(body):
+        raise AppValidationError(_UNREVIEWED_REFUSAL)
+
+    now = datetime.now(timezone.utc)
+    users = await user_repo.find_many({"_id": {"$in": [creator_id, client_id]}})
+    names = {u["_id"]: u.get("full_name", "") for u in users}
+
+    doc = {
+        "_id": secrets.token_urlsafe(16),
+        "title": title,
+        "body_html": body,
+        "body_format": BODY_FORMAT_PLAIN_TEXT,
+        # NO body_sha256 yet. The digest is the record of what was SIGNED, and
+        # a draft has not been signed -- stamping one here would invite reading
+        # a mutable value as evidence.
+        "body_sha256": None,
+        "version": 1,
+        "status": AgreementStatus.DRAFT.value,
+        "case_id": case_id,
+        "engagement_id": None,
+        "eto_classification": None,
+        "parties": [
+            {"user_id": uid, "full_name": names.get(uid, ""), "signed": False,
+             "signed_at": None, "signature_method": None, "signature_data": None}
+            for uid in (creator_id, client_id)
+        ],
+        "audit_log": [{"action": "draft_created", "actor_id": creator_id,
+                       "timestamp": now, "ip_address": None}],
+        "created_by": creator_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await get_agreements_col().insert_one(doc)
+    return doc
+
+
+async def update_draft(*, agreement_id: str, creator_id: str,
+                       expected_version: int, title: str | None = None,
+                       body_html: str | None = None) -> dict:
+    """Edit a draft. Optimistic concurrency on `version`.
+
+    A stale write is REFUSED, not merged. Two tabs editing one draft would
+    otherwise silently lose whichever save landed first, and the lawyer would
+    sign a body they never saw.
+    """
+    from app.db.collections import get_agreements_col
+
+    await _require_verified_lawyer(creator_id)
+    col = get_agreements_col()
+    current = await col.find_one({"_id": agreement_id})
+    if not current:
+        raise NotFoundError("Agreement")
+    if current.get("created_by") != creator_id:
+        raise ForbiddenError("This draft is not yours")
+    if current.get("status") != AgreementStatus.DRAFT.value:
+        raise AppValidationError(
+            "This agreement has been sent and can no longer be edited."
+        )
+
+    updates = {"updated_at": datetime.now(timezone.utc)}
+    if title is not None:
+        updates["title"] = title
+    if body_html is not None:
+        body = normalise_body(body_html)
+        if is_unreviewed_template(body):
+            raise AppValidationError(_UNREVIEWED_REFUSAL)
+        updates["body_html"] = body
+
+    res = await col.update_one(
+        {"_id": agreement_id, "status": AgreementStatus.DRAFT.value,
+         "version": expected_version},
+        {"$set": updates, "$inc": {"version": 1}},
+    )
+    if res.modified_count == 0:
+        raise ConflictError(
+            "This draft changed since you loaded it. Reload it and reapply "
+            "your edit -- nothing has been saved."
+        )
+    return await col.find_one({"_id": agreement_id})
+
+
+async def delete_draft(*, agreement_id: str, creator_id: str) -> None:
+    """Remove an unsent draft. Frees a slot against the D7 cap.
+
+    Only a DRAFT is removable. A sent agreement is somebody else's record too,
+    and deleting one would erase an instrument a counterparty has seen.
+    """
+    from app.db.collections import get_agreements_col
+
+    col = get_agreements_col()
+    current = await col.find_one({"_id": agreement_id})
+    if not current:
+        raise NotFoundError("Agreement")
+    if current.get("created_by") != creator_id:
+        raise ForbiddenError("This draft is not yours")
+    if current.get("status") != AgreementStatus.DRAFT.value:
+        raise AppValidationError(
+            "This agreement has been sent and can no longer be deleted."
+        )
+    await col.delete_one({"_id": agreement_id,
+                          "status": AgreementStatus.DRAFT.value})
+
+
+async def sign_and_send_draft(*, agreement_id: str, creator_id: str,
+                              expected_version: int, expected_body_sha256: str,
+                              method: str, signature_data: str,
+                              consent: bool, idempotency_key: str,
+                              ip_address: str | None = None) -> dict:
+    """ONE call, ONE transaction: freeze, sign, transition, audit, park, receipt.
+
+    THE HASH CHECK IS THE POINT. The caller states the version and the body
+    digest they reviewed. If a concurrent edit landed in between, both differ
+    and the send is refused -- otherwise a lawyer could sign wording they never
+    read, and the digest stored as evidence would describe text they never saw.
+
+    AUTHORISATION IS RE-CHECKED HERE, not inherited from `create_draft`. Drafting
+    and sending are separated in time: verification can be revoked
+    (`user_service.py:312`) and a case can be reassigned. A relationship that
+    ended after drafting must block sending.
+    """
+    from app.db.collections import get_agreements_col
+    from app.services import document_transitions as tx
+
+    tx.validate_idempotency_key(idempotency_key)
+    if not consent:
+        raise AppValidationError(
+            "You must confirm you intend to sign and send this agreement."
+        )
+
+    # D5 at SEND, the second of the two checkpoints.
+    await _require_verified_lawyer(creator_id)
+
+    col = get_agreements_col()
+    current = await col.find_one({"_id": agreement_id})
+    if not current:
+        raise NotFoundError("Agreement")
+    if current.get("created_by") != creator_id:
+        raise ForbiddenError("This draft is not yours")
+
+    counterparty = next(
+        (p["user_id"] for p in current.get("parties", [])
+         if p["user_id"] != creator_id), None)
+
+    # D2 AT SEND. The relationship that authorised drafting may have ended.
+    await _require_case_relationship(
+        current.get("case_id"), lawyer_id=creator_id, client_id=counterparty)
+
+    if current.get("status") != AgreementStatus.DRAFT.value:
+        # Idempotent replay: the same key against an already-sent agreement is
+        # the caller retrying a request that already succeeded.
+        receipts = current.get("idempotency_receipts") or {}
+        token = tx._receipt_key(idempotency_key)
+        if token in receipts:
+            return await _replay_or_conflict(
+                current, token, receipts, agreement_id=agreement_id,
+                expected_version=expected_version,
+                expected_body_sha256=expected_body_sha256,
+                counterparty=counterparty, signature_data=signature_data,
+                consent=consent)
+        raise AppValidationError(
+            "This agreement has already been sent."
+        )
+
+    digest = body_digest(current.get("body_html", ""))
+    if digest != expected_body_sha256:
+        raise ConflictError(
+            "This draft changed since you reviewed it. Reload it and read the "
+            "current wording before signing -- nothing has been sent."
+        )
+
+    fingerprint = _draft_fingerprint(
+        draft_id=agreement_id, expected_version=expected_version,
+        body_sha256=digest,
+        parties=[p["user_id"] for p in current.get("parties", [])],
+        case_id=current.get("case_id"), signature_data=signature_data,
+        consent=consent)
+    token = tx._receipt_key(idempotency_key)
+
+    sig_method = SignatureMethod(method)
+    eto = ETO_CLASSIFICATION[sig_method]
+
+    async def _txn(session):
+        now = datetime.now(timezone.utc)
+        fresh = await col.find_one({"_id": agreement_id}, session=session)
+        receipts = (fresh or {}).get("idempotency_receipts") or {}
+        if token in receipts:
+            return await _replay_or_conflict(
+                fresh, token, receipts, agreement_id=agreement_id,
+                expected_version=expected_version,
+                expected_body_sha256=expected_body_sha256,
+                counterparty=counterparty, signature_data=signature_data,
+                consent=consent, session=session)
+
+        # ONE conditional write carrying the whole precondition: still a draft,
+        # still the version the signer reviewed.
+        claimed = await col.update_one(
+            {"_id": agreement_id, "status": AgreementStatus.DRAFT.value,
+             "version": expected_version,
+             "parties": {"$elemMatch": {"user_id": creator_id,
+                                        "signed": {"$ne": True}}}},
+            {"$set": {
+                "status": AgreementStatus.PENDING.value,
+                # The body is FROZEN here, and this is the first moment a
+                # digest is stored: what was signed, fixed at send.
+                "body_sha256": digest,
+                "sent_at": now,
+                "parties.$.signed": True,
+                "parties.$.signed_at": now,
+                "parties.$.signature_method": method,
+                "parties.$.signature_data": signature_data,
+                "parties.$.eto_classification": eto,
+                "parties.$.consent_at": now,
+                "eto_classification": eto,
+                "updated_at": now,
+                f"idempotency_receipts.{token}": {
+                    "fingerprint": fingerprint, "at": now,
+                },
+            },
+             "$inc": {"version": 1},
+             "$push": {"audit_log": {
+                 "action": "sent",
+                 "actor_id": creator_id,
+                 "timestamp": now,
+                 "ip_address": ip_address,
+                 "note": eto,
+                 "consent": True,
+                 "body_sha256": digest,
+             }}},
+            session=session,
+        )
+        if claimed.modified_count == 0:
+            raise _TransitionConflict(
+                "This draft changed while you were sending it. Reload it and "
+                "check its current state -- nothing has been sent."
+            )
+
+        sent = await col.find_one({"_id": agreement_id}, session=session)
+        await _park_notification(
+            session, agreement_id, "sent", counterparty,
+            NotificationType.AGREEMENT_CREATED,
+            "Agreement awaiting your signature",
+            f"{_creator_name(sent, creator_id)} sent you "
+            f"\"{sent.get('title', 'an agreement')}\" to sign.",
+        )
+        return sent
+
+    try:
+        result = await _run_in_transaction(_txn)
+    except _TransitionConflict as conflict:
+        raise ConflictError(conflict.message) from conflict
+
+    await _drain_soon()
+    return result
+
+
+def _creator_name(agreement: dict, creator_id: str) -> str:
+    return next((p.get("full_name") for p in agreement.get("parties", [])
+                 if p["user_id"] == creator_id), "A lawyer")
+
+
+async def _replay_or_conflict(agreement, token, receipts, *, agreement_id,
+                              expected_version, expected_body_sha256,
+                              counterparty, signature_data, consent,
+                              session=None):
+    """Same key + same payload replays; same key + different payload is 409.
+
+    Returning the stored result for a matching retry is what makes a dropped
+    response safe. Returning it for a DIFFERENT payload would be worse than an
+    error: the caller would believe their new request succeeded.
+    """
+    stored = receipts.get(token) or {}
+    replay = _draft_fingerprint(
+        draft_id=agreement_id, expected_version=expected_version,
+        body_sha256=expected_body_sha256,
+        parties=[p["user_id"] for p in agreement.get("parties", [])],
+        case_id=agreement.get("case_id"), signature_data=signature_data,
+        consent=consent)
+    if stored.get("fingerprint") != replay:
+        raise ConflictError(
+            "This Idempotency-Key was already used for a different request. "
+            "Use a new key -- nothing has been sent."
+        )
+    return agreement
 
 
 async def create_lawyer_agreement(

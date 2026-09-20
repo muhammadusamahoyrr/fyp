@@ -687,11 +687,28 @@ mentions it.
 
 | # | Decision | Why it is open | Blocks |
 |---|---|---|---|
-| **D6** | Rate-limit ceiling for sign-and-send | `10/hour` per authenticated user is a starting point, not a measured figure. Too low blocks a busy firm; too high leaves the abuse boundary wide. | 3C |
-| **D7** | Active-draft cap per lawyer | Drafts are cheap but unbounded. A cap needs a number somebody owns. | 3C |
 | **D8** | Trusted-proxy / `X-Forwarded-For` policy | Until configured, a recorded IP may be the proxy's. **No IP may appear on an evidence document before this is settled** — the document would assert a false fact. Deployment + product, not engineering alone. | 3E |
 | **D4** | Who owns securing reviewing counsel, by when? | Still unowned. Blocks templates, ETO wording and certificate conclusions — three backlogs, one conversation. | Phase 4 |
 
-Three previously-open items are now **closed**: D1 (park the builder), D2 (the
-counterparty rule, stated exactly in §3) and **D5 (KYC required to author or
-send — checked at both points)**.
+Five previously-open items are now **closed**: D1 (park the builder), D2 (the
+counterparty rule, stated exactly in §3), **D5** (KYC required to author or
+send, checked at both points), **D6** and **D7** (below).
+
+### D6 — Sign-and-send rate limit. **DECIDED: `10/hour` per authenticated lawyer**
+
+Applied to SEND ONLY, which is the abuse boundary: sending is what reaches
+another person. Draft `PATCH` is autosave and must never be throttled —
+throttling it loses the lawyer's work for no safety gain.
+
+A **default, not a measured figure.** Ten sends an hour is comfortably above
+normal practice and far below what a spam run needs. Revisit against real
+traffic rather than treating the number as settled.
+
+### D7 — Active-draft cap. **DECIDED: 20 per lawyer, as a named constant**
+
+Drafts are cheap but unbounded, and an unbounded per-user collection is a
+storage vector even without malice. Twenty is generous for real work.
+
+**A named constant, not a literal**, so the number has one home and a later
+change is one edit rather than a search. Counts only `draft` rows; deleting a
+draft frees a slot, so the cap bounds live work rather than lifetime output.
