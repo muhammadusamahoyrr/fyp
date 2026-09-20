@@ -211,21 +211,46 @@ async def two_users(mongo_transactional):
 
     from app.db.collections import get_users_col
 
+    from datetime import datetime, timezone
+
+    from app.db.collections import get_cases_col
+
     users = [
         {"_id": "AG-ALICE", "full_name": "Alice", "role": "client", "email": "a@x.test"},
         {"_id": "AG-BOB", "full_name": "Bob", "role": "client", "email": "b@x.test"},
     ]
     await get_users_col().insert_many(users)
+    # The case both parties are on. Gate 3B authorises the counterparty THROUGH
+    # the case, so without one every create here is refused.
+    now = datetime.now(timezone.utc)
+    await get_cases_col().insert_one({
+        "_id": AG_CASE, "client_id": "AG-ALICE", "lawyer_id": "AG-BOB",
+        "title": "Shared matter", "case_number": "AG-C-1",
+        "status": "in_progress", "milestones": [],
+        "created_at": now, "updated_at": now,
+    })
     yield ["AG-ALICE", "AG-BOB"]
     await get_users_col().delete_many({"_id": {"$in": ["AG-ALICE", "AG-BOB"]}})
+    await get_cases_col().delete_one({"_id": AG_CASE})
+
+
+AG_CASE = "AG-CASE"
 
 
 async def _make(parties, creator="AG-ALICE", body="<p>Original terms</p>"):
+    """Build a test agreement ON THE SHARED CASE.
+
+    Gate 3B made the case link the authorization: an agreement with no case and
+    no engagement has no relationship behind it, so it is refused. These tests
+    are about digests, signing and declining mechanics rather than about who may
+    create what, so the fixture supplies the case that makes them legal.
+    """
     from app.services import agreement_service
 
     return await agreement_service.create_user_agreement(
         title="Test Agreement", body_html=body,
-        parties=[{"user_id": p} for p in parties], creator_id=creator)
+        parties=[{"user_id": p} for p in parties], creator_id=creator,
+        case_id=AG_CASE)
 
 
 @pytest.mark.integration

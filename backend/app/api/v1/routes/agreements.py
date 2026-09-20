@@ -30,6 +30,10 @@ async def create_agreement(
         body_html=body.body_html,
         parties=[p.model_dump() for p in body.party_ids],
         creator_id=current_user["_id"],
+        # PASSED THROUGH, which it was not before: the service has always
+        # accepted `case_id` and this route never sent it, so every
+        # wizard-created agreement was silently unlinked from its case.
+        case_id=body.case_id,
     )
 
 

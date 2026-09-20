@@ -241,6 +241,147 @@ _DIY_PARKED = (
 )
 
 
+# ── Authorization primitives (gate 3B) ───────────────────────────────────────
+#
+# THE DEFECT THESE CLOSE. `_create_agreement` validated only that every party id
+# resolved to a registered user. Any authenticated user could therefore name any
+# other user and push an AGREEMENT_CREATED notification at them, with no shared
+# case, no engagement and no rate limit. It was reachable only because the DIY
+# builder is parked; shipping lawyer authoring without this would have opened it.
+#
+# The rule is D2 in AGREEMENTS_PRODUCT_PLAN.md §3, stated exactly, plus D5 (KYC).
+
+_KYC_REFUSAL = (
+    "Your lawyer profile is not verified, so you cannot create or send "
+    "agreements yet. Verification is handled by the admin team."
+)
+
+
+async def _require_verified_lawyer(user_id: str) -> dict:
+    """D5: a lawyer must be KYC-verified to author OR send an agreement.
+
+    Checked at BOTH points because they are separated in time: a draft authored
+    while verified may be sent after an admin revokes that verification
+    (`user_service.py:312` clears `kyc_verified`). Create-only would let a
+    de-verified lawyer send a binding instrument; send-only would let them build
+    drafts they can never use.
+
+    Consistent with the five other lawyer-acting surfaces that already enforce
+    it -- engagement acceptance, appointment booking, document review, document
+    transitions and the lawyer directory.
+    """
+    user = await user_repo.find_by_id(user_id)
+    if not user or user.get("role") != "lawyer":
+        raise ForbiddenError("Only a lawyer can author this kind of agreement")
+    if not user.get("is_active", True):
+        raise ForbiddenError("This lawyer account is no longer active")
+    if not (user.get("lawyer_profile") or {}).get("kyc_verified"):
+        raise ForbiddenError(_KYC_REFUSAL)
+    return user
+
+
+async def _require_case_relationship(case_id: str, lawyer_id: str,
+                                     client_id: str) -> dict:
+    """D2 rules 3-6: the case is the ONLY thing that makes a client reachable.
+
+    A historical executed engagement is deliberately NOT accepted as permission.
+    It would let a lawyer contact somebody years after a finished matter, which
+    is cold outreach with extra steps. `exists_executed_relationship` stays what
+    it is -- a REVIEW gate -- and is not an authoring credential.
+
+    Distinct messages per failure, because each needs a different action from
+    the lawyer and one vague error sends them chasing the wrong thing.
+    """
+    from app.db.collections import get_cases_col
+
+    if not case_id:
+        raise AppValidationError(
+            "A case is required. Agreements you author are always attached to "
+            "one of your cases."
+        )
+    case = await get_cases_col().find_one({"_id": case_id})
+    if not case:
+        raise NotFoundError("Case")
+    if case.get("lawyer_id") != lawyer_id:
+        raise ForbiddenError(
+            "You are not the lawyer assigned to this case, so you cannot "
+            "create an agreement on it."
+        )
+    if case.get("client_id") != client_id:
+        raise ForbiddenError(
+            "That person is not the client on this case. An agreement can only "
+            "be sent to the client of the case it is attached to."
+        )
+    return case
+
+
+async def _authorise_case_link(case_id: str, creator_id: str,
+                               party_ids: list[str]) -> dict:
+    """The creator must be a party to the case, and so must the counterparty.
+
+    Used by every producer that carries a `case_id`. Two separate checks with
+    two separate messages, because "you are not on this case" and "they are not
+    on this case" need different corrections from the caller.
+    """
+    from app.db.collections import get_cases_col
+
+    case = await get_cases_col().find_one({"_id": case_id})
+    if not case:
+        raise NotFoundError("Case")
+
+    on_case = {case.get("client_id"), case.get("lawyer_id")} - {None}
+    if creator_id not in on_case:
+        raise ForbiddenError(
+            "You are not a party to this case, so you cannot attach an "
+            "agreement to it."
+        )
+    outsiders = [p for p in party_ids if p not in on_case]
+    if outsiders:
+        raise ForbiddenError(
+            "Every party must be on the case this agreement is attached to."
+        )
+    return case
+
+
+async def create_lawyer_agreement(
+    title: str,
+    body_html: str,
+    client_id: str,
+    creator_id: str,
+    case_id: str,
+) -> dict:
+    """PRODUCT C: a lawyer authoring an agreement for their client on a case.
+
+    DELIBERATELY NOT GATED BY `agreements_diy_builder_enabled`. That flag parks
+    the CLIENT wizard (Product B), whose templates are withdrawn. This is a
+    different product with a different author, a different counterparty rule and
+    the lawyer's own wording -- reading the same flag would tie them together
+    again, which is exactly what parking was meant to prevent.
+
+    Exactly two parties (D2 rule 2), the case is mandatory and validated
+    (rules 3-6), and the author must be a verified lawyer (D5).
+
+    NOT REACHABLE FROM THE ROUTE YET. Gate 3B builds the primitives; the UI and
+    its endpoint are 3D. This exists now so the rules are testable before
+    anything external can call them.
+    """
+    await _require_verified_lawyer(creator_id)
+    await _require_case_relationship(case_id, lawyer_id=creator_id,
+                                     client_id=client_id)
+    if client_id == creator_id:
+        raise AppValidationError(
+            "An agreement needs two different parties."
+        )
+    return await _create_agreement(
+        title=title,
+        body_html=body_html,
+        parties=[{"user_id": creator_id}, {"user_id": client_id}],
+        creator_id=creator_id,
+        case_id=case_id,
+        engagement_id=None,   # D2 rule 10: never from an external caller
+    )
+
+
 async def create_user_agreement(
     title: str,
     body_html: str,
@@ -337,6 +478,30 @@ async def _create_agreement(
         raise AppValidationError(
             "An agreement needs at least two parties — select a counterparty to sign with you"
         )
+
+    # D2 RULE 2: exactly two parties, not merely at least two. A three-party
+    # agreement has no defined case relationship -- rules 5 and 6 name one
+    # lawyer and one client -- so it cannot be authorised, only guessed at.
+    if len(party_ids) > 2:
+        raise AppValidationError(
+            "An agreement has exactly two parties: you and one counterparty."
+        )
+
+    # THE RELATIONSHIP RULE (D2). Before this, any registered user id was
+    # accepted, so anyone could push a signature request at anyone. `case_id` is
+    # what makes a counterparty reachable, and it is authorised against the
+    # CREATOR -- a case they are not a party to grants nothing.
+    if case_id:
+        await _authorise_case_link(case_id, creator_id, party_ids)
+    elif engagement_id is None:
+        # No case and no engagement: no relationship of any kind. The only
+        # producer that may omit a case is the internal engagement-letter one,
+        # which supplies `engagement_id` instead.
+        raise ForbiddenError(
+            "An agreement must be attached to a case you are a party to. "
+            "Creating one for an unrelated user is not permitted."
+        )
+
     # Creating an agreement IS sending it for signature here: every party is
     # notified to sign immediately below. So withdrawn template text is refused
     # at the door rather than allowed to sit in a pending state.

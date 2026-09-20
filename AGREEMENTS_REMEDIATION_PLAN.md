@@ -839,7 +839,36 @@ letter was "declined": nobody refused it. *"The engagement was ended by the
 
 **Verdict: existing statuses suffice.** No new status for this arrow.
 
-### 3.G1.2 Lawyer agreement authoring
+### 3.G1.2 Lawyer agreement authoring — PRIMITIVES IMPLEMENTED (gate 3B)
+
+**2026-09-20.** The authorization primitives are built; the ROUTE and UI are
+still 3D, so nothing external can reach lawyer authoring yet.
+
+- `create_lawyer_agreement` — Product C's producer. Deliberately does **not**
+  read `agreements_diy_builder_enabled`: reading Product B's flag would tie the
+  two together again, which is what parking existed to prevent. Test:
+  `test_lawyer_authoring_is_not_gated_by_the_parked_builder_flag`.
+- `_require_verified_lawyer` — D5, callable at create **and** send.
+- `_require_case_relationship` — D2 rules 3-6, distinct message per failure.
+- `_authorise_case_link` — used by every producer carrying a `case_id`.
+- `_create_agreement` now refuses an agreement with **no case and no
+  engagement**, and refuses more than two parties.
+- `case_id` plumbed schema → route → service → persistence;
+  `AgreementCreate` gains `extra="forbid"` so an unknown field is a 422 rather
+  than silently dropped.
+
+**EVERY GUARD WAS PROVED ABLE TO FAIL** — disabled one at a time, its test
+required to go red, then restored and required to go green. That exercise found
+a real gap: `_authorise_case_link`'s `outsiders` check had NO test, because the
+case-relationship test reaches it through `create_lawyer_agreement`, which
+refuses earlier. A guard whose test cannot go red is decoration;
+`test_a_party_who_is_not_on_the_case_is_refused` now drives the shared
+implementation directly.
+
+**Not in this gate, by instruction:** rate limits (D6), draft cap (D7),
+trusted-proxy/IP (D8).
+
+#### Original analysis, for the record
 
 **Backend capability already exists; the UI does not.**
 `POST /agreements` (`agreements.py:15-18`) depends only on `get_current_user` —

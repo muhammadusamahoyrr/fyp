@@ -21,9 +21,29 @@ _MAX_SIGNATURE = 200_000   # generous for a base64 PNG of a drawn signature
 
 
 class AgreementCreate(BaseModel):
+    """A request to create an agreement.
+
+    ``extra="forbid"`` DELIBERATELY. The default is ``ignore``, and that was the
+    defect: this model did not declare ``case_id``, the service accepted one,
+    and the route never passed it -- so a client that sent a case id had it
+    SILENTLY DROPPED and got back an agreement linked to nothing, with no error
+    to tell them. Forbidding unknown fields turns that class of mistake into a
+    422 the caller can act on, rather than data quietly going missing.
+    """
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(..., min_length=1, max_length=_MAX_TITLE)
     body_html: str = Field(..., min_length=1, max_length=_MAX_BODY)
     party_ids: list[PartyInput]
+    # The case this agreement belongs to. Optional at the schema level because
+    # the internal engagement-letter producer supplies it separately, but the
+    # SERVICE refuses a case-less external agreement -- an agreement with no
+    # case and no engagement has no relationship behind it (D2).
+    #
+    # `engagement_id` is deliberately ABSENT and must stay absent: it is set
+    # only by `create_pending_engagement_letter`, and Gate 2's backlink
+    # validation assumes no external caller can supply one (D2 rule 10).
+    case_id: str | None = None
 
 
 class SignatureSubmit(BaseModel):

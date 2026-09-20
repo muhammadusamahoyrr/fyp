@@ -44,6 +44,8 @@ def _diy_builder_enabled(monkeypatch):
     from app.core.config import settings
     monkeypatch.setattr(settings, "agreements_diy_builder_enabled", True)
 
+UT_CASE = "UT-CASE"
+
 SAMPLE = f"""{UNREVIEWED_TEMPLATE_MARKER}
 
 Employment Contract
@@ -118,12 +120,27 @@ async def two_users(mongo_transactional):
 
     from app.db.collections import get_users_col
 
+    from datetime import datetime, timezone
+
+    from app.db.collections import get_cases_col
+
     await get_users_col().insert_many([
         {"_id": "UT-ALICE", "full_name": "Alice", "role": "client", "email": "a@x.test"},
         {"_id": "UT-BOB", "full_name": "Bob", "role": "client", "email": "b@x.test"},
     ])
+    # Gate 3B authorises a counterparty through a shared case; without one the
+    # create is refused before the withdrawn-template guard is ever reached,
+    # which would make these tests pass for the wrong reason.
+    now = datetime.now(timezone.utc)
+    await get_cases_col().insert_one({
+        "_id": UT_CASE, "client_id": "UT-ALICE", "lawyer_id": "UT-BOB",
+        "title": "Shared matter", "case_number": "UT-C-1",
+        "status": "in_progress", "milestones": [],
+        "created_at": now, "updated_at": now,
+    })
     yield ["UT-ALICE", "UT-BOB"]
     await get_users_col().delete_many({"_id": {"$in": ["UT-ALICE", "UT-BOB"]}})
+    await get_cases_col().delete_one({"_id": UT_CASE})
 
 
 @pytest.mark.integration
@@ -134,7 +151,8 @@ async def test_an_agreement_cannot_be_created_from_withdrawn_boilerplate(two_use
     with pytest.raises(AppValidationError) as exc:
         await agreement_service.create_user_agreement(
             title="Employment Contract", body_html=SAMPLE,
-            parties=[{"user_id": u} for u in two_users], creator_id="UT-ALICE")
+            parties=[{"user_id": u} for u in two_users], creator_id="UT-ALICE",
+            case_id=UT_CASE)
 
     assert "unreviewed" in str(exc.value).lower()
 
@@ -189,7 +207,8 @@ async def test_replacing_the_notice_makes_the_agreement_usable_again(two_users):
     doc = await agreement_service.create_user_agreement(
         title="Employment Contract",
         body_html="This Agreement is made between Alice and Bob on 1 January 2026.",
-        parties=[{"user_id": u} for u in two_users], creator_id="UT-ALICE")
+        parties=[{"user_id": u} for u in two_users], creator_id="UT-ALICE",
+        case_id=UT_CASE)
     try:
         for uid in two_users:
             result = await agreement_service.submit_signature(

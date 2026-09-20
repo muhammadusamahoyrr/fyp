@@ -524,3 +524,67 @@ async def test_the_drainer_actually_delivers_the_parked_event(world):
     assert result["delivered"] == 0
     assert await get_notifications_col().count_documents(
         {"user_id": LAWYER, "payload.engagement_id": w["engagement_id"]}) == 1
+
+
+# -- the property `ENGAGEMENT_RETAINED_STATUSES` exists to protect -----------
+
+@pytest.mark.integration
+async def test_a_terminated_engagement_with_an_executed_letter_is_still_billable(world):
+    """END TO END: really terminate, then really try to bill.
+
+    `payment_service._require_executed_engagement_letter` deliberately accepts
+    ENDED engagements -- its comment at lines 100-105 explains why: the letter's
+    own terms say fees for work already performed remain payable, so scoping the
+    gate to `accepted` would make terminating a way to escape a bill for work
+    that was actually done, and would equally strand a lawyer who finished a
+    matter before invoicing.
+
+    3A gave termination a new power -- it now writes to the letter -- so that
+    property needs re-proving against the REAL termination path rather than a
+    hand-built `terminated` row. The executed letter must survive untouched and
+    the gate must still pass.
+    """
+    from app.services import engagement_service, payment_service
+
+    w = await _accepted(letter=AgreementStatus.EXECUTED.value)
+
+    # Before: billable.
+    await payment_service._require_executed_engagement_letter(w["case_id"], LAWYER)
+
+    await engagement_service.terminate_engagement(
+        w["engagement_id"], CLIENT, "Work is complete, ending the engagement.")
+
+    eng, case, letter = await _rows(w)
+    assert eng["status"] == EngagementStatus.TERMINATED.value
+    assert letter["status"] == AgreementStatus.EXECUTED.value, "3A touched an executed letter"
+    assert "cancellation_source" not in letter
+    assert case["lawyer_id"] is None, "the case was not released"
+
+    # After: STILL billable. This is the assertion that matters.
+    await payment_service._require_executed_engagement_letter(w["case_id"], LAWYER)
+
+
+@pytest.mark.integration
+async def test_a_terminated_engagement_whose_letter_3a_cancelled_is_not_billable(world):
+    """The other half, so the rule above is not mistaken for "always billable".
+
+    A PENDING letter cancelled by 3A means nobody ever agreed the fee in
+    writing, so the gate must refuse -- and must say why in the cancelled-letter
+    wording, not the awaiting-signatures wording.
+    """
+    from app.core.exceptions import AppValidationError
+    from app.services import engagement_service, payment_service
+
+    w = await _accepted()  # pending letter
+    await engagement_service.terminate_engagement(
+        w["engagement_id"], CLIENT, "Ending before signature.")
+
+    _, _, letter = await _rows(w)
+    assert letter["status"] == AgreementStatus.CANCELLED.value
+
+    with pytest.raises(AppValidationError) as exc:
+        await payment_service._require_executed_engagement_letter(
+            w["case_id"], LAWYER)
+    message = str(exc.value).lower()
+    assert "was declined" in message or "not executed" in message
+    assert "terminate" not in message
