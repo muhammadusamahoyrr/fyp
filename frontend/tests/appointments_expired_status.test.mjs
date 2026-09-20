@@ -64,8 +64,31 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const api = await import("./support/api-stub.mjs");
+const { pktToday } = await import("../src/lib/bookingTime.js");
 
 const { createElement: h } = React;
+
+/* An instant on TODAY'S PAKISTAN CALENDAR DAY, at a fixed PKT wall-clock time.
+ *
+ * These fixtures used to be `new Date()` plus two or three hours, which is a
+ * different thing entirely: after 22:00 local, "now + 2h" is TOMORROW, so the
+ * appointment stopped being today and the assertion that it counts as Today
+ * failed. The file broke for two hours every night, on every diff, for a
+ * reason that had nothing to do with what it tests.
+ *
+ * The tests are about STATUS inclusion and exclusion - does an expired request
+ * count towards the day, does a confirmed one - and not about an appointment
+ * being a couple of hours away. So the fixture is anchored to the day the page
+ * itself means by "today": `pktToday()` is the app's own helper, so a machine
+ * in any timezone builds the same PKT day the component compares against.
+ *
+ * `isPktToday` is a day comparison and does not exclude times already past, so
+ * a fixed morning hour is stable at every hour of the run, 22:00-00:00
+ * included.
+ */
+function pktInstant(hhmm) {
+    return new Date(`${pktToday()}T${hhmm}:00+05:00`).toISOString();
+}
 
 /* An appointment as the API returns one. `status` is the BACKEND value; what
  * each page makes of it is the thing under test. */
@@ -211,14 +234,11 @@ test("an expired request is not counted as a session on the day", async () => {
     // observable. An earlier version of this test checked that no "Upcoming"
     // badge appeared, which is true whether or not the row is counted — it
     // passed against code that counted it.
-    const at = (hours) => {
-        const d = new Date();
-        d.setHours(d.getHours() + hours, 0, 0, 0);
-        return d.toISOString();
-    };
     const ui = await mountLawyer([
-        appointment({ id: "live", status: "confirmed", scheduled_at: at(2) }),
-        appointment({ id: "gone", status: "expired", scheduled_at: at(3) }),
+        appointment({ id: "live", status: "confirmed",
+                      scheduled_at: pktInstant("10:00") }),
+        appointment({ id: "gone", status: "expired",
+                      scheduled_at: pktInstant("11:00") }),
     ]);
 
     assert.equal(ui.stat("Today"), 1,
@@ -228,10 +248,8 @@ test("an expired request is not counted as a session on the day", async () => {
 
 test("a confirmed appointment is still counted on the day", async () => {
     // The control: excluding everything would satisfy the test above.
-    const soon = new Date();
-    soon.setHours(soon.getHours() + 2, 0, 0, 0);
     const ui = await mountLawyer([appointment({
-        status: "confirmed", scheduled_at: soon.toISOString(),
+        status: "confirmed", scheduled_at: pktInstant("10:00"),
     })]);
 
     assert.equal(ui.stat("Today"), 1);
