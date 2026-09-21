@@ -687,7 +687,7 @@ mentions it.
 
 | # | Decision | Why it is open | Blocks |
 |---|---|---|---|
-| **D8** | Trusted-proxy / `X-Forwarded-For` policy | Until configured, a recorded IP may be the proxy's. **No IP may appear on an evidence document before this is settled** — the document would assert a false fact. Deployment + product, not engineering alone. | 3E |
+| **D8** ✅ | Trusted-proxy / `X-Forwarded-For` policy | **CLOSED 2026-09-21.** `X-Forwarded-For` is trusted only when the immediate peer is a configured proxy address. If the client IP cannot be verified, it is **omitted** from the evidence document rather than printed with a caveat — an unverifiable IP asserts a false fact, and the certificate already states what it does not record. | 3E |
 | **D4** | Who owns securing reviewing counsel, by when? | Still unowned. Blocks templates, ETO wording and certificate conclusions — three backlogs, one conversation. | Phase 4 |
 
 Five previously-open items are now **closed**: D1 (park the builder), D2 (the

@@ -57,8 +57,13 @@ export function AgreementsPage() {
     const [composing, setComposing] = useState(null);
 
     const reload = useCallback(() => {
-        listAgreements().then(({ data }) => {
-            if (Array.isArray(data)) setItems(data.map(a => mapAgreement(a, user?._id)));
+        // 3F: the response is a page, not a bare array. Reading `data.items`
+        // rather than `data` -- an `Array.isArray(data)` check would now be
+        // false for every successful response and the screen would render
+        // "no agreements" to someone who has forty.
+        listAgreements({ page_size: 50 }).then(({ data }) => {
+            const rows = data?.items;
+            if (Array.isArray(rows)) setItems(rows.map(a => mapAgreement(a, user?._id)));
             setLoading(false);
         }).catch(() => setLoading(false));
     }, [user?._id]);

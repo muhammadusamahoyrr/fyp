@@ -1092,8 +1092,13 @@ gate and should go first if only one ships.
 3. **Case-linked generic agreements** — allowed, as recommended?
 4. **Rate limit** on create: `10/hour` per creator, matching the earlier §3.8
    proposal?
-5. **Trusted-proxy policy** — needed before any IP reaches a PDF. Product and
-   deployment decision, not engineering alone.
+5. ~~**Trusted-proxy policy** — needed before any IP reaches a PDF.~~
+   **CLOSED 2026-09-21 as D8**: `X-Forwarded-For` is trusted ONLY when the
+   immediate peer is a configured proxy address. If the client IP cannot be
+   verified under that rule, it is OMITTED from the evidence document rather
+   than printed with a caveat. An unverifiable IP on an evidence document is a
+   false assertion of fact; saying nothing is the only honest alternative, and
+   the document already states what it does not record.
 
 ### 3.G1.9 Risks and migration implications
 
@@ -1315,7 +1320,9 @@ breaking one, it needs a plan amendment first, not a workaround.
 11. **Termination is never blocked** by a missing or superseded letter link.
 12. **No two-call create-then-sign.** Sign-and-send is one atomic call.
 13. **Raw signature data never appears** in ordinary JSON responses.
-14. **No IP on an evidence document** until D8 is settled.
+14. **No UNVERIFIED IP on an evidence document** (D8, closed 2026-09-21). An
+    IP appears only when the immediate peer is a configured trusted proxy, or
+    when there is no proxy in front at all. Otherwise the field is omitted.
 15. **No legal or enforceability claim** without counsel-approved wording.
 16. **Phase 3 must not unpark Product B.** Lawyer authoring uses its own
     producer and never reads `agreements_diy_builder_enabled`.

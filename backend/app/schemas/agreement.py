@@ -60,10 +60,16 @@ class AgreementDecline(BaseModel):
 # ── Response models ───────────────────────────────────────────────────────────
 
 class PartyOut(BaseModel):
-    """One signing party. STRICT (no extra) so ``signature_data`` — the raw
-    base64 signature blob — is dropped: the UI renders only names + signed
-    status, never the signature image, and it shouldn't reach a counterparty.
-    (The list endpoint already strips it; this brings get/sign in line.)"""
+    """One signing party. ``signature_data`` — the raw base64 signature blob or
+    typed legal name — is not declared here, so it is not serialised: the UI
+    renders names and signed status, never the signature itself, and it must
+    not reach a counterparty.
+
+    Deliberately NOT ``extra="forbid"``. An earlier docstring claimed this was
+    "STRICT (no extra)", which was never true and must not be made true: this
+    model is validated FROM stored rows, and those rows do contain
+    ``signature_data``. Forbidding extras would reject every real party and
+    turn a privacy note into a 500. Omitting the field is what drops it."""
     user_id: str
     full_name: str | None = None
     signed: bool = False
@@ -96,6 +102,35 @@ class AgreementOut(BaseModel):
     # never recover. Optimistic concurrency only works if the server states
     # what the caller is holding.
     version: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# ── Gate 3F: the list is not the document ────────────────────────────────────
+
+class AgreementListItem(BaseModel):
+    """A row in a list. NO `body_html`.
+
+    The list used to carry every agreement's full text. A lawyer with forty
+    agreements downloaded forty contracts to render forty one-line rows, and
+    the client's screen did the same -- and nothing on either screen displayed
+    the body. `body_sha256` is not exposed either: the digest is evidence about
+    a specific document, and it belongs with that document.
+
+    `signature_data` never appears here. It is the signature itself -- a typed
+    legal name or a drawn image -- and a list of agreements is not a place to
+    hand every party's signature to every other party.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(alias="_id")
+    title: str | None = None
+    status: str | None = None
+    case_id: str | None = None
+    engagement_id: str | None = None
+    created_by: str | None = None
+    version: int | None = None
+    parties: list[PartyOut] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

@@ -820,11 +820,29 @@ async def _create_agreement(
 ) -> dict:
     """Shared implementation. Call one of the two named entry points instead."""
     # Resolve parties against real users — names come from the DB, not the caller
-    party_ids: list[str] = []
-    for p in parties:
-        uid = p["user_id"] if isinstance(p, dict) else p
-        if uid not in party_ids:
-            party_ids.append(uid)
+    #
+    # A REPEATED PARTY IS REFUSED, not quietly collapsed. This used to skip
+    # duplicates silently, which turned the caller's actual mistake into a
+    # different and misleading complaint: naming one person twice reduced the
+    # list to one party and the request came back "an agreement needs at least
+    # two parties", which is not what went wrong. Worse, [creator, X, X] passed
+    # silently as a two-party agreement, so a caller who believed they had
+    # added two counterparties was told nothing.
+    requested: list[str] = [p["user_id"] if isinstance(p, dict) else p
+                            for p in parties]
+    seen: set[str] = set()
+    if any(uid in seen or seen.add(uid) for uid in requested):
+        raise AppValidationError(
+            "The same party is listed more than once. Each party may appear "
+            "only once on an agreement."
+        )
+
+    # LISTING THE CREATOR IS ALLOWED, and must stay allowed:
+    # `create_pending_engagement_letter` passes both the lawyer and the client
+    # explicitly, because it knows exactly who they are. Refusing that would
+    # break every engagement letter. What is refused above is the same id
+    # TWICE, which is unambiguously a mistake.
+    party_ids = list(requested)
     if creator_id not in party_ids:
         party_ids.insert(0, creator_id)
 
@@ -927,20 +945,75 @@ async def _create_agreement(
     return doc
 
 
-async def list_agreements(user_id: str) -> list[dict]:
-    """All agreements the user is a party to (or created), sanitized for lists."""
-    items = await agreement_repo.find_for_user(user_id)
-    out = []
-    for a in items:
-        a = dict(a)
-        a["id"] = a.pop("_id")
-        a.pop("audit_log", None)
-        a["parties"] = [
-            {k: v for k, v in p.items() if k != "signature_data"}
-            for p in a.get("parties", [])
-        ]
-        out.append(a)
-    return out
+#: The largest page the list endpoint will serve. A caller asking for more is
+#: refused rather than quietly given fewer, because a client that believes it
+#: received everything and did not is how a "you have no agreements" screen
+#: gets shown to someone who has forty.
+MAX_PAGE_SIZE = 50
+
+
+def _list_row(a: dict) -> dict:
+    """One agreement, reduced to what a LIST needs.
+
+    Three things are removed, each for its own reason:
+
+    `body_html`   the document itself. A list of forty agreements was forty
+                  full contracts on the wire to render forty one-line rows,
+                  and no list screen displays the body.
+    `audit_log`   records signer IP addresses. A counterparty must not see
+                  another party's IP.
+    `signature_data`  the signature itself -- a typed legal name or a drawn
+                  image. `PartyOut` already omits it, but this path builds
+                  plain dicts, so it is stripped here as well rather than
+                  relying on a schema two layers away.
+    """
+    row = dict(a)
+    row["id"] = row.pop("_id")
+    row.pop("audit_log", None)
+    row.pop("body_html", None)
+    row.pop("body_sha256", None)
+    row["parties"] = [
+        {k: v for k, v in p.items() if k != "signature_data"}
+        for p in row.get("parties", [])
+    ]
+    return row
+
+
+async def list_agreements(user_id: str, page: int = 1,
+                          page_size: int = 20,
+                          status: str | None = None) -> dict:
+    """One page of the agreements this user may see, newest first.
+
+    DRAFTS STAY PRIVATE, including when `status="draft"` is asked for
+    explicitly. The visibility rule lives in `AgreementRepository.visible_to`
+    and the status filter is ANDed with it, so a filter can only ever narrow
+    what the caller could already see -- it is not a second, parallel place
+    where visibility is decided.
+
+    An unknown status is refused rather than silently returning nothing. "No
+    agreements" and "you asked for a state that does not exist" look identical
+    in an empty list, and only one of them is the caller's bug.
+    """
+    if status is not None:
+        valid = {s.value for s in AgreementStatus}
+        if status not in valid:
+            raise AppValidationError(
+                f"Unknown status {status!r}. Valid values are: "
+                + ", ".join(sorted(valid))
+            )
+    if page_size > MAX_PAGE_SIZE:
+        raise AppValidationError(
+            f"page_size may not exceed {MAX_PAGE_SIZE}."
+        )
+
+    result = await agreement_repo.page_for_user(user_id, page, page_size, status)
+    return {
+        "items": [_list_row(a) for a in result.items],
+        "total": result.total,
+        "page": result.page,
+        "page_size": result.page_size,
+        "pages": result.pages,
+    }
 
 
 def _refuse_if_someone_elses_draft(agreement: dict, user_id: str) -> None:

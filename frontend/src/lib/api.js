@@ -1137,8 +1137,18 @@ export async function updateLawyerProfile(updates) {
   });
 }
 
-export async function listAgreements() {
-  return apiFetch('/agreements');
+/* One page of the caller's agreements: {items, total, page, page_size, pages}.
+ *
+ * NO USER ID, deliberately. The server answers for whoever the token says you
+ * are; a user id in the query string would be a request for somebody else's
+ * agreements, and `status=draft` would then be a way to read a lawyer's unsent
+ * wording. Paging and filtering describe the SLICE, never the subject.
+ *
+ * The rows carry no `body_html`. Open an agreement to read it. */
+export async function listAgreements({ page = 1, page_size = 20, status = null } = {}) {
+  const p = new URLSearchParams({ page, page_size });
+  if (status) p.set('status', status);
+  return apiFetch(`/agreements?${p}`);
 }
 
 // ─── Agreement drafts (Gate 3C routes) ───────────────────────────────────────

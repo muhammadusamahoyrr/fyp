@@ -18,8 +18,9 @@ class AgreementRepository(BaseRepository):
     # agreements for this user" would have found it first and reintroduced the
     # bug. Use `find_for_user`, which knows drafts are private.
 
-    async def find_for_user(self, user_id: str) -> list[dict]:
-        """Agreements the user may see, newest first.
+    @staticmethod
+    def visible_to(user_id: str, status: str | None = None) -> dict:
+        """The filter for "agreements this user may see".
 
         A DRAFT IS PRIVATE TO ITS CREATOR. Gate 3C's `create_draft` writes both
         parties into `parties` so the row is complete before it is sent -- which
@@ -30,17 +31,37 @@ class AgreementRepository(BaseRepository):
 
         So drafts match only by `created_by`; everything else keeps the old
         rule. `get_agreement` applies the same distinction for reads by id.
+
+        ONE function, because a visibility rule that is written twice is a
+        visibility rule that will be fixed once. A caller-supplied `status` is
+        ANDed with it and can only ever narrow it -- asking for
+        `status=draft` still returns the caller's own drafts and nobody
+        else's, because the $or below is what decides that, not the filter
+        layered on top.
         """
         from app.core.constants import AgreementStatus
 
-        return await self.find_many(
-            {"$or": [
-                # Sent or finished: visible to every party, as before.
-                {"parties.user_id": user_id,
-                 "status": {"$ne": AgreementStatus.DRAFT.value}},
-                # Drafts: the author only.
-                {"created_by": user_id},
-            ]},
+        visible = {"$or": [
+            # Sent or finished: visible to every party, as before.
+            {"parties.user_id": user_id,
+             "status": {"$ne": AgreementStatus.DRAFT.value}},
+            # Drafts: the author only.
+            {"created_by": user_id},
+        ]}
+        if status:
+            return {"$and": [visible, {"status": status}]}
+        return visible
+
+    async def find_for_user(self, user_id: str) -> list[dict]:
+        """Every agreement the user may see, newest first, unpaginated."""
+        return await self.find_many(self.visible_to(user_id),
+                                    sort=[("created_at", -1)])
+
+    async def page_for_user(self, user_id: str, page: int, page_size: int,
+                            status: str | None = None):
+        """One page of the same set, newest first."""
+        return await self.paginate(
+            self.visible_to(user_id, status), page, page_size,
             sort=[("created_at", -1)],
         )
 

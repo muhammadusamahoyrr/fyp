@@ -537,8 +537,9 @@ async def test_a_draft_is_invisible_to_the_counterparty_in_the_list(world):
     case_id = await _case()
     d = await _draft(case_id)
 
-    mine = await agreement_service.list_agreements(LAWYER)
-    theirs = await agreement_service.list_agreements(CLIENT)
+    # 3F: the list is paginated, so the rows are under "items".
+    mine = (await agreement_service.list_agreements(LAWYER))["items"]
+    theirs = (await agreement_service.list_agreements(CLIENT))["items"]
 
     assert d["_id"] in {a["id"] for a in mine}, "the author lost their own draft"
     assert d["_id"] not in {a["id"] for a in theirs}, "counterparty saw a draft"
@@ -574,7 +575,7 @@ async def test_once_sent_the_counterparty_can_see_and_fetch_it(world):
     d = await _draft(await _case())
     await _send(d)
 
-    theirs = await agreement_service.list_agreements(CLIENT)
+    theirs = (await agreement_service.list_agreements(CLIENT))["items"]
     assert d["_id"] in {a["id"] for a in theirs}
     fetched = await agreement_service.get_agreement(d["_id"], CLIENT)
     assert fetched["status"] == AgreementStatus.PENDING.value
@@ -785,14 +786,29 @@ def test_no_repository_helper_returns_agreements_without_a_draft_filter():
     It returned every agreement naming a user, drafts included, and nothing
     called it -- so the next person wanting "agreements for this user" would
     have found it first. Removed; this stops it coming back.
+
+    3F MOVED THE RULE rather than weakening it: the draft filter now lives in
+    `visible_to`, which both lookups build on. This checks the rule where it
+    now is, AND that every lookup routes through it -- a second lookup that
+    assembled its own filter is how the rule gets fixed in one place and not
+    the other.
     """
     import inspect
 
     from app.repositories.agreement_repo import AgreementRepository
 
     assert not hasattr(AgreementRepository, "find_by_party")
-    src = inspect.getsource(AgreementRepository.find_for_user)
-    assert "DRAFT" in src, "the surviving lookup lost its draft filter"
+
+    rule = inspect.getsource(AgreementRepository.visible_to)
+    assert "DRAFT" in rule, "the shared visibility filter lost its draft rule"
+    assert "created_by" in rule, "drafts must match their author only"
+
+    for name in ("find_for_user", "page_for_user"):
+        src = inspect.getsource(getattr(AgreementRepository, name))
+        assert "visible_to" in src, (
+            f"{name} builds its own filter instead of using visible_to -- "
+            "two copies of a visibility rule is one copy that gets fixed"
+        )
 
 
 @pytest.mark.integration
@@ -803,8 +819,8 @@ async def test_the_author_keeps_full_control_of_their_own_draft(world):
     d = await _draft(await _case())
 
     assert (await agreement_service.get_agreement(d["_id"], LAWYER))["_id"] == d["_id"]
-    assert d["_id"] in {a["id"]
-                        for a in await agreement_service.list_agreements(LAWYER)}
+    assert d["_id"] in {a["id"] for a in
+                        (await agreement_service.list_agreements(LAWYER))["items"]}
     edited = await agreement_service.update_draft(
         agreement_id=d["_id"], creator_id=LAWYER,
         expected_version=1, body_html="Revised wording.")

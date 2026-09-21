@@ -182,8 +182,12 @@ const useMyAgreements = (userId) => {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const reload = useCallback(() => {
-        listAgreements().then(({ data }) => {
-            if (Array.isArray(data)) setItems(data.map(a => mapAgreement(a, userId)));
+        // 3F: the response is a page, not a bare array. See the note in the
+        // lawyer screen -- an `Array.isArray(data)` check silently renders an
+        // empty list for every successful response.
+        listAgreements({ page_size: 50 }).then(({ data }) => {
+            const rows = data?.items;
+            if (Array.isArray(rows)) setItems(rows.map(a => mapAgreement(a, userId)));
             setLoading(false);
         }).catch(() => setLoading(false));
     }, [userId]);

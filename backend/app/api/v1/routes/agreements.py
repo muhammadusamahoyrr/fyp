@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 from app.core.rate_limit import limiter
 from app.dependencies import get_current_user, require_lawyer
 from app.schemas.agreement import (
     AgreementCreate,
+    AgreementListItem,
     DraftCreate,
     DraftSignAndSend,
     DraftUpdate,
@@ -13,7 +14,7 @@ from app.schemas.agreement import (
 )
 from app.services import agreement_service
 
-from app.schemas.common import StatusResponse
+from app.schemas.common import PaginatedResponse, StatusResponse
 
 router = APIRouter(prefix="/agreements", tags=["agreements"])
 
@@ -46,10 +47,22 @@ async def create_agreement(
     )
 
 
-@router.get("", response_model=list[AgreementOut])
-async def list_agreements(current_user: dict = Depends(get_current_user)):
-    """All agreements the current user is a party to or created."""
-    return await agreement_service.list_agreements(current_user["_id"])
+@router.get("", response_model=PaginatedResponse[AgreementListItem])
+async def list_agreements(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=agreement_service.MAX_PAGE_SIZE),
+    status: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """One page of the agreements the current user may see, newest first.
+
+    BREAKING: this returned a bare list and now returns
+    `{items, total, page, page_size, pages}`, and the items carry no
+    `body_html`. A list of forty agreements was forty full contracts on the
+    wire to draw forty one-line rows. Open one to read it.
+    """
+    return await agreement_service.list_agreements(
+        current_user["_id"], page=page, page_size=page_size, status=status)
 
 
 @router.get("/{agreement_id}", response_model=AgreementOut)

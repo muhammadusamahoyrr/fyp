@@ -41,13 +41,26 @@ test("the client's agreement screen offers no Draft filter", () => {
 });
 
 test("the list endpoint is scoped by the server, not by a user id from the browser", () => {
+    // 3F gave this function paging and a status filter, so "takes no argument"
+    // is no longer the right shape of the rule. The rule itself is unchanged:
+    // a parameter may describe the SLICE, never the SUBJECT. A user id here
+    // would be a request for somebody else's agreements, and `status=draft`
+    // layered on top of it would be a way to read a lawyer's unsent wording.
     const decl = API.match(/export async function listAgreements\s*\(([^)]*)\)/);
     assert.ok(decl, "listAgreements moved; this test needs updating");
-    assert.equal(decl[1].trim(), "",
-        "listAgreements must take no argument: a user id in the query string " +
-        "is a request for someone else's drafts waiting to be written");
-    assert.ok(/listAgreements\(\)\s*\{\s*\n?\s*return apiFetch\('\/agreements'\)/.test(API),
-        "listAgreements must call the plain user-scoped /agreements route");
+
+    const params = decl[1];
+    const ALLOWED = ["page", "page_size", "status"];
+    for (const [, name] of params.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*=/g)) {
+        assert.ok(ALLOWED.includes(name),
+            `listAgreements takes ${name}: a list parameter may describe the ` +
+            "slice, never whose agreements come back");
+    }
+    assert.ok(!/user|client_id|lawyer_id|created_by|\bparty/i.test(params),
+        "a caller-supplied identity in the list call is a request for " +
+        "someone else's agreements");
+    assert.match(API, /listAgreements\([^)]*\)\s*\{[\s\S]{0,300}?apiFetch\(`\/agreements\?/,
+        "listAgreements must call the user-scoped /agreements route");
 });
 
 test("neither screen asks for another user's agreements", () => {
@@ -55,8 +68,14 @@ test("neither screen asks for another user's agreements", () => {
         const calls = src.match(/listAgreements\([^)]*\)/g) || [];
         assert.ok(calls.length > 0, `${name} view no longer lists agreements`);
         for (const call of calls) {
-            assert.equal(call, "listAgreements()",
-                `${name} view passes an argument to listAgreements: ${call}`);
+            // Paging arguments are fine; an identity is not. The screens know
+            // who the viewer is (they render "me" differently) and must never
+            // be tempted to pass that to the server as a filter.
+            assert.ok(!/user|_id|client_id|lawyer_id|created_by/i.test(call),
+                `${name} view passes an identity to listAgreements: ${call}`);
+            const args = call.slice("listAgreements(".length, -1).trim();
+            assert.ok(args === "" || /^\{[^}]*\}$/.test(args),
+                `${name} view passes a positional argument: ${call}`);
         }
     }
 });

@@ -136,3 +136,33 @@ test("idempotencyKey returns a fresh string each time it is called", async () =>
     assert.ok(a.length >= 10);
     assert.notEqual(a, b, "two intents must not share a key");
 });
+
+// ── Gate 3F: the list is a page, not a bare array ───────────────────────────
+
+test("listAgreements asks for a page and defaults to a bounded size", async () => {
+    await api.listAgreements();
+    const c = only();
+    assert.match(c.url, /\/agreements\?/);
+    const q = new URL(c.url).searchParams;
+    assert.equal(q.get("page"), "1");
+    assert.ok(Number(q.get("page_size")) > 0);
+    assert.equal(q.get("status"), null, "no status filter unless asked for");
+});
+
+test("a status filter is passed through, and nothing else is", async () => {
+    await api.listAgreements({ page: 3, page_size: 10, status: "pending" });
+    const q = new URL(only().url).searchParams;
+    assert.equal(q.get("page"), "3");
+    assert.equal(q.get("page_size"), "10");
+    assert.equal(q.get("status"), "pending");
+    assert.deepEqual([...q.keys()].sort(), ["page", "page_size", "status"],
+        "a list parameter may describe the slice, never whose rows come back");
+});
+
+test("a null status is omitted rather than sent as the string 'null'", async () => {
+    // URLSearchParams stringifies whatever it is given, so `status=null`
+    // would reach the server as a real filter value and be refused as an
+    // unknown status -- turning "show me everything" into an error.
+    await api.listAgreements({ status: null });
+    assert.equal(new URL(only().url).searchParams.get("status"), null);
+});
