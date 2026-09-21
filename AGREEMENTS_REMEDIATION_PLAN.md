@@ -1710,6 +1710,39 @@ untrusted hop lets a signer write their own IP into the signature record.
 
 ---
 
+## What the frontend tests do and do not cover
+
+**They stub at the API-CLIENT seam, not the network.**
+
+`tests/support/jsx-loader.mjs` replaces `@/lib/api.js` with generated spies
+whenever *component* code imports it, so a mounted test controls what
+`getAgreement` and friends RETURN — the `{data, error, status}` shape
+`apiFetch` produces — and never sees a URL, a method, a header or a status
+code. The components, their state and their rendering are real; the transport
+is not exercised at all.
+
+**What that leaves uncovered**, and where it is covered instead:
+
+| Not visible to a mounted test | Covered by |
+|---|---|
+| route, method, query string | `agreement_draft_api.test.mjs`, which imports the REAL client and stubs `fetch` |
+| `Idempotency-Key` and other headers | same |
+| HTTP status handling inside `apiFetch` (401 refresh, JSON parse) | same |
+| the server's actual response shape | the backend suites |
+
+**The gap this leaves is real and has bitten once.** A mounted test cannot
+tell that the server stopped sending a field, because the stub sends whatever
+the test says. Gate 3F removed `body_html` from list rows; the backend tests
+asserted the removal, the frontend tests asserted the calls, and every
+agreement rendered "No content." beside a working Sign button until somebody
+opened one.
+
+`test_the_frontend_reads_only_fields_the_list_row_provides` exists for exactly
+that seam: it reads `mapAgreement` as text and compares the keys it touches
+against `AgreementListItem`'s declared fields. It is the only test that holds
+both halves of the contract at once, and it is why a field the list stops
+carrying now fails a build instead of a user.
+
 ## MERGE_CHECKLIST — `fix/agreements-phase0`
 
 Everything below is a gate on merging, not a wish list. The engineering items
