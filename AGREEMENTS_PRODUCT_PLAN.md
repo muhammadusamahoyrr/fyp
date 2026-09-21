@@ -688,7 +688,7 @@ mentions it.
 | # | Decision | Why it is open | Blocks |
 |---|---|---|---|
 | **D8** ✅ | Trusted-proxy / `X-Forwarded-For` policy | **CLOSED 2026-09-21.** `X-Forwarded-For` is trusted only when the immediate peer is a configured proxy address. If the client IP cannot be verified, it is **omitted** from the evidence document rather than printed with a caveat — an unverifiable IP asserts a false fact, and the certificate already states what it does not record. | 3E |
-| **D4** | Who owns securing reviewing counsel, by when? | Still unowned. Blocks templates, ETO wording and certificate conclusions — three backlogs, one conversation. | Phase 4 |
+| **D4** | Who owns securing reviewing counsel, by when? | **ANSWERED 2026-09-21 as DG-25: accept the indefinite park — no owner assigned, deliberately. See §11.** Remains unowned by decision rather than by neglect; the D1 default (cut the builder if no counsel by end of October) stands. Still unowned. Blocks templates, ETO wording and certificate conclusions — three backlogs, one conversation. | Phase 4 |
 
 Five previously-open items are now **closed**: D1 (park the builder), D2 (the
 counterparty rule, stated exactly in §3), **D5** (KYC required to author or
@@ -712,3 +712,210 @@ storage vector even without malice. Twenty is generous for real work.
 **A named constant, not a literal**, so the number has one home and a later
 change is one edit rather than a search. Counts only `draft` rows; deleting a
 draft frees a slot, so the cap bounds live work rather than lifetime output.
+
+
+---
+
+## 11. Decision Record
+
+Owner answers to the Decision Freeze Checklist (DG-00 .. DG-28), recorded as
+given. Nothing here is inferred: where an answer names exceptions, the
+exception text is the owner's own wording.
+
+**Decided: 2026-09-21. Decided by: project owner (Muhammad Usama).**
+
+### DG-00 — Is FR-11 authoritative for this repository?
+
+**ANSWERED: ADOPT WITH RECORDED EXCEPTIONS.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-21 |
+| Decided by | Project owner |
+| Sources in play | **FR-11** (prompt-supplied), **PLAN** (this file + remediation plan) |
+| Result | FR-11 binds, except for the four items below |
+
+**Exceptions, as stated by the owner:**
+
+1. **FR-11.7 — only two parties for now.**
+2. **FR-11.8 / 11.11 — registered users only, no signing links for outsiders.**
+3. **FR-11.6 / 11.10 — plain text, not rich text.**
+4. **FR-11.9 — "Signed" shows only when everyone has signed.**
+
+### DG-28 — Is the intended lifecycle (Steps 1-9) authoritative?
+
+**ANSWERED: ADOPT WITH RECORDED EXCEPTIONS.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-21 |
+| Decided by | Project owner |
+| Sources in play | **LIFECYCLE** (prompt-supplied Steps 1-9), **PLAN** |
+| Result | Steps 1-9 bind, except as below |
+
+**Exception, as stated by the owner:**
+
+1. **Two parties only for now. More than two can come later.**
+
+### DG-07 — KYC on the engagement-letter path
+
+**ANSWERED: RE-CHECK KYC AT ACCEPTANCE.**
+
+*Supersedes the first record of DG-07 (2026-09-21, "record once-at-request as
+deliberate"), which was changed by the owner before any code was written.*
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-21 (revised same day) |
+| Decided by | Project owner |
+| Sources in play | **IMPLEMENTATION** (verified behaviour), previously **UNDEFINED** |
+| Result | **DECIDED + IMPLEMENTATION GAP** — the code does not do this yet |
+| Counsel | **PENDING COUNSEL** — no legal conclusion is stated here |
+
+**What was verified before the decision** (`884161a`):
+`engagement_service.py:57-66` -- `_get_verified_lawyer` rejects an unverified
+lawyer. Called once, at `:108`, inside `request_engagement` (`:84`).
+`engagement_repo.insert(doc)` at `:127` is the only engagement-row creator in
+the repository, so no engagement exists without that check having passed.
+`propose_terms` (`:188`) and `accept_terms` (`:260`) re-check identity and
+status only; neither re-checks KYC before `create_pending_engagement_letter`
+at `:365`.
+
+**Decision:** KYC must be re-verified at acceptance, before
+`create_pending_engagement_letter` generates the letter. This aligns Producer
+A with D5's treatment of Producer C, which re-checks at create, update and
+send (`agreement_service.py:408, 467, 550`) precisely because verification can
+be revoked.
+
+**IMPLEMENTATION GAP — not yet built.** At `884161a` the only KYC check on this
+path is the once-at-request one described above. `accept_terms`
+(`engagement_service.py:260`) re-checks ownership and status only. Closing this
+gap means adding a verification step on the acceptance path; no code is written
+by this docs-only record, and the rollback behaviour of a failed check at
+acceptance is **UNDEFINED** and not decided here.
+
+**Pending counsel:** whether any particular verification point is sufficient
+for an instrument a client signs is a legal question and is not answered
+here.
+
+### DG-25 — D4, reviewing counsel ownership
+
+**ANSWERED: ACCEPT THE INDEFINITE PARK.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-21 |
+| Decided by | Project owner |
+| Owner assigned | **None** -- deliberately |
+| Sources in play | **PLAN** (D1, D4) |
+| Counsel | **PENDING COUNSEL** |
+
+No counsel owner is assigned. The recorded D1 default stands: park now, and
+cut the builder if no counsel is secured by end of October. D4 remains open
+by choice rather than by neglect, and the certificate continues to state
+facts only.
+
+### FR-11 source -- REQUIRED FOLLOW-UP
+
+DG-00 was answered ADOPT WITH EXCEPTIONS, so FR-11 is now a binding
+requirement source for this repository. **It does not exist here.** The audit
+at `884161a` searched the repository by filename and by content and found no
+SRS, requirements, specification, proposal or acceptance-criteria document;
+the only `functional requirement` match repo-wide was untracked QA
+boilerplate unrelated to agreements.
+
+**The authoritative FR-11 text currently lives outside this repository** and
+must be committed into it before it can be cited as a source. Until then,
+every FR-11 reference in these plans points at text no reader of the
+repository can open.
+
+*The wording of FR-11 is not reproduced here, because it was supplied
+conversationally and has not been seen in an authoritative form.*
+
+### Consequences for the register -- now askable
+
+Recorded per the Decision Freeze Checklist dependency chains. **These are
+listed, not answered.**
+
+| Unblocked by | Now askable |
+|---|---|
+| **DG-00** | DG-01, DG-03, DG-08, DG-18, DG-19 |
+| **DG-28** | DG-04, DG-11 (in part), DG-12 |
+| **DG-00 + DG-28 + DG-04** | DG-20 |
+| **DG-25** | DG-21, DG-23 (and DG-24 after DG-23) |
+| **DG-04 once answered** | DG-02, DG-14 |
+| **DG-01 + DG-04 once answered** | DG-05, then DG-06 and DG-27 |
+| **DG-03 once answered** | DG-22 |
+
+### Consequences -- rows the exceptions already settle
+
+The owner's exception wording states a position on four rows. Recorded here so
+they are not re-asked, and NOT restated as independent decisions.
+
+| Row | Settled by | Owner's wording |
+|---|---|---|
+| **DG-01** party count | DG-00 exception 1 + DG-28 exception 1 | "only two parties for now"; "More than two can come later" |
+| **DG-03** identity model | DG-00 exception 2 | "Registered users only, no signing links for outsiders" |
+| **DG-05** `Signed` semantics | DG-00 exception 4 | "Signed shows only when everyone has signed" |
+| **DG-20** body format | DG-00 exception 3 | "Plain text, not rich text" |
+
+Each matches current behaviour, so none of the four implies a code change:
+`agreement_service.py:~844-848` (two parties), `:853` (registered users only),
+`:~90` (executed on all signatures), `:~430` (`BODY_FORMAT_PLAIN_TEXT`).
+
+**"For now" is recorded as stated.** DG-01 is time-scoped, not closed: the
+owner reserved more-than-two parties for later. It is not marked CLOSED in
+section 10 for that reason.
+
+### DG-04 — Version model
+
+**ANSWERED: IMMUTABLE VERSIONS REQUIRED. NO SECOND EXCEPTION.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-21 |
+| Decided by | Project owner |
+| Sources in play | **LIFECYCLE** Steps 4/5/7 (adopted at DG-28), **IMPLEMENTATION** |
+| Result | **DECIDED + SUBSTANTIAL IMPLEMENTATION GAP** |
+
+DG-28 was adopted with a party-count exception only. Lifecycle Steps 4, 5 and
+7 — immutable versions, v1 preserved, signatures re-scoped on change — carry
+no exception and **bind**. The owner declined a second exception, so the
+current model must change.
+
+**What exists at `884161a`:** `version` is an optimistic-concurrency counter
+incremented in place (`agreement_service.py:491`,
+`{"$set": updates, "$inc": {"version": 1}}`). There is no parent-version,
+superseded flag, diff or version document anywhere in the service, schema or
+repository. Editing a draft **overwrites** the prior body. A signature's audit
+entry records a body digest but **no version id**.
+
+**What the decision requires** (recorded, not designed): immutable versions
+carrying at minimum a parent, an author, a timestamp, the exact body and its
+digest; signatures scoped to the version signed; and v1 preserved when v2 is
+created.
+
+**Consequences for other rows, recorded not answered:**
+
+- **DG-02** (acceptance distinct from signing) is now askable — lifecycle
+  acceptance is per-version, and versions now exist as a requirement.
+- **DG-14** (amendments) is now askable — Step 9 presupposes immutable
+  originals.
+- **DG-20** (body format) is settled as plain text by the DG-00 exception, but
+  what a version *contains* now matters for diffing; that is a design question,
+  not a further decision.
+- **H.2 #5 no longer holds as a reason.** The audit observed that a v1
+  signature could not be miscounted toward v2 because v2 could not exist. Once
+  versions exist, that protection disappears and signature-to-version binding
+  becomes load-bearing. **UNDEFINED** and not decided here.
+
+*Note on scope: this is the largest structural change in the register. Nothing
+is implemented by this record.*
+
+### Consequence requiring confirmation -- DG-04 — **RESOLVED**
+
+**SUPERSEDED 2026-09-21** by the DG-04 record above. This block asked the owner
+to confirm whether adopting the lifecycle without a versioning exception was
+intended. It was: the owner declined a second exception and chose immutable
+versions. Retained for the record of how the question arose.
+

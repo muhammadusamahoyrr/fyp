@@ -1235,6 +1235,15 @@ Invariants:
 
 ### 3.G1.15 Draft concurrency and atomic sign-and-send (gate 3C)
 
+> **SUPERSEDED AS A TARGET MODEL, 2026-09-21** — by **DG-04** in
+> `AGREEMENTS_PRODUCT_PLAN.md` §11: immutable versions are required, with no
+> exception for lifecycle Steps 4/5/7. Everything below remains an ACCURATE
+> description of the code shipped at gate 3C — `expected_version`, the `$inc`
+> counter and the 409-on-stale-write are all real and still in force. What is
+> superseded is the assumption that an optimistic-concurrency counter is the
+> whole version story: editing still overwrites the prior body, and the
+> decision requires that it stop doing so. Not yet implemented.
+
 **Phase 3 must not repeat the parked wizard's two-call create-then-sign
 design** (`ModAgreements.jsx:1051-1066`), which could leave a pending agreement
 its creator never signed.
@@ -1743,6 +1752,31 @@ against `AgreementListItem`'s declared fields. It is the only test that holds
 both halves of the contract at once, and it is why a field the list stops
 carrying now fails a build instead of a user.
 
+## Decision Record — pointer
+
+The owner answers to the Decision Freeze Checklist (DG-00 .. DG-28) are
+recorded in **`AGREEMENTS_PRODUCT_PLAN.md` §11**, not here, so there is one
+home for them.
+
+What they change for THIS document:
+
+- **FR-11 and the Section 1-9 lifecycle are now adopted as requirement
+  sources**, each with recorded exceptions. Until now this plan cited neither.
+- **Two-party (D2) and plain-text bodies are reinforced, not challenged** —
+  both are named exceptions to FR-11, so §3 D2 and `BODY_FORMAT_PLAIN_TEXT`
+  stand as written. DG-01 is recorded as time-scoped ("for now"), not closed.
+- **Registered-users-only is now a recorded position**, so the absence of an
+  invitation or signing-link mechanism is intended rather than missing.
+- **Lifecycle Steps 4/5/7 (immutable versions) are binding, and DG-04 is now
+  answered: immutable versions are REQUIRED, with no second exception.** This
+  plan's §3C implements `version` as an optimistic-concurrency counter, which
+  remains an accurate description of the shipped code but is **no longer the
+  target model**. See the SUPERSEDED note at §3.G1.15.
+- **DG-07 was revised the same day** — KYC must be re-verified at acceptance,
+  not only at request. Recorded as a decision plus an implementation gap; the
+  code at `884161a` does not do this.
+- **D4 is answered** — see the MERGE_CHECKLIST note below.
+
 ## MERGE_CHECKLIST — `fix/agreements-phase0`
 
 Everything below is a gate on merging, not a wish list. The engineering items
@@ -1810,6 +1844,12 @@ been open long enough to be worth naming in the same place.
       backlogs: contract templates, ETO wording, and whether the evidence
       certificate may ever state a legal conclusion. Until then the certificate
       states facts only, which is correct but deliberately limited.
+      **SUPERSEDED as a question, 2026-09-21** — answered as DG-25 in
+      `AGREEMENTS_PRODUCT_PLAN.md` §11: **accept the indefinite park, no owner
+      assigned, PENDING COUNSEL.** The item stays on this checklist because the
+      *consequence* is unchanged — templates, ETO wording and certificate
+      conclusions remain blocked, and the D1 end-of-October default still
+      stands. What is superseded is the framing of it as an undecided question.
 - [ ] **DIY builder cutoff — end of October.** The recorded decision is
       "park now (B), cut it (A) if no counsel is secured by end of October".
       That date is a decision point, not a reminder: if it passes unowned, the
