@@ -34,12 +34,37 @@ define("fetch", async (url, opts = {}) => {
         headers: opts.headers || {},
         body: opts.body ? JSON.parse(opts.body) : null,
     });
-    return {
+    const response = {
         ok: next.status >= 200 && next.status < 300,
         status: next.status,
         json: async () => next.body,
     };
+    // Only when the test says so: a Response that can produce bytes is what
+    // distinguishes a raw download from a JSON call parsed by mistake.
+    if (next.blob) response.blob = async () => ({ size: 1234 });
+    return response;
 });
+
+/* The smallest DOM `_saveBlob` needs: an object URL and an anchor to click.
+   Returns a record of what it was asked to save. */
+function withDomStubs() {
+    const saved = { filename: null, clicked: false };
+    define("URL", {
+        createObjectURL: () => "blob:stub",
+        revokeObjectURL: () => {},
+    });
+    define("document", {
+        createElement: () => ({
+            set download(v) { saved.filename = v; },
+            get download() { return saved.filename; },
+            href: "",
+            click() { saved.clicked = true; },
+            remove() {},
+        }),
+        body: { appendChild() {} },
+    });
+    return saved;
+}
 
 const api = await import("../src/lib/api.js");
 
@@ -165,4 +190,34 @@ test("a null status is omitted rather than sent as the string 'null'", async () 
     // unknown status -- turning "show me everything" into an error.
     await api.listAgreements({ status: null });
     assert.equal(new URL(only().url).searchParams.get("status"), null);
+});
+
+// ── Gate 3E: downloading the executed agreement ─────────────────────────────
+
+test("downloadExecutedAgreement asks the pdf route for raw bytes", async () => {
+    // ASSERTS THE OUTCOME, not just the URL. An earlier version checked only
+    // the path and method, so removing `returnResponse: true` -- which is the
+    // whole point of this call -- changed nothing it could see and the guard
+    // could not be proven. Without it apiFetch parses the PDF as JSON, hands
+    // back a plain object with no `blob()`, and the download silently fails.
+    const saved = withDomStubs();
+    next = { status: 200, body: {}, blob: true };
+
+    const result = await api.downloadExecutedAgreement("A1", "retainer.pdf");
+
+    const c = calls[0];
+    assert.match(c.url, /\/agreements\/A1\/pdf$/);
+    assert.equal(c.method, "GET");
+    assert.equal(c.body, null, "a download sends no payload");
+
+    assert.equal(result.error, undefined,
+        "the response was parsed as JSON instead of read as bytes");
+    assert.equal(result.data, true);
+    assert.equal(saved.filename, "retainer.pdf",
+        "the caller's filename must reach the download");
+});
+
+test("the agreement id is encoded into the pdf path", async () => {
+    await api.downloadExecutedAgreement("a/b?c").catch(() => {});
+    assert.match(calls[0].url, /\/agreements\/a%2Fb%3Fc\/pdf$/);
 });

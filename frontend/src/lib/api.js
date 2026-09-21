@@ -1151,6 +1151,25 @@ export async function listAgreements({ page = 1, page_size = 20, status = null }
   return apiFetch(`/agreements?${p}`);
 }
 
+/* Download the executed agreement with its signature record.
+ *
+ * The bytes are rendered SERVER-SIDE from the stored row. The body, the
+ * signatures and the audit log never travel as JSON -- only the finished
+ * document does -- so there is no client-side assembly here to get wrong.
+ *
+ * Only a party to a fully executed agreement gets one. A non-party is told it
+ * does not exist rather than refused, so this surfaces as an ordinary "not
+ * found" and must not be reported as though the user lacked permission for
+ * something they can see. */
+export async function downloadExecutedAgreement(agreementId, filename) {
+  const { data: res, error } = await apiFetch(
+    `/agreements/${encodeURIComponent(agreementId)}/pdf`,
+    { returnResponse: true },
+  );
+  if (error) return { error: error.message || 'Download failed' };
+  return _saveBlob(res, filename || `agreement-${agreementId}.pdf`);
+}
+
 // ─── Agreement drafts (Gate 3C routes) ───────────────────────────────────────
 //
 // A draft is the lawyer's private working copy. It reaches nobody until it is

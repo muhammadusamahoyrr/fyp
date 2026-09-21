@@ -30,6 +30,19 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Trusted reverse proxies, as a comma-separated list of peer addresses
+    # (decision D8). EMPTY BY DEFAULT, and the default is the safe one: with
+    # nothing configured, `X-Forwarded-For` is ignored entirely and the client
+    # IP is whatever the socket says.
+    #
+    # This exists because an evidence document must not assert a fact it cannot
+    # support. Behind an unconfigured proxy every request appears to come from
+    # the proxy, so recording that as "the IP the signer used" would be false;
+    # and trusting the header without checking the peer lets any caller write
+    # their own IP into the record. When neither is safe the IP is OMITTED --
+    # see `client_ip`.
+    trusted_proxies: str = ""
+
     # MongoDB
     mongodb_url: str = "mongodb://localhost:27017"
     db_name: str = "attorney_ai"

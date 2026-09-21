@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 
+from app.core.client_ip import client_ip, ip_is_verifiable
 from app.core.rate_limit import limiter
 from app.dependencies import get_current_user, require_lawyer
 from app.schemas.agreement import (
@@ -63,6 +64,39 @@ async def list_agreements(
     """
     return await agreement_service.list_agreements(
         current_user["_id"], page=page, page_size=page_size, status=status)
+
+
+@router.get("/{agreement_id}/pdf")
+async def executed_pdf(
+    agreement_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Download the executed agreement with its signature record.
+
+    Declared BEFORE `/{agreement_id}` would otherwise be reached for this
+    path -- FastAPI matches in declaration order, and a route registered after
+    a bare `/{id}` still wins here only because the suffix makes it more
+    specific. Kept adjacent so the two are read together.
+
+    Returns application/pdf. The body, signatures and audit log are read and
+    rendered server-side; none of them travels as JSON.
+    """
+    ip = client_ip(request)
+    pdf, filename = await agreement_service.executed_pdf(
+        agreement_id, current_user["_id"],
+        ip_address=ip, ip_verifiable=ip_is_verifiable(request))
+
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            # `inline` so a party can read it without a round trip through
+            # their downloads folder; the filename is still offered for saving.
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 @router.get("/{agreement_id}", response_model=AgreementOut)

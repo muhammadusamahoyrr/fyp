@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { listAgreements, signAgreement, declineAgreement } from "@/lib/api.js";
+import { listAgreements, signAgreement, declineAgreement, downloadExecutedAgreement } from "@/lib/api.js";
 import { DraftComposer } from "./DraftComposer.jsx";
 
 const STATUS_LABEL = { pending: "Pending", executed: "Executed", cancelled: "Cancelled", draft: "Draft" };
@@ -90,6 +90,14 @@ export function AgreementsPage() {
         setDeclineOpen(false);
         setDeclineReason("");
         reload();
+    };
+
+    const doDownload = async () => {
+        setBusy(true);
+        const { error } = await downloadExecutedAgreement(active.id, `${active.title || "agreement"}.pdf`);
+        setBusy(false);
+        if (error) { showToast("❌ " + error); return; }
+        showToast("⬇ Downloaded");
     };
 
     const closeModal = () => { setActive(null); setDeclineOpen(false); setDeclineReason(""); };
@@ -206,6 +214,23 @@ export function AgreementsPage() {
                             <div style={{ background: T.cardHi, border: `1px solid ${T.border}`, borderRadius: 10, padding: "16px 18px", fontSize: 13, lineHeight: 1.8, color: T.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
                                 {active.body || "No content."}
                             </div>
+
+                            {/* Only once EXECUTED. There is no document to
+                                download before both parties have signed, and
+                                the server refuses one -- offering the button
+                                early would promise a file that does not
+                                exist. */}
+                            {active.status === "Executed" && (
+                                <div style={{ marginTop: 14 }}>
+                                    <Btn variant="secondary" disabled={busy} onClick={doDownload}>
+                                        ⬇ Download signed copy
+                                    </Btn>
+                                    <div style={{ fontSize: 10.5, color: T.textFaint, marginTop: 6, lineHeight: 1.5 }}>
+                                        Includes the signature record: who signed, how, when the
+                                        server recorded it, and the digest of the signed text.
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {active.needsMySig && (

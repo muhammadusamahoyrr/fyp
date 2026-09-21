@@ -1016,6 +1016,65 @@ async def list_agreements(user_id: str, page: int = 1,
     }
 
 
+async def executed_pdf(agreement_id: str, requester_id: str, *,
+                      ip_address: str | None = None,
+                      ip_verifiable: bool = False) -> tuple[bytes, str]:
+    """The executed agreement as a PDF, plus a filename. Records the download.
+
+    PARTIES ONLY, and only once EXECUTED.
+
+    A non-party gets NotFoundError, not a 403 -- the same rule the draft guard
+    follows and for the same reason: a 403 confirms the id exists, and for a
+    signed contract between two other people that is itself a disclosure.
+
+    A party asking for a document that is not executed yet gets a plain
+    explanation, because they are entitled to know the state of their own
+    agreement. The one exception is a DRAFT, which is refused by
+    `_refuse_if_someone_elses_draft` before this point for anyone but its
+    author -- a counterparty must not learn that a draft naming them exists,
+    and a PDF route is exactly the sort of place that leaks it.
+
+    THE ROW IS READ SERVER-SIDE. The body, the signatures and the audit log
+    never travel to the caller as JSON; they are rendered here and only the
+    resulting document is sent.
+    """
+    from app.db.collections import get_agreement_downloads_col
+    from app.services import agreement_pdf
+
+    agreement = await agreement_repo.find_by_id(agreement_id)
+    if not agreement:
+        raise NotFoundError("Agreement")
+
+    # Draft privacy first, exactly as on every other read path.
+    _refuse_if_someone_elses_draft(agreement, requester_id)
+
+    party_ids = {p["user_id"] for p in agreement.get("parties", [])}
+    if requester_id not in party_ids:
+        # NOT ForbiddenError. See the docstring.
+        raise NotFoundError("Agreement")
+
+    status = agreement.get("status")
+    if status != AgreementStatus.EXECUTED.value:
+        raise AppValidationError(
+            "This agreement has not been fully signed yet, so there is no "
+            "executed copy to download."
+        )
+
+    pdf = agreement_pdf.build_executed_pdf(agreement)
+
+    # D8: only an address we can stand behind is recorded against the
+    # download. An unverifiable one is omitted rather than stored as fact.
+    await get_agreement_downloads_col().insert_one({
+        "agreement_id": agreement_id,
+        "user_id": requester_id,
+        "downloaded_at": datetime.now(timezone.utc),
+        "ip_address": ip_address if ip_verifiable else None,
+        "bytes": len(pdf),
+    })
+
+    return pdf, f"agreement-{agreement_id}.pdf"
+
+
 def _refuse_if_someone_elses_draft(agreement: dict, user_id: str) -> None:
     """A DRAFT IS INVISIBLE TO EVERYONE EXCEPT ITS AUTHOR.
 

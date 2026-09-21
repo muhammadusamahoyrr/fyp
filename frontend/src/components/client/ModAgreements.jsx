@@ -6,7 +6,7 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { createAgreement, signAgreement, declineAgreement, listAgreements, searchLawyers } from "@/lib/api.js";
+import { createAgreement, signAgreement, declineAgreement, listAgreements, searchLawyers, downloadExecutedAgreement } from "@/lib/api.js";
 
 /* ══════════════════════════════════════════════════════
    MODULE: AGREEMENTS — 5-Step Wizard
@@ -1136,6 +1136,16 @@ const PageAllAgreements = ({ onNavigate }) => {
     const [declineOpen, setDeclineOpen] = useState(false);
     const [declineReason, setDeclineReason] = useState("");
     const [declineBusy, setDeclineBusy] = useState(false);
+    const [downloading, setDownloading] = useState(false);
+
+    const doDownload = async () => {
+        setDownloading(true);
+        const { error } = await downloadExecutedAgreement(
+            viewing.id, `${viewing.name || "agreement"}.pdf`);
+        setDownloading(false);
+        if (error) { toast.show("❌ " + error, "danger"); return; }
+        toast.show("⬇ Downloaded", "success");
+    };
     // No "Draft" tab. A draft belongs to the lawyer who is writing it and is
     // invisible to the client until it is sent, so this tab could only ever be
     // empty for a client -- and before the server started filtering drafts out
@@ -1301,6 +1311,24 @@ const PageAllAgreements = ({ onNavigate }) => {
                             <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "18px 20px", fontSize: 13, lineHeight: 1.85, color: t.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
                                 {viewing.body || "No content."}
                             </div>
+
+                            {/* Only once EXECUTED. Before both parties have
+                                signed there is no document to download, and
+                                the server refuses one -- offering the button
+                                early would promise a file that does not
+                                exist. */}
+                            {viewing.rawStatus === "executed" && (
+                                <div style={{ marginTop: 16 }}>
+                                    <button type="button" disabled={downloading} onClick={doDownload}
+                                        style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 10, padding: "9px 15px", cursor: downloading ? "not-allowed" : "pointer", fontSize: 12.5, color: t.text, fontWeight: 600, fontFamily: "inherit" }}>
+                                        {downloading ? "Preparing…" : "⬇ Download signed copy"}
+                                    </button>
+                                    <div style={{ fontSize: 11, color: t.textFaint, marginTop: 7, lineHeight: 1.5 }}>
+                                        Includes the signature record: who signed, how, when the
+                                        server recorded it, and the digest of the signed text.
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {viewing.needsMySig && (
