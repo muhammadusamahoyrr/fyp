@@ -517,3 +517,162 @@ def test_no_peer_at_all_is_not_an_address(no_proxies):
     req = _Req(peer=None)
     assert client_ip(req) is None
     assert ip_is_verifiable(req) is False
+
+
+# ── rows that predate the evidence ──────────────────────────────────────────
+#
+# Found by rendering every executed row in the live database before merge: the
+# one executed agreement there is an engagement letter from before Gate 3C,
+# and it has no `body_sha256`. It RENDERED -- printing an empty digest heading
+# above the sentence "this digest was computed at the moment it was sent ...
+# re-computing it will reproduce this value". Both claims are false for that
+# row, and an empty heading reads as complete rather than as missing.
+
+def test_a_row_without_a_digest_is_refused_not_half_printed():
+    """A partial certificate is worse than none: it looks finished."""
+    from app.core.exceptions import AppValidationError
+    from app.services.agreement_pdf import build_executed_pdf
+
+    row = {
+        "_id": "OLD-1", "title": "Engagement letter",
+        "body_html": "Agreed terms.", "body_sha256": None,
+        "parties": [{"user_id": "L1", "full_name": "Adv", "signed": True,
+                     "signature_method": "typed", "signature_data": "Adv",
+                     "signed_at": datetime(2026, 3, 1, tzinfo=timezone.utc)}],
+        "audit_log": [],
+    }
+    with pytest.raises(AppValidationError) as exc:
+        build_executed_pdf(row)
+    assert "digest of the signed text" in str(exc.value)
+    assert "remains readable on screen" in str(exc.value), (
+        "the refusal must say what the party CAN still do"
+    )
+
+
+def test_the_refusal_names_every_missing_piece():
+    from app.services.agreement_pdf import missing_evidence
+
+    assert missing_evidence({"body_sha256": "a" * 64, "body_html": "x",
+                             "parties": [{"user_id": "L1", "signed": True,
+                                          "signed_at": datetime.now(timezone.utc)}]}) == []
+
+    gaps = missing_evidence({"parties": []})
+    assert "the digest of the signed text" in gaps
+    assert "the agreement text" in gaps
+    assert "any recorded signature" in gaps
+
+
+def test_a_signature_with_no_recorded_time_is_refused():
+    """The certificate prints a time for every signature; an absent one would
+    be rendered as an empty cell beside a name, which reads as "signed, time
+    unknown" rather than "we did not record it"."""
+    from app.core.exceptions import AppValidationError
+    from app.services.agreement_pdf import build_executed_pdf
+
+    row = {
+        "_id": "OLD-2", "body_html": "Terms.", "body_sha256": "b" * 64,
+        "parties": [{"user_id": "L1", "full_name": "Adv", "signed": True,
+                     "signature_method": "typed", "signed_at": None}],
+        "audit_log": [],
+    }
+    with pytest.raises(AppValidationError) as exc:
+        build_executed_pdf(row)
+    assert "time a signature was recorded" in str(exc.value)
+
+
+@pytest.mark.integration
+async def test_an_incomplete_row_is_not_logged_as_a_download(world):
+    """It was never served, so it must not count toward the metric."""
+    from app.core.exceptions import AppValidationError
+    from app.db.collections import get_agreement_downloads_col, get_agreements_col
+    from app.services import agreement_service
+
+    d = await _executed()
+    # Strip the digest the way a pre-3C row lacks it.
+    await get_agreements_col().update_one(
+        {"_id": d["_id"]}, {"$unset": {"body_sha256": ""}})
+
+    with pytest.raises(AppValidationError):
+        await agreement_service.executed_pdf(d["_id"], CLIENT)
+
+    assert await get_agreement_downloads_col().count_documents(
+        {"agreement_id": d["_id"]}) == 0, (
+        "a refused render was counted as a download"
+    )
+
+
+# ── the downloaded-share metric ─────────────────────────────────────────────
+#
+# `scripts/engagement_letter_reconcile.py` reports it. A metric that is quietly
+# wrong is worse than no metric: it gets quoted.
+
+@pytest.mark.integration
+async def test_the_metric_counts_agreements_not_download_events(world):
+    """Eight downloads by one party is ONE agreement with a copy in somebody's
+    hands, not eight. Counting events would report 800%."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path("scripts").resolve()))
+    from engagement_letter_reconcile import download_rates
+    from app.services import agreement_service
+
+    d = await _executed()
+    for _ in range(8):
+        await agreement_service.executed_pdf(d["_id"], CLIENT)
+
+    stats = await download_rates()
+    assert stats["download_rows"] >= 8, "the audit rows are all there"
+    assert stats["downloaded"] == 1, "eight events became eight agreements"
+    assert stats["downloaded"] <= stats["executed"], (
+        "the numerator exceeded the denominator"
+    )
+
+
+@pytest.mark.integration
+async def test_a_download_row_for_a_vanished_agreement_does_not_inflate_it(world):
+    """A download whose agreement was later removed must not count."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path("scripts").resolve()))
+    from engagement_letter_reconcile import download_rates
+    from app.db.collections import get_agreement_downloads_col
+
+    d = await _executed()
+    await get_agreement_downloads_col().insert_one({
+        "agreement_id": "GONE-FOREVER", "user_id": CLIENT,
+        "downloaded_at": datetime.now(timezone.utc),
+        "ip_address": None, "bytes": 10,
+    })
+
+    stats = await download_rates()
+    assert stats["downloaded"] <= stats["executed"]
+    assert stats["percent"] is None or stats["percent"] <= 100.0
+
+
+@pytest.mark.integration
+async def test_the_share_is_none_rather_than_a_division_by_zero(world):
+    """With nothing executed there is no share to report, and 0% would imply
+    there was something to download."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path("scripts").resolve()))
+    from engagement_letter_reconcile import download_rates
+    from app.db.collections import get_agreements_col
+
+    # Scoped to this fixture's own rows. An unqualified
+    # delete_many({"status": "executed"}) would reach across every other
+    # test's data in the shared test database, and a test that tidies up
+    # somebody else's fixtures fails them later and somewhere else.
+    await get_agreements_col().delete_many(
+        {"status": "executed", "created_by": {"$in": [LAWYER, CLIENT, STRANGER]}})
+
+    stats = await download_rates()
+    if stats["executed"] == 0:
+        assert stats["percent"] is None
+    else:
+        # Other rows survive, which is fine: the property under test is that
+        # the share is never a division by zero and never exceeds 100.
+        assert 0.0 <= stats["percent"] <= 100.0

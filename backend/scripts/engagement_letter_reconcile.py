@@ -143,6 +143,7 @@ async def census() -> dict:
         "orphans": await _orphan_letters(),
         "engagement_totals": await status_breakdown(),
         "letter_anomalies": await _letter_anomalies(),
+        "downloads": await download_rates(),
     }
 
 
@@ -264,6 +265,44 @@ async def status_breakdown() -> dict:
     }
 
 
+async def download_rates() -> dict:
+    """How many executed agreements have ever been downloaded (Gate 3E).
+
+    READ-ONLY, like everything else in this script.
+
+    The point is not the number. An executed agreement nobody ever opens
+    is one neither party holds a copy of, which is the state the PDF gate
+    exists to end -- so a low share says the feature is not reaching
+    people, not that people do not want it.
+
+    COUNTS AGREEMENTS, NOT DOWNLOADS. One party downloading eight times is
+    one agreement with a copy in somebody's hands, not eight. Counting
+    distinct agreement ids is what makes the percentage mean "has a copy"
+    rather than "was clicked".
+    """
+    from app.db.collections import get_agreement_downloads_col
+
+    agreements = get_agreements_col()
+    downloads = get_agreement_downloads_col()
+
+    executed = await agreements.count_documents({"status": "executed"})
+
+    # Restricted to rows that really are executed: a download whose
+    # agreement was later removed must not push the numerator above the
+    # denominator.
+    downloaded_ids = await downloads.distinct("agreement_id")
+    downloaded = await agreements.count_documents(
+        {"status": "executed", "_id": {"$in": downloaded_ids}}
+    ) if downloaded_ids else 0
+
+    return {
+        "executed": executed,
+        "downloaded": downloaded,
+        "download_rows": await downloads.count_documents({}),
+        "percent": round(100.0 * downloaded / executed, 1) if executed else None,
+    }
+
+
 # ── --apply is DISABLED until Phase 2 ────────────────────────────────────────
 #
 # A mutating path was drafted here and has been REMOVED rather than left behind
@@ -360,11 +399,27 @@ def _print_totals(report: dict) -> None:
         print(f"    {status:<18} {n}")
 
 
+def _print_downloads(report: dict) -> None:
+    d = report.get("downloads") or {}
+    print("\nExecuted agreements and signed copies (Gate 3E):")
+    print(f"    executed                   {d.get('executed', 0)}")
+    print(f"    downloaded at least once   {d.get('downloaded', 0)}")
+    print(f"    download events recorded   {d.get('download_rows', 0)}")
+    pct = d.get("percent")
+    print("    share downloaded           "
+          + ("n/a (nothing executed yet)" if pct is None else f"{pct}%"))
+    if d.get("executed") and not d.get("downloaded"):
+        print("    -- nobody holds a copy of a signed agreement. Either the")
+        print("       download is not reachable, or these rows predate the")
+        print("       evidence the certificate needs and are refused.")
+
+
 def _print_census(report: dict) -> None:
     print("\n=== ENGAGEMENT LETTER CENSUS ===")
     print(f"Retained statuses scanned    : {', '.join(report['retained_statuses'])}")
     print(f"Retained engagements scanned : {report['retained_engagements']}")
     _print_totals(report)
+    _print_downloads(report)
 
     if not report["retained_engagements"]:
         print("\nNo engagements in a retained status -- no lawyer is stranded")

@@ -13,6 +13,7 @@ from app.db.appointment_index_spec import (
     APPOINTMENT_INDEX_REQUIREMENTS,
 )
 from app.db.collections import (
+    get_agreement_downloads_col,
     get_agreements_col,
     get_auth_sessions_col,
     get_answer_provenance_col,
@@ -673,6 +674,22 @@ async def _agreements_indexes() -> None:
         IndexModel([("status", ASCENDING)]),
         IndexModel([("parties.user_id", ASCENDING)]),
         IndexModel([("created_at", DESCENDING)]),
+        # The DRAFT side of `AgreementRepository.visible_to`, and the D7 cap,
+        # which counts a lawyer's live drafts on every create. Both filter on
+        # created_by AND status; without this they scan the collection, and
+        # the cap runs on a path a lawyer hits repeatedly.
+        IndexModel([("created_by", ASCENDING), ("status", ASCENDING)]),
+        # Paging is newest-first within a party's visible set.
+        IndexModel([("parties.user_id", ASCENDING), ("created_at", DESCENDING)]),
+    ])
+
+    # One row per executed-agreement PDF served (Gate 3E). Queried two ways:
+    # "who downloaded this agreement" and "what has this user downloaded",
+    # which is why both leading keys exist rather than one compound index.
+    await get_agreement_downloads_col().create_indexes([
+        IndexModel([("agreement_id", ASCENDING)]),
+        IndexModel([("user_id", ASCENDING)]),
+        IndexModel([("downloaded_at", DESCENDING)]),
     ])
 
 

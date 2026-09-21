@@ -52,6 +52,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.core.exceptions import AppValidationError
 from app.services.pdf_generator import P, _styles
 
 #: What the certificate says instead of an IP it cannot stand behind (D8).
@@ -111,12 +112,56 @@ def signing_ips(agreement: dict) -> dict[str, str]:
     return found
 
 
+def missing_evidence(agreement: dict) -> list[str]:
+    """What this row lacks that the certificate would otherwise claim.
+
+    Rows written before Gate 3C predate `body_sha256`: sending did not compute
+    a digest, so there is nothing to print. The certificate's central sentence
+    -- "this digest was computed at the moment it was sent, and re-computing
+    it will reproduce this value" -- is then FALSE, and it was being printed
+    under an empty heading, which reads as complete.
+    """
+    gaps = []
+    if not agreement.get("body_sha256"):
+        gaps.append("the digest of the signed text")
+    if not agreement.get("body_html"):
+        gaps.append("the agreement text")
+
+    signed = [p for p in agreement.get("parties", []) if p.get("signed")]
+    if not signed:
+        gaps.append("any recorded signature")
+    elif any(not p.get("signed_at") for p in signed):
+        gaps.append("the time a signature was recorded")
+    return gaps
+
+
 def build_executed_pdf(agreement: dict) -> bytes:
     """Render an EXECUTED agreement. Returns PDF bytes.
 
     The caller is responsible for authorisation and for refusing anything that
-    is not executed; this function renders what it is given.
+    is not executed. This function refuses a row whose evidence is INCOMPLETE.
+
+    REFUSING IS THE POINT. An agreement executed before Gate 3C carries no
+    `body_sha256`, and rendering it produced a certificate with an empty digest
+    heading followed by the claim that the digest "was computed at the moment
+    it was sent" and "re-computing it will reproduce this value". Both are
+    false for that row. A partial certificate is worse than none, because it
+    reads as complete -- exactly the kind of unsupported claim Phase 0 removed.
+
+    The digest is NOT back-filled. Computing one now would assert that the
+    text has not changed since signing, which is the one thing a missing
+    digest makes unverifiable.
     """
+    gaps = missing_evidence(agreement)
+    if gaps:
+        raise AppValidationError(
+            "This agreement cannot be issued as a signed copy: the record is "
+            "missing " + ", ".join(gaps) + ". It was executed before the "
+            "system recorded that evidence, so a certificate would state "
+            "facts that were never captured. The agreement itself is "
+            "unaffected and remains readable on screen."
+        )
+
     styles = _styles()
     buffer = BytesIO()
     doc = SimpleDocTemplate(
