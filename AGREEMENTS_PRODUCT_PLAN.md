@@ -221,6 +221,13 @@ decline shipped anyway — engagement letters depend on them.
 C is not achievable on your timeline, and shipping a contract builder whose
 every template is withdrawn is worse than not having the tab.
 
+> **SUPERSEDED 2026-09-21 — the "A if no counsel by end of October" half is
+> WITHDRAWN.** See **DG-25 (revised)** in §11: the owner will NOT delete the
+> builder. It stays parked, with no deletion date. Option B stands; Option A is
+> no longer a scheduled default. The rest of this recommendation — that C is
+> not achievable now, and that shipping withdrawn templates is worse than no
+> tab — is unchanged.
+
 ### D2 — Who may send an agreement to whom?
 
 Currently: any authenticated user can send a signature request naming any
@@ -592,7 +599,7 @@ Note the false-claim count is **4, not 3** — §2.2 found a fourth in the backe
 | Duplicate binding agreements from a double-click | Medium | High | R1 |
 | A withdrawn template is signed anyway | **Low** — backend refuses at create *and* sign | Severe | Already mitigated; keep the guard |
 | Stored XSS via `body_html` | Low today — rendered as text | Medium, rises with R3's PDF | Sanitise in R1, before the PDF lands |
-| Counsel never secured, R4 never ships | Medium | Medium — caps the product at engagement letters | D1 option A; be willing to cut |
+| Counsel never secured, R4 never ships | Medium | Medium — caps the product at engagement letters | ~~D1 option A; be willing to cut~~ **SUPERSEDED 2026-09-21 (DG-25 revised, §11): the builder stays parked and is NOT cut. Mitigation is now: accept the cap at engagement letters for as long as the park lasts.** |
 | R2's contract change breaks billing | Medium | High | Re-read the fee gate's "ended engagements still count" reasoning first; it exists because this was got wrong once |
 
 **Note on the stranded-lawyer row.** The likelihood is stated as *reachable*
@@ -688,7 +695,7 @@ mentions it.
 | # | Decision | Why it is open | Blocks |
 |---|---|---|---|
 | **D8** ✅ | Trusted-proxy / `X-Forwarded-For` policy | **CLOSED 2026-09-21.** `X-Forwarded-For` is trusted only when the immediate peer is a configured proxy address. If the client IP cannot be verified, it is **omitted** from the evidence document rather than printed with a caveat — an unverifiable IP asserts a false fact, and the certificate already states what it does not record. | 3E |
-| **D4** | Who owns securing reviewing counsel, by when? | **ANSWERED 2026-09-21 as DG-25: accept the indefinite park — no owner assigned, deliberately. See §11.** Remains unowned by decision rather than by neglect; the D1 default (cut the builder if no counsel by end of October) stands. Still unowned. Blocks templates, ETO wording and certificate conclusions — three backlogs, one conversation. | Phase 4 |
+| **D4** | Who owns securing reviewing counsel, by when? | **ANSWERED 2026-09-21 as DG-25: accept the indefinite park — no owner assigned, deliberately. See §11.** Remains unowned by decision rather than by neglect; ~~the D1 default (cut the builder if no counsel by end of October) stands.~~ **REVISED 2026-09-21 — that default is WITHDRAWN; the builder stays parked indefinitely and is not deleted. See DG-25 (revised), §11.** Still unowned. Blocks templates, ETO wording and certificate conclusions — three backlogs, one conversation. | Phase 4 |
 
 Five previously-open items are now **closed**: D1 (park the builder), D2 (the
 counterparty rule, stated exactly in §3), **D5** (KYC required to author or
@@ -798,9 +805,15 @@ acceptance is **UNDEFINED** and not decided here.
 for an instrument a client signs is a legal question and is not answered
 here.
 
-### DG-25 — D4, reviewing counsel ownership
+### DG-25 — D4, reviewing counsel ownership — **SUPERSEDED**
 
-**ANSWERED: ACCEPT THE INDEFINITE PARK.**
+> **SUPERSEDED 2026-09-21** by **DG-25 (revised)** below. Reason: the record
+> beneath preserved the D1 default of deleting the builder at end of October.
+> The owner has since withdrawn that default — the builder is **not** to be
+> deleted. Kept visible because it is the record of what "accept the indefinite
+> park" was taken to mean at the time.
+
+**ANSWERED (SUPERSEDED): ACCEPT THE INDEFINITE PARK.**
 
 | Field | Value |
 |---|---|
@@ -810,10 +823,52 @@ here.
 | Sources in play | **PLAN** (D1, D4) |
 | Counsel | **PENDING COUNSEL** |
 
-No counsel owner is assigned. The recorded D1 default stands: park now, and
-cut the builder if no counsel is secured by end of October. D4 remains open
-by choice rather than by neglect, and the certificate continues to state
-facts only.
+No counsel owner is assigned. ~~The recorded D1 default stands: park now, and
+cut the builder if no counsel is secured by end of October.~~ **That sentence
+is superseded — see DG-25 (revised).** D4 remains open by choice rather than
+by neglect, and the certificate continues to state facts only.
+
+### DG-25 (revised) — the builder stays parked and is NOT deleted
+
+**ANSWERED: KEEP THE BUILDER PARKED. THE OCTOBER DELETION DEFAULT IS
+WITHDRAWN.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-21 (revision of the record above) |
+| Decided by | Project owner |
+| Sources in play | **PLAN** (D1, D4) |
+| Status | **PENDING COUNSEL** |
+
+- The DIY builder is **not** deleted. It remains parked behind
+  `agreements_diy_builder_enabled` (`core/config.py:283`, default false).
+- The D1 default "cut it (A) if no counsel is secured by end of October" is
+  **WITHDRAWN**. No deletion date replaces it.
+- **Owner of providing templates: Muhammad Usama (project owner).**
+- **Target date: none set.** Recorded from the owner's words: templates will
+  be provided "later — anytime".
+
+**PROVISION IS NOT VERIFICATION.** A template being supplied does not make it
+verified. Before any specific template may be treated as usable, all of the
+following must be recorded for that template:
+
+1. a **named reviewer**;
+2. a **review date**;
+3. a **template version**;
+4. the **jurisdiction** it was reviewed for;
+5. an **unexpired review period**.
+
+Until every one of those is recorded for a given template, the
+withdrawn-template guard stays ON for it — `is_unreviewed_template`
+(`agreement_service.py:83`), which refuses the marker at create **and** at
+sign.
+
+**A conflicting statement, recorded not resolved.** In the same answer the
+owner stated that the templates to be provided "are verified \[ones\] already".
+That is recorded here as **the owner's statement**, not as established
+verification, because this decision also requires the five items above before
+any template counts as verified. No assessment of the claim is made here, and
+no legal conclusion is stated. **PENDING COUNSEL.**
 
 ### FR-11 source -- REQUIRED FOLLOW-UP
 
@@ -918,4 +973,266 @@ is implemented by this record.*
 to confirm whether adopting the lifecycle without a versioning exception was
 intended. It was: the owner declined a second exception and chose immutable
 versions. Retained for the record of how the question arose.
+
+
+---
+
+## 12. Decision Record — Round 2
+
+Owner answers to the second Decision Sheet. **Decided 2026-09-21, by the
+project owner.** Recorded as given; nothing is inferred and nothing here is
+implemented.
+
+Each record states whether it implies a code change. Where it does, it is
+labelled **implementation gap, not scheduled** — the decision is made, the
+work is not planned, and no code is written by this document.
+
+### DG-08 — Producer separation
+
+**ANSWERED: (c) Producer A is system-only; B and C share ONE rule set.**
+
+| Field | Value |
+|---|---|
+| Sources | **PLAN** (D1, D2, D5, D6, D7), **IMPLEMENTATION** |
+| Code change? | **YES — implementation gap, not scheduled** |
+
+Engagement letters (A) stay system-generated, reachable only from
+`accept_terms` and never over HTTP. The client builder (B) and lawyer-authored
+agreements (C) converge on a single rule set.
+
+**This does NOT remove or delete the builder.** B stays parked per DG-25
+(revised); convergence describes the rules B will follow *when* it is
+unparked, not its removal.
+
+Today B and A share `_create_agreement` (`agreement_service.py:813`) while C
+has its own path (`:397`), which is the opposite grouping from the one decided.
+Aligning them is the gap.
+
+### DG-11 — Party set after creation
+
+**ANSWERED: (a) immutable after creation.**
+
+| Field | Value |
+|---|---|
+| Sources | **LIFECYCLE** Step 7 (adopted at DG-28), **FR-11** silent on post-creation change |
+| Code change? | **NO** — matches current behaviour; no party-mutation route exists |
+| Exception | Records a **departure from LIFECYCLE Step 7**, which implies the party set may change |
+
+### DG-12 — Required signers
+
+**ANSWERED: (a) every party is a required signer.**
+
+| Field | Value |
+|---|---|
+| Sources | **LIFECYCLE** ("all required parties"), **FR-11** silent |
+| Code change? | **NO** — matches `agreement_service.py:~90`, where every `parties[]` entry gates execution |
+
+### DG-02 — Acceptance distinct from signing
+
+**ANSWERED: (b) acceptance is a separate per-party, per-version act that opens
+signing.** **PENDING COUNSEL.**
+
+| Field | Value |
+|---|---|
+| Sources | **LIFECYCLE** Steps 3–6, **UNDEFINED** in both plans before now |
+| Code change? | **YES — implementation gap, not scheduled** |
+
+No acceptance exists on agreements today; the only party acts are sign
+(`routes/agreements.py:110`) and decline (`:127`). Acceptance is per-version,
+so it depends on DG-04's immutable versions existing first.
+
+**PENDING COUNSEL** — what a party is taken to have agreed to, and when, is a
+legal question. No legal conclusion is stated here.
+
+### DG-14 — Amendments
+
+**ANSWERED: (a) deferred; reserve a supersedes / linked-agreement field in the
+design.** **PENDING COUNSEL.**
+
+| Field | Value |
+|---|---|
+| Sources | **LIFECYCLE** Step 9 (adopted at DG-28), **IMPLEMENTATION** |
+| Code change? | **Deferred.** The reserved field is a design note, not scheduled work |
+| Exception | Records a **deferral of LIFECYCLE Step 9**, which is otherwise binding |
+
+Nothing is built. The decision reserves a `supersedes` / linked-agreement
+field so a later amendment does not require re-modelling.
+
+**PENDING COUNSEL** — the relationship between an executed instrument and a
+later change to it is a legal question. No legal conclusion is stated here.
+
+### DG-18 — Reference number
+
+**ANSWERED: (a) add a dedicated human-readable reference-number field.**
+
+| Field | Value |
+|---|---|
+| Sources | **FR-11.1** (binding since DG-00) |
+| Code change? | **YES — implementation gap, not scheduled** |
+
+No `reference_number` exists in `schemas/agreement.py`, the service, or either
+screen. Human-readable is recorded as decided; its format is **UNDEFINED**.
+
+### DG-19 — Agreement value
+
+**ANSWERED: (a) add an optional agreement-value field.**
+
+| Field | Value |
+|---|---|
+| Sources | **FR-11.1** (binding since DG-00) |
+| Code change? | **YES — implementation gap, not scheduled** |
+
+Optional is recorded as decided. Currency, precision, and whether it derives
+from engagement fee terms are **UNDEFINED**.
+
+### DG-21 — Template preview
+
+**ANSWERED: (b) record an exception to FR-11.4 while the builder is parked.**
+
+| Field | Value |
+|---|---|
+| Sources | **FR-11.4**, **PLAN** (D1, DG-25 revised) |
+| Code change? | **NO** — the Preview button is already absent (`ModAgreements.jsx:457-459`) |
+| Exception | **FR-11.4 does not apply while the builder is parked.** It resumes if the builder is unparked |
+
+### DG-23 — Drawn and uploaded signature methods
+
+**ANSWERED: (a) draw and upload move into the live screens, independent of the
+builder.**
+
+| Field | Value |
+|---|---|
+| Sources | **FR-11.9** (binding since DG-00) |
+| Code change? | **YES — implementation gap, not scheduled** |
+
+All three methods exist in the parked `PageCreate` (`ModAgreements.jsx:799`);
+both live signing paths hardcode typed (`:1221`, `AgreementsPage.jsx:132`).
+The backend already accepts all three (`core/constants.py:106-109`).
+
+> **RISK NOTE — SVG.** An uploaded SVG can carry scripts. Any SVG must be
+> sanitised or converted before it is displayed or included in a PDF. This is
+> recorded as a constraint on the future work, not as a finding about current
+> code: upload is not reachable today, so no SVG currently reaches a renderer.
+
+### DG-24 — Upload type and size limits
+
+**ANSWERED: (b) keep the server's smaller limit, correct the UI label, check
+file type in the browser.**
+
+| Field | Value |
+|---|---|
+| Sources | **FR-11.9**, **IMPLEMENTATION** |
+| Code change? | **YES — implementation gap, not scheduled** |
+| Exception | **FR-11.9's 2 MB does not apply.** The server limit governs |
+
+The server caps `signature_data` at 200,000 characters
+(`schemas/agreement.py:20`, `_MAX_SIGNATURE`) — roughly 146 KB of base64, about
+14× stricter than 2 MB. The UI label "PNG, JPG or SVG · Max 2MB"
+(`ModAgreements.jsx:955`) is unenforced and must be corrected to the real
+limit. Browser-side type checking replaces the current `accept="image/*"` hint
+(`:933`).
+
+### DG-27 — Status vocabulary
+
+**ANSWERED: (a) both screens use FR-11.1's vocabulary.**
+
+| Field | Value |
+|---|---|
+| Sources | **FR-11.1** (binding since DG-00) |
+| Code change? | **YES — implementation gap, not scheduled** |
+
+The client screen already matches (`ModAgreements.jsx:158` — `Signed`,
+`Rejected`). The lawyer screen does not (`AgreementsPage.jsx:13` — `Executed`,
+`Cancelled`) and must change.
+
+### DG-06 — Partly-signed display
+
+**ANSWERED: (b) a derived display, not a new stored status.**
+
+| Field | Value |
+|---|---|
+| Sources | **LIFECYCLE** Step 6, **FR-11** silent |
+| Code change? | **YES — implementation gap, not scheduled** |
+
+No enum member is added; `AgreementStatus` stays at four
+(`core/constants.py:112-116`). The display derives from `parties[].signed`,
+which is already present.
+
+### DG-22 — Sharing
+
+**ANSWERED: (a) out of scope for now; exception to FR-11.11.**
+
+| Field | Value |
+|---|---|
+| Sources | **FR-11.11**, **PLAN** |
+| Code change? | **NO** — nothing exists and nothing is added |
+| Exception | **FR-11.11 does not apply for now** |
+
+**DG-03 stands as already recorded** — registered users only, no signing links
+for outsiders.
+
+### Round 2 consequences
+
+#### Register status, recounted from the 29 rows
+
+Counts are recalculated from the rows themselves, not carried forward.
+
+| Status | IDs | Count |
+|---|---|---|
+| **DECIDED** | DG-00, DG-01, DG-02, DG-03, DG-04, DG-05, DG-06, DG-07, DG-08, DG-11, DG-12, DG-14, DG-18, DG-19, DG-20, DG-21, DG-22, DG-23, DG-24, DG-25, DG-27, DG-28 | **22** |
+| **DECIDED EARLIER, implementation outstanding** | DG-09, DG-10, DG-15 | **3** |
+| **NOT A DECISION — implementation behaviour** | DG-13, DG-16, DG-17, DG-26 | **4** |
+| **STILL OPEN** | *(none)* | **0** |
+| **TOTAL** | | **29 ✓** |
+
+22 + 3 + 4 + 0 = **29**, matching the register's DG-00 .. DG-28 inclusive.
+**Every decision row in the register now has an answer.** What remains is
+implementation and the items below.
+
+#### Implementation gaps this round CREATES
+
+Each is decided and unscheduled. No code is written by this document.
+
+| Row | Gap | Evidence of the current state |
+|---|---|---|
+| **DG-08** | A system-only; B and C on one rule set | B+A share `agreement_service.py:813`; C has `:397` — the opposite grouping |
+| **DG-02** | Per-party, per-version acceptance | No acceptance surface; depends on DG-04 landing first |
+| **DG-18** | Human-readable reference number | Field absent everywhere |
+| **DG-19** | Optional agreement value | Field absent everywhere |
+| **DG-23** | Draw + upload in live screens, with SVG sanitised or converted | `ModAgreements.jsx:1221`, `AgreementsPage.jsx:132` hardcode typed |
+| **DG-24** | Correct the UI limit label; browser-side type check | `ModAgreements.jsx:933, 955` |
+| **DG-27** | Lawyer screen adopts FR-11.1 vocabulary | `AgreementsPage.jsx:13` |
+| **DG-06** | Derived partly-signed display | `parties[].signed` exists; nothing renders it |
+
+#### Implementation gaps CARRIED IN from earlier rounds
+
+| Row | Gap | Status |
+|---|---|---|
+| **DG-04** | Immutable versions — the largest structural change in the register | Open gap; `agreement_service.py:491` still an in-place counter |
+| **DG-07** | Re-check KYC at acceptance | Open gap; `accept_terms` does not verify |
+| **DG-09** | Decline records a `cancellation_source` | Open gap (§3.G1.10) |
+| **DG-10** | Withdraw-vs-decline notification copy | Open gap (§3.5) |
+| **DG-15** | Expiry gate | Deferred, unscheduled (§3.G1.12) |
+
+#### Left UNDEFINED by this round — not answered, listed so they are not lost
+
+- **DG-18** reference-number **format**.
+- **DG-19** value **currency and precision**, and whether it derives from
+  engagement fee terms.
+- **DG-02** rollback behaviour when acceptance is withdrawn or a new version
+  supersedes an accepted one.
+- **DG-07** rollback behaviour when the KYC re-check fails at acceptance.
+- **DG-04** whether a signature stores a **version id** alongside its body
+  digest. The audit's reason that a v1 signature could not be miscounted
+  toward v2 relied on v2 being impossible; once versions exist that protection
+  is gone.
+- **DG-14** the reserved `supersedes` field's shape.
+- **DG-23** which SVG treatment applies — sanitise, or convert to raster.
+- **DG-13** deleted or deactivated party.
+
+#### Ordering constraint, recorded not scheduled
+
+**DG-02 depends on DG-04.** Acceptance is per-version, so immutable versions
+must exist before per-version acceptance can. Nothing else in this round has a
+stated prerequisite.
 

@@ -1777,6 +1777,22 @@ What they change for THIS document:
   code at `884161a` does not do this.
 - **D4 is answered** — see the MERGE_CHECKLIST note below.
 
+**Round 2 (2026-09-21)** — thirteen further decisions are recorded in
+`AGREEMENTS_PRODUCT_PLAN.md` **§12**. What they change for THIS document:
+
+- **The builder is NOT deleted.** DG-25 was revised; the end-of-October
+  deletion default is withdrawn and marked superseded in every place it
+  appeared, here and in the product plan.
+- **Producer A becomes system-only; B and C converge on one rule set**
+  (DG-08). This inverts today's grouping, where A and B share
+  `_create_agreement` and C does not. Implementation gap, not scheduled.
+- **Immutable party set (DG-11) and all-parties-required (DG-12)** match the
+  code as shipped and change nothing here.
+- **FR-11.4 (preview), FR-11.9's 2 MB and FR-11.11 (sharing) now carry
+  recorded exceptions**, so their absence is intended rather than outstanding.
+- **Every register row DG-00 .. DG-28 now has an answer.** What remains is
+  implementation, and none of it is scheduled by these documents.
+
 ## MERGE_CHECKLIST — `fix/agreements-phase0`
 
 Everything below is a gate on merging, not a wish list. The engineering items
@@ -1848,13 +1864,24 @@ been open long enough to be worth naming in the same place.
       `AGREEMENTS_PRODUCT_PLAN.md` §11: **accept the indefinite park, no owner
       assigned, PENDING COUNSEL.** The item stays on this checklist because the
       *consequence* is unchanged — templates, ETO wording and certificate
-      conclusions remain blocked, and the D1 end-of-October default still
-      stands. What is superseded is the framing of it as an undecided question.
-- [ ] **DIY builder cutoff — end of October.** The recorded decision is
+      conclusions remain blocked. What is superseded is the framing of it as an
+      undecided question.
+      **REVISED 2026-09-21 (DG-25 revised):** the clause that "the D1
+      end-of-October default still stands" is **WITHDRAWN**. There is no
+      deletion date; the builder stays parked indefinitely.
+- [x] ~~**DIY builder cutoff — end of October.** The recorded decision is
       "park now (B), cut it (A) if no counsel is secured by end of October".
       That date is a decision point, not a reminder: if it passes unowned, the
       default is to DELETE the builder rather than leave a parked feature
-      indefinitely.
+      indefinitely.~~
+      **SUPERSEDED 2026-09-21 — the October deletion default is WITHDRAWN.**
+      Answered as **DG-25 (revised)** in `AGREEMENTS_PRODUCT_PLAN.md` §11: the
+      builder is **not** deleted and stays parked with no deletion date.
+      Templates will be provided later by the project owner (no target date).
+      **Provision is not verification** — a template needs a named reviewer,
+      review date, version, jurisdiction and an unexpired review period before
+      the withdrawn-template guard is lifted for it. No longer a merge gate;
+      kept here, struck through, so the old default is not re-read as live.
 - [ ] **Six orphaned engagement letters, unclassified.** Agreements whose
       engagement and case rows are both gone (five `pending`, one `executed`),
       all created 2026-08-24. Nothing deletes an agreement when its engagement
