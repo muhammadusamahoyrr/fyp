@@ -423,3 +423,145 @@ test("client: the 51st agreement is reachable and the count is honest", async ()
     assert.ok(ui.text().includes("Agreement 51"),
         "the 51st agreement is unreachable");
 });
+
+// ── a slow answer must not overwrite a newer question ───────────────────────
+
+test("lawyer: a late fetch for A does not overwrite the open B", async () => {
+    // Open A, open B before A answers, then let A answer. If the late reply
+    // wins, the modal shows B's title above A's terms -- one agreement's
+    // wording under another's heading, on a signing surface.
+    const rowA = lightRow({ id: "A1", _id: "A1", title: "Agreement A" });
+    const rowB = lightRow({ id: "B2", _id: "B2", title: "Agreement B" });
+    __respond("listAgreements", () => page([rowA, rowB]));
+
+    const pending = [];
+    __respond("getAgreement", (id) => new Promise(resolve => {
+        pending.push(() => resolve(ok({
+            ...(id === "A1" ? rowA : rowB),
+            body_html: id === "A1" ? "TERMS OF A" : "TERMS OF B",
+        })));
+    }));
+
+    const ui = await mount(lawyerScreen());
+    await ui.openRow("Agreement A");   // A in flight
+    await ui.openRow("Agreement B");   // B in flight
+    assert.equal(pending.length, 2, "both fetches should be in flight");
+
+    await act(async () => { pending[1](); });   // B answers
+    await act(async () => { pending[0](); });   // A answers LATE
+    await act(async () => {});
+
+    assert.ok(ui.text().includes("TERMS OF B"), "B's terms are not shown");
+    assert.ok(!ui.text().includes("TERMS OF A"),
+        "a stale reply overwrote the open agreement: the reader sees one "
+        + "agreement's heading above another's wording");
+});
+
+test("client: a late fetch for A does not overwrite the open B", async () => {
+    const rowA = lightRow({ id: "A1", _id: "A1", title: "Agreement A" });
+    const rowB = lightRow({ id: "B2", _id: "B2", title: "Agreement B" });
+    __respond("listAgreements", () => page([rowA, rowB]));
+
+    const pending = [];
+    __respond("getAgreement", (id) => new Promise(resolve => {
+        pending.push(() => resolve(ok({
+            ...(id === "A1" ? rowA : rowB),
+            body_html: id === "A1" ? "TERMS OF A" : "TERMS OF B",
+        })));
+    }));
+
+    const ui = await mount(clientScreen());
+    await ui.clickText("All Agreements");
+    await ui.openRow("Agreement A");
+    await ui.openRow("Agreement B");
+    assert.equal(pending.length, 2);
+
+    await act(async () => { pending[1](); });
+    await act(async () => { pending[0](); });
+    await act(async () => {});
+
+    assert.ok(ui.text().includes("TERMS OF B"));
+    assert.ok(!ui.text().includes("TERMS OF A"),
+        "a stale reply overwrote the open agreement");
+});
+
+// ── after acting, what is on screen is what the server says ─────────────────
+
+test("lawyer: after signing, the list shows the server's new status", async () => {
+    let signed = false;
+    __respond("listAgreements", () => page([
+        lightRow(signed
+            ? { status: "executed",
+                parties: [{ user_id: ME, full_name: "Adv Khan", signed: true },
+                          { user_id: THEM, full_name: "The Client", signed: true }] }
+            : {}),
+    ]));
+    __respond("getAgreement", () => ok(fullDoc()));
+    __respond("signAgreement", () => { signed = true; return ok(fullDoc({ status: "executed" })); });
+
+    const ui = await mount(lawyerScreen());
+    await ui.openRow("Retainer");
+    const before = __calls("listAgreements").length;
+
+    await ui.type("Your full name", "Adv Khan");
+    await ui.clickButton("Sign Agreement");
+    await act(async () => {});
+
+    // COUNTED RELATIVE TO THE ACTION. Auth hydration fires its own reload
+    // when `user` arrives, so an absolute count asserts a property of the
+    // test harness rather than of the screen.
+    assert.ok(__calls("listAgreements").length > before,
+        "the list was not refreshed from the server after signing");
+    assert.ok(ui.text().includes("Executed"),
+        "the screen still shows the pre-signature status");
+});
+
+test("lawyer: after declining, the refreshed row comes from the server", async () => {
+    let declined = false;
+    __respond("listAgreements", () => page([
+        lightRow(declined ? { status: "cancelled" } : {}),
+    ]));
+    __respond("getAgreement", () => ok(fullDoc()));
+    __respond("declineAgreement", () => { declined = true; return ok(fullDoc({ status: "cancelled" })); });
+
+    const ui = await mount(lawyerScreen());
+    await ui.openRow("Retainer");
+    const before = __calls("listAgreements").length;
+
+    await ui.clickButton("I do not want to sign this");
+    await ui.clickButton("Confirm decline");
+    await act(async () => {});
+
+    assert.ok(__calls("listAgreements").length > before,
+        "no refresh after declining");
+    assert.ok(ui.text().includes("Cancelled"));
+});
+
+// ── paging asks the server for the next page ────────────────────────────────
+
+test("lawyer: Load more requests page 2 and the count line moves", async () => {
+    const many = Array.from({ length: 51 }, (_, i) => lightRow({
+        id: `A${i + 1}`, _id: `A${i + 1}`, title: `Agreement ${i + 1}`,
+    }));
+    __respond("listAgreements", (opts = {}) => {
+        const size = opts.page_size || 20;
+        const p = opts.page || 1;
+        return ok({ items: many.slice((p - 1) * size, p * size),
+                    total: many.length, page: p, page_size: size,
+                    pages: Math.ceil(many.length / size) });
+    });
+
+    const ui = await mount(lawyerScreen());
+    const firstCount = ui.text().match(/Showing (\d+) of 51/)?.[1];
+    assert.ok(firstCount, "no count line on the first page");
+
+    await ui.clickButton("Load more");
+
+    const pagesAsked = __calls("listAgreements").map(c => c.args[0]?.page || 1);
+    assert.ok(pagesAsked.includes(2),
+        `page 2 was never requested; asked for ${JSON.stringify(pagesAsked)}`);
+
+    const secondCount = ui.text().match(/Showing (\d+) of 51/)?.[1];
+    assert.ok(Number(secondCount) > Number(firstCount),
+        `the count line did not move: ${firstCount} then ${secondCount}`);
+});

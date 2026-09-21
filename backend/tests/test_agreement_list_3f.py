@@ -405,3 +405,80 @@ def test_party_out_does_not_forbid_extras():
         "signature_data": "a typed legal name",
     })
     assert "signature_data" not in party.model_dump()
+
+
+# ── the list contract, checked against what the frontend actually reads ─────
+
+def test_the_frontend_reads_only_fields_the_list_row_provides():
+    """THE TEST THAT WOULD HAVE CAUGHT THE 3F REGRESSION.
+
+    Gate 3F removed `body_html` from list rows. The backend tests asserted the
+    removal, the frontend tests asserted the right calls were made, and nobody
+    compared the two: both screens went on reading `a.body_html` off the row,
+    so every agreement opened showing "No content." beside a working Sign
+    button.
+
+    A field a mapper reads and the row never carries is `undefined` -- which
+    renders as an empty string or a fallback, not as an error. So the only
+    place this is visible is here, holding both halves at once.
+
+    Reads the JSX as text on purpose. The alternative is a running browser,
+    and the property is structural: which keys does the mapper touch, and does
+    the serialiser promise them.
+    """
+    import re
+    from pathlib import Path
+
+    from app.schemas.agreement import AgreementListItem
+
+    root = Path(__file__).resolve().parents[2] / "frontend" / "src" / "components"
+    screens = {
+        "lawyer": (root / "lawyer" / "AgreementsPage.jsx",
+                   r"function mapAgreement\(a, myId\) \{(.*?)\n\}"),
+        "client": (root / "client" / "ModAgreements.jsx",
+                   r"const mapAgreement = \(a, myId\) => \{(.*?)\n\};"),
+    }
+
+    provided = set(AgreementListItem.model_fields) | {"_id"}
+
+    for name, (path, pattern) in screens.items():
+        source = path.read_text(encoding="utf-8")
+        match = re.search(pattern, source, re.S)
+        assert match, f"{name}: mapAgreement moved; this test needs updating"
+
+        read = set(re.findall(r"\ba\.([a-z_]+)", match.group(1)))
+        missing = sorted(read - provided)
+        assert not missing, (
+            f"{name} mapAgreement reads {missing} off a LIST ROW, and "
+            f"AgreementListItem does not provide it. The value will be "
+            f"undefined and render as a blank or a fallback, which is exactly "
+            f"how the body disappeared in 3F."
+        )
+
+
+def test_the_list_row_and_the_schema_agree():
+    """`_list_row` builds the dict; `AgreementListItem` serialises it. A key
+    the builder strips but the schema still declares would serialise as null
+    and read, to a caller, as "this agreement has none"."""
+    from app.schemas.agreement import AgreementListItem
+    from app.services.agreement_service import _list_row
+
+    row = _list_row({
+        "_id": "A1", "title": "Retainer", "status": "pending",
+        "body_html": "Terms.", "body_sha256": "a" * 64,
+        "audit_log": [{"action": "sent"}],
+        "case_id": "C1", "engagement_id": None, "created_by": "L1",
+        "version": 2, "parties": [{"user_id": "L1", "signature_data": "x"}],
+    })
+
+    for stripped in ("body_html", "body_sha256", "audit_log"):
+        assert stripped not in row
+        assert stripped not in AgreementListItem.model_fields, (
+            f"the schema still declares {stripped} that `_list_row` removes, "
+            f"so it serialises as null rather than being absent"
+        )
+
+    # Everything the schema promises, the builder must actually produce.
+    out = AgreementListItem(**{**row, "_id": row["id"]})
+    assert out.version == 2
+    assert out.status == "pending"

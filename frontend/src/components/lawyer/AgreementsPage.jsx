@@ -1,7 +1,7 @@
 'use client';
 // Lawyer Agreements — engagement letters and contracts awaiting signature.
 // Counterpart of the client's AgreementHub; same backend, lawyer perspective.
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
@@ -29,7 +29,11 @@ function mapAgreement(a, myId) {
         needsMySig: a.status === "pending" && !!me && !me.signed,
         date: a.created_at ? new Date(a.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
         counterparts: parties.filter(p => p.user_id !== myId).map(p => p.full_name).join(" · "),
-        eto: a.eto_classification,
+        // NO `eto` HERE either. Like the body, it is a property of the
+        // DOCUMENT and the list does not carry it -- reading it off a row
+        // yielded undefined, so the subtitle silently said "Awaiting first
+        // signature" for agreements that were already executed. It now comes
+        // from the fetched document.
         isEngagementLetter: !!a.engagement_id,
         // Kept for the editor: `version` drives optimistic concurrency and
         // `raw` is the untouched server copy, which is what the digest is
@@ -65,6 +69,8 @@ export function AgreementsPage() {
     // from `active` (the list row) so it is impossible to render one while
     // believing it is the other.
     const [doc, setDoc] = useState(null);
+    // Monotonic counter identifying the most recent open. See `openAgreement`.
+    const openSeq = useRef(0);
 
     // Paging. `total` is what stops a truncated list looking complete.
     const [total, setTotal] = useState(0);
@@ -102,13 +108,22 @@ export function AgreementsPage() {
         setActive(row);
         setSignName(user?.full_name || "");
         setDoc({ loading: true, body: null, error: null });
+
+        // THE LAST QUESTION ASKED IS THE ONLY ONE WHOSE ANSWER COUNTS.
+        // Open A, open B before A replies, and A's late reply would land in
+        // `doc` while `active` is B -- putting one agreement's wording under
+        // another's heading, on a screen whose next button is Sign.
+        const token = ++openSeq.current;
         const { data, error } = await getAgreement(row.id);
+        if (token !== openSeq.current) return;
+
         if (error || !data) {
             setDoc({ loading: false, body: null,
                      error: error?.message || "This agreement could not be loaded." });
             return;
         }
-        setDoc({ loading: false, body: data.body_html ?? "", error: null });
+        setDoc({ loading: false, body: data.body_html ?? "",
+                 eto: data.eto_classification, error: null });
     }, [user?.full_name]);
 
     const doSign = async () => {
@@ -142,7 +157,7 @@ export function AgreementsPage() {
         showToast("⬇ Downloaded");
     };
 
-    const closeModal = () => { setActive(null); setDoc(null); setDeclineOpen(false); setDeclineReason(""); };
+    const closeModal = () => { openSeq.current += 1; setActive(null); setDoc(null); setDeclineOpen(false); setDeclineReason(""); };
 
     const changeFilter = (next) => {
         // ONE place, because resetting the page is not optional: keeping page
@@ -282,7 +297,7 @@ export function AgreementsPage() {
                             <span style={{ fontSize: 20 }}>{active.isEngagementLetter ? "⚖️" : "📄"}</span>
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 15, fontWeight: 700, color: T.text, fontFamily: "Georgia,serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.title}</div>
-                                <div style={{ fontSize: 11, color: T.textMuted }}>{active.eto || "Awaiting first signature"}</div>
+                                <div style={{ fontSize: 11, color: T.textMuted }}>{doc?.eto || "Awaiting first signature"}</div>
                             </div>
                             <Badge type={STATUS_BADGE[active.status] || "gray"}>{active.status}</Badge>
                             <button onClick={closeModal} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: T.textMuted, fontSize: 14 }}>✕</button>
