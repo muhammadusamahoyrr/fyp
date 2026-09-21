@@ -26,7 +26,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "./theme.js";
 import { Btn, Badge } from "./components.jsx";
 import {
-    listCases, createDraft, updateDraft, deleteDraft, sendDraft,
+    listCases, getAgreement, createDraft, updateDraft, deleteDraft, sendDraft,
     idempotencyKey, errorCode,
 } from "@/lib/api.js";
 import { bodyDigestHex } from "@/lib/agreementBody.js";
@@ -86,9 +86,18 @@ export function DraftComposer({ draft, onClose, onSaved }) {
 
     // `server` is the last state the SERVER confirmed: body, title and version.
     // Everything sent back to it is derived from here, never from the editor.
-    const [server, setServer] = useState(draft || null);
-    const [title, setTitle] = useState(draft?.title || "");
-    const [body, setBody] = useState(draft?.body_html || "");
+    //
+    // IT DOES NOT START FROM THE `draft` PROP. That prop is a LIST ROW, and
+    // Gate 3F removed `body_html` from list rows -- so seeding from it opened
+    // the editor blank, instantly flagged "Unsaved changes", and a save would
+    // have replaced the lawyer's real wording with whatever was in the box.
+    // The draft is fetched by id below; until it arrives there is nothing to
+    // edit and nothing to save.
+    const [server, setServer] = useState(null);
+    const [title, setTitle] = useState("");
+    const [body, setBody] = useState("");
+    const [loadError, setLoadError] = useState(null);
+    const [loading, setLoading] = useState(!!draft);
 
     const [cases, setCases] = useState([]);
     const [casesLoading, setCasesLoading] = useState(!draft);
@@ -106,6 +115,32 @@ export function DraftComposer({ draft, onClose, onSaved }) {
     // exists to prevent — so it is state, not a value computed at call time.
     const [sendKey, setSendKey] = useState(null);
 
+    /* Load the draft the row points at. The row is a pointer, not the
+       document: it has an id and a status and nothing to edit. */
+    useEffect(() => {
+        const id = draft?.id || draft?._id;
+        if (!id) return;
+        let cancelled = false;
+        setLoading(true);
+        getAgreement(id).then(({ data, error }) => {
+            if (cancelled) return;
+            setLoading(false);
+            if (error || !data) {
+                setLoadError(error?.message || "This draft could not be loaded.");
+                return;
+            }
+            setServer(data);
+            setTitle(data.title || "");
+            setBody(data.body_html || "");
+        }).catch(() => {
+            if (!cancelled) {
+                setLoading(false);
+                setLoadError("This draft could not be loaded.");
+            }
+        });
+        return () => { cancelled = true; };
+    }, [draft]);
+
     useEffect(() => {
         if (draft) return;
         listCases({ page: 1, page_size: 50 })
@@ -114,8 +149,21 @@ export function DraftComposer({ draft, onClose, onSaved }) {
             .finally(() => setCasesLoading(false));
     }, [draft]);
 
+    // `server` is null until the fetch lands, so a freshly opened draft is
+    // never dirty and never savable -- which is what makes an empty overwrite
+    // impossible rather than merely unlikely.
     const dirty = !!server && (body !== server.body_html || title !== server.title);
     const canSend = !!server && !dirty && !!body.trim();
+    // `!loading && !loadError` is BELT AND BRACES, not the load-bearing guard.
+    // The render below short-circuits to a loading or error panel and never
+    // reaches the editor, so there is no Save button to disable in those
+    // states -- a prove-it run confirmed these two terms can be deleted with
+    // no test turning red. They stay because they are cheap and they keep
+    // being true if the render branches are ever rearranged; the guard that
+    // actually prevents an empty overwrite is that branch, pinned by
+    // "composer: a failed fetch disables saving so nothing is overwritten".
+    const canSave = !loading && !loadError && !!title.trim() && !!body.trim()
+        && (server ? dirty : !!picked);
 
     const fail = (error, fallback) => {
         setNote({ kind: "error", text: error?.message || fallback });
@@ -241,7 +289,7 @@ export function DraftComposer({ draft, onClose, onSaved }) {
             : "✅ Sent");
     }, [server, dirty, consent, signName, sendKey, onSaved, onClose]);
 
-    const composing = !server && !picked;
+    const composing = !draft && !server && !picked;
     const counterparty = server?.parties?.find(p => p.user_id !== server.created_by);
 
     return (
@@ -270,7 +318,28 @@ export function DraftComposer({ draft, onClose, onSaved }) {
                     <button onClick={() => onClose()} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: T.textMuted, fontSize: 14 }}>✕</button>
                 </div>
 
-                {composing ? (
+                {loading ? (
+                    <div style={{ padding: 34, textAlign: "center", color: T.textMuted, fontSize: 13 }}>
+                        Loading the draft…
+                    </div>
+                ) : loadError ? (
+                    /* NO EDITOR AT ALL while the wording is unknown. An
+                       enabled textarea over an unloaded draft is one Save
+                       away from replacing the real terms with an empty
+                       string. */
+                    <div style={{ padding: 30, textAlign: "center" }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: T.danger, marginBottom: 8 }}>
+                            {loadError}
+                        </div>
+                        <div style={{ fontSize: 12.5, color: T.textMuted, lineHeight: 1.6, maxWidth: 400, margin: "0 auto" }}>
+                            Your saved wording is untouched. Close this and reopen it —
+                            nothing can be edited or saved until the draft is on screen.
+                        </div>
+                        <div style={{ marginTop: 16 }}>
+                            <Btn variant="secondary" onClick={() => onClose()}>Close</Btn>
+                        </div>
+                    </div>
+                ) : composing ? (
                     <CasePicker T={T} cases={cases} loading={casesLoading}
                         onPick={setPicked} onCancel={() => onClose()} />
                 ) : (
@@ -331,7 +400,7 @@ export function DraftComposer({ draft, onClose, onSaved }) {
                         </div>
 
                         <div style={{ padding: "12px 20px 16px", borderTop: `1px solid ${T.border}`, background: T.surface, display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
-                            <Btn variant="secondary" disabled={busy || (!!server && !dirty) || !title.trim() || !body.trim()}
+                            <Btn variant="secondary" disabled={busy || !canSave}
                                 onClick={doSave}>
                                 {busy ? "Saving…" : server ? (dirty ? "Save changes" : "Saved") : "Save draft"}
                             </Btn>

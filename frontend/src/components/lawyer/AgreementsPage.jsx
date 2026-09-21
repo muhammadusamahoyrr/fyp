@@ -5,8 +5,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { listAgreements, signAgreement, declineAgreement, downloadExecutedAgreement } from "@/lib/api.js";
+import { listAgreements, getAgreement, signAgreement, declineAgreement, downloadExecutedAgreement } from "@/lib/api.js";
 import { DraftComposer } from "./DraftComposer.jsx";
+
+const PAGE_SIZE = 25;
 
 const STATUS_LABEL = { pending: "Pending", executed: "Executed", cancelled: "Cancelled", draft: "Draft" };
 const STATUS_BADGE = { Pending: "warn", Executed: "success", Cancelled: "danger", Draft: "gray" };
@@ -17,7 +19,10 @@ function mapAgreement(a, myId) {
     return {
         id: a.id || a._id,
         title: a.title || "Agreement",
-        body: a.body_html || "",
+        // NO `body` HERE. Gate 3F made the list light, and deriving the
+        // displayed text from a list row is what made every agreement open
+        // as "No content." beside a working Sign button. The body is fetched
+        // by id when the document is opened -- see `openAgreement`.
         status: STATUS_LABEL[a.status] || "Pending",
         parties,
         signedCount: parties.filter(p => p.signed).length,
@@ -56,18 +61,55 @@ export function AgreementsPage() {
     // sign it is to send it.
     const [composing, setComposing] = useState(null);
 
+    // The DOCUMENT behind the open row: { loading, body, error }. Kept apart
+    // from `active` (the list row) so it is impossible to render one while
+    // believing it is the other.
+    const [doc, setDoc] = useState(null);
+
+    // Paging. `total` is what stops a truncated list looking complete.
+    const [total, setTotal] = useState(0);
+    const [pages, setPages] = useState(1);
+    const [page, setPage] = useState(1);
+    const [statusFilter, setStatusFilter] = useState(null);
+
     const reload = useCallback(() => {
         // 3F: the response is a page, not a bare array. Reading `data.items`
         // rather than `data` -- an `Array.isArray(data)` check would now be
         // false for every successful response and the screen would render
         // "no agreements" to someone who has forty.
-        listAgreements({ page_size: 50 }).then(({ data }) => {
-            const rows = data?.items;
-            if (Array.isArray(rows)) setItems(rows.map(a => mapAgreement(a, user?._id)));
-            setLoading(false);
-        }).catch(() => setLoading(false));
-    }, [user?._id]);
+        listAgreements({ page, page_size: PAGE_SIZE, status: statusFilter })
+            .then(({ data }) => {
+                const rows = data?.items;
+                if (Array.isArray(rows)) {
+                    const mapped = rows.map(a => mapAgreement(a, user?._id));
+                    // Page 1 REPLACES, later pages APPEND. A filter change
+                    // resets to page 1, so this is also what clears the old
+                    // results rather than stacking them underneath.
+                    setItems(prev => (page === 1 ? mapped : [...prev, ...mapped]));
+                    setTotal(data.total ?? mapped.length);
+                    setPages(data.pages ?? 1);
+                }
+                setLoading(false);
+            }).catch(() => setLoading(false));
+    }, [user?._id, page, statusFilter]);
     useEffect(() => { reload(); }, [reload]);
+
+    /* Open a row: fetch the DOCUMENT, never trust the row.
+     *
+     * The sign and decline panels are gated on `doc.body != null`, so a failed
+     * fetch cannot leave somebody able to sign text they were never shown. */
+    const openAgreement = useCallback(async (row) => {
+        setActive(row);
+        setSignName(user?.full_name || "");
+        setDoc({ loading: true, body: null, error: null });
+        const { data, error } = await getAgreement(row.id);
+        if (error || !data) {
+            setDoc({ loading: false, body: null,
+                     error: error?.message || "This agreement could not be loaded." });
+            return;
+        }
+        setDoc({ loading: false, body: data.body_html ?? "", error: null });
+    }, [user?.full_name]);
 
     const doSign = async () => {
         if (!signName.trim()) { showToast("⚠️ Type your full name to sign"); return; }
@@ -100,7 +142,15 @@ export function AgreementsPage() {
         showToast("⬇ Downloaded");
     };
 
-    const closeModal = () => { setActive(null); setDeclineOpen(false); setDeclineReason(""); };
+    const closeModal = () => { setActive(null); setDoc(null); setDeclineOpen(false); setDeclineReason(""); };
+
+    const changeFilter = (next) => {
+        // ONE place, because resetting the page is not optional: keeping page
+        // 3 across a filter change shows the user page 3 of a list they just
+        // narrowed, which usually looks empty.
+        setPage(1);
+        setStatusFilter(next);
+    };
 
     const awaitingMe = items.filter(a => a.needsMySig);
     // Only ever this lawyer's own: the server does not return anyone else's.
@@ -138,6 +188,24 @@ export function AgreementsPage() {
                 ))}
             </div>
 
+            {/* Status filter. Composes with paging through `changeFilter`,
+                which is the only writer of both. */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[["All", null], ["Pending", "pending"], ["Executed", "executed"],
+                  ["Cancelled", "cancelled"], ["Draft", "draft"]].map(([label, value]) => (
+                    <button key={label} type="button" onClick={() => changeFilter(value)}
+                        style={{
+                            padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                            border: `1px solid ${statusFilter === value ? T.primary : T.border}`,
+                            background: statusFilter === value ? T.primaryGlow : "transparent",
+                            color: statusFilter === value ? T.primary : T.textMuted,
+                            cursor: "pointer", fontFamily: "inherit",
+                        }}>
+                        {label}
+                    </button>
+                ))}
+            </div>
+
             {/* List */}
             <Card style={{ padding: 0, overflow: "hidden" }}>
                 {loading ? (
@@ -154,7 +222,7 @@ export function AgreementsPage() {
                 ) : items.map((a, i) => (
                     <div key={a.id} onClick={() => {
                         if (a.isDraft) { setComposing(a.raw); return; }
-                        setActive(a); setSignName(user?.full_name || "");
+                        openAgreement(a);
                     }} style={{
                         display: "flex", alignItems: "center", gap: 14, padding: "14px 20px",
                         borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none",
@@ -178,6 +246,25 @@ export function AgreementsPage() {
                         <Badge type={STATUS_BADGE[a.status] || "gray"}>{a.status}</Badge>
                     </div>
                 ))}
+
+                {/* HOW MANY THERE ARE, and a way to reach them.
+                    The screen used to ask for 50 rows and ignore the total, so
+                    a lawyer with 51 agreements had one that simply did not
+                    exist as far as the UI was concerned -- indistinguishable
+                    from having 50. */}
+                {!loading && items.length > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 20px", borderTop: `1px solid ${T.border}`, background: T.surface, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, color: T.textMuted }}>
+                            Showing {items.length} of {total}
+                        </span>
+                        {items.length < total && (
+                            <Btn variant="secondary" size="sm" disabled={loading}
+                                onClick={() => { setLoading(true); setPage(p => p + 1); }}>
+                                Load more
+                            </Btn>
+                        )}
+                    </div>
+                )}
             </Card>
 
             {/* Detail / sign modal */}
@@ -211,16 +298,34 @@ export function AgreementsPage() {
                                     </div>
                                 ))}
                             </div>
-                            <div style={{ background: T.cardHi, border: `1px solid ${T.border}`, borderRadius: 10, padding: "16px 18px", fontSize: 13, lineHeight: 1.8, color: T.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
-                                {active.body || "No content."}
-                            </div>
+                            {/* THE DOCUMENT, fetched by id. Three distinct
+                                states, and "No content." is only ever the
+                                third: a body the server really returned empty.
+                                It must never stand in for a field the list
+                                did not carry. */}
+                            {doc?.loading ? (
+                                <div style={{ background: T.cardHi, border: `1px solid ${T.border}`, borderRadius: 10, padding: "20px 18px", fontSize: 13, color: T.textMuted, textAlign: "center" }}>
+                                    Loading the agreement…
+                                </div>
+                            ) : doc?.error ? (
+                                <div style={{ background: `${T.danger}12`, border: `1px solid ${T.danger}40`, borderRadius: 10, padding: "16px 18px", fontSize: 13, lineHeight: 1.7, color: T.danger }}>
+                                    {doc.error}
+                                    <div style={{ color: T.textMuted, marginTop: 6, fontSize: 12 }}>
+                                        Nothing can be signed until the wording is on screen.
+                                    </div>
+                                </div>
+                            ) : (
+                                <div style={{ background: T.cardHi, border: `1px solid ${T.border}`, borderRadius: 10, padding: "16px 18px", fontSize: 13, lineHeight: 1.8, color: T.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
+                                    {doc?.body ? doc.body : "No content."}
+                                </div>
+                            )}
 
                             {/* Only once EXECUTED. There is no document to
                                 download before both parties have signed, and
                                 the server refuses one -- offering the button
                                 early would promise a file that does not
                                 exist. */}
-                            {active.status === "Executed" && (
+                            {active.status === "Executed" && doc && !doc.loading && !doc.error && (
                                 <div style={{ marginTop: 14 }}>
                                     <Btn variant="secondary" disabled={busy} onClick={doDownload}>
                                         ⬇ Download signed copy
@@ -233,7 +338,11 @@ export function AgreementsPage() {
                             )}
                         </div>
 
-                        {active.needsMySig && (
+                        {/* GATED ON THE BODY. Signing is offered only once the
+                            document is on screen -- a failed fetch must not
+                            leave somebody able to put their name to text they
+                            were never shown. */}
+                        {active.needsMySig && doc && !doc.loading && !doc.error && (
                             <div style={{ padding: "12px 20px 16px", borderTop: `1px solid ${T.border}`, background: T.surface }}>
                                 <div style={{ fontSize: 10.5, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>
                                     Sign — type your full legal name

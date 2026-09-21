@@ -69,13 +69,30 @@ const DRAFT = (over = {}) => ({
 
 const ok = (body) => ({ data: body, error: null, status: 200 });
 
+/* What `getAgreement` should return for the draft being opened.
+ *
+ * THE COMPOSER NOW FETCHES. Its `draft` prop is a LIST ROW -- and since Gate
+ * 3F list rows carry no `body_html`, seeding the editor from one opened it
+ * blank and a save would have replaced the real wording. So the prop is a
+ * pointer and the document is fetched by id.
+ *
+ * Tests that care about the fetched document set this; the rest get the same
+ * object they passed as `draft`, which is what they were previously asserting
+ * against directly. */
+let fetchedDraft = null;
+
 async function mount(props) {
+    __respond("getAgreement", () => ({
+        data: fetchedDraft ?? props.draft, error: null, status: 200,
+    }));
+
     const host = dom.window.document.createElement("div");
     dom.window.document.body.appendChild(host);
     const root = createRoot(host);
     await act(async () => { root.render(h(DraftComposer, props)); });
-    // A second flush: the case list is fetched in an effect, and its state
-    // update lands a microtask after the first render settles.
+    // A second flush: the case list and the draft are both fetched in effects,
+    // and their state updates land a microtask after the first render settles.
+    await act(async () => {});
     await act(async () => {});
     return {
         host,
@@ -120,7 +137,7 @@ async function mount(props) {
     };
 }
 
-test.beforeEach(() => { __reset(); });
+test.beforeEach(() => { __reset(); fetchedDraft = null; });
 
 const argsOf = (name) => __calls(name).map(c => c.args);
 const BODY_FIELD = "Write the terms of this agreement…";

@@ -6,7 +6,7 @@ import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { createAgreement, signAgreement, declineAgreement, listAgreements, searchLawyers, downloadExecutedAgreement } from "@/lib/api.js";
+import { createAgreement, getAgreement, signAgreement, declineAgreement, listAgreements, searchLawyers, downloadExecutedAgreement } from "@/lib/api.js";
 
 /* ══════════════════════════════════════════════════════
    MODULE: AGREEMENTS — 5-Step Wizard
@@ -163,7 +163,10 @@ const mapAgreement = (a, myId) => {
     return {
         id: a.id || a._id,
         name: a.title || "Agreement",
-        body: a.body_html || "",
+        // NO `body` HERE. Gate 3F made the list light, and deriving the
+        // displayed text from a list row is what made every agreement open as
+        // "No content." beside a working Sign button. The body is fetched by
+        // id when the document is opened -- see `openAgreement`.
         status: AG_STATUS_LABEL[a.status] || "Pending",
         rawStatus: a.status,
         parties,
@@ -178,21 +181,43 @@ const mapAgreement = (a, myId) => {
 };
 
 // Fetch + map the user's real agreements; returns [items, loading, reload]
+const AGREEMENTS_PAGE_SIZE = 25;
+
+/* The caller's agreements, one page at a time.
+ *
+ * 3F: the response is a page, not a bare array -- an `Array.isArray(data)`
+ * check silently renders an empty list for every successful response.
+ *
+ * `total` is returned alongside the rows because a list that stops at its
+ * page size is indistinguishable from a complete one. Asking for 50 and
+ * ignoring the total is how somebody's 51st agreement stops existing. */
 const useMyAgreements = (userId) => {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
+
     const reload = useCallback(() => {
-        // 3F: the response is a page, not a bare array. See the note in the
-        // lawyer screen -- an `Array.isArray(data)` check silently renders an
-        // empty list for every successful response.
-        listAgreements({ page_size: 50 }).then(({ data }) => {
-            const rows = data?.items;
-            if (Array.isArray(rows)) setItems(rows.map(a => mapAgreement(a, userId)));
-            setLoading(false);
-        }).catch(() => setLoading(false));
-    }, [userId]);
+        listAgreements({ page, page_size: AGREEMENTS_PAGE_SIZE })
+            .then(({ data }) => {
+                const rows = data?.items;
+                if (Array.isArray(rows)) {
+                    const mapped = rows.map(a => mapAgreement(a, userId));
+                    // Page 1 replaces, later pages append.
+                    setItems(prev => (page === 1 ? mapped : [...prev, ...mapped]));
+                    setTotal(data.total ?? mapped.length);
+                }
+                setLoading(false);
+            }).catch(() => setLoading(false));
+    }, [userId, page]);
     useEffect(() => { reload(); }, [reload]);
-    return [items, loading, reload];
+
+    const loadMore = useCallback(() => {
+        setLoading(true);
+        setPage(p => p + 1);
+    }, []);
+
+    return [items, loading, reload, { total, loadMore, hasMore: items.length < total }];
 };
 
 // ── STEP PROGRESS BAR ────────────────────────
@@ -1124,7 +1149,7 @@ const PageAllAgreements = ({ onNavigate }) => {
     const t = useTheme();
     const toast = useToast();
     const { user } = useAuth();
-    const [agmts, loading, reload] = useMyAgreements(user?._id);
+    const [agmts, loading, reload, paging] = useMyAgreements(user?._id);
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState("All");
     const [viewing, setViewing] = useState(null);       // mapped agreement being viewed
@@ -1137,6 +1162,25 @@ const PageAllAgreements = ({ onNavigate }) => {
     const [declineReason, setDeclineReason] = useState("");
     const [declineBusy, setDeclineBusy] = useState(false);
     const [downloading, setDownloading] = useState(false);
+    // The DOCUMENT behind the open row: { loading, body, error }. Separate
+    // from `viewing` (the list row) so one can never be mistaken for the other.
+    const [doc, setDoc] = useState(null);
+
+    /* Open a row: fetch the document, never trust the row. Sign and decline
+       are gated on this having succeeded, so a failed load cannot leave
+       somebody able to sign text they were never shown. */
+    const openAgreement = async (row) => {
+        setViewing(row);
+        setSignName(user?.full_name || "");
+        setDoc({ loading: true, body: null, error: null });
+        const { data, error } = await getAgreement(row.id);
+        if (error || !data) {
+            setDoc({ loading: false, body: null,
+                     error: error?.message || "This agreement could not be loaded." });
+            return;
+        }
+        setDoc({ loading: false, body: data.body_html ?? "", error: null });
+    };
 
     const doDownload = async () => {
         setDownloading(true);
@@ -1165,7 +1209,7 @@ const PageAllAgreements = ({ onNavigate }) => {
         setSignBusy(false);
         if (error) { toast.show("❌ " + (error.message || "Failed to sign"), "danger"); return; }
         toast.show(data?.status === "executed" ? "🎉 Agreement fully executed!" : "✅ Signed — awaiting the other party", "success", 4000);
-        setViewing(null);
+        setViewing(null); setDoc(null);
         setSignName("");
         reload();
     };
@@ -1176,7 +1220,7 @@ const PageAllAgreements = ({ onNavigate }) => {
         setDeclineBusy(false);
         if (error) { toast.show("❌ " + (error.message || "Failed to decline"), "danger"); return; }
         toast.show("Agreement declined — the other party has been notified", "info", 4000);
-        setViewing(null);
+        setViewing(null); setDoc(null);
         setDeclineOpen(false);
         setDeclineReason("");
         reload();
@@ -1224,7 +1268,7 @@ const PageAllAgreements = ({ onNavigate }) => {
                     ))}
                 </div>
                 {filtered.map((a, i) => (
-                    <div key={a.id} onClick={() => { setViewing(a); setSignName(user?.full_name || ""); }} style={{
+                    <div key={a.id} onClick={() => openAgreement(a)} style={{
                         display: "grid", gridTemplateColumns: "2fr 1fr 80px 120px 100px", minWidth: 620,
                         alignItems: "center", padding: "16px 20px",
                         borderBottom: i < filtered.length - 1 ? `1px solid ${t.border}` : "none",
@@ -1251,11 +1295,11 @@ const PageAllAgreements = ({ onNavigate }) => {
                         <div style={{ display: "flex", gap: 6 }}>
                             {a.needsMySig ? (
                                 <Btn primary style={{ fontSize: 11, padding: "7px 14px" }}
-                                    onClick={e => { e.stopPropagation(); setViewing(a); setSignName(user?.full_name || ""); }}>
+                                    onClick={e => { e.stopPropagation(); openAgreement(a); }}>
                                     ✍️ Sign
                                 </Btn>
                             ) : (
-                                <button onClick={e => { e.stopPropagation(); setViewing(a); }} style={{
+                                <button onClick={e => { e.stopPropagation(); openAgreement(a); }} style={{
                                     width: 30, height: 30, borderRadius: 8, border: `1px solid ${t.border}`,
                                     background: t.inputBg, color: t.textMuted, cursor: "pointer", fontSize: 13,
                                     display: "flex", alignItems: "center", justifyContent: "center",
@@ -1264,6 +1308,23 @@ const PageAllAgreements = ({ onNavigate }) => {
                         </div>
                     </div>
                 ))}
+                {/* HOW MANY THERE ARE. Without the total, a list that stops
+                    at its page size looks exactly like a complete one. */}
+                {!loading && agmts.length > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 18px", borderTop: `1px solid ${t.border}`, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, color: t.textMuted }}>
+                            Showing {filtered.length === agmts.length
+                                ? `${agmts.length} of ${paging.total}`
+                                : `${filtered.length} of ${agmts.length} loaded (${paging.total} total)`}
+                        </span>
+                        {paging.hasMore && (
+                            <button type="button" onClick={paging.loadMore} disabled={loading}
+                                style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 9, padding: "7px 14px", cursor: "pointer", fontSize: 12.5, color: t.text, fontWeight: 600, fontFamily: "inherit" }}>
+                                Load more
+                            </button>
+                        )}
+                    </div>
+                )}
                 {loading ? (
                     <div style={{ padding: "40px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>Loading agreements…</div>
                 ) : filtered.length === 0 && (
@@ -1308,16 +1369,33 @@ const PageAllAgreements = ({ onNavigate }) => {
                                 ))}
                             </div>
                             {/* Body */}
-                            <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "18px 20px", fontSize: 13, lineHeight: 1.85, color: t.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
-                                {viewing.body || "No content."}
-                            </div>
+                            {/* THE DOCUMENT, fetched by id. "No content." is
+                                only ever a body the server really returned
+                                empty -- never a stand-in for a field the list
+                                did not carry. */}
+                            {doc?.loading ? (
+                                <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "22px 20px", fontSize: 13, color: t.textMuted, textAlign: "center" }}>
+                                    Loading the agreement…
+                                </div>
+                            ) : doc?.error ? (
+                                <div style={{ background: `${t.danger}12`, border: `1px solid ${t.danger}40`, borderRadius: 12, padding: "18px 20px", fontSize: 13, lineHeight: 1.7, color: t.danger }}>
+                                    {doc.error}
+                                    <div style={{ color: t.textMuted, marginTop: 6, fontSize: 12 }}>
+                                        Nothing can be signed until the wording is on screen.
+                                    </div>
+                                </div>
+                            ) : (
+                                <div style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 12, padding: "18px 20px", fontSize: 13, lineHeight: 1.85, color: t.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
+                                    {doc?.body ? doc.body : "No content."}
+                                </div>
+                            )}
 
                             {/* Only once EXECUTED. Before both parties have
                                 signed there is no document to download, and
                                 the server refuses one -- offering the button
                                 early would promise a file that does not
                                 exist. */}
-                            {viewing.rawStatus === "executed" && (
+                            {viewing.rawStatus === "executed" && doc && !doc.loading && !doc.error && (
                                 <div style={{ marginTop: 16 }}>
                                     <button type="button" disabled={downloading} onClick={doDownload}
                                         style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 10, padding: "9px 15px", cursor: downloading ? "not-allowed" : "pointer", fontSize: 12.5, color: t.text, fontWeight: 600, fontFamily: "inherit" }}>
@@ -1331,7 +1409,8 @@ const PageAllAgreements = ({ onNavigate }) => {
                             )}
                         </div>
 
-                        {viewing.needsMySig && (
+                        {/* GATED ON THE BODY: no signing text nobody saw. */}
+                        {viewing.needsMySig && doc && !doc.loading && !doc.error && (
                             <div style={{ padding: "14px 22px", borderTop: `1px solid ${t.border}`, background: t.surface }}>
                                 <div style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 8 }}>
                                     Sign — type your full legal name
