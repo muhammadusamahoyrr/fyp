@@ -1669,3 +1669,125 @@ lawyer authoring plus PDF. The authoring flow still needs its counterparty rule
 minutes, and answers a question nothing currently answers: is a real lawyer
 stuck right now? Then Phase 0 — an hour, removing four false claims from a
 product that asks people to sign legal instruments.
+
+
+---
+
+## Deployment checklist
+
+Settings that change what the product ASSERTS, not merely how it performs.
+Each one has a safe default and a consequence for leaving it there.
+
+### `trusted_proxies` (D8) — empty by default
+
+Comma-separated peer addresses of the reverse proxies in front of the API.
+
+**Empty is safe and is the default.** `X-Forwarded-For` is then ignored
+entirely and the client IP is whatever the socket reports.
+
+**Empty is not free.** Behind a real proxy, every request appears to come from
+that proxy, so `ip_is_verifiable` returns false and **every evidence
+certificate prints "origin not recorded"** for every signature. That statement
+is true — we genuinely cannot establish the address — but it is weaker
+evidence than the system is capable of producing, on every document, silently.
+
+**To configure:**
+
+1. Set `TRUSTED_PROXIES` to the address(es) the API actually sees as the peer.
+   Not the public load-balancer hostname — the address of the last hop, as the
+   application observes it. If unsure, log `request.client.host` once in
+   staging and read it off.
+2. Restart, then execute a test agreement end to end.
+3. Download the PDF and **confirm an IP appears** beside each signature. If it
+   still says "origin not recorded", the configured value does not match the
+   observed peer, and nothing else in the document will tell you that.
+4. Confirm the address shown is the CLIENT's, not the proxy's. A proxy address
+   printed as a signer's origin is a false statement about a real person, and
+   it is the failure D8 exists to prevent.
+
+**Never** set this to a wildcard or to a range you do not control. Trusting an
+untrusted hop lets a signer write their own IP into the signature record.
+
+---
+
+## MERGE_CHECKLIST — `fix/agreements-phase0`
+
+Everything below is a gate on merging, not a wish list. The engineering items
+are verifiable now; the last group is not engineering at all and does not block
+the merge, but does block calling the module finished.
+
+### 1. Tests
+
+- [ ] **Full backend suite green**, run once against a real replica set, and
+      compared BY FAILING TEST ID against the last full baseline (6587 passed /
+      0 failed at `b0ce79f`). Targeted runs are not a substitute: Gate 3F's
+      party rule passed its own tests and broke eight engagement tests in a
+      module it never touched.
+- [ ] **Frontend suite green** (`npm test`, whole suite).
+- [ ] No test was weakened to make it pass. A test that moved must have a
+      recorded reason.
+
+### 2. Configuration
+
+- [ ] **`trusted_proxies` set** for the target environment, and an IP verified
+      to appear on a generated certificate — see the deployment checklist
+      above. Leaving it empty ships a product whose evidence documents all say
+      "origin not recorded".
+- [ ] **Park flag reviewed.** `agreements_diy_builder_enabled` is **false** and
+      must stay false: all six DIY templates were withdrawn as United States
+      boilerplate, and the backend refuses any body still carrying the
+      withdrawal notice. Turning it on requires counsel-reviewed templates
+      (D1 / Phase 4.3), not a deployment decision. Engagement letters are
+      unaffected by the flag and must remain so.
+
+### 3. Transactions in production
+
+The signing, declining and termination paths are transactional and
+**fail closed**: with no replica set they raise rather than degrading to
+non-atomic writes.
+
+- [ ] **Confirm the production MongoDB is a replica set.** Atlas is; a
+      standalone `mongod` is not.
+- [ ] **Verify the fail-closed behaviour deliberately**, in staging, by
+      pointing the app at a standalone instance and confirming a sign attempt
+      returns 503 rather than writing a partial state. A fail-closed path that
+      has never been observed failing is an assumption.
+- [ ] Confirm the **event outbox relay** is running. Parked events with no
+      drainer are silently undelivered notifications.
+
+### 4. Data
+
+- [ ] **Indexes created** on the target database — `create_all_indexes()`
+      covers `agreement_downloads` (by agreement, by user, by time) and the
+      `(created_by, status)` pair the draft cap and draft visibility both use.
+- [ ] **Pre-3C executed rows will refuse to render.** Any agreement executed
+      before Gate 3C carries no `body_sha256`, and the PDF builder refuses it
+      with a clear message rather than printing a certificate whose digest
+      section is empty. Confirmed: 1 such row exists today (the executed
+      orphaned letter). It is NOT back-filled — computing a digest now would
+      assert the text is unchanged since signing, which is the one thing a
+      missing digest makes unverifiable.
+
+### 5. Open, and NOT engineering
+
+These do not block the merge. They block calling the module done, and each has
+been open long enough to be worth naming in the same place.
+
+- [ ] **D4 — reviewing counsel has no owner.** One conversation unblocks three
+      backlogs: contract templates, ETO wording, and whether the evidence
+      certificate may ever state a legal conclusion. Until then the certificate
+      states facts only, which is correct but deliberately limited.
+- [ ] **DIY builder cutoff — end of October.** The recorded decision is
+      "park now (B), cut it (A) if no counsel is secured by end of October".
+      That date is a decision point, not a reminder: if it passes unowned, the
+      default is to DELETE the builder rather than leave a parked feature
+      indefinitely.
+- [ ] **Six orphaned engagement letters, unclassified.** Agreements whose
+      engagement and case rows are both gone (five `pending`, one `executed`),
+      all created 2026-08-24. Nothing deletes an agreement when its engagement
+      is deleted, so letters outlive what they describe. They must be
+      classified as real retained records or fixture residue BY A HUMAN before
+      any cleanup: deleting a signed instrument is not a script's decision.
+      `scripts/engagement_letter_reconcile.py` lists them with `created_by` and
+      `created_at` for exactly this purpose, and its `--apply` path stays
+      disabled.
