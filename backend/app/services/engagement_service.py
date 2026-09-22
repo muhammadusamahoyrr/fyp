@@ -147,12 +147,26 @@ async def request_engagement(client_id: str, data: dict) -> dict:
     }
     try:
         await engagement_repo.insert(doc)
-    except DuplicateKeyError:
+    except DuplicateKeyError as exc:
+        # WHICH guard rejected this, read from `keyPattern` -- a structural
+        # field -- rather than from the driver's message, which carries the
+        # duplicated values themselves. Same approach as
+        # `appointment_service._duplicate_constraint`.
+        pattern = tuple((getattr(exc, "details", None) or {}).get("keyPattern") or {})
+        if pattern == ("appointment_id",):
+            # `uniq_engagement_appointment` (§17 NR-42 / R5-13): this
+            # consultation has already been used for a hire request. The
+            # database is what decides it, so two simultaneous requests cannot
+            # both win.
+            raise ConflictError(
+                "You have already asked a lawyer to take a case after this "
+                "consultation. Book another consultation to make a new request."
+            ) from exc
         # Lost the race: a concurrent request already opened a pending engagement.
         raise ConflictError(
             "You already have a pending request for this case. "
             "Cancel it before requesting another lawyer."
-        )
+        ) from exc
 
     # Case enters "waiting for lawyer" state while the request is open
     await case_repo.update_one(

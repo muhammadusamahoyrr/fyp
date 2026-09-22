@@ -834,6 +834,25 @@ async def _engagements_indexes() -> None:
         col, [("case_id", ASCENDING)],
         "uniq_pending_engagement", ENGAGEMENT_OPEN_STATUSES,
     )
+    # ONE HIRE ATTEMPT PER COMPLETED CONSULTATION
+    # (AGREEMENTS_PRODUCT_PLAN.md §17 NR-42, decided in R5-13).
+    #
+    # NOT SCOPED BY STATUS, deliberately. The consultation is consumed by the
+    # attempt, not by the attempt succeeding: an engagement that ends
+    # `declined` or `cancelled` still used it, and the client books again
+    # rather than re-using it. Scoping this to open or retained statuses would
+    # hand the consultation back on every refusal.
+    #
+    # `$type: "string"` is what keeps LEGACY rows out of it. A partial filter
+    # on `{"$exists": True}` would still match a row whose `appointment_id` is
+    # explicitly null, and every engagement written before §17 R5-1 has no such
+    # field at all -- so nulls and missing fields are both outside the index
+    # and any number of them may coexist.
+    await _try_unique_partial(
+        col, [("appointment_id", ASCENDING)],
+        "uniq_engagement_appointment",
+        filter_expression={"appointment_id": {"$type": "string"}},
+    )
 
 
 async def _lawyer_reviews_indexes() -> None:

@@ -378,22 +378,27 @@ async def test_concurrent_requests_leave_exactly_one_open(parties, monkeypatch):
 
 
 async def test_a_cancelled_request_allows_another(parties, monkeypatch):
-    """The guard is PARTIAL — scoped to `requested`. Cancelling must let the
-    client approach a different lawyer."""
+    """The CASE guard is PARTIAL — scoped to `requested`. Cancelling must let
+    the client approach a lawyer again.
+
+    The retry needs a FRESH consultation: since §17 R5-13 the first attempt
+    consumed the first one, cancelled or not (that rule has its own tests in
+    test_hire_consultation_uniqueness.py). What this test still proves is that
+    `uniq_pending_engagement` releases the case.
+    """
     from app.db.collections import get_engagements_col
     from app.services import engagement_service
 
     case_id = await _a_case(parties)
-    payload = await _hire(parties, case_id)
     first = await engagement_service.request_engagement(
-        parties["client_id"], payload)
+        parties["client_id"], await _hire(parties, case_id))
 
     await get_engagements_col().update_one(
         {"_id": first["id"]},
         {"$set": {"status": EngagementStatus.CANCELLED.value}})
 
     again = await engagement_service.request_engagement(
-        parties["client_id"], payload)
+        parties["client_id"], await _hire(parties, case_id))
     assert again["status"] == EngagementStatus.REQUESTED.value
 
 

@@ -3026,26 +3026,26 @@ appointment closure blocking is added in this migration.
 
 ---
 
-### R5-11 — Implementation order — **DECIDED** (steps 1–2 done, uncommitted; step 3 in progress)
+### R5-11 — Implementation order — **DECIDED** (steps 1–7 done)
 
 | # | Step | Status | Blocked by |
 |---|---|---|---|
 | 1 | `appointment_id` required + completed-appointment → Hire entry (NR-39/40/41): backend enforcement, the per-lawyer eligible-consultation query, and the minimal lawyer-page gate | **DONE** | — |
 | 2 | Validated billing predicate + `engagement_id` integrity; refuse new fee requests on a terminated Engagement (C-B) | **DONE** | — |
 | 3 | KYC re-check in `accept_terms`, before the first claim (R5-2) | **DONE** | — |
-| 4 | Remove new engagement-letter generation and dependencies, including Gate 2's reversal and `_linked_engagement` (C-A) | — | step 2 landed; **pre-cutover legacy-letter census** run immediately before implementation |
-| 5 | Review eligibility (R5-6) | — | ships **with** step 4 — otherwise reviews fail silently |
-| 6 | Appointment uniqueness / reuse rule | — | **NR-42** (owner decision, still OPEN) |
-| 7 | Frontend completion/integration: "Hire this lawyer" from the completed-appointment view + stale letter copy | — | step 1 |
+| 4 | Remove new engagement-letter generation and dependencies, including Gate 2's reversal and `_linked_engagement` (C-A) | **DONE** | — (pre-cutover legacy-letter census run 2026-09-22) |
+| 5 | Review eligibility (R5-6) | **DONE** | shipped **with** step 4, as required |
+| 6 | Appointment uniqueness / reuse rule (R5-13) | **DONE** | — |
+| 7 | Frontend completion/integration: "Hire this lawyer" from the completed-appointment view + stale letter copy | **DONE** | — |
 | 8 | Final reconciliation/cleanup: remediation plan updated and R5 marked SUPERSEDED (NR-38); ENGAGEMENT_REDESIGN.md reconciled; **final reconciliation census** of the post-cutover state | — | last |
 
 **Renumbered 2026-09-22 — numbering only; no product decision changed.** The
 order is the one actually being implemented. Earlier numberings of this table
 are superseded. Step 1 delivered part of step 7 (the lawyer-page hire entry is
 gated and names a chosen consultation); step 7 keeps the dedicated entry from
-the appointment screen and the stale letter copy. Step 6 cannot start until
-NR-42 is decided. The former separate "remediation plan" step is carried in
-step 8.
+the appointment screen and the stale letter copy. Steps 1-7 are now
+complete, step 6 included (R5-13), so the only Gate 2 work left is step 8 --
+which also carries the former separate "remediation plan" step.
 
 **Two censuses, two purposes.** Both are read-only.
 
@@ -3105,6 +3105,51 @@ Nothing in R5-12 is a legal conclusion.
 
 ---
 
+---
+
+### R5-13 — NR-42: one hire attempt per completed consultation — **DECIDED**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-23 |
+| Decided by | Project owner |
+| Sources | **PLAN**, closing **NR-42** and completing **NR-39** |
+| Code change? | **YES — a database invariant. Gate 2 step 6** |
+
+**A completed consultation supports at most ONE new Engagement attempt with
+that lawyer.** The attempt consumes it, not the outcome:
+
+| Situation | Result |
+|---|---|
+| First engagement created from a consultation | allowed |
+| A second engagement naming the same consultation | **refused** |
+| The first engagement later `declined`, `cancelled` or otherwise ended | the consultation stays **consumed** |
+| The client wants to ask again | they complete **another** consultation |
+| A different completed consultation | may create its own engagement |
+| Legacy engagements with no `appointment_id` | unaffected, and unlimited |
+
+**Why the attempt and not the outcome.** Returning the consultation on every
+refusal would make a declined request free to repeat, which is the cold-outreach
+pressure the consultation requirement exists to remove (R5-1). It also keeps the
+rule expressible as a single invariant rather than a status-dependent one.
+
+**ENFORCED BY THE DATABASE, not by a read-then-write.** A unique partial index,
+`uniq_engagement_appointment` on `appointment_id` in `_engagements_indexes`
+(`app/db/indexes.py`), filtered to `{"appointment_id": {"$type": "string"}}`.
+
+- **Not scoped by status**, because the consumption is not.
+- **`$type: "string"` is what exempts legacy rows.** Engagements written before
+  R5-1 have no `appointment_id` at all, and `{"$exists": true}` would still
+  match an explicit null — so nulls and missing fields alike stay outside the
+  index, and any number of them coexist.
+- Two simultaneous requests for one consultation cannot both win: the loser's
+  insert is refused by the index, and `request_engagement` reads `keyPattern`
+  to tell that refusal from the one-open-engagement-per-case guard and raises
+  the ordinary conflict, never a driver error.
+
+**Nothing is backfilled**, and no engagement's lifecycle changes: a `declined`
+or `cancelled` engagement remains exactly the historical record it was.
+
 ### New open items
 
 | # | Item | Why it needs review |
@@ -3114,4 +3159,4 @@ Nothing in R5-12 is a legal conclusion.
 | ~~NR-41~~ | ~~Age limit on the completed appointment~~ | **CLOSED (R5-12):** none in V1 |
 | ~~C-A~~ | ~~Gate 2's reversal for legacy linked letters~~ | **CLOSED (R5-12):** no reversal, no `case.lawyer_id` write |
 | ~~C-B~~ | ~~New fee requests after termination~~ | **CLOSED (R5-12):** refused; pre-termination requests stay payable |
-| NR-42 | Does a `declined` / `cancelled` Engagement use up its appointment? | NR-39 says "at most one new Engagement"; whether one that never became a hire counts toward that limit is unstated. It decides whether the uniqueness rule covers every Engagement or only open + retained ones |
+| ~~NR-42~~ | ~~Does a `declined` / `cancelled` Engagement use up its appointment?~~ | **CLOSED 2026-09-23 by R5-13.** It does: the attempt consumes the consultation, whatever becomes of it. Enforced by `uniq_engagement_appointment` |
