@@ -178,7 +178,7 @@ async def test_a_historical_executed_engagement_alone_is_not_permission(people):
                                      "status": CaseStatus.OPEN.value}})
 
     # The relationship is real enough to REVIEW...
-    assert await EngagementRepository().exists_executed_relationship(
+    assert await EngagementRepository().exists_retained_relationship(
         CLIENT, LAWYER) is True
 
     # ...and not enough to AUTHOR.

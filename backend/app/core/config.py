@@ -270,12 +270,11 @@ class Settings(BaseSettings):
     # steps of the user's work. Writing replacement templates is legal work
     # blocked on counsel, not engineering work.
     #
-    # WHAT IT DOES NOT GATE, and must not. Engagement letters are a different
-    # product sharing the same collection and UI: they are generated when a
-    # client accepts a lawyer's fee terms, and they gate all billing. They are
-    # created by `create_pending_engagement_letter` from inside
-    # engagement_service, NOT through the HTTP route, so this flag leaves them
-    # untouched. Listing, viewing, signing and declining stay available to
+    # WHAT IT DOES NOT GATE, and must not. Legacy engagement letters share the
+    # same collection and UI. New engagements no longer generate them
+    # (AGREEMENTS_PRODUCT_PLAN.md §17 R5-3) and they gate nothing, but the ones
+    # that exist remain historical records. This flag leaves them untouched:
+    # listing, viewing, signing and declining stay available to
     # everyone whatever this is set to -- an agreement somebody is already a
     # party to must never become unreachable because a feature was parked.
     #

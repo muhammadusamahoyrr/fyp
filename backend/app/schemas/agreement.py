@@ -41,8 +41,8 @@ class AgreementCreate(BaseModel):
     # case and no engagement has no relationship behind it (D2).
     #
     # `engagement_id` is deliberately ABSENT and must stay absent: it is set
-    # only by `create_pending_engagement_letter`, and Gate 2's backlink
-    # validation assumes no external caller can supply one (D2 rule 10).
+    # only by the legacy `create_pending_engagement_letter`; no external
+    # caller may supply one (D2 rule 10).
     case_id: str | None = None
 
 

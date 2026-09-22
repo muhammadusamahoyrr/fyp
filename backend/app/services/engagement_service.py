@@ -16,7 +16,6 @@ from app.core.exceptions import (
     ConflictError,
     ForbiddenError,
     NotFoundError,
-    ServiceUnavailableError,
 )
 from app.repositories.case_repo import CaseRepository
 from app.repositories.engagement_repo import EngagementRepository
@@ -83,7 +82,18 @@ def _fee_str(fee_amount, fee_type) -> str:
 
 async def request_engagement(client_id: str, data: dict) -> dict:
     """Client asks a lawyer to take their case. Consent-first: nothing is
-    assigned until the lawyer accepts."""
+    assigned until the lawyer accepts.
+
+    A NEW hire follows a completed consultation with the same lawyer
+    (AGREEMENTS_PRODUCT_PLAN.md §17 R5-1), so `appointment_id` is required and
+    checked FIRST: client owns it, it is with this lawyer, it is completed.
+    The appointment is the entry path only -- the engagement written below is
+    still the Hire record, and nothing here claims the case.
+    """
+    from app.services import appointment_service
+    appointment = await appointment_service.completed_consultation_for_hire(
+        data.get("appointment_id"), client_id, data["lawyer_id"])
+
     case = await case_repo.find_by_id(data["case_id"])
     if not case:
         raise NotFoundError("Case")
@@ -97,6 +107,15 @@ async def request_engagement(client_id: str, data: dict) -> dict:
     # would put a real person's time against a case that does not exist yet.
     from app.services.case_service import assert_not_draft
     assert_not_draft(case, "be sent to a lawyer")
+
+    # A consultation booked FOR a case hires for that case (§17 NR-40). One
+    # booked without a case may lead to any case of the client's, which the
+    # ownership check above has already established.
+    appt_case_id = appointment.get("case_id")
+    if appt_case_id and appt_case_id != case["_id"]:
+        raise AppValidationError(
+            "That consultation was booked for a different case. Ask the lawyer "
+            "to take the case you consulted them about.")
 
     pending = await engagement_repo.find_pending_for_case(case["_id"])
     if pending:
@@ -113,6 +132,9 @@ async def request_engagement(client_id: str, data: dict) -> dict:
         "case_id":        case["_id"],
         "client_id":      client_id,
         "lawyer_id":      lawyer["_id"],
+        # The consultation this hire followed. A reference, never the Hire:
+        # legacy engagements predate it and carry no such field.
+        "appointment_id": appointment["_id"],
         "status":         EngagementStatus.REQUESTED.value,
         "message":        data.get("message"),
         "fee_amount":     None,
@@ -261,8 +283,8 @@ async def accept_terms(engagement_id: str, client_id: str) -> dict:
     """Client agrees to the proposed terms. THIS is what claims the case.
 
     Everything that used to happen the moment a lawyer accepted happens here
-    instead, on the client's action: the atomic claim, the move to in_progress,
-    the timeline entry and the engagement letter.
+    instead, on the client's action: the atomic claim, the move to in_progress
+    and the timeline entry. No engagement letter is generated (§17 R5-3).
     """
     eng = await engagement_repo.find_by_id(engagement_id)
     if not eng:
@@ -282,6 +304,17 @@ async def accept_terms(engagement_id: str, client_id: str) -> dict:
 
     now = datetime.now(timezone.utc)
     lawyer_id = eng["lawyer_id"]
+
+    # KYC, AGAIN (AGREEMENTS_PRODUCT_PLAN.md §17 R5-2). `request_engagement`
+    # verified the lawyer when the client asked; terms and acceptance can come
+    # much later, and the lawyer must still be an active, verified lawyer at the
+    # moment they take the case. The same rule as the request, not a second one.
+    #
+    # HERE, BEFORE EITHER CLAIM, and nowhere later. A refusal at this point has
+    # written nothing, so there is nothing to undo. Between the two claims below
+    # it would leave an engagement `accepted` with no case behind it, which is
+    # the partial acceptance the ordering exists to prevent.
+    await _get_verified_lawyer(lawyer_id)
 
     # TWO atomic steps, in this order, and the order is the whole correctness
     # argument.
@@ -337,75 +370,15 @@ async def accept_terms(engagement_id: str, client_id: str) -> dict:
     fee_type = eng.get("fee_type")
     scope_note = eng.get("scope_note")
 
-    # The engagement letter is the consent artifact, so it is generated BEFORE
-    # the engagement is called accepted, and a failure here undoes the claim.
+    # NO ENGAGEMENT LETTER (AGREEMENTS_PRODUCT_PLAN.md §17 R5-3, R3-1).
     #
-    # This used to be `except Exception: pass` — the engagement stood even when
-    # no letter was ever written, which `payment_service` had to defend against
-    # separately because a missing letter and an unsigned one both mean nobody
-    # agreed to the price. Now that the letter records terms the client has just
-    # accepted, proceeding without one would leave that agreement unrecorded.
-    try:
-        from app.services import agreement_service
-        letter = _engagement_letter_text(
-            client_name=(client or {}).get("full_name", "Client"),
-            lawyer_name=lawyer_name,
-            case_title=(case or {}).get("title", ""),
-            case_number=(case or {}).get("case_number", ""),
-            case_type=(case or {}).get("case_type", ""),
-            fee_amount=fee_amount,
-            fee_type=fee_type,
-            scope_note=scope_note,
-        )
-        # The INTERNAL producer, deliberately not the route's entry point. This
-        # letter is created UNSIGNED and awaits both parties; the external
-        # wizard path signs on creation. Separate names keep that difference
-        # explicit, and keep engagement letters working while the DIY builder
-        # is parked behind `agreements_diy_builder_enabled`.
-        agreement = await agreement_service.create_pending_engagement_letter(
-            title=f"Engagement Letter — {(case or {}).get('title', 'Case')} ({(case or {}).get('case_number', '')})",
-            body_html=letter,
-            parties=[{"user_id": lawyer_id}, {"user_id": client_id}],
-            creator_id=lawyer_id,
-            case_id=eng["case_id"],
-            engagement_id=engagement_id,
-        )
-        agreement_id = agreement["_id"]
-    except Exception:
-        # Undo BOTH atomic steps, in reverse. A half-formed engagement holding a
-        # claimed case is worse than a failed request the client can retry, and
-        # an engagement left saying `accepted` with no letter behind it is the
-        # exact state the billing gate had to be written to defend against.
-        await case_repo.update_one(
-            {"_id": eng["case_id"], "lawyer_id": lawyer_id},
-            {"$set": {
-                "lawyer_id": None,
-                "status": CaseStatus.PENDING_LAWYER.value,
-                "updated_at": datetime.now(timezone.utc),
-            }},
-        )
-        await engagement_repo.claim_transition(
-            engagement_id,
-            EngagementStatus.ACCEPTED.value,
-            EngagementStatus.TERMS_PROPOSED.value,
-            {"accepted_at": None},
-        )
-        logger.exception(
-            "Engagement letter generation failed for engagement %s; "
-            "acceptance rolled back and the case released",
-            engagement_id,
-        )
-        raise ServiceUnavailableError(
-            "Your acceptance could not be recorded because the engagement letter "
-            "could not be generated. Nothing has been agreed — please try again."
-        )
-
-    # The status is already `accepted` — it was the first atomic step. Only the
-    # letter it now has needs recording.
-    await engagement_repo.update_one(
-        {"_id": engagement_id},
-        {"$set": {"agreement_id": agreement_id, "updated_at": now}},
-    )
+    # Acceptance used to generate one here and roll both claims back when it
+    # could not. The engagement is now the Hire record in its own right: the
+    # client's acceptance of the proposed terms is what is recorded, billing is
+    # governed by the validated engagement (payment_service), and reviews by the
+    # retained engagement itself. So there is no agreement written, no
+    # `agreement_id` stored, and no letter failure that can undo an acceptance.
+    # Letters created before this remain as legacy records.
 
     # Taking on a case changes what this lawyer's profile MEANS.
     # `build_profile_text` folds in their five most recent cases — the
@@ -438,10 +411,8 @@ async def accept_terms(engagement_id: str, client_id: str) -> dict:
         "Your terms were accepted",
         f"{(client or {}).get('full_name', 'The client')} accepted your terms for "
         f"\"{(case or {}).get('title', 'the case')}\"."
-        + _fee_str(fee_amount, fee_type)
-        + " The engagement letter is ready for signature on the Agreements page.",
-        {"engagement_id": engagement_id, "case_id": eng["case_id"],
-         "agreement_id": agreement_id},
+        + _fee_str(fee_amount, fee_type),
+        {"engagement_id": engagement_id, "case_id": eng["case_id"]},
     )
 
     return await _public_engagement(engagement_id)
@@ -479,58 +450,6 @@ async def decline_terms(engagement_id: str, client_id: str, reason: str | None) 
     )
 
     return await _public_engagement(engagement_id)
-
-def _engagement_letter_text(
-    client_name: str,
-    lawyer_name: str,
-    case_title: str,
-    case_number: str,
-    case_type: str,
-    fee_amount,
-    fee_type,
-    scope_note: str | None,
-) -> str:
-    """Plain-text engagement letter body — rendered pre-wrap in both dashboards."""
-    today = datetime.now(timezone.utc).strftime("%d %B %Y")
-    fee_line = (
-        f"PKR {fee_amount:,.0f} ({_FEE_TYPE_LABELS.get(fee_type or '', 'as agreed')})"
-        if fee_amount else "As mutually agreed between the parties"
-    )
-    scope = scope_note or (
-        "Legal representation and advice in the matter described above, including "
-        "preparation and filing of documents, court appearances, and case management."
-    )
-    return f"""ENGAGEMENT LETTER
-
-Date: {today}
-
-This Engagement Letter records the terms on which the Advocate agrees to represent the Client in the matter below.
-
-PARTIES
-Client:   {client_name}
-Advocate: {lawyer_name}
-
-MATTER
-Case:        {case_title}
-Case Number: {case_number}
-Case Type:   {case_type.title() if case_type else "—"}
-
-SCOPE OF ENGAGEMENT
-{scope}
-
-PROFESSIONAL FEE
-{fee_line}
-
-Court fees, filing charges, and other out-of-pocket expenses are payable by the Client in addition to the professional fee, unless agreed otherwise in writing.
-
-TERMS
-1. The Advocate shall act in the Client's best interest with professional diligence and keep the Client informed of material developments, including hearing outcomes.
-2. The Client shall provide truthful, complete information and documents relevant to the matter.
-3. Either party may end the engagement by written notice; fees for work already performed remain payable.
-4. Confidential information shared for this engagement shall not be disclosed except as required by law.
-
-This letter is executed electronically by both parties under the Electronic Transactions Ordinance 2002. Each party's electronic signature below has the same effect as a handwritten signature."""
-
 
 async def decline_engagement(engagement_id: str, lawyer_id: str, reason: str | None) -> dict:
     eng = await engagement_repo.find_by_id(engagement_id)
@@ -953,7 +872,8 @@ async def _cancel_pending_letter(session, *, expected: dict, engagement_id: str,
     """Cancel this engagement's still-pending letter. Returns an anomaly, or None.
 
     Anomalies are REPORTED, never raised: see `_terminate_in_transaction`. The
-    return values are `no_letter`, `letter_missing` and `letter_superseded`;
+    return values are `letter_missing` and `letter_superseded` -- a present
+    but broken legacy link. No letter at all is not an anomaly (§17 R5-3);
     an executed or already-cancelled letter is NOT an anomaly, merely nothing
     to do.
     """
@@ -962,10 +882,11 @@ async def _cancel_pending_letter(session, *, expected: dict, engagement_id: str,
 
     agreement_id = expected.get("agreement_id")
     if not agreement_id:
-        # An engagement that never got a letter. `accept_terms` rolls back when
-        # generation fails, so this is rare -- but it is a linkage fact worth
-        # recording, not a reason to refuse somebody their exit.
-        return "no_letter"
+        # No letter to cancel. Every engagement accepted since §17 R5-3 is in
+        # this state BY DESIGN -- acceptance no longer generates a letter -- so
+        # it is not an anomaly and nothing is recorded. Only a legacy link
+        # that is present but broken (below) is worth a human's attention.
+        return None
 
     letter = await get_agreements_col().find_one(
         {"_id": agreement_id}, session=session)

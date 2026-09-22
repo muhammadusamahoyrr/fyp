@@ -6,7 +6,17 @@ import { useTheme } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import {
     listPayments, paymentSummary, createFeeRequest, downloadReceipt, listCases,
+    listEngagements,
 } from "@/lib/api.js";
+
+// The engagement a new fee on this case is billed under: the lawyer's own
+// accepted or completed one. A terminated engagement bills nothing new
+// (AGREEMENTS_PRODUCT_PLAN.md §17 R5-5). This only finds the id to send —
+// the server validates it against the case, the lawyer and the client.
+function billableEngagementFor(engagements, caseId) {
+    return engagements.find(e => e.case_id === caseId
+        && (e.status === "accepted" || e.status === "completed")) || null;
+}
 
 const STATUS_STYLE = {
     paid:    { bg: "#10b98122", fg: "#10b981", label: "Paid" },
@@ -31,7 +41,7 @@ function Tile({ t, label, value, accent }) {
     );
 }
 
-function RaiseFeeModal({ t, cases, onClose, onDone }) {
+function RaiseFeeModal({ t, cases, engagements, engagementsError, onClose, onDone }) {
     const toast = useToast();
     const [caseId, setCaseId] = useState(cases[0]?._id || "");
     const [amount, setAmount] = useState("");
@@ -43,8 +53,14 @@ function RaiseFeeModal({ t, cases, onClose, onDone }) {
         const amt = Number(amount);
         if (!caseId) return toast.show("Pick a case", "error", 2500);
         if (!amt || amt <= 0) return toast.show("Enter a valid amount", "error", 2500);
+        // A failed engagements read is not "this case has no engagement".
+        if (engagementsError) return toast.show("Could not load your engagements. Please try again.", "error", 3000);
+        const engagement = billableEngagementFor(engagements, caseId);
+        if (!engagement) return toast.show("This case has no active engagement to bill under. New fees cannot be raised under a terminated engagement.", "error", 4000);
         setBusy(true);
-        const { data, error } = await createFeeRequest({ case_id: caseId, amount: amt, purpose, note });
+        const { data, error } = await createFeeRequest({
+            case_id: caseId, amount: amt, purpose, note, engagement_id: engagement.id,
+        });
         setBusy(false);
         if (error) return toast.show("❌ " + (error.message || "Failed to raise fee"), "error", 3000);
         toast.show("✅ Fee request sent to the client", "success", 2500);
@@ -97,6 +113,8 @@ function PaymentsPage() {
     const [summary, setSummary] = useState(null);
     const [payments, setPayments] = useState([]);
     const [cases, setCases] = useState([]);
+    const [engagements, setEngagements] = useState([]);
+    const [engagementsError, setEngagementsError] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [loading, setLoading] = useState(true);
 
@@ -110,6 +128,10 @@ function PaymentsPage() {
     useEffect(() => {
         load();
         listCases({ page_size: 50 }).then(({ data }) => { if (data?.items) setCases(data.items); });
+        listEngagements().then(({ data, error }) => {
+            if (error || !Array.isArray(data)) setEngagementsError(true);
+            else setEngagements(data);
+        }).catch(() => setEngagementsError(true));
     }, []);
 
     return (
@@ -156,7 +178,8 @@ function PaymentsPage() {
             </div>
 
             {showModal && (
-                <RaiseFeeModal t={t} cases={cases} onClose={() => setShowModal(false)}
+                <RaiseFeeModal t={t} cases={cases} engagements={engagements}
+                    engagementsError={engagementsError} onClose={() => setShowModal(false)}
                     onDone={() => { setShowModal(false); load(); }} />
             )}
         </div>

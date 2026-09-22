@@ -23,18 +23,27 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
-from app.core.constants import AgreementStatus, CaseStatus, EngagementStatus
-from app.core.exceptions import (
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from support.hire_fixtures import (  # noqa: E402
+    delete_appointments_for, seed_completed_appointment,
+)
+
+from app.core.constants import (  # noqa: E402
+    AgreementStatus, CaseStatus, EngagementStatus,
+)
+from app.core.exceptions import (  # noqa: E402
     AppValidationError,
     ConflictError,
     ForbiddenError,
-    ServiceUnavailableError,
 )
-from app.services import engagement_service
+from app.services import engagement_service  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -85,6 +94,7 @@ async def parties(app_indexes):
     await get_cases_col().delete_many({"_id": case_id})
     await get_engagements_col().delete_many({"case_id": case_id})
     await get_agreements_col().delete_many({"case_id": case_id})
+    await delete_appointments_for(client_id)
 
 
 @pytest.fixture(autouse=True)
@@ -97,10 +107,16 @@ def _no_embed(monkeypatch):
         pass
 
 
+async def _hire(p, lawyer_id: str, message: str) -> dict:
+    """A request payload backed by a completed consultation (§17 R5-1)."""
+    appt_id = await seed_completed_appointment(p["client_id"], lawyer_id)
+    return {"case_id": p["case_id"], "lawyer_id": lawyer_id,
+            "appointment_id": appt_id, "message": message}
+
+
 async def _request(p) -> str:
     eng = await engagement_service.request_engagement(
-        p["client_id"], {"case_id": p["case_id"], "lawyer_id": p["lawyer_id"],
-                         "message": "Please take this."})
+        p["client_id"], await _hire(p, p["lawyer_id"], "Please take this."))
     return eng["id"]
 
 
@@ -223,8 +239,7 @@ async def test_an_outstanding_proposal_blocks_a_request_to_another_lawyer(partie
     with pytest.raises(ConflictError):
         await engagement_service.request_engagement(
             parties["client_id"],
-            {"case_id": parties["case_id"], "lawyer_id": parties["rival_id"],
-             "message": "You too?"})
+            await _hire(parties, parties["rival_id"], "You too?"))
 
 
 async def test_the_index_refuses_a_second_open_engagement_on_one_case(parties):
@@ -295,103 +310,69 @@ async def test_a_case_claimed_elsewhere_is_a_real_conflict(parties):
     assert eng["status"] == EngagementStatus.CANCELLED.value
 
 
-# ── the letter is the consent artifact ──────────────────────────────────────
+# ── acceptance generates no letter (§17 R5-3) ───────────────────────────────
 
-async def test_acceptance_produces_an_engagement_letter(parties):
-    from app.db.collections import get_agreements_col
+async def test_acceptance_creates_no_agreement_and_records_the_terms(parties):
+    """FORMERLY: acceptance produced an engagement letter carrying the terms.
+    Now the engagement IS the record of what the client accepted: the fee and
+    scope stay on it, no agreement row is written, no `agreement_id` is set."""
+    from app.db.collections import get_agreements_col, get_engagements_col
 
     eid = await _request(parties)
     await engagement_service.propose_terms(eid, parties["lawyer_id"], TERMS)
     accepted = await engagement_service.accept_terms(eid, parties["client_id"])
 
-    assert accepted["agreement_id"]
-    agreement = await get_agreements_col().find_one({"_id": accepted["agreement_id"]})
-    assert agreement is not None
-    assert "75,000" in agreement["body_html"]
-    assert "Trial court only." in agreement["body_html"]
+    assert accepted["status"] == EngagementStatus.ACCEPTED.value
+    assert not accepted.get("agreement_id")
+    stored = await get_engagements_col().find_one({"_id": eid})
+    assert "agreement_id" not in stored or stored["agreement_id"] is None
+    assert stored["fee_amount"] == 75000
+    assert stored["scope_note"] == "Trial court only."
+    assert await get_agreements_col().count_documents(
+        {"case_id": parties["case_id"]}) == 0
+    assert (await _case(parties["case_id"]))["lawyer_id"] == parties["lawyer_id"]
 
 
-async def test_a_failed_letter_leaves_no_engagement_and_no_claim(parties, monkeypatch):
-    """`except Exception: pass` is gone, and the claim is given back.
-
-    An engagement standing with no letter was a billing loophole that
-    payment_service had to defend against separately. Now the letter records
-    terms the client has just accepted, so proceeding without one would leave
-    that agreement with no artifact at all.
-    """
+async def test_a_broken_letter_producer_cannot_affect_acceptance(parties, monkeypatch):
+    """FORMERLY: a failing producer rolled both claims back with a 503. The
+    producer is no longer on the acceptance path at all -- break it, and
+    acceptance still completes and still claims the case."""
     from app.services import agreement_service
 
+    calls = {"n": 0}
+
     async def boom(**kw):
+        calls["n"] += 1
         raise RuntimeError("agreement service down")
 
     monkeypatch.setattr(agreement_service, "create_pending_engagement_letter", boom)
 
     eid = await _request(parties)
     await engagement_service.propose_terms(eid, parties["lawyer_id"], TERMS)
+    accepted = await engagement_service.accept_terms(eid, parties["client_id"])
 
-    with pytest.raises(ServiceUnavailableError):
-        await engagement_service.accept_terms(eid, parties["client_id"])
-
-    case = await _case(parties["case_id"])
-    assert case["lawyer_id"] is None, "the claim was not released"
-
-    from app.db.collections import get_engagements_col
-    eng = await get_engagements_col().find_one({"_id": eid})
-    assert eng["status"] == EngagementStatus.TERMS_PROPOSED.value
+    assert accepted["status"] == EngagementStatus.ACCEPTED.value
+    assert calls["n"] == 0, "acceptance still calls the legacy letter producer"
+    assert (await _case(parties["case_id"]))["lawyer_id"] == parties["lawyer_id"]
 
 
-async def test_the_client_can_retry_after_a_failed_letter(parties, monkeypatch):
+def test_the_legacy_producer_stays_available_but_off_the_acceptance_path():
+    """R5-8: `create_pending_engagement_letter` is kept for legacy fixtures;
+    `accept_terms` no longer references it."""
+    import inspect
+
     from app.services import agreement_service
 
-    calls = {"n": 0}
-    real = agreement_service.create_pending_engagement_letter
+    assert callable(agreement_service.create_pending_engagement_letter)
+    assert "create_pending_engagement_letter" not in inspect.getsource(
+        engagement_service.accept_terms)
 
-    async def flaky(**kw):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("transient")
-        return await real(**kw)
-
-    monkeypatch.setattr(agreement_service, "create_pending_engagement_letter", flaky)
-
-    eid = await _request(parties)
-    await engagement_service.propose_terms(eid, parties["lawyer_id"], TERMS)
-    with pytest.raises(ServiceUnavailableError):
-        await engagement_service.accept_terms(eid, parties["client_id"])
-
-    accepted = await engagement_service.accept_terms(eid, parties["client_id"])
-    assert accepted["status"] == EngagementStatus.ACCEPTED.value
-
-
-# ── EXIT: `accepted` has doors ──────────────────────────────────────────────
 
 async def _accepted(p) -> str:
     eid = await _request(p)
     await engagement_service.propose_terms(eid, p["lawyer_id"], TERMS)
     await engagement_service.accept_terms(eid, p["client_id"])
     return eid
-
-
-async def _execute_letter(engagement_id: str) -> None:
-    """Mark the engagement letter executed.
-
-    Review eligibility requires an EXECUTED letter (plan Phase 2 R5): an
-    accepted engagement whose letter is still pending is not yet a relationship
-    anybody agreed to in writing. `accept_terms` leaves the letter PENDING, so
-    the tests below sign it before asserting on eligibility.
-
-    Set directly rather than driven through two `submit_signature` calls: those
-    need a transactional Mongo, and what these tests are about is the ENDED
-    engagement still counting, not the signing mechanics -- which
-    test_agreement_phase1.py covers on a replica set.
-    """
-    from app.db.collections import get_agreements_col, get_engagements_col
-
-    eng = await get_engagements_col().find_one({"_id": engagement_id})
-    await get_agreements_col().update_one(
-        {"_id": eng["agreement_id"]},
-        {"$set": {"status": AgreementStatus.EXECUTED.value}},
-    )
 
 
 @pytest.mark.parametrize("who", ["client_id", "lawyer_id"])
@@ -416,8 +397,7 @@ async def test_termination_releases_the_case(parties):
     # And the case really is available again.
     again = await engagement_service.request_engagement(
         parties["client_id"],
-        {"case_id": parties["case_id"], "lawyer_id": parties["rival_id"],
-         "message": "Can you take over?"})
+        await _hire(parties, parties["rival_id"], "Can you take over?"))
     assert again["status"] == EngagementStatus.REQUESTED.value
 
 
@@ -530,9 +510,9 @@ async def test_a_completed_engagement_still_counts_as_having_retained(parties):
     eid = await _accepted(parties)
     await engagement_service.complete_engagement(
         eid, parties["client_id"], note="All finished.", one_sided=True)
-    await _execute_letter(eid)
 
-    assert await repo.exists_executed_relationship(
+    # No letter at all -- the retained engagement is enough (§17 R5-6).
+    assert await repo.exists_retained_relationship(
         parties["client_id"], parties["lawyer_id"])
 
 
@@ -543,9 +523,8 @@ async def test_a_terminated_engagement_still_counts_as_having_retained(parties):
     eid = await _accepted(parties)
     await engagement_service.terminate_engagement(
         eid, parties["client_id"], "Poor communication.")
-    await _execute_letter(eid)
 
-    assert await repo.exists_executed_relationship(
+    assert await repo.exists_retained_relationship(
         parties["client_id"], parties["lawyer_id"])
 
 
@@ -554,7 +533,7 @@ async def test_a_merely_requested_engagement_does_not_count(parties):
 
     repo = EngagementRepository()
     await _request(parties)
-    assert not await repo.exists_executed_relationship(
+    assert not await repo.exists_retained_relationship(
         parties["client_id"], parties["lawyer_id"])
 
 

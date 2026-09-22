@@ -8,6 +8,9 @@ from app.core.constants import EngagementFeeType
 class EngagementRequest(BaseModel):
     case_id: str
     lawyer_id: str
+    # REQUIRED for every new hire: the completed consultation it follows
+    # (AGREEMENTS_PRODUCT_PLAN.md §17 R5-1). Validated by the service, not here.
+    appointment_id: str = Field(min_length=1)
     message: str | None = Field(default=None, max_length=2000)
 
 
@@ -70,6 +73,8 @@ class EngagementOut(BaseModel):
     case_id: str | None = None
     client_id: str | None = None
     lawyer_id: str | None = None
+    # Optional on the way OUT: engagements created before §17 R5-1 have none.
+    appointment_id: str | None = None
     status: str | None = None
     message: str | None = None
     fee_amount: float | None = None

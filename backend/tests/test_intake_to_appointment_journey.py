@@ -20,12 +20,22 @@ them is not the journey a client actually walks.
 from __future__ import annotations
 
 import secrets
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from app.core.constants import AppointmentMode, CaseStatus, EngagementStatus
-from app.services import (
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from support.hire_fixtures import (  # noqa: E402
+    delete_appointments_for, seed_completed_appointment,
+)
+
+from app.core.constants import (  # noqa: E402
+    AppointmentMode, CaseStatus, EngagementStatus,
+)
+from app.services import (  # noqa: E402
     appointment_service,
     case_service,
     engagement_service,
@@ -59,6 +69,7 @@ async def journey_parties(app_indexes):
     ])
     yield {"lawyer_id": lawyer_id, "client_id": client_id, "tag": tag}
     await get_users_col().delete_many({"_id": {"$in": [lawyer_id, client_id]}})
+    await delete_appointments_for(client_id)
 
 
 @pytest.fixture
@@ -206,8 +217,11 @@ async def test_engagement_assigns_the_lawyer_to_that_same_case(journey_parties, 
     case_id = result["case_id"]
     await _confirm(case_id, client_id)
 
+    # The consultation comes first (§17 R5-1); the hire follows it.
+    appt_id = await seed_completed_appointment(client_id, lawyer_id)
     requested = await engagement_service.request_engagement(
         client_id, {"case_id": case_id, "lawyer_id": lawyer_id,
+                    "appointment_id": appt_id,
                     "message": "Please take my maintenance case."})
     assert requested["status"] == EngagementStatus.REQUESTED.value
 
@@ -235,8 +249,10 @@ async def test_the_appointment_lands_on_the_engaged_case(journey_parties, offlin
     case_id = result["case_id"]
     await _confirm(case_id, client_id)
 
+    appt_id = await seed_completed_appointment(client_id, lawyer_id)
     requested = await engagement_service.request_engagement(
-        client_id, {"case_id": case_id, "lawyer_id": lawyer_id, "message": None})
+        client_id, {"case_id": case_id, "lawyer_id": lawyer_id,
+                    "appointment_id": appt_id, "message": None})
     await engagement_service.propose_terms(
         requested["id"], lawyer_id, {"fee_amount": 50000, "fee_type": "fixed"})
     await engagement_service.accept_terms(requested["id"], client_id)
@@ -301,10 +317,12 @@ async def test_the_journey_cannot_skip_the_confirmation(journey_parties, offline
     lawyer_id = journey_parties["lawyer_id"]
     result = await _walk_intake(client_id)
 
-    with pytest.raises(AppValidationError):
+    # A real consultation, so the refusal below can only be the draft guard.
+    appt_id = await seed_completed_appointment(client_id, lawyer_id)
+    with pytest.raises(AppValidationError, match="(?i)draft"):
         await engagement_service.request_engagement(
             client_id, {"case_id": result["case_id"], "lawyer_id": lawyer_id,
-                        "message": "Take it now"})
+                        "appointment_id": appt_id, "message": "Take it now"})
 
     with pytest.raises(AppValidationError):
         await lawyer_service.match_lawyers_for_case(result["case_id"], top_n=5)

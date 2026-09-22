@@ -686,13 +686,14 @@ async def submit_review(
         raise NotFoundError("Lawyer")
 
     # Relationship guard: only a client who has actually worked with this lawyer
-    # may review — an accepted engagement OR a completed appointment. Blocks
+    # may review — a retained engagement (accepted, completed or terminated) OR
+    # a completed appointment (AGREEMENTS_PRODUCT_PLAN.md §17 R5-6). Blocks
     # rating spam from users with no real relationship.
-    # An EXECUTED engagement letter, not merely an accepted engagement. A
-    # declined letter now reverses its engagement, but an accepted engagement
-    # whose letter is still pending is also not yet a relationship anybody
-    # agreed to in writing -- and before this it could be reviewed.
-    has_engagement  = await engagement_repo.exists_executed_relationship(
+    #
+    # No executed letter is required any more. That was remediation plan §2 R5;
+    # new engagements have no letter at all (R5-3), so keeping it would refuse
+    # every review of a lawyer the client actually hired. R5 is superseded.
+    has_engagement  = await engagement_repo.exists_retained_relationship(
         client_id, lawyer_id)
     has_appointment = await appointment_repo.exists_completed(client_id, lawyer_id)
     if not (has_engagement or has_appointment):

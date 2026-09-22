@@ -715,6 +715,8 @@ export async function citatorJudgment(id) {
 
 // ─── Payments (peshi/professional fees) ──────────────────────────────────────
 
+// `engagement_id` is REQUIRED: the Hire this fee is billed under. The server
+// validates it against the case, the lawyer and the client (§17 R5-5).
 export async function createFeeRequest({ case_id, amount, purpose, note, hearing_id, engagement_id }) {
   return apiFetch('/payments/fee-request', {
     method: 'POST',
@@ -977,10 +979,20 @@ export async function saveMyWorkingHours({ working_hours, exceptions }) {
 // relationship they could not leave. `acceptEngagement` is gone rather than
 // deprecated; keeping it would keep that gap open.
 
-export async function requestEngagement({ case_id, lawyer_id, message }) {
+// The caller's completed consultations with this lawyer that can lead to a
+// hire. Scoped to the one lawyer and unpaged, so an eligible consultation is
+// never missed because it fell outside a page of the client's diary. The
+// server still re-checks whichever one the request names.
+export async function listHireConsultations(lawyer_id) {
+  return apiFetch(`/appointments/hire-eligible/${encodeURIComponent(lawyer_id)}`);
+}
+
+// `appointment_id` is REQUIRED: a new hire follows a completed consultation
+// with the same lawyer (AGREEMENTS_PRODUCT_PLAN.md §17 R5-1).
+export async function requestEngagement({ case_id, lawyer_id, appointment_id, message }) {
   return apiFetch('/engagements', {
     method: 'POST',
-    body: JSON.stringify({ case_id, lawyer_id, message: message || null }),
+    body: JSON.stringify({ case_id, lawyer_id, appointment_id, message: message || null }),
   });
 }
 

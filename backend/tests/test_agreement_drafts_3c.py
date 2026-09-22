@@ -61,6 +61,10 @@ async def world(mongo_transactional):
     ids = [LAWYER, OTHER_LAWYER, CLIENT]
     await get_users_col().delete_many({"_id": {"$in": ids}})
     await get_cases_col().delete_many({"client_id": CLIENT})
+    # Engagements too: tests here insert them, and a row surviving into the
+    # next test now changes review eligibility, which reads the engagement.
+    from app.db.collections import get_engagements_col
+    await get_engagements_col().delete_many({"client_id": CLIENT})
     await get_agreements_col().delete_many({"created_by": {"$in": ids}})
     await get_event_outbox_col().delete_many({"payload.recipient_id": {"$in": ids}})
 
@@ -720,22 +724,21 @@ async def test_no_notification_or_outbox_event_exists_before_send(world):
 
 
 @pytest.mark.integration
-async def test_the_fee_gate_never_sees_a_draft_as_a_letter(world):
+async def test_the_fee_gate_never_bills_through_a_draft(world):
     """NOT VULNERABLE, pinned anyway.
 
-    Engagement letters are created directly as `pending` by
-    `create_pending_engagement_letter`, never through the draft path, and the
-    gate requires `executed`. A draft can therefore never satisfy it -- but the
-    gate reads an agreement by id, so the property is worth holding.
+    Billing now validates the ENGAGEMENT, not a letter (§17 R5-5), and a draft
+    is not an engagement. A fee request naming a draft's id as its engagement
+    must be refused like any other id that is not this lawyer's engagement.
     """
-    from app.core.exceptions import AppValidationError
+    from app.core.exceptions import ForbiddenError
     from app.db.collections import get_engagements_col
     from app.services import payment_service
 
     case_id = await _case()
     d = await _draft(case_id)
 
-    # An engagement pointed at a DRAFT: contrived, and must still refuse.
+    # A real engagement exists; the fee request names the DRAFT instead.
     now = datetime.now(timezone.utc)
     await get_engagements_col().insert_one({
         "_id": secrets.token_urlsafe(12), "case_id": case_id,
@@ -743,26 +746,23 @@ async def test_the_fee_gate_never_sees_a_draft_as_a_letter(world):
         "agreement_id": d["_id"], "created_at": now, "updated_at": now,
     })
 
-    with pytest.raises(AppValidationError):
-        await payment_service._require_executed_engagement_letter(case_id, LAWYER)
+    with pytest.raises(ForbiddenError):
+        await payment_service.create_fee_request(
+            LAWYER, {"case_id": case_id, "amount": 1000,
+                     "purpose": "peshi_fee", "engagement_id": d["_id"]})
 
 
 @pytest.mark.integration
-async def test_a_draft_does_not_make_a_relationship_reviewable(world):
-    """NOT VULNERABLE, pinned. Review eligibility requires an EXECUTED letter."""
-    from app.db.collections import get_engagements_col
+async def test_a_draft_alone_does_not_make_a_relationship_reviewable(world):
+    """NOT VULNERABLE, pinned. Review eligibility reads the ENGAGEMENT's status
+    (§17 R5-6); a draft agreement is not one, and creates no relationship."""
     from app.repositories.engagement_repo import EngagementRepository
 
     case_id = await _case()
-    d = await _draft(case_id)
-    now = datetime.now(timezone.utc)
-    await get_engagements_col().insert_one({
-        "_id": secrets.token_urlsafe(12), "case_id": case_id,
-        "client_id": CLIENT, "lawyer_id": LAWYER, "status": "completed",
-        "agreement_id": d["_id"], "created_at": now, "updated_at": now,
-    })
+    await _draft(case_id)
 
-    assert await EngagementRepository().exists_executed_relationship(
+    # No engagement at all -- only a draft naming the same case.
+    assert await EngagementRepository().exists_retained_relationship(
         CLIENT, LAWYER) is False
 
 

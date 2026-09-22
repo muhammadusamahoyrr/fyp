@@ -1,26 +1,33 @@
-"""A lawyer cannot bill a client who has not signed the engagement letter.
+"""Billing no longer requires a signed engagement letter -- and the hole the
+letter once closed stays closed.
 
-The letter records the fee the lawyer set and the scope they agreed to. It is
-the ONLY place in this system where the client agrees to a price: the lawyer
-sets fee_amount unilaterally when accepting, and `accepted` is a terminal state
-the client cannot leave.
+HISTORY. This file used to pin `_require_executed_engagement_letter`. The letter
+was then the only place the client agreed to a price: a lawyer accepted an
+engagement, set a fee of Rs 500,000 the client had never seen, and raised a fee
+request against it with the letter unsigned -- HTTP 200.
 
-Verified live before this guard existed: a lawyer accepted an engagement, set a
-fee of Rs 500,000 the client had never seen, and raised a fee request against it
-with the letter still unsigned — HTTP 200. The client could not cancel or
-decline (422). The only party who had agreed to that number was the one being
-paid.
+NOW (AGREEMENTS_PRODUCT_PLAN.md §17 R5-3, R3-25; Gate 2 Step 4). New
+engagements generate no letter, and the letter gate is removed. The client's
+consent is recorded by the two-step flow itself: the lawyer PROPOSES a fee, the
+client ACCEPTS it, and only an accepted (or completed) engagement bills. So the
+live-proven hole is closed by the engagement's status, not by a letter -- which
+is what `test_a_fee_the_client_has_not_accepted_is_still_refused` pins.
+
+Unit-level: the engagement collection is stubbed, so these run without Mongo.
+The integration coverage of the predicate is test_fee_billing_predicate.py.
 """
 import pytest
 
-from app.core.constants import AgreementStatus, EngagementStatus
-from app.core.exceptions import AppValidationError
+from app.core.constants import EngagementStatus
+from app.core.exceptions import AppValidationError, ForbiddenError
 from app.services import payment_service as ps
 
+CASE = {"_id": "c1", "client_id": "C1", "lawyer_id": "L1"}
 
-def _eng(agreement_id="a1"):
-    return {"_id": "e1", "case_id": "c1", "lawyer_id": "L1",
-            "status": EngagementStatus.ACCEPTED.value, "agreement_id": agreement_id}
+
+def _eng(status=EngagementStatus.ACCEPTED.value, agreement_id="a1"):
+    return {"_id": "e1", "case_id": "c1", "lawyer_id": "L1", "client_id": "C1",
+            "status": status, "agreement_id": agreement_id}
 
 
 class _Col:
@@ -28,64 +35,50 @@ class _Col:
     async def find_one(self, *a, **k): return self._doc
 
 
-def _patch(monkeypatch, eng, agreement):
+def _patch(monkeypatch, eng):
     monkeypatch.setattr(ps, "get_engagements_col", lambda: _Col(eng))
-    monkeypatch.setattr(ps, "get_agreements_col", lambda: _Col(agreement))
 
 
-class TestTheGate:
-    async def test_an_executed_letter_allows_billing(self, monkeypatch):
-        _patch(monkeypatch, _eng(), {"_id": "a1", "status": AgreementStatus.EXECUTED.value})
-        await ps._require_executed_engagement_letter("c1", "L1")   # must not raise
+class TestNoLetterGate:
+    async def test_an_accepted_engagement_bills_whatever_its_letter_says(self, monkeypatch):
+        """Formerly: a pending letter blocked billing. The letter is not read."""
+        _patch(monkeypatch, _eng())
+        assert (await ps._require_billable_engagement("e1", CASE, "L1"))["_id"] == "e1"
 
-    async def test_a_pending_letter_blocks_billing(self, monkeypatch):
-        """The exact live-proven hole."""
-        _patch(monkeypatch, _eng(), {"_id": "a1", "status": AgreementStatus.PENDING.value})
-        with pytest.raises(AppValidationError) as exc:
-            await ps._require_executed_engagement_letter("c1", "L1")
-        # Copy changed in Phase 2; the REFUSAL is what this test protects.
-        # The old wording said the letter "must be signed by both you and the
-        # client" for every non-executed state, including `cancelled`, which
-        # cannot be signed -- so each state now names its own action.
-        assert "awaiting signatures" in str(exc.value)
-        assert "both parties must sign" in str(exc.value).lower()
+    async def test_an_engagement_with_no_letter_at_all_bills(self, monkeypatch):
+        """Formerly: a missing letter blocked billing. It is now the NORMAL state."""
+        _patch(monkeypatch, _eng(agreement_id=None))
+        assert (await ps._require_billable_engagement("e1", CASE, "L1"))["_id"] == "e1"
 
-    async def test_a_missing_letter_blocks_billing(self, monkeypatch):
-        """engagement_service wraps letter generation in `except Exception: pass`,
-        so an engagement can stand with no letter at all. That silent gap must
-        not become a billing loophole — no letter is no consent."""
-        _patch(monkeypatch, _eng(agreement_id=None), None)
-        with pytest.raises(AppValidationError) as exc:
-            await ps._require_executed_engagement_letter("c1", "L1")
-        assert "no engagement letter is available" in str(exc.value)
-        assert "contact support" in str(exc.value).lower()
+    async def test_a_dangling_agreement_id_does_not_block_billing(self, monkeypatch):
+        """Formerly: an id pointing at nothing blocked billing."""
+        _patch(monkeypatch, _eng(agreement_id="gone"))
+        assert (await ps._require_billable_engagement("e1", CASE, "L1"))["_id"] == "e1"
 
-    async def test_a_dangling_agreement_id_blocks_billing(self, monkeypatch):
-        """An id pointing at nothing is not consent either."""
-        _patch(monkeypatch, _eng("gone"), None)
-        with pytest.raises(AppValidationError):
-            await ps._require_executed_engagement_letter("c1", "L1")
+    def test_the_letter_gate_is_gone(self):
+        assert not hasattr(ps, "_require_executed_engagement_letter")
+        # Billing no longer reads the agreements collection at all.
+        assert not hasattr(ps, "get_agreements_col")
 
-    async def test_no_accepted_engagement_blocks_billing(self, monkeypatch):
-        _patch(monkeypatch, None, None)
-        with pytest.raises(AppValidationError) as exc:
-            await ps._require_executed_engagement_letter("c1", "L1")
-        assert "no billable engagement with an executed letter" in str(exc.value)
 
-    async def test_the_two_failure_modes_say_different_things(self, monkeypatch):
-        """'not signed yet' and 'never generated' need different actions from
-        the lawyer. One vague error would send them chasing the wrong one."""
-        _patch(monkeypatch, _eng(), {"_id": "a1", "status": AgreementStatus.PENDING.value})
-        with pytest.raises(AppValidationError) as unsigned:
-            await ps._require_executed_engagement_letter("c1", "L1")
-        _patch(monkeypatch, _eng(agreement_id=None), None)
-        with pytest.raises(AppValidationError) as missing:
-            await ps._require_executed_engagement_letter("c1", "L1")
-        assert str(unsigned.value) != str(missing.value)
+class TestTheConsentStillRequired:
+    async def test_a_fee_the_client_has_not_accepted_is_still_refused(self, monkeypatch):
+        """THE LIVE-PROVEN HOLE, restated. Terms the lawyer proposed and the
+        client never accepted authorise no fee -- letter or no letter."""
+        _patch(monkeypatch, _eng(status=EngagementStatus.TERMS_PROPOSED.value))
+        with pytest.raises(AppValidationError, match="not accepted"):
+            await ps._require_billable_engagement("e1", CASE, "L1")
+
+    async def test_no_engagement_is_still_refused(self, monkeypatch):
+        """Formerly: "no billable engagement with an executed letter"."""
+        _patch(monkeypatch, None)
+        with pytest.raises(ForbiddenError):
+            await ps._require_billable_engagement("e1", CASE, "L1")
 
 
 def test_the_gate_runs_before_any_write():
     """A refused request must leave no half-made payment record behind."""
     import inspect
     src = inspect.getsource(ps.create_fee_request)
-    assert src.index("_require_executed_engagement_letter") < src.index("insert_one")
+    assert src.index("_require_billable_engagement") < src.index("insert_one")
+    assert "_require_executed_engagement_letter" not in src

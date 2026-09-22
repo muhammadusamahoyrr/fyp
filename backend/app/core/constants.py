@@ -156,13 +156,12 @@ ENGAGEMENT_OPEN_STATUSES = (
 # An engagement that became a real working relationship. An engagement that has
 # since ended still happened, and still counts.
 #
-# NECESSARY BUT NO LONGER SUFFICIENT for either gate. Both billing
-# (`payment_service._require_executed_engagement_letter`) and reviews
-# (`engagement_repo.exists_executed_relationship`) now ALSO require the
-# engagement's letter to be `executed`. Membership here alone once implied both,
-# and that was the hole: a declined letter left the engagement `accepted`, so a
-# client could review — and a lawyer be told to chase — a relationship neither
-# party had signed.
+# The review gate is membership here (`engagement_repo.
+# exists_retained_relationship`, AGREEMENTS_PRODUCT_PLAN.md §17 R5-6). Billing
+# uses the same set minus `terminated`, which retains the relationship but
+# authorises no NEW fee (`payment_service._NEW_FEE_ENGAGEMENT_STATUSES`, R5-5).
+# Neither requires an executed engagement letter any more: new engagements have
+# none (R5-3).
 ENGAGEMENT_RETAINED_STATUSES = (
     EngagementStatus.ACCEPTED.value,
     EngagementStatus.COMPLETED.value,

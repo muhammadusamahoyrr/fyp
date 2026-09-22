@@ -31,10 +31,10 @@ async def create_agreement(
     """Create an agreement the user has drafted themselves.
 
     This route is the DIY contract builder's only entry point, and it is parked
-    behind `agreements_diy_builder_enabled` (403 while off). Engagement letters
-    do NOT come through here — they are created inside `engagement_service` via
-    `create_pending_engagement_letter`, so hiring a lawyer and signing their
-    letter keep working whatever this flag is set to.
+    behind `agreements_diy_builder_enabled` (403 while off). Legacy engagement
+    letters never came through here, and new engagements generate none
+    (AGREEMENTS_PRODUCT_PLAN.md §17 R5-3); existing letters stay signable and
+    declinable whatever this flag is set to.
     """
     return await agreement_service.create_user_agreement(
         title=body.title,

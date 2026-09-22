@@ -233,7 +233,11 @@ async def test_exactly_one_notification_and_only_to_the_other_party(world):
 # ── 5.3 a broken letter link never blocks the exit ──────────────────────────
 
 @pytest.mark.integration
-async def test_termination_succeeds_with_no_letter_and_records_the_anomaly(world):
+async def test_an_engagement_with_no_letter_terminates_with_no_letter_operation(world):
+    """FORMERLY recorded `letter_anomaly: "no_letter"`. Every engagement
+    accepted since §17 R5-3 has no letter by design, so there is no letter to
+    cancel and nothing anomalous to record -- the exit completes cleanly."""
+    from app.db.collections import get_agreements_col
     from app.services import engagement_service
 
     w = await _accepted(letter=None)
@@ -242,8 +246,9 @@ async def test_termination_succeeds_with_no_letter_and_records_the_anomaly(world
 
     eng, case, _ = await _rows(w)
     assert eng["status"] == EngagementStatus.TERMINATED.value, "exit was blocked"
-    assert eng["letter_anomaly"] == "no_letter"
+    assert "letter_anomaly" not in eng, "a letterless engagement was called anomalous"
     assert case["lawyer_id"] is None
+    assert await get_agreements_col().count_documents({"case_id": w["case_id"]}) == 0
 
 
 @pytest.mark.integration
@@ -356,14 +361,12 @@ async def test_a_second_termination_is_refused(world):
 
 @pytest.mark.integration
 async def test_termination_racing_a_letter_decline_yields_one_terminal_state(world):
-    """Two exits, same engagement, at the same instant.
+    """Termination and a legacy-letter decline, same letter, same instant.
 
-    Both paths end the engagement and both touch the letter, by different
-    routes: terminate cancels a pending letter as a side effect; decline
-    cancels the letter and reverses the engagement. Exactly one may win, and
-    whichever does must leave a record that agrees with itself -- the
-    engagement's terminal state and the letter's cancellation cause must
-    describe the same event.
+    Since §17 C-A a decline ends only the LETTER: it never touches the
+    engagement or the case. So the engagement ends `terminated` whoever wins,
+    and the only contest is over the letter -- which exactly one of the two may
+    cancel, leaving a record that says which.
     """
     import asyncio
 
@@ -390,21 +393,20 @@ async def test_termination_racing_a_letter_decline_yields_one_terminal_state(wor
 
     eng, case, letter = await _rows(w)
 
-    # The engagement reached exactly one terminal state.
-    assert eng["status"] in (EngagementStatus.TERMINATED.value,
-                             EngagementStatus.DECLINED.value)
-    # The letter is cancelled either way -- both routes cancel a pending one.
+    # The decline cannot end the engagement any more; termination always does.
+    assert eng["status"] == EngagementStatus.TERMINATED.value
+    assert "declined_at" not in eng and "decline_source" not in eng
     assert letter["status"] == AgreementStatus.CANCELLED.value
 
-    # THE CONSISTENCY CHECK: the two records must tell the same story.
-    if eng["status"] == EngagementStatus.TERMINATED.value:
-        assert "declined_at" not in eng, "terminated engagement carries decline metadata"
+    # THE CONSISTENCY CHECK: one cancellation, recorded by whichever won.
+    actions = [a["action"] for a in letter.get("audit_log") or []]
+    assert actions.count("cancelled") + actions.count("declined") == 1, actions
+    if "cancelled" in actions:
         assert letter.get("cancellation_source") == "engagement_terminated"
     else:
-        assert eng["decline_source"] == "engagement_letter"
-        assert "terminated_at" not in eng, "declined engagement carries termination metadata"
+        assert "cancellation_source" not in letter
 
-    # And the case is released exactly once, by whichever won.
+    # The case is released exactly once, by the termination.
     assert case["lawyer_id"] is None
     assert len(case.get("milestones") or []) == 1
 
@@ -526,30 +528,27 @@ async def test_the_drainer_actually_delivers_the_parked_event(world):
         {"user_id": LAWYER, "payload.engagement_id": w["engagement_id"]}) == 1
 
 
-# -- the property `ENGAGEMENT_RETAINED_STATUSES` exists to protect -----------
+# -- termination and billing: no NEW fee after termination (§17 C-B) --------
 
 @pytest.mark.integration
-async def test_a_terminated_engagement_with_an_executed_letter_is_still_billable(world):
+async def test_termination_with_an_executed_letter_ends_new_billing_and_spares_the_letter(world):
     """END TO END: really terminate, then really try to bill.
 
-    `payment_service._require_executed_engagement_letter` deliberately accepts
-    ENDED engagements -- its comment at lines 100-105 explains why: the letter's
-    own terms say fees for work already performed remain payable, so scoping the
-    gate to `accepted` would make terminating a way to escape a bill for work
-    that was actually done, and would equally strand a lawyer who finished a
-    matter before invoicing.
-
-    3A gave termination a new power -- it now writes to the letter -- so that
-    property needs re-proving against the REAL termination path rather than a
-    hand-built `terminated` row. The executed letter must survive untouched and
-    the gate must still pass.
+    FORMERLY this asserted the opposite -- an executed letter kept a terminated
+    engagement billable. §17 C-B: no NEW fee is raised under a terminated
+    engagement (fees raised before it stay payable; see
+    test_fee_billing_predicate.py). What 3A must still guarantee is untouched:
+    the executed letter survives termination byte-for-byte.
     """
+    from app.core.exceptions import AppValidationError
     from app.services import engagement_service, payment_service
 
     w = await _accepted(letter=AgreementStatus.EXECUTED.value)
+    fee = {"case_id": w["case_id"], "amount": 5000, "purpose": "peshi_fee",
+           "engagement_id": w["engagement_id"]}
 
-    # Before: billable.
-    await payment_service._require_executed_engagement_letter(w["case_id"], LAWYER)
+    # Before: billable, through the validated engagement.
+    await payment_service.create_fee_request(LAWYER, fee)
 
     await engagement_service.terminate_engagement(
         w["engagement_id"], CLIENT, "Work is complete, ending the engagement.")
@@ -560,18 +559,16 @@ async def test_a_terminated_engagement_with_an_executed_letter_is_still_billable
     assert "cancellation_source" not in letter
     assert case["lawyer_id"] is None, "the case was not released"
 
-    # After: STILL billable. This is the assertion that matters.
-    await payment_service._require_executed_engagement_letter(w["case_id"], LAWYER)
+    # After: no new fee under the terminated engagement.
+    with pytest.raises(AppValidationError, match="has been terminated"):
+        await payment_service.create_fee_request(LAWYER, {**fee, "amount": 6000})
 
 
 @pytest.mark.integration
-async def test_a_terminated_engagement_whose_letter_3a_cancelled_is_not_billable(world):
-    """The other half, so the rule above is not mistaken for "always billable".
-
-    A PENDING letter cancelled by 3A means nobody ever agreed the fee in
-    writing, so the gate must refuse -- and must say why in the cancelled-letter
-    wording, not the awaiting-signatures wording.
-    """
+async def test_termination_cancels_a_pending_legacy_letter_and_bills_nothing_new(world):
+    """The LEGACY path 3A exists for, kept: a linked pending letter is cancelled
+    by termination, so it is never left signable behind an ended engagement.
+    New billing is refused for the engagement's status, not the letter's."""
     from app.core.exceptions import AppValidationError
     from app.services import engagement_service, payment_service
 
@@ -581,10 +578,9 @@ async def test_a_terminated_engagement_whose_letter_3a_cancelled_is_not_billable
 
     _, _, letter = await _rows(w)
     assert letter["status"] == AgreementStatus.CANCELLED.value
+    assert letter["cancellation_source"] == "engagement_terminated"
 
-    with pytest.raises(AppValidationError) as exc:
-        await payment_service._require_executed_engagement_letter(
-            w["case_id"], LAWYER)
-    message = str(exc.value).lower()
-    assert "was declined" in message or "not executed" in message
-    assert "terminate" not in message
+    with pytest.raises(AppValidationError, match="has been terminated"):
+        await payment_service.create_fee_request(
+            LAWYER, {"case_id": w["case_id"], "amount": 5000,
+                     "purpose": "peshi_fee", "engagement_id": w["engagement_id"]})

@@ -1,23 +1,26 @@
-"""Phase 2: declining an engagement letter reverses its engagement.
+"""Declining a legacy engagement letter ends the LETTER, and nothing else.
 
-THE DEFECT
-----------
-`decline_agreement` read `engagement_id` nowhere. The field was written at
-creation and acted on by nothing, so declining an engagement letter cancelled
-the agreement and left the engagement `accepted` with the case still assigned.
-The lawyer could not invoice -- the fee gate refuses a non-executed letter --
-and was told the letter "must be signed by both you and the client", which
-`submit_signature` refuses permanently for a cancelled agreement. The
-instruction was impossible to follow.
+HISTORY
+-------
+Phase 2 (remediation plan R1-R8) made declining a linked engagement letter
+REVERSE its engagement to `declined` and release the case, in one transaction,
+because a letter was then the consent artifact and billing and reviews read it.
 
-THE APPROVED RULES (plan Phase 2, R1-R8)
-----------------------------------------
-Reuse `declined`; no new status. Record `declined_by`, `declined_at`,
-`decline_source`, the human `decline_reason` and `declined_agreement_id`. Keep
-the accept-terms case claim. Reverse in ONE transaction. Release the case only
-when it is still held by that engagement's lawyer. Review eligibility requires
-an EXECUTED letter. Never tell the user to terminate -- the reversal already
-ended the engagement.
+NOW -- AGREEMENTS_PRODUCT_PLAN.md §17 R5-12 / C-A (Gate 2 Step 4)
+-------------------------------------------------------------------
+New engagements generate no letter, and neither billing nor reviews read one.
+Letters that exist are historical compatibility data. So a decline:
+
+* cancels the agreement and appends one `declined` audit entry (actor, time,
+  IP, reason, body digest) -- in ONE conditional write, filtered on `pending`;
+* notifies the counterparty, parked in the same transaction;
+* does NOT read or write the engagement it names, and does NOT write
+  `case.lawyer_id` (R3-26) -- the reversal is gone;
+* works when the engagement or the case no longer exists. The pre-cutover
+  census found five pending letters in exactly that state.
+
+`decline_source` values the reversal already wrote stay readable on their
+engagement rows (`EngagementOut`); no new decline writes one.
 
 Tests that need a real transaction take `mongo_transactional`, which skips with
 a reason on a standalone rather than exercising only the fail-closed path.
@@ -130,99 +133,87 @@ async def _rows(w: dict) -> tuple[dict, dict, dict]:
     )
 
 
-# ── 1 & 2: either party can decline, and the reversal is symmetric ───────────
+async def _decline(w, user_id=CLIENT, reason="No"):
+    from app.services import agreement_service
+    return await agreement_service.decline_agreement(
+        agreement_id=w["agreement_id"], user_id=user_id,
+        reason=reason, ip_address=None)
+
+
+def _outbox_id(w, decliner=CLIENT, recipient=LAWYER):
+    return f"agreement:{w['agreement_id']}:declined:{decliner}:{recipient}"
+
+
+async def _assert_only_the_letter_moved(w, eng_before, case_before):
+    """THE C-A INVARIANT: the engagement and the case are byte-identical."""
+    _, eng, case = await _rows(w)
+    assert eng == eng_before, "a decline wrote to the engagement"
+    assert case == case_before, "a decline wrote to the case"
+
+
+# ── 1 & 2: either party can decline, and only the letter moves ──────────────
 
 @pytest.mark.integration
 @pytest.mark.parametrize("decliner,expected", [(CLIENT, "client"), (LAWYER, "lawyer")])
-async def test_declining_a_linked_letter_reverses_everything(world, decliner, expected):
-    from app.services import agreement_service
-
+async def test_declining_a_linked_letter_ends_only_the_letter(world, decliner, expected):
+    """FORMERLY: the engagement went `declined` and the case was released.
+    Now either party's decline cancels the letter and touches nothing else."""
     w = await _engaged()
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=decliner,
-        reason="The fee is higher than we discussed.", ip_address=None)
+    _, eng_before, case_before = await _rows(w)
 
-    agreement, eng, case = await _rows(w)
+    await _decline(w, user_id=decliner, reason="Not signing this")
 
+    agreement, _, _ = await _rows(w)
     assert agreement["status"] == AgreementStatus.CANCELLED.value
-    assert eng["status"] == EngagementStatus.DECLINED.value
-    assert eng["declined_by"] == expected
-    assert eng["decline_source"] == "engagement_letter"
-    assert eng["declined_agreement_id"] == w["agreement_id"]
-    assert eng["declined_at"] is not None
-    # The case is released so the client can engage somebody else.
-    assert case["lawyer_id"] is None
-    assert case["status"] == CaseStatus.OPEN.value
+    entry = agreement["audit_log"][-1]
+    assert entry["action"] == "declined" and entry["actor_id"] == decliner
+    await _assert_only_the_letter_moved(w, eng_before, case_before)
 
 
 # ── 3: the human reason is not a machine sentinel ────────────────────────────
 
 @pytest.mark.integration
-async def test_the_human_reason_is_kept_apart_from_the_machine_discriminator(world):
-    """`decline_reason` is shown to the counterparty.
-
-    Writing the sentinel into it would render "engagement_letter" to a person,
-    or force every reader to know which values are prose and which are codes.
-    """
-    from app.services import agreement_service
-
+async def test_the_reason_is_recorded_on_the_letter_and_no_decline_source_is_written(world):
+    """The human reason lives in the letter's audit entry. `decline_source` was
+    the reversal's machine discriminator on the ENGAGEMENT; no new decline
+    writes one."""
     w = await _engaged()
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=CLIENT,
-        reason="I have decided to handle this myself.", ip_address=None)
+    await _decline(w, reason="The fee is wrong")
 
-    _, eng, _ = await _rows(w)
-    assert eng["decline_reason"] == "I have decided to handle this myself."
-    assert eng["decline_source"] == "engagement_letter"
-    assert eng["decline_reason"] != eng["decline_source"]
+    agreement, eng, _ = await _rows(w)
+    assert agreement["audit_log"][-1]["reason"] == "The fee is wrong"
+    assert "decline_source" not in eng
+    assert "declined_agreement_id" not in eng
+    assert "declined_at" not in eng
 
 
 @pytest.mark.integration
 async def test_no_reason_leaves_the_field_null_not_a_sentinel(world):
-    from app.services import agreement_service
-
     w = await _engaged()
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=CLIENT,
-        reason=None, ip_address=None)
+    await _decline(w, reason="   ")
 
-    _, eng, _ = await _rows(w)
-    assert eng["decline_reason"] is None
-    assert eng["decline_source"] == "engagement_letter"
+    agreement, _, _ = await _rows(w)
+    assert agreement["audit_log"][-1]["reason"] is None
 
 
-# ── 4: everything moves together ─────────────────────────────────────────────
+# ── 4: the agreement, its audit entry and its notice move together ──────────
 
 @pytest.mark.integration
-async def test_agreement_engagement_case_audit_and_outbox_all_change(world):
-    """The atomic unit, asserted across all five artifacts."""
+async def test_the_agreement_audit_and_outbox_change_and_nothing_else(world):
+    """FORMERLY all five changed together. Now three do: the agreement, its
+    audit entry, and one outbox row for the counterparty."""
     from app.db.collections import get_event_outbox_col
-    from app.services import agreement_service
 
     w = await _engaged()
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=CLIENT,
-        reason="No thanks", ip_address="198.51.100.4")
+    _, eng_before, case_before = await _rows(w)
+    await _decline(w)
 
-    agreement, eng, case = await _rows(w)
-
+    agreement, _, _ = await _rows(w)
     assert agreement["status"] == AgreementStatus.CANCELLED.value
-    entry = next(a for a in agreement["audit_log"] if a["action"] == "declined")
-    assert entry["body_sha256"] == agreement["body_sha256"]
-    assert entry["reason"] == "No thanks"
-    assert entry["ip_address"] == "198.51.100.4"
-
-    assert eng["status"] == EngagementStatus.DECLINED.value
-    assert case["lawyer_id"] is None
-
-    milestones = case.get("milestones") or []
-    assert len(milestones) == 1
-    assert "letter declined" in milestones[0]["title"].lower()
-
-    parked = await get_event_outbox_col().find_one(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"})
-    assert parked is not None
-    assert parked["destination"] == "notifications"
+    assert [a["action"] for a in agreement["audit_log"]] == ["declined"]
+    assert agreement["audit_log"][0]["body_sha256"] == agreement["body_sha256"]
+    assert await get_event_outbox_col().count_documents({"_id": _outbox_id(w)}) == 1
+    await _assert_only_the_letter_moved(w, eng_before, case_before)
 
 
 # ── 5: a forced failure rolls the whole thing back ───────────────────────────
@@ -322,88 +313,41 @@ async def test_an_executed_letter_cannot_be_declined_and_nothing_moves(world):
     assert case["lawyer_id"] == LAWYER
 
 
-# ── 8: a case reassigned since is never cleared ──────────────────────────────
+# ── 8: no case is ever written by a decline ─────────────────────────────────
 
 @pytest.mark.integration
-async def test_a_case_now_held_by_another_lawyer_is_not_released(world):
-    """The conditional filter's whole purpose.
-
-    A late decline of a superseded letter must not take a live matter away from
-    a lawyer who has nothing to do with it.
-    """
+async def test_a_case_held_by_another_lawyer_is_left_exactly_as_it_is(world):
+    w = await _engaged()
     from app.db.collections import get_cases_col
-    from app.services import agreement_service
-
-    w = await _engaged()
-    # The case moves on to somebody else before the decline lands.
     await get_cases_col().update_one(
         {"_id": w["case_id"]}, {"$set": {"lawyer_id": OTHER_LAWYER}})
+    _, eng_before, case_before = await _rows(w)
 
-    before = await get_cases_col().find_one({"_id": w["case_id"]})
-
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=CLIENT,
-        reason="Too slow", ip_address=None)
-
-    agreement, eng, case = await _rows(w)
-    # The letter and its own engagement still end -- those are this decline's
-    # business. The case is not, and must be left alone ENTIRELY.
-    assert agreement["status"] == AgreementStatus.CANCELLED.value
-    assert eng["status"] == EngagementStatus.DECLINED.value
-    assert case == before, "a reassigned case was modified in some field"
+    await _decline(w)
+    await _assert_only_the_letter_moved(w, eng_before, case_before)
 
 
 @pytest.mark.integration
-async def test_a_reassigned_case_gains_no_milestone_and_is_not_called_open(world):
-    """Two claims that must not be made about somebody else's case.
-
-    A milestone about an engagement that is no longer the case's own would put
-    a stranger's history on their timeline. And telling the counterparty their
-    case is "open again" when another lawyer holds it is a false statement
-    about their own matter, which invites them to act on it.
-    """
-    from app.db.collections import get_cases_col, get_event_outbox_col
-    from app.services import agreement_service
-
+async def test_no_case_gains_a_milestone_from_a_decline(world):
     w = await _engaged()
-    await get_cases_col().update_one(
-        {"_id": w["case_id"]}, {"$set": {"lawyer_id": OTHER_LAWYER}})
-
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=CLIENT,
-        reason="Too slow", ip_address=None)
-
-    case = await get_cases_col().find_one({"_id": w["case_id"]})
-    assert not (case.get("milestones") or []), "a milestone landed on another lawyer's case"
-    assert case["status"] == CaseStatus.IN_PROGRESS.value, "status was changed"
-
-    parked = await get_event_outbox_col().find_one(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"})
-    body = parked["payload"]["body"].lower()
-    assert "open again" not in body, "claimed a reassigned case was reopened"
-    assert "assignment was not changed" in body
-    assert "engagement has ended" in body
-    assert "no fees can be raised" in body
+    await _decline(w)
+    _, _, case = await _rows(w)
+    assert not (case.get("milestones") or [])
+    assert case["status"] == CaseStatus.IN_PROGRESS.value
 
 
 @pytest.mark.integration
-async def test_a_superseded_letter_cannot_reverse_its_engagement(world):
-    """The engagement points at a DIFFERENT letter, so this one is stale."""
-    from app.core.exceptions import AppValidationError
-    from app.services import agreement_service
-
+async def test_a_superseded_letter_is_declinable_and_moves_nothing_else(world):
+    """FORMERLY refused (superseded link). The decline no longer reads the
+    engagement, so a letter it no longer points at is simply declined."""
     w = await _engaged(link_back=False)
+    _, eng_before, case_before = await _rows(w)
 
-    with pytest.raises(AppValidationError) as exc:
-        await agreement_service.decline_agreement(
-            agreement_id=w["agreement_id"], user_id=CLIENT,
-            reason="No", ip_address=None)
-    assert "superseded" in str(exc.value).lower()
+    await _decline(w)
 
-    agreement, eng, case = await _rows(w)
-    assert agreement["status"] == AgreementStatus.PENDING.value, "nothing written"
-    assert eng["status"] == EngagementStatus.ACCEPTED.value
-    assert case["lawyer_id"] == LAWYER
+    agreement, _, _ = await _rows(w)
+    assert agreement["status"] == AgreementStatus.CANCELLED.value
+    await _assert_only_the_letter_moved(w, eng_before, case_before)
 
 
 @pytest.mark.integration
@@ -431,6 +375,7 @@ async def test_concurrent_sign_and_decline_produce_one_terminal_outcome(world):
     from app.services import agreement_service
 
     w = await _engaged()
+    _, eng_before, case_before = await _rows(w)
 
     async def sign():
         try:
@@ -442,28 +387,22 @@ async def test_concurrent_sign_and_decline_produce_one_terminal_outcome(world):
 
     async def decline():
         try:
-            return await agreement_service.decline_agreement(
-                agreement_id=w["agreement_id"], user_id=CLIENT,
-                reason="No", ip_address=None)
+            return await _decline(w)
         except Exception as exc:
             return exc
 
     await asyncio.gather(sign(), decline())
 
-    agreement, eng, case = await _rows(w)
+    agreement, _, _ = await _rows(w)
     actions = [a["action"] for a in agreement["audit_log"]]
-
     if agreement["status"] == AgreementStatus.CANCELLED.value:
         assert actions[-1] == "declined", "nothing may follow the decline"
-        assert eng["status"] == EngagementStatus.DECLINED.value
-        assert case["lawyer_id"] is None
     else:
-        # The signature won; the letter is still pending its second signature,
-        # so the engagement must be exactly as it was.
+        # The signature won; the letter still awaits its second signature.
         assert agreement["status"] == AgreementStatus.PENDING.value
         assert "declined" not in actions
-        assert eng["status"] == EngagementStatus.ACCEPTED.value
-        assert case["lawyer_id"] == LAWYER
+    # Whichever won, the engagement and case never moved.
+    await _assert_only_the_letter_moved(w, eng_before, case_before)
 
 
 # ── 10: idempotent retry ─────────────────────────────────────────────────────
@@ -472,66 +411,48 @@ async def test_concurrent_sign_and_decline_produce_one_terminal_outcome(world):
 async def test_a_genuine_full_callback_retry_duplicates_nothing(world):
     """A REAL retry: the whole callback runs twice, across two transactions.
 
-    The previous version of this test re-invoked `_reverse_engagement` twice
-    inside ONE transaction, which is not what `with_transaction` does and
-    proved the wrong property. `with_transaction` ABORTS a failed attempt --
-    rolling back every write it made -- and then runs the callback again in a
-    fresh transaction.
-
-    So this drives that exact shape: attempt one executes fully and is aborted,
-    attempt two executes and commits. Everything the first attempt wrote must
-    have vanished, and the committed result must be single: one audit entry,
-    one milestone, one engagement transition, one outbox row.
+    `with_transaction` ABORTS a failed attempt -- rolling back every write it
+    made -- and runs the callback again in a fresh transaction. Attempt one
+    executes fully and is aborted; attempt two commits. The committed result
+    must be single: one audit entry, one outbox row, and still no engagement or
+    case write.
     """
     from app.db.collections import get_event_outbox_col
     from app.db.mongodb import get_client
     from app.services import agreement_service
 
     w = await _engaged()
-
-    # Build the callback the service would build, then drive it by hand so the
-    # abort/retry boundary is explicit rather than simulated.
+    _, eng_before, case_before = await _rows(w)
     attempts = {"n": 0}
 
     async def run_once(session):
         attempts["n"] += 1
         return await agreement_service._decline_in_transaction(
-            session,
-            agreement_id=w["agreement_id"], user_id=CLIENT,
-            reason="Changed my mind", ip_address=None,
-        )
+            session, agreement_id=w["agreement_id"], user_id=CLIENT,
+            reason="Changed my mind", ip_address=None)
 
     client = get_client()
     async with await client.start_session() as session:
-        # ATTEMPT 1 — runs the full body, then aborts. Nothing may survive.
         session.start_transaction()
         await run_once(session)
         await session.abort_transaction()
 
-    agreement, eng, case = await _rows(w)
+    agreement, _, _ = await _rows(w)
     assert agreement["status"] == AgreementStatus.PENDING.value
     assert agreement["audit_log"] == []
-    assert eng["status"] == EngagementStatus.ACCEPTED.value
-    assert not (case.get("milestones") or [])
-    assert await get_event_outbox_col().count_documents(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"}) == 0, (
+    assert await get_event_outbox_col().count_documents({"_id": _outbox_id(w)}) == 0, (
         "an aborted attempt left an outbox row behind")
 
     async with await client.start_session() as session:
-        # ATTEMPT 2 — the retry. Commits.
         session.start_transaction()
         await run_once(session)
         await session.commit_transaction()
 
     assert attempts["n"] == 2
-
-    agreement, eng, case = await _rows(w)
+    agreement, _, _ = await _rows(w)
     assert len([a for a in agreement["audit_log"] if a["action"] == "declined"]) == 1
-    assert len(case.get("milestones") or []) == 1, "milestone duplicated across retry"
-    assert eng["status"] == EngagementStatus.DECLINED.value
-    assert eng["decline_source"] == "engagement_letter"
-    assert await get_event_outbox_col().count_documents(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"}) == 1
+    assert await get_event_outbox_col().count_documents({"_id": _outbox_id(w)}) == 1
+    await _assert_only_the_letter_moved(w, eng_before, case_before)
 
 
 @pytest.mark.integration
@@ -576,164 +497,110 @@ async def test_parking_a_duplicate_event_inside_a_transaction_fails_closed(world
     await get_event_outbox_col().delete_one({"_id": logical})
 
 
-# ── item 4: linkage regressions, all decided INSIDE the transaction ──────────
+# ── item 4: broken or changed links no longer block a decline (C-A) ─────────
 
 @pytest.mark.integration
-async def test_a_backlink_changed_after_preflight_aborts_everything(world, monkeypatch):
-    """THE time-of-check/time-of-use gap.
-
-    Preflight validates the chain on a stale read. If the engagement is
-    re-pointed at a DIFFERENT letter between that check and the writes, the old
-    code would have reversed on a letter the engagement no longer recognised.
-
-    The engagement is moved to letter B after preflight passes but before the
-    transaction body runs. Letter A must stay pending, and nothing else may
-    move.
-    """
+async def test_an_engagement_changed_mid_decline_does_not_affect_it(world, monkeypatch):
+    """FORMERLY a TOCTOU abort on the engagement backlink. The decline no longer
+    reads the engagement, so an engagement re-pointed between preflight and the
+    transaction neither blocks the decline nor gets written by it."""
     from app.db.collections import get_engagements_col
     from app.services import agreement_service
 
     w = await _engaged()
-    real_preflight = agreement_service._linked_engagement
-    flipped = {"done": False}
+    real_run = agreement_service._run_in_transaction
 
-    async def flip_after_preflight(agreement, user_id, session=None):
-        result = await real_preflight(agreement, user_id, session=session)
-        # Only the preflight call (no session) triggers the flip, so the
-        # in-transaction check sees the CHANGED world.
-        if session is None and not flipped["done"]:
-            flipped["done"] = True
-            await get_engagements_col().update_one(
-                {"_id": w["engagement_id"]},
-                {"$set": {"agreement_id": "LETTER-B"}})
-        return result
+    async def flip_then_run(txn):
+        await get_engagements_col().update_one(
+            {"_id": w["engagement_id"]}, {"$set": {"agreement_id": "LETTER-B"}})
+        return await real_run(txn)
 
-    monkeypatch.setattr(agreement_service, "_linked_engagement",
-                        flip_after_preflight)
-
-    from app.core.exceptions import AppValidationError
-    with pytest.raises(AppValidationError) as exc:
-        await agreement_service.decline_agreement(
-            agreement_id=w["agreement_id"], user_id=CLIENT,
-            reason="No", ip_address=None)
-    assert "superseded" in str(exc.value).lower()
+    monkeypatch.setattr(agreement_service, "_run_in_transaction", flip_then_run)
+    await _decline(w)
 
     agreement, eng, case = await _rows(w)
-    assert agreement["status"] == AgreementStatus.PENDING.value, "letter A moved"
-    assert agreement["audit_log"] == [], "an audit entry survived"
+    assert agreement["status"] == AgreementStatus.CANCELLED.value
+    assert eng["agreement_id"] == "LETTER-B"          # only the test wrote it
     assert eng["status"] == EngagementStatus.ACCEPTED.value
-    assert eng["agreement_id"] == "LETTER-B", "the flip itself was rolled back"
     assert case["lawyer_id"] == LAWYER
-
-    from app.db.collections import get_event_outbox_col
-    assert await get_event_outbox_col().count_documents(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"}) == 0
 
 
 @pytest.mark.integration
-async def test_a_missing_engagement_aborts_the_whole_decline(world):
-    from app.core.exceptions import AppValidationError
+async def test_an_orphaned_legacy_letter_can_be_declined(world):
+    """THE CENSUS REGRESSION. The pre-cutover census found five pending letters
+    whose engagement row no longer exists. FORMERLY their decline aborted on
+    the missing link; now it proceeds like any other agreement's."""
     from app.db.collections import get_engagements_col
-    from app.services import agreement_service
 
     w = await _engaged()
     await get_engagements_col().delete_one({"_id": w["engagement_id"]})
 
-    with pytest.raises(AppValidationError):
-        await agreement_service.decline_agreement(
-            agreement_id=w["agreement_id"], user_id=CLIENT,
-            reason="No", ip_address=None)
-
-    agreement, _, case = await _rows(w)
-    assert agreement["status"] == AgreementStatus.PENDING.value
-    assert agreement["audit_log"] == []
-    assert case["lawyer_id"] == LAWYER
-
-
-@pytest.mark.integration
-async def test_a_missing_case_aborts_the_whole_decline(world):
-    """A missing case is broken linkage, not merely an unreleasable case."""
-    from app.core.exceptions import AppValidationError
-    from app.db.collections import get_cases_col
-    from app.services import agreement_service
-
-    w = await _engaged()
-    await get_cases_col().delete_one({"_id": w["case_id"]})
-
-    with pytest.raises(AppValidationError) as exc:
-        await agreement_service.decline_agreement(
-            agreement_id=w["agreement_id"], user_id=CLIENT,
-            reason="No", ip_address=None)
-    assert "case" in str(exc.value).lower()
+    await _decline(w, reason="This was never mine to sign")
 
     agreement, eng, _ = await _rows(w)
-    assert agreement["status"] == AgreementStatus.PENDING.value
-    assert agreement["audit_log"] == []
-    assert eng["status"] == EngagementStatus.ACCEPTED.value
+    assert agreement["status"] == AgreementStatus.CANCELLED.value
+    assert agreement["audit_log"][-1]["action"] == "declined"
+    assert eng is None, "a decline recreated the missing engagement"
 
 
 @pytest.mark.integration
-async def test_an_agreement_party_who_is_not_an_engagement_party_is_refused(world):
-    """The two documents disagree about who is involved.
-
-    That is not a decline this code can reason about, so it refuses rather than
-    guessing which document is right.
-    """
-    from app.core.exceptions import AppValidationError
-    from app.db.collections import get_agreements_col, get_engagements_col
-    from app.services import agreement_service
+async def test_a_letter_whose_case_is_gone_can_be_declined(world):
+    """All six census orphans also lost their case. That does not block a
+    decline either -- and nothing recreates the case."""
+    from app.db.collections import get_cases_col, get_engagements_col
 
     w = await _engaged()
-    # A third party is added to the LETTER but is nobody on the engagement.
-    await get_agreements_col().update_one(
-        {"_id": w["agreement_id"]},
-        {"$push": {"parties": {
-            "user_id": OTHER_LAWYER, "full_name": "Lawyer Two", "signed": False,
-            "signed_at": None, "signature_method": None, "signature_data": None}}})
+    await get_engagements_col().delete_one({"_id": w["engagement_id"]})
+    await get_cases_col().delete_one({"_id": w["case_id"]})
 
-    with pytest.raises(AppValidationError) as exc:
-        await agreement_service.decline_agreement(
-            agreement_id=w["agreement_id"], user_id=OTHER_LAWYER,
-            reason="Not mine", ip_address=None)
-    assert "not a party to the engagement" in str(exc.value).lower()
+    await _decline(w)
 
-    agreement, eng, case = await _rows(w)
-    assert agreement["status"] == AgreementStatus.PENDING.value
-    assert agreement["audit_log"] == []
-    assert eng["status"] == EngagementStatus.ACCEPTED.value
-    assert case["lawyer_id"] == LAWYER
-    assert await get_engagements_col().count_documents(
-        {"_id": w["engagement_id"], "decline_source": {"$exists": True}}) == 0
+    agreement, _, case = await _rows(w)
+    assert agreement["status"] == AgreementStatus.CANCELLED.value
+    assert case is None, "a decline recreated the missing case"
+
+
+@pytest.mark.integration
+async def test_a_party_to_the_letter_may_decline_it_whatever_the_engagement_says(world):
+    """FORMERLY refused: the reversal required the decliner to be a party to the
+    ENGAGEMENT too, because it was about to change that engagement. The decline
+    now ends only the agreement, so the agreement's own parties are the
+    authority -- and the engagement it names is left exactly as it was."""
+    from app.db.collections import get_engagements_col
+
+    w = await _engaged()
+    await get_engagements_col().update_one(
+        {"_id": w["engagement_id"]}, {"$set": {"client_id": "SOMEONE-ELSE"}})
+    _, eng_before, case_before = await _rows(w)
+
+    await _decline(w, user_id=CLIENT)
+
+    agreement, _, _ = await _rows(w)
+    assert agreement["status"] == AgreementStatus.CANCELLED.value
+    await _assert_only_the_letter_moved(w, eng_before, case_before)
 
 
 # ── the counterparty notice ──────────────────────────────────────────────────
 
 @pytest.mark.integration
-async def test_the_counterparty_notice_carries_every_fact_they_need(world):
-    """Four facts, because the reader's next action depends on all of them."""
+async def test_the_counterparty_notice_says_who_declined_what_and_why(world):
+    """And claims nothing else -- no ended engagement, no reopened case."""
     from app.db.collections import get_event_outbox_col
-    from app.services import agreement_service
 
     w = await _engaged()
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=CLIENT,
-        reason="Fee too high", ip_address=None)
+    await _decline(w, reason="Scope is too broad")
 
-    parked = await get_event_outbox_col().find_one(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"})
-    body = parked["payload"]["body"].lower()
-
-    assert "client one" in body, "who declined"
-    assert "fee too high" in body, "why"
-    assert "engagement has ended" in body
-    assert "case is open again" in body
-    assert "no fees can be raised" in body
-    assert "new engagement" in body and "new letter" in body
-    # R6: the reversal already ended it, so there is nothing to terminate.
-    assert "terminate" not in body
+    row = await get_event_outbox_col().find_one({"_id": _outbox_id(w)})
+    body = row["payload"]["body"]
+    assert "Client One" in body
+    assert "Engagement Letter — Property matter" in body
+    assert "Scope is too broad" in body
+    assert row["payload"]["title"] == "Agreement declined"
+    for claim in ("engagement has ended", "open again", "new engagement"):
+        assert claim not in body.lower(), claim
 
 
-# ── item 5: the reversal metadata is exposed, not internal ──────────────────
+# ── item 5: historical reversal metadata stays readable ─────────────────────
 
 def test_engagement_out_exposes_the_letter_decline_metadata():
     """R2's fields reach the client, deliberately.
@@ -818,151 +685,83 @@ async def test_removing_the_requester_from_parties_after_preflight_aborts(world,
     `decline_agreement` authorises on a stale pre-transaction read. If the
     requester is removed from the agreement between that check and the writes,
     the callback must refuse -- a party who is no longer a party must not still
-    be able to end the instrument.
+    be able to end the instrument. (The hook moved from `_linked_engagement`,
+    which no longer exists, to the transaction runner itself.)
     """
     from app.core.exceptions import ForbiddenError
     from app.db.collections import get_agreements_col, get_event_outbox_col
     from app.services import agreement_service
 
     w = await _engaged()
-    real_preflight = agreement_service._linked_engagement
-    pulled = {"done": False}
+    real_run = agreement_service._run_in_transaction
 
-    async def pull_after_preflight(agreement, user_id, session=None):
-        result = await real_preflight(agreement, user_id, session=session)
-        if session is None and not pulled["done"]:
-            pulled["done"] = True
-            await get_agreements_col().update_one(
-                {"_id": w["agreement_id"]},
-                {"$pull": {"parties": {"user_id": CLIENT}}})
-        return result
+    async def pull_then_run(txn):
+        await get_agreements_col().update_one(
+            {"_id": w["agreement_id"]},
+            {"$pull": {"parties": {"user_id": CLIENT}}})
+        return await real_run(txn)
 
-    monkeypatch.setattr(agreement_service, "_linked_engagement",
-                        pull_after_preflight)
+    monkeypatch.setattr(agreement_service, "_run_in_transaction", pull_then_run)
 
     with pytest.raises(ForbiddenError):
-        await agreement_service.decline_agreement(
-            agreement_id=w["agreement_id"], user_id=CLIENT,
-            reason="No", ip_address=None)
+        await _decline(w)
 
     agreement, eng, case = await _rows(w)
     assert agreement["status"] == AgreementStatus.PENDING.value
     assert agreement["audit_log"] == []
     assert eng["status"] == EngagementStatus.ACCEPTED.value
     assert case["lawyer_id"] == LAWYER
-    assert await get_event_outbox_col().count_documents(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"}) == 0
+    assert await get_event_outbox_col().count_documents({"_id": _outbox_id(w)}) == 0
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("ended", [EngagementStatus.COMPLETED.value,
                                    EngagementStatus.TERMINATED.value])
-async def test_engagement_party_mismatch_is_refused_even_when_ended(world, ended):
-    """Authorization does not lapse because the engagement did.
-
-    The ended-engagement early return used to come BEFORE the identity check,
-    so a requester who was a party to the LETTER but a stranger to the
-    ENGAGEMENT was never checked -- they could cancel the letter of a
-    relationship they had nothing to do with, purely because it had finished.
-    """
-    from app.core.exceptions import AppValidationError
-    from app.db.collections import get_agreements_col
-    from app.services import agreement_service
-
+async def test_a_letter_beside_an_ended_engagement_is_declined_without_touching_it(world, ended):
+    """An ended engagement is not re-ended, re-opened or annotated by a late
+    decline of its legacy letter."""
     w = await _engaged(eng_status=ended)
-    await get_agreements_col().update_one(
-        {"_id": w["agreement_id"]},
-        {"$push": {"parties": {
-            "user_id": OTHER_LAWYER, "full_name": "Lawyer Two", "signed": False}}})
+    _, eng_before, case_before = await _rows(w)
 
-    with pytest.raises(AppValidationError) as exc:
-        await agreement_service.decline_agreement(
-            agreement_id=w["agreement_id"], user_id=OTHER_LAWYER,
-            reason="Not mine", ip_address=None)
-    assert "not a party to the engagement" in str(exc.value).lower()
+    await _decline(w)
 
-    agreement, eng, _ = await _rows(w)
-    assert agreement["status"] == AgreementStatus.PENDING.value
-    assert agreement["audit_log"] == []
-    assert eng["status"] == ended
+    agreement, _, _ = await _rows(w)
+    assert agreement["status"] == AgreementStatus.CANCELLED.value
+    await _assert_only_the_letter_moved(w, eng_before, case_before)
 
 
-# -- final pass: the non-released notice tells the truth ---------------------
+# -- final pass: the notice makes no engagement claims ------------------------
 
 @pytest.mark.integration
-async def test_an_already_unassigned_case_is_not_called_reassigned(world):
-    """A zero-match release does NOT mean somebody else took the case.
-
-    The previous copy inferred "assigned elsewhere" from `modified_count == 0`,
-    which is also what an already-unassigned case produces -- telling a client a
-    stranger had taken their matter when in fact nobody had.
-    """
-    from app.db.collections import get_cases_col, get_event_outbox_col
-    from app.services import agreement_service
+async def test_an_unassigned_case_stays_unassigned(world):
+    from app.db.collections import get_cases_col
 
     w = await _engaged()
-    await get_cases_col().update_one(
-        {"_id": w["case_id"]}, {"$set": {"lawyer_id": None}})
+    await get_cases_col().update_one({"_id": w["case_id"]}, {"$set": {"lawyer_id": None}})
+    _, eng_before, case_before = await _rows(w)
 
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=CLIENT,
-        reason="No", ip_address=None)
-
-    parked = await get_event_outbox_col().find_one(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"})
-    body = parked["payload"]["body"].lower()
-
-    assert "assigned elsewhere" not in body, "claimed a stranger took the case"
-    assert "open again" not in body
-    assert "assignment was not changed" in body
-    assert "no fees can be raised" in body
+    await _decline(w)
+    await _assert_only_the_letter_moved(w, eng_before, case_before)
 
 
-@pytest.mark.integration
-@pytest.mark.parametrize("scenario", ["reassigned", "already_unassigned"])
-async def test_a_non_released_case_never_instructs_an_impossible_new_engagement(world, scenario):
-    """While another lawyer holds the case, `request_engagement` refuses.
-
-    So a notice telling the client to start a new engagement fails the moment
-    they follow it. Only the released branch may say that.
-    """
-    from app.db.collections import get_cases_col, get_event_outbox_col
+def test_the_decline_notice_makes_no_engagement_claims():
+    """The three reversal-shaped notices are gone; one shape remains."""
     from app.services import agreement_service
 
-    w = await _engaged()
-    await get_cases_col().update_one(
-        {"_id": w["case_id"]},
-        {"$set": {"lawyer_id":
-                  OTHER_LAWYER if scenario == "reassigned" else None}})
-
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=CLIENT,
-        reason="No", ip_address=None)
-
-    parked = await get_event_outbox_col().find_one(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"})
-    body = parked["payload"]["body"].lower()
-
-    assert "open again" not in body
-    assert "start a new engagement" not in body
-    assert "engage another lawyer" not in body
-    assert "engagement has ended" in body
+    said = agreement_service._decline_notice("Client One", "Letter", "Too costly")
+    assert said == 'Client One declined "Letter". Reason: Too costly'
+    assert agreement_service._decline_notice("A", "T", None) == 'A declined "T".'
 
 
-@pytest.mark.integration
-async def test_only_the_released_branch_promises_a_new_engagement(world):
-    """The released case genuinely can be re-engaged, so it alone says so."""
-    from app.db.collections import get_event_outbox_col
+def test_the_reversal_machinery_is_gone():
+    """C-A, structurally: nothing in the agreement module can reverse an
+    engagement or write a case any more."""
+    import inspect
+
     from app.services import agreement_service
 
-    w = await _engaged()
-    await agreement_service.decline_agreement(
-        agreement_id=w["agreement_id"], user_id=CLIENT,
-        reason="No", ip_address=None)
-
-    parked = await get_event_outbox_col().find_one(
-        {"_id": f"agreement:{w['agreement_id']}:declined:{CLIENT}:{LAWYER}"})
-    body = parked["payload"]["body"].lower()
-
-    assert "open again" in body
-    assert "start a new engagement" in body
+    for name in ("_linked_engagement", "_reverse_engagement",
+                 "DECLINE_SOURCE_ENGAGEMENT_LETTER"):
+        assert not hasattr(agreement_service, name), name
+    src = inspect.getsource(agreement_service._decline_in_transaction)
+    assert "get_engagements_col" not in src and "get_cases_col" not in src

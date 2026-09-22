@@ -1,18 +1,21 @@
 """Who may review a lawyer, and when a fee may be raised.
 
-Both gates read the same chain -- engagement status AND its letter's status --
-and both were wrong in the same way before Phase 2: they trusted the engagement
-alone. A declined letter left the engagement `accepted`, so a client could
-review a lawyer who had refused to sign, and the fee gate told that lawyer to
-get a `cancelled` letter signed, which is impossible.
+HISTORY. Both gates once read the same chain -- engagement status AND its
+letter's status. Review eligibility required an EXECUTED letter (remediation
+plan §2 R5), and the fee gate refused anything else with one message per letter
+state.
 
-REVIEW ELIGIBILITY now requires an EXECUTED letter. That is stricter than the
-mechanical consequence of the Phase 2 reversal: an accepted engagement whose
-letter is merely PENDING is not reviewable either, because nobody has agreed
-anything in writing yet.
+NOW (AGREEMENTS_PRODUCT_PLAN.md §17 R5-3, R5-5, R5-6; Gate 2 Steps 4+5). New
+engagements generate no letter, so neither gate reads one:
 
-The completed-appointment path is independent and unchanged -- a consultation
-that happened is its own relationship, with no engagement letter involved.
+* REVIEWS -- a completed appointment OR a retained engagement (`accepted`,
+  `completed`, `terminated`). R5 is superseded.
+* FEES -- the validated engagement (`payment_service._require_billable_
+  engagement`): accepted or completed, never terminated.
+
+The letters in these fixtures are LEGACY rows. Each test that carries one shows
+it no longer changes the answer; the ones with `letter_status=None` are the
+shape every new engagement has.
 """
 from __future__ import annotations
 
@@ -36,6 +39,7 @@ async def people(mongo):
         get_cases_col,
         get_engagements_col,
         get_lawyer_reviews_col,
+        get_payments_col,
         get_users_col,
     )
 
@@ -51,6 +55,7 @@ async def people(mongo):
     await get_agreements_col().delete_many({"created_by": {"$in": [CLIENT, LAWYER]}})
     await get_cases_col().delete_many({"client_id": CLIENT})
     await get_appointments_col().delete_many({"client_id": CLIENT})
+    await get_payments_col().delete_many({"payer_id": CLIENT})
     # `uniq_client_lawyer_review` is a real unique index and these tests reuse
     # one (client, lawyer) pair, so a review left behind makes the NEXT test
     # fail on a duplicate key rather than on the thing it asserts.
@@ -58,10 +63,10 @@ async def people(mongo):
 
 
 async def _arrangement(eng_status: str, letter_status: str | None) -> dict:
-    """An engagement in `eng_status` whose letter is in `letter_status`.
+    """An engagement in `eng_status`, with a LEGACY letter in `letter_status`.
 
-    `letter_status=None` means the engagement has no letter at all, which is the
-    shape the orphan and generation-failure paths leave behind.
+    `letter_status=None` means no letter at all -- the shape of every
+    engagement accepted since §17 R5-3.
     """
     from app.db.collections import (
         get_agreements_col,
@@ -106,23 +111,39 @@ async def _arrangement(eng_status: str, letter_status: str | None) -> dict:
     return {"case_id": case_id, "engagement_id": eng_id, "agreement_id": agr_id}
 
 
+async def _review(stars=4, comment="Fine"):
+    from app.services import lawyer_service
+    await lawyer_service.submit_review(
+        client_id=CLIENT, lawyer_id=LAWYER, stars=stars, comment=comment)
+
+
+async def _stored_review():
+    from app.db.collections import get_lawyer_reviews_col
+    return await get_lawyer_reviews_col().find_one(
+        {"client_id": CLIENT, "lawyer_id": LAWYER})
+
+
 # ── review eligibility matrix ────────────────────────────────────────────────
 
 @pytest.mark.integration
 @pytest.mark.parametrize("eng_status,letter_status,eligible", [
-    # THE regression: accepted engagement, letter still awaiting signatures.
-    (EngagementStatus.ACCEPTED.value, AgreementStatus.PENDING.value, False),
+    # The retained statuses qualify on their own -- no letter at all (new flow).
+    (EngagementStatus.ACCEPTED.value, None, True),
+    (EngagementStatus.COMPLETED.value, None, True),
+    (EngagementStatus.TERMINATED.value, None, True),
+    # FORMERLY False: accepted with a legacy letter still awaiting signatures.
+    (EngagementStatus.ACCEPTED.value, AgreementStatus.PENDING.value, True),
+    # Legacy executed letters change nothing either way.
     (EngagementStatus.ACCEPTED.value, AgreementStatus.EXECUTED.value, True),
-    # An ended relationship is still a relationship worth writing about.
     (EngagementStatus.COMPLETED.value, AgreementStatus.EXECUTED.value, True),
     (EngagementStatus.TERMINATED.value, AgreementStatus.EXECUTED.value, True),
-    # A declined letter reverses its engagement out of RETAINED entirely.
-    (EngagementStatus.DECLINED.value, AgreementStatus.CANCELLED.value, False),
     # Never a relationship at all.
     (EngagementStatus.REQUESTED.value, None, False),
     (EngagementStatus.TERMS_PROPOSED.value, None, False),
-    # Retained but no letter was ever generated.
-    (EngagementStatus.ACCEPTED.value, None, False),
+    (EngagementStatus.DECLINED.value, None, False),
+    (EngagementStatus.CANCELLED.value, None, False),
+    # Legacy: an engagement the old letter reversal left `declined`.
+    (EngagementStatus.DECLINED.value, AgreementStatus.CANCELLED.value, False),
 ])
 async def test_review_eligibility_matrix(people, eng_status, letter_status, eligible):
     from app.repositories.engagement_repo import EngagementRepository
@@ -130,7 +151,7 @@ async def test_review_eligibility_matrix(people, eng_status, letter_status, elig
     await _arrangement(eng_status, letter_status)
     repo = EngagementRepository()
 
-    assert await repo.exists_executed_relationship(CLIENT, LAWYER) is eligible
+    assert await repo.exists_retained_relationship(CLIENT, LAWYER) is eligible
 
 
 @pytest.mark.integration
@@ -138,11 +159,10 @@ async def test_a_completed_appointment_still_allows_a_review(people):
     """Independent of engagements entirely.
 
     A consultation that happened is its own relationship. Tying review rights
-    solely to engagement letters would silently remove the right to review a
-    lawyer somebody actually met.
+    solely to engagements would silently remove the right to review a lawyer
+    somebody actually met.
     """
     from app.db.collections import get_appointments_col
-    from app.services import lawyer_service
 
     now = datetime.now(timezone.utc)
     await get_appointments_col().insert_one({
@@ -154,177 +174,141 @@ async def test_a_completed_appointment_still_allows_a_review(people):
     # No engagement at all, so this can only pass via the appointment path.
     # `submit_review` returns None by design; NOT RAISING is the assertion, and
     # the stored row is what proves it actually landed.
-    await lawyer_service.submit_review(
-        client_id=CLIENT, lawyer_id=LAWYER, stars=5, comment="Helpful")
-
-    from app.db.collections import get_lawyer_reviews_col
-    stored = await get_lawyer_reviews_col().find_one(
-        {"client_id": CLIENT, "lawyer_id": LAWYER})
+    await _review(stars=5, comment="Helpful")
+    stored = await _stored_review()
     assert stored is not None and stored["stars"] == 5
 
 
 @pytest.mark.integration
-async def test_an_accepted_engagement_with_a_pending_letter_cannot_review(people):
-    """The end-to-end refusal, through the service rather than the repository."""
-    from app.core.exceptions import ForbiddenError
-    from app.services import lawyer_service
+@pytest.mark.parametrize("status", [EngagementStatus.ACCEPTED.value,
+                                    EngagementStatus.COMPLETED.value,
+                                    EngagementStatus.TERMINATED.value])
+async def test_a_retained_engagement_with_no_letter_can_be_reviewed(people, status):
+    """THE new-flow case, end to end through the service: an engagement with
+    no letter at all is a relationship the client can write about."""
+    await _arrangement(status, None)
+    await _review()
+    assert await _stored_review() is not None
 
+
+@pytest.mark.integration
+async def test_an_accepted_engagement_with_a_pending_letter_can_be_reviewed(people):
+    """FORMERLY refused (R5). A legacy letter still awaiting signatures no
+    longer stands between a client and the lawyer they hired."""
     await _arrangement(EngagementStatus.ACCEPTED.value, AgreementStatus.PENDING.value)
+    await _review(stars=3, comment="Early days")
+    assert await _stored_review() is not None
 
+
+@pytest.mark.integration
+@pytest.mark.parametrize("status", [EngagementStatus.REQUESTED.value,
+                                    EngagementStatus.TERMS_PROPOSED.value,
+                                    EngagementStatus.DECLINED.value,
+                                    EngagementStatus.CANCELLED.value])
+async def test_an_engagement_that_never_began_grants_no_review(people, status):
+    from app.core.exceptions import ForbiddenError
+
+    await _arrangement(status, None)
     with pytest.raises(ForbiddenError):
-        await lawyer_service.submit_review(
-            client_id=CLIENT, lawyer_id=LAWYER, stars=1, comment="Too early")
+        await _review(stars=1, comment="Never worked together")
+    assert await _stored_review() is None
 
 
 @pytest.mark.integration
 async def test_a_second_engagement_declined_at_letter_stage_grants_no_rights(people):
-    """A declined SECOND engagement does not create review eligibility.
-
-    REPLACES an earlier test that executed a letter and then flipped it to
-    `cancelled` to simulate a decline. That sequence is impossible: an executed
-    agreement is immutable, and `decline_agreement` refuses one outright — so
-    the test was asserting behaviour for a state the system cannot reach, and
-    would have kept passing if the immutability guarantee broke.
-
-    The reachable shape is this one: a client engages a lawyer, the letter is
-    declined at the pending stage, and the reversal leaves the engagement
-    `declined`. Nothing about that grants a right to review.
-    """
+    """LEGACY SHAPE, kept. Before §17 C-A a declined letter reversed its
+    engagement to `declined`; such rows still exist in principle and must not
+    create review eligibility."""
     from app.core.exceptions import ForbiddenError
     from app.repositories.engagement_repo import EngagementRepository
-    from app.services import lawyer_service
 
     await _arrangement(EngagementStatus.DECLINED.value,
                        AgreementStatus.CANCELLED.value)
 
-    assert await EngagementRepository().exists_executed_relationship(
+    assert await EngagementRepository().exists_retained_relationship(
         CLIENT, LAWYER) is False
-
     with pytest.raises(ForbiddenError):
-        await lawyer_service.submit_review(
-            client_id=CLIENT, lawyer_id=LAWYER, stars=1, comment="Never worked out")
+        await _review(stars=1, comment="Never worked out")
 
 
 @pytest.mark.integration
-async def test_one_executed_letter_is_enough_even_beside_a_declined_one(people):
-    """A later failed engagement does not revoke a real past relationship.
-
-    The client retained this lawyer once under a signed letter; a second
-    engagement that collapsed at the letter stage is a separate event. The
-    lookup must find the qualifying pair rather than be confused by the other.
-    """
+async def test_one_retained_engagement_is_enough_even_beside_a_declined_one(people):
+    """A later failed engagement does not revoke a real past relationship."""
     from app.repositories.engagement_repo import EngagementRepository
 
-    await _arrangement(EngagementStatus.COMPLETED.value,
-                       AgreementStatus.EXECUTED.value)
+    await _arrangement(EngagementStatus.COMPLETED.value, None)
     await _arrangement(EngagementStatus.DECLINED.value,
                        AgreementStatus.CANCELLED.value)
 
-    assert await EngagementRepository().exists_executed_relationship(
+    assert await EngagementRepository().exists_retained_relationship(
         CLIENT, LAWYER) is True
 
 
-# ── fee gate copy, per state ─────────────────────────────────────────────────
-
 @pytest.mark.integration
-async def test_a_pending_letter_names_signatures_not_the_impossible(people):
-    from app.core.exceptions import AppValidationError
+async def test_one_review_per_client_lawyer_pair_still_holds(people):
+    """The anti-abuse constraint is unchanged: a second review is refused and
+    the stored review is not duplicated."""
+    from app.core.exceptions import ConflictError
+    from app.db.collections import get_lawyer_reviews_col
+
+    await _arrangement(EngagementStatus.ACCEPTED.value, None)
+    await _review(stars=5, comment="First")
+    with pytest.raises(ConflictError):
+        await _review(stars=1, comment="Second")
+    assert await get_lawyer_reviews_col().count_documents(
+        {"client_id": CLIENT, "lawyer_id": LAWYER}) == 1
+
+
+# ── fees: the engagement bills, the letter does not ──────────────────────────
+
+async def _raise_fee(w):
     from app.services import payment_service
-
-    w = await _arrangement(EngagementStatus.ACCEPTED.value,
-                           AgreementStatus.PENDING.value)
-
-    with pytest.raises(AppValidationError) as exc:
-        await payment_service._require_executed_engagement_letter(
-            w["case_id"], LAWYER)
-
-    message = str(exc.value)
-    assert "awaiting signatures" in message
-    assert "both parties must sign" in message.lower()
-    assert "terminate" not in message.lower()
-
-
-@pytest.mark.integration
-async def test_a_missing_letter_says_billing_is_disabled(people):
-    from app.core.exceptions import AppValidationError
-    from app.services import payment_service
-
-    w = await _arrangement(EngagementStatus.ACCEPTED.value, None)
-
-    with pytest.raises(AppValidationError) as exc:
-        await payment_service._require_executed_engagement_letter(
-            w["case_id"], LAWYER)
-
-    message = str(exc.value)
-    assert "no engagement letter is available" in message
-    assert "contact support" in message.lower()
+    return await payment_service.create_fee_request(
+        LAWYER, {"case_id": w["case_id"], "amount": 2500, "purpose": "peshi_fee",
+                 "engagement_id": w["engagement_id"]})
 
 
 @pytest.mark.integration
-async def test_a_cancelled_letter_explains_the_only_way_forward(people):
-    """The defensive path.
-
-    After Phase 2 a declined letter reverses its engagement out of RETAINED, so
-    the lookup should not reach here. A row predating that, or repaired by hand,
-    still must not be told to get a cancelled letter signed.
-    """
-    from app.core.exceptions import AppValidationError
-    from app.services import payment_service
-
-    # Engagement deliberately left RETAINED beside a cancelled letter -- exactly
-    # the state Phase 2 removes, kept here to pin the defensive branch.
-    w = await _arrangement(EngagementStatus.ACCEPTED.value,
-                           AgreementStatus.CANCELLED.value)
-
-    with pytest.raises(AppValidationError) as exc:
-        await payment_service._require_executed_engagement_letter(
-            w["case_id"], LAWYER)
-
-    message = str(exc.value).lower()
-    assert "was declined" in message
-    assert "new engagement" in message and "new letter" in message
-    assert "must be signed by both you and the client" not in message
-    assert "terminate" not in message
+@pytest.mark.parametrize("letter_status", [
+    None,                              # the new flow: no letter at all
+    AgreementStatus.PENDING.value,     # FORMERLY "awaiting signatures"
+    AgreementStatus.EXECUTED.value,    # still fine, and irrelevant
+    AgreementStatus.CANCELLED.value,   # legacy residue beside a live engagement
+])
+async def test_an_accepted_engagement_bills_whatever_its_letter_says(people, letter_status):
+    """The four letter-state messages are gone because the letter is no longer
+    read. A cancelled legacy letter beside an ACCEPTED engagement is the state
+    §17 R5-12 records: the engagement is the consent, so it still bills."""
+    w = await _arrangement(EngagementStatus.ACCEPTED.value, letter_status)
+    fee = await _raise_fee(w)
+    assert fee["engagement_id"] == w["engagement_id"]
 
 
 @pytest.mark.integration
-async def test_no_qualifying_engagement_says_so_plainly(people):
-    from app.core.exceptions import AppValidationError
-    from app.services import payment_service
+async def test_a_completed_engagement_stays_billable(people):
+    w = await _arrangement(EngagementStatus.COMPLETED.value, None)
+    fee = await _raise_fee(w)
+    assert fee["engagement_id"] == w["engagement_id"]
 
-    # Declined engagement: not in RETAINED, so the lookup finds nothing.
+
+@pytest.mark.integration
+async def test_a_terminated_engagement_bills_nothing_new_even_with_an_executed_letter(people):
+    """FORMERLY billable (an executed letter was enough). §17 C-B: no new fee
+    once the engagement is terminated; fees raised before it stay payable."""
+    from app.core.exceptions import AppValidationError
+
+    w = await _arrangement(EngagementStatus.TERMINATED.value,
+                           AgreementStatus.EXECUTED.value)
+    with pytest.raises(AppValidationError, match="has been terminated"):
+        await _raise_fee(w)
+
+
+@pytest.mark.integration
+async def test_a_declined_engagement_bills_nothing(people):
+    """Formerly "no billable engagement with an executed letter"."""
+    from app.core.exceptions import AppValidationError
+
     w = await _arrangement(EngagementStatus.DECLINED.value,
                            AgreementStatus.CANCELLED.value)
-
-    with pytest.raises(AppValidationError) as exc:
-        await payment_service._require_executed_engagement_letter(
-            w["case_id"], LAWYER)
-
-    assert "no billable engagement with an executed letter" in str(exc.value)
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("ended", [EngagementStatus.COMPLETED.value,
-                                   EngagementStatus.TERMINATED.value])
-async def test_an_ended_engagement_with_an_executed_letter_stays_billable(people, ended):
-    """The property `ENGAGEMENT_RETAINED_STATUSES` exists to protect.
-
-    Fees for work already performed remain payable, so finishing or walking out
-    of an engagement must not become a way to escape the bill -- nor strand a
-    lawyer who invoices after the matter closes.
-    """
-    from app.services import payment_service
-
-    w = await _arrangement(ended, AgreementStatus.EXECUTED.value)
-
-    # No exception is the assertion.
-    await payment_service._require_executed_engagement_letter(w["case_id"], LAWYER)
-
-
-@pytest.mark.integration
-async def test_an_executed_letter_on_an_accepted_engagement_is_billable(people):
-    from app.services import payment_service
-
-    w = await _arrangement(EngagementStatus.ACCEPTED.value,
-                           AgreementStatus.EXECUTED.value)
-    await payment_service._require_executed_engagement_letter(w["case_id"], LAWYER)
+    with pytest.raises(AppValidationError, match="not accepted"):
+        await _raise_fee(w)

@@ -144,7 +144,8 @@ class TestSettlement:
         })
 
         fee = await ps.create_fee_request(
-            lawyer["_id"], {"case_id": case_id, "amount": 50_000, "purpose": "professional_fee"})
+            lawyer["_id"], {"case_id": case_id, "amount": 50_000, "purpose": "professional_fee",
+                            "engagement_id": eng_id})
         pid = fee.get("id") or fee["_id"]
 
         yield {"payment_id": pid, "payer_id": client["_id"], "fee": fee}

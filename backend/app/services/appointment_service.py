@@ -976,6 +976,86 @@ async def mark_no_show(appt_id: str, lawyer_id: str) -> dict:
     return _sanitize(updated, for_lawyer=True)
 
 
+async def completed_consultation_for_hire(
+    appt_id: str | None, client_id: str, lawyer_id: str,
+) -> dict:
+    """The completed consultation a NEW hire must follow, or a refusal.
+
+    AGREEMENTS_PRODUCT_PLAN.md §17 R5-1: a client may ask a lawyer to take a
+    case only after a consultation with that lawyer has been completed. The
+    appointment is the entry path to the hire and nothing more -- it is not
+    the Hire record and not the billing relationship; the engagement is both.
+
+    Returns the raw row so the caller can apply the case rule (a case-bound
+    consultation fixes the case). Every check here is about the APPOINTMENT;
+    the case and the lawyer's KYC are the engagement's to check.
+
+    Ownership goes through `_load_for_actor`, so an appointment that does not
+    exist and one that belongs to another client are refused identically --
+    the same rule every other appointment read follows.
+    """
+    if not appt_id:
+        raise AppValidationError(
+            "Book a consultation with this lawyer first. You can ask them to "
+            "take your case once they have marked it completed.")
+    appt = await _load_for_actor(appt_id, client_id, "client")
+    refusal = _hire_refusal(appt, lawyer_id)
+    if refusal:
+        raise AppValidationError(refusal)
+    return appt
+
+
+def _hire_refusal(appt: dict, lawyer_id: str) -> str | None:
+    """Why this (client-owned) appointment cannot lead to a hire, or None.
+
+    ONE predicate, shared by the check that enforces it and the list that
+    offers consultations to choose from, so the two cannot disagree about
+    which consultations qualify. Ownership is the caller's: both callers
+    query under the client's own filter before they get here.
+    """
+    if appt.get("lawyer_id") != lawyer_id:
+        return "This consultation was with a different lawyer."
+    if _current_status(appt) is not AppointmentStatus.COMPLETED:
+        return ("You can ask this lawyer to take your case once they have "
+                "marked your consultation completed.")
+    # THE COMPLETION RULE, RE-ASSERTED ON THE STORED ROW. `complete_appointment`
+    # refuses before the scheduled end, but that rule is newer than some rows:
+    # completion once accepted a PENDING appointment with no clock check at all
+    # (APPOINTMENT_REMEDIATION_PLAN.md, contract changes). A `completed` row
+    # whose end has not passed is a consultation that cannot have finished, so
+    # it does not qualify. Same predicate as the transition, not a second one.
+    scheduled_at, end_at = appt.get("scheduled_at"), appt.get("end_at")
+    if (scheduled_at is None or end_at is None
+            or transitions.timing_error(
+                AppointmentStatus.COMPLETED,
+                scheduled_at=_as_utc(scheduled_at),
+                end_at=_as_utc(end_at),
+                now=datetime.now(timezone.utc))):
+        return ("This consultation has not finished yet, so it cannot lead "
+                "to a hire.")
+    return None
+
+
+async def list_consultations_for_hire(client_id: str, lawyer_id: str) -> list[dict]:
+    """Every consultation this client could name to hire this lawyer.
+
+    Scoped to the one (client, lawyer) pair and NOT paged. A page of the
+    client's whole diary could hold none of this lawyer's consultations while
+    an eligible one sat on page two, and the client would be told to book one
+    they already had. A single pair's history is bounded by how often those
+    two people have actually met.
+
+    Offering is not authorising: `request_engagement` re-checks the chosen id
+    through `completed_consultation_for_hire`. Nothing here decides whether a
+    consultation already used for a request may be named again (NR-42), so
+    none is excluded for that reason.
+    """
+    rows = await appt_repo.find_completed_between(client_id, lawyer_id)
+    eligible = [a for a in rows if _hire_refusal(a, lawyer_id) is None]
+    names_by_id = await _names_for(eligible)
+    return [_enrich(_sanitize(a), _names_from(a, names_by_id)) for a in eligible]
+
+
 async def get_appointment(appt_id: str, user_id: str, user_role: str) -> dict:
     appt = await _load_for_actor(appt_id, user_id, user_role)
     return _enrich(
