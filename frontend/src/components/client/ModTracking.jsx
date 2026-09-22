@@ -2434,6 +2434,42 @@ function CancelAppointment({ appt, t, onReload, error, setError }) {
     );
 }
 
+/* "Hire this lawyer", offered only where it can actually work.
+ *
+ * A new engagement must follow a COMPLETED consultation with that lawyer
+ * (AGREEMENTS_PRODUCT_PLAN.md §17 R5-1), and only the lawyer can mark one
+ * completed -- so this is the first moment the client is allowed to ask.
+ *
+ * It hands off to the lawyers page rather than duplicating the hire form: the
+ * link carries the lawyer, their name and THIS consultation, so the form opens
+ * with the right consultation already chosen. The server re-checks all three.
+ */
+function HireAfterConsultation({ appt, t }) {
+    if (appt.status !== "completed" || !appt.lawyer_id) return null;
+
+    const href = "/lawyers?hire=" + encodeURIComponent(appt.lawyer_id)
+        + "&hire_name=" + encodeURIComponent(appt.lawyer_name || "")
+        + "&appointment=" + encodeURIComponent(appt.id);
+
+    return (
+        <div style={{ marginTop: 10 }}>
+            <a href={href} style={{
+                display: "inline-block", minHeight: 44, lineHeight: "28px",
+                padding: "8px 16px", borderRadius: 9, textDecoration: "none",
+                border: "1px solid " + t.primary + "55", background: t.primary + "12",
+                color: t.primary, fontSize: 12.5, fontWeight: 700,
+            }}>
+                Hire this lawyer →
+            </a>
+            <div style={{ fontSize: 11.5, color: t.textMuted, marginTop: 6 }}>
+                Ask {appt.lawyer_name || "this lawyer"} to take one of your cases.
+                You will agree the fee before anything is assigned.
+            </div>
+        </div>
+    );
+}
+
+
 function PageAppointments({ appointments, loading, t, onReload, cancelErrors, setCancelError, refreshError,
                             onLoadMore, loadingMore, moreError, total, complete }) {
     const { T } = useLang();
@@ -2567,6 +2603,7 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                                     "{appt.notes}"
                                 </div>
                             )}
+                            <HireAfterConsultation appt={appt} t={t} />
                             <CancellationDetail appt={appt} t={t} />
                             <ExpiryDetail appt={appt} t={t} />
                             <ReportIssue appt={appt} t={t} />

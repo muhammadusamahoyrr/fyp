@@ -115,6 +115,7 @@ const ModLawyers = () => {
     const [hireMessage, setHireMessage] = useState("");
     const [hireSubmitting, setHireSubmitting] = useState(false);
     const [myCases, setMyCases] = useState([]);
+    const [casesLoaded, setCasesLoaded] = useState(false);
     const [myEngagements, setMyEngagements] = useState([]);
     // A hire follows a COMPLETED consultation with the same lawyer; the server
     // refuses a request without one. `hireConsults` are the consultations the
@@ -133,7 +134,8 @@ const ModLawyers = () => {
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => {
             if (data?.items) setMyCases(data.items);
-        }).catch(() => { });
+            setCasesLoaded(true);
+        }).catch(() => { setCasesLoaded(true); });
         refreshEngagements();
     }, []);
 
@@ -494,6 +496,33 @@ const ModLawyers = () => {
         setLoadingMatch(false);
     };
 
+    /* ARRIVING FROM A COMPLETED CONSULTATION (§17 R5-1, step 7).
+     *
+     * The appointment card links here with the lawyer, their name and the
+     * consultation. The lawyer is taken from the DIRECTORY when this page
+     * happens to be showing them, and otherwise built from the link itself --
+     * the directory is paged, so waiting for them to appear in it would leave
+     * the client on a page where nothing happens. `openHire` re-reads the
+     * eligible consultations from the server either way, and the request it
+     * finally sends is validated there.
+     */
+    const hireLawyerId = searchParams?.get("hire");
+    const hireLawyerName = searchParams?.get("hire_name");
+    const hireApptId = searchParams?.get("appointment");
+    const hireLinkHandled = useRef(false);
+
+    useEffect(() => {
+        // WAIT FOR THE CASES. `openHire` refuses when the client has none,
+        // and on a fresh page load that read has not returned yet -- opening
+        // before it does would tell somebody with cases to go and create one.
+        if (!hireLawyerId || !casesLoaded || hireLinkHandled.current) return;
+        hireLinkHandled.current = true;
+        const known = apiLawyers.find(l => l._id === hireLawyerId);
+        openHire(known || { _id: hireLawyerId, name: hireLawyerName || "this lawyer" },
+                 hireApptId || null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [hireLawyerId, hireApptId, casesLoaded]);
+
     // Auto-trigger match when arriving from intake, but only once backend is confirmed reachable.
     useEffect(() => {
         if (!backendUp) return;
@@ -707,7 +736,7 @@ const ModLawyers = () => {
     };
 
     // ── HIRE (ENGAGEMENT) HELPERS ─────────────────────────────────
-    const openHire = async (lawyer) => {
+    const openHire = async (lawyer, preferredAppointmentId = null) => {
         if (!lawyer?._id || lawyer._id.startsWith("api-")) {
             toast.show("This lawyer is a sample profile — only listed lawyers can be hired.", "warn", 4000);
             return;
@@ -747,9 +776,14 @@ const ModLawyers = () => {
         setHireLawyer(lawyer);
         setHireConsults(consults);
         setHireMessage("");
-        // Exactly one: it is the only possible answer, so it is filled in.
-        // Several: the client chooses; nothing is picked on their behalf.
-        chooseConsult(consults.length === 1 ? consults[0] : null);
+        // The consultation the client came FROM, when they arrived from one and
+        // the server still lists it as eligible. Otherwise: exactly one is the
+        // only possible answer, so it is filled in; several are the client's
+        // choice and nothing is picked on their behalf.
+        const arrivedFrom = preferredAppointmentId
+            ? consults.find(a => a.id === preferredAppointmentId)
+            : null;
+        chooseConsult(arrivedFrom || (consults.length === 1 ? consults[0] : null));
         setShowHireModal(true);
     };
 
@@ -827,7 +861,7 @@ const ModLawyers = () => {
             toast.show(error.message || "Could not accept the terms.", "error", 4000);
             return;
         }
-        toast.show(`${e.lawyer_name || "Your lawyer"} is now engaged. The engagement letter is ready to sign on the Agreements page.`, "success", 5000);
+        toast.show(`${e.lawyer_name || "Your lawyer"} is now engaged on your case.`, "success", 5000);
         refreshEngagements();
     };
 

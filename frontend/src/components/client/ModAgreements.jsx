@@ -350,8 +350,8 @@ const PageDashboard = ({ onNavigate }) => {
                 ) : agmts.length === 0 ? (
                     <div style={{ padding: "28px 20px", textAlign: "center", color: t.textMuted, fontSize: 13 }}>
                         {DIY_BUILDER_ENABLED
-                            ? "No agreements yet — create one, or hire a lawyer to receive an engagement letter here."
-                            : "No agreements yet. When you hire a lawyer, their engagement letter appears here for you to sign."}
+                            ? "No agreements yet — create one to get started."
+                            : "No agreements yet. Agreements shared with you appear here for you to read and sign."}
                     </div>
                 ) : agmts.slice(0, 4).map((a, i) => (
                     <div key={a.id} onClick={() => onNavigate("all")} style={{

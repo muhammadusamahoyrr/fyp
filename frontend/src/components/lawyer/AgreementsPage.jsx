@@ -1,5 +1,5 @@
 'use client';
-// Lawyer Agreements — engagement letters and contracts awaiting signature.
+// Lawyer Agreements — contracts awaiting signature, and legacy engagement letters.
 // Counterpart of the client's AgreementHub; same backend, lawyer perspective.
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "./theme.js";
@@ -177,7 +177,7 @@ export function AgreementsPage() {
                 <div style={{ flex: 1, minWidth: 220 }}>
                     <div style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Agreements</div>
                     <div style={{ fontSize: 13, color: T.textMuted, marginTop: 3 }}>
-                        Engagement letters and contracts — signed electronically under ETO 2002
+                        Contracts and legacy engagement letters — signed electronically under ETO 2002
                     </div>
                 </div>
                 <Btn variant="primary" onClick={() => setComposing("new")}>+ New agreement</Btn>
@@ -229,9 +229,8 @@ export function AgreementsPage() {
                     <div style={{ padding: 40, textAlign: "center" }}>
                         <div style={{ fontSize: 32, marginBottom: 10 }}>📜</div>
                         <div style={{ fontSize: 14, color: T.textMuted }}>
-                            No agreements yet. Accepting a client&apos;s case request creates an
-                            engagement letter here automatically — or write one yourself with
-                            &ldquo;New agreement&rdquo;.
+                            No agreements yet. Write one with &ldquo;New agreement&rdquo;; agreements
+                            shared with you appear here too.
                         </div>
                     </div>
                 ) : items.map((a, i) => (
