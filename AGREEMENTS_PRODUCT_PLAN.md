@@ -1236,3 +1236,191 @@ Each is decided and unscheduled. No code is written by this document.
 must exist before per-version acceptance can. Nothing else in this round has a
 stated prerequisite.
 
+
+---
+
+## 13. Design Decision Record — versioned agreements
+
+Answers to the open questions raised in **§12 of the versioned-agreements
+design** (produced read-only against `f2822f8`; the design itself is not
+committed to this repository). Question numbering below is the design's.
+
+**Decided 2026-09-22, by the project owner.** Nothing here is implemented, and
+no gate is started.
+
+### Q1 — Proposal authority
+
+**ANSWERED: either party may propose a change.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-22 |
+| Decided by | Project owner |
+| Sources | **LIFECYCLE** Step 3 (adopted at DG-28), **PLAN** |
+| Effect | **Confirms** the design's §3 assumption; nothing in the design changes |
+
+### Q2 — Withdraw after a signature exists
+
+**ANSWERED: BLOCKED once any signature exists on any version.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-22 |
+| Decided by | Project owner |
+| Sources | **PLAN**; **FR-11 silent**; **LIFECYCLE silent** |
+| Effect | **Confirms** the design's §3 assumption |
+
+Withdraw remains available while no version carries a signature. The check is
+across **all** versions, not only the current one, so a signature on a
+superseded version also blocks withdrawal.
+
+### Q3 — Title edits
+
+**ANSWERED: a title edit does NOT create a new version.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-22 |
+| Decided by | Project owner |
+| Sources | **IMPLEMENTATION** (`body_digest`, `agreement_service.py:147-159`) |
+| Effect | `title` stays on the agreement, not inside `versions[]` |
+
+The digest covers the **body only**. A title is not part of the signed
+instrument, so changing it does not change what anyone signed.
+
+### Q4 — Version cap
+
+**ANSWERED: at most 20 versions per agreement (open + superseded combined).**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-22 |
+| Decided by | Project owner |
+| Sources | **PLAN** |
+| Effect | New refusal on the propose-change path |
+
+The 21st proposal attempt is refused with a message telling the parties to
+resolve the current version or start a new agreement.
+
+**This cap is what keeps the embedded `versions[]` list valid.** The design's
+§1.2 chose an embedded list over a separate collection on the explicit ground
+that version count is bounded. **If this cap is ever raised or removed, the
+collection-shape decision must be revisited** — an unbounded embedded list
+grows the document without limit and eventually breaks the single-document
+transaction the signing path relies on (`agreement_service.py:614`, `:1192`).
+
+### Q5 — Does proposing imply accepting?
+
+**ANSWERED: NO. Proposing a version is not an implicit acceptance.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-22 |
+| Decided by | Project owner |
+| Sources | **PLAN**, consistent with **DG-02** (acceptance is a separate act) |
+| Effect | The proposer must explicitly accept their own version, like any other party |
+
+A new version therefore starts with **zero** acceptances, including the
+proposer's.
+
+### Q8 — Downloading a superseded version
+
+**ANSWERED: either party may download a superseded version as a PDF.**
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-22 |
+| Decided by | Project owner |
+| Sources | **PLAN**; **FR-11.12** covers the finalized agreement only |
+| Effect | Extends the PDF route; adds a visual watermark requirement |
+
+Two requirements, both mandatory:
+
+1. The document must be **visually watermarked "SUPERSEDED — NOT EXECUTED"**.
+2. It **must not be presented as evidence of agreement.**
+
+This is a presentation rule recorded as decided. Whether such a document has
+any standing is **not** addressed here — see Q9, pending counsel.
+
+### Still open after this round
+
+| Q | Question | Status |
+|---|---|---|
+| **Q6** | Rollback when the DG-07 KYC re-check fails at engagement acceptance | **OPEN — owner decision.** Already recorded UNDEFINED in §12 |
+| **Q7** | Reference-number format (DG-18); value currency and precision (DG-19) | **OPEN — owner decision.** Already recorded UNDEFINED in §12 |
+| **Q9** | Whether a signature on a superseded version has any standing, and how the certificate should describe it | **OPEN — PENDING COUNSEL.** No legal conclusion is stated. The design keeps such a signature as history and excludes it from execution; that is a data rule, not a statement about its effect |
+| **Q10** | Whether auto-accepting an engagement letter on the client's behalf (design §6) adequately represents their assent, given Q5 and DG-02 require explicit acceptance everywhere else | **OPEN — PENDING COUNSEL.** No legal conclusion is stated |
+| **Q11** | Whether the evidence certificate may state that a version *was superseded*, or only list what was recorded | **OPEN — PENDING COUNSEL.** No legal conclusion is stated |
+
+**Q10 is the one that interacts with a decision made above.** Q5 settles that
+proposing is not accepting, and DG-02 settles that acceptance is a separate
+act — while design §6 has the system auto-accept a letter for both parties so
+that Producer A's behaviour does not change. Those sit in tension. It is
+recorded, not resolved, and no legal conclusion is drawn.
+
+
+---
+
+## 14. V0 census — run on 2026-09-22, commit `f2822f8`
+
+Read-only aggregation, `$group` and `$sort` only. The pipeline was asserted
+free of `$out`/`$merge` before connecting, and the only driver calls used were
+`aggregate` and `count_documents`. Nothing was written.
+
+### Raw result
+
+**8 rows total.**
+
+| n | status | has `version` | has `body_sha256` | is letter | max version | max parties | signed in group |
+|---|---|---|---|---|---|---|---|
+| 5 | `pending` | no | no | yes | — | 2 | 0 |
+| 2 | `pending` | no | no | **no** | — | **1** | 0 |
+| 1 | `executed` | no | no | yes | — | 2 | 2 |
+
+**Collection-wide extremes:** `maxVersion = None` · `maxParties = 2` ·
+`minParties = 1`
+
+**Partly signed** (≥1 signature but not all): **0** — 7 `pending` and 1
+`executed`, none partial.
+
+**Rows with a party count other than 2: 2.**
+
+### Two things §7 of the design did not anticipate
+
+**1. Two rows have ONE party.** The design assumed every row is two-party, and
+current code enforces it — `_create_agreement` refuses fewer than two
+(`agreement_service.py:~836`) and more than two (`:~844`). These two rows are
+`pending`, not letters, and predate that guard. They cannot be migrated into a
+two-party model without a decision: a one-party agreement has no counterparty
+to accept or sign, so **every** step of the versioned design is undefined for
+them.
+
+**OWNER DECISION — Q12 (new).** What happens to a one-party agreement:
+migrate it as-is and let it sit unusable, exclude it from migration, or
+classify it as fixture residue. Not decided here. It is likely the same
+population as the six orphaned engagement letters already awaiting human
+classification, but that has **not** been verified and is not asserted.
+
+**2. NO row has a `body_sha256` — not one of the eight.** The design's §7
+said A/B rows carry a "digest at creation" on the strength of
+`_create_agreement:898`. That is true of rows created by today's code and
+false of every row actually in the database: all eight predate it. The
+consequence is broader than the single pre-3C executed letter the earlier
+audit identified — **every** row would migrate to `versions[0].body_sha256 =
+null`, and any of them that later reached `executed` would be refused a PDF by
+`agreement_pdf.py:125`.
+
+This does not change a decision. It corrects a factual assumption in the
+design's migration section, and it means the "pre-3C rows refuse to render"
+note in the MERGE_CHECKLIST describes the whole collection, not an edge case.
+
+### What the census confirms
+
+- **No `version` field anywhere** — consistent with `_create_agreement` never
+  writing one. There are also **zero drafts**, so Producer C has never been
+  used against this database.
+- **No partly-signed rows**, so the V3 migration has no mid-flight signature
+  state to preserve.
+- **Max 2 parties**, so nothing exceeds the design's assumed maximum; the
+  deviation is in the other direction.
+

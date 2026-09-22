@@ -1793,6 +1793,27 @@ What they change for THIS document:
 - **Every register row DG-00 .. DG-28 now has an answer.** What remains is
   implementation, and none of it is scheduled by these documents.
 
+**Versioned-agreements design decisions (2026-09-22)** — recorded in
+`AGREEMENTS_PRODUCT_PLAN.md` **§13**, answering the open questions from the
+design produced against `f2822f8`. What they fix for THIS document:
+
+- **Either party may propose a change; proposing is NOT accepting** (Q1, Q5).
+  Each new version starts with zero acceptances, the proposer's included.
+- **Withdraw is blocked once any signature exists on any version** (Q2) —
+  across superseded versions too, not only the current one.
+- **A title edit does not create a version** (Q3): the digest covers the body
+  only (`agreement_service.py:147-159`).
+- **At most 20 versions per agreement** (Q4). This cap is load-bearing for the
+  design's embedded-`versions[]` shape; **raising it means revisiting the
+  collection-shape decision**, because an unbounded embedded list eventually
+  breaks the single-document transaction the signing path relies on.
+- **A superseded version may be downloaded, watermarked "SUPERSEDED — NOT
+  EXECUTED", and must not be presented as evidence of agreement** (Q8).
+
+Q6 and Q7 stay open as owner decisions; **Q9, Q10 and Q11 stay open and
+PENDING COUNSEL**, with no legal conclusion stated. None of this is
+implemented, and no gate is started.
+
 ## MERGE_CHECKLIST — `fix/agreements-phase0`
 
 Everything below is a gate on merging, not a wish list. The engineering items
