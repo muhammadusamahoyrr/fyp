@@ -1864,13 +1864,19 @@ non-atomic writes.
 - [ ] **Indexes created** on the target database — `create_all_indexes()`
       covers `agreement_downloads` (by agreement, by user, by time) and the
       `(created_by, status)` pair the draft cap and draft visibility both use.
-- [ ] **Pre-3C executed rows will refuse to render.** Any agreement executed
-      before Gate 3C carries no `body_sha256`, and the PDF builder refuses it
-      with a clear message rather than printing a certificate whose digest
-      section is empty. Confirmed: 1 such row exists today (the executed
-      orphaned letter). It is NOT back-filled — computing a digest now would
-      assert the text is unchanged since signing, which is the one thing a
-      missing digest makes unverifiable.
+- [ ] **Rows without a digest will refuse to render.** Any agreement carrying
+      no `body_sha256` is refused by the PDF builder with a clear message,
+      rather than printing a certificate whose digest section is empty.
+      **CORRECTED 2026-09-22 by the V0 census: this is not an edge case.
+      ZERO of the 8 rows in the database have a `body_sha256` — not one.**
+      This line previously read "Confirmed: 1 such row exists today (the
+      executed orphaned letter)", counting only the executed row because only
+      an executed row can reach the PDF path. The underlying fact is broader:
+      **every existing row lacks the digest**, so any of them that later
+      reaches `executed` will be refused too. No digest is back-filled —
+      computing one now would assert the text is unchanged since signing,
+      which is the one thing a missing digest makes unverifiable. No decision
+      changes; only the fact is corrected.
 
 ### 5. Open, and NOT engineering
 
