@@ -1716,6 +1716,229 @@ reviewing counsel, review date, version, mandatory and optional clauses, and a
 review expiry. Until a template exists in that registry, it does not appear in
 the product.
 
+### 4.4 Statutory requirements matrix — tenancy agreement, PUNJAB ONLY
+
+**RESEARCH ARTIFACT, 2026-09-23. NOT A TEMPLATE, AND NOT LEGAL ADVICE.** This is
+the first §4.3 registry entry drafted as a *specification*: what the statute
+says a Punjab tenancy agreement must contain, so counsel can VERIFY clauses
+against a source rather than draft them from nothing. **No template is created
+or enabled by this section, and the DG-25 withdrawn-template guard stays on.**
+
+**Scope: the Province of Punjab, Pakistan, and nothing else.** Sindh, Khyber
+Pakhtunkhwa, Balochistan and Islamabad have their own rent statutes which have
+NOT been read. Nothing here may be generalised to them, or to "Pakistan".
+
+**SOURCE PRECEDENCE.** An applicable authoritative Pakistani/Punjab rule,
+notification, prescribed form/model, or other controlling instrument identified
+after this matrix supersedes conflicting matrix content; affected rows must be
+revised before template implementation.
+
+**Primary source (the only authority used for statutory claims):** *The Punjab
+Rented Premises Act 2009 (VII of 2009)*, official Punjab Code text —
+`https://punjabcode.punjab.gov.pk/uploads/articles/THE_PUNJAB_RENTED_PREMISES_ACT_2009.doc.pdf`
+(read in full, 2026-09-23). Index copy: `punjablaws.gov.pk/laws/498.html`. No
+private legal-template website was used as authority, and no Indian source was
+used for anything — Indian "Punjab" results were encountered during research and
+discarded, which is the same wrong-jurisdiction failure that withdrew the
+original six templates.
+
+#### Two findings that change the shape of this work
+
+1. **The Act prescribes NO tenancy-agreement form.** Its only Schedule is the
+   notice form for Rent Tribunal proceedings under **s.21(1)**, not an
+   agreement. But **s.33(2)** provides that rules made under the Act *"may
+   prescribe a model tenancy agreement, a draft application form and a notice"*.
+   **Whether such rules exist is SOURCE UNVERIFIED** — searched the official
+   Punjab domains on 2026-09-23 and found no rules instrument. **If a model
+   tenancy agreement has been prescribed by rules, it outranks this entire
+   matrix and this matrix must be rebuilt from it.** That is question **T-Q1**
+   below and should be counsel's first question.
+2. **"as far as possible".** s.6(1) says a tenancy agreement *"shall contain, as
+   far as possible, the following"*. That qualifier is recorded exactly as the
+   statute puts it and is **not** upgraded to an absolute obligation anywhere in
+   this matrix. What it means in practice is **T-Q2**, for counsel.
+
+**Discrepancy against this project's own earlier research, recorded rather than
+quietly dropped:** a preliminary search suggested tenancy agreements must be
+presented to the Rent Registrar *"within seven days of execution"*. **That
+seven-day period does not appear in ss.5-6 of the official text.** s.5(2)
+requires presentation but states no period. The preliminary claim is therefore
+**NOT VERIFIED** and must not be built to — see row **B8**.
+
+#### A. Required document content — what s.6(1) enumerates
+
+| ID | Requirement / clause | Source statute | Section | Mandatory / conditional | Applicability condition | Evidence location | Counsel verification | Notes |
+|---|---|---|---|---|---|---|---|---|
+| A1 | Particulars of the landlord | Punjab Rented Premises Act 2009 | s.6(1)(a) | Enumerated, qualified by "as far as possible" | Always | Punjab Code PDF, s.6(1)(a) | PENDING COUNSEL — verify against statute/current provincial practice | The statute does not define which particulars. Field list is a product decision, not a statutory one |
+| A2 | Particulars of the tenant | Punjab Rented Premises Act 2009 | s.6(1)(a) | Enumerated, qualified | Always | same clause as A1 | PENDING COUNSEL | One clause covers both parties; split here only for rendering |
+| A3 | Description of the premises | Punjab Rented Premises Act 2009 | s.6(1)(b) | Enumerated, qualified | Always | s.6(1)(b) | PENDING COUNSEL | "premises" is defined at s.2(f); see D5 for what is excluded. **See research update: Registration Act 1908 s.21(1) imposes a stricter description test for a document to be ACCEPTED FOR REGISTRATION. That is a separate requirement, not a re-reading of s.6(1)(b), and does not change this row's status** |
+| A4 | Period of the tenancy | Punjab Rented Premises Act 2009 | s.6(1)(c) | Enumerated, qualified | Always | s.6(1)(c) | PENDING COUNSEL | Interacts with s.15(a): expiry of the period is a ground for eviction. **See research update: the period is also what engages the Registration Act 1908 s.17(1)(d) categories. Whether a given tenancy falls inside them is COUNSEL REQUIRED — no registration obligation is asserted here** |
+| A5 | Rate of rent | Punjab Rented Premises Act 2009 | s.6(1)(d) | Enumerated, qualified | Always | s.6(1)(d) | PENDING COUNSEL | "rent" is defined at s.2(h) and *includes* arrears and utility bills |
+| A6 | Rate of enhancement | Punjab Rented Premises Act 2009 | s.6(1)(d) | Enumerated, qualified | Always | s.6(1)(d) | PENDING COUNSEL | The Act sets no cap or formula. Do not supply one |
+| A7 | Due date of rent | Punjab Rented Premises Act 2009 | s.6(1)(d) | Enumerated, qualified | Always | s.6(1)(d) | PENDING COUNSEL | If omitted, s.7(2) supplies a default — see C4 |
+| A8 | Mode of payment of rent | Punjab Rented Premises Act 2009 | s.6(1)(d) | Enumerated, qualified | Always | s.6(1)(d) | PENDING COUNSEL | If omitted, s.7(3) supplies a default — see C4 |
+| A9 | Particulars of the landlord's bank account | Punjab Rented Premises Act 2009 | s.6(1)(e) | **Conditional** | Only "if the rent is to be paid through a bank" | s.6(1)(e) | PENDING COUNSEL | Must not be collected or rendered when payment is not through a bank |
+| A10 | Purpose for which the premises is let out | Punjab Rented Premises Act 2009 | s.6(1)(f) | Enumerated, qualified | Always | s.6(1)(f) | PENDING COUNSEL | Load-bearing: s.15(e) makes use for a different purpose a ground for eviction |
+| A11 | Amount of advance rent | Punjab Rented Premises Act 2009 | s.6(1)(g) | **Conditional** — "if any" | Only where advance rent is taken | s.6(1)(g) | PENDING COUNSEL | Three distinct amounts share one clause; kept separate for rendering. **See research update: money advanced is one of the cases the Stamp Act Schedule I LEASE article turns on. No rate is adopted and none is implied for this row** |
+| A12 | Amount of security | Punjab Rented Premises Act 2009 | s.6(1)(g) | **Conditional** — "if any" | Only where security is taken | s.6(1)(g) | PENDING COUNSEL | **See research update: whether a security deposit is "money advanced" for the Stamp Act LEASE article is COUNSEL REQUIRED. No rate is adopted** |
+| A13 | Amount of *pagri* | Punjab Rented Premises Act 2009 | s.6(1)(g) | **Conditional** — "if any" | Only where *pagri* is taken | s.6(1)(g) | PENDING COUNSEL | *pagri* is defined at s.2(e). Whether the product should offer this field at all is a product+counsel question, not a statutory one |
+| A14 | Rent stated for only part of a fixed tenure | Punjab Rented Premises Act 2009 | s.6(2) | Gap-filler, not required content | Where tenure is fixed but rent is fixed only for part of it | s.6(2) | PENDING COUNSEL | Absent a contrary stipulation the rent is deemed the same for the whole tenure. A drafting consequence to surface, NOT a clause the statute requires |
+
+#### B. Execution and filing
+
+| ID | Requirement | Source statute | Section | Mandatory / conditional | Applicability condition | Evidence location | Counsel verification | Notes |
+|---|---|---|---|---|---|---|---|---|
+| B1 | The tenancy must be by a tenancy agreement, and a "tenancy agreement" is an agreement **in writing** | Punjab Rented Premises Act 2009 | s.5(1) with s.2(m) | Mandatory on its face | Always | s.5(1), s.2(m) | PENDING COUNSEL | s.5(1) is addressed to the landlord: a landlord "shall not let out a premises to a tenant except by a tenancy agreement" |
+| B2 | The landlord shall present the tenancy agreement before the Rent Registrar | Punjab Rented Premises Act 2009 | s.5(2) | Mandatory on its face | Always | s.5(2) | PENDING COUNSEL | Obligation is on the landlord. **No time period is stated** — see B8 |
+| B3 | The Rent Registrar enters particulars in a register, affixes an official seal, retains a copy, returns the original to the landlord | Punjab Rented Premises Act 2009 | s.5(3) | Registrar's function | On presentation | s.5(3) | PENDING COUNSEL | Product consequence: the executed artifact the parties hold is a **sealed paper original**. How an electronically executed document reaches this step is **D3**, unresolved |
+| B4 | Entry of particulars does **not** absolve either party of liability to register the agreement under the law relating to registration of documents | Punjab Rented Premises Act 2009 | s.5(4) | Mandatory on its face | Always | s.5(4) | PENDING COUNSEL | The Act does not say which instruments require registration or when. That analysis is **D2** and is NOT attempted here |
+| B5 | An agreement entered in the Rent Registrar's office, or a certified copy, is proof of the landlord-tenant relationship | Punjab Rented Premises Act 2009 | s.5(5) | Evidentiary effect | Where entered | s.5(5) | PENDING COUNSEL | Recorded as what the section says. No claim is made here about the evidentiary status of anything the product produces |
+| B6 | Any other agreement between landlord and tenant in respect of the premises must be presented in the same manner | Punjab Rented Premises Act 2009 | s.5(6) | Mandatory on its face | Where such an agreement exists | s.5(6) | PENDING COUNSEL | Reaches side agreements, not only the tenancy agreement |
+| B7 | The Rent Registrar maintains a register of tenancy agreements, agreements to sell and any other agreement in respect of rented premises | Punjab Rented Premises Act 2009 | s.17(2) | Registrar's function | Always | s.17(2) | PENDING COUNSEL | Confirms the register's scope is wider than tenancy agreements |
+| B8 | Presentation "within seven days of execution" | — | — | **NOT VERIFIED** | — | **Not found in ss.5-6 of the official text** | PENDING COUNSEL — confirm whether any seven-day period exists in rules or practice | Claimed by a secondary source during preliminary research and **contradicted by the primary source**. Do not implement a seven-day rule on this basis |
+
+#### C. Statutory rights and obligations — NOT agreement clauses unless counsel says so
+
+Listed because a drafter and a reviewer need them. **None of these is recorded
+as required document content**, and several are expressly subject to what the
+agreement says, which is the opposite of a mandatory clause.
+
+| ID | Statutory position | Section | Category | Counsel verification | Notes |
+|---|---|---|---|---|---|
+| C1 | Landlord shall provide a **certified copy of the tenancy agreement to the tenant** | s.12(1)(a) | Statutory obligation / product-relevant | PENDING COUNSEL | The only s.12 duty not qualified by "subject to the tenancy agreement". Bears directly on what the product must let a tenant obtain |
+| C2 | Landlord shall repair to keep the premises habitable | s.12(1)(b) | Statutory obligation — expressly *"subject to the tenancy agreement"* | PENDING COUNSEL | Optional guidance only |
+| C3 | Landlord shall pay tax, fee or charge levied on the premises | s.12(1)(c) | Statutory obligation | PENDING COUNSEL | See also s.14 reimbursement |
+| C4 | Landlord shall not cut off utilities without just cause, nor enter without reasonable notice | s.12(2) | *"Subject to the tenancy agreement"* | PENDING COUNSEL | Optional guidance only |
+| C5 | Tenant obligations: condition, purpose, inspection access, vacant possession on determination, no nuisance, no structural change without prior written consent | s.13(1)(a)-(f) | *"Subject to the tenancy agreement"* | PENDING COUNSEL | Optional guidance only. Do **not** render as mandatory clauses |
+| C6 | No subletting, transfer or assignment without the landlord's prior written consent | s.11 | Statutory restriction | PENDING COUNSEL | Not expressed as subject to the agreement |
+| C7 | Default due date where the agreement is silent: not later than the tenth day of the following month | s.7(2) | Gap-filler | PENDING COUNSEL | Relevant to A7 |
+| C8 | Default mode where the agreement is silent: money order or deposit in the landlord's bank account | s.7(3) | Gap-filler | PENDING COUNSEL | Relevant to A8 and A9 |
+| C9 | Grounds for eviction, including breach of a term of the tenancy agreement and use for a different purpose | s.15(a)-(f) | Consequence | PENDING COUNSEL | Explains why A4 and A10 matter |
+| C10 | Non-conforming tenancy: the Tribunal will not entertain an application unless the tenant deposits 5%, or the landlord 10%, of the annual rent value | s.9(a)-(b) | Consequence of non-compliance | PENDING COUNSEL | The Act's own enforcement mechanism. Recorded as stated; no prediction is made about any particular document |
+| C11 | Existing tenancies to be brought into conformity within two years of commencement | s.8 | Transitional | PENDING COUNSEL | Act commenced 17 November 2009 |
+| C12 | An agreement to sell or other later agreement does not affect the relationship unless the tenancy is revoked by written agreement before the Rent Registrar | s.10 | Statutory position | PENDING COUNSEL | Interacts with B6 |
+| C13 | On transfer of ownership the new owner sends written intimation to the tenant and applies to the Rent Registrar | s.30 | Statutory obligation | PENDING COUNSEL | Post-execution lifecycle event |
+| C14 | Reimbursement where the landlord fails to pay a tax, fee or charge | s.14 | Statutory position | PENDING COUNSEL | — |
+
+#### D. Dependencies — separate counsel or provincial verification required
+
+**None of the following is asserted as a rule here.** Each is an open question.
+
+| ID | Dependency | Current state | Counsel verification | Tracked as |
+|---|---|---|---|---|
+| D1 | Stamp duty on a tenancy agreement in Punjab | **INSTRUMENT VERIFIED 2026-09-23; RATE NOT ADOPTED.** Governing instrument is the **Stamp Act 1899 (II of 1899) as applicable in Punjab**, Schedule I, which contains a **LEASE** article. See the research update below for what was and was not established | PENDING COUNSEL — which case in the article applies, at what value, and under the current Punjab amendments | NR-49 |
+| D2 | Registration under the law relating to registration of documents | **PROVISION VERIFIED 2026-09-23.** **Registration Act 1908, s.17(1)(d)** — compulsory registration of *"leases of immovable property from year to year, or for any term exceeding one year, or reserving a yearly rent"*; with a **proviso** empowering Government to exempt, by Gazette order, leases in a district whose terms do not exceed five years and annual rents do not exceed fifty rupees. See the research update below | PENDING COUNSEL — whether a given tenancy falls inside s.17(1)(d), and whether any exemption order is in force | NR-49 |
+| D3 | Electronic execution of a document that must be presented to, sealed by and returned by a Rent Registrar (s.5(2)-(3)) | Unresolved. The ETO 2002 tiering question is already open | PENDING COUNSEL | NR-47, §4.1 |
+| D4 | Whether rules under **s.33(2)** prescribe a **model tenancy agreement** | **SOURCE UNVERIFIED.** No rules instrument found on official Punjab domains, 2026-09-23 | PENDING COUNSEL — **ask this first** | **T-Q1** |
+| D5 | Applicability exclusions: "building" excludes a room in a hotel, hostel, boarding house, guest house or place of religious worship (s.2(a)); "premises" excludes agricultural land or land subservient to agriculture (s.2(f)); Government may exempt classes of premises or areas by notification (s.3) | Stated by the Act; the exemption power means current notifications must be checked | PENDING COUNSEL | Jurisdiction gating |
+| D6 | Every other province and Islamabad | **OUT OF SCOPE.** Their statutes have not been read | PENDING COUNSEL before any non-Punjab use | — |
+
+#### Open questions for counsel, in the order they should be asked
+
+- **T-Q1** — Have rules been made under s.33(2) prescribing a model tenancy
+  agreement? If yes, this matrix is superseded by that model and must be rebuilt
+  from it.
+- **T-Q2** — What does *"as far as possible"* in s.6(1) mean in practice: is an
+  agreement missing an enumerated item defective, and with what consequence
+  under s.9?
+- **T-Q3** — Which of the s.12/s.13 obligations, if any, should be *stated in*
+  the agreement rather than left to the statute?
+- **T-Q4** — Stamp duty and registration for a Punjab tenancy agreement: what
+  applies, at what value, and by when (**D1**, **D2**).
+- **T-Q5** — Can a tenancy agreement be executed electronically and still
+  satisfy s.5(2)-(3), which contemplates a sealed paper original (**D3**)?
+
+#### Research update — 2026-09-23 (read-only, no counsel obtained)
+
+Authoritative-source research on T-Q1, T-Q2, D1 and D2. **Pakistani and Punjab
+sources only; no Indian source was used or relied on; no legal-template site was
+treated as authority.** Nothing below is counsel approval, and no reviewer,
+review date, version or expiry is recorded because none exists.
+
+| Question | State | Finding | What remains |
+|---|---|---|---|
+| **T-Q1** — do rules under s.33(2) prescribe a model tenancy agreement? | **SOURCE UNVERIFIED** | Searched `punjabcode.punjab.gov.pk`, `punjablaws.gov.pk`, `punjab.gov.pk`, `pakistancode.gov.pk` and `lhc.gov.pk` on 2026-09-23. **No rules instrument under the Act was located.** s.33(2) remains an enabling power only | **This is NOT a finding that no such rules exist** — only that none was located. COUNSEL REQUIRED, and still the first question to ask. If a model is prescribed, **this matrix is superseded by it and must be reconciled/rebuilt against it before any template implementation** |
+| **T-Q2** — meaning of "as far as possible" in s.6(1) | **COUNSEL REQUIRED** | No authoritative Pakistani instrument explaining the phrase was located. Superior-court decisions on the Act exist on `lhc.gov.pk`, but construing judicial language is legal interpretation, which this artifact does not do | Counsel to advise whether an agreement missing an enumerated s.6(1) item is defective, and with what consequence under s.9 |
+| **D1** — stamp duty | **INSTRUMENT VERIFIED; RATE NOT ADOPTED** | See below | Which case applies to an ordinary rent agreement, and the current rate |
+| **D2** — registration | **PROVISION VERIFIED** | See below | Application to a given tenancy; exemption orders in force |
+
+**D2 — Registration Act 1908 (official Punjab Board of Revenue text).**
+
+- **s.17(1)(d)** makes registration compulsory for *"leases of immovable
+  property from year to year, or for any term exceeding one year, or reserving a
+  yearly rent"*. This is the provision s.5(4) of the Rented Premises Act
+  preserves; **s.5(4) itself creates no registration requirement**, which is why
+  it was not treated as the source.
+- **Proviso to s.17(1)** — Government may, by order published in the official
+  Gazette, exempt leases executed in a district or part of a district *"the
+  terms granted by which do not exceed five years and the annual rents reserved
+  by which do not exceed fifty rupees"*. Whether any such order is in force is
+  **SOURCE UNVERIFIED**.
+- **s.17(2)(xiii)** — a counterpart of a lease is outside clauses (b) and (c)
+  where the lease itself has been registered. Note it is expressed against
+  (b)/(c), not (d).
+- **s.18** — any document not required to be registered under s.17 **may** still
+  be registered.
+- **s.21(1)** — *"No non-testamentary document relating to immovable property
+  shall be accepted for registration unless it contains a description of such
+  property sufficient to identify the same"*, with s.21(2) adding how houses in
+  towns are to be described. **This bears directly on matrix row A3.**
+- **s.49** — a document required to be registered shall not operate to create,
+  declare, assign, limit or extinguish any right, title or interest in
+  immovable property unless registered. **Recorded as the section's text. No
+  conclusion is drawn here about any document the product might produce.**
+- Note also **The Registration (Punjab Amendment) Act 1941** exists on
+  `punjablaws.gov.pk`; it has **not** been read, so any Punjab-specific
+  modification of the above is **SOURCE UNVERIFIED**.
+
+**D1 — Stamp Act 1899 as applicable in Punjab (official Punjab text).**
+
+- The governing instrument is **Schedule I of the Stamp Act 1899**, which
+  contains a **LEASE** article. Its duty is not a single figure: it is
+  structured by case — a lease granted for **money advanced in addition to the
+  rent reserved**; for a **fine or premium in addition to the rent reserved**;
+  and for a **fine or premium where no rent is reserved** — each split between
+  *"immovable property in an urban area"* and *"any other case"*, expressed as
+  **two percent** and **three percent** of the stated consideration
+  respectively, with a **Note** adding, on registration of the instrument, a
+  further **Rs.500** where consideration does not exceed **Rs.500,000** and
+  **Rs.1,000** where it exceeds that.
+- **The duty for an ordinary rent agreement with no advance, fine or premium was
+  NOT located and is SOURCE UNVERIFIED.** The clauses read cover the
+  advance/fine/premium cases only. **No rate is adopted for a plain tenancy
+  agreement, and none may be inferred from the percentages above.**
+- **The Article number is SOURCE UNVERIFIED** — the article's clauses were read
+  but its numbered heading was not captured from the official PDF.
+- **Schedule I is amended by successive Punjab Finance Acts** — footnotes in the
+  official text cite the Punjab Finance Acts of 1995, 1998, 2004, 2006, 2014,
+  2017 and 2019. Any rate must therefore be read against the current
+  consolidated Punjab text and current e-stamping practice, not against a
+  historical printing. This is why no rate is carried into the matrix.
+
+**Rows requiring revision once counsel answers.** **A3** (premises description —
+Registration Act s.21(1) adds a description-sufficiency requirement for a
+document to be *accepted for registration*, which is a different and stricter
+test than s.6(1)(b) of the Rented Premises Act); **A4** (period of tenancy —
+triggers s.17(1)(d)); **A11**, **A12** (advance rent and security — the LEASE
+article's duty cases turn on money advanced or a fine/premium); **D1**, **D2**
+(revised above); and **every row** if T-Q1 discovers a prescribed model.
+
+**Sources used, all Pakistani/Punjab official:**
+`bor.punjab.gov.pk/system/files/THE%20REGISTRATION%20ACT%201908_0.pdf` ·
+`punjablaws.punjab.gov.pk/uploads/articles/stamp-act-1899-pdf2.pdf` ·
+`punjabcode.punjab.gov.pk` (Rented Premises Act 2009) ·
+`punjablaws.gov.pk/laws/36a.html`, `/laws/15.html`, `/laws/52.html` (indexes).
+
+#### What this section does NOT do
+
+It does not create a template, enable one, or lift the DG-25 guard. It states no
+conclusion about compliance, enforceability, validity or the sufficiency of any
+signature. No reviewer, review date, version, approval or expiry is recorded,
+because none exists — inventing any of them is the failure §4.3 exists to
+prevent. A government department's own published rent agreement was seen during
+research (`pma.punjab.gov.pk`); it is one department's operational document, not
+a prescribed form, and is **not** treated as authority.
+
 ---
 
 ## Test matrix
