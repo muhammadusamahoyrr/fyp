@@ -859,6 +859,12 @@ files rather than carried over from earlier drafts.
 and writes a milestone (`:812`). **It never reads or writes the agreement.** So
 a termination while the letter is `pending` leaves that letter pending forever.
 
+> **SUPERSEDED 2026-09-20 by Gate 3A (`ced696e`).** The paragraph above is the
+> behaviour verified at inspection, kept as the record of the defect this gate
+> was written for. Termination now reads and writes the agreement inside one
+> transaction, cancelling a still-`pending` linked letter; the line numbers no
+> longer resolve. **§3.0** records what shipped.
+
 **Severity: low, unlike the Gate 2 defect.** The residue is inert — the fee gate
 already refuses a non-executed letter, and the case is released by `:801`.
 (**2026-09-23:** the letter no longer gates billing; the residue stays inert
@@ -887,6 +893,11 @@ ended, which is not a letter-derived state.
 milestone, agreement → `cancelled` (conditional on `pending`) **plus its audit
 entry with `body_sha256`**, and the outbox park. Today's four writes at
 `:789`–`:812` are **not** transactional — see §3.G1.7 B1.
+
+> **IMPLEMENTED 2026-09-20 in `ced696e`.** "Today's four writes" describes the
+> code as it stood when this boundary was specified. The boundary itself was
+> built exactly as written, in `_terminate_in_transaction`; the line numbers
+> above no longer resolve. §3.0 records what shipped.
 
 **Notifications.** The non-terminating party, as now. Copy must not say the
 letter was "declined": nobody refused it. *"The engagement was ended by the
@@ -1131,10 +1142,16 @@ gate and should go first if only one ships.
 
 **Blockers for the items that depend on them:**
 
-- **B1 — `terminate_engagement` is not transactional.** Four separate writes at
-  `engagement_service.py:789-812`. A crash between them leaves an engagement
-  `terminated` with the case still assigned — the mirror of the Gate 2 defect,
-  in code Gate 2 did not touch. **Must be fixed as part of 3A**, not after.
+- **B1 — `terminate_engagement` is not transactional.** ✅ **FIXED 2026-09-20
+  in `ced696e`; no longer a blocker.** The defect as recorded at inspection:
+  four separate writes at `engagement_service.py:789-812`. A crash between them
+  leaves an engagement `terminated` with the case still assigned — the mirror
+  of the Gate 2 defect, in code Gate 2 did not touch. **Must be fixed as part
+  of 3A**, not after. It was: the four writes are now one transaction (§3.0),
+  and `backend/tests/test_engagement_termination_3a.py` carries 16 tests,
+  including an injected-failure rollback case and two concurrency cases. They
+  were not re-run in this documentation pass, so no claim is made here about
+  their current result.
 - **B2 — the create route drops `case_id`.** `agreement_service._create_agreement`
   accepts it; `agreements.py:23-25` never passes it, so every wizard-created
   agreement is unlinked. Prerequisite for 3B/3C.
@@ -1267,6 +1284,12 @@ becomes reachable.
   party can invoke right now. A crash between them leaves an engagement
   `terminated` with its case still assigned — the Gate 2 defect's mirror, in
   code Gate 2 did not touch.
+
+  > **SUPERSEDED 2026-09-20 by `ced696e`.** This bullet is the exposure
+  > argument that put 3A first, and it is kept for that reason. The
+  > implementation it describes is gone: the four writes are one transaction.
+  > **§3.0** records what shipped. The ordering conclusion below still stands.
+
 - **3B's defect is masked.** Unauthorized create is real
   (`agreement_service.py:331-335`) but unreachable: `create_user_agreement`
   refuses while the builder is parked. It becomes live the moment authoring

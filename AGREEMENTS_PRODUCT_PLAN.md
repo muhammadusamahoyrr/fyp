@@ -401,10 +401,14 @@ counsel-approved templates, not a deployment.
 
 ### ⬜ Still outstanding
 
-Transactional termination + pending-letter cancellation (3A) · lawyer/case/client
+~~Transactional termination + pending-letter cancellation (3A)~~ · lawyer/case/client
 authorization primitives and `case_id` plumbing (3B) · versioned drafts and
 atomic sign-and-send (3C) · lawyer authoring UI (3D) · executed PDF and download
 audit (3E) · chores (3F) · automated expiry (separate later gate).
+
+> **3A SHIPPED 2026-09-20 in `ced696e`** — struck above rather than deleted, so
+> the list still reads as the record of what was outstanding when it was
+> written. See AGREEMENTS_REMEDIATION_PLAN.md §3.0.
 
 ### 📋 Census outcome — reported, not repaired
 
@@ -513,6 +517,18 @@ this assertion will start passing for the wrong reason.
   conditionally cancel its correctly-linked pending letter. ⬜ **Outstanding —
   gate 3A.** Termination works today but is not transactional, and does not
   touch the letter.
+
+  > **SUPERSEDED 2026-09-20 by `ced696e` — this requirement is IMPLEMENTED.**
+  > The description of the defect above is historical. `terminate_engagement`
+  > runs one transaction through `_run_in_transaction`, covering the
+  > engagement transition, the case disposition and release, the
+  > release-gated milestone, cancellation of a still-`pending` linked letter
+  > with a `body_sha256` audit entry, and the outbox park.
+  > `backend/tests/test_engagement_termination_3a.py` carries 16 tests,
+  > including an injected-failure rollback case and two concurrency cases. They
+  > were not re-run in this documentation pass, so no claim is made here about
+  > their current result.
+
 - **Executed letters are permanent records** and are never modified by any
   later engagement event.
 
@@ -688,7 +704,7 @@ edit.
 | 7 | Reviewing requires an executed letter | R2 / Phase 2 | ✅ shipped — ⚠️ **SUPERSEDED (§17 R5-6):** completed appointment OR retained engagement | eligibility matrix |
 | 8 | Engagement activates only after execution | — | ⚠️ **superseded** | rejected; remediation §2.G1.4 |
 | 9 | DIY client builder parked (D1) | — | ⏸ deferred | `agreements_diy_builder_enabled` off, service-enforced |
-| 10 | Terminating an engagement is atomic and cancels its pending letter | **3A** | ⬜ outstanding | live integrity defect — remediation §3.G1.7 B1 |
+| 10 | Terminating an engagement is atomic and cancels its pending letter | **3A** | ✅ **shipped 2026-09-20 (`ced696e`)** — was "⬜ outstanding" | ~~live integrity defect~~ — closed; remediation §3.0. `test_engagement_termination_3a.py` (16), not re-run in the docs pass |
 | 11 | Counterparty rule: lawyer + one client + mandatory validated case (D2) | **3B** | ⬜ outstanding | remediation §3.G1.2 |
 | 12 | `case_id` reaches persistence and is authorized | **3B** | ⬜ outstanding | remediation §3.G1.7 B2 |
 | 13 | Drafts are versioned; send is one atomic idempotent call | **3C** | ⬜ outstanding | remediation §3.G1.3 |
