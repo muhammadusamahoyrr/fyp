@@ -524,7 +524,8 @@ async def sign_and_send_draft(*, agreement_id: str, creator_id: str,
                               expected_version: int, expected_body_sha256: str,
                               method: str, signature_data: str,
                               consent: bool, idempotency_key: str,
-                              ip_address: str | None = None) -> dict:
+                              ip_address: str | None = None,
+                              ip_verifiable: bool = False) -> dict:
     """ONE call, ONE transaction: freeze, sign, transition, audit, park, receipt.
 
     THE HASH CHECK IS THE POINT. The caller states the version and the body
@@ -640,7 +641,11 @@ async def sign_and_send_draft(*, agreement_id: str, creator_id: str,
                  "action": "sent",
                  "actor_id": creator_id,
                  "timestamp": now,
-                 "ip_address": ip_address,
+                 # D8: only an address we can stand behind, as the download
+                 # row already does. An unverifiable one is omitted rather
+                 # than stored -- `agreement_pdf` prints this straight onto
+                 # the certificate as the signer's origin.
+                 "ip_address": ip_address if ip_verifiable else None,
                  "note": eto,
                  "consent": True,
                  "body_sha256": digest,
@@ -1141,6 +1146,7 @@ async def submit_signature(
     method: str,
     signature_data: str,
     ip_address: str | None,
+    ip_verifiable: bool = False,
 ) -> dict:
     agreement = await agreement_repo.find_by_id(agreement_id)
     if not agreement:
@@ -1238,7 +1244,8 @@ async def submit_signature(
                     "action": "signed",
                     "actor_id": user_id,
                     "timestamp": now,
-                    "ip_address": ip_address,
+                    # D8, as in `sign_and_send_draft`.
+                    "ip_address": ip_address if ip_verifiable else None,
                     "note": eto,
                     # WHAT was signed, not merely that it was.
                     "body_sha256": digest,
@@ -1382,6 +1389,7 @@ async def decline_agreement(
     user_id: str,
     reason: str | None,
     ip_address: str | None,
+    ip_verifiable: bool = False,
 ) -> dict:
     """A party refuses to sign, ending the agreement.
 
@@ -1426,7 +1434,8 @@ async def decline_agreement(
     async def _txn(session):
         return await _decline_in_transaction(
             session, agreement_id=agreement_id, user_id=user_id,
-            reason=clean_reason, ip_address=ip_address)
+            reason=clean_reason, ip_address=ip_address,
+            ip_verifiable=ip_verifiable)
 
     try:
         result = await _run_in_transaction(_txn)
@@ -1438,7 +1447,8 @@ async def decline_agreement(
 
 
 async def _decline_in_transaction(session, *, agreement_id: str, user_id: str,
-                                  reason: str | None, ip_address: str | None) -> dict:
+                                  reason: str | None, ip_address: str | None,
+                                  ip_verifiable: bool = False) -> dict:
     """The whole decline, as ONE callback, runnable inside a caller's session.
 
     INTERNAL -- underscore-prefixed because it takes an open session and
@@ -1508,7 +1518,8 @@ async def _decline_in_transaction(session, *, agreement_id: str, user_id: str,
                 "action": "declined",
                 "actor_id": user_id,
                 "timestamp": now,
-                "ip_address": ip_address,
+                # D8, as in `submit_signature`.
+                "ip_address": ip_address if ip_verifiable else None,
                 "reason": reason,
                 "body_sha256": digest,
             }},

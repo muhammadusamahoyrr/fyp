@@ -367,7 +367,11 @@ async def test_the_body_digest_is_stamped_into_every_audit_entry(agreement_parti
     agreement_id = await _pending(agreement_parties)
     await agreement_service.submit_signature(
         agreement_id=agreement_id, user_id="P1-ALICE",
-        method="typed", signature_data="Alice", ip_address="203.0.113.7")
+        method="typed", signature_data="Alice", ip_address="203.0.113.7",
+        # D8: an address is stored only when it can be stood behind. This test
+        # is about the DIGEST reaching every entry, so the origin is supplied
+        # as verifiable rather than left to the fail-closed default.
+        ip_verifiable=True)
 
     row = await get_agreements_col().find_one({"_id": agreement_id})
     entry = next(a for a in row["audit_log"] if a["action"] == "signed")

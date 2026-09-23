@@ -363,7 +363,10 @@ async def test_declining_records_who_what_and_why(two_users):
     doc = await _make(two_users)
     out = await agreement_service.decline_agreement(
         agreement_id=doc["_id"], user_id="AG-BOB",
-        reason="Terms are unacceptable", ip_address="9.9.9.9")
+        reason="Terms are unacceptable", ip_address="9.9.9.9",
+        # D8: verifiable, so the assertion below still tests what it says --
+        # that a decline records the origin, not that the gate discards it.
+        ip_verifiable=True)
 
     entry = [e for e in out["audit_log"] if e["action"] == "declined"][0]
     assert entry["actor_id"] == "AG-BOB"

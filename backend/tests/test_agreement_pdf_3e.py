@@ -100,7 +100,11 @@ async def _sent(body: str = "Fees are 40% of recovery.") -> dict:
         expected_version=d["version"],
         expected_body_sha256=agreement_service.body_digest(d["body_html"]),
         method="typed", signature_data=TYPED_SIGNATURE, consent=True,
-        idempotency_key=secrets.token_urlsafe(12), ip_address="203.0.113.9")
+        idempotency_key=secrets.token_urlsafe(12), ip_address="203.0.113.9",
+        # D8: these helpers stand in for a request that arrived directly, where
+        # the socket address IS the client's. The fail-closed default belongs
+        # to callers that did not establish the origin.
+        ip_verifiable=True)
     return d
 
 
@@ -111,7 +115,8 @@ async def _executed(body: str = "Fees are 40% of recovery.") -> dict:
     d = await _sent(body)
     await agreement_service.submit_signature(
         agreement_id=d["_id"], user_id=CLIENT, method="typed",
-        signature_data=CLIENT_SIGNATURE, ip_address="198.51.100.7")
+        signature_data=CLIENT_SIGNATURE, ip_address="198.51.100.7",
+        ip_verifiable=True)
     return d
 
 

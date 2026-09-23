@@ -114,13 +114,16 @@ async def sign_agreement(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    ip = request.client.host if request.client else None
+    # D8: resolved through `client_ip`, never off the socket. Behind a proxy
+    # the peer address is the PROXY's, and this value is written into the audit
+    # log that the evidence certificate prints as the signer's origin.
     return await agreement_service.submit_signature(
         agreement_id=agreement_id,
         user_id=current_user["_id"],
         method=body.method.value,
         signature_data=body.signature_data,
-        ip_address=ip,
+        ip_address=client_ip(request),
+        ip_verifiable=ip_is_verifiable(request),
     )
 
 
@@ -136,12 +139,14 @@ async def decline_agreement(
     The counterpart to /sign. Without it a party could only sign or ignore, and
     `AgreementStatus.CANCELLED` was unreachable despite the UI rendering it.
     """
-    ip = request.client.host if request.client else None
+    # D8, as for /sign: a decline is recorded like a signature, so its origin
+    # is held to the same standard.
     return await agreement_service.decline_agreement(
         agreement_id=agreement_id,
         user_id=current_user["_id"],
         reason=body.reason,
-        ip_address=ip,
+        ip_address=client_ip(request),
+        ip_verifiable=ip_is_verifiable(request),
     )
 
 
@@ -223,7 +228,8 @@ async def sign_and_send_draft(
         raise HTTPException(status_code=422, detail={
             "code": "missing_idempotency_key",
             "message": "The Idempotency-Key header is required."})
-    ip = request.client.host if request.client else None
+    # D8: the sender's own signature is captured here, so the same resolution
+    # applies as on /sign.
     return await agreement_service.sign_and_send_draft(
         agreement_id=agreement_id,
         creator_id=current_user["_id"],
@@ -233,5 +239,6 @@ async def sign_and_send_draft(
         signature_data=body.signature_data,
         consent=body.consent,
         idempotency_key=idempotency_key,
-        ip_address=ip,
+        ip_address=client_ip(request),
+        ip_verifiable=ip_is_verifiable(request),
     )
