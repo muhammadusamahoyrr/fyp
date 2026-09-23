@@ -401,14 +401,27 @@ counsel-approved templates, not a deployment.
 
 ### ⬜ Still outstanding
 
-~~Transactional termination + pending-letter cancellation (3A)~~ · lawyer/case/client
-authorization primitives and `case_id` plumbing (3B) · versioned drafts and
-atomic sign-and-send (3C) · lawyer authoring UI (3D) · executed PDF and download
-audit (3E) · chores (3F) · automated expiry (separate later gate).
+~~Transactional termination + pending-letter cancellation (3A)~~ ·
+~~lawyer/case/client authorization primitives and `case_id` plumbing (3B)~~ ·
+~~versioned drafts and atomic sign-and-send (3C)~~ ·
+~~lawyer authoring UI (3D)~~ · ~~executed PDF and download audit (3E)~~ ·
+~~chores (3F)~~ · automated expiry (separate later gate).
 
-> **3A SHIPPED 2026-09-20 in `ced696e`** — struck above rather than deleted, so
-> the list still reads as the record of what was outstanding when it was
-> written. See AGREEMENTS_REMEDIATION_PLAN.md §3.0.
+> **ALL OF PHASE 3 HAS SHIPPED.** Struck above rather than deleted, so the list
+> still reads as the record of what was outstanding when it was written.
+>
+> | Gate | Commit | Where it is recorded |
+> |---|---|---|
+> | 3A | `ced696e` | remediation §3.0 |
+> | 3B | `0820be0` | remediation §3.G1.2, §3.G1.7 B2/B3 |
+> | 3C | `b0ce79f` | remediation §3.G1.3 |
+> | 3D | `f184fe3` | `DraftComposer.jsx` in `AgreementsPage.jsx` |
+> | 3E | `9d07d57` | remediation §3.G1.16 |
+> | 3F | `77e2679` | list pagination and chores |
+>
+> **Automated expiry is still outstanding** and is a separate later gate
+> (remediation §3.G1.12). What remains beyond it is the **Round 3 redesign**,
+> which is NOT Phase 3 work and is not scheduled — see §9 below.
 
 ### 📋 Census outcome — reported, not repaired
 
@@ -602,8 +615,8 @@ source was never built are marked **NO SOURCE** rather than given a number.
 | Review requires an executed letter | pass | `test_review_and_fee_gates.py` matrix | ✅ test-evidenced — **SUPERSEDED (§17 R5-6):** eligibility is now a completed appointment OR a retained engagement; no letter is read |
 | Agreements in `pending` never signed by their creator | **NO SOURCE** | — | ⚠️ the R1 "counter" was never built; only the atomic path was. With the wizard parked this shape is unreachable, so the metric is **retired**, not pending |
 | Duplicate agreements per idempotency key | **NO SOURCE** | — | ⚠️ idempotency deferred with the wizard; returns with gate 3C |
-| Executed agreements downloaded at least once | **NO SOURCE** | gate 3E download-audit event | ⬜ planned |
-| Agreements authored by lawyers | **0** — capability does not exist | gate 3D | ⬜ planned |
+| Executed agreements downloaded at least once | **UNMEASURED** | gate 3E download-audit event — **the source now exists** (`agreement_downloads`, shipped `9d07d57`) | ✅ source built; no number has been read off it |
+| Agreements authored by lawyers | **UNMEASURED** — ~~capability does not exist~~ | gate 3D, shipped `f184fe3` | ✅ **the capability exists and is reachable**; the count has not been measured |
 
 > **Correction.** Earlier drafts of this table carried R1/R2 "counters" as
 > though they had shipped. They did not: R1 shipped the *atomic path*, and the
@@ -705,19 +718,40 @@ edit.
 | 8 | Engagement activates only after execution | — | ⚠️ **superseded** | rejected; remediation §2.G1.4 |
 | 9 | DIY client builder parked (D1) | — | ⏸ deferred | `agreements_diy_builder_enabled` off, service-enforced |
 | 10 | Terminating an engagement is atomic and cancels its pending letter | **3A** | ✅ **shipped 2026-09-20 (`ced696e`)** — was "⬜ outstanding" | ~~live integrity defect~~ — closed; remediation §3.0. `test_engagement_termination_3a.py` (16), not re-run in the docs pass |
-| 11 | Counterparty rule: lawyer + one client + mandatory validated case (D2) | **3B** | ⬜ outstanding | remediation §3.G1.2 |
-| 12 | `case_id` reaches persistence and is authorized | **3B** | ⬜ outstanding | remediation §3.G1.7 B2 |
-| 13 | Drafts are versioned; send is one atomic idempotent call | **3C** | ⬜ outstanding | remediation §3.G1.3 |
-| 14 | A lawyer can author an agreement for their client | **3D** | ⬜ outstanding | first point the capability is user-visible |
-| 15 | Either party can obtain the executed document | **3E** | ⬜ outstanding | download-audit event feeds metric row 9 |
-| 16 | Download adoption is measurable | **3E** | ⬜ outstanding | no source until 3E ships |
+| 11 | Counterparty rule: lawyer + one client + mandatory validated case (D2) | **3B** | ✅ **shipped 2026-09-20 (`0820be0`)** — was "⬜ outstanding" | remediation §3.G1.2. `test_agreement_authorization_3b.py` (20) |
+| 12 | `case_id` reaches persistence and is authorized | **3B** | ✅ **shipped 2026-09-20 (`0820be0`)** — was "⬜ outstanding" | remediation §3.G1.7 B2, now FIXED. Schema declares it, the route passes it, `_authorise_case_link` authorises it |
+| 13 | Drafts are versioned; send is one atomic idempotent call | **3C** | ✅ **shipped 2026-09-20 (`b0ce79f`)** — was "⬜ outstanding" | remediation §3.G1.3. `test_agreement_drafts_3c.py` (39) |
+| 14 | A lawyer can author an agreement for their client | **3D** | ✅ **shipped (`f184fe3`)** — was "⬜ outstanding" | `DraftComposer.jsx`, rendered by `AgreementsPage.jsx`; three frontend test files |
+| 15 | Either party can obtain the executed document | **3E** | ✅ **shipped 2026-09-21 (`9d07d57`)** — was "⬜ outstanding" | remediation §3.G1.16. `test_agreement_pdf_3e.py` (30) |
+| 16 | Download adoption is measurable | **3E** | ✅ **source shipped (`9d07d57`)**; the number is **unmeasured** | `agreement_downloads` rows exist; §6 metric row still reads UNMEASURED |
 | 17 | Automated expiry (`cancellation_source="expired"`) | later gate | ⬜ deferred | reserved only; no scheduler specified |
-| 18 | Lawyer KYC required to author **and** send (D5) | **3B** | ✅ **decided** — outstanding to build | §3 D5; checked at create and at send |
+| 18 | Lawyer KYC required to author **and** send (D5) | **3B** | ✅ **decided AND built** (`0820be0`) — was "outstanding to build" | §3 D5. `_require_verified_lawyer` on `create_draft`, `update_draft`, `sign_and_send_draft`, `create_lawyer_agreement`. **What D5 applies to after R3-12/R3-14 is NR-23, still open** |
 | 19 | Counsel-approved template registry | Phase 4.3 | 🔒 counsel-blocked | D4 unowned |
 | 20 | ETO classification wording | Phase 4.1 | 🔒 counsel-blocked | neutral labels until reviewed |
 | 21 | Evidence-certificate legal conclusions | Phase 4 | 🔒 counsel-blocked | factual PDF in 3E is **not** blocked |
 | 22 | Signature encryption at rest | Phase 4.2 | 🔒 counsel/eng | claim already removed in R0 |
 | 23 | Six orphaned letters | retention work | ⬜ reported, unrepaired | census output; out of Phase 3 scope |
+
+### Shipped Phase 3 is NOT the Round 3 redesign
+
+**Reconciled 2026-09-23.** Rows 10-16 and 18 above are shipped. They implement
+the **pre-Round-3** design, and that is the code running today.
+
+Round 3 (§15) later decided a DIFFERENT authoring model, and **none of it is
+implemented**. Restated here only so the rows above are not read as covering
+it — the authoritative entries are in §15 and are unchanged:
+
+| Round 3 item | What §15 records | Implementation |
+|---|---|---|
+| **R3-12** — one agreement flow for everyone | Code change **YES — merges two producers** | **Not scheduled** |
+| **R3-14** — a client may ask ANY lawyer | **PENDING COUNSEL**; code change YES | **Not scheduled**, and counsel-blocked |
+| **R3-19** — a new `awaiting_sender` state | Code change **YES — a new status value** | **Not scheduled** |
+| **R3-23** — `awaiting_sender` does not consume the D7 quota | Code change **NO — "this is what the status change already does"** | **Contingent on R3-19** |
+| **R3-27** — `awaiting_sender` visibility (`current_editor_id`) | Code change **YES** | **Not scheduled** |
+| **NR-23** — what D5 applies to, and when | Open; sharpened by R3-14 and R3-12 | **Counsel-dependent** |
+
+Nothing in this subsection decides anything. `awaiting_sender`,
+`current_editor_id` and per-version `author_id` do not exist in the code.
 
 ---
 

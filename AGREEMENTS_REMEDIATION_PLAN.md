@@ -915,10 +915,23 @@ letter was "declined": nobody refused it. *"The engagement was ended by the
 
 **Verdict: existing statuses suffice.** No new status for this arrow.
 
-### 3.G1.2 Lawyer agreement authoring — PRIMITIVES IMPLEMENTED (gate 3B)
+### 3.G1.2 Lawyer agreement authoring — IMPLEMENTED (gates 3B and 3D)
 
 **2026-09-20.** The authorization primitives are built; the ROUTE and UI are
 still 3D, so nothing external can reach lawyer authoring yet.
+
+> **RECONCILED 2026-09-23 — 3D HAS SHIPPED (`f184fe3`), so the second sentence
+> above is historical.** Lawyer authoring IS reachable: the `/agreements/drafts`
+> family (gate 3C, `b0ce79f`) is its route, and `DraftComposer.jsx` — rendered
+> by `AgreementsPage.jsx` — is its UI.
+>
+> **The precise distinction still holds:** `create_lawyer_agreement` itself has
+> **no production route**. It is called only from
+> `test_agreement_authorization_3b.py`; every external caller reaches Product C
+> through the draft lifecycle instead. That is worth keeping in view — an
+> unrouted public producer is either dead code or a route somebody will add
+> without re-reading these rules — but it is NOT a claim that the capability is
+> unreachable.
 
 - `create_lawyer_agreement` — Product C's producer. Deliberately does **not**
   read `agreements_diy_builder_enabled`: reading Product B's flag would tie the
@@ -1088,7 +1101,21 @@ case is the normal post-decline state.
 no engagement is legitimate. `engagement_id` stays null, so Gate 2's reversal
 never triggers. The two links are independent and must stay so.
 
-### 3.G1.5 Executed PDF and signature evidence
+### 3.G1.5 Executed PDF and signature evidence — IMPLEMENTED (gate 3E)
+
+> **IMPLEMENTED 2026-09-21 in `9d07d57`.** What follows is the SPECIFICATION as
+> written before the gate, kept because it records what was required and why.
+> **§3.G1.16 describes what shipped**, including the download-audit collection
+> and the evidence rules the certificate obeys.
+>
+> **The D8 note below — that IP evidence waits on trusted-proxy handling — is
+> only HALF addressed.** The CODE half shipped in `3d39fe2`: sign, decline and
+> send resolve the origin through `client_ip`, and an unverifiable one is
+> stored as `None`, so the certificate prints "not recorded" rather than a
+> proxy's address. The OPERATIONAL half has NOT been done — `trusted_proxies`
+> is unset, and no IP has been verified on a generated certificate in any
+> target environment. That remains a **release gate**, unchecked, in the
+> MERGE_CHECKLIST §2 and the deployment checklist.
 
 **Route.** `GET /agreements/{id}/pdf`, parties-only, `status == executed` only.
 Follow `documents.py:174`'s `FileResponse` pattern.
@@ -1124,7 +1151,14 @@ executed agreements downloaded) becomes reportable.
 **Facts, not conclusions.** The certificate states what was recorded. It must
 not assert enforceability; that wording is Phase 4.1, counsel-gated.
 
-### 3.G1.6 Dependency-ordered implementation gates
+### 3.G1.6 Dependency-ordered implementation gates — HISTORICAL
+
+> **PLANNING CONTEXT, NOT OUTSTANDING WORK — reconciled 2026-09-23.** Every
+> gate in this table has shipped: 3A `ced696e`, 3B `0820be0`, 3C `b0ce79f`,
+> 3D `f184fe3`, 3E `9d07d57`, 3F `77e2679`. The table is kept unchanged because
+> it records the dependency reasoning that produced that order, and the
+> "files likely to change" column is a useful record of what was expected
+> against what happened. Nothing here is a to-do list any more.
 
 | Gate | Scope | Depends on | Files likely to change | Migration / index | API contract | Tests |
 |---|---|---|---|---|---|---|
@@ -1152,11 +1186,24 @@ gate and should go first if only one ships.
   including an injected-failure rollback case and two concurrency cases. They
   were not re-run in this documentation pass, so no claim is made here about
   their current result.
-- **B2 — the create route drops `case_id`.** `agreement_service._create_agreement`
-  accepts it; `agreements.py:23-25` never passes it, so every wizard-created
-  agreement is unlinked. Prerequisite for 3B/3C.
-- **B3 — no relationship check or rate limit on create** (§3.G1.2). Masked by
-  the park flag; unparking without this re-opens arbitrary-user notification.
+- **B2 — the create route drops `case_id`.** ✅ **FIXED 2026-09-20 in
+  `0820be0`; no longer a blocker.** The defect as recorded at inspection:
+  `agreement_service._create_agreement` accepts it; `agreements.py:23-25` never
+  passes it, so every wizard-created agreement is unlinked. Prerequisite for
+  3B/3C. It was fixed end to end — `AgreementCreate` declares `case_id` with
+  `extra="forbid"` so a stray field is a 422 rather than a silent drop, the
+  route passes it, and it is persisted. Tests:
+  `test_the_case_link_is_persisted_not_silently_dropped`,
+  `test_case_id_is_declared_and_survives_validation`.
+- **B3 — no relationship check or rate limit on create** (§3.G1.2). ✅ **FIXED
+  2026-09-20 in `0820be0`; no longer a blocker.** The defect as recorded:
+  masked by the park flag; unparking without this re-opens arbitrary-user
+  notification. `_authorise_case_link` now requires the creator AND every party
+  to be on the case, exactly two parties are allowed, and an agreement with
+  neither case nor engagement is refused. **On the rate limit, read §3.G1.11**,
+  which resolved that create takes an active-draft CAP (D7) rather than a rate
+  limit — the abuse boundary is sending (D6). The phrase above predates that
+  resolution.
 
 **Improvements, explicitly NOT Phase 3 scope expansion:**
 
@@ -1275,7 +1322,11 @@ The appointment expiry work is the precedent — including its hard lesson that 
 sweep and its guard must ship behind **one** flag, or a half-enabled state
 becomes reachable.
 
-### 3.G1.13 Gate order, corrected
+### 3.G1.13 Gate order, corrected — HISTORICAL, ORDER EXECUTED
+
+> **Reconciled 2026-09-23.** The order below was followed and completed:
+> **3A → 3B → 3C → 3D → 3E → 3F**, all shipped. Kept as the record of why 3A
+> went first. The bullets are historical; see the marker on the first one.
 
 **3A precedes 3B, and the reason is exposure, not severity of concept.**
 
@@ -1894,7 +1945,12 @@ What they change for THIS document:
   target model**. See the SUPERSEDED note at §3.G1.15.
 - **DG-07 was revised the same day** — KYC must be re-verified at acceptance,
   not only at request. Recorded as a decision plus an implementation gap; the
-  code at `884161a` does not do this.
+  code at `884161a` does not do this. **RECONCILED 2026-09-23:** the reference
+  to `884161a` is accurate for that commit and is left standing. The gap has
+  since been closed — acceptance-time KYC re-check shipped in Gate 2 step 3
+  (`AGREEMENTS_PRODUCT_PLAN.md` §17 R5-2), and D5's create-and-send checks
+  shipped with 3B (`0820be0`). What remains open is **NR-23**: what D5 applies
+  to once R3-12 and R3-14 land.
 - **D4 is answered** — see the MERGE_CHECKLIST note below.
 
 **Round 2 (2026-09-21)** — thirteen further decisions are recorded in
