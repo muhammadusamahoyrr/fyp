@@ -509,6 +509,12 @@ causes without a fifth state.
 *(The comparison below is the ANALYSIS THAT REJECTED `awaiting_signatures`.
 Option B is recorded so the reasoning survives, not as a live alternative.)*
 
+> **HISTORICAL — SUPERSEDED 2026-09-23.** Option A, recommended and shipped
+> here, was later removed by **AGREEMENTS_PRODUCT_PLAN.md §17 C-A / R5-12**: a
+> letter decline no longer reverses its engagement. Neither option is live. The
+> comparison stands unchanged as the record of why `awaiting_signatures` was
+> rejected — that reasoning, and the atomic claim it protected, still hold.
+
 The original §2 proposed an `awaiting_signatures` state: the engagement would
 not become `accepted` until the letter executed. **Reading the code, that is
 the more expensive and riskier of the two designs, and I no longer recommend
@@ -1583,7 +1589,7 @@ the 10 CPC particulars.**
 
 ### 4.1 Electronic-signature classification
 
-`ETO_CLASSIFICATION` (`agreement_service.py:13`) maps a canvas drawing to
+`ETO_CLASSIFICATION` (`agreement_service.py:31`) maps a canvas drawing to
 "Advanced Electronic Signature (ETO 2002 S.2(d)(i))". A drawn line in a browser
 is not sufficient evidence for that classification on its own — identity
 verification, exclusive signer control, integrity and attribution all bear on
@@ -1597,6 +1603,28 @@ instincts. The **labels** are the problem.
 technical descriptions ("drawn signature captured in browser", "typed name")
 and keep storing the factual evidence. Restore legal characterisations only with
 counsel-approved wording.
+
+> **COUNSEL RESPONSE RECORDED — 2026-09-23. No code changed by this note.**
+> A legal research/review pass reported that the ETO 2002 distinguishes a
+> **basic** electronic signature (valid, no evidentiary presumption) from an
+> **advanced** one (presumed authentic, but only when backed by an accreditation
+> certificate from a licensed Certification Service Provider), and that the
+> product's canvas signatures are **"almost certainly basic-tier"**. On that
+> basis it called the current "Advanced Electronic Signature" classification
+> **"likely inaccurate"** and **"probably a factual overstatement"**.
+>
+> That **supports the action above**: neutral technical descriptions remain the
+> proposed follow-up. The reviewer's own safer formulation —
+> *"an electronic signature recognized under the Electronic Transactions
+> Ordinance 2002"* — is recorded at AGREEMENTS_PRODUCT_PLAN.md §13 and tracked
+> as **NR-47**; it is qualified guidance, not a final verified conclusion.
+>
+> **`ETO_CLASSIFICATION` (`agreement_service.py:31`) is unchanged.** Correcting
+> it is a code task that has not been scheduled, and nothing in this note claims
+> AttorneyAI holds an advanced electronic signature. The reviewer also noted
+> that without a presumption the audit trail — timestamps, IP, digest — is what
+> would carry evidentiary weight, which is what this section's mechanism already
+> stores.
 
 ### 4.2 Signature encryption at rest
 

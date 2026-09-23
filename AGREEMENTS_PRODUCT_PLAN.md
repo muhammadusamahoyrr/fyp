@@ -21,6 +21,10 @@ Auto-generated when a client accepts a lawyer's fee terms. Case-linked. Signed
 by both parties. **Gates all billing** — a lawyer cannot raise a fee request
 without an executed letter.
 
+> **SUPERSEDED 2026-09-23 (§17 R5-3 / R5-5 / C-B).** Historical description,
+> accurate when written. New engagements generate no letter, and billing now
+> validates the engagement itself. Kept as the record of what Product A was.
+
 - Not optional. If this breaks, the lawyer marketplace cannot collect money.
 - Nobody chooses to use it; it happens as part of hiring a lawyer.
 - The generator is well built, with rollback if letter creation fails.
@@ -376,6 +380,11 @@ deferred by the D1 park decision.
 | Review **and** billing now require an *executed* letter | R2 | `test_review_and_fee_gates.py`, 18 tests |
 | Four state-specific fee-gate messages | R2 | `test_review_and_fee_gates.py` |
 
+> **SUPERSEDED 2026-09-23.** The last three rows record what R2 shipped, not
+> current architecture: the decline reversal is removed (**§17 C-A / R5-12**),
+> no gate requires an executed letter (**R5-5**, **R5-6**), and the four
+> fee-gate messages are gone. The tests named were converted, not deleted.
+
 ### ⚠️ Superseded (planned, then deliberately not built)
 
 | Item | Why |
@@ -487,9 +496,19 @@ this assertion will start passing for the wrong reason.
   `pending`. This is the atomic case-claim operation and is not deferred.
 - **Billing stays blocked** until that letter is `executed` — acceptance alone
   never makes a matter billable.
+
+  > **SUPERSEDED 2026-09-23 (§17 R5-5 / C-B).** Billing is gated by the
+  > validated engagement — this lawyer, this case, this client, accepted or
+  > completed and not terminated — not by any letter.
+
 - **Declining the pending letter reverses the acceptance**: the engagement
   becomes `declined` and the case is released *only if* that engagement's
   lawyer still holds it. ✅ Shipped.
+
+  > **SUPERSEDED 2026-09-23 (§17 C-A / R5-12).** The reversal is removed.
+  > Declining a legacy letter ends the letter only: it neither changes the
+  > engagement's status nor touches `case.lawyer_id` (**R3-26**).
+
 - **Terminating an accepted engagement** must be transactional and must
   conditionally cancel its correctly-linked pending letter. ⬜ **Outstanding —
   gate 3A.** Termination works today but is not transactional, and does not
@@ -564,7 +583,7 @@ source was never built are marked **NO SOURCE** rather than given a number.
 | Engagements at any status | **0** | same census | ✅ measured — and why "0 stranded" means *unexercised*, not *safe* |
 | Orphaned engagement letters | **6, one `executed`** | same census, reverse check | ✅ measured; unrepaired by design |
 | Concurrent sign/decline yields one terminal state | pass | `test_agreement_phase2.py` | ✅ test-evidenced |
-| Review requires an executed letter | pass | `test_review_and_fee_gates.py` matrix | ✅ test-evidenced |
+| Review requires an executed letter | pass | `test_review_and_fee_gates.py` matrix | ✅ test-evidenced — **SUPERSEDED (§17 R5-6):** eligibility is now a completed appointment OR a retained engagement; no letter is read |
 | Agreements in `pending` never signed by their creator | **NO SOURCE** | — | ⚠️ the R1 "counter" was never built; only the atomic path was. With the wizard parked this shape is unreachable, so the metric is **retired**, not pending |
 | Duplicate agreements per idempotency key | **NO SOURCE** | — | ⚠️ idempotency deferred with the wizard; returns with gate 3C |
 | Executed agreements downloaded at least once | **NO SOURCE** | gate 3E download-audit event | ⬜ planned |
@@ -664,9 +683,9 @@ edit.
 | 2 | One click never produces two binding instruments | R1 / Phase 1 | ✅ shipped | `test_agreement_phase1.py` (20) |
 | 3 | A notification cannot be lost to a crash after commit | R1 / Phase 1 | ✅ shipped | in-transaction park + ungated relay |
 | 4 | Agreement body is plain text, never silently rewritten | R1 / Phase 1 | ✅ shipped | `normalise_body` tests |
-| 5 | Declining a letter reverses the engagement | R2 / Phase 2 | ✅ shipped | `test_agreement_phase2.py` (27) |
-| 6 | Billing requires an executed letter | R2 / Phase 2 | ✅ shipped | `test_review_and_fee_gates.py` (18) |
-| 7 | Reviewing requires an executed letter | R2 / Phase 2 | ✅ shipped | eligibility matrix |
+| 5 | Declining a letter reverses the engagement | R2 / Phase 2 | ✅ shipped — ⚠️ **SUPERSEDED (§17 C-A / R5-12):** reversal removed | `test_agreement_phase2.py` (27) |
+| 6 | Billing requires an executed letter | R2 / Phase 2 | ✅ shipped — ⚠️ **SUPERSEDED (§17 R5-5 / C-B):** billing validates the engagement | `test_review_and_fee_gates.py` (18) |
+| 7 | Reviewing requires an executed letter | R2 / Phase 2 | ✅ shipped — ⚠️ **SUPERSEDED (§17 R5-6):** completed appointment OR retained engagement | eligibility matrix |
 | 8 | Engagement activates only after execution | — | ⚠️ **superseded** | rejected; remediation §2.G1.4 |
 | 9 | DIY client builder parked (D1) | — | ⏸ deferred | `agreements_diy_builder_enabled` off, service-enforced |
 | 10 | Terminating an engagement is atomic and cancels its pending letter | **3A** | ⬜ outstanding | live integrity defect — remediation §3.G1.7 B1 |
@@ -869,6 +888,39 @@ That is recorded here as **the owner's statement**, not as established
 verification, because this decision also requires the five items above before
 any template counts as verified. No assessment of the claim is made here, and
 no legal conclusion is stated. **PENDING COUNSEL.**
+
+#### Counsel-identified compliance constraints — NOT YET IMPLEMENTATION RULES
+
+**COUNSEL-IDENTIFIED LEGAL ISSUE, recorded 2026-09-23.** The 2026-09-23 review
+pass raised a dimension these plans had not carried: stamping and registration
+are **separate** from the Electronic Transactions Ordinance, and a valid
+electronic signature does not satisfy either.
+
+- DIY legal-document templates **may carry stamp-duty and/or registration
+  requirements of their own**.
+- Those requirements **vary by document type and by province**.
+- Lease, partnership, NDA, employment and the other templates **must not be
+  treated as having identical compliance requirements**.
+- **E-stamping and registration are separate concerns**, not one step.
+- Government **e-stamping mechanisms exist** in the relevant provinces.
+  AttorneyAI must not imply that stamping or registration is completed by the
+  product.
+- **Registration has no AttorneyAI-integrated digital path**, and the reviewer
+  noted it is done by lodging the instrument with the relevant office.
+
+The reviewer also flagged, for confirmation rather than as settled rules, that a
+partnership deed may attract a value-linked duty and that an unregistered firm's
+ability to sue on its own contract is a **separate** question under the
+Partnership Act 1932; and that a lease may attract ad valorem duty and
+compulsory registration above a term threshold, with an unregistered lease at
+risk of losing effect as a lease.
+
+**No per-template risk rating, duty rate or lease threshold is adopted here.**
+Those need province- and document-specific confirmation before any template
+ships — **NR-48** (partnership) and **NR-49** (lease). This subsection adds no
+requirement that AttorneyAI integrate e-stamping or registration; it records
+what a template's compliance review must cover. DG-25 stays **PENDING COUNSEL**,
+and the withdrawn-template guard stays on.
 
 ### FR-11 source -- REQUIRED FOLLOW-UP
 
@@ -1435,6 +1487,34 @@ record.
 | **Q10** | Whether auto-accepting an engagement letter on the client's behalf (design §6) adequately represents their assent, given Q5 and DG-02 require explicit acceptance everywhere else | **OPEN — PENDING COUNSEL.** No legal conclusion is stated |
 | **Q11** | Whether the evidence certificate may state that a version *was superseded*, or only list what was recorded | **OPEN — PENDING COUNSEL.** No legal conclusion is stated |
 
+> **COUNSEL GUIDANCE ON SIGNATURE WORDING — 2026-09-23. Qualified, not a
+> verified legal conclusion.** The review pass reported that electronic
+> signatures are valid and admissible by default under the ETO 2002, and that
+> the Ordinance distinguishes two tiers: a **basic** electronic signature
+> (valid, with no special evidentiary presumption) and an **advanced**
+> electronic signature (valid and presumed authentic, **but only when backed by
+> an accreditation certificate from a licensed Certification Service
+> Provider**).
+>
+> On that basis the reviewer said the product's current characterisation of a
+> canvas-drawn signature as *advanced* is **"likely inaccurate"** and
+> **"probably a factual overstatement"**, since no accredited certification
+> service is involved, and proposed as safer wording:
+>
+> > "an electronic signature recognized under the Electronic Transactions
+> > Ordinance 2002"
+>
+> — dropping "advanced" unless and until real accreditation is integrated. The
+> reviewer also observed that where no presumption applies, the audit trail
+> (timestamps, IP, digest) is what would carry evidentiary weight if a signature
+> were disputed.
+>
+> **This is counsel's qualified guidance and a proposed formulation, not a final
+> verified conclusion, and it is not a claim that AttorneyAI holds an advanced
+> electronic signature.** Q9–Q11 remain **PENDING COUNSEL**; the exact wording
+> to ship is **NR-47**. The code classification is unchanged by this note — see
+> AGREEMENTS_REMEDIATION_PLAN.md §4.1.
+
 **Q10 is the one that interacts with a decision made above.** Q5 settles that
 proposing is not accepting, and DG-02 settles that acceptance is a separate
 act — while design §6 has the system auto-accept a letter for both parties so
@@ -1537,6 +1617,20 @@ step is required before a lawyer can invoice.**
 | Sources | **PLAN** |
 | Status | **PENDING COUNSEL** |
 | Code change? | **YES — large. Implementation gap, not scheduled** |
+
+> **COUNSEL REVIEW NOTE — 2026-09-23. Status UNCHANGED: still PENDING COUNSEL.**
+> A legal research/review pass reported that, in the material it reviewed, **no
+> specific Pakistani statute or Bar Council rule was found** requiring a written
+> engagement letter as a precondition to acting or billing, and that Pakistan
+> follows general contract law under which oral contracts are enforceable
+> unless a specific law demands writing.
+>
+> **That pass expressly treated this as an unresolved gap, not a clearance**:
+> provincial Bar Council byelaws that are not indexed online could still impose
+> such a requirement, and the reviewer routed the question onward. **NR-43**
+> tracks that confirmation. Nothing here states that a written engagement is
+> unnecessary, and this decision is not closed. The same note applies to R3-25
+> and R5-3, which inherit this status.
 
 **This REPLACES the rule "billing requires an executed engagement letter."**
 That rule is implemented today at `payment_service.py:79`
@@ -2340,6 +2434,12 @@ required for billing.**
 | Code change? | **YES. Not scheduled** |
 | Closes | **NR-2** |
 
+> **COUNSEL REVIEW NOTE — 2026-09-23.** See the note at R3-1: the research pass
+> found no specific requirement in what it reviewed and expressly called it an
+> unresolved gap. **Status unchanged.** The reviewer said nothing about what may
+> authorise billing; the stamp-duty and registration findings recorded at
+> §18.6 concern document types, not fee requests.
+
 **This names the replacement the audit found missing.** The current gate
 (`payment_service.py:79`, called at `:187`) performs **two** checks, and only
 the second is about the letter:
@@ -2890,6 +2990,11 @@ New hires generate **no** engagement letter. Removed from the new flow:
 
 Existing letters are neither invalidated nor migrated (R5-4).
 
+> **COUNSEL REVIEW NOTE — 2026-09-23.** See R3-1. The research pass found no
+> specific statute or Bar Council rule in the material reviewed, and called that
+> an unresolved gap pending provincial byelaw confirmation (**NR-43**).
+> **This decision stays PENDING COUNSEL.**
+
 ---
 
 ### R5-4 — Legacy letters — **DECIDED** (C-A decided in R5-12)
@@ -3174,3 +3279,113 @@ ordinary application startup, like every other index here. So:
 | ~~C-A~~ | ~~Gate 2's reversal for legacy linked letters~~ | **CLOSED (R5-12):** no reversal, no `case.lawyer_id` write |
 | ~~C-B~~ | ~~New fee requests after termination~~ | **CLOSED (R5-12):** refused; pre-termination requests stay payable |
 | ~~NR-42~~ | ~~Does a `declined` / `cancelled` Engagement use up its appointment?~~ | **CLOSED 2026-09-23 by R5-13.** It does: the attempt consumes the consultation, whatever becomes of it. Enforced by `uniq_engagement_appointment` |
+| NR-43 | Provincial Bar Council byelaws — Punjab, Sindh, Khyber Pakhtunkhwa, Balochistan | **OPEN QUESTION, blocks R3-1 / R3-25 / R5-3.** The 2026-09-23 review pass found no specific statute or Bar Council rule in the material reviewed, and called byelaws that are not indexed online an unresolved gap. Determine whether any applicable professional or byelaw requirement imposes a written engagement/terms instrument |
+| NR-44 | The will template's electronic-execution statement — cross-module | **COUNSEL-IDENTIFIED LEGAL ISSUE.** `backend/app/services/pdf_generator.py` prints an electronic-execution statement in the will template's execution clause, and the review pass named wills among the documents the ETO excludes from electronic signing. The document module needs its own legal review. No code was changed |
+| NR-45 | Would the canonical Engagement record satisfy a written-instrument requirement, if one exists? | **OPEN QUESTION.** The reviewer called the record shape "a reasonable candidate" and said it has not been tested against any specific rule (§18.3) |
+| NR-46 | Pakistan-specific professional practice on documenting scope and fee | **OPEN QUESTION.** The reviewer found no Pakistan-specific source and routed the recommendation onward (§18.2) |
+| NR-47 | Final signature and certificate wording | **OPEN QUESTION.** Counsel proposed "an electronic signature recognized under the Electronic Transactions Ordinance 2002" but qualified it; confirm before it goes into the UI, the PDF and the evidence certificate (§13, remediation plan §4.1) |
+| NR-48 | Partnership deed — duty and the Partnership Act 1932 | **OPEN QUESTION.** The reviewer flagged a value-linked duty and a separate question about an unregistered firm suing on its own contract; needs its own counsel question (DG-25 subsection) |
+| NR-49 | Lease — province-specific stamp duty and registration | **OPEN QUESTION.** Ad valorem duty and a registration threshold were flagged for confirmation; no threshold or rate is adopted in this plan (DG-25 subsection) |
+
+
+---
+
+## 18. Counsel review record and product definitions — 2026-09-23
+
+A legal research/review pass answered the six questions in the counsel brief and
+raised a seventh of its own. **It is a research pass, not a final legal
+clearance**, and it named its own gaps. Every note below carries one of these
+labels, and no qualified statement is promoted into a definitive one:
+
+| Label | Meaning |
+|---|---|
+| **PRODUCT DECISION** | Something this project decided. No legal claim |
+| **CURRENT PRODUCT FACT** | What the system does today |
+| **KNOWN LIMITATION** | Something the system does not do or record |
+| **COUNSEL-IDENTIFIED LEGAL ISSUE** | A requirement or constraint the reviewer identified |
+| **COUNSEL RECOMMENDATION** | Professional advice, not a stated legal requirement |
+| **OPEN QUESTION** | Unanswered; tracked as an NR |
+| **PENDING COUNSEL** | Decision deliberately not closed |
+
+### 18.1 Appointment = consultation — **PRODUCT DECISION**
+
+An **Appointment** is a consultation: a booked meeting between a client and a
+lawyer, which the lawyer marks completed after it has taken place. This is the
+project's own terminology, not a legal characterisation, and it is the basis of
+the consultation-to-hire eligibility rule in R5-1: a completed consultation is
+what makes a new hire request possible.
+
+### 18.2 The canonical Hire sequence — **PRODUCT DECISION** / **CURRENT PRODUCT FACT**
+
+    client selects or creates a case
+      → lawyer proposes fee and scope
+      → client accepts
+      → the lawyer is assigned to the case
+
+This is the order the system implements. **No claim is made that this sequence
+satisfies any legal requirement.** The reviewer separately noted a
+cross-jurisdiction professional norm of documenting scope and fee in writing
+(**COUNSEL RECOMMENDATION**, with no Pakistan-specific source found and the
+question routed onward — **NR-46**); whether this sequence meets that norm is
+not decided here.
+
+### 18.3 The canonical Engagement record — **CURRENT PRODUCT FACT**
+
+An Engagement records:
+
+| Field | What it holds |
+|---|---|
+| Parties | the client's and the lawyer's identities |
+| Case reference | the case the hire is for |
+| Agreed fee | the amount the lawyer proposed |
+| Fee type | fixed, hourly or as recorded |
+| Scope / terms | the scope note the lawyer proposed |
+| Acceptance | that the client accepted, and by whom |
+| Timestamps | proposal, acceptance and status transitions |
+
+The review pass described this shape as **"a reasonable candidate"** to satisfy
+a written-record requirement *if one exists*, and said this has not been tested
+against any specific rule because none was found. **That is the whole of what
+was said: this plan does not state that the record legally satisfies any
+written-engagement requirement.** Tracked as **NR-45**.
+
+### 18.4 Work-performance dates are not recorded — **KNOWN LIMITATION**
+
+The system does not record **when the underlying legal work was performed**. It
+records when an engagement was proposed, accepted, completed or terminated, and
+when a fee request was raised — not the dates of the work a fee covers. This is
+a product and data limitation, recorded as a fact. It is why C-B could not
+distinguish a fee for pre-termination work from new work (§17 R5-5), and no
+legal conclusion is drawn from it.
+
+### 18.5 What the Engagement is separate from — **PRODUCT DECISION** + **COUNSEL-IDENTIFIED LEGAL ISSUE**
+
+**PRODUCT DECISION.** The Engagement is separate from:
+
+- **consultation records** (appointments — §18.1);
+- **payment records** (fee requests and their lifecycle, which reference an
+  Engagement but are not it);
+- **court-specific authority documents**.
+
+A **Vakalatnama** concerns authority to represent or appear in court. It is
+separate from fee and engagement terms, and **AttorneyAI's Agreements/Hire flow
+does not treat the Engagement as a Vakalatnama**. The separate document module's
+Vakalatnama execution checklist and power-of-attorney drafting remain outside
+this Engagement design.
+
+**COUNSEL-IDENTIFIED LEGAL ISSUE.** The review pass reported that court
+representation requires a Vakalatnama in writing under Order III Rule 4 CPC, and
+that the ETO 2002 **excludes certain document types from electronic signing**,
+naming negotiable instruments, documents of title, **wills** and **powers of
+attorney**. That is recorded as the constraint the reviewer identified. It is
+**not** restated here as a general product claim about what is possible in any
+electronic workflow, and the exclusions' application to specific documents needs
+its own review — for the will template, **NR-44**.
+
+### 18.6 Stamping and registration — **COUNSEL-IDENTIFIED LEGAL ISSUE**
+
+Recorded against the parked DIY builder at DG-25, above. Summary: stamping and
+registration are separate from the ETO and from each other; requirements vary by
+document type and province; no per-template rating, duty rate or threshold is
+adopted; and nothing here requires the product to integrate e-stamping or
+registration.
