@@ -237,8 +237,8 @@ _DIY_PARKED = (
     "Creating your own agreements is unavailable. The contract templates were "
     "withdrawn pending review by a qualified Pakistani lawyer, so this feature "
     "is switched off rather than left in a state where nothing you write can "
-    "actually be sent. Engagement letters from a lawyer you hire are "
-    "unaffected — you can still read, sign and decline those."
+    "actually be sent. Agreements already shared with you are unaffected — you "
+    "can still read, sign and decline those."
 )
 
 
@@ -781,24 +781,30 @@ async def create_pending_engagement_letter(
     case_id: str,
     engagement_id: str,
 ) -> dict:
-    """The INTERNAL producer: an unsigned letter awaiting both signatures.
+    """The LEGACY producer: an unsigned letter awaiting both signatures.
 
-    WHY THIS IS A SEPARATE NAMED OPERATION.
+    NO PRODUCTION CALLER SINCE §17 R5-3. Acceptance no longer generates a
+    letter, and neither billing nor reviews read one. This is kept for the
+    legacy fixtures that build letters in tests (R5-8), and because the rows it
+    once wrote still exist and must keep behaving; it may later move into test
+    support. Its behaviour is unchanged.
 
-    Two workflows create agreements and they have opposite requirements. The
-    external wizard (`POST /agreements`) carries the creator's signature and
-    signs on creation. This one deliberately does NOT: a lawyer accepting an
-    engagement has agreed the terms, but the letter still needs a signature from
-    each side, and the fee gate in `payment_service` turns on exactly that.
+    WHY IT IS A SEPARATE NAMED OPERATION.
+
+    Two workflows created agreements with opposite requirements. The external
+    wizard (`POST /agreements`) carries the creator's signature and signs on
+    creation. This one deliberately does NOT: a letter awaited a signature from
+    each side, and while letters gated billing that distinction was what the fee
+    gate turned on.
 
     Routing both through one function whose signature is optional is how the
     signature quietly becomes optional for the wizard too. Two names, two
     contracts, one shared implementation below.
 
     `case_id` and `engagement_id` are REQUIRED here, not optional as they were
-    when both callers shared a signature. An engagement letter that is not bound
-    to its engagement is invisible to the billing gate, which is the whole
-    reason it exists.
+    when both callers shared a signature: a letter that does not name its
+    engagement cannot be traced back to one, which is what made the orphans in
+    the census unreadable.
     """
     return await _create_agreement(
         title=title,

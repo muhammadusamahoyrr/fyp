@@ -38,7 +38,11 @@ Do not re-litigate these; they work and are tested.
   rolls back both the case claim and the engagement transition if letter
   generation fails.
 - **The fee gate** (`payment_service.py:79`) — a lawyer cannot bill without an
-  accepted engagement *and* an executed letter.
+  accepted engagement *and* an executed letter. **SUPERSEDED 2026-09-23:** the
+  letter half is gone. Billing now validates the engagement itself — this
+  lawyer's, for this case, with this client, accepted or completed and not
+  terminated (`_require_billable_engagement`, AGREEMENTS_PRODUCT_PLAN.md §17
+  R5-5 / C-B).
 - 35 service tests in `test_agreement_service.py` and 14 frontend tests in
   `agreement_decline.test.mjs`, all green (verified by running them).
 
@@ -625,12 +629,25 @@ that explains it.
 > Every `awaiting_signatures` instruction elsewhere in this document is void.
 > The rules below are the approved ones.
 
-**R1 — Reuse `declined`.** No `letter_declined` status is added. Every existing
+> **RECONCILED 2026-09-23 — Gate 2 step 8.** R1-R8 were approved on
+> 2026-09-20 and shipped. Four still hold; three were superseded by later
+> decisions in AGREEMENTS_PRODUCT_PLAN.md §17, and one (R2) survives only as
+> data already written. Each rule carries its disposition below. The rules
+> themselves are NOT rewritten: they record what was decided and built then.
+
+**R1 — Reuse `declined`.** **STILL TRUE**, now reached only through
+`decline_terms` (the client refusing proposed terms) and `decline_engagement`
+(the lawyer withdrawing). The letter path that also produced it is gone — see
+R4. No `letter_declined` status is added. Every existing
 terminal status already satisfies the three mechanical constraints (not in
 `RETAINED`, not in `OPEN`, terminal); only audit distinguishability was open,
 and fields solve that more cheaply than an enum value plus an index rebuild.
 
-**R2 — Metadata written on the reversal.**
+**R2 — Metadata written on the reversal.** **SUPERSEDED by §17 C-A**, which
+removed the reversal. No new decline writes these fields. Values already
+written stay on their rows and stay readable: `EngagementOut` still exposes
+`declined_at`, `decline_source` and `declined_agreement_id`, and a test pins
+that.
 
 | Field | Value |
 |---|---|
@@ -645,25 +662,39 @@ a machine sentinel in `decline_reason` would either be rendered to a person or
 force every reader to know which values are real prose.
 
 **R3 — The accept-terms case claim is unchanged.** It stays exactly as written.
+**STILL TRUE.** §17 R5-2 added the acceptance-time KYC re-check immediately
+*before* the first claim precisely so the two-step ordering did not have to
+move.
 
-**R4 — A declined pending letter reverses the engagement**, in one transaction:
+**R4 — A declined pending letter reverses the engagement**, in one transaction.
+**SUPERSEDED by §17 C-A / R5-12.** Declining a legacy letter now ends the
+LETTER and nothing else: it neither reverses the engagement nor writes
+`case.lawyer_id` (R3-26). `_linked_engagement` and `_reverse_engagement` are
+removed. As approved then, it was:
 
 - agreement `pending` → `cancelled`
 - engagement `accepted` → `declined`, with the R2 metadata
 - case `lawyer_id` → null **only if still assigned to that engagement's lawyer**
 - case status → `open`
 
-**R5 — Review eligibility requires an EXECUTED engagement letter.** An accepted
-engagement whose letter is still pending is not yet a reviewable relationship.
+**R5 — Review eligibility requires an EXECUTED engagement letter.**
+**SUPERSEDED by §17 R5-6.** A new engagement has no letter at all, so this rule
+would refuse every review of a lawyer a client actually hired. Eligibility is
+now a completed appointment OR a retained engagement (`accepted`, `completed`,
+`terminated`), read from the engagement's own status by
+`exists_retained_relationship` — the renamed `exists_executed_relationship`,
+whose `$lookup` to the letter is gone.
 
-**R6 — Never instruct the user to terminate.** The reversal is automatic, and
+**R6 — Never instruct the user to terminate.** **STILL TRUE.** The reversal is automatic, and
 after it `terminate_engagement` is neither available (the engagement is no
 longer `accepted`) nor necessary. Earlier copy that pointed there is removed.
 
-**R7 — The six orphaned letters stay out of scope** (§2.0b). Not deleted, not
+**R7 — The six orphaned letters stay out of scope** (§2.0b). **STILL TRUE** —
+the final reconciliation census of 2026-09-22 found exactly the same six, in
+the same states. Not deleted, not
 modified, not repaired by this work.
 
-**R8 — Reconciliation `--apply` stays disabled.** The census found zero
+**R8 — Reconciliation `--apply` stays disabled.** **STILL TRUE.** The census found zero
 engagements at every status, so there is nothing to reconcile and no reason to
 ship a mutating path.
 
@@ -682,6 +713,32 @@ count" reasoning (`payment_service.py:100-105`) are unaffected by R1–R8: no
 status joins or leaves either tuple. What changes is that the fee gate now
 distinguishes *why* a letter is not executed, and that review eligibility reads
 the letter rather than the engagement alone.
+
+> **SUPERSEDED 2026-09-23.** Both halves of that last sentence are gone: no
+> gate reads a letter any more. The tuple itself is unchanged and is now the
+> review gate outright (§17 R5-6), while billing uses the same set minus
+> `terminated` (R5-5 / C-B) — so an ended engagement is still billable when it
+> `completed`, and a terminated one authorises no NEW fee. The
+> "ended engagements still count" comment those lines refer to has been
+> rewritten with the gate it explained.
+
+### Deployment dependency — `uniq_engagement_appointment` (Gate 2 step 6)
+
+The one-hire-per-consultation invariant (§17 NR-42 / R5-13) is a unique partial
+index, created by `create_all_indexes()` during normal application startup like
+every other index in this system. It therefore carries one ordering
+requirement, and no migration:
+
+- **It must exist before the hire endpoint serves traffic** in any deployment
+  containing step 6. Startup creates it before the API accepts requests, so a
+  normal deploy satisfies this by construction.
+- **No manual production migration or backfill is required**, and none was
+  performed. The final census of 2026-09-22 found zero engagements and no
+  `appointment_id` values, so there is nothing for the index to reject when it
+  is built.
+- **Verified 2026-09-22 (read-only):** the index is not yet present on the
+  production database, because the application has not restarted since the step
+  6 commit. That is the expected state before deployment, not a defect.
 
 ### 2.0 Census result — run 2026-09-20 ✅
 
@@ -797,7 +854,9 @@ and writes a milestone (`:812`). **It never reads or writes the agreement.** So
 a termination while the letter is `pending` leaves that letter pending forever.
 
 **Severity: low, unlike the Gate 2 defect.** The residue is inert — the fee gate
-already refuses a non-executed letter, and the case is released by `:801`. This
+already refuses a non-executed letter, and the case is released by `:801`.
+(**2026-09-23:** the letter no longer gates billing; the residue stays inert
+because nothing reads a letter's status at all.) This
 is tidiness, not a stuck state, and must not be argued for as though it were.
 
 **Who may terminate / who is recorded.** Unchanged: either party, no handshake
@@ -894,7 +953,10 @@ executed engagement, OR an active assigned case"*.
 > permission to contact someone** — it would let a lawyer reach a client years
 > after a finished matter, which is cold outreach with extra steps. The
 > `exists_executed_relationship` helper stays where it belongs, gating REVIEWS;
-> it is not an authoring credential.
+> it is not an authoring credential. (**2026-09-23:** that helper is now
+> `exists_retained_relationship` and no longer reads a letter — §17 R5-6. The
+> rule this note states is unchanged: a past relationship is not permission to
+> contact anyone.)
 
 The implemented rule is D2's: lawyer authoring only; exactly two parties;
 mandatory `case_id`; the case exists; `case.lawyer_id == authenticated lawyer`;
@@ -1108,7 +1170,10 @@ gate and should go first if only one ships.
   caller is parked.
 - **3C touches the status field's meaning.** Adding `draft` makes a previously
   unreachable value reachable; every reader filtering `status == pending` must
-  be re-checked, including Gate 2's reversal and both gates.
+  be re-checked, including Gate 2's reversal and both gates. (**2026-09-23:**
+  the reversal and both letter gates have since been removed — §17 C-A, R5-3,
+  R5-5, R5-6. The `status == pending` readers that remain are the legacy
+  letter-cancel on termination and the decline itself.)
 - **Phase 1's "no leftover row" test must be re-asserted** once drafts exist —
   already flagged in the Phase 1 matrix, and 3C is the moment it comes due.
 - **3E's evidence certificate is partly counsel-gated** (Phase 4.1). Ship the
@@ -1582,7 +1647,11 @@ it. As implemented:
   when the engagement has already completed or terminated.
 - *Review and fee gates* — eligibility and billing both require an **executed**
   letter; the four state-specific fee-gate messages; an ended engagement with an
-  executed letter stays billable.
+  executed letter stays billable. **RECONCILED 2026-09-23:** these tests were
+  converted in Gate 2 step 4+5, not deleted. They now pin the opposite where the
+  rule reversed — a pending legacy letter blocks neither billing nor a review,
+  the four messages are gone, and a terminated engagement bills nothing new
+  (C-B) — and keep the legacy assertions that still hold.
 - *Concurrency and retry* — concurrent sign vs decline resolves to one coherent
   terminal state; a full-callback retry across two real transactions duplicates
   no audit entry, milestone or outbox row; a duplicate park fails closed.

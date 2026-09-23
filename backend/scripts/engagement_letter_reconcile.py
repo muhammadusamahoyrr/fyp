@@ -1,12 +1,19 @@
-"""engagement_letter_reconcile.py — find and repair engagements stranded by a
-declined engagement letter.
+"""engagement_letter_reconcile.py — audit LEGACY engagement letters.
 
-WHY THIS EXISTS
----------------
-`agreement_service.decline_agreement` never reads `engagement_id`. The field is
-written at creation and acted on nowhere. So declining an engagement letter
-cancels the agreement and leaves the engagement `accepted` and the case
-assigned:
+WHAT THIS IS FOR, NOW
+---------------------
+Engagement letters are historical data. Since AGREEMENTS_PRODUCT_PLAN.md §17
+R5-3 a new engagement generates no letter, billing reads the validated
+engagement (R5-5) and reviews read its status (R5-6), so no letter gates
+anything. What remains is the rows written before that — including the six
+orphaned letters whose engagement and case were both deleted — and this script
+is how a human looks at them. It is read-only.
+
+WHY IT EXISTED
+--------------
+Historical, and the reason the orphans are still here. `decline_agreement` read
+`engagement_id` nowhere, so declining an engagement letter cancelled the
+agreement and left the engagement `accepted` with the case assigned:
 
   1. Client accepts terms -> engagement `accepted`, case assigned, letter
      `pending`.
@@ -16,14 +23,20 @@ assigned:
      "the engagement letter is still 'cancelled' -- it must be signed by both
      you and the client".
 
-`cancelled` is terminal: `submit_signature` refuses it permanently. The error
-instructs the lawyer to do the one thing the system will never allow. There is
-representation without a letter, no route to payment, and nothing that explains
-it.
+Gate 2 of the remediation plan fixed that by reversing the engagement when its
+letter was declined. §17 C-A has since removed the reversal as well: a decline
+now ends the LETTER and nothing else, because the engagement — not the letter —
+is the hire. Both the defect and its first fix are history; the rows they left
+behind are not.
 
-The code fix (AGREEMENTS_REMEDIATION_PLAN.md Phase 2) governs NEW data only.
-Every engagement already stranded stays stranded. This script finds them and,
-separately, repairs them.
+NEW-FLOW ENGAGEMENTS ARE NOT ANOMALIES
+--------------------------------------
+An engagement carrying an `appointment_id` was created by the new flow, which
+writes no letter. Having none is its NORMAL state and the census says so
+(`new_flow_no_letter`, reported as OK). Only an engagement from before that —
+no `appointment_id` and no letter — is the `legacy_never_generated` case the
+older wording called `never_generated`. Without that split every future hire
+would be listed as a defect by a tool written for the opposite situation.
 
 CENSUS FIRST, AND IT IS THE DEFAULT
 -----------------------------------
@@ -86,8 +99,24 @@ from app.db.mongodb import close_db, connect_db  # noqa: E402
 _STRANDED_LETTER_STATES = (AgreementStatus.CANCELLED.value,)
 
 
+def _is_new_flow(eng: dict) -> bool:
+    """True when this engagement was created by the appointment -> hire flow.
+
+    `appointment_id` is the marker, and it is only ever written by
+    `request_engagement` since §17 R5-1. A legacy row does not carry it — the
+    field did not exist — so its absence is what distinguishes "this hire never
+    had a letter because none is written any more" from "this hire should have
+    had one and it is gone".
+    """
+    return isinstance(eng.get("appointment_id"), str) and bool(eng["appointment_id"])
+
+
 async def census() -> dict:
-    """Read-only. Engagements in a retained status with no executed letter."""
+    """Read-only. Retained engagements, classified by the state of their letter.
+
+    A new-flow engagement with no letter is EXPECTED (`new_flow_no_letter`) and
+    is not reported as affected; see the module docstring.
+    """
     engagements = get_engagements_col()
     agreements = get_agreements_col()
 
@@ -109,7 +138,10 @@ async def census() -> dict:
     for eng in rows:
         aid = eng.get("agreement_id")
         if not aid:
-            letter_state = "never_generated"
+            # THE SPLIT (§17 R5-3). A new-flow engagement has no letter by
+            # design; a legacy one with none lost it.
+            letter_state = ("new_flow_no_letter" if _is_new_flow(eng)
+                            else "legacy_never_generated")
         elif aid not in status_by_id:
             # An agreement_id that resolves to nothing. Distinct from never
             # having one: it means a row was deleted out from under the
@@ -120,6 +152,11 @@ async def census() -> dict:
 
         if letter_state == AgreementStatus.EXECUTED.value:
             buckets["executed_ok"] += 1
+            continue
+        if letter_state == "new_flow_no_letter":
+            # Correct, not a finding: a new-flow hire writes no letter. Counted
+            # under its own name so the report can say so out loud.
+            buckets["new_flow_no_letter"] += 1
             continue
 
         buckets[letter_state] += 1
@@ -433,8 +470,13 @@ def _print_census(report: dict) -> None:
 
     print("\nLetter state breakdown:")
     for state, n in sorted(report["buckets"].items(), key=lambda kv: -kv[1]):
-        mark = "OK " if state == "executed_ok" else "!! "
+        mark = "OK " if state in ("executed_ok", "new_flow_no_letter") else "!! "
         print(f"  {mark}{state:<20} {n}")
+
+    new_flow = report["buckets"].get("new_flow_no_letter", 0)
+    if new_flow:
+        print(f"\n  of which {new_flow} are NEW-FLOW engagements with no letter,")
+        print("  which is their normal state since §17 R5-3 -- not a finding.")
 
     stranded = report["stranded"]
     print(f"\nSTRANDED (reconcilable) : {len(stranded)}")

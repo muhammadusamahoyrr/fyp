@@ -2782,7 +2782,7 @@ a **RECOMMENDED** entry are annotated, not closed.
 | # | Item | Why it needs review |
 |---|---|---|
 | NR-37 | Appointments as account-closure blockers | **DEFERRED by owner decision (H-5 / §17 R5-9).** Pre-existing gap; not part of this migration |
-| NR-38 | Supersessions to record in the remediation plan | H-2 / R5-6 supersede **R5**; C-A (R5-12) supersedes the shipped **Gate 2 letter→engagement reversal rules (R1-R8, §2)**; C-B reverses terminated-engagement billing, which exists only in code and tests (`payment_service.py:100-105`, `test_engagement_termination_3a.py:532`), not as a remediation-plan rule. The remediation plan is out of scope until dependency step 8 |
+| ~~NR-38~~ | ~~Supersessions to record in the remediation plan~~ | **CLOSED 2026-09-23 by Gate 2 step 8.** AGREEMENTS_REMEDIATION_PLAN.md now carries a disposition on every rule R1-R8 (R2, R4 and R5 superseded; R1, R3, R6, R7, R8 still true), and its stale executed-letter claims about billing, reviews and the test inventory are corrected in place. ENGAGEMENT_REDESIGN.md is reconciled the same way. Historical narrative was preserved, not rewritten |
 
 
 ---
@@ -3037,7 +3037,7 @@ appointment closure blocking is added in this migration.
 | 5 | Review eligibility (R5-6) | **DONE** | shipped **with** step 4, as required |
 | 6 | Appointment uniqueness / reuse rule (R5-13) | **DONE** | — |
 | 7 | Frontend completion/integration: "Hire this lawyer" from the completed-appointment view + stale letter copy | **DONE** | — |
-| 8 | Final reconciliation/cleanup: remediation plan updated and R5 marked SUPERSEDED (NR-38); ENGAGEMENT_REDESIGN.md reconciled; **final reconciliation census** of the post-cutover state | — | last |
+| 8 | Final reconciliation/cleanup: remediation plan reconciled and R1-R8 given dispositions (NR-38); ENGAGEMENT_REDESIGN.md reconciled; stale backend docstrings corrected; the legacy census classifier taught the new flow; **final reconciliation census** run 2026-09-22 | **DONE** | — |
 
 **Renumbered 2026-09-22 — numbering only; no product decision changed.** The
 order is the one actually being implemented. Earlier numberings of this table
@@ -3149,6 +3149,20 @@ rule expressible as a single invariant rather than a status-dependent one.
 
 **Nothing is backfilled**, and no engagement's lifecycle changes: a `declined`
 or `cancelled` engagement remains exactly the historical record it was.
+
+**DEPLOYMENT DEPENDENCY (recorded 2026-09-23, Gate 2 step 8).**
+`uniq_engagement_appointment` is created by `create_all_indexes()` during
+ordinary application startup, like every other index here. So:
+
+- it **must exist before the hire endpoint serves traffic** in any deployment
+  carrying step 6 — which a normal deploy satisfies, since startup runs before
+  the API accepts requests;
+- **no manual migration or backfill is required**, and none was performed;
+- verified read-only on 2026-09-22: the index is **not yet present** on the
+  production database, because the application has not restarted since the step
+  6 commit. That is the expected pre-deployment state, not a defect. The same
+  census found zero engagements and no `appointment_id` values, so there is
+  nothing for the index to reject when it is built.
 
 ### New open items
 

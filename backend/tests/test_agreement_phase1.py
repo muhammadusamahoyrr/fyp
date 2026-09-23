@@ -51,8 +51,14 @@ async def test_the_user_builder_is_refused_while_parked(monkeypatch):
     message = str(exc.value).lower()
     assert "withdrawn" in message or "unavailable" in message
     # It must say what still works, or a client reads it as "agreements are
-    # broken" when engagement letters are fine.
-    assert "engagement letter" in message
+    # broken" when the ones already shared with them are fine.
+    #
+    # The copy named "engagement letters" until 2026-09-23. New engagements
+    # generate none (AGREEMENTS_PRODUCT_PLAN.md §17 R5-3), so it now names the
+    # agreements a client actually has. The REQUIREMENT is unchanged: the
+    # refusal has to say what is unaffected.
+    assert "unaffected" in message
+    assert "read, sign and decline" in message
 
 
 async def test_parking_refuses_before_touching_the_database(monkeypatch):
