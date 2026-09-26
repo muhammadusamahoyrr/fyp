@@ -42,6 +42,8 @@ export function legacyDocumentToDetail(doc) {
         review_status: doc.review_status || "none",
         recovery: null,
         legacy_status: doc.status || null,
+        // Legacy keeps the lawyer's note in its own field.
+        lawyer_note: doc.lawyer_note ?? null,
         compliance: doc.compliance ?? null,
         verification: doc.verification ?? null,
         current_version: 0,
@@ -56,4 +58,29 @@ export async function loadDocumentDetail(docId, { getV2, getLegacy }) {
     const legacy = await getLegacy(docId);
     if (legacy?.error || !legacy?.data) return legacy;
     return { ...legacy, data: legacyDocumentToDetail(legacy.data) };
+}
+
+const DECIDED = new Set(["approved", "returned", "rejected"]);
+
+/* The review state a waiting client polls for, from either backend's detail.
+ *
+ * WHY NOT THE CASE LIST. Polling used `GET /documents/case/{id}` and searched
+ * it for this document. That route's response model is the legacy
+ * `DocumentOut`, which REQUIRES `status` — a field a V2-native document does
+ * not have — so with V2 on the poll failed validation, and a client whose
+ * lawyer had already decided kept reading "waiting for lawyer". It also needed
+ * a case id, so a caseless document was never polled at all.
+ *
+ * THE NOTE. V2 keeps one `review_note`: the client's note while the document
+ * is submitted, overwritten with the lawyer's when they decide. Reading it
+ * before a decision would show the client their own note as the lawyer's
+ * reply, so it is the lawyer's note only once the status is a decision.
+ * Legacy has a separate `lawyer_note`. */
+export function reviewStateFromDetail(detail) {
+    if (!detail || !detail.review_status) return null;
+    const status = detail.review_status;
+    const lawyerNote = detail.source === "legacy"
+        ? detail.lawyer_note || ""
+        : (DECIDED.has(status) ? detail.review_note || "" : "");
+    return { reviewStatus: status, recovery: detail.recovery || null, lawyerNote };
 }

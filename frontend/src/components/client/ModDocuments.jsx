@@ -15,12 +15,12 @@ import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { complianceSummary } from "@/lib/complianceSummary.js";
 import { rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
-import { loadDocumentDetail } from "@/lib/documentLoader.js";
+import { loadDocumentDetail, reviewStateFromDetail } from "@/lib/documentLoader.js";
 import { useDocumentResume, NO_CASE } from "@/lib/useDocumentResume.js";
 import { caseSelection } from "@/lib/caseSelection.js";
 import {
     extractDocumentFields, generateDocument, downloadDocumentFile,
-    fetchRevisionPreview, submitDocumentForReview, listDocuments,
+    fetchRevisionPreview, submitDocumentForReview,
     searchLawyers, getCaseTimeline,
     createDocumentV2, generateRevisionV2, submitDocumentV2, getDocumentV2,
     withdrawDocumentV2, listTemplates, getDocumentLegacy,
@@ -473,22 +473,27 @@ const ModDocuments = () => {
 
     // Poll the real review status while waiting for the lawyer
     useEffect(() => {
-        if (!reviewSent || !docId || !genCaseId) return;
+        // THIS document's own detail — not the case list, which cannot carry a
+        // V2 document and does not exist for a caseless one. See
+        // reviewStateFromDetail in lib/documentLoader.js.
+        if (!reviewSent || !docId) return;
         if (reviewStatus && reviewStatus !== "submitted") return; // terminal state reached
+        let live = true;
         const refresh = async () => {
-            const { data } = await listDocuments(genCaseId);
-            const d = (Array.isArray(data) ? data : []).find(x => x._id === docId);
-            if (d?.review_status) {
-                setReviewStatus(d.review_status);
-                setReviewRecovery(d.recovery || null);
-                setLawyerNote(d.lawyer_note || "");
+            const { data } = await loadDocumentDetail(docId, {
+                getV2: getDocumentV2, getLegacy: getDocumentLegacy });
+            const s = live ? reviewStateFromDetail(data) : null;
+            if (s) {
+                setReviewStatus(s.reviewStatus);
+                setReviewRecovery(s.recovery);
+                setLawyerNote(s.lawyerNote);
             }
         };
         refresh();
         const iv = setInterval(refresh, 12000);
-        return () => clearInterval(iv);
+        return () => { live = false; clearInterval(iv); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [reviewSent, docId, genCaseId, reviewStatus]);
+    }, [reviewSent, docId, reviewStatus]);
 
     const submitToLawyer = async (retryKey = null) => {
         if (!docId) { toast.show("⚠️ Generate the document first (Step 2)", "warn"); return; }

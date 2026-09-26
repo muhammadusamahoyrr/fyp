@@ -220,6 +220,35 @@ test("with V2 off, a legacy document is reopened through the legacy route", asyn
     await p.unmount();
 });
 
+test("a submitted V2 document learns the lawyer's decision by polling its own detail", async () => {
+    // THE BUG. Polling searched the legacy case list, whose response model
+    // requires `status` — absent on a V2 document — so the decision never
+    // arrived and the client kept reading "waiting for lawyer".
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "doc-sub", dom.window.localStorage);
+    let asked = 0;
+    const revision = { revision_id: "rev-1", pdf_sha256: "d".repeat(64) };
+    api.__respond("getDocumentV2", () => {
+        asked += 1;
+        return { status: 200, error: null, data: asked === 1
+            ? { id: "doc-sub", case_id: "case-1", title: "Submitted notice",
+                review_status: "submitted", review_note: "Client's own note",
+                current_version: 1, current_revision: revision }
+            : { id: "doc-sub", case_id: "case-1", title: "Submitted notice",
+                review_status: "returned", review_note: "Add the respondent's address.",
+                current_version: 1, current_revision: revision } };
+    });
+
+    const p = await mountDocuments();
+    await p.settle(60);
+    assert.ok(asked >= 2, "the submitted document was never polled");
+    assert.equal(api.__calls("listDocuments").length, 0, "polled the legacy case list");
+    assert.match(p.text(), /Add the respondent's address\./, "the lawyer's decision never arrived");
+    assert.doesNotMatch(p.text(), /Client's own note/);
+    await p.unmount();
+});
+
 test("a V2 network failure is not retried against the legacy route", async () => {
     api.__respond("listCases", { data: CASES });
     api.__respond("getCases", { data: CASES });

@@ -8,7 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-    loadDocumentDetail, legacyDocumentToDetail, isFeatureDisabled,
+    loadDocumentDetail, legacyDocumentToDetail, isFeatureDisabled, reviewStateFromDetail,
 } from "../src/lib/documentLoader.js";
 import { restoreStateFromDocument } from "../src/lib/documentResume.js";
 
@@ -105,4 +105,39 @@ test("a legacy document whose PDF failed is not presented as generated", () => {
 test("a legacy document with no id is not restorable", () => {
     assert.equal(legacyDocumentToDetail({ title: "x" }), null);
     assert.equal(restoreStateFromDocument(legacyDocumentToDetail(null)), null);
+});
+
+/* ── polling the review state ───────────────────────────────────────────── */
+
+test("a V2 decision carries the lawyer's note", () => {
+    const s = reviewStateFromDetail({ id: "d", review_status: "returned",
+                                      review_note: "Add the CNIC.", recovery: null });
+    assert.deepEqual(s, { reviewStatus: "returned", recovery: null, lawyerNote: "Add the CNIC." });
+});
+
+test("while submitted, V2's review_note is the CLIENT's and is not shown as the lawyer's", () => {
+    const s = reviewStateFromDetail({ id: "d", review_status: "submitted",
+                                      review_note: "Please check para 3." });
+    assert.equal(s.reviewStatus, "submitted");
+    assert.equal(s.lawyerNote, "");
+});
+
+test("legacy keeps the lawyer's note in its own field", () => {
+    const s = reviewStateFromDetail(legacyDocumentToDetail({
+        ...LEGACY, review_status: "approved", review_note: "client wrote this",
+        lawyer_note: "Fine to file." }));
+    assert.equal(s.reviewStatus, "approved");
+    assert.equal(s.lawyerNote, "Fine to file.");
+});
+
+test("no detail or no status means nothing to apply", () => {
+    assert.equal(reviewStateFromDetail(null), null);
+    assert.equal(reviewStateFromDetail({ id: "d" }), null);
+});
+
+test("recovery guidance is carried through", () => {
+    const recovery = { state: "needs_reapproval", headline: "h" };
+    assert.deepEqual(
+        reviewStateFromDetail({ id: "d", review_status: "needs_reapproval", recovery }).recovery,
+        recovery);
 });
