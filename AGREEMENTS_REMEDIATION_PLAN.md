@@ -1769,7 +1769,7 @@ requires presentation but states no period. The preliminary claim is therefore
 
 | ID | Requirement / clause | Source statute | Section | Mandatory / conditional | Applicability condition | Evidence location | Counsel verification | Notes |
 |---|---|---|---|---|---|---|---|---|
-| A1 | Particulars of the landlord | Punjab Rented Premises Act 2009 | s.6(1)(a) | Enumerated, qualified by "as far as possible" | Always | Punjab Code PDF, s.6(1)(a) | PENDING COUNSEL — verify against statute/current provincial practice | The statute does not define which particulars. Field list is a product decision, not a statutory one |
+| A1 | Particulars of the landlord | Punjab Rented Premises Act 2009 | s.6(1)(a) | Enumerated, qualified by "as far as possible" | Always | Punjab Code PDF, s.6(1)(a) | PENDING COUNSEL — verify against statute/current provincial practice | The statute does not define which particulars. Field list is a product decision, not a statutory one. **2026-09-23: reviewers describe practice as full legal name, CNIC number and address, plus WITNESSES and rent in figures and words. None of that appears in s.6(1) — recorded as practice detail, not promoted to a statutory requirement. C16 may explain the CNIC expectation** |
 | A2 | Particulars of the tenant | Punjab Rented Premises Act 2009 | s.6(1)(a) | Enumerated, qualified | Always | same clause as A1 | PENDING COUNSEL | One clause covers both parties; split here only for rendering |
 | A3 | Description of the premises | Punjab Rented Premises Act 2009 | s.6(1)(b) | Enumerated, qualified | Always | s.6(1)(b) | PENDING COUNSEL | "premises" is defined at s.2(f); see D5 for what is excluded. **See research update: Registration Act 1908 s.21(1) imposes a stricter description test for a document to be ACCEPTED FOR REGISTRATION. That is a separate requirement, not a re-reading of s.6(1)(b), and does not change this row's status** |
 | A4 | Period of the tenancy | Punjab Rented Premises Act 2009 | s.6(1)(c) | Enumerated, qualified | Always | s.6(1)(c) | PENDING COUNSEL | Interacts with s.15(a): expiry of the period is a ground for eviction. **See research update: the period is also what engages the Registration Act 1908 s.17(1)(d) categories. Whether a given tenancy falls inside them is COUNSEL REQUIRED — no registration obligation is asserted here** |
@@ -1819,6 +1819,9 @@ agreement says, which is the opposite of a mandatory clause.
 | C12 | An agreement to sell or other later agreement does not affect the relationship unless the tenancy is revoked by written agreement before the Rent Registrar | s.10 | Statutory position | PENDING COUNSEL | Interacts with B6 |
 | C13 | On transfer of ownership the new owner sends written intimation to the tenant and applies to the Rent Registrar | s.30 | Statutory obligation | PENDING COUNSEL | Post-execution lifecycle event |
 | C14 | Reimbursement where the landlord fails to pay a tax, fee or charge | s.14 | Statutory position | PENDING COUNSEL | — |
+| **C15** | **A DIFFERENT STATUTE.** Landlord must inform the police of the tenant **within fifteen days** of delivery of possession | **Punjab Information of Temporary Residents Act 2015** (see note below) | Statutory obligation on the landlord | PENDING COUNSEL — confirm the section, the current instrument and the deadline | **Found 2026-09-23 and not previously in this matrix.** Nothing in the Rented Premises Act points to it |
+| **C16** | Landlord must not allow a tenant to occupy without being satisfied of identity by **CNIC or passport**, and must give the police a copy | Punjab Information of Temporary Residents Act 2015 | Statutory obligation on the landlord | PENDING COUNSEL | Explains why practice asks for CNIC numbers in the agreement even though s.6(1) does not |
+| **C17** | Registration is filed through the **Punjab Police Tenants Registration System** | Operational, not statutory | Practice | PENDING COUNSEL | `punjabpolice.gov.pk/trs` and district portals. Recorded as how it is done, not as a legal requirement |
 
 #### D. Dependencies — separate counsel or provincial verification required
 
@@ -1828,7 +1831,7 @@ agreement says, which is the opposite of a mandatory clause.
 |---|---|---|---|---|
 | D1 | Stamp duty on a tenancy agreement in Punjab | **INSTRUMENT VERIFIED 2026-09-23; RATE NOT ADOPTED.** Governing instrument is the **Stamp Act 1899 (II of 1899) as applicable in Punjab**, Schedule I, which contains a **LEASE** article. See the research update below for what was and was not established | PENDING COUNSEL — which case in the article applies, at what value, and under the current Punjab amendments | NR-49 |
 | D2 | Registration under the law relating to registration of documents | **PROVISION VERIFIED 2026-09-23.** **Registration Act 1908, s.17(1)(d)** — compulsory registration of *"leases of immovable property from year to year, or for any term exceeding one year, or reserving a yearly rent"*; with a **proviso** empowering Government to exempt, by Gazette order, leases in a district whose terms do not exceed five years and annual rents do not exceed fifty rupees. See the research update below | PENDING COUNSEL — whether a given tenancy falls inside s.17(1)(d), and whether any exemption order is in force | NR-49 |
-| D3 | Electronic execution of a document that must be presented to, sealed by and returned by a Rent Registrar (s.5(2)-(3)) | Unresolved. The ETO 2002 tiering question is already open | PENDING COUNSEL | NR-47, §4.1 |
+| D3 | Electronic execution of a document that must be presented to, sealed by and returned by a Rent Registrar (s.5(2)-(3)) | **POINTS AGAINST, 2026-09-23.** The counsel round answered that a **physical original is required** — in-person appearance, biometric capture, and the agreement printed on the physical e-stamp certificate. Recorded as direction, not clearance: the answer carried no named reviewer or source. The ETO 2002 tiering question stays open separately | PENDING COUNSEL — confirm before any electronic tenancy flow is designed | NR-47, §4.1, §4.4.2 |
 | D4 | Whether rules under **s.33(2)** prescribe a **model tenancy agreement** | **SOURCE UNVERIFIED.** No rules instrument found on official Punjab domains, 2026-09-23 | PENDING COUNSEL — **ask this first** | **T-Q1** |
 | D5 | Applicability exclusions: "building" excludes a room in a hotel, hostel, boarding house, guest house or place of religious worship (s.2(a)); "premises" excludes agricultural land or land subservient to agriculture (s.2(f)); Government may exempt classes of premises or areas by notification (s.3) | Stated by the Act; the exemption power means current notifications must be checked | PENDING COUNSEL | Jurisdiction gating |
 | D6 | Every other province and Islamabad | **OUT OF SCOPE.** Their statutes have not been read | PENDING COUNSEL before any non-Punjab use | — |
@@ -1938,6 +1941,313 @@ because none exists — inventing any of them is the failure §4.3 exists to
 prevent. A government department's own published rent agreement was seen during
 research (`pma.punjab.gov.pk`); it is one department's operational document, not
 a prescribed form, and is **not** treated as authority.
+
+### 4.4.2 Answers received — 2026-09-23, and what they are worth
+
+A round of answers came back against §4.4.1. **They are recorded here as
+received. They do NOT satisfy DG-25 and they do not lift the withdrawn-template
+guard**, for a reason that has to be stated plainly rather than buried:
+
+**Source quality — read this before relying on any row below.**
+
+- **Parts of the response are explicitly labelled "AI Overview"** — a search
+  engine's generated summary, not a named lawyer's answer. Two passages say so
+  in their own text.
+- **Some reasoning cites the wrong jurisdictions.** The signature answer argues
+  from **EU eIDAS** and the **US ESIGN Act**. The tenancy answers lean on the
+  **"11-month agreement"** convention, which is an Indian-practice framing, not
+  a rule that appears in the Pakistani provisions we read.
+- **No named reviewer, date, credential, version or review period** accompanies
+  any of it. DG-25 requires all five before a template ships, and §4.3 requires
+  them before a registry entry exists.
+- **Some answers contradict statute text we read directly** from official
+  Pakistani sources. Those conflicts are recorded below rather than resolved.
+
+So: useful as **direction**, not as clearance. Where an answer tells us to
+**claim less or build less**, it is safe to act on, because the worst case of
+over-correcting is a product that promises less than it could. Where an answer
+would let us **claim more or build more**, it is not acted on.
+
+#### What was answered, and what we did with it
+
+| Question | Answer as received | Conflicts with what we read | Acted on? |
+|---|---|---|---|
+| **T-Q1** model agreement | "No rigid, single mandatory fill-in-the-blank form." You write your own, on valid e-stamp paper, meeting statutory requirements | Consistent with our reading — the Act prescribes no form. **Does not address whether rules under s.33(2) exist**, which is what was asked | **No.** D4 stays `SOURCE UNVERIFIED` |
+| **T-Q2** "as far as possible" | Not rigid. Parties, description and rent are mandatory; the rest apply only where relevant | Plausible and matches the clause's structure, but **no source given** and it is the interpretive question | **No.** A1–A14 keep their state |
+| **T-Q3** ss.12/13 | Commercial variables (rent, duration, deposits) must be stated; baseline protections (habitability, lawful eviction) apply automatically by law | Consistent with the statute's "subject to the tenancy agreement" split | **No**, but it points the right way for C1–C5 |
+| **T-Q4** stamp duty | Two different figures in one answer: **"PKR 500 to 1,200"** and **"roughly 3% of the annual rent value"** | **Internally inconsistent.** No article number, and no source | **No rate adopted.** D1 unchanged |
+| **T-Q4** registration | "Under 11 months → no compulsory registration; 12 months or more → mandatory" | **Conflicts with the statute we read.** Registration Act **s.17(1)(d)** catches a lease *"from year to year, or for any term exceeding one year, **or reserving a yearly rent**"*. The third limb is not a duration test, and the 11-month rule of thumb ignores it | **No.** Recorded as a conflict |
+| **T-Q4** penalty | "If a landlord fails to register, a penalty of 10% of annual gross rent at the Rent Tribunal" | **Imprecise against s.9**, which we read: the Tribunal will not entertain an application unless the **tenant** deposits 5% **or the landlord** 10% of the annual rent value. It is a deposit required to be heard, on either party, not a landlord-only penalty for non-registration | **No** |
+| **T-Q5** electronic execution | **"A physical original is required."** The Rent Registrar will not accept a purely electronic or digitally signed document: in-person appearance, live biometric thumb impressions and photographs, and the agreement printed on the physical e-stamp certificate | Consistent with s.5(2)–(3), which describes a seal affixed to a document and an original returned | **YES — acted on.** This is a "do not build" answer; see below |
+| **NR-43** written engagement | No written retainer is legally needed in every jurisdiction or case; it depends on local rules and matter type | Same non-answer as the earlier pass: **the provincial Bar Council byelaws question is still not addressed** | **No.** NR-43 stays open |
+| **NR-45** record shape | A digital record alone proves an agreement exists but is weaker than a signed one; capture a **tamper-proof audit trail — e-signature with timestamp, IP address and an unchanged document copy** | Describes what this system already stores | **No change needed.** Noted as corroboration |
+| **NR-46** practice | Yes — normal and proper for Pakistani lawyers to record scope and fee in writing, especially in commercial and high-stakes matters | Answers the question asked | **Noted** |
+| **NR-47** signature label | Stop calling it Advanced. A drawn or typed mark is a **simple electronic signature**; it shows intent but carries no cryptographic proof or identity verification | Agrees with the earlier independent pass, though it reasons from eIDAS/ESIGN rather than the ETO 2002 | **YES — acted on.** See below |
+| **NR-44** will template | **"No, a will cannot legally be signed electronically in Pakistan."** Remove the feature or template | Consistent with the earlier pass naming wills among the ETO exclusions | **Referred out** — the document module, not this one |
+| **NR-48** partnership | An unregistered firm cannot sue third parties or co-partners, or claim set-off, under **s.69 of the Partnership Act**; it may still sue for dissolution or accounts | A specific, checkable citation — the most useful answer in the round | **No code.** Recorded against NR-48 |
+| **NR-49** provinces | Rules differ by province. Punjab: Rented Premises Act 2009 + Stamp Act 1899, e-stamping via Challan 32-A. Sindh: Rented Premises Ordinance 1979. Also flags **police/tenant registration** duties, e.g. the Punjab Information of Temporary Residents Act 2015 | The per-province split is consistent with our own scoping. The rates quoted carry the same sourcing problem as T-Q4 | **No.** Confirms Punjab-only scope was right |
+
+#### The two changes made on the strength of these answers
+
+Both remove a claim or narrow the product. Neither adds a capability, and
+neither depends on a rate, threshold or interpretation.
+
+**1. The signature label is no longer a legal classification (NR-47).**
+`ETO_CLASSIFICATION` mapped a canvas drawing to *"Advanced Electronic Signature
+(ETO 2002 S.2(d)(i))"*, and that string was **rendered to the client**
+(`ModAgreements.jsx:1365`). Two independent reviews called it inaccurate. The
+labels are now neutral descriptions of what was observed — *"Signature drawn in
+browser"*, *"Typed name"*, *"Uploaded signature image"* — and the unrecognised
+-method label is *"Signature method not recognised"*. **The characterisation is
+removed, not corrected**: restoring one still needs approved wording, which has
+not been given. The field name `eto_classification` is unchanged deliberately,
+so values already on existing rows are not orphaned.
+
+*Known wrinkle, recorded not fixed:* `_ETO_RANK` still ranks a canvas drawing
+above a typed name, and the agreement-level value is derived from the weakest
+signature. If both are the same tier in law, that ranking no longer carries the
+meaning it was built for. It is harmless — it only picks which factual
+description to show, and it preserves the safe degradation of an unknown method
+— but it should be revisited when NR-47 is answered properly.
+
+**2. Electronic execution of a Punjab tenancy agreement is treated as
+unavailable (T-Q5).** The answer is that a physical original, in-person
+appearance and biometric capture are required at the Rent Registrar. That is a
+**"do not build"** finding, and the cheapest kind to accept: nothing needs
+implementing, and **row D3 is now recorded as pointing against an electronic
+flow** rather than as an open design option. It does not change any code,
+because no tenancy template exists to gate.
+
+#### Second round of answers — same day, same sourcing caveat
+
+A further round arrived. One passage is again labelled **"AI Overview"**. The
+caveats at the head of §4.4.2 apply unchanged: no named reviewer, no date, no
+credential. What follows is recorded as **direction and leads**, not clearance.
+
+**The one genuinely new finding, and it is a real gap in our work.** The
+response mentioned tenant registration with the police. That is a **statute we
+had never read**, and it is verifiable on official Punjab domains:
+
+- **The Punjab Information of Temporary Residents Act 2015** —
+  `punjablaws.gov.pk/laws/2591.html`, full text at
+  `punjablaws.punjab.gov.pk/uploads/articles/PUNJAB_INFORMATION_OF_TEMPORARY_RESIDENTS_ACT_2015.pdf`.
+  A 2015 **Ordinance** of the same name (Ordinance II of 2015) also appears on a
+  police domain, so **which instrument is current is not yet established.**
+- What the official material states: a landlord must inform the police of the
+  tenant **within fifteen days** of delivery of possession; must not allow a
+  tenant to occupy without being satisfied of identity by **CNIC or passport**
+  and must give the police a copy; and filing is done through the **Punjab
+  Police Tenants Registration System**.
+- Recorded as new rows **C15, C16 and C17**. **This is the strongest argument
+  in either round for not shipping a tenancy template yet**: a whole obligation,
+  on the landlord, with a deadline, sitting outside the Act we read — and we
+  found it only because a reviewer mentioned it in passing.
+
+**The stamp-duty figure is now unstable across three answers**, which settles
+the question of whether to adopt one:
+
+| Round | Figure given |
+|---|---|
+| First | "PKR 500 to 1,200" *and* "roughly 3% of the annual rent value", in one answer |
+| First, provincial breakdown | "commonly around 2% to 3%"; Punjab "roughly 3% of the annual rent value" |
+| Second | "PKR 500 to PKR 1,200" *or* "about **0.5% to 1.5%** of the total annual rent" |
+
+Three different percentage ranges for the same instrument, none with an article
+number or a source. **D1 keeps no rate**, and this is now the evidenced reason
+rather than a precaution.
+
+**NR-43 is answered more substantively, and usefully.** No absolute statutory
+requirement for a written retainer before acting or charging; a professional
+relationship can arise orally or by conduct under the **Contract Act 1872**.
+The **Vakalatnama** is named as the document that empowers an advocate to appear
+in court — *"an authorization document rather than a comprehensive commercial
+fee agreement"*, which matches the separation already recorded at
+`AGREEMENTS_PRODUCT_PLAN.md` §18.5. The **Pakistan Legal Practitioners and Bar
+Councils Rules** are named as requiring integrity and fairness on fees without
+voiding a lawyer's right to reasonable remuneration absent a written contract.
+Written engagement letters are described as routine among reputable firms.
+
+**What that does and does not do for us.** It is the first answer to name the
+governing rules instrument, and it points the same way as our current design —
+acceptance of proposed terms recorded with an audit trail, no signed letter
+required. It still does **not** cite a provincial byelaw, which is what NR-43
+actually asks. **NR-43 stays open**, but the risk it guards now looks smaller.
+
+**On required contents**, round 2 lists full legal names, **CNIC numbers** and
+addresses of landlord, tenant **and witnesses**, property description, monthly
+rent **in figures and words**, payment method and duration. Only some of that
+appears in s.6(1), which we read. Witnesses, CNIC numbers and rent-in-words are
+**practice detail beyond the statutory text** — recorded as such against A1/A2,
+not promoted into statutory requirements. C16 may explain where the CNIC
+expectation comes from.
+
+**On execution**, round 2 repeats the round 1 answer: e-stamp challan 32-A via
+the PITB portal, printed on official e-stamp paper, **biometric verification at
+the registrar's office**. Consistent with T-Q5 being a "do not build".
+
+#### Product decision — verification status of registered lawyers
+
+**Recorded 2026-09-23 as the project owner's decision, not as legal advice.**
+All lawyers registered in this system are to be treated as verified, and the
+KYC verification step is **optional**.
+
+This bears on **R3-14** and **NR-23**, which asked when verification should be
+required. As a product decision about internal gating it is the owner's to make
+and is recorded as made.
+
+**One boundary, stated once.** Treating a lawyer as verified *inside the system*
+must not become a *claim to users* that their credentials were checked, unless
+they were. The client-facing lawyer profile currently says the platform reviews
+what a lawyer submits and does **not** independently confirm Bar Council
+enrolment. That sentence and this decision have to stay consistent: the decision
+removes an internal gate, it does not establish a fact about a person. Turning
+it into a displayed assurance would be the same class of false claim that Phase
+0 removed.
+
+**No code was changed for this.** The D5 KYC checks on `create_draft`,
+`update_draft`, `sign_and_send_draft` and `create_lawyer_agreement` are still in
+place. Removing or relaxing them is a separate, explicit task.
+
+#### What is still open after this round
+
+Everything that would let us build something: **T-Q1** (do s.33(2) rules
+exist), **T-Q4** (the rate, the article, and whether s.17(1)(d)'s *"reserving a
+yearly rent"* limb catches a monthly tenancy), **NR-43** (the Bar Council
+byelaws), **NR-23** and **R3-14**. Those need a named lawyer, and the
+conflicts recorded above are worth putting in front of them directly — a
+reviewer disagreeing with the statute text we read is the single most useful
+thing to resolve next.
+
+### 4.4.1 Counsel Review Checklist
+
+**For the reviewing lawyer. Punjab only.** §4.4 above holds the evidence — 42
+rows, each citing a section. **This checklist does not repeat it.** It asks only
+the questions engineering cannot answer, and points to the rows that carry the
+material for each one.
+
+**How to read the rows referenced below:** every row already carries its source
+statute, exact section, whether the item is enumerated or conditional, and its
+current state. Nothing in §4.4 is settled — every row is counsel-pending by
+design, and no reviewer, review date, version, approval or expiry is recorded
+anywhere, because none exists.
+
+**Authoritative sources already gathered and recorded in §4.4** (all Pakistani
+official texts; no Indian source and no legal-template site was used):
+
+| Source | Used for |
+|---|---|
+| Punjab Rented Premises Act 2009 (VII of 2009) — `punjabcode.punjab.gov.pk`, read in full | Every A, B and C row |
+| Registration Act 1908 — Punjab Board of Revenue text, `bor.punjab.gov.pk` | ss.17(1)(d), 17(2)(xiii), 18, 21(1), 49 — row D2 |
+| Stamp Act 1899 as applicable in Punjab — `punjablaws.punjab.gov.pk` | Schedule I LEASE article — row D1 |
+| Registration (Punjab Amendment) Act 1941 — index at `punjablaws.gov.pk/laws/52.html` | **Not read.** Row D2, open |
+
+---
+
+**T-Q1 — Prescribed model tenancy agreement.** Does any currently applicable
+rule, notification, prescribed form or model agreement made under **s.33(2)** of
+the Punjab Rented Premises Act 2009 prescribe a tenancy agreement or model whose
+contents must be followed?
+
+- If **yes** — counsel to identify the **instrument**, the **rule or provision**,
+  the **official source**, and its **effective/current status**.
+- If **no** — counsel to confirm that conclusion explicitly, on the sources
+  available to them.
+
+*Evidence:* **row D4**, and the note at the head of §4.4 recording that the Act
+prescribes no agreement form (its only Schedule is the s.21(1) Rent Tribunal
+notice) while s.33(2) permits rules to prescribe one. Engineering searched the
+official Punjab domains and located no such instrument; that is recorded as
+`SOURCE UNVERIFIED` and is **not** evidence that none exists.
+
+*Why it is first:* if a model is prescribed, it supersedes §4.4 and the matrix
+must be reconciled or rebuilt against it before any implementation.
+
+---
+
+**T-Q2 — "as far as possible".** What is the legally appropriate treatment of
+those words in **s.6(1)**? Should the s.6(1)(a)–(g) items be treated as
+mandatory agreement contents, as required where applicable or practicable, or as
+another category counsel considers correct?
+
+*Evidence:* **rows A1–A14**, which carry the s.6(1)(a)–(g) items individually,
+each marked "Enumerated, qualified" precisely because engineering did not
+resolve this. **Row C10** records the s.9 consequence of a non-conforming
+tenancy.
+
+*Boundary:* engineering has deliberately **not** answered this. §4.4 records the
+qualifier as the statute words it and nowhere upgrades it.
+
+---
+
+**T-Q3 — ss.12 and 13 as agreement content.** Which obligations in **s.12**
+(landlord) and **s.13** (tenant), if any, should be represented as express
+clauses in a tenancy agreement? Counsel to distinguish:
+
+- statutory obligations that exist independently of the agreement;
+- obligations **expressly made subject to the tenancy agreement**;
+- provisions useful only as optional guidance to the parties;
+- provisions that should **not** be converted into template clauses at all.
+
+*Evidence:* **rows C1–C5**, which separate s.12(1)(a) — providing the tenant a
+certified copy, the one s.12 duty *not* qualified — from the obligations the
+statute expressly makes subject to the agreement.
+
+---
+
+**T-Q4 — Stamp duty and registration.** For the intended Punjab tenancy use
+case, counsel to confirm each of the following, **with an authoritative source
+for each conclusion**:
+
+1. the applicable **stamp-duty instrument and provision**;
+2. the correct **LEASE category** within it;
+3. the **current applicable duty or rate**;
+4. whether any **advance rent, security or premium** changes the duty treatment;
+5. whether **registration is compulsory** for the intended tenancy;
+6. the applicability of **Registration Act 1908 s.17(1)(d)**;
+7. whether any **exemption order under the s.17 proviso** is currently in force;
+8. the effect of the **Registration (Punjab Amendment) Act 1941**.
+
+*Evidence:* **rows D1 and D2** (both revised on 2026-09-23 with what was and was
+not established), and **rows A3, A4, A11, A12** — premises description, tenancy
+period, advance rent and security respectively, each of which the research
+identified as interacting with duty or registration.
+
+*Boundary:* engineering has recorded the governing instruments but adopted **no
+rate and no registration threshold**, and will not insert either without this
+verification. The duty for an ordinary rent agreement carrying no advance, fine
+or premium was not located and remains `SOURCE UNVERIFIED`; the Schedule I
+article number is likewise unverified; and Schedule I is amended by successive
+Punjab Finance Acts, so any figure must be read against the current consolidated
+text.
+
+---
+
+**T-Q5 — Electronic execution.** Can an electronic execution flow satisfy
+**s.5(2)–(3)**, which has the landlord present the agreement to the Rent
+Registrar, who affixes an official seal, retains a copy and returns the original?
+Counsel to address separately:
+
+- validity of an electronic agreement and of an electronic signature;
+- presentation to the Rent Registrar;
+- sealing and certification requirements;
+- whether an electronic document can satisfy **each** of those steps;
+- whether a **physical original** is required at any point.
+
+*Evidence:* **rows B1, B2, B3** (s.5(1)–(3) and the s.2(m) writing requirement),
+**row B5** (s.5(5) proof of relationship), and **row D3**, which records this as
+unresolved and links it to the separate ETO 2002 tiering question at §4.1 and
+NR-47.
+
+*Boundary:* **electronic-signature validity does not by itself answer the Rent
+Registrar question**, and §4.4 does not treat it as doing so.
+
+---
+
+**What this checklist does not do.** It drafts no clause, proposes no template
+structure, selects no stamp-duty rate or registration threshold, interprets no
+legislation, and states no conclusion about compliance, enforceability or
+validity. It records no counsel approval, reviewer, date, version or expiry. The
+DG-25 withdrawn-template guard is unaffected and stays on.
 
 ---
 
@@ -2317,3 +2627,109 @@ been open long enough to be worth naming in the same place.
       `scripts/engagement_letter_reconcile.py` lists them with `created_by` and
       `created_at` for exactly this purpose, and its `--apply` path stays
       disabled.
+
+
+## AGREEMENT_SIGNING_SECURITY_CHECKLIST — 2026-09-23
+
+The named checklist for the multi-party / external-signer redesign (D2 rule 2,
+revised). One row per property that must hold, where it is enforced, and the
+test that fails if it stops holding. Rows with no test SAY SO rather than being
+left off: an unproven property is worth knowing about, and hiding it would make
+this list look stronger than it is.
+
+Scope: signature storage, invitation tokens, and the create-sign-send path.
+It does NOT restate the checks that predate this work (D2 case authorisation,
+D5 KYC, D8 signer IP, the draft-privacy guard) — those keep their own sections
+above and are unchanged by it.
+
+### 1. Signatures at rest
+
+| # | Property | Enforced at | Test |
+|---|---|---|---|
+| S1 | A stored signature is AES-256-GCM ciphertext, never clear text | `core/signature_crypto.py:encrypt_signature`, called on all three write paths | `test_sign_and_send_stores_an_envelope_not_the_signature`, `test_submit_signature_stores_an_envelope_too` |
+| S2 | With no key configured, signing REFUSES rather than storing clear text | `_key()` raises `SignatureKeyMissing` | `test_no_key_refuses_to_store_rather_than_writing_clear_text` |
+| S3 | The signature key is separate from the CNIC (Fernet) key | `settings.signature_encryption_key`, distinct from `encryption_key` | **no test — a configuration property.** Nothing stops an operator setting both to the same value; `.env.example` says not to |
+| S4 | An envelope is bound to its agreement AND its party, so a ciphertext moved between rows fails to decrypt | AAD `v1\|{agreement_id}\|{party_ref}` | `test_a_signature_cannot_be_moved_to_another_agreement`, `test_a_signature_cannot_be_moved_to_another_party`, `test_each_party_envelope_is_bound_to_that_party` |
+| S5 | Pre-existing plaintext signatures still render; nothing is migrated on deploy | `decrypt_signature` returns a plain `str` unchanged | `test_a_legacy_plaintext_signature_still_reads`, `test_the_executed_pdf_still_prints_the_typed_name` |
+| S6 | A signature is never serialised to any counterparty | `PartyOut` does not declare `signature_data` | `test_agreement_list_3f.py` (pre-existing) |
+
+**Operator note (not a code property):** rotating `SIGNATURE_ENCRYPTION_KEY`
+does not re-encrypt existing envelopes. Rotation is a procedure over production
+data with the old key available, not a deployment step. See `.env.example`.
+
+### 2. Invitation tokens
+
+| # | Property | Enforced at | Test |
+|---|---|---|---|
+| I1 | The token is 256 bits from `secrets.token_urlsafe(32)` | `core/invitation_token.py:new_token` | **no direct test** — covered indirectly by I2/I3 |
+| I2 | Only the SHA-256 hash is stored; the raw token is returned once and never persisted | `_external_party`; `invitation_tokens_do_not_store` is attached to the RETURN VALUE only | `test_only_the_hash_is_stored` |
+| I3 | Comparison is constant-time | `hmac.compare_digest` in `matches()` | `test_the_token_comparison_is_constant_time` |
+| I4 | The token travels in the request BODY, never a path or query parameter | `POST /invitation/view`, `POST /invitation/sign` take `InvitationToken` | `agreement_builder_signers.test.mjs` (client side); route signatures (server side) |
+| I5 | A token signs exactly ONE party slot and cannot sign twice | conditional update naming `party_id` AND requiring it unsigned | `test_signing_with_the_token_fills_only_that_slot`, `test_signing_twice_with_one_token_is_refused` |
+| I6 | A revoked or expired invitation is refused | `invitation_state()`, checked in `_party_for_token` | `test_an_expired_invitation_is_refused`, `test_a_revoked_invitation_is_refused` |
+| I7 | An invited signer reads only their own slot — not other parties' signatures, the audit log, or internal ids | `agreement_by_invitation` builds an explicit projection | `test_the_view_withholds_other_parties_details` |
+| I8 | Only a party to the agreement may revoke an invitation | authorisation check in `revoke_invitation` | `test_a_stranger_cannot_revoke_an_invitation` |
+| I9 | Revoking does not undo a signature already made | `revoke_invitation` touches `invite.revoked_at` only | `test_revoking_does_not_undo_a_signature_already_made` |
+| I10 | The unauthenticated invitation routes are rate limited independently of the signed-in limits | `_LIMIT_INVITATION = "20/hour"` | **no test** — asserted by reading the route decorators |
+| I11 | Token lookup is indexed, so the pre-auth endpoint is not a collection scan | partial index `agreement_invitation_token` | **no test** — index definition in `app/db/indexes.py`; verify after the rollout |
+
+### 3. Identity, and what the product does NOT claim
+
+| # | Property | Enforced at | Test |
+|---|---|---|---|
+| V1 | `identity_verified` is `False` for every external party | `PartyOut`, `agreement_by_invitation` | `test_the_record_does_not_claim_the_signer_was_verified` |
+| V2 | The invited signer is told, on their own signing page, that we do not verify who signs | `frontend/src/app/sign/page.jsx` | `agreement_builder_signers.test.mjs` |
+| V3 | The creator is told the same where the invitation is created | builder step 2 notice | **no test** — copy in `ModAgreements.jsx` |
+| V4 | No user-facing text claims more encryption than exists | allowlisted exact wording | `test_no_unsupported_claims.py` |
+| V5 | The audit entry for an invitation records the ADDRESS it was sent to, not an identity | `create_and_send_agreement` audit push | `test_the_audit_entry_records_the_address_not_an_identity` |
+
+### 4. The send path
+
+| # | Property | Enforced at | Test |
+|---|---|---|---|
+| P1 | Creating, signing and sending happen in ONE transaction — there is no request that produces a sent agreement the creator has not signed | `create_and_send_agreement` | `test_the_creator_is_already_signed_when_recipients_can_see_it`, `test_a_failure_parking_the_notification_leaves_no_agreement` |
+| P2 | Notifications are parked in the outbox inside that transaction and relayed only after commit | `event_outbox.park_in_transaction` | `test_notifications_are_parked_not_sent_directly` |
+| P3 | A retry with the same `Idempotency-Key` returns the same agreement; a different payload under the same key is a conflict, not a second agreement | HMAC-derived `_id` + `idempotency_receipts` | `test_the_same_key_and_payload_replays_rather_than_duplicating`, `test_the_same_key_with_a_different_payload_is_a_conflict`, `test_two_concurrent_sends_with_one_key_produce_one_agreement` |
+| P4 | The `Idempotency-Key` header is required | route guard, 422 `missing_idempotency_key` | **no server test** — the client side is covered by `agreement_builder_signers.test.mjs` |
+| P5 | At most three parties | `MAX_PARTIES = 3` | `test_two_or_three_parties_are_allowed_and_four_are_not` |
+| P6 | A party is named by `user_id` OR `email`, never both and never neither | `PartyInput.exactly_one_identity` | **no test** — a Pydantic `model_validator`; a violation is a 422 before the service is reached |
+| P7 | The case's own counterparties cannot be REPLACED — only added to | `_authorise_case_link` | `test_the_counterparty_cannot_be_replaced_by_a_stranger`, `test_two_or_three_parties_are_allowed_and_four_are_not` |
+| P7a | A case is OPTIONAL on the builder path; when one IS given it is fully enforced | `create_and_send_agreement` | `test_an_agreement_needs_no_case`, `test_a_supplied_case_is_still_fully_enforced` |
+| P8 | An expired agreement can never become executed | `_refuse_if_expired` on both signing paths | `test_an_expired_agreement_never_becomes_executed` |
+| P9 | `partially_signed` is derived on read, never stored | `signing_progress` | `test_it_is_not_stored_on_the_row` |
+| P10 | Sends are rate limited | `_LIMIT_SEND = "10/hour"` | **no test** — asserted by reading the route decorator |
+| P11 | An unconsented signature is refused before anything is written | `create_and_send_agreement`, `sign_by_invitation` | `test_an_unconsented_signature_is_refused_before_anything_is_written`, `test_signing_without_consent_is_refused` |
+| P12 | A registered party's email carries NO signing token | `send_agreement_notification_email` | `test_the_notification_email_carries_no_signing_token`, `test_a_registered_signer_gets_an_email_too` |
+| P13 | Both notification channels are reported per recipient, and a failed email does not fail the send | `_email_account_parties` | `test_a_registered_party_is_both_notified_and_emailed`, `test_a_failed_notification_email_does_not_fail_the_send` |
+| P14 | An invited address that has an account is converted AND the conversion is reported | `_resolve_parties`, `account_notifications` | `test_an_invited_address_with_an_account_is_reported` |
+| R1 | A reissue REPLACES the old token, so one link is live per slot | `reissue_invitation` | `test_reissuing_kills_the_previous_link` |
+| R2 | A reissue is refused once that person has signed, and on a cancelled or expired agreement | `reissue_invitation` | `test_it_refuses_once_that_person_has_signed`, `test_it_refuses_on_a_cancelled_agreement`, `test_it_refuses_on_an_expired_agreement` |
+| R3 | Only a party to the agreement may reissue | `reissue_invitation` | `test_a_stranger_cannot_reissue` |
+
+### 5. Known limits — accepted, not fixed
+
+- **Cold outreach is no longer foreclosed by a case requirement.** D2 rule 3
+  was revised on 2026-09-25 (product decision): `case_id` is optional on the
+  create-and-send path, so an authenticated user can request a signature from
+  any email address. What bounds it is the 10/hour send limit, attribution to
+  an account, and an invitation email that says an unexpected request can be
+  ignored. The reasoning, and what was deliberately given up, are recorded in
+  `AGREEMENTS_PRODUCT_PLAN.md` under "D2 rule 3, revised". Product C (a lawyer
+  authoring on their own case) is unaffected and still requires a case.
+
+- **Delivery is the sender's.** Nothing emails the invitation. The token is
+  shown to the creator once and passed on by them. A link that is lost cannot
+  be recovered, because only its hash is stored; the remedy is a new
+  invitation, which is the correct trade for a leaked database yielding no
+  usable token.
+- **Revoke has an API and no button.** `POST /{id}/invitations/{party_id}/revoke`
+  is reachable and tested; no screen calls it yet. Reissue, added 2026-09-25,
+  DOES have one ("Resend link" on each invited party in the agreement detail
+  view) and supersedes revoke for the common case, since issuing a new token
+  invalidates the old one.
+- **An invited signature proves an address was reached, not who signed.** This
+  is a product property, not a defect, and every surface that displays such a
+  signature says so.
+- **Seven rows above have no automated test** (S3, I1, I10, I11, V3, P4, P6).
+  Each is either configuration, a route decorator, an index, or a schema
+  validator — none is silently assumed, and each names where to look.

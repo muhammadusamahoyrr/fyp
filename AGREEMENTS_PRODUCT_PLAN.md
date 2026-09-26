@@ -248,8 +248,11 @@ is a spam and harassment vector in a product that handles legal matters.
 
 1. **Lawyer authoring only.** No client-authored agreements while Product B is
    parked.
-2. **Exactly two parties**: the authenticated lawyer plus one client.
-3. **`case_id` is mandatory** — there is no case-less lawyer-authored agreement.
+2. ~~**Exactly two parties**: the authenticated lawyer plus one client.~~
+   **REVISED 2026-09-23 — see "D2 rule 2, revised" below.** Two OR three
+   parties.
+3. ~~**`case_id` is mandatory** — there is no case-less lawyer-authored agreement.~~
+   **REVISED 2026-09-25 for the builder path — see "D2 rule 3, revised" below.** Still mandatory for lawyer-authored agreements (Product C).
 4. The case must **exist**.
 5. `case.lawyer_id` **must equal** the authenticated lawyer.
 6. `case.client_id` **must equal** the selected client.
@@ -269,6 +272,155 @@ is a spam and harassment vector in a product that handles legal matters.
 
 Rules 4–6 together mean the client is reachable *because of this case*, not
 because of history. That is the property that forecloses cold outreach.
+
+#### D2 rule 3, revised — 2026-09-25
+
+**Decision: `case_id` is OPTIONAL on the create-and-send (builder) path. An
+agreement is an independent legal object; a case is a relationship it may have,
+not a prerequisite for existing.**
+
+```
+Agreement
+  |- case_id   (optional)
+  \- signers[] (required)
+```
+
+**Why this was forced.** The builder has no case picker and never sent a
+`case_id`, while `create_and_send_agreement` refused outright without one. Every
+send the UI could produce was a guaranteed 403 — the feature was unusable by
+construction, and the failure surfaced as a button that appeared to do nothing.
+The choice was to add case selection to the wizard or to change the rule; the
+product owner chose the rule, on the grounds above.
+
+**What this gives up, stated plainly.** The case requirement was D2's defence
+against cold outreach: it meant a signature could only be requested from
+somebody you already had a matter with. Without it, any authenticated user can
+send a signature request to any email address. That is a real loss and is not
+mitigated away by the controls below — they only bound it:
+
+- the send rate limit (D6, `_LIMIT_SEND = "10/hour"`);
+- authentication — requests are always attributable to an account;
+- the invitation email states that an unexpected request can be ignored and
+  nothing will be signed.
+
+If abuse becomes real, the next control is a report path on the signing page,
+not reinstating a rule the product has decided against.
+
+**What does NOT change.**
+
+- **Product C is untouched.** A lawyer authoring an agreement for their client
+  (`create_lawyer_agreement` / `_create_agreement`) still requires a case, and
+  rule 3 stands as originally written for that path. The two products have
+  different authors and different rationales; `test_an_agreement_with_no_case_
+  and_no_engagement_is_refused` still pins it.
+- **A supplied case is still fully enforced.** `_authorise_case_link` continues
+  to require the creator to be a party to it, and continues to refuse letting
+  the case's own counterparty be replaced (rule 2, revised). Optional means the
+  field may be absent, never that it is unchecked when present.
+- Rules 1, 4–10 stand as written, applied whenever a case IS given.
+
+#### Notification channels — decided 2026-09-25
+
+**Decision: a registered party gets BOTH an in-app notification and an email.
+An invited (external) party gets an email carrying their one-time link.**
+
+| Party | In-app | Email | Carries a signing link |
+|---|---|---|---|
+| Registered account | yes (outbox, in the send transaction) | yes (best effort) | **no** — they sign by logging in |
+| Invited by email | n/a — no account | yes (best effort) | yes, one-time |
+
+**Why both for an account holder.** The in-app notification is the durable
+record, parked transactionally with the agreement. But it only ever reaches
+somebody who happens to log in, and nothing prompts them to. A counterparty
+could sit unaware for days while the product believed it had told them. The
+email is the nudge; the notification remains the record.
+
+**Why the account holder's email carries no token.** They can already
+authenticate. Mailing a bearer link to somebody with a login would create a
+second, weaker way into the same signature — one that works for anyone who
+reads their inbox, and that the audit trail would record as an unverified
+signer. The message points at their Agreements page.
+
+**An invited address that belongs to an account becomes a registered party**
+(`_resolve_parties`), and that is unchanged: one human must not hold two
+identities on one document. What changed is that the swap is no longer silent.
+The create response reports every registered party in `account_notifications`
+with `in_app`, `emailed`, `reason` and `was_invited_by_email`, and the UI states
+it. Before this, typing an address into the invite field produced no email, no
+link and no explanation — indistinguishable from a delivery failure, and it
+cost real time to diagnose.
+
+**Failure is reported per recipient, never assumed.** Both channels are separate
+booleans for a reason: a failed email must not read as "never notified", and a
+delivered one must not hide that the in-app notification is the actual record.
+Outcomes are written to the audit log (`party_notification_emailed` /
+`party_notification_email_failed`), because a result that exists only in an HTTP
+response is unanswerable an hour later.
+
+#### Reissuing an invitation — added 2026-09-25
+
+A one-time link is shown once and stored only as a hash, so a lost one — closed
+without copying, filtered by the recipient's mail server — could not be
+recovered by anyone, including the server. The only remedy was to abandon the
+agreement and create another, leaving the first pending forever.
+
+`POST /agreements/{id}/invitations/{party_id}/reissue` issues a fresh link and
+emails it again. **It REPLACES the old token rather than adding one**, so
+exactly one link is live per slot at any time; a reissue is therefore also the
+remedy when a link reaches the wrong hands. It is refused once that person has
+signed, on an executed, cancelled or expired agreement, and for a registered
+party (who never had a token). Rate limited under the send allowance, because it
+does the same outward thing.
+
+#### D2 rule 2, revised — 2026-09-23
+
+**Decision: an agreement has TWO OR THREE parties, and the third may be a
+registered user OR an external email address.**
+
+Recorded as an explicit change to rule 2 rather than made silently, because
+rule 2 as written was not a limitation of the implementation — it was the
+implementation. `_authorise_case_link` required the party set to equal the
+case's participants exactly, so a three-party agreement was impossible by
+construction, and the builder's own "Add Signers" design could not be built
+against it. Widening the rule is a product change and is stated as one.
+
+**What changes**
+
+- `MAX_PARTIES = 3`: the creator plus up to two others. Three is a cap, not a
+  target; two remains the ordinary case.
+- A party is named EITHER by `user_id` (a registered account) or by `email`
+  (an external signer), never both. Option (c) of the three considered: a
+  third party may be either.
+- **A party already authorised on the case may invite the additional party.**
+  The invitation is an act of an existing participant, not of a stranger.
+- An external signer needs **no account**. They receive a one-time invitation
+  token, they can read only their own slot of the agreement, and they sign
+  through it.
+
+**What does NOT change**
+
+- **The authorisation of the existing case participants is not weakened.** The
+  creator must still be on the case, and the case's own counterparties still
+  cannot be *replaced*: `counterparties_on_case - set(party_ids)` must be
+  empty. A further party may be ADDED; nobody who belongs there may be
+  dropped. Cold outreach is still foreclosed, because the case is still the
+  authority for everyone who was already on it.
+- Rules 1, 3–7 and 8–10 stand as written.
+
+**What the product must never claim about an external signer**
+
+The system checks that a token reached an address. It does **not** check who
+typed the signature. `PartyOut.identity_verified` is therefore `False` for
+every external party, the invited signer is told so on their own signing page,
+and the creator is told so where the invitation is created. Anyone relying on
+such a signature should learn its limits from the record, not discover them
+afterwards.
+
+**Delivery is the sender's.** No email is sent on the creator's behalf. The
+raw token is returned once, in the create response
+(`invitation_tokens_do_not_store`), and only its hash is stored — so a lost
+link cannot be recovered and a leaked database yields no usable token. The
+builder shows the links once, with that consequence stated.
 
 ### D5 — Must a lawyer be KYC-verified to author an agreement? **DECIDED: YES**
 
