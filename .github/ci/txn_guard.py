@@ -21,8 +21,9 @@ _uses: set[str] = set()
 _state = {"collected": 0, "executed": 0, "replica_skips": [], "other_skips": []}
 
 
-def pytest_collection_modifyitems(session, config, items):
-    for item in items:
+def pytest_collection_finish(session):
+    # AFTER `-m` deselection: count only what this step will actually run.
+    for item in session.items:
         if FIXTURE in getattr(item, "fixturenames", ()):
             _uses.add(item.nodeid)
     _state["collected"] = len(_uses)
