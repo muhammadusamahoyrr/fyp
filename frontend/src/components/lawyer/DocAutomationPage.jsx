@@ -21,6 +21,7 @@ import {
     NO_CASE, bindingForNewDocument, pendingBindingForDraft, bindingForDraft,
     caseActionsBlocked, boundCaseId,
 } from "@/lib/draftCaseBinding.js";
+import { verificationView } from "@/lib/draftVerification.js";
 
 // ============================================================
 // TOOLBAR BUTTON
@@ -207,6 +208,39 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
 // ============================================================
 // STAGE 2 — EDITOR
 // ============================================================
+const _TONE = (t) => ({
+    ok: t.success, warn: t.warn || "#FFC857", danger: t.danger || "#e5484d", neutral: t.textMuted,
+});
+
+function CitationStrip({ t, draftCheck, stale, documentCheck }) {
+    const d = verificationView(draftCheck);
+    const doc = verificationView(documentCheck);
+    const tone = _TONE(t);
+    return (
+        <div data-citation-strip style={{
+            flexShrink: 0, padding: "5px 24px", fontSize: 11, borderBottom: `1px solid ${t.border}`,
+            background: t.surface, color: t.textMuted, display: "flex", flexWrap: "wrap", gap: "4px 18px",
+        }}>
+            <span data-check="draft">
+                <b style={{ color: t.textDim }}>Citation check · last saved draft:</b>{" "}
+                {d ? <>
+                    <span style={{ color: stale ? t.textMuted : tone[d.tone], fontWeight: 700,
+                                   textDecoration: stale ? "line-through" : "none" }}>{d.headline}</span>
+                    {stale
+                        ? <span data-stale style={{ color: tone.warn, fontWeight: 700 }}> — out of date: the text has changed. Save again to re-check.</span>
+                        : d.detail && <span> — {d.detail}</span>}
+                </> : <span>not checked yet — citations are checked when you save.</span>}
+            </span>
+            {doc && (
+                <span data-check="document">
+                    <b style={{ color: t.textDim }}>Copy saved to Documents (frozen):</b>{" "}
+                    <span style={{ color: tone[doc.tone], fontWeight: 700 }}>{doc.headline}</span>
+                </span>
+            )}
+        </div>
+    );
+}
+
 function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
     // The case this document is bound to — fixed when the editor opened, never
     // the page selector's current value. See lib/draftCaseBinding.js.
@@ -251,6 +285,14 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
     const [publishIssue, setPublishIssue] = useState("");
     const publishKeyRef = useRef(null);
     const publishedHtmlRef = useRef(null);
+    // The server's citation check over the text AS LAST SAVED — restored with a
+    // reopened draft, replaced on every save, and stale from the first edit
+    // after it. `editSeq` counts edits so a save that raced a keystroke is
+    // still marked stale when its answer lands.
+    const [savedCheck, setSavedCheck] = useState(draft?.verification ?? null);
+    const [checkStale, setCheckStale] = useState(false);
+    const editSeq = useRef(0);
+    const markEdited = () => { editSeq.current += 1; setCheckStale(true); };
     const editorRef = useRef(null);
     const aiEndRef = useRef(null);
     const aiInputRef = useRef(null);
@@ -281,6 +323,7 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
     const handleSave = async () => {
         if (saving || caseBlocked) return;
         setSaving(true); setSaveErr("");
+        const seqAtSave = editSeq.current;
         const { data, error } = await saveDocDraft({
             draft_id: draftId,
             title: draft?.title || tmpl.name,
@@ -292,6 +335,8 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
         setSaving(false);
         if (error) { setSaveErr(error.message || "Save failed"); setTimeout(() => setSaveErr(""), 4000); return; }
         setDraftId(data.id);
+        setSavedCheck(data.verification ?? null);
+        setCheckStale(editSeq.current !== seqAtSave);
         setSaved(true); setTimeout(() => setSaved(false), 2500);
     };
 
@@ -389,6 +434,7 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
             const looksLikeDoc = reply.length > 300 && (reply.includes("\n\n") || reply.includes("PRAYER") || reply.includes("Respectfully") || reply.includes("IN THE COURT") || reply.includes("PETITION") || reply.includes("AGREEMENT"));
             if (looksLikeDoc && editorRef.current) {
                 editorRef.current.innerText = reply;
+                markEdited();
                 setWordCount(reply.trim().split(/\s+/).filter(Boolean).length);
             }
             setAiMessages(prev => [...prev, { role: "assistant", text: looksLikeDoc ? "✅ Document updated. Review the changes in the editor." : reply }]);
@@ -718,6 +764,12 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                 </>}
             </div>
 
+            {/* Citation check — the server's, not the browser's. Two results,
+                kept apart: the draft as last saved (goes stale on edit) and the
+                copy saved to Documents (frozen; describes that copy). */}
+            <CitationStrip t={t} draftCheck={savedCheck} stale={checkStale}
+                documentCheck={published?.verification ?? null} />
+
             {/* ── Rich-text Toolbar ── */}
             <div style={{
                 display: "flex", alignItems: "center", gap: 2,
@@ -884,7 +936,7 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                         contentEditable
                         suppressContentEditableWarning
                         spellCheck={false}
-                        onInput={e => setWordCount(e.currentTarget.innerText.trim().split(/\s+/).filter(Boolean).length)}
+                        onInput={e => { markEdited(); setWordCount(e.currentTarget.innerText.trim().split(/\s+/).filter(Boolean).length); }}
                         style={{
                             minHeight: 600, maxWidth: 780, margin: "0 auto",
                             background: t.card, borderRadius: 4,
