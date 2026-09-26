@@ -144,6 +144,25 @@ async function apiFetch(path, options = {}) {
     return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
   }
 
+  // A 401 WITH NO TOKEN AT ALL is a signed-out session, not a failed request.
+  //
+  // The refresh path below only runs when a token exists, so this case fell
+  // through and surfaced the server's own wording -- "Missing authentication
+  // token" -- in whatever error panel the caller renders. That reads like a bug
+  // in the request rather than "you have been signed out", which is the one
+  // thing the user can act on. Note tokens and cookies are per-ORIGIN: a session
+  // established on localhost does not exist on a tunnel URL, and vice versa.
+  if (res.status === 401 && !token) {
+    return {
+      data: null,
+      error: formatResponseError({
+        detail: 'You are signed out. Please sign in again on this address — '
+              + 'a session started on a different URL does not carry over.',
+      }),
+      status: 401,
+    };
+  }
+
   // Auto-refresh on 401
   if (res.status === 401 && token) {
     const refreshed = await _tryRefresh();
