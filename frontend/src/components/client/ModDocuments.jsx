@@ -15,6 +15,7 @@ import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { complianceSummary } from "@/lib/complianceSummary.js";
 import { rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
+import { loadDocumentDetail } from "@/lib/documentLoader.js";
 import { useDocumentResume, NO_CASE } from "@/lib/useDocumentResume.js";
 import { caseSelection } from "@/lib/caseSelection.js";
 import {
@@ -22,7 +23,7 @@ import {
     fetchRevisionPreview, submitDocumentForReview, listDocuments,
     searchLawyers, getCaseTimeline,
     createDocumentV2, generateRevisionV2, submitDocumentV2, getDocumentV2,
-    withdrawDocumentV2, listTemplates,
+    withdrawDocumentV2, listTemplates, getDocumentLegacy,
     idempotencyKey, errorCode, isRetryable,
 } from "@/lib/api.js";
 
@@ -454,7 +455,10 @@ const ModDocuments = () => {
         // every case thereafter, so switching matters kept showing the first
         // matter's draft.
         loaded: { hasDocument: Boolean(docId), caseId: genCaseId },
-        getDocument: getDocumentV2,
+        // V2 first; the legacy route only when V2 is switched off. See
+        // lib/documentLoader.js for why nothing else falls back.
+        getDocument: (id) => loadDocumentDetail(id, {
+            getV2: getDocumentV2, getLegacy: getDocumentLegacy }),
         onRestore: (restored, forCase) => {
             if (restored) {
                 applyRestored(restored);

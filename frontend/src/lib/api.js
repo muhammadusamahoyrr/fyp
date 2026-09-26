@@ -605,6 +605,12 @@ export async function listDocuments(case_id) {
   return apiFetch(`/documents/case/${case_id}`);
 }
 
+// One legacy document. Only for reopening a document the legacy generator made
+// while DOCUMENTS_V2 is off — see lib/documentLoader.js, which decides when.
+export async function getDocumentLegacy(doc_id) {
+  return apiFetch(`/documents/${encodeURIComponent(doc_id)}`);
+}
+
 export async function downloadDocument(doc_id, filename = 'document.pdf') {
   // BASE already includes /api/v1 — do not append it again
   const { data: res, error } = await apiFetch(`/documents/${doc_id}/download`, { returnResponse: true });

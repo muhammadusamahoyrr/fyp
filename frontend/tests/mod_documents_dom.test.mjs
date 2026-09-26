@@ -192,6 +192,47 @@ test("a restored document's title reaches the screen", async () => {
     await p.unmount();
 });
 
+test("with V2 off, a legacy document is reopened through the legacy route", async () => {
+    // THE DEFAULT CONFIGURATION. Generation fell back to legacy, the id was
+    // remembered, and restoration asked only the V2 route — which answers
+    // `feature_disabled` to everything. The document never came back.
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "legacy-doc", dom.window.localStorage);
+    api.__respond("getDocumentV2", {
+        data: null, status: 404,
+        error: { code: "feature_disabled", message: "Not found." },
+    });
+    api.__respond("getDocumentLegacy", {
+        data: { _id: "legacy-doc", case_id: "case-1", title: "Legacy Legal Notice",
+                template_type: "legal_notice", status: "generated",
+                compliance: { checked: false } },
+        status: 200,
+    });
+
+    const p = await mountDocuments();
+    assert.deepEqual(api.__calls("getDocumentLegacy").map(c => c.args[0]), ["legacy-doc"]);
+    assert.match(p.text(), /Legacy Legal Notice/, "the legacy document was not reopened");
+    // No revision to name, so the preview takes the legacy download route.
+    const previews = api.__calls("fetchRevisionPreview").filter(c => c.args[0] === "legacy-doc");
+    assert.ok(previews.length > 0, "the reopened document was never previewed");
+    assert.equal(previews[0].args[1]?.revisionId ?? null, null);
+    await p.unmount();
+});
+
+test("a V2 network failure is not retried against the legacy route", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "doc-x", dom.window.localStorage);
+    api.__respond("getDocumentV2", {
+        data: null, status: 0, error: { message: "Network error." },
+    });
+
+    const p = await mountDocuments();
+    assert.equal(api.__calls("getDocumentLegacy").length, 0);
+    await p.unmount();
+});
+
 /* ── the client's own history is on the page ──────────────────────────────── */
 
 test("the document dashboard lists documents the client owns", async () => {
