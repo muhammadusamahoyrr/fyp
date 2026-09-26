@@ -1239,9 +1239,10 @@ async def ai_pleading_urdu_pdf(
         "court_ur":      body.court_ur[:200],
         "english_label": body.english_label[:200],
     }
-    from app.services.document_writer import generate_owned_document
+    from app.services.document_writer import generate_owned_document, request_fingerprint
     doc = await generate_owned_document(
-        current_user["_id"], "urdu_pleading", fields, idempotency_key=idempotency_key)
+        current_user["_id"], "urdu_pleading", fields, idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint("pleading-urdu-pdf", body.model_dump()))
     return {"doc_id": doc["_id"], "title": doc["title"], "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
 
 

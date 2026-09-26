@@ -811,6 +811,10 @@ const ModDocuments = () => {
             // the previous one — otherwise a retry of the old submit would send
             // a version the user is no longer looking at.
             submitKeyRef.current = null;
+            // And the generate key is spent. Editing the fields and confirming
+            // again is a NEW render; reusing this key returned the previous
+            // revision (a PDF of the old answers) and is now refused as reuse.
+            generateKeyRef.current = null;
             setTimeout(() => { setGenerating(false); setGenDone(true); toast.show("✅ Draft generated!", "success"); }, 300);
         } catch {
             toast.show("❌ Generation failed — check backend connection", "danger");

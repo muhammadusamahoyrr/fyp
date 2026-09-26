@@ -87,8 +87,9 @@ async def labour_demand_pdf(
         "designation": body.designation, "employment_period": body.employment_period,
         "response_days": body.response_days, "calculation": calc,
     }
-    from app.services.document_writer import generate_owned_document
+    from app.services.document_writer import generate_owned_document, request_fingerprint
     doc = await generate_owned_document(
-        current_user["_id"], "labour_demand", fields, idempotency_key=idempotency_key)
+        current_user["_id"], "labour_demand", fields, idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint("labour-demand-pdf", body.model_dump()))
     return {"doc_id": doc["_id"], "title": doc["title"], "calculation": calc,
             "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}

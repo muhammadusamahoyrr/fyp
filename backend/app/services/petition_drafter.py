@@ -147,6 +147,22 @@ async def draft_petition(dispute_id: str, client_id: str, *,
         # Do NOT fill gaps — refuse and say what is missing.
         raise AppValidationError(f"Cannot draft — missing required detail(s): {', '.join(missing)}.")
 
+    # A RETRY IS ANSWERED FROM THE FIRST RUN, after the checks above (a replay
+    # never bypasses ownership or the readiness gate) and before the model is
+    # asked again — it would draft the facts differently, and the client would
+    # get a second, different petition for one click.
+    from app.services import document_writer
+    fp = document_writer.request_fingerprint("dispute-petition", {"dispute_id": dispute_id})
+    replayed = await document_writer.replay_owned_document(client_id, idempotency_key, fp)
+    if replayed:
+        if dispute.get("petition_document_id") != replayed["_id"]:
+            now = datetime.now(timezone.utc)
+            await get_disputes_col().update_one(
+                {"_id": dispute_id},
+                {"$set": {"petition_document_id": replayed["_id"],
+                          "petition_drafted_at": now, "updated_at": now}})
+        return _petition_response(dispute_id, replayed, replayed["fields"])
+
     user = await UserRepository().find_by_id(client_id)
     petitioner_name = (user or {}).get("full_name", "").strip()
 
@@ -180,16 +196,19 @@ async def draft_petition(dispute_id: str, client_id: str, *,
         "timing_note": _timing_note(jurisdiction),
     }
 
-    from app.services.document_writer import generate_owned_document
-    document = await generate_owned_document(
-        client_id, "dispute_petition", fields, idempotency_key=idempotency_key)
+    document = await document_writer.generate_owned_document(
+        client_id, "dispute_petition", fields,
+        idempotency_key=idempotency_key, request_fingerprint=fp)
 
     now = datetime.now(timezone.utc)
     await get_disputes_col().update_one(
         {"_id": dispute_id},
         {"$set": {"petition_document_id": document["_id"], "petition_drafted_at": now, "updated_at": now}},
     )
+    return _petition_response(dispute_id, document, fields)
 
+
+def _petition_response(dispute_id: str, document: dict, fields: dict) -> dict:
     return {
         "dispute_id": dispute_id,
         "document_id": document["_id"],

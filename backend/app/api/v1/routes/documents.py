@@ -119,16 +119,24 @@ async def quick_notice(
     if body.template_type not in allowed:
         raise AppValidationError(f"template_type must be one of {sorted(allowed)}")
 
+    from app.services import document_writer
+    fp = document_writer.request_fingerprint("quick-notice", body.model_dump())
+    # BEFORE extraction: the model can fill the fields differently on a second
+    # run, so a retry is answered from what the first run produced.
+    doc = await document_writer.replay_owned_document(current_user["_id"], idempotency_key, fp)
+    if doc:
+        return {"doc_id": doc["_id"], "title": doc["title"], "fields": doc["fields"],
+                "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
+
     fields = body.fields
     if not fields:
         fields = await document_service.extract_fields_from_text(body.text, body.template_type)
         if not fields:
             raise AppValidationError("Could not understand the description — please add more detail")
 
-    from app.services.document_writer import generate_owned_document
-    doc = await generate_owned_document(
+    doc = await document_writer.generate_owned_document(
         current_user["_id"], body.template_type, fields,
-        idempotency_key=idempotency_key)
+        idempotency_key=idempotency_key, request_fingerprint=fp)
     return {"doc_id": doc["_id"], "title": doc["title"], "fields": fields,
             "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
 

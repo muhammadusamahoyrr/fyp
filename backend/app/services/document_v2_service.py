@@ -35,11 +35,16 @@ from app.repositories.revision_repo import HEARTBEAT_SECONDS
 from app.services import artifact_store as store
 from app.core.exceptions import (
     AppValidationError,
+    ConflictError,
     ForbiddenError,
     NotFoundError,
     ServiceUnavailableError,
 )
 from app.services import extraction_profile, pleading_rules, template_registry
+from app.services.document_transitions import (
+    canonical_body_hash,
+    validate_idempotency_key,
+)
 from app.services.document_service import (
     _unavailable_verification,
     _verification_record,
@@ -143,9 +148,40 @@ def _require_substance(template_type: str, fields: dict | None) -> None:
             "generate again.")
 
 
+# The message `_run` maps to `idempotency_mismatch` ("already used"), and the
+# same words the transitions use for the same mistake.
+_KEY_REUSED = "This request key was already used for a different request."
+
+
+def create_fingerprint(*, template_type: str, title: str, case_id: str | None,
+                       request_fingerprint: str | None = None) -> str:
+    """What a create request WAS, so a reused key can be told from a retry.
+
+    A caller whose request is richer than (template, title, case) — a route that
+    derives its fields from free text — passes its own `request_fingerprint`,
+    computed over the raw request, and that is what is compared.
+    """
+    return canonical_body_hash({
+        "template_type": template_type, "title": title, "case_id": case_id,
+        "request": request_fingerprint})
+
+
+def _revision_fingerprint(template_type: str | None, fields: dict | None) -> str:
+    return canonical_body_hash({"template_type": template_type, "fields": fields or {}})
+
+
+def _require_same_revision_request(rev: dict, template_type: str, fields: dict) -> None:
+    """A retry must be the SAME render. The key alone used to be enough to get
+    the earlier revision back, so a key reused with different fields handed the
+    caller a PDF of content they had replaced — silently."""
+    if (_revision_fingerprint(rev.get("template_type"), rev.get("fields"))
+            != _revision_fingerprint(template_type, fields)):
+        raise ConflictError(_KEY_REUSED)
+
+
 async def create_document(
     *, client_id: str, case_id: str | None, template_type: str, title: str,
-    idempotency_key: str,
+    idempotency_key: str, request_fingerprint: str | None = None,
 ) -> dict:
     """Create the document identity idempotently (v5.1 §3).
 
@@ -168,12 +204,19 @@ async def create_document(
     """
     # Before anything is written: an identity for a template that cannot be
     # rendered is a document that can never exist.
+    validate_idempotency_key(idempotency_key)
     _require_composable_template(template_type)
     await _require_case_access(client_id, case_id)
 
+    fp = create_fingerprint(template_type=template_type, title=title,
+                            case_id=case_id, request_fingerprint=request_fingerprint)
     existing = await get_documents_col().find_one(
         {"client_id": client_id, "create_idempotency_key": idempotency_key})
     if existing:
+        # A RETRY returns the identity; a REUSED key is refused. Rows created
+        # before fingerprints existed carry none and are replayed as before.
+        if existing.get("create_fingerprint") not in (None, fp):
+            raise ConflictError(_KEY_REUSED)
         return existing
 
     now = _now()
@@ -191,6 +234,7 @@ async def create_document(
         "pending_events": [],
         "schema_version": 2,
         "create_idempotency_key": idempotency_key,
+        "create_fingerprint": fp,
         "retention_class": "document_revisions",
         "created_at": now,
         "updated_at": now,
@@ -198,10 +242,12 @@ async def create_document(
     try:
         await get_documents_col().insert_one(doc)
     except Exception:
-        # Lost the create race — return whoever won.
+        # Lost the create race — return whoever won, if it was the same request.
         existing = await get_documents_col().find_one(
             {"client_id": client_id, "create_idempotency_key": idempotency_key})
         if existing:
+            if existing.get("create_fingerprint") not in (None, fp):
+                raise ConflictError(_KEY_REUSED)
             return existing
         raise
     return doc
@@ -379,9 +425,11 @@ async def generate_revision(
 ) -> dict:
     """Generate the next revision of a document. Idempotent under retry."""
     worker_id = worker_id or WORKER_ID
+    validate_idempotency_key(idempotency_key)
 
     existing = await revision_repo.find_by_idempotency(document_id, idempotency_key)
     if existing:
+        _require_same_revision_request(existing, template_type, fields)
         # Same revision, no new work — but not until it HAS a hash. See
         # _await_terminal: returning a pending row hands the caller a null hash
         # it will later submit with, and the submit guard rejects that as a
@@ -428,6 +476,7 @@ async def generate_revision(
         # harmless gap.
         winner = await revision_repo.find_by_idempotency(document_id, idempotency_key)
         if winner:
+            _require_same_revision_request(winner, template_type, fields)
             return await _await_terminal(document_id, idempotency_key, winner)
         raise
 

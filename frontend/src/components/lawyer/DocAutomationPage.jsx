@@ -509,7 +509,7 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
 
         // The flag is off. The legacy route still works; it just cannot be
         // retried safely, which is why it is the fallback and not the default.
-        const { data, error } = await pleadingUrduPdf(payload);
+        const { data, error } = await pleadingUrduPdf(payload, urduKeyRef.current);
         setUrduPdfBusy(false);
         if (error || !data?.doc_id) {
             setUrduIssue(error?.message || "Could not produce the PDF.");

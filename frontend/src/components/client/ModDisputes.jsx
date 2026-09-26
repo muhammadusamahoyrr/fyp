@@ -8,6 +8,7 @@
 // has real usage and 38 backing tests, so it needed a home of its own rather
 // than to disappear with the module that happened to contain it.
 import React, { useEffect, useRef, useState } from "react";
+import { keyForIntent } from "@/lib/intentKey.js";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
@@ -61,6 +62,8 @@ export default function ModDisputes() {
     const [disputes, setDisputes] = useState([]);
     const [step, setStep] = useState(0);          // 0..2 wizard, 3 = result
     const [busy, setBusy] = useState(false);
+    // One Idempotency-Key per petition request (lib/intentKey.js).
+    const petitionKey = useRef(null);
     // The false-complaint warning and whether the user has accepted it.
     // The API refuses to file without the acknowledgement, so this is not
     // decoration — it is the only path to a successful submit.
@@ -123,7 +126,8 @@ export default function ModDisputes() {
     };
     const draftPetition = async () => {
         setBusy(true);
-        const { data, error } = await disputeDraftPetition(result.id);
+        const { data, error } = await disputeDraftPetition(
+            result.id, keyForIntent(petitionKey, { dispute: result.id }));
         setBusy(false);
         if (error || !data || data.error) return toast.show(data?.error || error?.detail || "Could not draft", "danger");
         setPetition(data);

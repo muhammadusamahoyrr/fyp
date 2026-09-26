@@ -1166,16 +1166,20 @@ export async function inheritanceCalculate(estate_value, heirs) {
   });
 }
 
-export async function inheritanceSettlementPdf({ estate_value, heirs, deceased_name, date_of_death, estate_description }) {
+// The one-click document tools below take an optional Idempotency-Key (see
+// lib/intentKey.js). Same key + same request replays the document already made.
+export async function inheritanceSettlementPdf({ estate_value, heirs, deceased_name, date_of_death, estate_description }, key = null) {
   return apiFetch('/inheritance/settlement-pdf', {
     method: 'POST',
+    headers: v2Headers(key),
     body: JSON.stringify({ estate_value, heirs, deceased_name, date_of_death, estate_description }),
   });
 }
 
-export async function inheritanceDemandLetter(payload) {
+export async function inheritanceDemandLetter(payload, key = null) {
   return apiFetch('/inheritance/demand-letter', {
     method: 'POST',
+    headers: v2Headers(key),
     body: JSON.stringify(payload),
   });
 }
@@ -1187,9 +1191,10 @@ export async function wasiyyatCompute(payload) {
   });
 }
 
-export async function wasiyyatPdf(payload) {
+export async function wasiyyatPdf(payload, key = null) {
   return apiFetch('/inheritance/wasiyyat-pdf', {
     method: 'POST',
+    headers: v2Headers(key),
     body: JSON.stringify(payload),
   });
 }
@@ -1219,8 +1224,8 @@ export async function disputeCreate(payload) {
 export async function disputeList() {
   return apiFetch('/disputes');
 }
-export async function disputeDraftPetition(id) {
-  return apiFetch(`/disputes/${id}/petition`, { method: 'POST' });
+export async function disputeDraftPetition(id, key = null) {
+  return apiFetch(`/disputes/${id}/petition`, { method: 'POST', headers: v2Headers(key) });
 }
 // Case-brief handoff (read/handoff only — no fee, engagement or payment)
 export async function disputeSendToLawyer(id) {
@@ -1243,8 +1248,9 @@ export async function labourDuesCalculate(payload) {
   return apiFetch('/calculators/labour-dues', { method: 'POST', body: JSON.stringify(payload) });
 }
 
-export async function labourDemandPdf(payload) {
-  return apiFetch('/calculators/labour-demand-pdf', { method: 'POST', body: JSON.stringify(payload) });
+export async function labourDemandPdf(payload, key = null) {
+  return apiFetch('/calculators/labour-demand-pdf', {
+    method: 'POST', headers: v2Headers(key), body: JSON.stringify(payload) });
 }
 
 // ─── Bail checker ─────────────────────────────────────────────────────────────
@@ -1267,9 +1273,10 @@ export async function rateAnswer({ session_id, rating, answer_preview = '', ques
 }
 
 // One-description fast path: legal notice / FIR pack / FIA complaint without a case.
-export async function quickNotice(text, template_type = 'legal_notice', fields = null) {
+export async function quickNotice(text, template_type = 'legal_notice', fields = null, key = null) {
   return apiFetch('/documents/quick-notice', {
     method: 'POST',
+    headers: v2Headers(key),
     body: JSON.stringify({ text, template_type, fields }),
   });
 }
@@ -1621,9 +1628,10 @@ export async function pleadingUrduDocumentV2(
   };
 }
 
-export async function pleadingUrduPdf({ urdu_text, title_ur = '', court_ur = '', english_label = '' }) {
+export async function pleadingUrduPdf({ urdu_text, title_ur = '', court_ur = '', english_label = '' }, key = null) {
   return apiFetch('/ai/pleading-urdu/pdf', {
     method: 'POST',
+    headers: v2Headers(key),
     body: JSON.stringify({ urdu_text, title_ur, court_ur, english_label }),
   });
 }

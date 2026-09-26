@@ -732,7 +732,9 @@ test("only the flag falls back to the un-idempotent legacy route", () => {
     const fn = automation.slice(automation.indexOf("const downloadUrduPdf"));
     const body = fn.slice(0, fn.indexOf("\n    };"));
     assert.match(body, /v2\.status === 404 && v2\.code === "feature_disabled"/);
-    assert.match(body, /await pleadingUrduPdf\(payload\)/);
+    // Same key as the V2 attempt: the legacy route ignores it today, and it
+    // makes the fallback one intent rather than a second document once it doesn't.
+    assert.match(body, /await pleadingUrduPdf\(payload, urduKeyRef\.current\)/);
 });
 
 test("a failed pleading download says so", () => {

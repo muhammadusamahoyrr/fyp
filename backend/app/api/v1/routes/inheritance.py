@@ -10,7 +10,7 @@ from app.schemas.inheritance import (
     WasiyyatComputation,
     WasiyyatPdfResult,
 )
-from app.services.document_writer import generate_owned_document
+from app.services.document_writer import generate_owned_document, request_fingerprint
 from app.services import inheritance as inheritance_service
 from app.services import wasiyyat as wasiyyat_service
 
@@ -111,7 +111,8 @@ async def settlement_pdf(
     }
     doc = await generate_owned_document(
         current_user["_id"], "inheritance_settlement", fields,
-        idempotency_key=idempotency_key)
+        idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint("settlement-pdf", body.model_dump()))
     return {"doc_id": doc["_id"], "title": doc["title"], "calculation": calc,
             "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
 
@@ -125,7 +126,8 @@ async def demand_letter(
     """Generate a demand notice for an heir whose share is being withheld."""
     doc = await generate_owned_document(
         current_user["_id"], "inheritance_demand", body.model_dump(),
-        idempotency_key=idempotency_key)
+        idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint("demand-letter", body.model_dump()))
     return {"doc_id": doc["_id"], "title": doc["title"], "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
 
 
@@ -194,6 +196,7 @@ async def wasiyyat_pdf(
     }
     doc = await generate_owned_document(
         current_user["_id"], "wasiyyat_nama", fields,
-        idempotency_key=idempotency_key)
+        idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint("wasiyyat-pdf", body.model_dump()))
     return {"doc_id": doc["_id"], "title": doc["title"], "computation": computation,
             "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
