@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.exceptions import AppValidationError
@@ -10,7 +10,7 @@ from app.schemas.inheritance import (
     WasiyyatComputation,
     WasiyyatPdfResult,
 )
-from app.services import document_service
+from app.services.document_writer import generate_owned_document
 from app.services import inheritance as inheritance_service
 from app.services import wasiyyat as wasiyyat_service
 
@@ -99,6 +99,7 @@ async def calculate_shares(
 async def settlement_pdf(
     body: SettlementRequest,
     current_user: dict = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """Compute shares and generate the Inheritance Share Statement PDF."""
     calc = _calc(body)
@@ -108,22 +109,24 @@ async def settlement_pdf(
         "estate_description": body.estate_description,
         "calculation":        calc,
     }
-    doc = await document_service.generate_standalone(
-        current_user["_id"], "inheritance_settlement", fields
-    )
-    return {"doc_id": doc["_id"], "title": doc["title"], "calculation": calc}
+    doc = await generate_owned_document(
+        current_user["_id"], "inheritance_settlement", fields,
+        idempotency_key=idempotency_key)
+    return {"doc_id": doc["_id"], "title": doc["title"], "calculation": calc,
+            "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
 
 
 @router.post("/demand-letter", response_model=DemandLetterResult)
 async def demand_letter(
     body: DemandRequest,
     current_user: dict = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """Generate a demand notice for an heir whose share is being withheld."""
-    doc = await document_service.generate_standalone(
-        current_user["_id"], "inheritance_demand", body.model_dump()
-    )
-    return {"doc_id": doc["_id"], "title": doc["title"]}
+    doc = await generate_owned_document(
+        current_user["_id"], "inheritance_demand", body.model_dump(),
+        idempotency_key=idempotency_key)
+    return {"doc_id": doc["_id"], "title": doc["title"], "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
 
 
 # ── Wasiyyat (Islamic will) + estate waterfall ────────────────────────────────
@@ -181,6 +184,7 @@ async def wasiyyat(
 async def wasiyyat_pdf(
     body: WasiyyatPdfRequest,
     current_user: dict = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """Compute the waterfall and generate a Wasiyyat Nama (Islamic will) PDF."""
     computation = _wasiyyat(body)
@@ -188,7 +192,8 @@ async def wasiyyat_pdf(
         **body.model_dump(exclude={"heirs", "bequests"}),
         "computation": computation,
     }
-    doc = await document_service.generate_standalone(
-        current_user["_id"], "wasiyyat_nama", fields
-    )
-    return {"doc_id": doc["_id"], "title": doc["title"], "computation": computation}
+    doc = await generate_owned_document(
+        current_user["_id"], "wasiyyat_nama", fields,
+        idempotency_key=idempotency_key)
+    return {"doc_id": doc["_id"], "title": doc["title"], "computation": computation,
+            "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}

@@ -122,12 +122,12 @@ def _timing_note(jurisdiction: dict) -> str:
     return " ".join(p for p in parts if p)
 
 
-async def draft_petition(dispute_id: str, client_id: str) -> dict:
+async def draft_petition(dispute_id: str, client_id: str, *,
+                         idempotency_key: str | None = None) -> dict:
     """Draft a petition PDF for a ready_for_drafting dispute. Returns the assembled
     sections + document id. Refuses anything not ready, and fails on a missing field."""
     from app.db.collections import get_disputes_col
     from app.repositories.user_repo import UserRepository
-    from app.services import document_service
 
     dispute = await get_disputes_col().find_one({"_id": dispute_id})
     if not dispute:
@@ -180,7 +180,9 @@ async def draft_petition(dispute_id: str, client_id: str) -> dict:
         "timing_note": _timing_note(jurisdiction),
     }
 
-    document = await document_service.generate_standalone(client_id, "dispute_petition", fields)
+    from app.services.document_writer import generate_owned_document
+    document = await generate_owned_document(
+        client_id, "dispute_petition", fields, idempotency_key=idempotency_key)
 
     now = datetime.now(timezone.utc)
     await get_disputes_col().update_one(
@@ -192,6 +194,9 @@ async def draft_petition(dispute_id: str, client_id: str) -> dict:
         "dispute_id": dispute_id,
         "document_id": document["_id"],
         "title": document["title"],
+        # A V2 petition is downloaded by revision; None on the legacy path.
+        "revision_id": document["revision_id"],
+        "pdf_sha256": document["pdf_sha256"],
         "language": "en",              # English-only this pass — stated, not silent
         "sections": {
             "court_heading": fields["court_heading"],

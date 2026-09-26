@@ -9,7 +9,7 @@ meant deleting one to remove the other.
 The endpoints are unchanged apart from the prefix (/overseas/dispute -> /disputes,
 /overseas/lawyer/disputes -> /disputes/lawyer).
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.dependencies import get_current_user, require_lawyer
@@ -111,13 +111,18 @@ async def get_dispute(dispute_id: str, current_user: dict = Depends(get_current_
 
 
 @router.post("/{dispute_id}/petition")
-async def draft_petition(dispute_id: str, current_user: dict = Depends(get_current_user)):
+async def draft_petition(
+    dispute_id: str,
+    current_user: dict = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
     """Draft a Special-Court petition PDF for a READY_FOR_DRAFTING dispute (Phase 5b).
     Refuses a held dispute and fails on a missing field — no gap-filling, no e-filing,
     no auto-submission. Returns a plain dict (no response_model, same no-silent-drop
     choice as the other dispute endpoints)."""
     from app.services import petition_drafter
-    return await petition_drafter.draft_petition(dispute_id, current_user["_id"])
+    return await petition_drafter.draft_petition(
+        dispute_id, current_user["_id"], idempotency_key=idempotency_key)
 
 
 @router.post("/{dispute_id}/send-to-lawyer")

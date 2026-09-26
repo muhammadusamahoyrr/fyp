@@ -515,7 +515,8 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
             setUrduIssue(error?.message || "Could not produce the PDF.");
             return;
         }
-        await downloadDocumentFile(data.doc_id, filename);
+        await downloadDocumentFile(data.doc_id, filename, {
+            revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
     };
 
     const FONT_OPTIONS = ["Default Font", "Georgia", "Times New Roman", "Courier New", "Arial"];

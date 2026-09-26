@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -108,6 +108,7 @@ class QuickNoticeRequest(BaseModel):
 async def quick_notice(
     body: QuickNoticeRequest,
     current_user: dict = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """One-sentence fast path: describe the grievance, get a ready legal document.
 
@@ -124,10 +125,12 @@ async def quick_notice(
         if not fields:
             raise AppValidationError("Could not understand the description — please add more detail")
 
-    doc = await document_service.generate_standalone(
-        current_user["_id"], body.template_type, fields
-    )
-    return {"doc_id": doc["_id"], "title": doc["title"], "fields": fields}
+    from app.services.document_writer import generate_owned_document
+    doc = await generate_owned_document(
+        current_user["_id"], body.template_type, fields,
+        idempotency_key=idempotency_key)
+    return {"doc_id": doc["_id"], "title": doc["title"], "fields": fields,
+            "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
 
 
 @router.post("/extract", response_model=DocumentExtractResult)

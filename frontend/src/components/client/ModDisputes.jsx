@@ -15,7 +15,7 @@ import { Card, BtnPrimary, BtnOutline, ThemedInput } from "@/components/shared/s
 import {
     disputeEligibility, disputeClassify, disputeCreate, disputeFilingRisk,
     disputeList, disputeDraftPetition, disputeSendToLawyer,
-    disputeSpecialCourtProvinces, downloadDocument,
+    disputeSpecialCourtProvinces, downloadDocumentFile,
 } from "@/lib/api.js";
 
 const ID_TYPES = [["nicop", "NICOP"], ["cnic", "CNIC"], ["passport", "Passport"], ["poc", "POC"], ["opf", "OPF card"]];
@@ -127,7 +127,7 @@ export default function ModDisputes() {
         setBusy(false);
         if (error || !data || data.error) return toast.show(data?.error || error?.detail || "Could not draft", "danger");
         setPetition(data);
-        if (data.document_id) await downloadDocument(data.document_id, "special-court-petition");
+        if (data.document_id) await downloadDocumentFile(data.document_id, "special-court-petition", { revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
         toast.show("Draft petition generated", "success");
     };
     const sendToLawyer = async () => {

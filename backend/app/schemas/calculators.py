@@ -32,3 +32,7 @@ class LabourDemandPdfResult(BaseModel):
     doc_id: str
     title: str
     calculation: dict[str, Any]   # wide labour-dues computation — kept as dict
+    # Set when DOCUMENTS_V2 produced it: a V2 document is downloaded by
+    # revision, not by the legacy file route. None on the legacy path.
+    revision_id: str | None = None
+    pdf_sha256: str | None = None
