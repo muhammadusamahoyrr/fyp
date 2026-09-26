@@ -257,6 +257,10 @@ async def test_compat_reader_projects_v2_native(mongo, _store, tmp_path):
 
     assert settings.documents_v2 is False
     view = await document_service.get_document(doc_id, CLIENT, "client")
-    assert view["file_path"] == "docs/x.0.pdf"        # projected from the revision
+    # Projected from the revision AND resolved into the store. The bare key
+    # ("docs/x.0.pdf") was asserted here once — and it is exactly what made the
+    # legacy download 404: `Path(key).exists()` looks in the working directory.
+    assert view["file_path"] == str(store.local_path("docs/x.0.pdf"))
+    assert str(tmp_path) in view["file_path"]
     assert view["fields"] == {"a": 1}
     assert view["verification"] == {"ran": True}

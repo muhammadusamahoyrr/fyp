@@ -128,6 +128,10 @@ class QuickNoticeResult(BaseModel):
     title: str
     # Extracted fields echoed back for the review panel — dynamically-keyed.
     fields: dict[str, Any] | None = None
+    # Set when DOCUMENTS_V2 produced it: a V2 document is downloaded by
+    # revision, not by the legacy file route. None on the legacy path.
+    revision_id: str | None = None
+    pdf_sha256: str | None = None
 
 
 class SuccessResponse(BaseModel):

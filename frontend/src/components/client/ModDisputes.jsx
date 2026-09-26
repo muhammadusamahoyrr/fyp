@@ -8,6 +8,7 @@
 // has real usage and 38 backing tests, so it needed a home of its own rather
 // than to disappear with the module that happened to contain it.
 import React, { useEffect, useRef, useState } from "react";
+import { keyForIntent } from "@/lib/intentKey.js";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
@@ -15,7 +16,7 @@ import { Card, BtnPrimary, BtnOutline, ThemedInput } from "@/components/shared/s
 import {
     disputeEligibility, disputeClassify, disputeCreate, disputeFilingRisk,
     disputeList, disputeDraftPetition, disputeSendToLawyer,
-    disputeSpecialCourtProvinces, downloadDocument,
+    disputeSpecialCourtProvinces, downloadDocumentFile,
 } from "@/lib/api.js";
 
 const ID_TYPES = [["nicop", "NICOP"], ["cnic", "CNIC"], ["passport", "Passport"], ["poc", "POC"], ["opf", "OPF card"]];
@@ -61,6 +62,8 @@ export default function ModDisputes() {
     const [disputes, setDisputes] = useState([]);
     const [step, setStep] = useState(0);          // 0..2 wizard, 3 = result
     const [busy, setBusy] = useState(false);
+    // One Idempotency-Key per petition request (lib/intentKey.js).
+    const petitionKey = useRef(null);
     // The false-complaint warning and whether the user has accepted it.
     // The API refuses to file without the acknowledgement, so this is not
     // decoration — it is the only path to a successful submit.
@@ -123,11 +126,12 @@ export default function ModDisputes() {
     };
     const draftPetition = async () => {
         setBusy(true);
-        const { data, error } = await disputeDraftPetition(result.id);
+        const { data, error } = await disputeDraftPetition(
+            result.id, keyForIntent(petitionKey, { dispute: result.id }));
         setBusy(false);
         if (error || !data || data.error) return toast.show(data?.error || error?.detail || "Could not draft", "danger");
         setPetition(data);
-        if (data.document_id) await downloadDocument(data.document_id, "special-court-petition");
+        if (data.document_id) await downloadDocumentFile(data.document_id, "special-court-petition", { revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
         toast.show("Draft petition generated", "success");
     };
     const sendToLawyer = async () => {

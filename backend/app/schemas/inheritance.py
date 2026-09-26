@@ -35,14 +35,26 @@ class SettlementPdfResult(BaseModel):
     doc_id: str
     title: str
     calculation: dict[str, Any]   # wide Faraid computation — kept as dict
+    # Set when DOCUMENTS_V2 produced it: a V2 document is downloaded by
+    # revision, not by the legacy file route. None on the legacy path.
+    revision_id: str | None = None
+    pdf_sha256: str | None = None
 
 
 class DemandLetterResult(BaseModel):
     doc_id: str
     title: str
+    # Set when DOCUMENTS_V2 produced it: a V2 document is downloaded by
+    # revision, not by the legacy file route. None on the legacy path.
+    revision_id: str | None = None
+    pdf_sha256: str | None = None
 
 
 class WasiyyatPdfResult(BaseModel):
     doc_id: str
     title: str
     computation: dict[str, Any]   # wide estate waterfall — kept as dict
+    # Set when DOCUMENTS_V2 produced it: a V2 document is downloaded by
+    # revision, not by the legacy file route. None on the legacy path.
+    revision_id: str | None = None
+    pdf_sha256: str | None = None

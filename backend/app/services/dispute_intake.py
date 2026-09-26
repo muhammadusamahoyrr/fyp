@@ -244,6 +244,10 @@ async def classify_grievance(text: str) -> dict:
     import asyncio
 
     from app.ai.llm import get_structured_llm
+    # Was used without being imported: every classification raised NameError,
+    # which the fail-safe below turned into "held for lawyer triage" — so no
+    # dispute ever reached ready_for_drafting.
+    from app.ai.provider_health import PURPOSE_DISPUTE_CLASSIFICATION
 
     text = (text or "").strip()
     if not text:
@@ -671,6 +675,51 @@ async def _pick_verified_lawyer():
     return items[0] if items else None
 
 
+_PETITION_NOTE = "Auto-shared with the case brief from the Overseas Property Dispute desk."
+
+
+async def _share_petition(doc_id: str, client_id: str, lawyer_id: str,
+                          dispute_id: str) -> dict:
+    """Put the petition in front of the assigned lawyer, through whichever
+    review pipeline holds it. Returns the revision shared (None on legacy).
+
+    WHY TWO PATHS. The legacy `submit_for_review` requires `doc.status ==
+    "generated"`. A V2 petition keeps that on its REVISION, so it failed, the
+    failure was logged, the handoff carried on with `petition_shared = false`
+    — and the lawyer's brief still offered a petition they could not open.
+
+    Chosen by the DOCUMENT's schema, not the flag: a V2 petition stays a V2
+    document after a rollback, and the V2 transition is the only one that can
+    submit it. The key is fixed per (dispute, lawyer), so a retried handoff
+    replays this submission instead of failing as "already submitted".
+    """
+    from app.core.exceptions import AppValidationError, NotFoundError
+    from app.db.collections import get_documents_col
+
+    doc = await get_documents_col().find_one({"_id": doc_id})
+    if not doc:
+        raise NotFoundError("Document")
+    if doc.get("schema_version") != 2:
+        from app.services import document_service
+        await document_service.submit_for_review(
+            doc_id, client_id, lawyer_id, note=_PETITION_NOTE, urgency="normal")
+        return {"revision_id": None, "pdf_sha256": None}
+
+    from app.repositories import revision_repo
+    from app.services import document_transitions as tx
+
+    rev = await revision_repo.find_by_id(doc.get("current_revision_id") or "")
+    if not rev or rev.get("status") != "generated":
+        raise AppValidationError("The petition has no finished PDF to share.")
+    await tx.submit(
+        document_id=doc_id, actor_id=client_id,
+        expected_version=doc.get("current_version"),
+        expected_pdf_sha256=rev.get("pdf_sha256"),
+        lawyer_id=lawyer_id, urgency="normal", note=_PETITION_NOTE,
+        idempotency_key=f"dispute-handoff:{dispute_id}:{lawyer_id}")
+    return {"revision_id": rev["_id"], "pdf_sha256": rev.get("pdf_sha256")}
+
+
 async def send_to_lawyer(dispute_id: str, client_id: str) -> dict:
     """Hand a dispute (in EITHER state) to one verified lawyer for review. Idempotent:
     if already sent, returns the existing assignment rather than picking again."""
@@ -712,15 +761,12 @@ async def send_to_lawyer(dispute_id: str, client_id: str) -> dict:
     # petition (e.g. held) still hands off; a petition already submitted elsewhere
     # does not block the handoff.
     petition_shared = False
+    shared_rev = {"revision_id": None, "pdf_sha256": None}
     petition_doc_id = dispute.get("petition_document_id")
     if petition_doc_id:
         try:
-            from app.services import document_service
-            await document_service.submit_for_review(
-                petition_doc_id, client_id, lawyer["_id"],
-                note="Auto-shared with the case brief from the Overseas Property Dispute desk.",
-                urgency="normal",
-            )
+            shared_rev = await _share_petition(
+                petition_doc_id, client_id, lawyer["_id"], dispute_id)
             petition_shared = True
         except Exception as exc:  # loud, not silent — same posture as triage notify
             logger.warning("could not share petition %s with lawyer %s: %s",
@@ -734,6 +780,10 @@ async def send_to_lawyer(dispute_id: str, client_id: str) -> dict:
             "assigned_lawyer":    lawyer_card,
             "sent_to_lawyer_at":  now,
             "petition_shared":    petition_shared,
+            # The exact bytes shared. The lawyer's brief downloads THIS revision,
+            # not "the current file". None for a legacy petition.
+            "petition_revision_id": shared_rev["revision_id"],
+            "petition_pdf_sha256":  shared_rev["pdf_sha256"],
             "updated_at":         now,
         }},
     )
@@ -780,6 +830,9 @@ def _case_brief(doc: dict, client: dict | None) -> dict:
             "download_url": f"/api/v1/documents/{doc['petition_document_id']}/download",
             "drafted_at":   doc.get("petition_drafted_at"),
             "shared_with_lawyer": bool(doc.get("petition_shared")),
+            # Set for a V2 petition: download the revision that was SHARED.
+            "revision_id":  doc.get("petition_revision_id"),
+            "pdf_sha256":   doc.get("petition_pdf_sha256"),
         }
     assignment = None
     if doc.get("assigned_lawyer_id"):

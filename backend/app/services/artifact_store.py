@@ -89,6 +89,18 @@ def _final_path(final_key_str: str) -> Path:
     return _contain(_root() / final_key_str)
 
 
+def local_path(final_key_str: str) -> Path:
+    """Where a published artifact's bytes are on THIS host.
+
+    For a reader that needs a filesystem path rather than bytes — the legacy
+    download route serves with FileResponse. The key itself is store-relative
+    (`docs/<id>.<fence>.pdf`); handing that to `Path(...).exists()` resolves it
+    against the process's working directory, finds nothing, and 404s a document
+    whose bytes are sitting in the store. Contained like every other path.
+    """
+    return _final_path(final_key_str)
+
+
 def ensure_dirs() -> None:
     _tmp_dir().mkdir(parents=True, exist_ok=True)
     _docs_dir().mkdir(parents=True, exist_ok=True)

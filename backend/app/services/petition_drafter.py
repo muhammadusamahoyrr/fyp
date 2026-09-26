@@ -70,6 +70,9 @@ async def _draft_facts(intake: dict, grievance: dict, petitioner: str) -> Petiti
     import asyncio
 
     from app.ai.llm import get_structured_llm
+    # Was used without being imported: every petition draft raised NameError,
+    # which the caller turns into "try again" — so no petition was ever drafted.
+    from app.ai.provider_health import PURPOSE_PETITION_DRAFTING
 
     facts_input = (
         f"Dispute category: {grievance.get('category')} "
@@ -122,12 +125,12 @@ def _timing_note(jurisdiction: dict) -> str:
     return " ".join(p for p in parts if p)
 
 
-async def draft_petition(dispute_id: str, client_id: str) -> dict:
+async def draft_petition(dispute_id: str, client_id: str, *,
+                         idempotency_key: str | None = None) -> dict:
     """Draft a petition PDF for a ready_for_drafting dispute. Returns the assembled
     sections + document id. Refuses anything not ready, and fails on a missing field."""
     from app.db.collections import get_disputes_col
     from app.repositories.user_repo import UserRepository
-    from app.services import document_service
 
     dispute = await get_disputes_col().find_one({"_id": dispute_id})
     if not dispute:
@@ -146,6 +149,22 @@ async def draft_petition(dispute_id: str, client_id: str) -> dict:
     if missing:
         # Do NOT fill gaps — refuse and say what is missing.
         raise AppValidationError(f"Cannot draft — missing required detail(s): {', '.join(missing)}.")
+
+    # A RETRY IS ANSWERED FROM THE FIRST RUN, after the checks above (a replay
+    # never bypasses ownership or the readiness gate) and before the model is
+    # asked again — it would draft the facts differently, and the client would
+    # get a second, different petition for one click.
+    from app.services import document_writer
+    fp = document_writer.request_fingerprint("dispute-petition", {"dispute_id": dispute_id})
+    replayed = await document_writer.replay_owned_document(client_id, idempotency_key, fp)
+    if replayed:
+        if dispute.get("petition_document_id") != replayed["_id"]:
+            now = datetime.now(timezone.utc)
+            await get_disputes_col().update_one(
+                {"_id": dispute_id},
+                {"$set": {"petition_document_id": replayed["_id"],
+                          "petition_drafted_at": now, "updated_at": now}})
+        return _petition_response(dispute_id, replayed, replayed["fields"])
 
     user = await UserRepository().find_by_id(client_id)
     petitioner_name = (user or {}).get("full_name", "").strip()
@@ -180,18 +199,26 @@ async def draft_petition(dispute_id: str, client_id: str) -> dict:
         "timing_note": _timing_note(jurisdiction),
     }
 
-    document = await document_service.generate_standalone(client_id, "dispute_petition", fields)
+    document = await document_writer.generate_owned_document(
+        client_id, "dispute_petition", fields,
+        idempotency_key=idempotency_key, request_fingerprint=fp)
 
     now = datetime.now(timezone.utc)
     await get_disputes_col().update_one(
         {"_id": dispute_id},
         {"$set": {"petition_document_id": document["_id"], "petition_drafted_at": now, "updated_at": now}},
     )
+    return _petition_response(dispute_id, document, fields)
 
+
+def _petition_response(dispute_id: str, document: dict, fields: dict) -> dict:
     return {
         "dispute_id": dispute_id,
         "document_id": document["_id"],
         "title": document["title"],
+        # A V2 petition is downloaded by revision; None on the legacy path.
+        "revision_id": document["revision_id"],
+        "pdf_sha256": document["pdf_sha256"],
         "language": "en",              # English-only this pass — stated, not silent
         "sections": {
             "court_heading": fields["court_heading"],

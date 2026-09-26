@@ -3,7 +3,8 @@
 //   1. Islamic Inheritance (Faraid) Calculator + settlement PDF + demand letter
 //   2. NADRA Succession Certificate Navigator (eligibility triage + checklist)
 //   3. Instant Documents (one description → legal notice / FIR pack / FIA complaint)
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import { keyForIntent } from "@/lib/intentKey.js";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
@@ -20,7 +21,7 @@ import {
     bailSearch,
     bailCheck,
     quickNotice,
-    downloadDocument,
+    downloadDocumentFile,
 } from "@/lib/api.js";
 
 const Lbl = ({ children }) => {
@@ -53,6 +54,9 @@ function InheritanceCalc() {
     const [estate, setEstate] = useState("");
     const [result, setResult] = useState(null);
     const [busy, setBusy] = useState(false);
+    // One Idempotency-Key per request made here (lib/intentKey.js).
+    const settlementKey = useRef(null);
+    const demandKey = useRef(null);
     // settlement PDF extras
     const [deceasedName, setDeceasedName] = useState("");
     const [dateOfDeath, setDateOfDeath] = useState("");
@@ -76,29 +80,31 @@ function InheritanceCalc() {
 
     const settlementPdf = async () => {
         setBusy(true);
-        const { data, error } = await inheritanceSettlementPdf({
+        const req = {
             estate_value: estateNum, heirs,
             deceased_name: deceasedName, date_of_death: dateOfDeath, estate_description: estateDesc,
-        });
+        };
+        const { data, error } = await inheritanceSettlementPdf(req, keyForIntent(settlementKey, req));
         setBusy(false);
         if (error || !data?.doc_id) return toast.show("❌ " + (error?.detail || "PDF failed"), "danger");
-        await downloadDocument(data.doc_id, "inheritance-share-statement");
+        await downloadDocumentFile(data.doc_id, "inheritance-share-statement", { revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
         toast.show("✅ Share statement downloaded", "success");
     };
 
     const demandPdf = async () => {
         if (!demand.claimant_name || !demand.recipient_name) return toast.show("Claimant and recipient names are required", "warn");
         setBusy(true);
-        const { data, error } = await inheritanceDemandLetter({
+        const req = {
             ...demand,
             share_amount: parseInt(String(demand.share_amount).replace(/[^0-9]/g, "")) || null,
             deceased_name: deceasedName || "the deceased",
             date_of_death: dateOfDeath,
             estate_description: estateDesc,
-        });
+        };
+        const { data, error } = await inheritanceDemandLetter(req, keyForIntent(demandKey, req));
         setBusy(false);
         if (error || !data?.doc_id) return toast.show("❌ " + (error?.detail || "PDF failed"), "danger");
-        await downloadDocument(data.doc_id, "inheritance-demand-notice");
+        await downloadDocumentFile(data.doc_id, "inheritance-demand-notice", { revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
         setDemandOpen(false);
         toast.show("✅ Demand notice downloaded", "success");
     };
@@ -225,6 +231,8 @@ function WasiyyatBuilder() {
     const [heirs, setHeirs] = useState(EMPTY_HEIRS);
     const [result, setResult] = useState(null);
     const [busy, setBusy] = useState(false);
+    // One Idempotency-Key per request made here (lib/intentKey.js).
+    const willKey = useRef(null);
     const [willOpen, setWillOpen] = useState(false);
     const [will, setWill] = useState({ testator_name: "", testator_father_name: "", testator_cnic: "", testator_address: "", executor_name: "", executor_relation: "", guardian_name: "", funeral_instructions: "", witness1_name: "", witness2_name: "", place: "" });
 
@@ -252,10 +260,11 @@ function WasiyyatBuilder() {
 
     const generateWill = async () => {
         setBusy(true);
-        const { data, error } = await wasiyyatPdf({ ...payload(), ...will });
+        const req = { ...payload(), ...will };
+        const { data, error } = await wasiyyatPdf(req, keyForIntent(willKey, req));
         setBusy(false);
         if (error || !data?.doc_id) return toast.show("❌ " + (error?.detail || "PDF failed"), "danger");
-        await downloadDocument(data.doc_id, "wasiyyat-nama");
+        await downloadDocumentFile(data.doc_id, "wasiyyat-nama", { revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
         toast.show("✅ Wasiyyat Nama downloaded", "success");
     };
 
@@ -474,6 +483,8 @@ function LabourDuesPanel() {
     const [f, setF] = useState({ monthly_wage: "", years_of_service: "", extra_months: "", unpaid_months: "", overtime_hours: "", terminated_without_notice: false });
     const [res, setRes] = useState(null);
     const [busy, setBusy] = useState(false);
+    // One Idempotency-Key per request made here (lib/intentKey.js).
+    const labourKey = useRef(null);
     const [dm, setDm] = useState({ worker_name: "", worker_address: "", employer_name: "", employer_address: "", designation: "", employment_period: "" });
     const [dmOpen, setDmOpen] = useState(false);
     const num = (k) => parseInt(String(f[k]).replace(/[^0-9]/g, "")) || 0;
@@ -496,10 +507,11 @@ function LabourDuesPanel() {
     const demand = async () => {
         if (!dm.worker_name || !dm.employer_name) return toast.show("Worker and employer names are required", "warn");
         setBusy(true);
-        const { data, error } = await labourDemandPdf({ ...payload(), ...dm });
+        const req = { ...payload(), ...dm };
+        const { data, error } = await labourDemandPdf(req, keyForIntent(labourKey, req));
         setBusy(false);
         if (error || !data?.doc_id) return toast.show("❌ " + (error?.detail || "PDF failed"), "danger");
-        await downloadDocument(data.doc_id, "labour-demand-notice");
+        await downloadDocumentFile(data.doc_id, "labour-demand-notice", { revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
         toast.show("✅ Demand notice downloaded", "success");
     };
 
@@ -684,13 +696,16 @@ function InstantDocs() {
     const [tmpl, setTmpl] = useState("legal_notice");
     const [text, setText] = useState("");
     const [busy, setBusy] = useState(false);
+    // One Idempotency-Key per request made here (lib/intentKey.js).
+    const noticeKey = useRef(null);
     const [done, setDone] = useState(null); // { doc_id, title, fields }
 
     const generate = async () => {
         if (text.trim().length < 10) return toast.show("Describe your situation in a sentence or two", "warn");
         setBusy(true);
         setDone(null);
-        const { data, error } = await quickNotice(text.trim(), tmpl);
+        const { data, error } = await quickNotice(text.trim(), tmpl, null,
+            keyForIntent(noticeKey, { text: text.trim(), tmpl }));
         setBusy(false);
         if (error || !data?.doc_id) return toast.show("❌ " + (error?.detail || "Generation failed"), "danger");
         setDone(data);
@@ -739,7 +754,7 @@ function InstantDocs() {
                         {busy ? "✨ Drafting…" : "✨ Generate Document"}
                     </BtnPrimary>
                     {done && (
-                        <BtnOutline onClick={() => downloadDocument(done.doc_id, done.title || "document")}>
+                        <BtnOutline onClick={() => downloadDocumentFile(done.doc_id, done.title || "document", { revisionId: done.revision_id, expectedPdfSha256: done.pdf_sha256 })}>
                             📥 Download {done.title}
                         </BtnOutline>
                     )}

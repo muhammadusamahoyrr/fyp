@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -108,6 +108,7 @@ class QuickNoticeRequest(BaseModel):
 async def quick_notice(
     body: QuickNoticeRequest,
     current_user: dict = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """One-sentence fast path: describe the grievance, get a ready legal document.
 
@@ -118,16 +119,26 @@ async def quick_notice(
     if body.template_type not in allowed:
         raise AppValidationError(f"template_type must be one of {sorted(allowed)}")
 
+    from app.services import document_writer
+    fp = document_writer.request_fingerprint("quick-notice", body.model_dump())
+    # BEFORE extraction: the model can fill the fields differently on a second
+    # run, so a retry is answered from what the first run produced.
+    doc = await document_writer.replay_owned_document(current_user["_id"], idempotency_key, fp)
+    if doc:
+        return {"doc_id": doc["_id"], "title": doc["title"], "fields": doc["fields"],
+                "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
+
     fields = body.fields
     if not fields:
         fields = await document_service.extract_fields_from_text(body.text, body.template_type)
         if not fields:
             raise AppValidationError("Could not understand the description — please add more detail")
 
-    doc = await document_service.generate_standalone(
-        current_user["_id"], body.template_type, fields
-    )
-    return {"doc_id": doc["_id"], "title": doc["title"], "fields": fields}
+    doc = await document_writer.generate_owned_document(
+        current_user["_id"], body.template_type, fields,
+        idempotency_key=idempotency_key, request_fingerprint=fp)
+    return {"doc_id": doc["_id"], "title": doc["title"], "fields": fields,
+            "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
 
 
 @router.post("/extract", response_model=DocumentExtractResult)
