@@ -181,15 +181,60 @@ def _collection(surface: str):
 _INDEXED_SURFACES: set[str] = set()
 
 
+#: MongoDB's "same keys, different name" refusal. Not a failure to enforce.
+_INDEX_OPTIONS_CONFLICT = 85
+
+
+async def _session_id_uniqueness_already_enforced(col) -> bool:
+    """Is `session_id` uniqueness enforced on this collection under ANY name?
+
+    THE GUARANTEE IS THE INDEX, NOT ITS NAME. A database that received this
+    index before the explicit `name=` was introduced carries Mongo's
+    auto-generated `session_id_1` instead, with identical keys and the same
+    `unique: true`. `create_indexes` then refuses with code 85 — same keys,
+    different name — and the application cannot start against a database whose
+    guarantee is, in fact, already in place.
+
+    A partial index is NOT accepted: it exempts whatever its filter excludes,
+    so uniqueness would hold over a subset while reading as enforced, which is
+    the silent-absence failure this module exists to prevent.
+    """
+    async for idx in col.list_indexes():
+        keys = [(k, int(v)) for k, v in (idx.get("key") or {}).items()
+                if isinstance(v, (int, float))]
+        if (keys == [("session_id", 1)]
+                and idx.get("unique") is True
+                and not idx.get("partialFilterExpression")):
+            return True
+    return False
+
+
 async def ensure_indexes(surface: str) -> None:
     if surface in _INDEXED_SURFACES:
         return
     from pymongo import ASCENDING, IndexModel
+    from pymongo.errors import OperationFailure
     col, _owner_field = _collection(surface)
-    await col.create_indexes([
-        IndexModel([("session_id", ASCENDING)], unique=True,
-                   name="session_id_unique"),
-    ])
+    try:
+        await col.create_indexes([
+            IndexModel([("session_id", ASCENDING)], unique=True,
+                       name="session_id_unique"),
+        ])
+    except OperationFailure as exc:
+        # STILL NEVER SWALLOWED. Only one error is tolerated, and only after
+        # confirming the guarantee holds under a different name. Any other
+        # failure, and a code-85 whose existing index is NOT a plain unique
+        # index on `session_id`, is re-raised and the application refuses to
+        # start — which is the correct outcome for a guarantee that is absent.
+        if exc.code != _INDEX_OPTIONS_CONFLICT:
+            raise
+        if not await _session_id_uniqueness_already_enforced(col):
+            raise
+        logger.warning(
+            "conversation surface %r: session_id uniqueness is enforced by a "
+            "pre-existing index under a different name; leaving it in place",
+            surface,
+        )
     _INDEXED_SURFACES.add(surface)
 
 
