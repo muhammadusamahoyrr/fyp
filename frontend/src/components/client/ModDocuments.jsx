@@ -14,6 +14,7 @@ import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
     from "@/lib/fieldReview.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { complianceSummary } from "@/lib/complianceSummary.js";
+import { verificationView } from "@/lib/draftVerification.js";
 import { rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
 import { loadDocumentDetail, reviewStateFromDetail } from "@/lib/documentLoader.js";
 import { useDocumentResume, NO_CASE } from "@/lib/useDocumentResume.js";
@@ -40,6 +41,8 @@ const STitle = ({ icon, sub, children }) => {
 
 // complianceSummary tone → this module's Badge types.
 const _PARTICULARS_BADGE = { success: "success", warn: "warn", neutral: "gray" };
+// verificationView tone → Badge types. Only "ok" is green.
+const _CITATION_BADGE = { ok: "success", warn: "warn", danger: "danger", neutral: "gray" };
 
 const Lbl = ({ children }) => {
     const t = useT();
@@ -1290,7 +1293,9 @@ const ModDocuments = () => {
                                                 ? `${verification.counts.omitted} REPEALED section${verification.counts.omitted === 1 ? "" : "s"} cited`
                                                 : verification.counts?.not_in_corpus > 0
                                                     ? `${verification.counts.not_in_corpus} citation${verification.counts.not_in_corpus === 1 ? "" : "s"} could not be found in the statute`
-                                                    : "Citations checked for existence"}
+                                                    : verification.counts?.total === 0
+                                                        ? "No citations found to check"
+                                                        : "Citations checked for existence"}
                                     </div>
 
                                     {verification.ran === false ? (
@@ -1505,12 +1510,13 @@ const ModDocuments = () => {
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 9, background: t.inputBg, border: `1px solid ${t.border}` }}>
                                     <span style={{ fontSize: 11.5, color: t.text }}>Citation check</span>
+                                    {/* One set of rules for every citation display (lib/
+                                        draftVerification.js). This fell through to a green
+                                        "✓ 0 found" for a draft citing nothing checkable and
+                                        for one citing only statutes outside the corpus. */}
                                     {verification
-                                        ? (verification.ran === false
-                                            ? <Badge type="warn">Not checked</Badge>
-                                            : (verification.counts?.not_in_corpus > 0
-                                                ? <Badge type="danger">{verification.counts.not_in_corpus} not found</Badge>
-                                                : <Badge type="success">✓ {verification.counts?.verified || 0} found</Badge>))
+                                        ? (() => { const v = verificationView(verification);
+                                            return <Badge type={_CITATION_BADGE[v.tone]}>{v.tone === "ok" ? "✓ " : ""}{v.headline}</Badge>; })()
                                         : <Badge type="gray">—</Badge>}
                                 </div>
                                 <div style={{ fontSize: 10, color: t.textMuted, marginTop: 8, fontStyle: "italic" }}>

@@ -249,6 +249,42 @@ test("a submitted V2 document learns the lawyer's decision by polling its own de
     await p.unmount();
 });
 
+/* The estate's four real citation outcomes (docs/v2-activation-evidence/
+ * citation-verification.md). The client badge fell through to a green
+ * "✓ 0 found" for the second and third — 14 of the 15 migrated documents with
+ * no positive citation evidence would have looked verified to their owners. */
+const ESTATE_OUTCOMES = [
+    ["verified", { ran: true, counts: { total: 2, verified: 2, not_in_corpus: 0, omitted: 0, unverifiable: 0 } }, true],
+    ["no checkable citation", { ran: true, counts: { total: 0, verified: 0, not_in_corpus: 0, omitted: 0, unverifiable: 0 } }, false],
+    ["statute outside the corpus", { ran: true, counts: { total: 2, verified: 0, not_in_corpus: 0, omitted: 0, unverifiable: 2 } }, false],
+    ["unverifiable by design", { ran: false, reason: "urdu_corpus_unsupported", counts: {} }, false],
+    ["a repealed section", { ran: true, counts: { total: 1, verified: 0, not_in_corpus: 0, omitted: 1, unverifiable: 0 } }, false],
+];
+
+for (const [label, verification, mayBeGreen] of ESTATE_OUTCOMES) {
+    test(`client citation badge — ${label}: ${mayBeGreen ? "may" : "must not"} read as verified`, async () => {
+        api.__respond("listCases", { data: CASES });
+        api.__respond("getCases", { data: CASES });
+        rememberDraft("case-1", "doc-cite", dom.window.localStorage);
+        api.__respond("getDocumentV2", { status: 200, error: null, data: {
+            id: "doc-cite", case_id: "case-1", title: "A notice", review_status: "none",
+            current_version: 1,
+            current_revision: { revision_id: "rev-c", pdf_sha256: "e".repeat(64), verification },
+        } });
+        const p = await mountDocuments();
+        try {
+            const row = [...p.container.querySelectorAll("span")]
+                .find(s => s.textContent.trim() === "Citation check");
+            assert.ok(row, "the citation row is not on screen");
+            const badge = row.parentElement.textContent.replace("Citation check", "").trim();
+            assert.equal(/✓/.test(badge), mayBeGreen, `badge read "${badge}"`);
+            assert.doesNotMatch(badge, /✓ 0 found/);
+        } finally {
+            await p.unmount();
+        }
+    });
+}
+
 test("a V2 network failure is not retried against the legacy route", async () => {
     api.__respond("listCases", { data: CASES });
     api.__respond("getCases", { data: CASES });

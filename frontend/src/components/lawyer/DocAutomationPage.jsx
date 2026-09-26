@@ -441,12 +441,11 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
             // Surface the citation check the backend runs on the finished draft.
             // It used to be computed, streamed, and silently dropped by the client.
             if (verif) {
-                const c = verif.counts || {};
-                const note = verif.ran === false
-                    ? "⚠️ Citations were NOT checked — verify every authority before filing."
-                    : (c.not_in_corpus > 0
-                        ? `⚠️ Citation check: ${c.not_in_corpus} citation(s) not found in the corpus, ${c.verified || 0} found. Existence only — read every authority.`
-                        : `⚖️ Citation check: ${c.verified || 0} found in the corpus (existence only). A lawyer must review before filing.`);
+                // Same rules as every other citation display: repealed and
+                // uncheckable citations are named, and "nothing to check" is
+                // never phrased as a pass.
+                const v = verificationView(verif);
+                const note = `${v.tone === "ok" ? "⚖️" : "⚠️"} Citation check: ${v.headline}.${v.detail ? " " + v.detail : ""}`;
                 setAiMessages(prev => [...prev, { role: "assistant", text: note }]);
             }
         } catch {
