@@ -10,11 +10,24 @@ build/
 *.tgz
 .next/
 frontend/.next/
+# Separate build dir used by NEXT_DIST_DIR so a production build never
+# clobbers a running dev server (see frontend/next.config.js).
+.next-build/
+frontend/.next-build/
 
 # Environment variables
 .env
 .env.local
 .env.*.local
+# Backups of the above. `demo/start-demo.ps1` writes one each time it rewrites
+# FRONTEND_URL, and a copy of .env holds every secret the original does -- the
+# SMTP password, both encryption keys and the Atlas connection string. Without
+# this line they show up as untracked files and are one `git add -A` away from
+# being committed.
+.env.bak.*
+*.env.bak.*
+.env.local.bak.*
+*.env.local.bak.*
 
 # IDE
 .vscode/
