@@ -48,6 +48,7 @@ setup_logging()
 from app.core.exceptions import (
     generic_exception_handler,
     http_exception_handler,
+    validation_exception_handler,
     rate_limit_handler,
 )
 from app.core.rate_limit import RateLimitStateDefault, limiter
@@ -442,7 +443,11 @@ app.add_middleware(
 # runs, so every downstream log line during the request carries it.
 app.add_middleware(RequestIdMiddleware)
 
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+
 app.add_exception_handler(HTTPException, http_exception_handler)
+# A 422 used to leave nothing in the log but the status code.
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 
