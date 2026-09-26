@@ -13,15 +13,18 @@ import FieldReview from "./FieldReview.jsx";
 import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
     from "@/lib/fieldReview.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
+import { complianceSummary } from "@/lib/complianceSummary.js";
+import { verificationView } from "@/lib/draftVerification.js";
 import { rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
+import { loadDocumentDetail, reviewStateFromDetail } from "@/lib/documentLoader.js";
 import { useDocumentResume, NO_CASE } from "@/lib/useDocumentResume.js";
 import { caseSelection } from "@/lib/caseSelection.js";
 import {
     extractDocumentFields, generateDocument, downloadDocumentFile,
-    fetchRevisionPreview, submitDocumentForReview, listDocuments,
+    fetchRevisionPreview, submitDocumentForReview,
     searchLawyers, getCaseTimeline,
     createDocumentV2, generateRevisionV2, submitDocumentV2, getDocumentV2,
-    withdrawDocumentV2, listTemplates,
+    withdrawDocumentV2, listTemplates, getDocumentLegacy,
     idempotencyKey, errorCode, isRetryable,
 } from "@/lib/api.js";
 
@@ -35,6 +38,11 @@ const STitle = ({ icon, sub, children }) => {
         </div>
     );
 };
+
+// complianceSummary tone → this module's Badge types.
+const _PARTICULARS_BADGE = { success: "success", warn: "warn", neutral: "gray" };
+// verificationView tone → Badge types. Only "ok" is green.
+const _CITATION_BADGE = { ok: "success", warn: "warn", danger: "danger", neutral: "gray" };
 
 const Lbl = ({ children }) => {
     const t = useT();
@@ -167,6 +175,8 @@ const ModDocuments = () => {
     const [genDone, setGenDone] = useState(false);
     // Statutory completeness of the generated draft, returned by the API.
     const [compliance, setCompliance] = useState(null);
+    // What the final screen may truthfully say about it — never "Verified".
+    const finalParticulars = complianceSummary(compliance);
     // Existence-check of every authority the draft cites, frozen at generation.
     const [verification, setVerification] = useState(null);
     // Which submitted keys the builder could not read. Not a compliance verdict
@@ -373,6 +383,8 @@ const ModDocuments = () => {
         if (restored.docTitle) setDocTitle(restored.docTitle);
         setDocRevisionId(restored.docRevisionId);
         setDocPdfSha256(restored.docPdfSha256);
+        setCompliance(restored.compliance ?? null);
+        setVerification(restored.verification ?? null);
         setGenDone(restored.genDone);
         setReviewSent(restored.reviewSent);
         setReviewStatus(restored.reviewStatus);
@@ -446,7 +458,10 @@ const ModDocuments = () => {
         // every case thereafter, so switching matters kept showing the first
         // matter's draft.
         loaded: { hasDocument: Boolean(docId), caseId: genCaseId },
-        getDocument: getDocumentV2,
+        // V2 first; the legacy route only when V2 is switched off. See
+        // lib/documentLoader.js for why nothing else falls back.
+        getDocument: (id) => loadDocumentDetail(id, {
+            getV2: getDocumentV2, getLegacy: getDocumentLegacy }),
         onRestore: (restored, forCase) => {
             if (restored) {
                 applyRestored(restored);
@@ -461,22 +476,27 @@ const ModDocuments = () => {
 
     // Poll the real review status while waiting for the lawyer
     useEffect(() => {
-        if (!reviewSent || !docId || !genCaseId) return;
+        // THIS document's own detail — not the case list, which cannot carry a
+        // V2 document and does not exist for a caseless one. See
+        // reviewStateFromDetail in lib/documentLoader.js.
+        if (!reviewSent || !docId) return;
         if (reviewStatus && reviewStatus !== "submitted") return; // terminal state reached
+        let live = true;
         const refresh = async () => {
-            const { data } = await listDocuments(genCaseId);
-            const d = (Array.isArray(data) ? data : []).find(x => x._id === docId);
-            if (d?.review_status) {
-                setReviewStatus(d.review_status);
-                setReviewRecovery(d.recovery || null);
-                setLawyerNote(d.lawyer_note || "");
+            const { data } = await loadDocumentDetail(docId, {
+                getV2: getDocumentV2, getLegacy: getDocumentLegacy });
+            const s = live ? reviewStateFromDetail(data) : null;
+            if (s) {
+                setReviewStatus(s.reviewStatus);
+                setReviewRecovery(s.recovery);
+                setLawyerNote(s.lawyerNote);
             }
         };
         refresh();
         const iv = setInterval(refresh, 12000);
-        return () => clearInterval(iv);
+        return () => { live = false; clearInterval(iv); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [reviewSent, docId, genCaseId, reviewStatus]);
+    }, [reviewSent, docId, reviewStatus]);
 
     const submitToLawyer = async (retryKey = null) => {
         if (!docId) { toast.show("⚠️ Generate the document first (Step 2)", "warn"); return; }
@@ -794,6 +814,10 @@ const ModDocuments = () => {
             // the previous one — otherwise a retry of the old submit would send
             // a version the user is no longer looking at.
             submitKeyRef.current = null;
+            // And the generate key is spent. Editing the fields and confirming
+            // again is a NEW render; reusing this key returned the previous
+            // revision (a PDF of the old answers) and is now refused as reuse.
+            generateKeyRef.current = null;
             setTimeout(() => { setGenerating(false); setGenDone(true); toast.show("✅ Draft generated!", "success"); }, 300);
         } catch {
             toast.show("❌ Generation failed — check backend connection", "danger");
@@ -1269,7 +1293,9 @@ const ModDocuments = () => {
                                                 ? `${verification.counts.omitted} REPEALED section${verification.counts.omitted === 1 ? "" : "s"} cited`
                                                 : verification.counts?.not_in_corpus > 0
                                                     ? `${verification.counts.not_in_corpus} citation${verification.counts.not_in_corpus === 1 ? "" : "s"} could not be found in the statute`
-                                                    : "Citations checked for existence"}
+                                                    : verification.counts?.total === 0
+                                                        ? "No citations found to check"
+                                                        : "Citations checked for existence"}
                                     </div>
 
                                     {verification.ran === false ? (
@@ -1484,12 +1510,13 @@ const ModDocuments = () => {
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 9, background: t.inputBg, border: `1px solid ${t.border}` }}>
                                     <span style={{ fontSize: 11.5, color: t.text }}>Citation check</span>
+                                    {/* One set of rules for every citation display (lib/
+                                        draftVerification.js). This fell through to a green
+                                        "✓ 0 found" for a draft citing nothing checkable and
+                                        for one citing only statutes outside the corpus. */}
                                     {verification
-                                        ? (verification.ran === false
-                                            ? <Badge type="warn">Not checked</Badge>
-                                            : (verification.counts?.not_in_corpus > 0
-                                                ? <Badge type="danger">{verification.counts.not_in_corpus} not found</Badge>
-                                                : <Badge type="success">✓ {verification.counts?.verified || 0} found</Badge>))
+                                        ? (() => { const v = verificationView(verification);
+                                            return <Badge type={_CITATION_BADGE[v.tone]}>{v.tone === "ok" ? "✓ " : ""}{v.headline}</Badge>; })()
                                         : <Badge type="gray">—</Badge>}
                                 </div>
                                 <div style={{ fontSize: 10, color: t.textMuted, marginTop: 8, fontStyle: "italic" }}>
@@ -1839,10 +1866,10 @@ const ModDocuments = () => {
                             {/* Document summary */}
                             <Card>
                                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 10 }}>Document Summary</div>
-                                {[["Type", selectedType?.label || "—"], ["Template", selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Compliance", null]].map(([k, v]) => (
+                                {[["Type", selectedType?.label || "—"], ["Template", selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Required particulars", null]].map(([k, v]) => (
                                     <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>{k}</span>
-                                        {k === "Status" ? <Badge type="info">Final</Badge> : k === "Compliance" ? <Badge type="success">✓ Verified</Badge> : <span style={{ fontWeight: 600, color: t.text, textAlign: "right", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>}
+                                        {k === "Status" ? <Badge type="info">Final</Badge> : k === "Required particulars" ? <Badge type={_PARTICULARS_BADGE[finalParticulars.tone]}>{finalParticulars.label}</Badge> : <span style={{ fontWeight: 600, color: t.text, textAlign: "right", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>}
                                     </div>
                                 ))}
                             </Card>

@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
-import { disputeLawyerInbox, disputeBrief, downloadDocument } from "@/lib/api.js";
+import { disputeLawyerInbox, disputeBrief, downloadDocumentFile } from "@/lib/api.js";
 
 const STATE_META = {
     ready_for_drafting: { label: "Ready to draft", type: "success" },
@@ -60,10 +60,23 @@ export function DisputesInboxPage() {
         setBrief(data);
     };
 
+    // Only a petition that was actually SHARED with this lawyer can be opened:
+    // sharing is what grants the reviewer access. `shared_with_lawyer` is the
+    // server's record of whether that succeeded (`petition_shared`). Anything
+    // but an explicit `true` — false, missing, malformed — means no download.
+    const petitionShared = brief?.petition?.shared_with_lawyer === true;
+
     const downloadPetition = async () => {
-        if (!brief?.petition?.document_id) return;
+        if (!petitionShared || !brief?.petition?.document_id) return;
         setBusyDoc(true);
-        await downloadDocument(brief.petition.document_id, "special-court-petition");
+        // The revision that was shared with this lawyer. A V2 petition has no
+        // legacy file, and the V2 route authorises the reviewer only for the
+        // revision put in front of them. None on a legacy petition, which then
+        // takes the legacy route exactly as before.
+        await downloadDocumentFile(brief.petition.document_id, "special-court-petition", {
+            revisionId: brief.petition.revision_id || null,
+            expectedPdfSha256: brief.petition.pdf_sha256 || null,
+        });
         setBusyDoc(false);
     };
 
@@ -130,13 +143,17 @@ export function DisputesInboxPage() {
                     </Section>
 
                     <Section title="Draft petition" T={T}>
-                        {brief.petition ? (
+                        {brief.petition && petitionShared ? (
                             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                                 <Btn variant="primary" size="sm" onClick={downloadPetition} disabled={busyDoc}>
                                     {busyDoc ? "Downloading…" : "⤓ Download draft petition (PDF)"}
                                 </Btn>
                                 <span style={{ fontSize: 11.5, color: T.textMuted }}>Drafted {fmtDate(brief.petition.drafted_at)} — a DRAFT for you to review, complete and file.</span>
                             </div>
+                        ) : brief.petition ? (
+                            // Drafted, but the share did not go through — so the
+                            // download would be refused. Say so; offer nothing.
+                            <div data-petition-state="not-shared" style={{ fontSize: 13, color: T.textMuted }}>A petition was drafted, but it has not been shared with you, so it cannot be opened here.</div>
                         ) : (
                             <div style={{ fontSize: 13, color: T.textMuted }}>No petition drafted — this dispute was held for your review before drafting.</div>
                         )}

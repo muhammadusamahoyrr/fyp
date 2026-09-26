@@ -85,7 +85,8 @@ const SENT = new Set([
  * with empty fields, because a caller that cannot tell those apart clears state
  * it should have kept.
  *
- * @param {object|null} detail  a /documents/v2/{id} response
+ * @param {object|null} detail  a /documents/v2/{id} response, or a legacy
+ *   document normalised by documentLoader.legacyDocumentToDetail
  */
 export function restoreStateFromDocument(detail) {
     if (!detail || !detail.id) return null;
@@ -99,6 +100,14 @@ export function restoreStateFromDocument(detail) {
     // staleness check with nothing the user can do about it.
     const revisionId = revision ? revision.revision_id || null : null;
     const pdfSha256 = revisionId ? revision.pdf_sha256 || null : null;
+
+    // A LEGACY document has no revision to name. Whether a PDF exists is its
+    // `status`, and its checks sit on the document itself. With no revision id
+    // the preview, download and submit paths all take the legacy route, which
+    // is exactly right for a document the legacy generator made.
+    const legacy = detail.source === "legacy";
+    const hasPdf = legacy ? detail.legacy_status === "generated" : Boolean(revisionId);
+    const checks = legacy ? detail : (revisionId ? revision : null);
 
     return {
         docId: detail.id,
@@ -116,12 +125,16 @@ export function restoreStateFromDocument(detail) {
         docRevisionId: revisionId,
         docPdfSha256: pdfSha256,
         docVersion: detail.current_version || 0,
-        genDone: Boolean(revisionId),
+        // The checks frozen on THIS revision. Dropped before, so a refreshed
+        // page lost them and every panel that reads them fell back to empty.
+        compliance: checks ? checks.compliance ?? null : null,
+        verification: checks ? checks.verification ?? null : null,
+        genDone: hasPdf,
         reviewSent: sent,
         reviewStatus: sent ? status : null,
         reviewRecovery: detail.recovery || null,
         // 3 = the review panel, where a decision or a recovery explanation is
         // shown; 2 = the generated preview; 1 = the form.
-        step: sent ? 3 : revisionId ? 2 : 1,
+        step: sent ? 3 : hasPdf ? 2 : 1,
     };
 }

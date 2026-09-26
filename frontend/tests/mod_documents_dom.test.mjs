@@ -192,6 +192,112 @@ test("a restored document's title reaches the screen", async () => {
     await p.unmount();
 });
 
+test("with V2 off, a legacy document is reopened through the legacy route", async () => {
+    // THE DEFAULT CONFIGURATION. Generation fell back to legacy, the id was
+    // remembered, and restoration asked only the V2 route — which answers
+    // `feature_disabled` to everything. The document never came back.
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "legacy-doc", dom.window.localStorage);
+    api.__respond("getDocumentV2", {
+        data: null, status: 404,
+        error: { code: "feature_disabled", message: "Not found." },
+    });
+    api.__respond("getDocumentLegacy", {
+        data: { _id: "legacy-doc", case_id: "case-1", title: "Legacy Legal Notice",
+                template_type: "legal_notice", status: "generated",
+                compliance: { checked: false } },
+        status: 200,
+    });
+
+    const p = await mountDocuments();
+    assert.deepEqual(api.__calls("getDocumentLegacy").map(c => c.args[0]), ["legacy-doc"]);
+    assert.match(p.text(), /Legacy Legal Notice/, "the legacy document was not reopened");
+    // No revision to name, so the preview takes the legacy download route.
+    const previews = api.__calls("fetchRevisionPreview").filter(c => c.args[0] === "legacy-doc");
+    assert.ok(previews.length > 0, "the reopened document was never previewed");
+    assert.equal(previews[0].args[1]?.revisionId ?? null, null);
+    await p.unmount();
+});
+
+test("a submitted V2 document learns the lawyer's decision by polling its own detail", async () => {
+    // THE BUG. Polling searched the legacy case list, whose response model
+    // requires `status` — absent on a V2 document — so the decision never
+    // arrived and the client kept reading "waiting for lawyer".
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "doc-sub", dom.window.localStorage);
+    let asked = 0;
+    const revision = { revision_id: "rev-1", pdf_sha256: "d".repeat(64) };
+    api.__respond("getDocumentV2", () => {
+        asked += 1;
+        return { status: 200, error: null, data: asked === 1
+            ? { id: "doc-sub", case_id: "case-1", title: "Submitted notice",
+                review_status: "submitted", review_note: "Client's own note",
+                current_version: 1, current_revision: revision }
+            : { id: "doc-sub", case_id: "case-1", title: "Submitted notice",
+                review_status: "returned", review_note: "Add the respondent's address.",
+                current_version: 1, current_revision: revision } };
+    });
+
+    const p = await mountDocuments();
+    await p.settle(60);
+    assert.ok(asked >= 2, "the submitted document was never polled");
+    assert.equal(api.__calls("listDocuments").length, 0, "polled the legacy case list");
+    assert.match(p.text(), /Add the respondent's address\./, "the lawyer's decision never arrived");
+    assert.doesNotMatch(p.text(), /Client's own note/);
+    await p.unmount();
+});
+
+/* The estate's four real citation outcomes (docs/v2-activation-evidence/
+ * citation-verification.md). The client badge fell through to a green
+ * "✓ 0 found" for the second and third — 14 of the 15 migrated documents with
+ * no positive citation evidence would have looked verified to their owners. */
+const ESTATE_OUTCOMES = [
+    ["verified", { ran: true, counts: { total: 2, verified: 2, not_in_corpus: 0, omitted: 0, unverifiable: 0 } }, true],
+    ["no checkable citation", { ran: true, counts: { total: 0, verified: 0, not_in_corpus: 0, omitted: 0, unverifiable: 0 } }, false],
+    ["statute outside the corpus", { ran: true, counts: { total: 2, verified: 0, not_in_corpus: 0, omitted: 0, unverifiable: 2 } }, false],
+    ["unverifiable by design", { ran: false, reason: "urdu_corpus_unsupported", counts: {} }, false],
+    ["a repealed section", { ran: true, counts: { total: 1, verified: 0, not_in_corpus: 0, omitted: 1, unverifiable: 0 } }, false],
+];
+
+for (const [label, verification, mayBeGreen] of ESTATE_OUTCOMES) {
+    test(`client citation badge — ${label}: ${mayBeGreen ? "may" : "must not"} read as verified`, async () => {
+        api.__respond("listCases", { data: CASES });
+        api.__respond("getCases", { data: CASES });
+        rememberDraft("case-1", "doc-cite", dom.window.localStorage);
+        api.__respond("getDocumentV2", { status: 200, error: null, data: {
+            id: "doc-cite", case_id: "case-1", title: "A notice", review_status: "none",
+            current_version: 1,
+            current_revision: { revision_id: "rev-c", pdf_sha256: "e".repeat(64), verification },
+        } });
+        const p = await mountDocuments();
+        try {
+            const row = [...p.container.querySelectorAll("span")]
+                .find(s => s.textContent.trim() === "Citation check");
+            assert.ok(row, "the citation row is not on screen");
+            const badge = row.parentElement.textContent.replace("Citation check", "").trim();
+            assert.equal(/✓/.test(badge), mayBeGreen, `badge read "${badge}"`);
+            assert.doesNotMatch(badge, /✓ 0 found/);
+        } finally {
+            await p.unmount();
+        }
+    });
+}
+
+test("a V2 network failure is not retried against the legacy route", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "doc-x", dom.window.localStorage);
+    api.__respond("getDocumentV2", {
+        data: null, status: 0, error: { message: "Network error." },
+    });
+
+    const p = await mountDocuments();
+    assert.equal(api.__calls("getDocumentLegacy").length, 0);
+    await p.unmount();
+});
+
 /* ── the client's own history is on the page ──────────────────────────────── */
 
 test("the document dashboard lists documents the client owns", async () => {

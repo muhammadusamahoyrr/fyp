@@ -13,6 +13,7 @@ import {
 } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { createGeneration } from "@/lib/attempt.js";
+import { complianceSummary } from "@/lib/complianceSummary.js";
 
 function StatusBadge({ status }) {
     const s = STATUS_STYLES[status] || STATUS_STYLES.Draft;
@@ -1152,9 +1153,15 @@ function ScreenDecision({ doc, t, onBack, onDecide, busy }) {
 // SCREEN 5 — FINAL & EXPORT
 // Mirrors client Screen 4 exactly — final document view
 // ═══════════════════════════════════════════════════════════════
+// complianceSummary tone → colour. Neutral is not green: "not checked" is not a pass.
+const _PARTICULARS_COLOR = (t) => ({ success: t.success, warn: "#FFC857", neutral: t.textMuted });
+
 function ScreenFinal({ doc, t, onBack }) {
     const { user } = useAuth();
     const lawyerName = user?.full_name || "Advocate";
+    const particulars = complianceSummary(doc?.compliance);
+    const approvedOn = doc?.reviewedAt
+        ? new Date(doc.reviewedAt).toLocaleDateString("en-GB") : null;
     const [previewUrl, setPreviewUrl] = useState(null);
     // PINNED TO THE REVISION UNDER REVIEW, not to "the current file".
     //
@@ -1229,22 +1236,23 @@ function ScreenFinal({ doc, t, onBack }) {
                         display: "flex", justifyContent: "space-between", alignItems: "center"
                     }}>
                         <span style={{ fontSize: 11, color: t.textFaint }}>🖊 Approved by Lawyer · {lawyerName}</span>
-                        <span style={{ fontSize: 11, color: t.textFaint }}>📅 {new Date().toLocaleDateString("en-GB")}</span>
+                        {/* When the decision was RECORDED — not today's date,
+                            which is what this used to print. */}
+                        <span style={{ fontSize: 11, color: t.textFaint }}>📅 {approvedOn || "Date not recorded"}</span>
                     </div>
                 </div>
 
-                {/* Export options */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8 }}>
-                    {[["📄", "PDF"], ["⬇", "Download"], ["✉️", "Email"], ["🖨", "Print"]].map(([ic, lbl]) => (
-                        <button key={lbl} style={{
-                            padding: "10px 0", borderRadius: 10,
-                            border: `1px solid ${t.border}`, background: t.card, color: t.textMuted,
-                            fontSize: 11, cursor: "pointer", fontFamily: "inherit",
-                            display: "flex", flexDirection: "column", alignItems: "center", gap: 4, fontWeight: 500
-                        }}>
-                            <span style={{ fontSize: 18 }}>{ic}</span>{lbl}
-                        </button>
-                    ))}
+                {/* Export. PDF / Email / Print had no handlers and did nothing;
+                    only the revision-bound download is real, so only it is shown. */}
+                <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => downloadDocumentFile(doc.id, `${doc.title || "document"}.pdf`, {
+                        revisionId: doc.viewRevisionId,
+                        expectedPdfSha256: doc.viewPdfSha256,
+                    })} style={{
+                        flex: 1, padding: "10px 0", borderRadius: 10,
+                        border: `1px solid ${t.primary}50`, background: t.card, color: t.primary,
+                        fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
+                    }}>⬇ Download PDF</button>
                 </div>
             </div>
 
@@ -1280,7 +1288,9 @@ function ScreenFinal({ doc, t, onBack }) {
                         ["Client", doc.client],
                         ["Reviewer", `${lawyerName}, Advocate`],
                         ["Status", "Final"],
-                        ["Compliance", "✓ Verified"],
+                        // What pleading_rules found, frozen at generation. Your
+                        // approval is not a statutory check and is not shown as one.
+                        ["Required particulars", particulars.label],
                     ].map(([k, v]) => (
                         <div key={k} style={{
                             display: "flex", justifyContent: "space-between", padding: "5px 0",
@@ -1289,7 +1299,9 @@ function ScreenFinal({ doc, t, onBack }) {
                             <span style={{ fontSize: 11, color: t.textFaint }}>{k}</span>
                             <span style={{
                                 fontSize: 11, fontWeight: 600,
-                                color: k === "Status" ? t.primary : k === "Compliance" ? t.success : t.textDim
+                                color: k === "Status" ? t.primary
+                                    : k === "Required particulars" ? _PARTICULARS_COLOR(t)[particulars.tone]
+                                    : t.textDim
                             }}>{v}</span>
                         </div>
                     ))}
@@ -1412,6 +1424,7 @@ function _mapQueueDoc(d) {
         reviewedRevisionId: d.reviewed_revision_id ?? null,
         reviewedPdfSha256: d.reviewed_pdf_sha256 ?? null,
         reviewedAction: d.reviewed_action ?? null,
+        reviewedAt: d.reviewed_at ?? null,
         queueRole: d.queue_role ?? null,
         viewRevisionId: d.submitted_revision_id ?? d.reviewed_revision_id ?? null,
         viewPdfSha256: d.submitted_pdf_sha256 ?? d.reviewed_pdf_sha256 ?? null,

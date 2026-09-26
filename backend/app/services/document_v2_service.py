@@ -14,7 +14,8 @@ The filesystem never inspects the fence; Mongo's `artifact_key` is the sole
 selector of the live bytes. A stale worker publishes its own fence-specific
 orphan and loses the select-CAS.
 
-DORMANT until settings.documents_v2 is flipped; no route calls this yet.
+DORMANT until settings.documents_v2 is flipped: the /documents/v2 routes that
+call it answer 404 feature_disabled while the flag is off.
 """
 from __future__ import annotations
 
@@ -33,11 +34,17 @@ from app.repositories import revision_repo
 from app.repositories.revision_repo import HEARTBEAT_SECONDS
 from app.services import artifact_store as store
 from app.core.exceptions import (
+    AppValidationError,
+    ConflictError,
     ForbiddenError,
     NotFoundError,
     ServiceUnavailableError,
 )
 from app.services import extraction_profile, pleading_rules, template_registry
+from app.services.document_transitions import (
+    canonical_body_hash,
+    validate_idempotency_key,
+)
 from app.services.document_service import (
     _unavailable_verification,
     _verification_record,
@@ -98,9 +105,83 @@ async def _require_case_access(actor_id: str, case_id: str | None) -> None:
     assert_not_draft(case, "have documents created against it")
 
 
+def _require_composable_template(template_type: str | None) -> None:
+    """The template must have a builder, and must be one a user may compose.
+
+    The route accepted any non-empty string. An unknown one created a persistent
+    document identity that could never render — `generate_pdf` raised on the
+    first generate — and a SYSTEM_ISSUED one (a payment receipt) let a caller
+    mint a platform record of a payment that never happened. The legacy route
+    was protected by its enum; this is the same guarantee, from the registry
+    that lists what actually exists.
+    """
+    if not template_type or not template_registry.known(template_type):
+        raise AppValidationError(f"Unknown document template: {template_type!r}.")
+    if template_type in template_registry.SYSTEM_ISSUED:
+        raise AppValidationError(
+            f"{template_registry.label_for(template_type)} is issued by the system "
+            "and cannot be drafted.")
+
+
+def _require_substance(template_type: str, fields: dict | None) -> None:
+    """Refuse to render a document with nothing in it.
+
+    The legacy generator has refused this since the empty-document fix; V2 did
+    not, so a direct API call rendered a fully formatted court document with
+    empty FACTS and PRAYER, stored as a real revision. Checked per template:
+
+      - a named instrument needs at least one field ITS BUILDER READS to be
+        non-blank. A key the builder ignores is not substance — it renders as
+        nothing — so a misspelt field cannot satisfy this;
+      - a lawyer's free draft needs visible text in its body. Its title and
+        author are declared fields but are not the document.
+    """
+    fields = fields or {}
+    if template_type == "lawyer_draft":
+        from app.services.document_service import visible_text
+        if not visible_text(str(fields.get("body_html") or "")).strip():
+            raise AppValidationError("The draft is empty — there is nothing to render.")
+        return
+    if not template_registry.shape_report(template_type, fields)["provided"]:
+        raise AppValidationError(
+            "Not enough detail to fill this document. Fill in its fields and "
+            "generate again.")
+
+
+# The message `_run` maps to `idempotency_mismatch` ("already used"), and the
+# same words the transitions use for the same mistake.
+_KEY_REUSED = "This request key was already used for a different request."
+
+
+def create_fingerprint(*, template_type: str, title: str, case_id: str | None,
+                       request_fingerprint: str | None = None) -> str:
+    """What a create request WAS, so a reused key can be told from a retry.
+
+    A caller whose request is richer than (template, title, case) — a route that
+    derives its fields from free text — passes its own `request_fingerprint`,
+    computed over the raw request, and that is what is compared.
+    """
+    return canonical_body_hash({
+        "template_type": template_type, "title": title, "case_id": case_id,
+        "request": request_fingerprint})
+
+
+def _revision_fingerprint(template_type: str | None, fields: dict | None) -> str:
+    return canonical_body_hash({"template_type": template_type, "fields": fields or {}})
+
+
+def _require_same_revision_request(rev: dict, template_type: str, fields: dict) -> None:
+    """A retry must be the SAME render. The key alone used to be enough to get
+    the earlier revision back, so a key reused with different fields handed the
+    caller a PDF of content they had replaced — silently."""
+    if (_revision_fingerprint(rev.get("template_type"), rev.get("fields"))
+            != _revision_fingerprint(template_type, fields)):
+        raise ConflictError(_KEY_REUSED)
+
+
 async def create_document(
     *, client_id: str, case_id: str | None, template_type: str, title: str,
-    idempotency_key: str,
+    idempotency_key: str, request_fingerprint: str | None = None,
 ) -> dict:
     """Create the document identity idempotently (v5.1 §3).
 
@@ -121,11 +202,21 @@ async def create_document(
     real filings, indistinguishable from them — in the view the lawyer trusts
     to be the matter's file.
     """
+    # Before anything is written: an identity for a template that cannot be
+    # rendered is a document that can never exist.
+    validate_idempotency_key(idempotency_key)
+    _require_composable_template(template_type)
     await _require_case_access(client_id, case_id)
 
+    fp = create_fingerprint(template_type=template_type, title=title,
+                            case_id=case_id, request_fingerprint=request_fingerprint)
     existing = await get_documents_col().find_one(
         {"client_id": client_id, "create_idempotency_key": idempotency_key})
     if existing:
+        # A RETRY returns the identity; a REUSED key is refused. Rows created
+        # before fingerprints existed carry none and are replayed as before.
+        if existing.get("create_fingerprint") not in (None, fp):
+            raise ConflictError(_KEY_REUSED)
         return existing
 
     now = _now()
@@ -143,6 +234,7 @@ async def create_document(
         "pending_events": [],
         "schema_version": 2,
         "create_idempotency_key": idempotency_key,
+        "create_fingerprint": fp,
         "retention_class": "document_revisions",
         "created_at": now,
         "updated_at": now,
@@ -150,10 +242,12 @@ async def create_document(
     try:
         await get_documents_col().insert_one(doc)
     except Exception:
-        # Lost the create race — return whoever won.
+        # Lost the create race — return whoever won, if it was the same request.
         existing = await get_documents_col().find_one(
             {"client_id": client_id, "create_idempotency_key": idempotency_key})
         if existing:
+            if existing.get("create_fingerprint") not in (None, fp):
+                raise ConflictError(_KEY_REUSED)
             return existing
         raise
     return doc
@@ -331,14 +425,22 @@ async def generate_revision(
 ) -> dict:
     """Generate the next revision of a document. Idempotent under retry."""
     worker_id = worker_id or WORKER_ID
+    validate_idempotency_key(idempotency_key)
 
     existing = await revision_repo.find_by_idempotency(document_id, idempotency_key)
     if existing:
+        _require_same_revision_request(existing, template_type, fields)
         # Same revision, no new work — but not until it HAS a hash. See
         # _await_terminal: returning a pending row hands the caller a null hash
         # it will later submit with, and the submit guard rejects that as a
         # document that changed.
         return await _await_terminal(document_id, idempotency_key, existing)
+
+    # Before a version number is reserved: a refused render must not leave a gap
+    # in the sequence or a failed revision behind it. After the idempotency
+    # lookup, so a retry of work already accepted is answered, not re-judged.
+    _require_composable_template(template_type)
+    _require_substance(template_type, fields)
 
     version = await revision_repo.reserve_version(document_id)
     revision_id = secrets.token_urlsafe(16)
@@ -374,6 +476,7 @@ async def generate_revision(
         # harmless gap.
         winner = await revision_repo.find_by_idempotency(document_id, idempotency_key)
         if winner:
+            _require_same_revision_request(winner, template_type, fields)
             return await _await_terminal(document_id, idempotency_key, winner)
         raise
 

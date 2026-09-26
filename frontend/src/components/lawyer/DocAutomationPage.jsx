@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
-import { listCases, aiDraftStream, saveDocDraft, listDocDrafts, deleteDocDraft, aiPleadingUrduStream, pleadingUrduPdf, pleadingUrduDocumentV2, publishDraftAsDocumentV2, downloadDocumentFile, idempotencyKey, errorCode } from "@/lib/api.js";
+import { listCases, getCase, aiDraftStream, saveDocDraft, listDocDrafts, deleteDocDraft, aiPleadingUrduStream, pleadingUrduPdf, pleadingUrduDocumentV2, publishDraftAsDocumentV2, downloadDocumentFile, idempotencyKey, errorCode } from "@/lib/api.js";
 
 // Infer the statute collection to ground drafting in, from the template.
 function templateCaseType(name = "") {
@@ -16,57 +16,12 @@ function templateCaseType(name = "") {
 }
 import { useAuth } from "@/context/AuthContext.jsx";
 import MyDocuments from "./MyDocuments.jsx";
-
-// ============================================================
-// DATA
-// ============================================================
-
-const CATEGORIES = ["All", "Agreement/Contract", "Application/Petition", "Litigation", "Criminal", "Property", "Labour", "Administrative"];
-
-const TEMPLATES = [
-    { id: 1, name: "Dissolution of Marriage Application", cat: "Application/Petition", desc: "Seek divorce with compliant petition under Muslim Family Laws Ordinance. Outlines grounds, reliefs, and clarity for family court filings.", icon: "⚖️", popular: true },
-    { id: 2, name: "Plaint — Civil Suit", cat: "Litigation", desc: "Standard plaint under Order VII Rule 1 CPC for civil suits. Covers facts, cause of action, and prayer clause.", icon: "🏛️", popular: true },
-    { id: 3, name: "Service Agreement", cat: "Agreement/Contract", desc: "Professional service contract covering scope, payment, timelines, and breach clauses. Suitable for B2B engagements.", icon: "🤝", popular: false },
-    { id: 4, name: "Legal Notice", cat: "Application/Petition", desc: "Formal legal notice to demand compliance, payment, or action before initiating legal proceedings.", icon: "📬", popular: true },
-    { id: 5, name: "Affidavit (General)", cat: "Application/Petition", desc: "Sworn affidavit format for court submission. General-purpose with fields for deponent details and declarations.", icon: "🔏", popular: false },
-    { id: 6, name: "Bail Application", cat: "Criminal", desc: "Regular bail application under CrPC with grounds, antecedents, and sureties. Includes statutory reference.", icon: "🔑", popular: true },
-    { id: 7, name: "Written Statement", cat: "Litigation", desc: "Defence written statement template for civil suits. Includes preliminary objections, para-wise reply, and counter-claim.", icon: "📝", popular: false },
-    { id: 8, name: "Power of Attorney (General)", cat: "Agreement/Contract", desc: "General POA authorising an agent to act on behalf of the principal for specified legal and financial matters.", icon: "📋", popular: false },
-    { id: 9, name: "Vakalatnama", cat: "Litigation", desc: "Court authority-to-plead form granting an advocate right to appear and act in proceedings.", icon: "📄", popular: false },
-    { id: 10, name: "RTI Application", cat: "Administrative", desc: "Right to Information application under RTI Act to obtain public records from government authorities.", icon: "🗂️", popular: false },
-    { id: 11, name: "Employment Contract", cat: "Agreement/Contract", desc: "Standard employment agreement covering designation, salary, confidentiality, termination, and dispute resolution.", icon: "💼", popular: false },
-    { id: 12, name: "Property Sale Deed", cat: "Property", desc: "Registered sale deed for immovable property transfer. Includes survey details, consideration, and possession clause.", icon: "🏠", popular: true },
-    { id: 13, name: "Labour Dispute Notice", cat: "Labour", desc: "Formal notice to employer for wrongful termination, unpaid wages, or violation of labour laws.", icon: "⚡", popular: false },
-    { id: 14, name: "NDA / Confidentiality Agreement", cat: "Agreement/Contract", desc: "Mutual or one-way non-disclosure agreement for trade secrets, business plans, and proprietary information.", icon: "🛡️", popular: false },
-];
-
-// The strings below are interpolated into template text that is then turned
-// into HTML (newlines -> <br>) and rendered with dangerouslySetInnerHTML. Case
-// data is user-supplied -- `client` is a display name the client chose -- so it
-// is data, not markup. Escaping at the point of derivation covers every
-// interpolation in the template map below without touching each one.
-const escapeHtml = (value) =>
-    String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-
-function buildContent(tmpl, caseObj) {
-    const caseRef = escapeHtml(caseObj?.id || "CS-2024-089");
-    const clientRef = escapeHtml(caseObj?.client || "[Client Name]");
-    const court = escapeHtml(caseObj?.court || "[Court Name]");
-    const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-
-    const map = {
-        1: `IN THE FAMILY COURT AT [LOCATION]\n\nSuit No. ______/2026\n\n${clientRef.toUpperCase()}, W/O [Husband's Name],\nResident of [Full Address], CNIC No. [__________],\n\n...Petitioner\n\nVERSUS\n\n[Respondent's Name], S/O [Father's Name],\nResident of [Full Address],\n\n...Respondent\n\n\nPETITION FOR DISSOLUTION OF MARRIAGE (DIVORCE)\nUNDER THE MUSLIM FAMILY LAWS ORDINANCE, 1961\n\nRespectfully Sheweth:\n\n1. That the petitioner and the respondent were duly married on [Date] at [Place] in accordance with Muslim personal law.\n\n2. That the respondent has treated the petitioner with cruelty and has failed to maintain the petitioner without reasonable cause.\n\n3. That the petitioner is entitled to seek dissolution of marriage under Section 2(ix) of the Dissolution of Muslim Marriages Act, 1939.\n\nPRAYER:\nIt is therefore respectfully prayed that this Honourable Court may be pleased to:\n(a) Grant decree of dissolution of marriage;\n(b) Award maintenance to the petitioner;\n(c) Award costs of the proceedings.\n\nDate: ${today}\n\n_________________________\nPetitioner / Advocate`,
-        2: `IN THE COURT OF THE CIVIL JUDGE, LAHORE\n\nCase No. ${caseRef} of 2026\n\n${clientRef.toUpperCase()}\n...Plaintiff\n\nVERSUS\n\n[Defendant Name]\n...Defendant\n\n\nPLAINT UNDER ORDER VII RULE 1, C.P.C.\n\nMost Respectfully Sheweth:\n\n1. That the plaintiff is a resident of [Address] and is entitled to file the present suit.\n\n2. That the defendant is indebted to the plaintiff in the sum of PKR [Amount] on account of [cause of action].\n\n3. That the cause of action arose on [Date] when the defendant failed to honour the obligation despite written demand dated [Date].\n\n4. That this Court has territorial and pecuniary jurisdiction to try the present suit.\n\nPRAYER:\nThe plaintiff humbly prays that this Honourable Court may be pleased to:\n(a) Decree the suit for PKR [Amount];\n(b) Award markup at the rate of [Rate]% per annum;\n(c) Award costs of the suit.\n\nVerified: The contents of the above plaint are true to the best of my knowledge.\n\nDate: ${today}\t\t\t_______________________\n\t\t\t\t\tPlaintiff / Advocate`,
-        default: `IN THE COURT OF THE HONOURABLE JUDGE\n\nCase Reference: ${caseRef}\n\n${tmpl.name.toUpperCase()}\n\nIN THE MATTER OF: ${clientRef}\n\nBefore: ${court}\n\nDate: ${today}\n\n${"─".repeat(60)}\n\n1. INTRODUCTION\n\nThis ${tmpl.name} is filed on behalf of ${clientRef} in connection with the above-referenced matter.\n\n2. FACTS\n\nThe relevant facts are as follows:\n\n   a) [State first material fact]\n   b) [State second material fact]\n   c) [State third material fact]\n\n3. GROUNDS\n\n   i.  [Ground one — legal basis]\n   ii. [Ground two — factual basis]\n\n4. PRAYER\n\nIn light of the above, it is respectfully prayed that this Honourable Court may be pleased to grant the relief sought herein, along with costs.\n\n${"─".repeat(60)}\n\nDate: ${today}\t\t\t_______________________\n\t\t\t\t\t[Advocate Name]\n\t\t\t\t\tBar Council Enrollment No.: [__________]`,
-    };
-
-    return map[tmpl.id] || map.default;
-}
+import { TEMPLATES, CATEGORIES, BLANK_TEMPLATE, buildContent } from "@/lib/lawyerDraftTemplates.js";
+import {
+    NO_CASE, bindingForNewDocument, pendingBindingForDraft, bindingForDraft,
+    caseActionsBlocked, boundCaseId,
+} from "@/lib/draftCaseBinding.js";
+import { verificationView } from "@/lib/draftVerification.js";
 
 // ============================================================
 // TOOLBAR BUTTON
@@ -115,7 +70,7 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
     const [showDrafts, setShowDrafts] = useState(false);
     const [search, setSearch] = useState("");
     const [cat, setCat] = useState("All");
-    const [bookmarked, setBookmarked] = useState(new Set([1, 6, 12]));
+    const [bookmarked, setBookmarked] = useState(new Set([1]));
 
     const filtered = TEMPLATES.filter(tmpl =>
         (cat === "All" || tmpl.cat === cat) &&
@@ -160,7 +115,7 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
             {/* Hero Cards */}
             <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
                 {[
-                    { label: "New Document", sub: "Start with a blank legal document.", icon: I.plus, color: t.primary, onClick: () => onSelect({ id: 0, name: "Blank Document", cat: "General", desc: "", icon: "📄" }) },
+                    { label: "New Document", sub: "Start from the generic legal-draft scaffold.", icon: I.plus, color: t.primary, onClick: () => onSelect(BLANK_TEMPLATE) },
                     { label: "My Drafts", sub: `${drafts.length} saved draft${drafts.length === 1 ? "" : "s"} — continue where you left off.`, icon: I.save, color: t.warn, onClick: () => setShowDrafts(v => !v) },
                 ].map(h => (
                     <button key={h.label} onClick={h.onClick}
@@ -253,7 +208,45 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
 // ============================================================
 // STAGE 2 — EDITOR
 // ============================================================
-function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
+const _TONE = (t) => ({
+    ok: t.success, warn: t.warn || "#FFC857", danger: t.danger || "#e5484d", neutral: t.textMuted,
+});
+
+function CitationStrip({ t, draftCheck, stale, documentCheck }) {
+    const d = verificationView(draftCheck);
+    const doc = verificationView(documentCheck);
+    const tone = _TONE(t);
+    return (
+        <div data-citation-strip style={{
+            flexShrink: 0, padding: "5px 24px", fontSize: 11, borderBottom: `1px solid ${t.border}`,
+            background: t.surface, color: t.textMuted, display: "flex", flexWrap: "wrap", gap: "4px 18px",
+        }}>
+            <span data-check="draft">
+                <b style={{ color: t.textDim }}>Citation check · last saved draft:</b>{" "}
+                {d ? <>
+                    <span style={{ color: stale ? t.textMuted : tone[d.tone], fontWeight: 700,
+                                   textDecoration: stale ? "line-through" : "none" }}>{d.headline}</span>
+                    {stale
+                        ? <span data-stale style={{ color: tone.warn, fontWeight: 700 }}> — out of date: the text has changed. Save again to re-check.</span>
+                        : d.detail && <span> — {d.detail}</span>}
+                </> : <span>not checked yet — citations are checked when you save.</span>}
+            </span>
+            {doc && (
+                <span data-check="document">
+                    <b style={{ color: t.textDim }}>Copy saved to Documents (frozen):</b>{" "}
+                    <span style={{ color: tone[doc.tone], fontWeight: 700 }}>{doc.headline}</span>
+                </span>
+            )}
+        </div>
+    );
+}
+
+function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
+    // The case this document is bound to — fixed when the editor opened, never
+    // the page selector's current value. See lib/draftCaseBinding.js.
+    const caseObj = binding.caseObj;
+    const caseId = boundCaseId(binding);
+    const caseBlocked = caseActionsBlocked(binding);
     // A saved draft stores editor HTML; a fresh template is plain text
     const initialHtml = draft ? draft.content : buildContent(tmpl, caseObj).replace(/\n/g, "<br>");
     const [aiMessages, setAiMessages] = useState([]);
@@ -292,6 +285,14 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
     const [publishIssue, setPublishIssue] = useState("");
     const publishKeyRef = useRef(null);
     const publishedHtmlRef = useRef(null);
+    // The server's citation check over the text AS LAST SAVED — restored with a
+    // reopened draft, replaced on every save, and stale from the first edit
+    // after it. `editSeq` counts edits so a save that raced a keystroke is
+    // still marked stale when its answer lands.
+    const [savedCheck, setSavedCheck] = useState(draft?.verification ?? null);
+    const [checkStale, setCheckStale] = useState(false);
+    const editSeq = useRef(0);
+    const markEdited = () => { editSeq.current += 1; setCheckStale(true); };
     const editorRef = useRef(null);
     const aiEndRef = useRef(null);
     const aiInputRef = useRef(null);
@@ -320,19 +321,22 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
     const queryState = (cmd) => document.queryCommandState(cmd);
 
     const handleSave = async () => {
-        if (saving) return;
+        if (saving || caseBlocked) return;
         setSaving(true); setSaveErr("");
+        const seqAtSave = editSeq.current;
         const { data, error } = await saveDocDraft({
             draft_id: draftId,
             title: draft?.title || tmpl.name,
             content: editorRef.current?.innerHTML || "",
             template_name: tmpl.name,
             template_icon: tmpl.icon,
-            case_id: caseObj?._id || null,
+            case_id: caseId,
         });
         setSaving(false);
         if (error) { setSaveErr(error.message || "Save failed"); setTimeout(() => setSaveErr(""), 4000); return; }
         setDraftId(data.id);
+        setSavedCheck(data.verification ?? null);
+        setCheckStale(editSeq.current !== seqAtSave);
         setSaved(true); setTimeout(() => setSaved(false), 2500);
     };
 
@@ -347,7 +351,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
      * file to someone who will edit it. They are not alternatives.
      */
     const publishAsDocument = async () => {
-        if (publishing) return;
+        if (publishing || caseBlocked) return;
         const bodyHtml = editorRef.current?.innerHTML || "";
         if (!(editorRef.current?.innerText || "").trim()) {
             setPublishIssue("There is nothing in the draft to save.");
@@ -368,6 +372,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
             title: draft?.title || tmpl.name,
             bodyHtml,
             authorName: user?.full_name || "",
+            caseId,
         }, publishKeyRef.current);
         setPublishing(false);
 
@@ -400,7 +405,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
 
     const sendToAI = async () => {
         const q = aiInput.trim();
-        if (!q || aiLoading) return;
+        if (!q || aiLoading || caseBlocked) return;
         setAiInput("");
         setAiMessages(prev => [...prev, { role: "user", text: q }]);
         setAiLoading(true);
@@ -418,7 +423,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                     // CASE-BOUND when a case is selected: the server authorises it
                     // and derives jurisdiction from it (so a Punjab matter no
                     // longer retrieves federal law). case_type is the fallback.
-                    case_id: caseObj?._id || null,
+                    case_id: caseId,
                     case_type: templateCaseType(tmpl.name),
                     history,
                 },
@@ -429,18 +434,18 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
             const looksLikeDoc = reply.length > 300 && (reply.includes("\n\n") || reply.includes("PRAYER") || reply.includes("Respectfully") || reply.includes("IN THE COURT") || reply.includes("PETITION") || reply.includes("AGREEMENT"));
             if (looksLikeDoc && editorRef.current) {
                 editorRef.current.innerText = reply;
+                markEdited();
                 setWordCount(reply.trim().split(/\s+/).filter(Boolean).length);
             }
             setAiMessages(prev => [...prev, { role: "assistant", text: looksLikeDoc ? "✅ Document updated. Review the changes in the editor." : reply }]);
             // Surface the citation check the backend runs on the finished draft.
             // It used to be computed, streamed, and silently dropped by the client.
             if (verif) {
-                const c = verif.counts || {};
-                const note = verif.ran === false
-                    ? "⚠️ Citations were NOT checked — verify every authority before filing."
-                    : (c.not_in_corpus > 0
-                        ? `⚠️ Citation check: ${c.not_in_corpus} citation(s) not found in the corpus, ${c.verified || 0} found. Existence only — read every authority.`
-                        : `⚖️ Citation check: ${c.verified || 0} found in the corpus (existence only). A lawyer must review before filing.`);
+                // Same rules as every other citation display: repealed and
+                // uncheckable citations are named, and "nothing to check" is
+                // never phrased as a pass.
+                const v = verificationView(verif);
+                const note = `${v.tone === "ok" ? "⚖️" : "⚠️"} Citation check: ${v.headline}.${v.detail ? " " + v.detail : ""}`;
                 setAiMessages(prev => [...prev, { role: "assistant", text: note }]);
             }
         } catch {
@@ -503,13 +508,14 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
 
         // The flag is off. The legacy route still works; it just cannot be
         // retried safely, which is why it is the fallback and not the default.
-        const { data, error } = await pleadingUrduPdf(payload);
+        const { data, error } = await pleadingUrduPdf(payload, urduKeyRef.current);
         setUrduPdfBusy(false);
         if (error || !data?.doc_id) {
             setUrduIssue(error?.message || "Could not produce the PDF.");
             return;
         }
-        await downloadDocumentFile(data.doc_id, filename);
+        await downloadDocumentFile(data.doc_id, filename, {
+            revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
     };
 
     const FONT_OPTIONS = ["Default Font", "Georgia", "Times New Roman", "Courier New", "Arial"];
@@ -649,7 +655,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                     {/* Save button — persists the draft to the backend */}
                     <button
                         onClick={handleSave}
-                        disabled={saving}
+                        disabled={saving || caseBlocked}
                         style={{
                             padding: "7px 14px", borderRadius: 10,
                             border: `1.5px solid ${t.border}`,
@@ -681,7 +687,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                         reproduce — which is what makes a citation check on it
                         mean anything later. It does NOT file anything with a
                         court, and the label must not suggest that it does. */}
-                    <button onClick={publishAsDocument} disabled={publishing}
+                    <button onClick={publishAsDocument} disabled={publishing || caseBlocked}
                         title="Save a fixed, hashed copy of this draft into your documents"
                         style={{
                             padding: "5px 13px", borderRadius: 8,
@@ -738,6 +744,31 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                     </button>
                 </div>
             </div>
+
+            {/* Which matter this document belongs to. The page's case selector is
+                hidden under this full-screen editor, so without this strip the
+                lawyer cannot see which case the AI and Save are acting on. */}
+            <div data-case-binding={binding.state} style={{
+                flexShrink: 0, padding: "6px 24px", fontSize: 11.5, fontWeight: 600,
+                borderBottom: `1px solid ${t.border}`,
+                background: binding.state === "unavailable" ? `${t.danger || "#e5484d"}14` : t.surface,
+                color: binding.state === "unavailable" ? (t.danger || "#e5484d") : t.textMuted,
+            }}>
+                {binding.state === "bound" && <>Case: {caseObj?.id} — {caseObj?.title}</>}
+                {binding.state === "none" && <>No case — this draft is not attached to any matter.</>}
+                {binding.state === "loading" && <>Loading the case this draft belongs to…</>}
+                {binding.state === "unavailable" && <>
+                    This draft belongs to a case that could not be loaded — it may have been
+                    reassigned, or you may be offline. Save, AI drafting and Save to Documents
+                    are paused so this draft is not attached to another matter. Export still works.
+                </>}
+            </div>
+
+            {/* Citation check — the server's, not the browser's. Two results,
+                kept apart: the draft as last saved (goes stale on edit) and the
+                copy saved to Documents (frozen; describes that copy). */}
+            <CitationStrip t={t} draftCheck={savedCheck} stale={checkStale}
+                documentCheck={published?.verification ?? null} />
 
             {/* ── Rich-text Toolbar ── */}
             <div style={{
@@ -905,7 +936,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                         contentEditable
                         suppressContentEditableWarning
                         spellCheck={false}
-                        onInput={e => setWordCount(e.currentTarget.innerText.trim().split(/\s+/).filter(Boolean).length)}
+                        onInput={e => { markEdited(); setWordCount(e.currentTarget.innerText.trim().split(/\s+/).filter(Boolean).length); }}
                         style={{
                             minHeight: 600, maxWidth: 780, margin: "0 auto",
                             background: t.card, borderRadius: 4,
@@ -1009,7 +1040,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                             />
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 9px 9px" }}>
                                 <span style={{ fontSize: 10, color: t.textFaint }}>⏎ Send · Shift+⏎ New line</span>
-                                <button onClick={sendToAI} disabled={!aiInput.trim() || aiLoading}
+                                <button onClick={sendToAI} disabled={!aiInput.trim() || aiLoading || caseBlocked}
                                     style={{ height: 29, paddingLeft: 13, paddingRight: 13, borderRadius: 8, border: "none", background: aiInput.trim() && !aiLoading ? t.primary : t.border, color: aiInput.trim() && !aiLoading ? (t.mode === "dark" ? t.bg : t.surface) : t.textFaint, cursor: aiInput.trim() && !aiLoading ? "pointer" : "default", display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 700, fontFamily: "inherit", transition: "all .15s" }}>
                                     <Icon d={I.send} size={11} style={{ transform: "rotate(45deg)" }} />
                                     Generate
@@ -1078,6 +1109,17 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
 // ============================================================
 const _DA_MAP = { open: "Filed", active: "Under Hearing", closed: "Closed", dismissed: "Closed" };
 
+// One shape for a case, whether it came from the list or was fetched by id.
+const _mapCase = (c) => ({
+    id: c.case_number || c._id,
+    _id: c._id,
+    title: c.title || "Untitled",
+    client: c.client_name || "—",
+    court: c.province || "—",
+    type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
+    status: _DA_MAP[c.status] || "Filed",
+});
+
 function DocAutomationPage() {
     const { t } = useTheme();
     const { activeCase } = useCase();
@@ -1088,15 +1130,32 @@ function DocAutomationPage() {
     const [selectedCaseId, setSelectedCaseId] = useState("");
     const [drafts, setDrafts] = useState([]);
     const [activeDraft, setActiveDraft] = useState(null);
+    // The open editor's case, fixed when it opened. See lib/draftCaseBinding.js.
+    const [editorBinding, setEditorBinding] = useState(NO_CASE);
+    // Guards against a slow case lookup for one draft landing after another
+    // draft (or a new document) has been opened.
+    const openSeq = useRef(0);
 
     useEffect(() => {
         if (stage !== "gallery") return;
         listDocDrafts().then(({ data }) => { if (Array.isArray(data)) setDrafts(data); });
     }, [stage]);
 
-    const openDraft = (d) => {
+    const openDraft = async (d) => {
+        const seq = ++openSeq.current;
         setActiveDraft(d);
+        setEditorBinding(pendingBindingForDraft(d));
         setSelectedTemplate({ id: -1, name: d.template_name || d.title, cat: "Draft", desc: "", icon: d.template_icon || "📄" });
+        setStage("editor");
+        const binding = await bindingForDraft(d, apiCases, getCase, _mapCase);
+        if (seq === openSeq.current) setEditorBinding(binding);
+    };
+
+    const openTemplate = (tmpl) => {
+        ++openSeq.current;
+        setActiveDraft(null);
+        setEditorBinding(bindingForNewDocument(activeCaseObj));
+        setSelectedTemplate(tmpl);
         setStage("editor");
     };
 
@@ -1108,15 +1167,7 @@ function DocAutomationPage() {
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => {
             if (data?.items) {
-                const mapped = data.items.map(c => ({
-                    id: c.case_number || c._id,
-                    _id: c._id,
-                    title: c.title || "Untitled",
-                    client: c.client_name || "—",
-                    court: c.province || "—",
-                    type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
-                    status: _DA_MAP[c.status] || "Filed",
-                }));
+                const mapped = data.items.map(_mapCase);
                 setApiCases(mapped);
                 if (activeCase) {
                     const match = mapped.find(c => c.id === activeCase || c._id === activeCase);
@@ -1169,7 +1220,7 @@ function DocAutomationPage() {
             )}
             {stage === "gallery" && (
                 <StageGallery
-                    onSelect={tmpl => { setActiveDraft(null); setSelectedTemplate(tmpl); setStage("editor"); }}
+                    onSelect={openTemplate}
                     drafts={drafts}
                     onOpenDraft={openDraft}
                     onDeleteDraft={removeDraft}
@@ -1177,7 +1228,7 @@ function DocAutomationPage() {
                 />
             )}
             {stage === "editor" && selectedTemplate && (
-                <StageEditor tmpl={selectedTemplate} caseObj={activeCaseObj} draft={activeDraft} onBack={() => setStage("gallery")} t={t} />
+                <StageEditor tmpl={selectedTemplate} binding={editorBinding} draft={activeDraft} onBack={() => setStage("gallery")} t={t} />
             )}
         </div>
     );

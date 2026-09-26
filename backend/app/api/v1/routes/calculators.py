@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 
 from app.dependencies import get_current_user
@@ -10,7 +10,6 @@ from app.schemas.calculators import (
     LabourDuesResult,
 )
 from app.services import court_fee as court_fee_service
-from app.services import document_service
 from app.services import labour_dues as labour_dues_service
 
 router = APIRouter(prefix="/calculators", tags=["calculators"])
@@ -72,7 +71,11 @@ async def labour_dues(body: LabourDuesRequest, current_user: dict = Depends(get_
 
 
 @router.post("/labour-demand-pdf", response_model=LabourDemandPdfResult)
-async def labour_demand_pdf(body: LabourDemandRequest, current_user: dict = Depends(get_current_user)):
+async def labour_demand_pdf(
+    body: LabourDemandRequest,
+    current_user: dict = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
     """Compute the dues and generate a demand notice to the employer."""
     calc = labour_dues_service.calculate(
         body.monthly_wage, body.years_of_service, body.extra_months, body.unpaid_months,
@@ -84,5 +87,9 @@ async def labour_demand_pdf(body: LabourDemandRequest, current_user: dict = Depe
         "designation": body.designation, "employment_period": body.employment_period,
         "response_days": body.response_days, "calculation": calc,
     }
-    doc = await document_service.generate_standalone(current_user["_id"], "labour_demand", fields)
-    return {"doc_id": doc["_id"], "title": doc["title"], "calculation": calc}
+    from app.services.document_writer import generate_owned_document, request_fingerprint
+    doc = await generate_owned_document(
+        current_user["_id"], "labour_demand", fields, idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint("labour-demand-pdf", body.model_dump()))
+    return {"doc_id": doc["_id"], "title": doc["title"], "calculation": calc,
+            "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}

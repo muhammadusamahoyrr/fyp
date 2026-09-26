@@ -5,7 +5,7 @@ import secrets
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
@@ -237,6 +237,10 @@ class AiResearchResult(BaseModel):
 class PdfResult(BaseModel):
     doc_id: str
     title: str
+    # Set when DOCUMENTS_V2 produced it: a V2 document is downloaded by
+    # revision, not by the legacy file route. None on the legacy path.
+    revision_id: str | None = None
+    pdf_sha256: str | None = None
 
 
 def _render_case_context(context: dict) -> str:
@@ -1220,6 +1224,7 @@ async def ai_pleading_urdu_stream(
 async def ai_pleading_urdu_pdf(
     body: PleadingUrduPdfRequest,
     current_user: dict = Depends(require_lawyer),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """Render an (already-translated) court-Urdu pleading as an RTL PDF."""
     from app.core.exceptions import AppValidationError
@@ -1234,8 +1239,11 @@ async def ai_pleading_urdu_pdf(
         "court_ur":      body.court_ur[:200],
         "english_label": body.english_label[:200],
     }
-    doc = await document_service.generate_standalone(current_user["_id"], "urdu_pleading", fields)
-    return {"doc_id": doc["_id"], "title": doc["title"]}
+    from app.services.document_writer import generate_owned_document, request_fingerprint
+    doc = await generate_owned_document(
+        current_user["_id"], "urdu_pleading", fields, idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint("pleading-urdu-pdf", body.model_dump()))
+    return {"doc_id": doc["_id"], "title": doc["title"], "revision_id": doc["revision_id"], "pdf_sha256": doc["pdf_sha256"]}
 
 
 # ── Multi-model comparison ────────────────────────────────────────────────────

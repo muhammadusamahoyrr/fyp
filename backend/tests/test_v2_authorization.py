@@ -181,7 +181,7 @@ async def _submitted_document(monkeypatch):
     monkeypatch.setattr(v2, "_render_and_select", _render)
     doc = await _create(OWNER_CASE)
     rev = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={}), idempotency_key=key(),
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}), idempotency_key=key(),
         current_user=OWNER)
     return doc["id"], rev
 
@@ -250,7 +250,7 @@ async def test_a_caseless_document_may_go_to_any_verified_lawyer(
     monkeypatch.setattr(v2, "_render_and_select", _render)
     doc = await _create(None)
     rev = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={}), idempotency_key=key(),
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}), idempotency_key=key(),
         current_user=OWNER)
 
     out = await tx.submit(
