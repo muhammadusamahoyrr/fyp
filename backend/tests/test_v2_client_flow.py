@@ -114,7 +114,7 @@ async def test_generation_returns_a_revision_id_and_a_hash(enabled, monkeypatch)
     doc = await _document()
 
     rev = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={"a": 1}),
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Notice 1"}),
         idempotency_key=key(), current_user=CLIENT)
 
     assert rev["revision_id"]
@@ -127,7 +127,7 @@ async def test_the_document_points_at_the_new_revision(enabled, monkeypatch):
     await _fake_render(monkeypatch)
     doc = await _document()
     rev = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={}), idempotency_key=key(),
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}), idempotency_key=key(),
         current_user=CLIENT)
 
     detail = await v2api.get_document_v2(doc["id"], current_user=CLIENT)
@@ -148,10 +148,10 @@ async def test_a_retry_with_the_same_key_returns_the_same_revision(
     k = key()
 
     first = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={"a": 1}), idempotency_key=k,
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Notice 1"}), idempotency_key=k,
         current_user=CLIENT)
     second = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={"a": 1}), idempotency_key=k,
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Notice 1"}), idempotency_key=k,
         current_user=CLIENT)
 
     assert first["revision_id"] == second["revision_id"]
@@ -169,7 +169,7 @@ async def test_concurrent_retries_of_one_intent_make_one_revision(
     async def go():
         try:
             return await v2api.generate_revision_v2(
-                doc["id"], v2api.GenerateBody(fields={"a": 1}),
+                doc["id"], v2api.GenerateBody(fields={"notice_body": "Notice 1"}),
                 idempotency_key=k, current_user=CLIENT)
         except Exception as exc:
             return exc
@@ -188,10 +188,10 @@ async def test_a_new_key_makes_a_new_revision(enabled, monkeypatch):
     doc = await _document()
 
     first = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={"a": 1}), idempotency_key=key(),
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Notice 1"}), idempotency_key=key(),
         current_user=CLIENT)
     second = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={"a": 2}), idempotency_key=key(),
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Notice 2"}), idempotency_key=key(),
         current_user=CLIENT)
 
     assert first["revision_id"] != second["revision_id"]
@@ -205,12 +205,12 @@ async def test_the_older_revision_survives_a_regeneration(enabled, monkeypatch):
     await _fake_render(monkeypatch, b"%PDF-1.4 first")
     doc = await _document()
     old = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={"a": 1}), idempotency_key=key(),
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Notice 1"}), idempotency_key=key(),
         current_user=CLIENT)
 
     await _fake_render(monkeypatch, b"%PDF-1.4 second")
     new = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={"a": 2}), idempotency_key=key(),
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Notice 2"}), idempotency_key=key(),
         current_user=CLIENT)
 
     old_preview = await v2api.preview_revision_v2(
@@ -250,7 +250,7 @@ async def _generated_doc(monkeypatch):
     await _fake_render(monkeypatch)
     doc = await _document()
     rev = await v2api.generate_revision_v2(
-        doc["id"], v2api.GenerateBody(fields={}), idempotency_key=key(),
+        doc["id"], v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}), idempotency_key=key(),
         current_user=CLIENT)
     return doc["id"], rev
 
@@ -280,7 +280,7 @@ async def test_a_stale_pair_cannot_be_submitted(enabled, monkeypatch, kyc_lawyer
     doc_id, first = await _generated_doc(monkeypatch)
     await _fake_render(monkeypatch, b"%PDF-1.4 regenerated")
     await v2api.generate_revision_v2(
-        doc_id, v2api.GenerateBody(fields={"changed": True}),
+        doc_id, v2api.GenerateBody(fields={"notice_body": "Changed notice"}),
         idempotency_key=key(), current_user=CLIENT)
 
     with pytest.raises(ConflictError):
@@ -343,7 +343,7 @@ async def test_the_same_submit_key_with_a_different_body_is_refused(
 async def test_a_missing_key_is_422_with_a_code(enabled):
     with pytest.raises(HTTPException) as caught:
         await v2api.generate_revision_v2(
-            "doc-1", v2api.GenerateBody(fields={}),
+            "doc-1", v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}),
             idempotency_key=None, current_user=CLIENT)
     assert caught.value.status_code == 422
     assert caught.value.detail["code"] == "missing_idempotency_key"
@@ -352,7 +352,7 @@ async def test_a_missing_key_is_422_with_a_code(enabled):
 async def test_a_malformed_key_is_422_with_a_code(enabled):
     with pytest.raises(HTTPException) as caught:
         await v2api.generate_revision_v2(
-            "doc-1", v2api.GenerateBody(fields={}),
+            "doc-1", v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}),
             idempotency_key="not a valid key!!", current_user=CLIENT)
     assert caught.value.status_code == 422
     assert caught.value.detail["code"] == "invalid_idempotency_key"
@@ -364,7 +364,7 @@ async def test_a_conflict_is_409_with_a_code(enabled, monkeypatch, kyc_lawyer):
     doc_id, first = await _generated_doc(monkeypatch)
     await _fake_render(monkeypatch, b"%PDF-1.4 regenerated")
     await v2api.generate_revision_v2(
-        doc_id, v2api.GenerateBody(fields={"x": 1}), idempotency_key=key(),
+        doc_id, v2api.GenerateBody(fields={"notice_body": "Notice 1"}), idempotency_key=key(),
         current_user=CLIENT)
 
     with pytest.raises(HTTPException) as caught:
@@ -417,7 +417,7 @@ async def test_generate_and_submit_are_invisible_while_the_flag_is_off(
         monkeypatch):
     monkeypatch.setattr(settings, "documents_v2", False)
     for coro in (
-        v2api.generate_revision_v2("d1", v2api.GenerateBody(fields={}),
+        v2api.generate_revision_v2("d1", v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}),
                                    idempotency_key=key(), current_user=CLIENT),
         v2api.submit_document(
             "d1", v2api.SubmitBody(expected_version=1, expected_pdf_sha256="x",

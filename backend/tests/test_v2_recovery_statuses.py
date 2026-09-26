@@ -136,7 +136,7 @@ async def test_the_owner_can_regenerate_and_resubmit(
     doc_id = await _doc_in(status)
 
     rev = await v2api.generate_revision_v2(
-        doc_id, v2api.GenerateBody(fields={"a": 1}),
+        doc_id, v2api.GenerateBody(fields={"notice_body": "Notice 1"}),
         idempotency_key=key(), current_user=CLIENT)
 
     out = await tx.submit(
@@ -158,7 +158,7 @@ async def test_the_lawyer_can_then_act_on_it(
     await _fake_render(monkeypatch)
     doc_id = await _doc_in(status)
     rev = await v2api.generate_revision_v2(
-        doc_id, v2api.GenerateBody(fields={}), idempotency_key=key(),
+        doc_id, v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}), idempotency_key=key(),
         current_user=CLIENT)
     await tx.submit(document_id=doc_id, actor_id=CLIENT["_id"],
                     expected_version=rev["version"],
@@ -187,7 +187,7 @@ async def test_an_unsupported_status_still_cannot_submit(
     await _fake_render(monkeypatch)
     doc_id = await _doc_in(mig.STATUS_NEEDS_REAPPROVAL)
     rev = await v2api.generate_revision_v2(
-        doc_id, v2api.GenerateBody(fields={}), idempotency_key=key(),
+        doc_id, v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}), idempotency_key=key(),
         current_user=CLIENT)
     await get_documents_col().update_one(
         {"_id": doc_id}, {"$set": {"review_status": "escalated"}})
