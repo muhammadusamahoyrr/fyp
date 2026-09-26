@@ -7,7 +7,9 @@ import nh3
 
 from app.core.claims import GENERATION_SCOPE
 from app.core.constants import DocumentTemplate
-from app.core.exceptions import AppValidationError, ForbiddenError, NotFoundError
+from app.core.exceptions import (
+    AppValidationError, ConflictError, ForbiddenError, NotFoundError,
+)
 from app.repositories.case_repo import CaseRepository
 from app.repositories.document_repo import DocumentRepository
 from app.repositories.draft_repo import DraftRepository
@@ -626,6 +628,10 @@ async def submit_for_review(
         raise NotFoundError("Document")
     if doc.get("client_id") != client_id:
         raise ForbiddenError("Document does not belong to you")
+    # Not a V2 document: a MIGRATED one keeps its legacy `status`, so the check
+    # below would pass it, and this submission binds no revision or hash.
+    if _is_v2(doc):
+        raise ConflictError(_SERVED_BY_V2)
     if doc.get("status") != "generated":
         raise AppValidationError("Generate the document PDF before submitting it for review")
     if doc.get("review_status") in ("submitted", "approved"):
@@ -696,6 +702,12 @@ async def review_document(
         raise NotFoundError("Document")
     if doc.get("submitted_to") != lawyer_id:
         raise ForbiddenError("This document was not submitted to you")
+    # NEVER a V2 document, flag on or off. This write binds no revision, checks
+    # no staleness and records no receipt: on a V2 row it would approve the
+    # CURRENT revision — possibly newer than the one submitted — outside the
+    # transition that guarantees otherwise. The rollback view is read-only.
+    if _is_v2(doc):
+        raise ConflictError(_SERVED_BY_V2)
     if doc.get("review_status") != "submitted":
         raise AppValidationError(
             f"Cannot review a document in '{doc.get('review_status')}' status"
@@ -734,7 +746,7 @@ async def review_queue(lawyer_id: str) -> list[dict]:
     from app.repositories.user_repo import UserRepository
     user_repo = UserRepository()
 
-    docs = await doc_repo.find_review_queue(lawyer_id)
+    docs = _legacy_rows(await doc_repo.find_review_queue(lawyer_id))
 
     client_ids = list({d.get("client_id") for d in docs if d.get("client_id")})
     case_ids = list({d.get("case_id") for d in docs if d.get("case_id")})
@@ -760,14 +772,51 @@ async def review_queue(lawyer_id: str) -> list[dict]:
     return out
 
 
-async def _compat(doc: dict) -> dict:
-    """Rollback-safety shim: while DOCUMENTS_V2 is off, a V2-native document is
-    served through the legacy-shaped view so it stays readable/downloadable. A
-    no-op for legacy documents and whenever the flag is on."""
+# ── The legacy routes and V2 documents ────────────────────────────────────────
+#
+# DECIDED (see docs/v2-activation-evidence/README.md, "Legacy endpoints"): the
+# legacy document routes are LEGACY-ONLY. A V2 document (schema_version 2 —
+# V2-native or migrated) is served by /documents/v2/*, whose access model is
+# per-revision: a reviewing lawyer sees only the revision put in front of them.
+#
+# Making these routes V2-compatible while the flag is on would re-open exactly
+# what V2 closed — the legacy detail, list and download serve "the current
+# document", so a reviewer could read a client's newer private draft through
+# them. So with the flag ON they fail closed on a V2 row: the detail and
+# download refuse it (409, after the existing access check, so existence is not
+# disclosed to a stranger), and the list and queue leave it out — V2 lists it.
+#
+# With the flag OFF (a rollback) they serve V2 rows READ-ONLY through `_compat`,
+# which was always the rollback contract. Legacy WRITES never touch a V2 row.
+
+_SERVED_BY_V2 = ("This document is served by the V2 document service "
+                 "(/documents/v2); the legacy route does not serve it.")
+
+
+def _is_v2(doc: dict | None) -> bool:
+    return (doc or {}).get("schema_version") == 2
+
+
+def _v2_on() -> bool:
     from app.core.config import settings
-    if not settings.documents_v2 and (doc or {}).get("schema_version") == 2:
-        return await legacy_view_of_v2_document(doc)
-    return doc
+    return bool(settings.documents_v2)
+
+
+async def _compat(doc: dict) -> dict:
+    """The legacy-route view of one row. A legacy row is returned as is. A V2
+    row is the legacy-shaped rollback view while the flag is OFF, and refused
+    while it is ON (see above)."""
+    if not _is_v2(doc):
+        return doc
+    if _v2_on():
+        raise ConflictError(_SERVED_BY_V2)
+    return await legacy_view_of_v2_document(doc)
+
+
+def _legacy_rows(docs: list[dict]) -> list[dict]:
+    """A legacy LISTING with the flag on lists legacy rows only; V2 rows are
+    listed by the V2 routes. With it off, every row is kept (rollback view)."""
+    return [d for d in docs if not _is_v2(d)] if _v2_on() else docs
 
 
 async def get_document(doc_id: str, requester_id: str, role: str = "client") -> dict:
@@ -803,7 +852,7 @@ async def list_documents(case_id: str, requester_id: str, role: str = "client") 
     # Every row through the same shim as a single read. Without it a V2-native
     # row reached `DocumentOut` with no `status` and failed validation — one
     # such document broke the whole case listing after a rollback.
-    return [await _compat(d) for d in docs]
+    return [await _compat(d) for d in _legacy_rows(docs)]
 
 
 # ── DOCUMENTS_V2 compatibility reader ─────────────────────────────────────────
@@ -813,7 +862,8 @@ async def list_documents(case_id: str, requester_id: str, role: str = "client") 
 # able to serve these documents READ-ONLY, or a rollback would strand them.
 #
 # Wired through `_compat` into get_document (and so the legacy download),
-# list_documents and review_queue. Active only while the flag is OFF.
+# list_documents and review_queue. Active only while the flag is OFF; with it
+# ON those routes refuse or omit V2 rows (see "The legacy routes" above).
 
 async def legacy_view_of_v2_document(doc: dict) -> dict:
     """Project a V2-native document into the legacy-shaped view.

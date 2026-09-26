@@ -13,7 +13,7 @@
 | Apply | **19/19 applied, 0 failed, 0 drifted, reconciles** |
 | Post-migration verification | done — see [`post-migration-verification.md`](./post-migration-verification.md) |
 | Citation verification | done, and **persisted** to all 19 revisions — see [`citation-verification.md`](./citation-verification.md) |
-| `DOCUMENTS_V2` | **still `False`** — not authorised, and see the caveat in GO/NO-GO |
+| `DOCUMENTS_V2` | **still `False`**. The citation-evidence caveat is **decided** (GO/NO-GO → *Decision*); the flag still waits on the credential clean-up |
 
 Much of §1–§6 below was written *before* any of that, when the pack was held at
 target identification. Those sections are kept as the record of what was
@@ -382,8 +382,9 @@ actually followed.
 
 ### What is actually left
 
-1. **`DOCUMENTS_V2` is still `False`, and enabling it is not yet advisable.**
-   See the caveat below.
+1. **`DOCUMENTS_V2` is still `False`.** The citation-evidence caveat below is
+   now **decided** (see *Decision* under it). What still stands between here
+   and the flag is item 2.
 2. **Rotate or delete `v2_survey`**, and remove the `dbAdmin` credential used
    for the apply. The `v2_survey` password was disclosed in a chat transcript.
 3. **Two orphan V2 artifacts** from the 2026-09-04 probe sit unreferenced in
@@ -415,6 +416,60 @@ records say so honestly, and "unavailable" is never rendered as "clean". But it
 should be a decision taken with the number in front of you rather than
 discovered afterwards. Full detail and the limits of what an existence-checker
 can ever establish: [`citation-verification.md`](./citation-verification.md).
+
+### Decision — citation evidence (2026-09-26)
+
+**Accepted: the 19 documents may be surfaced with the evidence they have.**
+The records are stored truthfully, and the question was never whether the
+citations are sound — an existence-checker cannot establish that for any
+document, V1 or V2 — but whether the product *says* what was and was not found.
+
+That premise was **checked against the screens, and it did not hold** on one of
+them. The client's "Citation check" badge fell through to a green
+**"✓ 0 found"** for a draft citing no checkable authority (12 of the 15) and for
+one citing only statutes outside the corpus (2 of the 15). Fourteen of the
+fifteen documents without positive evidence would have read as verified to
+their owners — live on V1 today, not introduced by V2. The lawyer review panel
+was already honest.
+
+The acceptance is therefore **conditional on the fix that shipped with it**:
+every citation display that can show a pass now goes through one rule set
+(`frontend/src/lib/draftVerification.js`):
+
+| Stored outcome | Shown as |
+|---|---|
+| every citation found | green — "N of N found in the corpus", *existence only* |
+| ran, nothing checkable cited | neutral — "No citations found to check" |
+| statute outside the corpus | amber — "… could not be checked" |
+| absent / repealed | red — named |
+| did not run (incl. the Urdu pleading) | amber — "Citations not checked" |
+
+Only the first is green. Pinned by `frontend/tests/mod_documents_dom.test.mjs`
+("client citation badge — …"), one case per estate outcome; against the old
+badge the three misleading cases fail. Not changed, and deliberately:
+the revision-history line says "Not verified" for any record without a
+`verdict`, which under-states the 4 verified revisions but never overstates.
+
+### Legacy endpoints (decided 2026-09-26)
+
+The legacy document routes are **legacy-only; deprecated for V2 documents**.
+A V2 document (schema_version 2 — native or migrated) is served by
+`/documents/v2/*`, whose reviewer sees only the revision put in front of them.
+Making the legacy routes V2-compatible with the flag on would re-open that —
+they serve "the current document" — so they fail closed instead:
+
+| Legacy route | V2 row, flag ON | V2 row, flag OFF (rollback) |
+|---|---|---|
+| `GET /documents/{id}`, `/download` | 409, after the access check | read-only rollback view |
+| `GET /documents/case/{id}`, `/review-queue` | row omitted (V2 lists it) | read-only rollback view |
+| `POST /{id}/submit`, `PATCH /{id}/review` | 409 | 409 |
+
+The writes refuse in both states: they bind no revision, check no staleness and
+write no receipt, and before this a lawyer could approve a V2 document's
+*current* revision — possibly newer than the one submitted — through the legacy
+review route. No frontend path calls these routes for a V2 row (verified by
+search); they remain for legacy rows and rollback. Pinned by
+`backend/tests/test_legacy_routes_v2_on.py`.
 
 ### The proportionality point
 
@@ -470,5 +525,8 @@ Not migration damage — the V2 suites call the real `generate_pdf`, which write
 to `{upload_root}/docs`. Fixed by an autouse fixture mirroring the database
 isolation already in place, and pinned by `tests/test_upload_isolation.py`.
 
-Nothing in this pack should be read as approval. No migration was run, no
-manifest was approved, and `DOCUMENTS_V2` remains `False`.
+Nothing in this pack should be read as approval to switch the flag. The
+migration was run (§6); the citation-evidence caveat and the legacy-endpoint
+question are decided above; `DOCUMENTS_V2` remains `False` until the
+credential clean-up in *What is actually left* is done and the flag is turned
+on deliberately.
