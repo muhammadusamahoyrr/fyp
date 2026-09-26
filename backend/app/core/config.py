@@ -56,6 +56,22 @@ class Settings(BaseSettings):
     # AES encryption for CNIC
     encryption_key: str
 
+    # AES-256-GCM for stored signatures. SEPARATE FROM `encryption_key` on
+    # purpose: that one is Fernet and protects CNICs, and one compromised key
+    # must not expose identity documents and signatures together. Empty here
+    # rather than required so an existing deployment still boots; the refusal
+    # happens where a signature would actually be stored, in
+    # `core/signature_crypto.py`, which never falls back to clear text.
+    signature_encryption_key: str = ""
+
+    # D6 send throttle, as a setting rather than a constant so a demo or a load
+    # test can raise it without editing the route. THE DEFAULT IS THE REAL
+    # POLICY -- 10 sends an hour -- and anything looser is a deliberate local
+    # override, not a new baseline. It bounds how many people one account can
+    # push a signature request at, which matters more now that D2 rule 3 no
+    # longer requires a case behind each one.
+    agreement_send_rate_limit: str = "10/hour"
+
     # LLM
     gemini_api_key: str = ""
     groq_api_key: str = ""

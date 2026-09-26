@@ -11,6 +11,7 @@ Test tiers (see pytest.ini markers):
 """
 from __future__ import annotations
 
+import base64
 import importlib
 import sys
 from pathlib import Path
@@ -24,6 +25,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 TEST_DB_SUFFIX = "_test"
+
+#: A throwaway AES-256 key for the suite. NOT a secret and not a fallback: the
+#: application refuses to store a signature when `SIGNATURE_ENCRYPTION_KEY` is
+#: unset, which is the behaviour we want in production and an obstacle in a test
+#: run that signs hundreds of agreements. Fixed rather than random so a failure
+#: is reproducible, and obviously disposable so nobody mistakes it for a real
+#: one. Set here, session-wide, because a per-test key would make a ciphertext
+#: written by one test undecryptable in the next.
+TEST_SIGNATURE_KEY = base64.b64encode(b"attorney-ai test signature key!!").decode()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _signature_encryption_key():
+    """Give the suite a signature key without touching the developer's `.env`."""
+    from app.core.config import settings
+
+    previous = getattr(settings, "signature_encryption_key", "")
+    settings.signature_encryption_key = TEST_SIGNATURE_KEY
+    yield
+    settings.signature_encryption_key = previous
 
 
 @pytest.fixture(autouse=True)

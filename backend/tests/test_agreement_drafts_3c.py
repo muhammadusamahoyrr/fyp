@@ -474,19 +474,31 @@ def test_the_send_route_is_the_only_rate_limited_one():
 # ── the parked wizard is untouched by any of this ───────────────────────────
 
 @pytest.mark.integration
-async def test_drafting_is_not_gated_by_the_parked_builder_flag(world):
+async def test_drafting_is_not_gated_by_the_parked_builder_flag(world, monkeypatch):
     from app.core.config import settings
 
-    assert settings.agreements_diy_builder_enabled is False
+    # PARKED IS SET HERE, NOT ASSUMED. These used to read whatever
+    # `.env` happened to say, so a developer who enabled the builder to
+    # try it locally got four failures describing a product decision
+    # rather than their config. A test about the parked state must put
+    # the system in it.
+    monkeypatch.setattr(settings, "agreements_diy_builder_enabled", False)
     d = await _draft(await _case())
     assert d["status"] == AgreementStatus.DRAFT.value
 
 
 @pytest.mark.integration
-async def test_the_client_wizard_stays_closed(world):
+async def test_the_client_wizard_stays_closed(world, monkeypatch):
+    from app.core.config import settings
     from app.core.exceptions import ForbiddenError
     from app.services import agreement_service
 
+    # PARKED IS SET HERE, NOT ASSUMED. These used to read whatever
+    # `.env` happened to say, so a developer who enabled the builder to
+    # try it locally got four failures describing a product decision
+    # rather than their config. A test about the parked state must put
+    # the system in it.
+    monkeypatch.setattr(settings, "agreements_diy_builder_enabled", False)
     case_id = await _case()
     with pytest.raises(ForbiddenError):
         await agreement_service.create_user_agreement(

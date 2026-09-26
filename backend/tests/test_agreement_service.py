@@ -105,14 +105,23 @@ def test_no_signatures_yet_has_no_classification():
 def test_an_unknown_method_degrades_instead_of_ranking_as_advanced():
     """A raw dict index would KeyError here; ranking it high would silently
     overstate the signature's legal weight. It must rank below every known
-    method and label itself unclassified."""
+    method and say it was not recognised.
+
+    Asserted against the constant rather than a literal: the labels became
+    neutral descriptions on 2026-09-23 (NR-47) and a test that pins their
+    wording breaks on the next honest rewording while proving nothing about
+    the ranking, which is what this test is actually for.
+    """
+    from app.services.agreement_service import _ETO_UNKNOWN_LABEL
+
     result = _derive_eto([
         _party("alice", SignatureMethod.CANVAS.value),
         _party("mystery", "some_future_method"),
     ])
 
-    assert result is not None
-    assert "Unclassified" in result
+    assert result == _ETO_UNKNOWN_LABEL
+    assert result != ETO_CLASSIFICATION[SignatureMethod.CANVAS], (
+        "an unrecognised method took the known method's label")
 
 
 def test_a_missing_method_does_not_raise():

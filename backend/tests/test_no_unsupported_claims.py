@@ -168,9 +168,55 @@ FORBIDDEN: tuple[tuple[str, re.Pattern[str], tuple[str, ...], str], ...] = (
         "aes_cipher_claim",
         re.compile(r"AES-?\s?(?:256|128)", re.IGNORECASE),
         ("frontend/src/", "backend/app/"),
-        "Signature data is stored as plaintext base64. No AES variant may be "
-        "named in a string a user reads. Implement Phase 4.2 first, then say "
-        "what is actually running.",
+        # NARROWED 2026-09-23, NOT RELAXED. The original rationale read
+        # "Signature data is stored as plaintext base64", and that is no longer
+        # true: `core/signature_crypto.py` encrypts every stored signature with
+        # AES-256-GCM, bound to its agreement and party. A cipher module cannot
+        # be forbidden from naming its own algorithm, so that ONE file is
+        # exempt -- it is implementation, not a string a user reads.
+        #
+        # EVERYTHING ELSE STAYS FORBIDDEN, and the frontend is untouched by this
+        # change. Encrypting the signature does not encrypt the agreement body,
+        # the audit log or anything else, so a blanket "AES-256 encrypted"
+        # banner would still overstate what runs. The only wording this earns is
+        # a specific one about signatures at rest.
+        "Signatures are encrypted (AES-256-GCM, `core/signature_crypto.py`), "
+        "but nothing else is: the body, the audit log and the party records are "
+        "stored in clear. A user-facing AES claim must therefore say WHAT is "
+        "encrypted -- 'Signatures encrypted at rest with AES-256-GCM' -- and "
+        "must not imply the agreement as a whole is. Add such wording to the "
+        "allowlist below with the string that makes it true.",
+    ),
+    (
+        "invitation_delivery_claim",
+        # "sent to <address>", "we emailed", "check your email/inbox" -- any
+        # phrasing that tells a user an invitation was DELIVERED.
+        re.compile(
+            r"(?:link|invitation|invite)[^.\n]{0,40}\bsent\s+to\b"
+            r"|\bwe\s+(?:have\s+)?(?:e-?mail|email)ed\b"
+            r"|\bcheck\s+(?:your|their)\s+(?:e-?mail|inbox)\b",
+            re.IGNORECASE),
+        ("frontend/src/components/client/ModAgreements.jsx",
+         "frontend/src/app/sign/",
+         "backend/app/services/agreement_service.py"),
+        # ADDED 2026-09-24, after exactly this shipped. The builder told the
+        # sender "One-time link sent to ali@example.pk" on the review step and
+        # "we can show the invitation was sent to that address" beside the
+        # email field. Neither was true at the time: there was no agreement
+        # sender at all. A user read those lines, sent the agreement, and
+        # waited for an email that no code path could produce.
+        #
+        # KEPT AFTER `send_agreement_invitation_email` WAS ADDED, because the
+        # reason changed rather than went away. Delivery is BEST EFFORT and
+        # deliberately not retried: SMTP may be unconfigured, or one send may
+        # fail, and either way the creator still holds the link. A static
+        # string cannot know which happened.
+        "Invitation email is best effort. Whether one was delivered is a "
+        "PER-RECIPIENT RESULT the server reports in `invitation_delivery` "
+        "({emailed, reason}); the UI must render that value rather than assert "
+        "delivery in fixed text. A hardcoded 'link sent to…' or 'check your "
+        "inbox' is a claim about a specific send that the string cannot see, "
+        "and it is wrong every time SMTP is down or unconfigured.",
     ),
     (
         "esignature_compliance_claim",
@@ -224,13 +270,41 @@ def test_the_allowlist_actually_matches_files():
     )
 
 
+#: Exact wordings a rule permits, because they are TRUE and specific.
+#:
+#: An allowlist rather than a weaker pattern, and exact substrings rather than a
+#: looser regex, so that approving one sentence never approves a family of them.
+#: A claim earns its place here by naming WHAT is protected: signatures are
+#: encrypted at rest, and the agreement body, the audit log and the party
+#: records are not. A banner saying merely "AES-256 encrypted" would still be
+#: an overstatement and is still refused.
+APPROVED_CLAIMS: dict[str, tuple[str, ...]] = {
+    "aes_cipher_claim": (
+        "Signature encrypted at rest with AES-256-GCM",
+    ),
+}
+
+
+#: Files a rule may not be applied to, because the file IMPLEMENTS the thing the
+#: rule guards. Deliberately exact paths, never prefixes: a directory exemption
+#: would grow to cover code nobody meant to exempt. Keyed by rule label so an
+#: exemption cannot silently widen to the other rules.
+IMPLEMENTATION_EXEMPT: dict[str, frozenset[str]] = {
+    # The cipher module names its own algorithm in its docstring, its
+    # ALGORITHM constant and its "key must be 32 bytes" error. Every one of
+    # those is true, and none is a string a user reads.
+    "aes_cipher_claim": frozenset({"backend/app/core/signature_crypto.py"}),
+}
+
+
 @pytest.mark.parametrize("label,pattern,paths,rationale",
                          FORBIDDEN, ids=[f[0] for f in FORBIDDEN])
 def test_no_unsupported_claim_reaches_a_user(label, pattern, paths, rationale):
+    exempt = IMPLEMENTATION_EXEMPT.get(label, frozenset())
     hits: list[str] = []
     for path in _scanned_files():
         rel = path.relative_to(REPO).as_posix()
-        if not rel.startswith(paths):
+        if not rel.startswith(paths) or rel in exempt:
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
@@ -238,8 +312,9 @@ def test_no_unsupported_claim_reaches_a_user(label, pattern, paths, rationale):
             continue
         # Comment SPANS are blanked, not whole lines: a comment may name a claim
         # in order to refuse it, but code sharing that line is still scanned.
+        approved = APPROVED_CLAIMS.get(label, ())
         for lineno, line in enumerate(_strip_comments(text, path.suffix), start=1):
-            if pattern.search(line):
+            if pattern.search(line) and not any(a in line for a in approved):
                 hits.append(f"  {rel}:{lineno}  {line.strip()[:90]}")
 
     assert not hits, (

@@ -681,6 +681,18 @@ async def _agreements_indexes() -> None:
         IndexModel([("created_by", ASCENDING), ("status", ASCENDING)]),
         # Paging is newest-first within a party's visible set.
         IndexModel([("parties.user_id", ASCENDING), ("created_at", DESCENDING)]),
+        # Step 4: an invited signer is found ONLY by the hash of their token,
+        # on a path that runs before any authentication. Without this, every
+        # invitation view and signature is a collection scan on the endpoint
+        # most worth making cheap to abuse.
+        #
+        # PARTIAL, on the hash being a string: the overwhelming majority of
+        # parties are registered users with no `invite` at all, and they have
+        # no business in this index.
+        IndexModel([("parties.invite.token_hash", ASCENDING)],
+                   name="agreement_invitation_token",
+                   partialFilterExpression={
+                       "parties.invite.token_hash": {"$type": "string"}}),
     ])
 
     # One row per executed-agreement PDF served (Gate 3E). Queried two ways:

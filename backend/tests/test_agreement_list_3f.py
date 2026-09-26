@@ -35,6 +35,7 @@ TYPED_SIGNATURE = "Lister Ahmed Khan, Advocate"
 LAWYER = "F3-LAWYER"
 CLIENT = "F3-CLIENT"
 STRANGER = "F3-STRANGER"
+FOURTH = "F3-FOURTH"
 
 
 @pytest.fixture
@@ -54,9 +55,14 @@ async def world(mongo_transactional):
          "email": "c@f3.test", "is_active": True},
         {"_id": STRANGER, "full_name": "Nobody", "role": "client",
          "email": "s@f3.test", "is_active": True},
+        # A FOURTH registered user, so the cap test below is refused by the CAP
+        # and not by "not a registered user" — which would pass for the wrong
+        # reason and keep passing if the cap were removed.
+        {"_id": FOURTH, "full_name": "One Too Many", "role": "client",
+         "email": "f@f3.test", "is_active": True},
     ])
     yield
-    ids = [LAWYER, CLIENT, STRANGER]
+    ids = [LAWYER, CLIENT, STRANGER, FOURTH]
     await get_users_col().delete_many({"_id": {"$in": ids}})
     await get_cases_col().delete_many({"client_id": CLIENT})
     await get_agreements_col().delete_many({"created_by": {"$in": ids}})
@@ -364,18 +370,31 @@ async def test_the_creator_listed_twice_is_still_refused(world):
 
 
 @pytest.mark.integration
-async def test_more_than_two_parties_is_still_refused(world):
-    """D2 rule 2, unchanged by 3F: a three-party agreement has no defined case
-    relationship, so it cannot be authorised, only guessed at."""
+async def test_the_party_cap_is_still_enforced(world):
+    """The cap moved from two to three on 2026-09-23 (the owner's reversal of
+    D2), so this no longer asserts "exactly two". It asserts there is STILL a
+    cap: a limit that quietly becomes unbounded is the failure worth catching,
+    not the specific number.
+
+    `parties=[CLIENT, STRANGER]` plus the creator is three, which is now the
+    maximum and is accepted; a fourth is refused.
+    """
     from app.core.exceptions import AppValidationError
     from app.services import agreement_service
 
     case_id = await _case()
+
+    ok = await agreement_service._create_agreement(
+        title="Retainer", body_html="Terms.",
+        parties=[CLIENT, STRANGER], creator_id=LAWYER, case_id=case_id)
+    assert len(ok["parties"]) == agreement_service.MAX_PARTIES == 3
+
     with pytest.raises(AppValidationError) as exc:
         await agreement_service._create_agreement(
             title="Retainer", body_html="Terms.",
-            parties=[CLIENT, STRANGER], creator_id=LAWYER, case_id=case_id)
-    assert "exactly two parties" in str(exc.value)
+            parties=[CLIENT, STRANGER, FOURTH], creator_id=LAWYER,
+            case_id=case_id)
+    assert "at most 3 parties" in str(exc.value)
 
 
 # ── the chores ──────────────────────────────────────────────────────────────

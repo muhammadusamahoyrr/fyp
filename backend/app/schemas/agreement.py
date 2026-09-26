@@ -1,13 +1,36 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.core.constants import SignatureMethod
 
 
 class PartyInput(BaseModel):
-    user_id: str
-    full_name: str | None = None  # resolved server-side from the users collection
+    """One party, named EITHER by account or by email address.
+
+    Exactly one of `user_id` and `email` is required. A registered user is
+    resolved server-side and gets the existing authorisation rules; an email
+    address gets an invitation token instead, and the system does NOT treat
+    that person's identity as verified.
+
+    `full_name` is accepted only for an external party, because there is no
+    account to read it from. For a registered user it is ignored and the name
+    comes from the users collection -- a caller-supplied name on somebody
+    else's signature is a claim about them that nobody checked.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str | None = None
+    email: EmailStr | None = None
+    full_name: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def exactly_one_identity(self):
+        if bool(self.user_id) == bool(self.email):
+            raise ValueError(
+                "name each party by EITHER user_id (a registered user) or "
+                "email (an external signer), not both and not neither")
+        return self
 
 
 # Bounds, for the same reason document drafting has _MAX_DRAFT_CONTENT and
@@ -46,6 +69,26 @@ class AgreementCreate(BaseModel):
     case_id: str | None = None
 
 
+class AgreementCreateAndSend(AgreementCreate):
+    """Create, sign as the creator, and send — one request, one transaction.
+
+    THE SIGNATURE IS PART OF THE REQUEST, and that is the whole point. The old
+    two-call flow created an unsigned agreement, notified the counterparties,
+    and left the creator's signature to a second call that might never arrive.
+    Carrying the signature here means there is no request that produces a sent
+    agreement without one.
+
+    `consent` is required to be True rather than merely present: a default of
+    False that nobody sets is an unconsented signature, and a default of True
+    is consent nobody gave.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    method: SignatureMethod
+    signature_data: str = Field(..., min_length=1, max_length=_MAX_SIGNATURE)
+    consent: bool
+
+
 class SignatureSubmit(BaseModel):
     method: SignatureMethod
     # base64 image or typed name string
@@ -69,12 +112,33 @@ class PartyOut(BaseModel):
     "STRICT (no extra)", which was never true and must not be made true: this
     model is validated FROM stored rows, and those rows do contain
     ``signature_data``. Forbidding extras would reject every real party and
-    turn a privacy note into a 500. Omitting the field is what drops it."""
-    user_id: str
+    turn a privacy note into a 500. Omitting the field is what drops it.
+
+    ``user_id`` IS OPTIONAL SINCE EXTERNAL SIGNERS EXIST. A party invited by
+    email has no account, so it carries ``email`` and ``party_id`` instead.
+    Callers that compare ``user_id`` to decide "is this me" must handle null --
+    the frontend does, and a null never equals a real id, so the comparison
+    fails closed.
+
+    ``external`` is stated rather than inferred, and ``identity_verified`` is
+    stated rather than assumed. For an invited signer the product checked an
+    invitation token and nothing else: it knows the invitation reached that
+    address, not who typed the signature. A consumer of this model must be able
+    to see that difference without knowing how invitations work.
+
+    The invitation TOKEN never appears here. Only its hash is stored, and even
+    that is not serialised: a party list that carried signing credentials for
+    the other parties would hand every signer the others' authority."""
+    user_id: str | None = None
+    party_id: str | None = None
+    email: str | None = None
+    external: bool = False
+    identity_verified: bool = False
     full_name: str | None = None
     signed: bool = False
     signed_at: datetime | None = None
     signature_method: str | None = None
+    invitation_status: str | None = None
 
 
 class AgreementOut(BaseModel):
@@ -104,6 +168,90 @@ class AgreementOut(BaseModel):
     version: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Step 5: DERIVED, never stored. "Partially signed" is a fact about the
+    # parties; storing it would let two places disagree about one agreement.
+    # The statuses stay draft -> pending -> executed | cancelled.
+    signed_count: int | None = None
+    total_parties: int | None = None
+    partially_signed: bool | None = None
+    expires_at: datetime | None = None
+
+
+class InvitationDelivery(BaseModel):
+    """Whether one invitation email actually went out.
+
+    A separate model rather than a bare bool because "not emailed" has two
+    causes the sender must act on differently: SMTP is not configured at all
+    (nothing will ever be emailed until an operator fixes it), or this one send
+    failed (worth retrying, or just pass the link on). Collapsing them to False
+    would leave the UI saying "share this link" without saying why.
+    """
+    emailed: bool = False
+    #: `email_not_configured` | `delivery_failed` | null when delivered.
+    #: A stable code, never the SMTP error text -- that carries the recipient
+    #: address and host details, and this reaches a browser.
+    reason: str | None = None
+
+
+class AccountNotification(BaseModel):
+    """How a REGISTERED party was told about an agreement.
+
+    Both channels, reported separately. `in_app` is the durable record (an
+    outbox event, parked in the same transaction as the agreement); `emailed`
+    is a best-effort nudge that can fail without anything else being wrong.
+    Collapsing them into one flag would make a failed email look like the
+    person was never told.
+
+    `was_invited_by_email` marks somebody whose address the sender typed into
+    the invite-by-email field. They have an account, so they became a
+    registered party -- this flag is what lets the UI explain that, instead of
+    leaving the sender waiting for an invitation link that was never going to
+    be issued.
+    """
+    user_id: str
+    email: str | None = None
+    full_name: str | None = None
+    in_app: bool = True
+    emailed: bool = False
+    #: `email_not_configured` | `delivery_failed` | `no_email_on_file` | null
+    reason: str | None = None
+    was_invited_by_email: bool = False
+
+
+class AgreementCreated(AgreementOut):
+    """The create-and-send response, which is the ONLY place a raw invitation
+    token is ever returned.
+
+    An invited signer has no account and no inbox we control: the product
+    stores only the HASH of their token, so this response is the single moment
+    the token exists in readable form. The creator gets it here to pass on, and
+    after that nobody -- including this server -- can produce it again. A
+    forgotten link means issuing a new invitation, which is the correct
+    outcome: a link that could be recovered from storage would be a link a
+    database leak also recovers.
+
+    The field is named for what it is so that a caller cannot log or persist it
+    by accident and call it an id. It is absent when no party was invited by
+    email.
+
+    ``invitation_delivery`` says, per ``party_id``, whether the invitation email
+    actually went out. It exists because delivery is BEST EFFORT: SMTP may be
+    unconfigured, or a send may fail, and in either case the creator still holds
+    the link and must be told to pass it on rather than shown a success they did
+    not get. ``reason`` is a stable code (``email_not_configured`` or
+    ``delivery_failed``), never an SMTP message -- those carry addresses and
+    host details and this object reaches a browser.
+    """
+    invitation_tokens_do_not_store: dict[str, str] | None = None
+    invitation_delivery: dict[str, InvitationDelivery] | None = None
+    #: Addresses that were invited by email but turned out to have accounts.
+    #: They are notified in the app instead, which is correct -- see
+    #: `_resolve_parties` -- but the sender has to be told, or they wait for an
+    #: email that was never going to be sent.
+    #: Every registered party besides the creator, with how each was told.
+    #: Replaces the short-lived `notified_in_app`, which reported the same
+    #: conversion but could not say whether the email went out.
+    account_notifications: list[AccountNotification] | None = None
 
 
 # ── Gate 3F: the list is not the document ────────────────────────────────────
@@ -127,6 +275,9 @@ class AgreementListItem(BaseModel):
     title: str | None = None
     status: str | None = None
     case_id: str | None = None
+    signed_count: int | None = None
+    total_parties: int | None = None
+    partially_signed: bool | None = None
     engagement_id: str | None = None
     created_by: str | None = None
     version: int | None = None
@@ -181,6 +332,24 @@ class DraftSignAndSend(BaseModel):
 
     expected_version: int = Field(..., ge=1)
     expected_body_sha256: str = Field(..., min_length=64, max_length=64)
+    method: SignatureMethod
+    signature_data: str = Field(..., min_length=1, max_length=_MAX_SIGNATURE)
+    consent: bool
+
+
+# ── Step 4: invited signers ──────────────────────────────────────────────────
+
+class InvitationToken(BaseModel):
+    """A signing invitation, presented in the BODY so it stays out of URLs,
+    logs and referrer headers."""
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(..., min_length=20, max_length=200)
+
+
+class InvitationSign(InvitationToken):
+    """An invited signer signing their own slot. `consent` is explicit for the
+    same reason it is on `AgreementCreateAndSend`."""
     method: SignatureMethod
     signature_data: str = Field(..., min_length=1, max_length=_MAX_SIGNATURE)
     consent: bool

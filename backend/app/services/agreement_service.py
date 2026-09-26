@@ -1,10 +1,13 @@
+import base64
 import hashlib
+import hmac
 import logging
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
+from app.core.signature_crypto import encrypt_signature
 from app.core.constants import (
     AgreementStatus,
     CaseStatus,
@@ -28,10 +31,28 @@ logger = logging.getLogger(__name__)
 agreement_repo = AgreementRepository()
 user_repo = UserRepository()
 
+# NEUTRAL TECHNICAL DESCRIPTIONS, NOT LEGAL CLASSIFICATIONS.
+#
+# These read "Advanced Electronic Signature (ETO 2002 S.2(d)(i))" for a canvas
+# drawing until 2026-09-23, and that string was rendered to the client
+# (`ModAgreements.jsx:1365`). Two independent reviews said the same thing: the
+# ETO 2002 advanced tier depends on an accreditation certificate from a licensed
+# Certification Service Provider, which this product does not have and is not
+# integrated with, so the label asserted something untrue about a real person's
+# signature.
+#
+# What replaces it states only what the system actually observed. A description
+# of HOW someone signed cannot be wrong in the way a tier claim can. The legal
+# characterisation is not corrected here, it is REMOVED — restoring one needs
+# counsel-approved wording (NR-47), and none has been given.
+#
+# The key and the stored field keep the name `eto_classification` deliberately:
+# renaming them is a schema change that would orphan the values already written
+# on existing rows. See AGREEMENTS_REMEDIATION_PLAN.md §4.1.
 ETO_CLASSIFICATION = {
-    SignatureMethod.CANVAS: "Advanced Electronic Signature (ETO 2002 S.2(d)(i))",
-    SignatureMethod.TYPED: "Basic Electronic Signature (ETO 2002)",
-    SignatureMethod.IMAGE_UPLOAD: "Basic Electronic Signature (ETO 2002)",
+    SignatureMethod.CANVAS: "Signature drawn in browser",
+    SignatureMethod.TYPED: "Typed name",
+    SignatureMethod.IMAGE_UPLOAD: "Uploaded signature image",
 }
 
 # Strength order, weakest first. The agreement as a whole is only as strong as
@@ -49,7 +70,7 @@ _ETO_RANK = {
 # "unknown" instead of silently ranking as Advanced — the safe direction for a
 # value that characterises a signature's legal weight.
 _ETO_RANK_UNKNOWN = -1
-_ETO_UNKNOWN_LABEL = "Unclassified electronic signature — verify against ETO 2002"
+_ETO_UNKNOWN_LABEL = "Signature method not recognised"
 
 
 def _derive_eto(parties: list[dict]) -> str:
@@ -71,6 +92,18 @@ def _derive_eto(parties: list[dict]) -> str:
 # Sentinel written into the withdrawn agreement templates by the frontend
 # (ModAgreements.jsx UNREVIEWED_MARKER). ASCII only and no em-dash on purpose:
 # it crosses a language boundary and is compared byte-for-byte.
+#: How many parties one agreement may carry.
+#
+#: WAS TWO, BY DECISION D2. The owner reversed that on 2026-09-23 to support the
+#: three-party agreements the builder UI already offered. Three, not "many":
+#: every party is a signature the document waits for, and each one added is
+#: another person who must be authorised, notified and tracked. A cap that grows
+#: without a reason to grow is how a two-party guarantee quietly becomes none.
+#:
+#: See AGREEMENTS_PRODUCT_PLAN.md for the recorded reversal of D2.
+MAX_PARTIES = 3
+
+# Sentinel written into the withdrawn agreement templates by the frontend
 UNREVIEWED_TEMPLATE_MARKER = "[UNREVIEWED SAMPLE - NOT LEGAL CONTENT]"
 
 _UNREVIEWED_REFUSAL = (
@@ -336,10 +369,31 @@ async def _authorise_case_link(case_id: str, creator_id: str,
             "You are not a party to this case, so you cannot attach an "
             "agreement to it."
         )
-    outsiders = [p for p in party_ids if p not in on_case]
-    if outsiders:
+
+    # THE RULE CHANGED ON 2026-09-23, AND IT WAS NOT WEAKENED.
+    #
+    # It used to be "every party must be on the case", which made a third party
+    # impossible: a case has exactly a client and a lawyer, so any third
+    # signatory was refused by construction.
+    #
+    # What replaces it keeps the property that mattered. The old rule stopped a
+    # case being used as a pretext to push a signature request at a stranger,
+    # and it did that by requiring the OTHER side of the case to be present.
+    # That requirement stays: you cannot attach an agreement to a case and then
+    # name anyone except your actual counterparty on it. What is now allowed is
+    # ADDITIONAL parties beyond those two -- an invitee, vouched for by a
+    # creator who is themselves on the case, up to `MAX_PARTIES`.
+    #
+    # So the reachability is unchanged for two-party agreements, and a third
+    # party is reachable only by someone with a real case and their real
+    # counterparty already on the document. It is not an open channel to any
+    # registered user (defect B3), because the counterparty cannot be omitted.
+    counterparties_on_case = on_case - {creator_id}
+    missing_counterparty = counterparties_on_case - set(party_ids)
+    if missing_counterparty:
         raise ForbiddenError(
-            "Every party must be on the case this agreement is attached to."
+            "The other party to this case must be on an agreement attached to "
+            "it. You may add a further party, but not replace them."
         )
     return case
 
@@ -498,6 +552,38 @@ async def update_draft(*, agreement_id: str, creator_id: str,
     return await col.find_one({"_id": agreement_id})
 
 
+async def set_archived(*, agreement_id: str, user_id: str,
+                       archived: bool) -> dict:
+    """Remove an agreement from ONE person's list, or put it back.
+
+    NOT A DELETE, AND DELIBERATELY NOT. `delete_draft` will remove an unsent
+    draft and refuses anything else, because "a sent agreement is somebody
+    else's record too". That reasoning does not stop being true when the
+    request comes from a list screen: a signed instrument is evidence, and the
+    counterparty holds their own view of it.
+
+    So this writes the caller's id into `archived_by` and nothing else. The
+    document, its signatures and its audit log are untouched, every other
+    party's list is unaffected, and the person who archived it can find it
+    again under the archived filter. Reversible by construction.
+    """
+    agreement = await agreement_repo.find_by_id(agreement_id)
+    if not agreement:
+        raise NotFoundError("Agreement")
+
+    # The same test as reading it: you may hide what you can see.
+    party_ids = {p.get("user_id") for p in agreement.get("parties", [])}
+    if user_id not in party_ids and agreement.get("created_by") != user_id:
+        raise ForbiddenError("Access denied to this agreement")
+
+    op = "$addToSet" if archived else "$pull"
+    await get_agreements_col().update_one(
+        {"_id": agreement_id},
+        {op: {"archived_by": user_id},
+         "$set": {"updated_at": datetime.now(timezone.utc)}})
+    return await get_agreement(agreement_id, user_id)
+
+
 async def delete_draft(*, agreement_id: str, creator_id: str) -> None:
     """Remove an unsent draft. Frees a slot against the D7 cap.
 
@@ -627,7 +713,13 @@ async def sign_and_send_draft(*, agreement_id: str, creator_id: str,
                 "parties.$.signed": True,
                 "parties.$.signed_at": now,
                 "parties.$.signature_method": method,
-                "parties.$.signature_data": signature_data,
+                # AES-256-GCM, bound to this agreement and this signer. The
+                # fingerprint above still hashes the PLAINTEXT: that is
+                # integrity for idempotency, and it is not what keeps the
+                # signature confidential.
+                "parties.$.signature_data": encrypt_signature(
+                    signature_data, agreement_id=agreement_id,
+                    party_ref=creator_id),
                 "parties.$.eto_classification": eto,
                 "parties.$.consent_at": now,
                 "eto_classification": eto,
@@ -678,8 +770,11 @@ async def sign_and_send_draft(*, agreement_id: str, creator_id: str,
 
 
 def _creator_name(agreement: dict, creator_id: str) -> str:
+    # .get, not ["user_id"]: an external party carries that key as None today,
+    # but a subscript here would turn any future party shape without it into a
+    # KeyError inside a notification body.
     return next((p.get("full_name") for p in agreement.get("parties", [])
-                 if p["user_id"] == creator_id), "A lawyer")
+                 if p.get("user_id") == creator_id), "A lawyer")
 
 
 async def _replay_or_conflict(agreement, token, receipts, *, agreement_id,
@@ -778,6 +873,501 @@ async def create_user_agreement(
     )
 
 
+def _send_fingerprint(*, title: str, body_sha256: str, parties: list[str],
+                      case_id: str | None, signature_data: str,
+                      consent: bool) -> str:
+    """Canonical fingerprint of a create-and-send request.
+
+    The same idea as `_draft_fingerprint`, for a request that has no draft to
+    name yet: it binds everything that decides WHAT is being sent, so a retry
+    carrying the same key but a different payload is a conflict rather than a
+    silent alias. The signature is hashed rather than carried.
+    """
+    from app.services import document_transitions as tx
+
+    return tx.canonical_body_hash({
+        "title": title,
+        "body_sha256": body_sha256,
+        "parties": sorted(parties),
+        "case_id": case_id,
+        "signature_sha256": hashlib.sha256(
+            (signature_data or "").encode("utf-8")).hexdigest(),
+        "consent": bool(consent),
+    })
+
+
+def _idempotent_agreement_id(creator_id: str, idempotency_key: str) -> str:
+    """A stable, UNGUESSABLE id for one create-and-send request.
+
+    WHY DERIVE THE ID AT ALL. Every other idempotent operation in this module
+    writes its receipt onto a row that already exists. A create has no row yet,
+    so the retry has nothing to read -- and two racing requests would both
+    insert. Deriving `_id` from the request makes the DATABASE the arbiter:
+    the second insert collides on the primary key and loses, which is the same
+    mechanism the appointment slot indexes use.
+
+    WHY HMAC AND NOT A PLAIN HASH. The idempotency key comes from the client. A
+    plain digest of it would make every agreement id computable by anyone who
+    could guess a key, which is id enumeration with extra steps. HMAC under the
+    server secret keeps the id stable for the caller and unguessable to
+    everyone else.
+    """
+    mac = hmac.new(
+        settings.secret_key.encode("utf-8"),
+        f"agreement-create|{creator_id}|{idempotency_key}".encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(mac[:16]).rstrip(b"=").decode("ascii")
+
+
+async def create_and_send_agreement(
+    *,
+    title: str,
+    body_html: str,
+    parties: list[dict],
+    creator_id: str,
+    method: str,
+    signature_data: str,
+    consent: bool,
+    idempotency_key: str,
+    case_id: str | None = None,
+    ip_address: str | None = None,
+    ip_verifiable: bool = False,
+) -> dict:
+    """Create, sign as the creator, and send -- ONE transaction, or nothing.
+
+    WHAT THIS REPLACES. `create_user_agreement` inserted an agreement with
+    EVERY party unsigned and notified the counterparties immediately, outside
+    any transaction; the creator then signed in a second request. Between those
+    two calls the counterparty had been told to sign a document its sender had
+    not signed, and if the second call never came they were left holding it. The
+    builder UI papered over the gap by showing "SIGNED" as soon as the first
+    call returned -- a frontend assumption about a state the backend had not
+    reached.
+
+    Here the creator's signature is part of the same write that makes the
+    agreement visible. There is no moment at which a recipient can see an
+    agreement its sender has not signed, because the row does not exist until
+    both are true.
+
+    NOTIFICATIONS ARE PARKED IN THE TRANSACTION, not sent from it. The outbox
+    row commits with the agreement or not at all, and the relay delivers after.
+    A notification cannot precede the state it describes.
+
+    IDEMPOTENT ON `_id`. See `_idempotent_agreement_id`. A retry with the same
+    key and the same payload returns the original agreement; the same key with a
+    DIFFERENT payload is a conflict, because it is two different documents
+    asking to be the same one.
+    """
+    if not settings.agreements_diy_builder_enabled:
+        raise ForbiddenError(_DIY_PARKED)
+
+    # Validation first, outside the transaction: a refusal here has nothing to
+    # roll back, and doing it inside would hold a transaction open across
+    # several reads for requests that were never going to succeed.
+    party_ids, user_map, external_specs, resolved_to_accounts = \
+        await _resolve_parties(parties, creator_id)
+    # A CASE IS AN OPTIONAL RELATIONSHIP, NOT A PREREQUISITE.
+    #
+    # Product decision, 2026-09-25: an agreement is an independent legal object.
+    # Its required part is the signers; a case is a link it may or may not have.
+    # This path used to refuse outright without one, which made the builder
+    # unusable by construction -- it has no case picker, so every send was a
+    # guaranteed 403.
+    #
+    # WHAT THIS GIVES UP, STATED PLAINLY. The case requirement was D2's defence
+    # against cold outreach: it meant you could only ask for a signature from
+    # someone you already had a matter with. Without it, an authenticated user
+    # can send a signature request to any address. What still bounds that is the
+    # send rate limit (D6, 10/hour), authentication, and the invitation email
+    # saying that an unexpected request can simply be ignored. If abuse becomes
+    # real, the next control is a report path on the signing page, not
+    # reinstating a rule the product has decided against.
+    #
+    # WHEN A CASE IS GIVEN, NOTHING IS RELAXED. `_authorise_case_link` still
+    # requires the creator to be on it and still refuses to let the case's own
+    # counterparty be replaced. Attaching a case you are not part of, or using
+    # one as a pretext to name somebody else, is refused exactly as before.
+    if case_id:
+        await _authorise_case_link(case_id, creator_id, party_ids)
+    if is_unreviewed_template(body_html):
+        raise AppValidationError(_UNREVIEWED_REFUSAL)
+    if not consent:
+        raise AppValidationError(
+            "Signing requires explicit consent to sign electronically."
+        )
+    if method not in {m.value for m in SignatureMethod}:
+        raise AppValidationError("Unknown signature method.")
+
+    body = normalise_body(body_html)
+    digest = body_digest(body)
+    agreement_id = _idempotent_agreement_id(creator_id, idempotency_key)
+    fingerprint = _send_fingerprint(
+        title=title, body_sha256=digest,
+        parties=party_ids + [f"email:{e['email'].strip().lower()}"
+                             for e in external_specs],
+        case_id=case_id,
+        signature_data=signature_data, consent=consent)
+
+    from app.services import document_transitions as tx
+    token = tx._receipt_key(idempotency_key)
+
+    # A completed earlier attempt, before doing any work.
+    existing = await agreement_repo.find_by_id(agreement_id)
+    if existing:
+        return _replayed_or_conflict(existing, token, fingerprint)
+
+    eto = ETO_CLASSIFICATION[SignatureMethod(method)]
+    now = datetime.now(timezone.utc)
+    creator_name = user_map.get(creator_id, {}).get("full_name", "A user")
+
+    def _party(uid: str) -> dict:
+        signing = uid == creator_id
+        return {
+            "user_id": uid,
+            "full_name": user_map[uid].get("full_name", ""),
+            "signed": signing,
+            "signed_at": now if signing else None,
+            "signature_method": method if signing else None,
+            # Encrypted, bound to this agreement and this party. Only the
+            # creator has signed at this point; every other slot is empty.
+            "signature_data": encrypt_signature(
+                signature_data, agreement_id=agreement_id, party_ref=uid
+            ) if signing else None,
+            "eto_classification": eto if signing else None,
+            "consent_at": now if signing else None,
+        }
+
+    # THE TOKENS LIVE ONLY IN THIS VARIABLE. They are returned to the creator
+    # once, so an invitation can be delivered, and never written to the row --
+    # the row keeps their hashes. Nothing logs them.
+    _invitation_tokens: dict[str, str] = {}
+    external_parties = []
+    for spec in external_specs:
+        record, raw_token = _external_party(spec, now=now)
+        _invitation_tokens[record["party_id"]] = raw_token
+        external_parties.append(record)
+
+    doc = {
+        "_id": agreement_id,
+        "title": title,
+        "body_html": body,
+        "body_format": BODY_FORMAT_PLAIN_TEXT,
+        "body_sha256": digest,
+        "eto_classification": eto,
+        "case_id": case_id,
+        "engagement_id": None,
+        "parties": [_party(uid) for uid in party_ids] + external_parties,
+        "status": AgreementStatus.PENDING.value,
+        "sent_at": now,
+        "expires_at": now + timedelta(days=AGREEMENT_TTL_DAYS),
+        "audit_log": [
+            {"action": "created", "actor_id": creator_id, "timestamp": now,
+             "ip_address": ip_address if ip_verifiable else None,
+             "body_sha256": digest},
+            {"action": "sent", "actor_id": creator_id, "timestamp": now,
+             "ip_address": ip_address if ip_verifiable else None,
+             "note": eto, "consent": True, "body_sha256": digest},
+        ],
+        "idempotency_receipts": {token: {"fingerprint": fingerprint, "at": now}},
+        "created_by": creator_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    async def _txn(session):
+        from app.db.collections import get_agreements_col
+        from app.services import event_outbox
+
+        await get_agreements_col().insert_one(doc, session=session)
+        for uid in party_ids:
+            if uid == creator_id:
+                continue
+            logical_id = f"agreement:{agreement_id}:sent:{uid}"
+            await event_outbox.park_in_transaction(
+                session, logical_id, "notifications",
+                {
+                    "logical_event_id": logical_id,
+                    "recipient_id": uid,
+                    "ntype": NotificationType.AGREEMENT_CREATED.value,
+                    "title": "Agreement awaiting your signature",
+                    "body": (f"{creator_name} sent you \"{title}\" to sign. "
+                             "Open the Agreements page to review and sign."),
+                    "data": {"agreement_id": agreement_id, "case_id": case_id},
+                },
+            )
+        # An invited address has no account to notify. What IS recorded is that
+        # an invitation was created for that address -- the fact the product can
+        # stand behind. Delivery itself is the caller's to arrange with the
+        # token returned below.
+        if external_parties:
+            await get_agreements_col().update_one(
+                {"_id": agreement_id},
+                {"$push": {"audit_log": {"$each": [
+                    {"action": "invitation_created", "actor_id": creator_id,
+                     "timestamp": now, "ip_address": None,
+                     "party_id": p["party_id"], "invited_address": p["email"],
+                     "expires_at": p["invite"]["expires_at"]}
+                    for p in external_parties
+                ]}}},
+                session=session,
+            )
+
+    from pymongo.errors import DuplicateKeyError
+    try:
+        await _run_in_transaction(_txn)
+    except DuplicateKeyError:
+        # A concurrent request with the same key won the insert. Whichever
+        # committed first is the agreement; this one replays it or conflicts.
+        winner = await agreement_repo.find_by_id(agreement_id)
+        if winner is None:                       # pragma: no cover - defensive
+            raise
+        return _replayed_or_conflict(winner, token, fingerprint)
+
+    await _drain_soon()
+    # DERIVED HERE TOO, not only on read. `AgreementCreated` declares
+    # signed_count/total_parties/partially_signed, and this path returned the
+    # raw inserted row -- so the one response that reports a brand-new
+    # agreement was also the one that reported `null` for how far along it was,
+    # while GET and LIST of the same agreement answered properly. A caller
+    # cannot be expected to know which endpoints populate a field the model
+    # says is there.
+    out = with_derived(doc)
+    # Said plainly on the response: these addresses have accounts, so they were
+    # notified in the app rather than emailed. Without this the sender watches
+    # for an email that was never going to be sent.
+    # BOTH CHANNELS FOR A REGISTERED PARTY. The in-app notification is the
+    # record; the email is what makes them look. On its own the notification
+    # only arrives when the person happens to log in, and nothing prompts them
+    # to -- a counterparty could sit unaware for days while the product
+    # believed it had told them.
+    out["account_notifications"] = await _email_account_parties(
+        party_ids, user_map,
+        agreement_id=agreement_id, creator_id=creator_id,
+        title=title, sender_name=creator_name,
+        invited_by_email={r["user_id"] for r in resolved_to_accounts})
+    # Attached to the RETURN VALUE, not to the stored row. A caller that
+    # persists or logs this object is storing signing credentials, which is why
+    # the key says so.
+    if _invitation_tokens:
+        out["invitation_tokens_do_not_store"] = _invitation_tokens
+        out["invitation_delivery"] = await _email_invitations(
+            external_parties, _invitation_tokens,
+            agreement_id=agreement_id, title=title, sender_name=creator_name)
+    return out
+
+
+
+async def _email_account_parties(party_ids: list[str], user_map: dict, *,
+                                 agreement_id: str, creator_id: str,
+                                 title: str, sender_name: str,
+                                 invited_by_email: set[str]) -> list[dict]:
+    """Email every registered party besides the creator, best effort.
+
+    AFTER THE COMMIT, like the invitation emails and for the same reasons: an
+    SMTP round trip has no business inside a transaction, and a mail failure
+    must not roll back a signed agreement.
+
+    NO TOKEN IS SENT. These people have accounts; the message points at their
+    Agreements page and they sign after logging in. That is the whole reason a
+    registered party and an invited one are different things.
+
+    `invited_by_email` marks the ones whose address the sender typed into the
+    email field, expecting an email. They get the same treatment as everybody
+    else -- the flag exists so the UI can explain why the delivery they asked
+    for became an in-app notification plus this.
+    """
+    from app.utils.email import send_agreement_notification_email
+
+    results: list[dict] = []
+    for uid in party_ids:
+        if uid == creator_id:
+            continue
+        user = user_map.get(uid) or {}
+        address = user.get("email")
+        entry = {
+            "user_id": uid,
+            "email": address,
+            "full_name": user.get("full_name"),
+            "in_app": True,
+            "emailed": False,
+            "reason": None,
+            "was_invited_by_email": uid in invited_by_email,
+        }
+        if not address:
+            # An account with no address on file. Nothing failed; there is
+            # simply nowhere to send, and the in-app notification stands.
+            entry["reason"] = "no_email_on_file"
+            results.append(entry)
+            continue
+        try:
+            delivered = await send_agreement_notification_email(
+                address, title=title, sender_name=sender_name,
+                recipient_name=user.get("full_name"))
+            entry["emailed"] = bool(delivered)
+            entry["reason"] = None if delivered else "email_not_configured"
+        except Exception as exc:  # noqa: BLE001
+            from app.utils.email import classify_delivery_error
+            entry["reason"] = classify_delivery_error(exc)
+            logger.warning(
+                "agreement notification email failed; error_type=%s reason=%s",
+                type(exc).__name__, entry["reason"])
+        results.append(entry)
+
+    await _record_party_notifications(agreement_id, results)
+    return results
+
+
+async def _record_party_notifications(agreement_id: str,
+                                      results: list[dict]) -> None:
+    """Audit each registered party's notification outcome. Best effort."""
+    if not results:
+        return
+    now = datetime.now(timezone.utc)
+    entries = [{
+        "action": "party_notification_emailed" if r["emailed"]
+                  else "party_notification_email_failed",
+        "actor_id": None,
+        "timestamp": now,
+        "ip_address": None,
+        "recipient_id": r["user_id"],
+        "reason": r.get("reason"),
+    } for r in results]
+    try:
+        await get_agreements_col().update_one(
+            {"_id": agreement_id},
+            {"$push": {"audit_log": {"$each": entries}}})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not record party notifications; error_type=%s",
+                       type(exc).__name__)
+
+
+async def _email_invitations(external_parties: list[dict],
+                             tokens: dict[str, str], *,
+                             agreement_id: str,
+                             title: str, sender_name: str) -> dict[str, dict]:
+    """Mail each invited signer their link. Best effort, AFTER the commit.
+
+    AFTER, AND OUTSIDE THE TRANSACTION, for two reasons. An SMTP call inside a
+    transaction holds it open across a network round trip to a third party; and
+    a mail failure must never roll back a signed agreement -- the signatures are
+    real whether or not a message was delivered.
+
+    NOT THROUGH THE OUTBOX, which is where a retrying design would put it. The
+    relay cannot recover a token from its hash, so a retryable job would have to
+    store the raw token in `event_outbox` until it sent, and "only the hash is
+    ever stored" is the property that makes a leaked database worthless. The
+    cost of this choice is that a transient SMTP failure loses that one email;
+    it is bounded because the creator is handed every link anyway and can pass
+    it on, so nothing becomes unrecoverable.
+
+    EVERY FAILURE IS REPORTED, never swallowed into a claim of success. The
+    caller gets a per-address result and the UI states it, so "emailed" and
+    "here is the link, send it yourself" are different things on screen.
+
+    AND RECORDED, not only returned. The result used to exist solely in the HTTP
+    response: once the sender closed the tab, nothing anywhere said whether an
+    invitation had been emailed. Answering "did this person ever get their link"
+    then meant querying the database by hand and inferring from absence. The
+    outcome now goes into the audit log beside the invitation it belongs to.
+    """
+    from app.utils.email import send_agreement_invitation_email
+
+    results: dict[str, dict] = {}
+    for party in external_parties:
+        party_id = party["party_id"]
+        token = tokens.get(party_id)
+        if not token:                            # pragma: no cover - defensive
+            continue
+        try:
+            delivered = await send_agreement_invitation_email(
+                party["email"],
+                token=token,
+                title=title,
+                sender_name=sender_name,
+                signer_name=party.get("full_name"),
+                expires_at=(party.get("invite") or {}).get("expires_at"),
+            )
+            results[party_id] = {
+                "emailed": bool(delivered),
+                # The one non-failure that is still not a delivery: no SMTP
+                # user configured, so `_send` declined rather than tried.
+                "reason": None if delivered else "email_not_configured",
+            }
+        except Exception as exc:                 # noqa: BLE001
+            # Only the class. A raw SMTP message carries the recipient address
+            # and host details, and this string reaches a browser.
+            from app.utils.email import classify_delivery_error
+            reason = classify_delivery_error(exc)
+            logger.warning(
+                "agreement invitation email failed; error_type=%s reason=%s",
+                type(exc).__name__, reason)
+            results[party_id] = {"emailed": False, "reason": reason}
+
+    await _record_delivery(agreement_id, external_parties, results)
+    return results
+
+
+async def _record_delivery(agreement_id: str, external_parties: list[dict],
+                           results: dict[str, dict]) -> None:
+    """Write each invitation's delivery outcome into the audit log.
+
+    BEST EFFORT, AND DELIBERATELY SO. The agreement is committed and the emails
+    are already sent or already failed; losing the note about it must not turn
+    into an error the caller sees, and there is nothing to roll back. A failure
+    here is logged and dropped.
+
+    The TOKEN IS NOT WRITTEN -- only the address it went to and whether it left.
+    """
+    now = datetime.now(timezone.utc)
+    entries = []
+    for party in external_parties:
+        outcome = results.get(party["party_id"])
+        if outcome is None:                      # pragma: no cover - defensive
+            continue
+        entries.append({
+            "action": "invitation_emailed" if outcome["emailed"]
+                      else "invitation_email_failed",
+            "actor_id": None,
+            "timestamp": now,
+            "ip_address": None,
+            "party_id": party["party_id"],
+            "invited_address": party.get("email"),
+            "reason": outcome.get("reason"),
+        })
+    if not entries:
+        return
+    try:
+        await get_agreements_col().update_one(
+            {"_id": agreement_id},
+            {"$push": {"audit_log": {"$each": entries}}})
+    except Exception as exc:                     # noqa: BLE001
+        logger.warning("could not record invitation delivery; error_type=%s",
+                       type(exc).__name__)
+
+
+def _replayed_or_conflict(agreement: dict, token: str, fingerprint: str) -> dict:
+    """The earlier agreement for this key, or a refusal.
+
+    Same payload, same key -> the caller retried and gets what they already
+    made. Different payload, same key -> two different agreements are asking to
+    be the same one, which is a mistake the caller must see rather than have
+    resolved for them silently.
+    """
+    receipt = (agreement.get("idempotency_receipts") or {}).get(token)
+    if receipt and receipt.get("fingerprint") == fingerprint:
+        # Derived on the replay too: a retry must not describe the agreement
+        # differently from the request it is replaying. Note the tokens are NOT
+        # re-attached -- they exist only in the original response, and a replay
+        # that re-issued them would mean a retry could recover signing
+        # credentials from a row that stores only their hashes.
+        return with_derived(agreement)
+    raise ConflictError(
+        "This Idempotency-Key was already used for a different agreement. "
+        "Use a new key, or resend the original request unchanged."
+    )
+
+
 async def create_pending_engagement_letter(
     title: str,
     body_html: str,
@@ -821,6 +1411,228 @@ async def create_pending_engagement_letter(
     )
 
 
+def _split_party_specs(parties: list) -> tuple[list[str], list[dict]]:
+    """Separate registered parties from invited addresses.
+
+    Accepts the shapes the callers actually pass: a bare user id string, a
+    ``{"user_id": ...}`` dict, or a ``{"email": ..., "full_name": ...}`` dict.
+    The schema has already refused a spec naming both or neither; this refuses
+    it again rather than trusting that, because two internal callers reach here
+    without passing through the schema at all.
+    """
+    registered: list[str] = []
+    externals: list[dict] = []
+    for spec in parties:
+        if not isinstance(spec, dict):
+            registered.append(spec)
+            continue
+        uid, email = spec.get("user_id"), spec.get("email")
+        if bool(uid) == bool(email):
+            raise AppValidationError(
+                "Name each party by either a registered user or an email "
+                "address, not both and not neither."
+            )
+        if uid:
+            registered.append(uid)
+        else:
+            externals.append({"email": email,
+                              "full_name": spec.get("full_name")})
+    return registered, externals
+
+
+def _external_party(spec: dict, *, now) -> tuple[dict, str]:
+    """A party record for an invited address, and the token to send them.
+
+    The token is RETURNED, never stored: only its hash goes in the record, and
+    the caller is responsible for putting the token in the invitation and then
+    forgetting it.
+
+    `identity_verified` is False and says so in the data rather than being
+    implied by the absence of a user id. A reader of this record should not
+    have to know how invitations work to know what was and was not checked.
+    """
+    from app.core import invitation_token as inv
+
+    token = inv.new_token()
+    return {
+        "party_id": secrets.token_urlsafe(8),
+        "user_id": None,
+        "email": spec["email"].strip(),
+        "full_name": (spec.get("full_name") or "").strip() or spec["email"].strip(),
+        "external": True,
+        # What the product checked: that an invitation was sent to an address.
+        # NOT who signed. See `core/invitation_token.py`.
+        "identity_verified": False,
+        "signed": False,
+        "signed_at": None,
+        "signature_method": None,
+        "signature_data": None,
+        "eto_classification": None,
+        "invite": {
+            # `invited_address`, NOT `sent_to`. This is the address the
+            # invitation was ISSUED FOR. Whether a message actually reached it
+            # is a separate fact with its own audit entries
+            # (`invitation_emailed` / `invitation_email_failed`), because the
+            # send is best effort and can fail after the invitation exists.
+            "token_hash": inv.token_hash(token),
+            "invited_address": spec["email"].strip(),
+            "created_at": now,
+            "expires_at": inv.expires_at(),
+            "revoked_at": None,
+        },
+    }, token
+
+
+#: How long a sent agreement stays signable. Not a legal deadline and not
+#: advice: it is a bound on how long an unsigned document sits waiting, so a
+#: half-finished agreement does not stay signable indefinitely after everyone
+#: has forgotten it. Cancelling and expiring share ONE mechanism -- see
+#: `cancellation_source`, plan section 3.G1.10 -- rather than adding statuses.
+AGREEMENT_TTL_DAYS = 90
+
+
+def signing_progress(agreement: dict) -> dict:
+    """How far through signing this agreement is. DERIVED, never stored.
+
+    `partially_signed` is a fact about the parties, not a fourth status. Storing
+    it would mean two places could disagree about the same agreement, and the
+    one that got updated late would be believed. The statuses stay
+    `draft -> pending -> executed | cancelled`, which is what the frontend
+    already understands.
+    """
+    parties = agreement.get("parties") or []
+    signed = sum(1 for p in parties if p.get("signed"))
+    pending = agreement.get("status") == AgreementStatus.PENDING.value
+    return {
+        "signed_count": signed,
+        "total_parties": len(parties),
+        "partially_signed": bool(pending and 0 < signed < len(parties)),
+        "awaiting": [
+            {"full_name": p.get("full_name"),
+             "external": bool(p.get("external"))}
+            for p in parties if not p.get("signed")
+        ],
+    }
+
+
+def with_derived(agreement: dict | None) -> dict | None:
+    """An agreement plus its derived signing state, for a response."""
+    if not agreement:
+        return agreement
+    out = dict(agreement)
+    out.update(signing_progress(agreement))
+    return out
+
+
+def _refuse_if_expired(agreement: dict) -> None:
+    """An expired agreement cannot be signed, and therefore cannot execute.
+
+    Checked on every signing path rather than swept by a job: a sweep that has
+    not run yet would leave an expired agreement signable, and "expired" would
+    mean "expired and noticed" rather than "expired".
+    """
+    expiry = agreement.get("expires_at")
+    if not isinstance(expiry, datetime):
+        return
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    if expiry <= datetime.now(timezone.utc):
+        raise AppValidationError(
+            "This agreement expired on "
+            f"{expiry.strftime('%Y-%m-%d')} and can no longer be signed. "
+            "Ask the sender to issue a new one."
+        )
+
+
+async def _resolve_parties(parties: list[dict],
+                           creator_id: str) -> tuple[list[str], dict, list, list]:
+    """The party ids for an agreement, and the user rows behind them.
+
+    EXTRACTED so `_create_agreement` and `create_and_send_agreement` cannot
+    drift apart. Two copies of a security check is one check and one liability:
+    the copy that gets a fix and the copy that keeps the hole. Everything here
+    was `_create_agreement`'s, unchanged.
+    """
+    # A REPEATED PARTY IS REFUSED, not quietly collapsed. This used to skip
+    # duplicates silently, which turned the caller's actual mistake into a
+    # different and misleading complaint: naming one person twice reduced the
+    # list to one party and the request came back "an agreement needs at least
+    # two parties", which is not what went wrong.
+    registered, externals = _split_party_specs(parties)
+
+    seen: set[str] = set()
+    if any(uid in seen or seen.add(uid) for uid in registered):
+        raise AppValidationError(
+            "The same party is listed more than once. Each party may appear "
+            "only once on an agreement."
+        )
+    seen_email: set[str] = set()
+    for spec in externals:
+        addr = spec["email"].strip().lower()
+        if addr in seen_email:
+            raise AppValidationError(
+                "The same email address is listed more than once. Each party "
+                "may appear only once on an agreement."
+            )
+        seen_email.add(addr)
+
+    resolved_to_accounts: list[dict] = []
+    party_ids = list(registered)
+    if creator_id not in party_ids:
+        party_ids.insert(0, creator_id)
+
+    users = await user_repo.find_many({"_id": {"$in": party_ids}})
+    user_map = {u["_id"]: u for u in users}
+    missing = [uid for uid in party_ids if uid not in user_map]
+    if missing:
+        raise AppValidationError("One or more parties are not registered users")
+
+    # AN INVITED ADDRESS THAT BELONGS TO AN ACCOUNT IS A REGISTERED PARTY.
+    # Otherwise the same person could be invited by email to an agreement they
+    # can already see, and would hold a token that signs a slot their own login
+    # cannot -- two identities for one human, and the audit trail says the
+    # signer was unverified when in fact they have an account.
+    if externals:
+        addresses = [spec["email"].strip().lower() for spec in externals]
+        known = await user_repo.find_many({"email": {"$in": addresses}})
+        by_email = {(u.get("email") or "").lower(): u for u in known}
+        still_external = []
+        for spec in externals:
+            account = by_email.get(spec["email"].strip().lower())
+            if account is None:
+                still_external.append(spec)
+                continue
+            # REPORTED, not just applied. The caller asked for an email
+            # invitation and is getting an in-app notification instead; if
+            # nothing says so, the only visible outcome is an email that never
+            # arrives.
+            resolved_to_accounts.append({
+                "email": spec["email"].strip(),
+                "user_id": account["_id"],
+                "full_name": account.get("full_name"),
+            })
+            if account["_id"] in party_ids:
+                raise AppValidationError(
+                    "That email address belongs to a party who is already on "
+                    "this agreement."
+                )
+            party_ids.append(account["_id"])
+            user_map[account["_id"]] = account
+        externals = still_external
+
+    total = len(party_ids) + len(externals)
+    if total < 2:
+        raise AppValidationError(
+            "An agreement needs at least two parties — select a counterparty to sign with you"
+        )
+    if total > MAX_PARTIES:
+        raise AppValidationError(
+            f"An agreement has at most {MAX_PARTIES} parties: you and up to "
+            f"{MAX_PARTIES - 1} counterparties."
+        )
+    return party_ids, user_map, externals, resolved_to_accounts
+
+
 async def _create_agreement(
     title: str,
     body_html: str,
@@ -830,49 +1642,15 @@ async def _create_agreement(
     engagement_id: str | None = None,
 ) -> dict:
     """Shared implementation. Call one of the two named entry points instead."""
-    # Resolve parties against real users — names come from the DB, not the caller
-    #
-    # A REPEATED PARTY IS REFUSED, not quietly collapsed. This used to skip
-    # duplicates silently, which turned the caller's actual mistake into a
-    # different and misleading complaint: naming one person twice reduced the
-    # list to one party and the request came back "an agreement needs at least
-    # two parties", which is not what went wrong. Worse, [creator, X, X] passed
-    # silently as a two-party agreement, so a caller who believed they had
-    # added two counterparties was told nothing.
-    requested: list[str] = [p["user_id"] if isinstance(p, dict) else p
-                            for p in parties]
-    seen: set[str] = set()
-    if any(uid in seen or seen.add(uid) for uid in requested):
+    party_ids, user_map, externals, _resolved = await _resolve_parties(
+        parties, creator_id)
+    if externals:
+        # This path predates invitations and has no way to deliver one. Refused
+        # rather than silently dropping the party, which would produce an
+        # agreement missing a signatory nobody was told about.
         raise AppValidationError(
-            "The same party is listed more than once. Each party may appear "
-            "only once on an agreement."
-        )
-
-    # LISTING THE CREATOR IS ALLOWED, and must stay allowed:
-    # `create_pending_engagement_letter` passes both the lawyer and the client
-    # explicitly, because it knows exactly who they are. Refusing that would
-    # break every engagement letter. What is refused above is the same id
-    # TWICE, which is unambiguously a mistake.
-    party_ids = list(requested)
-    if creator_id not in party_ids:
-        party_ids.insert(0, creator_id)
-
-    users = await user_repo.find_many({"_id": {"$in": party_ids}})
-    user_map = {u["_id"]: u for u in users}
-    missing = [uid for uid in party_ids if uid not in user_map]
-    if missing:
-        raise AppValidationError("One or more parties are not registered users")
-    if len(party_ids) < 2:
-        raise AppValidationError(
-            "An agreement needs at least two parties — select a counterparty to sign with you"
-        )
-
-    # D2 RULE 2: exactly two parties, not merely at least two. A three-party
-    # agreement has no defined case relationship -- rules 5 and 6 name one
-    # lawyer and one client -- so it cannot be authorised, only guessed at.
-    if len(party_ids) > 2:
-        raise AppValidationError(
-            "An agreement has exactly two parties: you and one counterparty."
+            "This path cannot invite an external signer. Use the builder's "
+            "create-and-send flow."
         )
 
     # THE RELATIONSHIP RULE (D2). Before this, any registered user id was
@@ -979,6 +1757,7 @@ def _list_row(a: dict) -> dict:
                   relying on a schema two layers away.
     """
     row = dict(a)
+    row.update(signing_progress(a))
     row["id"] = row.pop("_id")
     row.pop("audit_log", None)
     row.pop("body_html", None)
@@ -992,7 +1771,8 @@ def _list_row(a: dict) -> dict:
 
 async def list_agreements(user_id: str, page: int = 1,
                           page_size: int = 20,
-                          status: str | None = None) -> dict:
+                          status: str | None = None,
+                          archived: bool = False) -> dict:
     """One page of the agreements this user may see, newest first.
 
     DRAFTS STAY PRIVATE, including when `status="draft"` is asked for
@@ -1017,7 +1797,8 @@ async def list_agreements(user_id: str, page: int = 1,
             f"page_size may not exceed {MAX_PAGE_SIZE}."
         )
 
-    result = await agreement_repo.page_for_user(user_id, page, page_size, status)
+    result = await agreement_repo.page_for_user(
+        user_id, page, page_size, status, archived)
     return {
         "items": [_list_row(a) for a in result.items],
         "total": result.total,
@@ -1126,6 +1907,323 @@ def _refuse_draft_action(agreement: dict, user_id: str) -> None:
         )
 
 
+# ── invited signers (Step 4) ────────────────────────────────────────────────
+#
+# An invited party has no account, so none of the authorisation above applies to
+# them: `visible_to` matches on `parties.user_id`, and theirs is null. Their
+# authority is the token and nothing else, which is why every function here
+# starts by resolving one and refuses rather than falling through to a
+# user-based check.
+
+
+async def _party_for_token(token: str) -> tuple[dict, dict]:
+    """The agreement and the party this token signs for.
+
+    THE LOOKUP IS BY HASH, so a stolen database yields no usable token, and the
+    presented value is compared in constant time afterwards. `NotFoundError` is
+    raised for every failure -- unknown, revoked, expired -- because
+    distinguishing them to an unauthenticated caller turns this into an oracle
+    for which invitations exist.
+    """
+    from app.core import invitation_token as inv
+
+    if not token or len(token) < 20:
+        raise NotFoundError("Invitation")
+
+    agreement = await agreement_repo.find_one(
+        {"parties.invite.token_hash": inv.token_hash(token)})
+    if not agreement:
+        raise NotFoundError("Invitation")
+
+    for party in agreement.get("parties", []):
+        invite = party.get("invite")
+        if not invite:
+            continue
+        if not inv.matches(token, invite.get("token_hash", "")):
+            continue
+        state = inv.invitation_state(invite)
+        if state != "usable":
+            raise ForbiddenError(_INVITATION_REFUSAL[state])
+        return agreement, party
+
+    raise NotFoundError("Invitation")
+
+
+_INVITATION_REFUSAL = {
+    "revoked": "This invitation was withdrawn by the sender. Ask them for a "
+               "new one if you still need to sign.",
+    "expired": "This invitation has expired. Ask the sender for a new one.",
+    "no_invitation": "This invitation is no longer valid.",
+}
+
+
+async def agreement_by_invitation(token: str) -> dict:
+    """What an invited signer may READ. Never the whole row.
+
+    The other parties' signatures, the audit log with its IP addresses and the
+    internal ids are all withheld: holding an invitation is authority to sign
+    one slot, not to read everything about the people on the other side.
+    """
+    agreement, party = await _party_for_token(token)
+    return {
+        "id": agreement["_id"],
+        "title": agreement.get("title"),
+        "body_html": agreement.get("body_html"),
+        "body_sha256": agreement.get("body_sha256"),
+        "status": agreement.get("status"),
+        "you": {
+            "party_id": party["party_id"],
+            "email": party.get("email"),
+            "full_name": party.get("full_name"),
+            "signed": bool(party.get("signed")),
+            "signed_at": party.get("signed_at"),
+            # Stated to the signer as well as in the record: they should know
+            # the product is not vouching for who they are.
+            "identity_verified": False,
+        },
+        "parties": [
+            {"full_name": p.get("full_name"), "signed": bool(p.get("signed")),
+             "external": bool(p.get("external"))}
+            for p in agreement.get("parties", [])
+        ],
+        "expires_at": (party.get("invite") or {}).get("expires_at"),
+    }
+
+
+async def sign_by_invitation(*, token: str, method: str, signature_data: str,
+                             consent: bool, ip_address: str | None = None,
+                             ip_verifiable: bool = False) -> dict:
+    """An invited signer signs THEIR slot, and only theirs.
+
+    The conditional update names the party by `party_id` AND requires it to be
+    unsigned, so a replayed request updates nothing: the second attempt matches
+    no document and is reported as already signed rather than appending a
+    second signature. One token can therefore never sign twice, and never
+    another party's slot -- the token resolves to exactly one `party_id`.
+    """
+    if not consent:
+        raise AppValidationError(
+            "Signing requires explicit consent to sign electronically.")
+    if method not in {m.value for m in SignatureMethod}:
+        raise AppValidationError("Unknown signature method.")
+
+    agreement, party = await _party_for_token(token)
+    agreement_id = agreement["_id"]
+    party_id = party["party_id"]
+
+    if agreement.get("status") != AgreementStatus.PENDING.value:
+        raise AppValidationError(
+            "This agreement is no longer awaiting signatures.")
+    if party.get("signed"):
+        raise AppValidationError("You have already signed this agreement.")
+    _refuse_if_expired(agreement)
+    if is_unreviewed_template(agreement.get("body_html", "")):
+        raise AppValidationError(_UNREVIEWED_REFUSAL)
+
+    eto = ETO_CLASSIFICATION[SignatureMethod(method)]
+    now = datetime.now(timezone.utc)
+    digest = agreement.get("body_sha256") or body_digest(
+        agreement.get("body_html", ""))
+
+    async def _txn(session):
+        col = get_agreements_col()
+        claimed = await col.update_one(
+            {"_id": agreement_id,
+             "status": AgreementStatus.PENDING.value,
+             "parties": {"$elemMatch": {"party_id": party_id,
+                                        "signed": {"$ne": True}}}},
+            {"$set": {
+                "parties.$.signed": True,
+                "parties.$.signed_at": now,
+                "parties.$.signature_method": method,
+                # Bound to the PARTY ID, since an invited signer has no user id.
+                "parties.$.signature_data": encrypt_signature(
+                    signature_data, agreement_id=agreement_id,
+                    party_ref=party_id),
+                "parties.$.eto_classification": eto,
+                "parties.$.consent_at": now,
+                "updated_at": now,
+             },
+             "$push": {"audit_log": {
+                 "action": "signed",
+                 # No actor_id: there is no account. The party and the address
+                 # the invitation went to are what can be stated.
+                 "actor_id": None,
+                 "party_id": party_id,
+                 "invited_email": party.get("email"),
+                 "identity_verified": False,
+                 "timestamp": now,
+                 "ip_address": ip_address if ip_verifiable else None,
+                 "note": eto,
+                 "consent": True,
+                 "body_sha256": digest,
+             }}},
+            session=session,
+        )
+        if claimed.modified_count == 0:
+            raise _TransitionConflict(
+                "This agreement has already been signed or is no longer "
+                "awaiting your signature.")
+
+        fresh = await col.find_one({"_id": agreement_id}, session=session)
+        parties = fresh.get("parties", [])
+        if all(p.get("signed") for p in parties):
+            await col.update_one(
+                {"_id": agreement_id,
+                 "status": AgreementStatus.PENDING.value},
+                {"$set": {"status": AgreementStatus.EXECUTED.value,
+                          "executed_at": now,
+                          "eto_classification": _derive_eto(parties),
+                          "updated_at": now}},
+                session=session,
+            )
+            from app.services import event_outbox
+            for other in parties:
+                if not other.get("user_id"):
+                    continue
+                logical_id = f"agreement:{agreement_id}:executed:{other['user_id']}"
+                await event_outbox.park_in_transaction(
+                    session, logical_id, "notifications",
+                    {"logical_event_id": logical_id,
+                     "recipient_id": other["user_id"],
+                     "ntype": NotificationType.AGREEMENT_SIGNED.value,
+                     "title": "Agreement fully executed",
+                     "body": f'"{agreement.get("title")}" has been signed by '
+                             "all parties and is now executed.",
+                     "data": {"agreement_id": agreement_id}},
+                )
+
+    try:
+        await _run_in_transaction(_txn)
+    except _TransitionConflict as conflict:
+        raise AppValidationError(conflict.message) from conflict
+
+    await _drain_soon()
+    return await agreement_by_invitation(token)
+
+
+async def revoke_invitation(*, agreement_id: str, party_id: str,
+                            actor_id: str) -> dict:
+    """Withdraw an invitation. Only a party to the agreement may do it.
+
+    A signature already made is NOT undone: revoking stops a token being used
+    again, it does not erase what someone did while it was valid.
+    """
+    agreement = await agreement_repo.find_by_id(agreement_id)
+    if not agreement:
+        raise NotFoundError("Agreement")
+    if actor_id not in {p.get("user_id") for p in agreement.get("parties", [])} \
+            and agreement.get("created_by") != actor_id:
+        raise ForbiddenError("Access denied to this agreement")
+
+    now = datetime.now(timezone.utc)
+    updated = await get_agreements_col().update_one(
+        {"_id": agreement_id,
+         "parties": {"$elemMatch": {"party_id": party_id,
+                                    "invite.revoked_at": None}}},
+        {"$set": {"parties.$.invite.revoked_at": now, "updated_at": now},
+         "$push": {"audit_log": {
+             "action": "invitation_revoked", "actor_id": actor_id,
+             "party_id": party_id, "timestamp": now, "ip_address": None}}},
+    )
+    if updated.modified_count == 0:
+        raise AppValidationError(
+            "That invitation does not exist or was already withdrawn.")
+    return await get_agreement(agreement_id, actor_id)
+
+
+async def reissue_invitation(*, agreement_id: str, party_id: str,
+                             actor_id: str) -> dict:
+    """A fresh link for an invited signer whose old one never arrived.
+
+    WHY THIS HAS TO EXIST. The raw token is shown once and only its hash is
+    stored, so a link that is lost -- closed without copying, filtered by the
+    recipient's mail server, sitting in a spam folder nobody checks -- cannot be
+    recovered by anyone, including this server. Without a reissue the only
+    remedy was to abandon the agreement and create another one, which means a
+    second document, a second set of signatures, and the first one left pending
+    forever.
+
+    THE OLD TOKEN DIES HERE. The hash is REPLACED, not added to, so exactly one
+    link is live for a slot at any time. A reissue is therefore also the remedy
+    when a link reaches the wrong hands: issuing a new one revokes the old by
+    construction.
+
+    WHAT IT WILL NOT DO. It will not reissue for a party who has already signed
+    (their signature stands and a new link would invite a second one), nor on an
+    agreement that is executed, cancelled or expired, nor for a registered user
+    -- they have an account and never had a token.
+    """
+    from app.core import invitation_token as inv
+
+    agreement = await agreement_repo.find_by_id(agreement_id)
+    if not agreement:
+        raise NotFoundError("Agreement")
+
+    # Same authorisation as revoking: this is an act on somebody else's ability
+    # to sign, so it belongs to the people already on the document.
+    if actor_id not in {p.get("user_id") for p in agreement.get("parties", [])}             and agreement.get("created_by") != actor_id:
+        raise ForbiddenError("Access denied to this agreement")
+
+    if agreement.get("status") != AgreementStatus.PENDING.value:
+        raise AppValidationError(
+            "Only an agreement still awaiting signatures can have an "
+            "invitation reissued.")
+    _refuse_if_expired(agreement)
+
+    party = next((p for p in agreement.get("parties", [])
+                  if p.get("party_id") == party_id), None)
+    if party is None or not party.get("external"):
+        raise NotFoundError("Invitation")
+    if party.get("signed"):
+        raise AppValidationError(
+            "That person has already signed. Reissuing their link would invite "
+            "a second signature.")
+
+    now = datetime.now(timezone.utc)
+    token = inv.new_token()
+    expires = inv.expires_at()
+
+    # Conditional on the slot still being external and unsigned, so a signature
+    # landing between the read above and this write is not overwritten.
+    updated = await get_agreements_col().update_one(
+        {"_id": agreement_id,
+         "parties": {"$elemMatch": {"party_id": party_id, "signed": False,
+                                    "external": True}}},
+        {"$set": {
+            "parties.$.invite.token_hash": inv.token_hash(token),
+            "parties.$.invite.created_at": now,
+            "parties.$.invite.expires_at": expires,
+            # A reissue un-revokes: asking for a new link is asking for the
+            # slot to be usable again.
+            "parties.$.invite.revoked_at": None,
+            "updated_at": now,
+         },
+         "$push": {"audit_log": {
+             "action": "invitation_reissued", "actor_id": actor_id,
+             "party_id": party_id, "timestamp": now, "ip_address": None,
+             "invited_address": party.get("email"),
+         }}},
+    )
+    if updated.modified_count == 0:
+        raise AppValidationError(
+            "That invitation could not be reissued. It may have just been "
+            "signed.")
+
+    fresh = dict(party)
+    fresh["invite"] = dict(party.get("invite") or {}, expires_at=expires)
+    delivery = await _email_invitations(
+        [fresh], {party_id: token},
+        agreement_id=agreement_id,
+        title=agreement.get("title") or "Agreement",
+        sender_name=_creator_name(agreement, agreement.get("created_by")))
+
+    out = with_derived(await agreement_repo.find_by_id(agreement_id))
+    out["invitation_tokens_do_not_store"] = {party_id: token}
+    out["invitation_delivery"] = delivery
+    return out
+
+
 async def get_agreement(agreement_id: str, requester_id: str) -> dict:
     agreement = await agreement_repo.find_by_id(agreement_id)
     if not agreement:
@@ -1133,11 +2231,11 @@ async def get_agreement(agreement_id: str, requester_id: str) -> dict:
 
     _refuse_if_someone_elses_draft(agreement, requester_id)
 
-    party_ids = {p["user_id"] for p in agreement.get("parties", [])}
+    party_ids = {p.get("user_id") for p in agreement.get("parties", [])}
     if requester_id not in party_ids and agreement.get("created_by") != requester_id:
         raise ForbiddenError("Access denied to this agreement")
 
-    return agreement
+    return with_derived(agreement)
 
 
 async def submit_signature(
@@ -1181,6 +2279,11 @@ async def submit_signature(
     if is_unreviewed_template(agreement.get("body_html", "")):
         raise AppValidationError(_UNREVIEWED_REFUSAL)
 
+    # Both signing paths check this, because an agreement that expires while a
+    # registered party is signing is no more signable than one that expires
+    # while an invited signer is.
+    _refuse_if_expired(agreement)
+
     # Check if this party already signed
     for party in agreement.get("parties", []):
         if party["user_id"] == user_id and party.get("signed"):
@@ -1212,7 +2315,10 @@ async def submit_signature(
                 "parties.$.signed": True,
                 "parties.$.signed_at": now,
                 "parties.$.signature_method": method,
-                "parties.$.signature_data": signature_data,
+                # AES-256-GCM, bound to this agreement and this signer.
+                "parties.$.signature_data": encrypt_signature(
+                    signature_data, agreement_id=agreement_id,
+                    party_ref=user_id),
                 "parties.$.eto_classification": eto,
                 "updated_at": now,
             }},

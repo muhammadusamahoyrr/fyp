@@ -53,6 +53,7 @@ from reportlab.platypus import (
 )
 
 from app.core.exceptions import AppValidationError
+from app.core.signature_crypto import decrypt_signature
 from app.services.pdf_generator import P, _styles
 
 #: What the certificate says instead of an IP it cannot stand behind (D8).
@@ -214,7 +215,20 @@ def build_executed_pdf(agreement: dict) -> bytes:
             # METHOD is stated and the blob is not reproduced.
             method = party.get("signature_method")
             if method == "typed":
-                mark = P(party.get("signature_data") or "", small)
+                # The ONLY read of a stored signature in the product. A typed
+                # name is printed as the mark; a drawn or uploaded one is not
+                # reproduced, so it is never decrypted here at all.
+                #
+                # A signature that fails to authenticate is NOT printed as
+                # blank or as a placeholder: `decrypt_signature` raises, the
+                # PDF is not produced, and the caller hears about it. A
+                # certificate that quietly omits a signature it could not
+                # verify is worse than one that is not issued.
+                mark = P(decrypt_signature(
+                    party.get("signature_data"),
+                    agreement_id=agreement.get("_id"),
+                    party_ref=party.get("user_id") or party.get("party_id") or "",
+                ) or "", small)
             else:
                 mark = P(_method_wording(method), small)
             when = _utc(party.get("signed_at"))

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from app.core.signature_crypto import encrypt_signature
 from app.db.collections import get_agreements_col
 from app.repositories.base import BaseRepository
 
@@ -19,7 +20,8 @@ class AgreementRepository(BaseRepository):
     # bug. Use `find_for_user`, which knows drafts are private.
 
     @staticmethod
-    def visible_to(user_id: str, status: str | None = None) -> dict:
+    def visible_to(user_id: str, status: str | None = None,
+                   archived: bool = False) -> dict:
         """The filter for "agreements this user may see".
 
         A DRAFT IS PRIVATE TO ITS CREATOR. Gate 3C's `create_draft` writes both
@@ -48,9 +50,23 @@ class AgreementRepository(BaseRepository):
             # Drafts: the author only.
             {"created_by": user_id},
         ]}
+
+        # ARCHIVING IS PER USER AND HIDES NOTHING FROM ANYONE ELSE.
+        #
+        # `archived_by` holds the ids of the people who have removed this
+        # agreement from their own list. A sent agreement is a record the other
+        # parties hold too -- `delete_draft` refuses to remove one for exactly
+        # that reason -- so "remove from my list" must mean my list and no more.
+        # The row, its signatures and its audit log are untouched, and the
+        # counterparty's view is unaffected.
+        clauses = [visible]
+        if archived:
+            clauses.append({"archived_by": user_id})
+        else:
+            clauses.append({"archived_by": {"$ne": user_id}})
         if status:
-            return {"$and": [visible, {"status": status}]}
-        return visible
+            clauses.append({"status": status})
+        return {"$and": clauses}
 
     async def find_for_user(self, user_id: str) -> list[dict]:
         """Every agreement the user may see, newest first, unpaginated."""
@@ -58,10 +74,11 @@ class AgreementRepository(BaseRepository):
                                     sort=[("created_at", -1)])
 
     async def page_for_user(self, user_id: str, page: int, page_size: int,
-                            status: str | None = None):
+                            status: str | None = None,
+                            archived: bool = False):
         """One page of the same set, newest first."""
         return await self.paginate(
-            self.visible_to(user_id, status), page, page_size,
+            self.visible_to(user_id, status, archived), page, page_size,
             sort=[("created_at", -1)],
         )
 
@@ -84,7 +101,14 @@ class AgreementRepository(BaseRepository):
                     "parties.$.signed": True,
                     "parties.$.signed_at": datetime.now(timezone.utc),
                     "parties.$.signature_method": signature["method"],
-                    "parties.$.signature_data": signature["data"],
+                    # ENCRYPTED, like every other write of this field. This
+                    # method currently has no production caller -- the two live
+                    # paths are in `agreement_service` -- and that is exactly
+                    # why it encrypts: a dead path that writes clear text is a
+                    # plaintext signature waiting for its first caller.
+                    "parties.$.signature_data": encrypt_signature(
+                        signature["data"], agreement_id=agreement_id,
+                        party_ref=user_id),
                     # Each signature has its OWN ETO character: a drawn
                     # signature and a typed name are not the same instrument.
                     # Stored per party so the agreement-level classification can

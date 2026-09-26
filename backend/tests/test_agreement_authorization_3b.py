@@ -254,7 +254,8 @@ async def test_a_client_cannot_use_the_lawyer_producer(people):
 # ── the parked wizard stays parked ──────────────────────────────────────────
 
 @pytest.mark.integration
-async def test_lawyer_authoring_is_not_gated_by_the_parked_builder_flag(people):
+async def test_lawyer_authoring_is_not_gated_by_the_parked_builder_flag(
+        people, monkeypatch):
     """Product C must not read Product B's flag.
 
     The flag is off here (its default). If lawyer authoring consulted it, the
@@ -264,7 +265,12 @@ async def test_lawyer_authoring_is_not_gated_by_the_parked_builder_flag(people):
     from app.core.config import settings
     from app.services import agreement_service
 
-    assert settings.agreements_diy_builder_enabled is False
+    # PARKED IS SET HERE, NOT ASSUMED. These used to read whatever
+    # `.env` happened to say, so a developer who enabled the builder to
+    # try it locally got four failures describing a product decision
+    # rather than their config. A test about the parked state must put
+    # the system in it.
+    monkeypatch.setattr(settings, "agreements_diy_builder_enabled", False)
     case_id = await _case()
     doc = await agreement_service.create_lawyer_agreement(
         title="Retainer", body_html="Terms.",
@@ -273,10 +279,17 @@ async def test_lawyer_authoring_is_not_gated_by_the_parked_builder_flag(people):
 
 
 @pytest.mark.integration
-async def test_the_client_wizard_stays_closed_while_parked(people):
+async def test_the_client_wizard_stays_closed_while_parked(people, monkeypatch):
+    from app.core.config import settings
     from app.core.exceptions import ForbiddenError
     from app.services import agreement_service
 
+    # PARKED IS SET HERE, NOT ASSUMED. These used to read whatever
+    # `.env` happened to say, so a developer who enabled the builder to
+    # try it locally got four failures describing a product decision
+    # rather than their config. A test about the parked state must put
+    # the system in it.
+    monkeypatch.setattr(settings, "agreements_diy_builder_enabled", False)
     case_id = await _case()
     with pytest.raises(ForbiddenError) as exc:
         await agreement_service.create_user_agreement(
@@ -365,17 +378,33 @@ def test_engagement_id_cannot_be_supplied_by_a_caller():
 
 
 @pytest.mark.integration
-async def test_exactly_two_parties(people):
+async def test_two_or_three_parties_are_allowed_and_four_are_not(people):
+    """D2's "exactly two" was reversed by the owner on 2026-09-23 to support
+    the three-party agreements the builder already offered. The CAP still
+    exists and is still tested -- what changed is where it sits.
+
+    The counterparty on the case is present in both cases below, because that
+    is what the authorisation rule requires; the third party is the addition.
+    """
     from app.core.exceptions import AppValidationError
     from app.services import agreement_service
 
     case_id = await _case()
+
+    three = await agreement_service._create_agreement(
+        title="Three parties", body_html="Terms.",
+        parties=[{"user_id": CLIENT}, {"user_id": OTHER_LAWYER}],
+        creator_id=LAWYER, case_id=case_id)
+    assert len(three["parties"]) == 3
+    assert {p["user_id"] for p in three["parties"]} == {LAWYER, CLIENT, OTHER_LAWYER}
+
     with pytest.raises(AppValidationError) as exc:
         await agreement_service._create_agreement(
-            title="Three's a crowd", body_html="Terms.",
-            parties=[{"user_id": CLIENT}, {"user_id": OTHER_LAWYER}],
+            title="Four is too many", body_html="Terms.",
+            parties=[{"user_id": CLIENT}, {"user_id": OTHER_LAWYER},
+                     {"user_id": STRANGER}],
             creator_id=LAWYER, case_id=case_id)
-    assert "exactly two parties" in str(exc.value).lower()
+    assert "at most 3 parties" in str(exc.value).lower()
 
 
 @pytest.mark.integration
@@ -458,10 +487,22 @@ async def test_a_party_who_is_not_on_the_case_is_refused(people):
     from app.services import agreement_service
 
     case_id = await _case()          # LAWYER + CLIENT are on this case
+
+    # THE PROPERTY THAT SURVIVED THE D2 REVERSAL. A third party is now allowed,
+    # but the case's own counterparty cannot be REPLACED by one: otherwise a
+    # case becomes a pretext for pushing a signature request at a stranger,
+    # which is defect B3 returning by another door.
     with pytest.raises(ForbiddenError) as exc:
         await agreement_service._create_agreement(
             title="Smuggled in", body_html="Terms.",
-            parties=[{"user_id": STRANGER}],   # not on the case
+            parties=[{"user_id": STRANGER}],   # CLIENT omitted entirely
             creator_id=LAWYER,                 # is on the case
             case_id=case_id)
-    assert "every party must be on the case" in str(exc.value).lower()
+    assert "must be on an agreement attached to it" in str(exc.value).lower()
+
+    # And the same stranger IS acceptable once the real counterparty is there.
+    ok = await agreement_service._create_agreement(
+        title="Invited alongside", body_html="Terms.",
+        parties=[{"user_id": CLIENT}, {"user_id": STRANGER}],
+        creator_id=LAWYER, case_id=case_id)
+    assert {p["user_id"] for p in ok["parties"]} == {LAWYER, CLIENT, STRANGER}
