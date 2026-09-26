@@ -30,6 +30,19 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Trusted reverse proxies, as a comma-separated list of peer addresses
+    # (decision D8). EMPTY BY DEFAULT, and the default is the safe one: with
+    # nothing configured, `X-Forwarded-For` is ignored entirely and the client
+    # IP is whatever the socket says.
+    #
+    # This exists because an evidence document must not assert a fact it cannot
+    # support. Behind an unconfigured proxy every request appears to come from
+    # the proxy, so recording that as "the IP the signer used" would be false;
+    # and trusting the header without checking the peer lets any caller write
+    # their own IP into the record. When neither is safe the IP is OMITTED --
+    # see `client_ip`.
+    trusted_proxies: str = ""
+
     # MongoDB
     mongodb_url: str = "mongodb://localhost:27017"
     db_name: str = "attorney_ai"
@@ -42,6 +55,22 @@ class Settings(BaseSettings):
 
     # AES encryption for CNIC
     encryption_key: str
+
+    # AES-256-GCM for stored signatures. SEPARATE FROM `encryption_key` on
+    # purpose: that one is Fernet and protects CNICs, and one compromised key
+    # must not expose identity documents and signatures together. Empty here
+    # rather than required so an existing deployment still boots; the refusal
+    # happens where a signature would actually be stored, in
+    # `core/signature_crypto.py`, which never falls back to clear text.
+    signature_encryption_key: str = ""
+
+    # D6 send throttle, as a setting rather than a constant so a demo or a load
+    # test can raise it without editing the route. THE DEFAULT IS THE REAL
+    # POLICY -- 10 sends an hour -- and anything looser is a deliberate local
+    # override, not a new baseline. It bounds how many people one account can
+    # push a signature request at, which matters more now that D2 rule 3 no
+    # longer requires a case behind each one.
+    agreement_send_rate_limit: str = "10/hour"
 
     # LLM
     gemini_api_key: str = ""
@@ -244,6 +273,30 @@ class Settings(BaseSettings):
     # unanswered requests at once, and a cap is what stops that being one
     # event. The sweep refuses anything above its own DEFAULT_LIMIT of 200.
     appointment_expiry_batch: int = 50
+
+    # ── DIY CONTRACT BUILDER ──────────────────────────────────────────────────
+    # OFF. This parks the client-facing agreement wizard -- the NDA / lease /
+    # employment template gallery and the create flow behind it.
+    #
+    # WHY IT IS PARKED AND NOT MERELY HIDDEN. All six templates were withdrawn
+    # because the wording was United States contract boilerplate, unsuitable to
+    # sign in Pakistan, and the backend already refuses any body still carrying
+    # the withdrawal notice. So the builder cannot currently produce a valid
+    # agreement at all: every path through it ends in a refusal, after four
+    # steps of the user's work. Writing replacement templates is legal work
+    # blocked on counsel, not engineering work.
+    #
+    # WHAT IT DOES NOT GATE, and must not. Legacy engagement letters share the
+    # same collection and UI. New engagements no longer generate them
+    # (AGREEMENTS_PRODUCT_PLAN.md §17 R5-3) and they gate nothing, but the ones
+    # that exist remain historical records. This flag leaves them untouched:
+    # listing, viewing, signing and declining stay available to
+    # everyone whatever this is set to -- an agreement somebody is already a
+    # party to must never become unreachable because a feature was parked.
+    #
+    # Turning it on requires counsel-reviewed templates first
+    # (AGREEMENTS_PRODUCT_PLAN.md D1 / Phase 4.3), not just a deployment.
+    agreements_diy_builder_enabled: bool = False
 
     english_ocr_enabled: bool = False
     # Identifier of the reviewed benchmark/evidence used to approve production

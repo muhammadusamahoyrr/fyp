@@ -31,6 +31,23 @@ from app.services.agreement_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _diy_builder_enabled(monkeypatch):
+    """These tests exercise the USER creation path, which is parked by default.
+
+    `agreements_diy_builder_enabled` is False in production because every
+    bundled template is withdrawn, so `create_user_agreement` refuses outright.
+    That refusal has its own tests; the ones here are about what the creation
+    path DOES once it is allowed to run -- digests, party validation, the
+    withdrawn-boilerplate guard.
+
+    Turning the flag on keeps both properties under test: that parking refuses,
+    and that nothing else broke while it was parked.
+    """
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "agreements_diy_builder_enabled", True)
+
+
 def _party(uid: str, method: str | None = None, signed: bool = True) -> dict:
     return {"user_id": uid, "full_name": uid.title(), "signed": signed,
             "signature_method": method}
@@ -88,14 +105,23 @@ def test_no_signatures_yet_has_no_classification():
 def test_an_unknown_method_degrades_instead_of_ranking_as_advanced():
     """A raw dict index would KeyError here; ranking it high would silently
     overstate the signature's legal weight. It must rank below every known
-    method and label itself unclassified."""
+    method and say it was not recognised.
+
+    Asserted against the constant rather than a literal: the labels became
+    neutral descriptions on 2026-09-23 (NR-47) and a test that pins their
+    wording breaks on the next honest rewording while proving nothing about
+    the ranking, which is what this test is actually for.
+    """
+    from app.services.agreement_service import _ETO_UNKNOWN_LABEL
+
     result = _derive_eto([
         _party("alice", SignatureMethod.CANVAS.value),
         _party("mystery", "some_future_method"),
     ])
 
-    assert result is not None
-    assert "Unclassified" in result
+    assert result == _ETO_UNKNOWN_LABEL
+    assert result != ETO_CLASSIFICATION[SignatureMethod.CANVAS], (
+        "an unrecognised method took the known method's label")
 
 
 def test_a_missing_method_does_not_raise():
@@ -181,24 +207,59 @@ def test_party_out_drops_the_raw_signature_blob():
 # ── service behaviour (needs Mongo) ──────────────────────────────────────────
 
 @pytest.fixture
-async def two_users(mongo):
+async def two_users(mongo_transactional):
+    """Depends on `mongo_transactional`, not `mongo`, ON PURPOSE.
+
+    Every integration test in this file drives sign or decline, and those run
+    inside a transaction and FAIL CLOSED where transactions are unavailable. On
+    a standalone mongod they would fail with a 503 rather than tell you why --
+    a red suite that says nothing about the code. The fixture skips instead,
+    naming the reason and how to get a replica set.
+    """
+    mongo = mongo_transactional
+
     from app.db.collections import get_users_col
+
+    from datetime import datetime, timezone
+
+    from app.db.collections import get_cases_col
 
     users = [
         {"_id": "AG-ALICE", "full_name": "Alice", "role": "client", "email": "a@x.test"},
         {"_id": "AG-BOB", "full_name": "Bob", "role": "client", "email": "b@x.test"},
     ]
     await get_users_col().insert_many(users)
+    # The case both parties are on. Gate 3B authorises the counterparty THROUGH
+    # the case, so without one every create here is refused.
+    now = datetime.now(timezone.utc)
+    await get_cases_col().insert_one({
+        "_id": AG_CASE, "client_id": "AG-ALICE", "lawyer_id": "AG-BOB",
+        "title": "Shared matter", "case_number": "AG-C-1",
+        "status": "in_progress", "milestones": [],
+        "created_at": now, "updated_at": now,
+    })
     yield ["AG-ALICE", "AG-BOB"]
     await get_users_col().delete_many({"_id": {"$in": ["AG-ALICE", "AG-BOB"]}})
+    await get_cases_col().delete_one({"_id": AG_CASE})
+
+
+AG_CASE = "AG-CASE"
 
 
 async def _make(parties, creator="AG-ALICE", body="<p>Original terms</p>"):
+    """Build a test agreement ON THE SHARED CASE.
+
+    Gate 3B made the case link the authorization: an agreement with no case and
+    no engagement has no relationship behind it, so it is refused. These tests
+    are about digests, signing and declining mechanics rather than about who may
+    create what, so the fixture supplies the case that makes them legal.
+    """
     from app.services import agreement_service
 
-    return await agreement_service.create_agreement(
+    return await agreement_service.create_user_agreement(
         title="Test Agreement", body_html=body,
-        parties=[{"user_id": p} for p in parties], creator_id=creator)
+        parties=[{"user_id": p} for p in parties], creator_id=creator,
+        case_id=AG_CASE)
 
 
 @pytest.mark.integration
@@ -311,7 +372,10 @@ async def test_declining_records_who_what_and_why(two_users):
     doc = await _make(two_users)
     out = await agreement_service.decline_agreement(
         agreement_id=doc["_id"], user_id="AG-BOB",
-        reason="Terms are unacceptable", ip_address="9.9.9.9")
+        reason="Terms are unacceptable", ip_address="9.9.9.9",
+        # D8: verifiable, so the assertion below still tests what it says --
+        # that a decline records the origin, not that the gate discards it.
+        ip_verifiable=True)
 
     entry = [e for e in out["audit_log"] if e["action"] == "declined"][0]
     assert entry["actor_id"] == "AG-BOB"

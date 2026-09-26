@@ -81,6 +81,19 @@ async def list_appointments(
     )
 
 
+@router.get("/hire-eligible/{lawyer_id}", response_model=list[AppointmentOut])
+async def list_consultations_for_hire(
+    lawyer_id: str,
+    current_user: dict = Depends(require_client),
+):
+    """The caller's completed consultations with this lawyer that can lead to
+    a hire (AGREEMENTS_PRODUCT_PLAN.md §17 R5-1). The client is taken from the
+    token, never the request. Offering is not authorising: the engagement
+    request re-checks whichever one is chosen."""
+    return await appointment_service.list_consultations_for_hire(
+        current_user["_id"], lawyer_id)
+
+
 @router.get("/availability/{lawyer_id}", response_model=AvailabilityResponse,
             deprecated=True)
 async def get_lawyer_availability(

@@ -98,16 +98,41 @@ export const PasswordStrengthMeter = ({ password }) => {
 export const Card = ({ children, style = {}, className = "" }) => {
     const t = useT();
     const [isHover, setIsHover] = useState(false);
+
+    // SHORTHAND AND LONGHAND MUST NOT BOTH SURVIVE THE SPREAD.
+    //
+    // This used to set `border` and then spread `...style`, and several callers
+    // pass `borderColor` (an accent tint on a notice card). The resulting object
+    // held both, and because hover rewrites the SHORTHAND every re-render, React
+    // warned: "Updating a style property during rerender (border) when a
+    // conflicting property is set (borderColor)". Which of the two wins is then
+    // down to key order, which is not something a caller should have to reason
+    // about.
+    //
+    // So the border is resolved to ONE property here. A caller's own `border`
+    // wins outright; a caller's `borderColor` is folded into our shorthand. Both
+    // already behaved that way -- their value came last in the spread and
+    // overrode hover -- so this changes no card's appearance, it just stops the
+    // two spellings coexisting.
+    // The resolved border stays in its ORIGINAL position, ahead of the spread.
+    // A caller that wants one edge different passes `borderTop` alongside
+    // `border` (ModIntake does), and that only works while the edge override
+    // comes after the all-edges value. Moving the shorthand last would have
+    // silently squared off those cards' accent edge.
+    const { border, borderColor, ...rest } = style;
+    const resolvedBorder =
+        border ?? `1.5px solid ${borderColor ?? (isHover ? `${t.primary}35` : t.border)}`;
+
     return (
         <div className={className} style={{
             background: t.card,
-            border: `1.5px solid ${isHover ? `${t.primary}35` : t.border}`,
+            border: resolvedBorder,
             borderRadius: 24,
             padding: 28,
             boxShadow: isHover ? `0 16px 48px -8px ${t.primary}25, ${t.shadowCard}` : t.shadowCard,
             transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
             cursor: "default",
-            ...style
+            ...rest,
         }} onMouseEnter={() => setIsHover(true)} onMouseLeave={() => setIsHover(false)}>{children}</div>
     );
 };

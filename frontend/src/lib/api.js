@@ -144,6 +144,25 @@ async function apiFetch(path, options = {}) {
     return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
   }
 
+  // A 401 WITH NO TOKEN AT ALL is a signed-out session, not a failed request.
+  //
+  // The refresh path below only runs when a token exists, so this case fell
+  // through and surfaced the server's own wording -- "Missing authentication
+  // token" -- in whatever error panel the caller renders. That reads like a bug
+  // in the request rather than "you have been signed out", which is the one
+  // thing the user can act on. Note tokens and cookies are per-ORIGIN: a session
+  // established on localhost does not exist on a tunnel URL, and vice versa.
+  if (res.status === 401 && !token) {
+    return {
+      data: null,
+      error: formatResponseError({
+        detail: 'You are signed out. Please sign in again on this address — '
+              + 'a session started on a different URL does not carry over.',
+      }),
+      status: 401,
+    };
+  }
+
   // Auto-refresh on 401
   if (res.status === 401 && token) {
     const refreshed = await _tryRefresh();
@@ -721,6 +740,8 @@ export async function citatorJudgment(id) {
 
 // ─── Payments (peshi/professional fees) ──────────────────────────────────────
 
+// `engagement_id` is REQUIRED: the Hire this fee is billed under. The server
+// validates it against the case, the lawyer and the client (§17 R5-5).
 export async function createFeeRequest({ case_id, amount, purpose, note, hearing_id, engagement_id }) {
   return apiFetch('/payments/fee-request', {
     method: 'POST',
@@ -983,10 +1004,20 @@ export async function saveMyWorkingHours({ working_hours, exceptions }) {
 // relationship they could not leave. `acceptEngagement` is gone rather than
 // deprecated; keeping it would keep that gap open.
 
-export async function requestEngagement({ case_id, lawyer_id, message }) {
+// The caller's completed consultations with this lawyer that can lead to a
+// hire. Scoped to the one lawyer and unpaged, so an eligible consultation is
+// never missed because it fell outside a page of the client's diary. The
+// server still re-checks whichever one the request names.
+export async function listHireConsultations(lawyer_id) {
+  return apiFetch(`/appointments/hire-eligible/${encodeURIComponent(lawyer_id)}`);
+}
+
+// `appointment_id` is REQUIRED: a new hire follows a completed consultation
+// with the same lawyer (AGREEMENTS_PRODUCT_PLAN.md §17 R5-1).
+export async function requestEngagement({ case_id, lawyer_id, appointment_id, message }) {
   return apiFetch('/engagements', {
     method: 'POST',
-    body: JSON.stringify({ case_id, lawyer_id, message: message || null }),
+    body: JSON.stringify({ case_id, lawyer_id, appointment_id, message: message || null }),
   });
 }
 
@@ -1079,11 +1110,78 @@ export async function markAllNotificationsRead() {
 
 // ─── Agreements ───────────────────────────────────────────────────────────────
 
-export async function createAgreement(title, body_html, party_ids) {
+/* Create, sign and send in ONE call.
+ *
+ * WAS TWO CALLS: create, then sign. Between them the counterparty had been
+ * notified of an agreement its sender had not signed, and the wizard showed
+ * "SIGNED" as soon as the first returned. The signature travels with the
+ * request now, and the backend writes both in one transaction.
+ *
+ * `Idempotency-Key` is REQUIRED by the route. A retry after a timeout must not
+ * produce a second agreement, and the caller is the only one who knows the two
+ * attempts were the same intent.
+ *
+ * `party_ids` entries name EITHER a registered user or an email address:
+ *   { user_id: "..." }                      a party who signs from their account
+ *   { email: "x@y.pk", full_name: "..." }   invited; signs via a one-time link
+ */
+export async function createAgreement({ title, body_html, party_ids, case_id,
+                                        method, signature_data, consent,
+                                        idempotency_key }) {
   return apiFetch('/agreements', {
     method: 'POST',
-    body: JSON.stringify({ title, body_html, party_ids }),
+    headers: { 'Idempotency-Key': idempotency_key || idempotencyKey() },
+    body: JSON.stringify({ title, body_html, party_ids, case_id,
+                           method, signature_data, consent }),
   });
+}
+
+/* What an invited signer may read, with no account. The token goes in the BODY
+ * — a path or query parameter lands in logs, history and referrer headers, and
+ * this token is the whole authority to sign. */
+export async function viewAgreementByInvitation(token) {
+  return apiFetch('/agreements/invitation/view', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function signAgreementByInvitation({ token, method, signature_data,
+                                                  consent }) {
+  return apiFetch('/agreements/invitation/sign', {
+    method: 'POST',
+    body: JSON.stringify({ token, method, signature_data, consent }),
+  });
+}
+
+/* A FRESH LINK for an invited signer whose old one never arrived — filtered by
+ * their mail server, or lost when the one-time panel was closed. The response
+ * carries the new token exactly once, like the original send, and says whether
+ * the email went out. The previous link stops working. */
+export async function reissueAgreementInvitation(agreement_id, party_id) {
+  return apiFetch(
+    `/agreements/${encodeURIComponent(agreement_id)}/invitations/${encodeURIComponent(party_id)}/reissue`,
+    { method: 'POST' });
+}
+
+/* REMOVE FROM MY LIST, not delete. `DELETE /agreements/drafts/{id}` removes an
+ * unsent draft and refuses anything else, because a sent agreement is a record
+ * the other parties hold too. This hides it for the caller alone and is
+ * reversible with unarchiveAgreement. */
+export async function archiveAgreement(agreement_id) {
+  return apiFetch(`/agreements/${encodeURIComponent(agreement_id)}/archive`,
+                  { method: 'POST' });
+}
+
+export async function unarchiveAgreement(agreement_id) {
+  return apiFetch(`/agreements/${encodeURIComponent(agreement_id)}/unarchive`,
+                  { method: 'POST' });
+}
+
+export async function revokeAgreementInvitation(agreement_id, party_id) {
+  return apiFetch(
+    `/agreements/${encodeURIComponent(agreement_id)}/invitations/${encodeURIComponent(party_id)}/revoke`,
+    { method: 'POST' });
 }
 
 export async function signAgreement(agreement_id, method, signature_data) {
@@ -1143,9 +1241,114 @@ export async function updateLawyerProfile(updates) {
   });
 }
 
-export async function listAgreements() {
-  return apiFetch('/agreements');
+/* One page of the caller's agreements: {items, total, page, page_size, pages}.
+ *
+ * NO USER ID, deliberately. The server answers for whoever the token says you
+ * are; a user id in the query string would be a request for somebody else's
+ * agreements, and `status=draft` would then be a way to read a lawyer's unsent
+ * wording. Paging and filtering describe the SLICE, never the subject.
+ *
+ * The rows carry no `body_html`. Open an agreement to read it. */
+export async function listAgreements({ page = 1, page_size = 20, status = null,
+                                       archived = false } = {}) {
+  const p = new URLSearchParams({ page, page_size });
+  if (status) p.set('status', status);
+  if (archived) p.set('archived', 'true');
+  return apiFetch(`/agreements?${p}`);
 }
+
+/* Download the executed agreement with its signature record.
+ *
+ * The bytes are rendered SERVER-SIDE from the stored row. The body, the
+ * signatures and the audit log never travel as JSON -- only the finished
+ * document does -- so there is no client-side assembly here to get wrong.
+ *
+ * Only a party to a fully executed agreement gets one. A non-party is told it
+ * does not exist rather than refused, so this surfaces as an ordinary "not
+ * found" and must not be reported as though the user lacked permission for
+ * something they can see. */
+export async function downloadExecutedAgreement(agreementId, filename) {
+  const { data: res, error } = await apiFetch(
+    `/agreements/${encodeURIComponent(agreementId)}/pdf`,
+    { returnResponse: true },
+  );
+  if (error) return { error: error.message || 'Download failed' };
+  return _saveBlob(res, filename || `agreement-${agreementId}.pdf`);
+}
+
+// ─── Agreement drafts (Gate 3C routes) ───────────────────────────────────────
+//
+// A draft is the lawyer's private working copy. It reaches nobody until it is
+// SENT, and sending and signing are one call — the parked two-step wizard could
+// leave a counterparty holding an agreement its sender never signed.
+//
+// Three things travel with these calls that the older /agreements routes never
+// carried, and each exists to stop a specific failure:
+//
+//   expected_version       optimistic concurrency. Two tabs editing one draft
+//                          must not silently overwrite each other.
+//   expected_body_sha256   the digest of the wording the signer actually READ.
+//                          If a concurrent edit landed, it will not match and
+//                          the send is refused rather than binding them to text
+//                          they never saw.
+//   Idempotency-Key        a retry of a lost response must not send twice.
+
+export async function createDraft({ title, body_html, client_id, case_id }) {
+  return apiFetch('/agreements/drafts', {
+    method: 'POST',
+    body: JSON.stringify({ title, body_html, client_id, case_id }),
+  });
+}
+
+/* An edit. `expected_version` is REQUIRED — the server rejects the call
+   without it, and that is deliberate: a save that does not say what it
+   believed it was editing cannot be checked for conflicts.
+
+   A field that is absent OR null is left out of the payload entirely. Absent
+   already falls out of JSON.stringify, which drops undefined; NULL does not,
+   and `{"title": null}` is a 422 against a schema whose title has
+   min_length=1. Both spellings mean the same thing to a caller — "I am not
+   changing this" — so both are treated the same here rather than one of them
+   failing the save for a field the caller never meant to touch. */
+export async function updateDraft(agreementId, { expected_version, title, body_html }) {
+  return apiFetch(`/agreements/drafts/${encodeURIComponent(agreementId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      expected_version,
+      ...(title != null ? { title } : {}),
+      ...(body_html != null ? { body_html } : {}),
+    }),
+  });
+}
+
+export async function deleteDraft(agreementId) {
+  return apiFetch(`/agreements/drafts/${encodeURIComponent(agreementId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/* Sign and send, in one server-side transaction.
+ *
+ * `key` is minted once per INTENT (see idempotencyKey) and reused by every
+ * retry of that same send. A fresh key on a retry is a second agreement. */
+export async function sendDraft(
+  agreementId,
+  { expected_version, expected_body_sha256, method = 'typed', signature_data, consent },
+  key,
+) {
+  return apiFetch(`/agreements/drafts/${encodeURIComponent(agreementId)}/send`, {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      expected_version, expected_body_sha256, method, signature_data, consent,
+    }),
+  });
+}
+
+// The body digest lives in lib/agreementBody.js, not here. It is pure
+// computation rather than a request, and the test loader replaces this module
+// with spies for any component that imports it -- which would have made the
+// one value a signature record depends on unobservable in a mounted test.
 
 // ─── AI ──────────────────────────────────────────────────────────────────────
 // opts: { templateId?: "chat" | "case_context", context?: object, history?: array }

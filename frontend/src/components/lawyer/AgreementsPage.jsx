@@ -1,11 +1,15 @@
 'use client';
-// Lawyer Agreements — engagement letters and contracts awaiting signature.
+// Lawyer Agreements — contracts awaiting signature, and legacy engagement letters.
 // Counterpart of the client's AgreementHub; same backend, lawyer perspective.
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { listAgreements, signAgreement, declineAgreement } from "@/lib/api.js";
+import { listAgreements, getAgreement, signAgreement, declineAgreement, downloadExecutedAgreement } from "@/lib/api.js";
+import SignaturePad from "@/components/shared/SignaturePad.jsx";
+import { DraftComposer } from "./DraftComposer.jsx";
+
+const PAGE_SIZE = 25;
 
 const STATUS_LABEL = { pending: "Pending", executed: "Executed", cancelled: "Cancelled", draft: "Draft" };
 const STATUS_BADGE = { Pending: "warn", Executed: "success", Cancelled: "danger", Draft: "gray" };
@@ -16,15 +20,40 @@ function mapAgreement(a, myId) {
     return {
         id: a.id || a._id,
         title: a.title || "Agreement",
-        body: a.body_html || "",
+        // NO `body` HERE. Gate 3F made the list light, and deriving the
+        // displayed text from a list row is what made every agreement open
+        // as "No content." beside a working Sign button. The body is fetched
+        // by id when the document is opened -- see `openAgreement`.
         status: STATUS_LABEL[a.status] || "Pending",
         parties,
-        signedCount: parties.filter(p => p.signed).length,
+        // THE SERVER'S COUNTS FIRST. It derives them from the parties on every
+        // read, and it is the side that knows about an external signer whose
+        // row carries no user_id. Counting here is only the fallback.
+        signedCount: a.signed_count ?? parties.filter(p => p.signed).length,
+        totalParties: a.total_parties ?? parties.length,
         needsMySig: a.status === "pending" && !!me && !me.signed,
         date: a.created_at ? new Date(a.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
-        counterparts: parties.filter(p => p.user_id !== myId).map(p => p.full_name).join(" · "),
-        eto: a.eto_classification,
+        // An invited signer has NO user_id, so the filter keeps them -- which
+        // is right -- but `full_name` may be absent, and a blank in a
+        // dot-separated list reads as a missing party rather than an invited
+        // one.
+        counterparts: parties
+            .filter(p => p.user_id !== myId)
+            .map(p => p.full_name || p.email || "Invited signer")
+            .join(" · "),
+        // NO `eto` HERE either. Like the body, it is a property of the
+        // DOCUMENT and the list does not carry it -- reading it off a row
+        // yielded undefined, so the subtitle silently said "Awaiting first
+        // signature" for agreements that were already executed. It now comes
+        // from the fetched document.
         isEngagementLetter: !!a.engagement_id,
+        // Kept for the editor: `version` drives optimistic concurrency and
+        // `raw` is the untouched server copy, which is what the digest is
+        // taken over at send time. The mapped view is for DISPLAY; signing
+        // reads from the server's own object.
+        isDraft: a.status === "draft",
+        version: a.version,
+        raw: a,
     };
 }
 
@@ -34,7 +63,10 @@ export function AgreementsPage() {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [active, setActive] = useState(null);
-    const [signName, setSignName] = useState("");
+    // {method, data} from SignaturePad. A lawyer counter-signing had a
+    // name box only, while the same person composing an agreement could
+    // draw or upload.
+    const [signSig, setSignSig] = useState({ method: "canvas", data: "" });
     const [busy, setBusy] = useState(false);
     // Same two-step guard as the client screen. The backend authorises decline
     // by PARTY, not by role -- a lawyer is a party and may refuse -- so the
@@ -43,22 +75,82 @@ export function AgreementsPage() {
     const [declineReason, setDeclineReason] = useState("");
     const [toast, setToast] = useState(null);
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
+    // `composing` is either "new" or the draft being edited. A draft never
+    // opens the signing modal: it has nothing to sign yet, and the only way to
+    // sign it is to send it.
+    const [composing, setComposing] = useState(null);
+
+    // The DOCUMENT behind the open row: { loading, body, error }. Kept apart
+    // from `active` (the list row) so it is impossible to render one while
+    // believing it is the other.
+    const [doc, setDoc] = useState(null);
+    // Monotonic counter identifying the most recent open. See `openAgreement`.
+    const openSeq = useRef(0);
+
+    // Paging. `total` is what stops a truncated list looking complete.
+    const [total, setTotal] = useState(0);
+    const [pages, setPages] = useState(1);
+    const [page, setPage] = useState(1);
+    const [statusFilter, setStatusFilter] = useState(null);
 
     const reload = useCallback(() => {
-        listAgreements().then(({ data }) => {
-            if (Array.isArray(data)) setItems(data.map(a => mapAgreement(a, user?._id)));
-            setLoading(false);
-        }).catch(() => setLoading(false));
-    }, [user?._id]);
+        // 3F: the response is a page, not a bare array. Reading `data.items`
+        // rather than `data` -- an `Array.isArray(data)` check would now be
+        // false for every successful response and the screen would render
+        // "no agreements" to someone who has forty.
+        listAgreements({ page, page_size: PAGE_SIZE, status: statusFilter })
+            .then(({ data }) => {
+                const rows = data?.items;
+                if (Array.isArray(rows)) {
+                    const mapped = rows.map(a => mapAgreement(a, user?._id));
+                    // Page 1 REPLACES, later pages APPEND. A filter change
+                    // resets to page 1, so this is also what clears the old
+                    // results rather than stacking them underneath.
+                    setItems(prev => (page === 1 ? mapped : [...prev, ...mapped]));
+                    setTotal(data.total ?? mapped.length);
+                    setPages(data.pages ?? 1);
+                }
+                setLoading(false);
+            }).catch(() => setLoading(false));
+    }, [user?._id, page, statusFilter]);
     useEffect(() => { reload(); }, [reload]);
 
+    /* Open a row: fetch the DOCUMENT, never trust the row.
+     *
+     * The sign and decline panels are gated on `doc.body != null`, so a failed
+     * fetch cannot leave somebody able to sign text they were never shown. */
+    const openAgreement = useCallback(async (row) => {
+        setActive(row);
+        setSignSig({ method: "canvas", data: "" });
+        setDoc({ loading: true, body: null, error: null });
+
+        // THE LAST QUESTION ASKED IS THE ONLY ONE WHOSE ANSWER COUNTS.
+        // Open A, open B before A replies, and A's late reply would land in
+        // `doc` while `active` is B -- putting one agreement's wording under
+        // another's heading, on a screen whose next button is Sign.
+        const token = ++openSeq.current;
+        const { data, error } = await getAgreement(row.id);
+        if (token !== openSeq.current) return;
+
+        if (error || !data) {
+            setDoc({ loading: false, body: null,
+                     error: error?.message || "This agreement could not be loaded." });
+            return;
+        }
+        setDoc({ loading: false, body: data.body_html ?? "",
+                 eto: data.eto_classification, error: null });
+    }, [user?.full_name]);
+
     const doSign = async () => {
-        if (!signName.trim()) { showToast("⚠️ Type your full name to sign"); return; }
+        if (!signSig.data) {
+            showToast("⚠️ Add your signature first — draw, type or upload");
+            return;
+        }
         setBusy(true);
-        const { data, error } = await signAgreement(active.id, "typed", signName.trim());
+        const { data, error } = await signAgreement(active.id, signSig.method, signSig.data);
         setBusy(false);
         if (error) { showToast("❌ " + (error.message || "Failed to sign")); return; }
-        showToast(data?.status === "executed" ? "🎉 Agreement fully executed — both parties notified" : "✅ Signed — awaiting the other party");
+        showToast(data?.status === "executed" ? "🎉 Agreement fully executed — all parties notified" : "✅ Signed — awaiting the other parties");
         setActive(null);
         reload();
     };
@@ -75,22 +167,44 @@ export function AgreementsPage() {
         reload();
     };
 
-    const closeModal = () => { setActive(null); setDeclineOpen(false); setDeclineReason(""); };
+    const doDownload = async () => {
+        setBusy(true);
+        const { error } = await downloadExecutedAgreement(active.id, `${active.title || "agreement"}.pdf`);
+        setBusy(false);
+        if (error) { showToast("❌ " + error); return; }
+        showToast("⬇ Downloaded");
+    };
+
+    const closeModal = () => { openSeq.current += 1; setActive(null); setDoc(null); setDeclineOpen(false); setDeclineReason(""); };
+
+    const changeFilter = (next) => {
+        // ONE place, because resetting the page is not optional: keeping page
+        // 3 across a filter change shows the user page 3 of a list they just
+        // narrowed, which usually looks empty.
+        setPage(1);
+        setStatusFilter(next);
+    };
 
     const awaitingMe = items.filter(a => a.needsMySig);
+    // Only ever this lawyer's own: the server does not return anyone else's.
+    const drafts = items.filter(a => a.isDraft);
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 18, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-            <div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Agreements</div>
-                <div style={{ fontSize: 13, color: T.textMuted, marginTop: 3 }}>
-                    Engagement letters and contracts — signed electronically under ETO 2002
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Agreements</div>
+                    <div style={{ fontSize: 13, color: T.textMuted, marginTop: 3 }}>
+                        Contracts and legacy engagement letters — signed electronically under ETO 2002
+                    </div>
                 </div>
+                <Btn variant="primary" onClick={() => setComposing("new")}>+ New agreement</Btn>
             </div>
 
             {/* Stats */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
                 {[
+                    { l: "Drafts", v: drafts.length, c: T.textMuted, ic: "📝" },
                     { l: "Awaiting My Signature", v: awaitingMe.length, c: awaitingMe.length ? T.warn : T.success, ic: "✍️" },
                     { l: "Pending Others", v: items.filter(a => a.status === "Pending" && !a.needsMySig).length, c: T.info, ic: "⏰" },
                     { l: "Executed", v: items.filter(a => a.status === "Executed").length, c: T.success, ic: "✅" },
@@ -107,6 +221,24 @@ export function AgreementsPage() {
                 ))}
             </div>
 
+            {/* Status filter. Composes with paging through `changeFilter`,
+                which is the only writer of both. */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[["All", null], ["Pending", "pending"], ["Executed", "executed"],
+                  ["Cancelled", "cancelled"], ["Draft", "draft"]].map(([label, value]) => (
+                    <button key={label} type="button" onClick={() => changeFilter(value)}
+                        style={{
+                            padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                            border: `1px solid ${statusFilter === value ? T.primary : T.border}`,
+                            background: statusFilter === value ? T.primaryGlow : "transparent",
+                            color: statusFilter === value ? T.primary : T.textMuted,
+                            cursor: "pointer", fontFamily: "inherit",
+                        }}>
+                        {label}
+                    </button>
+                ))}
+            </div>
+
             {/* List */}
             <Card style={{ padding: 0, overflow: "hidden" }}>
                 {loading ? (
@@ -115,11 +247,15 @@ export function AgreementsPage() {
                     <div style={{ padding: 40, textAlign: "center" }}>
                         <div style={{ fontSize: 32, marginBottom: 10 }}>📜</div>
                         <div style={{ fontSize: 14, color: T.textMuted }}>
-                            No agreements yet. Accepting a client's case request creates an engagement letter here automatically.
+                            No agreements yet. Write one with &ldquo;New agreement&rdquo;; agreements
+                            shared with you appear here too.
                         </div>
                     </div>
                 ) : items.map((a, i) => (
-                    <div key={a.id} onClick={() => { setActive(a); setSignName(user?.full_name || ""); }} style={{
+                    <div key={a.id} onClick={() => {
+                        if (a.isDraft) { setComposing(a.raw); return; }
+                        openAgreement(a);
+                    }} style={{
                         display: "flex", alignItems: "center", gap: 14, padding: "14px 20px",
                         borderBottom: i < items.length - 1 ? `1px solid ${T.border}` : "none",
                         cursor: "pointer", transition: "background .12s",
@@ -131,7 +267,7 @@ export function AgreementsPage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13.5, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title}</div>
                             <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 2 }}>
-                                With {a.counterparts || "—"} · {a.signedCount}/{a.parties.length} signed · {a.date}
+                                With {a.counterparts || "—"} · {a.signedCount}/{a.totalParties} signed · {a.date}
                             </div>
                         </div>
                         {a.needsMySig && (
@@ -142,6 +278,25 @@ export function AgreementsPage() {
                         <Badge type={STATUS_BADGE[a.status] || "gray"}>{a.status}</Badge>
                     </div>
                 ))}
+
+                {/* HOW MANY THERE ARE, and a way to reach them.
+                    The screen used to ask for 50 rows and ignore the total, so
+                    a lawyer with 51 agreements had one that simply did not
+                    exist as far as the UI was concerned -- indistinguishable
+                    from having 50. */}
+                {!loading && items.length > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 20px", borderTop: `1px solid ${T.border}`, background: T.surface, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, color: T.textMuted }}>
+                            Showing {items.length} of {total}
+                        </span>
+                        {items.length < total && (
+                            <Btn variant="secondary" size="sm" disabled={loading}
+                                onClick={() => { setLoading(true); setPage(p => p + 1); }}>
+                                Load more
+                            </Btn>
+                        )}
+                    </div>
+                )}
             </Card>
 
             {/* Detail / sign modal */}
@@ -159,7 +314,7 @@ export function AgreementsPage() {
                             <span style={{ fontSize: 20 }}>{active.isEngagementLetter ? "⚖️" : "📄"}</span>
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 15, fontWeight: 700, color: T.text, fontFamily: "Georgia,serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.title}</div>
-                                <div style={{ fontSize: 11, color: T.textMuted }}>{active.eto || "Awaiting first signature"}</div>
+                                <div style={{ fontSize: 11, color: T.textMuted }}>{doc?.eto || "Awaiting first signature"}</div>
                             </div>
                             <Badge type={STATUS_BADGE[active.status] || "gray"}>{active.status}</Badge>
                             <button onClick={closeModal} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: T.textMuted, fontSize: 14 }}>✕</button>
@@ -167,31 +322,90 @@ export function AgreementsPage() {
 
                         <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-                                {active.parties.map(p => (
-                                    <div key={p.user_id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 11px", borderRadius: 9, background: p.signed ? `${T.success}14` : T.cardHi, border: `1px solid ${p.signed ? T.success + "40" : T.border}` }}>
+                                {/* KEYED BY WHATEVER IDENTIFIES THE PARTY. An
+                                    external signer has no user_id, so keying on
+                                    it alone gave every invited signer the key
+                                    `undefined` and React reused one row for all
+                                    of them. */}
+                                {active.parties.map((p, i) => (
+                                    <div key={p.user_id || p.party_id || p.email || i} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 11px", borderRadius: 9, background: p.signed ? `${T.success}14` : T.cardHi, border: `1px solid ${p.signed ? T.success + "40" : T.border}` }}>
                                         <span style={{ fontSize: 11 }}>{p.signed ? "✅" : "⏰"}</span>
-                                        <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{p.full_name}</span>
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{p.full_name || p.email || "Invited signer"}</span>
+                                        {p.external && (
+                                            /* Said on the party itself: this is
+                                               where someone decides how much to
+                                               trust the signature. */
+                                            <span title="Invited by email — identity not verified by us" style={{
+                                                fontSize: 9.5, fontWeight: 700, color: T.warn,
+                                                background: T.warn + "1F", border: `1px solid ${T.warn}40`,
+                                                borderRadius: 5, padding: "1px 5px",
+                                            }}>EMAIL{p.invitation_status === "revoked" ? " · REVOKED" : p.invitation_status === "expired" ? " · EXPIRED" : ""}</span>
+                                        )}
                                         <span style={{ fontSize: 10, color: p.signed ? T.success : T.textMuted }}>{p.signed ? "signed" : "pending"}</span>
                                     </div>
                                 ))}
                             </div>
-                            <div style={{ background: T.cardHi, border: `1px solid ${T.border}`, borderRadius: 10, padding: "16px 18px", fontSize: 13, lineHeight: 1.8, color: T.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
-                                {active.body || "No content."}
-                            </div>
+                            {/* THE DOCUMENT, fetched by id. Three distinct
+                                states, and "No content." is only ever the
+                                third: a body the server really returned empty.
+                                It must never stand in for a field the list
+                                did not carry. */}
+                            {doc?.loading ? (
+                                <div style={{ background: T.cardHi, border: `1px solid ${T.border}`, borderRadius: 10, padding: "20px 18px", fontSize: 13, color: T.textMuted, textAlign: "center" }}>
+                                    Loading the agreement…
+                                </div>
+                            ) : doc?.error ? (
+                                <div style={{ background: `${T.danger}12`, border: `1px solid ${T.danger}40`, borderRadius: 10, padding: "16px 18px", fontSize: 13, lineHeight: 1.7, color: T.danger }}>
+                                    {doc.error}
+                                    <div style={{ color: T.textMuted, marginTop: 6, fontSize: 12 }}>
+                                        Nothing can be signed until the wording is on screen.
+                                    </div>
+                                </div>
+                            ) : (
+                                <div style={{ background: T.cardHi, border: `1px solid ${T.border}`, borderRadius: 10, padding: "16px 18px", fontSize: 13, lineHeight: 1.8, color: T.text, whiteSpace: "pre-wrap", fontFamily: "Georgia,serif" }}>
+                                    {doc?.body ? doc.body : "No content."}
+                                </div>
+                            )}
+
+                            {/* Only once EXECUTED. There is no document to
+                                download before every party has signed, and
+                                the server refuses one -- offering the button
+                                early would promise a file that does not
+                                exist. */}
+                            {active.status === "Executed" && doc && !doc.loading && !doc.error && (
+                                <div style={{ marginTop: 14 }}>
+                                    <Btn variant="secondary" disabled={busy} onClick={doDownload}>
+                                        ⬇ Download signed copy
+                                    </Btn>
+                                    <div style={{ fontSize: 10.5, color: T.textFaint, marginTop: 6, lineHeight: 1.5 }}>
+                                        Includes the signature record: who signed, how, when the
+                                        server recorded it, and the digest of the signed text.
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        {active.needsMySig && (
+                        {/* GATED ON THE BODY. Signing is offered only once the
+                            document is on screen -- a failed fetch must not
+                            leave somebody able to put their name to text they
+                            were never shown. */}
+                        {active.needsMySig && doc && !doc.loading && !doc.error && (
                             <div style={{ padding: "12px 20px 16px", borderTop: `1px solid ${T.border}`, background: T.surface }}>
                                 <div style={{ fontSize: 10.5, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>
-                                    Sign — type your full legal name
+                                    Sign — draw, type or upload
                                 </div>
-                                <div style={{ display: "flex", gap: 10 }}>
-                                    <input value={signName} onChange={e => setSignName(e.target.value)} placeholder="Your full name"
-                                        style={{ flex: 1, height: 38, border: `1px solid ${T.border}`, borderRadius: 9, background: T.inputBg, color: T.text, fontSize: 13, padding: "0 12px", outline: "none", fontFamily: "inherit" }} />
+                                <SignaturePad height={150} onChange={setSignSig} />
+                                <div style={{ marginTop: 10 }}>
                                     <Btn variant="accent" disabled={busy} onClick={doSign}>{busy ? "Signing…" : "✍️ Sign Agreement"}</Btn>
                                 </div>
+                                {/* WHAT IS RECORDED, not what it amounts to in law.
+                                    "Classified under the Electronic Transactions
+                                    Ordinance 2002" is a legal conclusion no lawyer
+                                    has reviewed -- the same class of claim stripped
+                                    from the rest of this module. Phase 4.1 owns it. */}
                                 <div style={{ fontSize: 10.5, color: T.textFaint, marginTop: 7, lineHeight: 1.5 }}>
-                                    Recorded with timestamp and IP in the audit log; classified under the Electronic Transactions Ordinance 2002.
+                                    Recorded in the audit log with the time, your IP address where it
+                                    can be determined, and a digest of the text you signed.
                                 </div>
 
                                 {!declineOpen ? (
@@ -224,6 +438,14 @@ export function AgreementsPage() {
                         )}
                     </div>
                 </div>
+            )}
+
+            {composing && (
+                <DraftComposer
+                    draft={composing === "new" ? null : composing}
+                    onSaved={reload}
+                    onClose={(msg) => { setComposing(null); if (msg) showToast(msg); }}
+                />
             )}
 
             {toast && (

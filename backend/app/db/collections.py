@@ -232,6 +232,17 @@ def get_deletion_tombstones_col() -> AsyncIOMotorCollection:
     is resumable and an erased artifact still leaves an audit residue."""
     return get_database()["deletion_tombstones"]
 
+def get_agreement_downloads_col() -> AsyncIOMotorCollection:
+    """One row per executed-agreement PDF served.
+
+    Exists for a product question -- what share of executed agreements are ever
+    actually downloaded -- and, incidentally, as a record of who took a copy of
+    a signed contract and when. Append-only: a download happened or it did not,
+    and there is no correction to make afterwards.
+    """
+    return get_database()["agreement_downloads"]
+
+
 def get_ocr_revisions_col() -> AsyncIOMotorCollection:
     """Immutable OCR readings. One row per (owner, file, page, source bytes,
     engine build, config) — inserted, never updated, so what was read and what
