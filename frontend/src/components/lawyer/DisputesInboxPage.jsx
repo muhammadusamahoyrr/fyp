@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
-import { disputeLawyerInbox, disputeBrief, downloadDocument } from "@/lib/api.js";
+import { disputeLawyerInbox, disputeBrief, downloadDocumentFile } from "@/lib/api.js";
 
 const STATE_META = {
     ready_for_drafting: { label: "Ready to draft", type: "success" },
@@ -63,7 +63,14 @@ export function DisputesInboxPage() {
     const downloadPetition = async () => {
         if (!brief?.petition?.document_id) return;
         setBusyDoc(true);
-        await downloadDocument(brief.petition.document_id, "special-court-petition");
+        // The revision that was shared with this lawyer. A V2 petition has no
+        // legacy file, and the V2 route authorises the reviewer only for the
+        // revision put in front of them. None on a legacy petition, which then
+        // takes the legacy route exactly as before.
+        await downloadDocumentFile(brief.petition.document_id, "special-court-petition", {
+            revisionId: brief.petition.revision_id || null,
+            expectedPdfSha256: brief.petition.pdf_sha256 || null,
+        });
         setBusyDoc(false);
     };
 
