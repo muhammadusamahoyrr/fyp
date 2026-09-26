@@ -16,57 +16,7 @@ function templateCaseType(name = "") {
 }
 import { useAuth } from "@/context/AuthContext.jsx";
 import MyDocuments from "./MyDocuments.jsx";
-
-// ============================================================
-// DATA
-// ============================================================
-
-const CATEGORIES = ["All", "Agreement/Contract", "Application/Petition", "Litigation", "Criminal", "Property", "Labour", "Administrative"];
-
-const TEMPLATES = [
-    { id: 1, name: "Dissolution of Marriage Application", cat: "Application/Petition", desc: "Seek divorce with compliant petition under Muslim Family Laws Ordinance. Outlines grounds, reliefs, and clarity for family court filings.", icon: "⚖️", popular: true },
-    { id: 2, name: "Plaint — Civil Suit", cat: "Litigation", desc: "Standard plaint under Order VII Rule 1 CPC for civil suits. Covers facts, cause of action, and prayer clause.", icon: "🏛️", popular: true },
-    { id: 3, name: "Service Agreement", cat: "Agreement/Contract", desc: "Professional service contract covering scope, payment, timelines, and breach clauses. Suitable for B2B engagements.", icon: "🤝", popular: false },
-    { id: 4, name: "Legal Notice", cat: "Application/Petition", desc: "Formal legal notice to demand compliance, payment, or action before initiating legal proceedings.", icon: "📬", popular: true },
-    { id: 5, name: "Affidavit (General)", cat: "Application/Petition", desc: "Sworn affidavit format for court submission. General-purpose with fields for deponent details and declarations.", icon: "🔏", popular: false },
-    { id: 6, name: "Bail Application", cat: "Criminal", desc: "Regular bail application under CrPC with grounds, antecedents, and sureties. Includes statutory reference.", icon: "🔑", popular: true },
-    { id: 7, name: "Written Statement", cat: "Litigation", desc: "Defence written statement template for civil suits. Includes preliminary objections, para-wise reply, and counter-claim.", icon: "📝", popular: false },
-    { id: 8, name: "Power of Attorney (General)", cat: "Agreement/Contract", desc: "General POA authorising an agent to act on behalf of the principal for specified legal and financial matters.", icon: "📋", popular: false },
-    { id: 9, name: "Vakalatnama", cat: "Litigation", desc: "Court authority-to-plead form granting an advocate right to appear and act in proceedings.", icon: "📄", popular: false },
-    { id: 10, name: "RTI Application", cat: "Administrative", desc: "Right to Information application under RTI Act to obtain public records from government authorities.", icon: "🗂️", popular: false },
-    { id: 11, name: "Employment Contract", cat: "Agreement/Contract", desc: "Standard employment agreement covering designation, salary, confidentiality, termination, and dispute resolution.", icon: "💼", popular: false },
-    { id: 12, name: "Property Sale Deed", cat: "Property", desc: "Registered sale deed for immovable property transfer. Includes survey details, consideration, and possession clause.", icon: "🏠", popular: true },
-    { id: 13, name: "Labour Dispute Notice", cat: "Labour", desc: "Formal notice to employer for wrongful termination, unpaid wages, or violation of labour laws.", icon: "⚡", popular: false },
-    { id: 14, name: "NDA / Confidentiality Agreement", cat: "Agreement/Contract", desc: "Mutual or one-way non-disclosure agreement for trade secrets, business plans, and proprietary information.", icon: "🛡️", popular: false },
-];
-
-// The strings below are interpolated into template text that is then turned
-// into HTML (newlines -> <br>) and rendered with dangerouslySetInnerHTML. Case
-// data is user-supplied -- `client` is a display name the client chose -- so it
-// is data, not markup. Escaping at the point of derivation covers every
-// interpolation in the template map below without touching each one.
-const escapeHtml = (value) =>
-    String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-
-function buildContent(tmpl, caseObj) {
-    const caseRef = escapeHtml(caseObj?.id || "CS-2024-089");
-    const clientRef = escapeHtml(caseObj?.client || "[Client Name]");
-    const court = escapeHtml(caseObj?.court || "[Court Name]");
-    const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-
-    const map = {
-        1: `IN THE FAMILY COURT AT [LOCATION]\n\nSuit No. ______/2026\n\n${clientRef.toUpperCase()}, W/O [Husband's Name],\nResident of [Full Address], CNIC No. [__________],\n\n...Petitioner\n\nVERSUS\n\n[Respondent's Name], S/O [Father's Name],\nResident of [Full Address],\n\n...Respondent\n\n\nPETITION FOR DISSOLUTION OF MARRIAGE (DIVORCE)\nUNDER THE MUSLIM FAMILY LAWS ORDINANCE, 1961\n\nRespectfully Sheweth:\n\n1. That the petitioner and the respondent were duly married on [Date] at [Place] in accordance with Muslim personal law.\n\n2. That the respondent has treated the petitioner with cruelty and has failed to maintain the petitioner without reasonable cause.\n\n3. That the petitioner is entitled to seek dissolution of marriage under Section 2(ix) of the Dissolution of Muslim Marriages Act, 1939.\n\nPRAYER:\nIt is therefore respectfully prayed that this Honourable Court may be pleased to:\n(a) Grant decree of dissolution of marriage;\n(b) Award maintenance to the petitioner;\n(c) Award costs of the proceedings.\n\nDate: ${today}\n\n_________________________\nPetitioner / Advocate`,
-        2: `IN THE COURT OF THE CIVIL JUDGE, LAHORE\n\nCase No. ${caseRef} of 2026\n\n${clientRef.toUpperCase()}\n...Plaintiff\n\nVERSUS\n\n[Defendant Name]\n...Defendant\n\n\nPLAINT UNDER ORDER VII RULE 1, C.P.C.\n\nMost Respectfully Sheweth:\n\n1. That the plaintiff is a resident of [Address] and is entitled to file the present suit.\n\n2. That the defendant is indebted to the plaintiff in the sum of PKR [Amount] on account of [cause of action].\n\n3. That the cause of action arose on [Date] when the defendant failed to honour the obligation despite written demand dated [Date].\n\n4. That this Court has territorial and pecuniary jurisdiction to try the present suit.\n\nPRAYER:\nThe plaintiff humbly prays that this Honourable Court may be pleased to:\n(a) Decree the suit for PKR [Amount];\n(b) Award markup at the rate of [Rate]% per annum;\n(c) Award costs of the suit.\n\nVerified: The contents of the above plaint are true to the best of my knowledge.\n\nDate: ${today}\t\t\t_______________________\n\t\t\t\t\tPlaintiff / Advocate`,
-        default: `IN THE COURT OF THE HONOURABLE JUDGE\n\nCase Reference: ${caseRef}\n\n${tmpl.name.toUpperCase()}\n\nIN THE MATTER OF: ${clientRef}\n\nBefore: ${court}\n\nDate: ${today}\n\n${"─".repeat(60)}\n\n1. INTRODUCTION\n\nThis ${tmpl.name} is filed on behalf of ${clientRef} in connection with the above-referenced matter.\n\n2. FACTS\n\nThe relevant facts are as follows:\n\n   a) [State first material fact]\n   b) [State second material fact]\n   c) [State third material fact]\n\n3. GROUNDS\n\n   i.  [Ground one — legal basis]\n   ii. [Ground two — factual basis]\n\n4. PRAYER\n\nIn light of the above, it is respectfully prayed that this Honourable Court may be pleased to grant the relief sought herein, along with costs.\n\n${"─".repeat(60)}\n\nDate: ${today}\t\t\t_______________________\n\t\t\t\t\t[Advocate Name]\n\t\t\t\t\tBar Council Enrollment No.: [__________]`,
-    };
-
-    return map[tmpl.id] || map.default;
-}
+import { TEMPLATES, CATEGORIES, BLANK_TEMPLATE, buildContent } from "@/lib/lawyerDraftTemplates.js";
 
 // ============================================================
 // TOOLBAR BUTTON
@@ -115,7 +65,7 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
     const [showDrafts, setShowDrafts] = useState(false);
     const [search, setSearch] = useState("");
     const [cat, setCat] = useState("All");
-    const [bookmarked, setBookmarked] = useState(new Set([1, 6, 12]));
+    const [bookmarked, setBookmarked] = useState(new Set([1]));
 
     const filtered = TEMPLATES.filter(tmpl =>
         (cat === "All" || tmpl.cat === cat) &&
@@ -160,7 +110,7 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
             {/* Hero Cards */}
             <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
                 {[
-                    { label: "New Document", sub: "Start with a blank legal document.", icon: I.plus, color: t.primary, onClick: () => onSelect({ id: 0, name: "Blank Document", cat: "General", desc: "", icon: "📄" }) },
+                    { label: "New Document", sub: "Start from the generic legal-draft scaffold.", icon: I.plus, color: t.primary, onClick: () => onSelect(BLANK_TEMPLATE) },
                     { label: "My Drafts", sub: `${drafts.length} saved draft${drafts.length === 1 ? "" : "s"} — continue where you left off.`, icon: I.save, color: t.warn, onClick: () => setShowDrafts(v => !v) },
                 ].map(h => (
                     <button key={h.label} onClick={h.onClick}

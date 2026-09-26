@@ -13,6 +13,7 @@ import FieldReview from "./FieldReview.jsx";
 import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
     from "@/lib/fieldReview.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
+import { complianceSummary } from "@/lib/complianceSummary.js";
 import { rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
 import { useDocumentResume, NO_CASE } from "@/lib/useDocumentResume.js";
 import { caseSelection } from "@/lib/caseSelection.js";
@@ -35,6 +36,9 @@ const STitle = ({ icon, sub, children }) => {
         </div>
     );
 };
+
+// complianceSummary tone → this module's Badge types.
+const _PARTICULARS_BADGE = { success: "success", warn: "warn", neutral: "gray" };
 
 const Lbl = ({ children }) => {
     const t = useT();
@@ -167,6 +171,8 @@ const ModDocuments = () => {
     const [genDone, setGenDone] = useState(false);
     // Statutory completeness of the generated draft, returned by the API.
     const [compliance, setCompliance] = useState(null);
+    // What the final screen may truthfully say about it — never "Verified".
+    const finalParticulars = complianceSummary(compliance);
     // Existence-check of every authority the draft cites, frozen at generation.
     const [verification, setVerification] = useState(null);
     // Which submitted keys the builder could not read. Not a compliance verdict
@@ -373,6 +379,8 @@ const ModDocuments = () => {
         if (restored.docTitle) setDocTitle(restored.docTitle);
         setDocRevisionId(restored.docRevisionId);
         setDocPdfSha256(restored.docPdfSha256);
+        setCompliance(restored.compliance ?? null);
+        setVerification(restored.verification ?? null);
         setGenDone(restored.genDone);
         setReviewSent(restored.reviewSent);
         setReviewStatus(restored.reviewStatus);
@@ -1839,10 +1847,10 @@ const ModDocuments = () => {
                             {/* Document summary */}
                             <Card>
                                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 10 }}>Document Summary</div>
-                                {[["Type", selectedType?.label || "—"], ["Template", selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Compliance", null]].map(([k, v]) => (
+                                {[["Type", selectedType?.label || "—"], ["Template", selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Required particulars", null]].map(([k, v]) => (
                                     <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>{k}</span>
-                                        {k === "Status" ? <Badge type="info">Final</Badge> : k === "Compliance" ? <Badge type="success">✓ Verified</Badge> : <span style={{ fontWeight: 600, color: t.text, textAlign: "right", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>}
+                                        {k === "Status" ? <Badge type="info">Final</Badge> : k === "Required particulars" ? <Badge type={_PARTICULARS_BADGE[finalParticulars.tone]}>{finalParticulars.label}</Badge> : <span style={{ fontWeight: 600, color: t.text, textAlign: "right", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>}
                                     </div>
                                 ))}
                             </Card>

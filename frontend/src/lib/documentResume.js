@@ -116,6 +116,10 @@ export function restoreStateFromDocument(detail) {
         docRevisionId: revisionId,
         docPdfSha256: pdfSha256,
         docVersion: detail.current_version || 0,
+        // The checks frozen on THIS revision. Dropped before, so a refreshed
+        // page lost them and every panel that reads them fell back to empty.
+        compliance: revisionId ? revision.compliance ?? null : null,
+        verification: revisionId ? revision.verification ?? null : null,
         genDone: Boolean(revisionId),
         reviewSent: sent,
         reviewStatus: sent ? status : null,
