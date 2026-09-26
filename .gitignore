@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 package-lock.json
+# ...except the frontend's: CI installs with `npm ci`, which requires the exact
+# committed lockfile so every run builds and tests the same dependency tree.
+!frontend/package-lock.json
 yarn.lock
 pnpm-lock.yaml
 

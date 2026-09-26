@@ -43,6 +43,7 @@ async def _noop_async(*a, **k):
 
 
 @pytest.mark.asyncio
+@pytest.mark.corpus  # reads the real, non-versioned corpus — see pytest.ini
 async def test_record_states_the_corpus_it_was_checked_against():
     """A verdict that cannot say what it was checked against cannot be defended
     later — the corpus grows, so the record has to freeze its own basis."""
