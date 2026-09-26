@@ -67,6 +67,16 @@ jobs:
         # rather than a missing dependency and cost a round trip to diagnose.
         run: python -m pytest --version
 
+      - name: Install the OCR engine (tesseract)
+        # The OCR service checks for a `tesseract` binary with English support
+        # before using any OCR result; the runner image has none, so OCR tests
+        # stop at "engine unavailable". `tesseract-ocr` includes English.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+          tesseract --version | head -1
+          tesseract --list-langs | grep -x eng
+
       - name: Start MongoDB as a single-node replica set
         # NOT a service container: services cannot pass `--replSet`, and on a
         # standalone the agreement transaction tests self-skip. Tests start only
