@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
-import { listCases, aiDraftStream, saveDocDraft, listDocDrafts, deleteDocDraft, aiPleadingUrduStream, pleadingUrduPdf, pleadingUrduDocumentV2, publishDraftAsDocumentV2, downloadDocumentFile, idempotencyKey, errorCode } from "@/lib/api.js";
+import { listCases, getCase, aiDraftStream, saveDocDraft, listDocDrafts, deleteDocDraft, aiPleadingUrduStream, pleadingUrduPdf, pleadingUrduDocumentV2, publishDraftAsDocumentV2, downloadDocumentFile, idempotencyKey, errorCode } from "@/lib/api.js";
 
 // Infer the statute collection to ground drafting in, from the template.
 function templateCaseType(name = "") {
@@ -17,6 +17,10 @@ function templateCaseType(name = "") {
 import { useAuth } from "@/context/AuthContext.jsx";
 import MyDocuments from "./MyDocuments.jsx";
 import { TEMPLATES, CATEGORIES, BLANK_TEMPLATE, buildContent } from "@/lib/lawyerDraftTemplates.js";
+import {
+    NO_CASE, bindingForNewDocument, pendingBindingForDraft, bindingForDraft,
+    caseActionsBlocked, boundCaseId,
+} from "@/lib/draftCaseBinding.js";
 
 // ============================================================
 // TOOLBAR BUTTON
@@ -203,7 +207,12 @@ function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
 // ============================================================
 // STAGE 2 — EDITOR
 // ============================================================
-function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
+function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
+    // The case this document is bound to — fixed when the editor opened, never
+    // the page selector's current value. See lib/draftCaseBinding.js.
+    const caseObj = binding.caseObj;
+    const caseId = boundCaseId(binding);
+    const caseBlocked = caseActionsBlocked(binding);
     // A saved draft stores editor HTML; a fresh template is plain text
     const initialHtml = draft ? draft.content : buildContent(tmpl, caseObj).replace(/\n/g, "<br>");
     const [aiMessages, setAiMessages] = useState([]);
@@ -270,7 +279,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
     const queryState = (cmd) => document.queryCommandState(cmd);
 
     const handleSave = async () => {
-        if (saving) return;
+        if (saving || caseBlocked) return;
         setSaving(true); setSaveErr("");
         const { data, error } = await saveDocDraft({
             draft_id: draftId,
@@ -278,7 +287,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
             content: editorRef.current?.innerHTML || "",
             template_name: tmpl.name,
             template_icon: tmpl.icon,
-            case_id: caseObj?._id || null,
+            case_id: caseId,
         });
         setSaving(false);
         if (error) { setSaveErr(error.message || "Save failed"); setTimeout(() => setSaveErr(""), 4000); return; }
@@ -297,7 +306,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
      * file to someone who will edit it. They are not alternatives.
      */
     const publishAsDocument = async () => {
-        if (publishing) return;
+        if (publishing || caseBlocked) return;
         const bodyHtml = editorRef.current?.innerHTML || "";
         if (!(editorRef.current?.innerText || "").trim()) {
             setPublishIssue("There is nothing in the draft to save.");
@@ -318,6 +327,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
             title: draft?.title || tmpl.name,
             bodyHtml,
             authorName: user?.full_name || "",
+            caseId,
         }, publishKeyRef.current);
         setPublishing(false);
 
@@ -350,7 +360,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
 
     const sendToAI = async () => {
         const q = aiInput.trim();
-        if (!q || aiLoading) return;
+        if (!q || aiLoading || caseBlocked) return;
         setAiInput("");
         setAiMessages(prev => [...prev, { role: "user", text: q }]);
         setAiLoading(true);
@@ -368,7 +378,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                     // CASE-BOUND when a case is selected: the server authorises it
                     // and derives jurisdiction from it (so a Punjab matter no
                     // longer retrieves federal law). case_type is the fallback.
-                    case_id: caseObj?._id || null,
+                    case_id: caseId,
                     case_type: templateCaseType(tmpl.name),
                     history,
                 },
@@ -599,7 +609,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                     {/* Save button — persists the draft to the backend */}
                     <button
                         onClick={handleSave}
-                        disabled={saving}
+                        disabled={saving || caseBlocked}
                         style={{
                             padding: "7px 14px", borderRadius: 10,
                             border: `1.5px solid ${t.border}`,
@@ -631,7 +641,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                         reproduce — which is what makes a citation check on it
                         mean anything later. It does NOT file anything with a
                         court, and the label must not suggest that it does. */}
-                    <button onClick={publishAsDocument} disabled={publishing}
+                    <button onClick={publishAsDocument} disabled={publishing || caseBlocked}
                         title="Save a fixed, hashed copy of this draft into your documents"
                         style={{
                             padding: "5px 13px", borderRadius: 8,
@@ -687,6 +697,25 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                         <span style={{ fontSize: 13 }}>اردو</span> Court Urdu
                     </button>
                 </div>
+            </div>
+
+            {/* Which matter this document belongs to. The page's case selector is
+                hidden under this full-screen editor, so without this strip the
+                lawyer cannot see which case the AI and Save are acting on. */}
+            <div data-case-binding={binding.state} style={{
+                flexShrink: 0, padding: "6px 24px", fontSize: 11.5, fontWeight: 600,
+                borderBottom: `1px solid ${t.border}`,
+                background: binding.state === "unavailable" ? `${t.danger || "#e5484d"}14` : t.surface,
+                color: binding.state === "unavailable" ? (t.danger || "#e5484d") : t.textMuted,
+            }}>
+                {binding.state === "bound" && <>Case: {caseObj?.id} — {caseObj?.title}</>}
+                {binding.state === "none" && <>No case — this draft is not attached to any matter.</>}
+                {binding.state === "loading" && <>Loading the case this draft belongs to…</>}
+                {binding.state === "unavailable" && <>
+                    This draft belongs to a case that could not be loaded — it may have been
+                    reassigned, or you may be offline. Save, AI drafting and Save to Documents
+                    are paused so this draft is not attached to another matter. Export still works.
+                </>}
             </div>
 
             {/* ── Rich-text Toolbar ── */}
@@ -959,7 +988,7 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
                             />
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 9px 9px" }}>
                                 <span style={{ fontSize: 10, color: t.textFaint }}>⏎ Send · Shift+⏎ New line</span>
-                                <button onClick={sendToAI} disabled={!aiInput.trim() || aiLoading}
+                                <button onClick={sendToAI} disabled={!aiInput.trim() || aiLoading || caseBlocked}
                                     style={{ height: 29, paddingLeft: 13, paddingRight: 13, borderRadius: 8, border: "none", background: aiInput.trim() && !aiLoading ? t.primary : t.border, color: aiInput.trim() && !aiLoading ? (t.mode === "dark" ? t.bg : t.surface) : t.textFaint, cursor: aiInput.trim() && !aiLoading ? "pointer" : "default", display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 700, fontFamily: "inherit", transition: "all .15s" }}>
                                     <Icon d={I.send} size={11} style={{ transform: "rotate(45deg)" }} />
                                     Generate
@@ -1028,6 +1057,17 @@ function StageEditor({ tmpl, caseObj, draft, onBack, t }) {
 // ============================================================
 const _DA_MAP = { open: "Filed", active: "Under Hearing", closed: "Closed", dismissed: "Closed" };
 
+// One shape for a case, whether it came from the list or was fetched by id.
+const _mapCase = (c) => ({
+    id: c.case_number || c._id,
+    _id: c._id,
+    title: c.title || "Untitled",
+    client: c.client_name || "—",
+    court: c.province || "—",
+    type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
+    status: _DA_MAP[c.status] || "Filed",
+});
+
 function DocAutomationPage() {
     const { t } = useTheme();
     const { activeCase } = useCase();
@@ -1038,15 +1078,32 @@ function DocAutomationPage() {
     const [selectedCaseId, setSelectedCaseId] = useState("");
     const [drafts, setDrafts] = useState([]);
     const [activeDraft, setActiveDraft] = useState(null);
+    // The open editor's case, fixed when it opened. See lib/draftCaseBinding.js.
+    const [editorBinding, setEditorBinding] = useState(NO_CASE);
+    // Guards against a slow case lookup for one draft landing after another
+    // draft (or a new document) has been opened.
+    const openSeq = useRef(0);
 
     useEffect(() => {
         if (stage !== "gallery") return;
         listDocDrafts().then(({ data }) => { if (Array.isArray(data)) setDrafts(data); });
     }, [stage]);
 
-    const openDraft = (d) => {
+    const openDraft = async (d) => {
+        const seq = ++openSeq.current;
         setActiveDraft(d);
+        setEditorBinding(pendingBindingForDraft(d));
         setSelectedTemplate({ id: -1, name: d.template_name || d.title, cat: "Draft", desc: "", icon: d.template_icon || "📄" });
+        setStage("editor");
+        const binding = await bindingForDraft(d, apiCases, getCase, _mapCase);
+        if (seq === openSeq.current) setEditorBinding(binding);
+    };
+
+    const openTemplate = (tmpl) => {
+        ++openSeq.current;
+        setActiveDraft(null);
+        setEditorBinding(bindingForNewDocument(activeCaseObj));
+        setSelectedTemplate(tmpl);
         setStage("editor");
     };
 
@@ -1058,15 +1115,7 @@ function DocAutomationPage() {
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => {
             if (data?.items) {
-                const mapped = data.items.map(c => ({
-                    id: c.case_number || c._id,
-                    _id: c._id,
-                    title: c.title || "Untitled",
-                    client: c.client_name || "—",
-                    court: c.province || "—",
-                    type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
-                    status: _DA_MAP[c.status] || "Filed",
-                }));
+                const mapped = data.items.map(_mapCase);
                 setApiCases(mapped);
                 if (activeCase) {
                     const match = mapped.find(c => c.id === activeCase || c._id === activeCase);
@@ -1119,7 +1168,7 @@ function DocAutomationPage() {
             )}
             {stage === "gallery" && (
                 <StageGallery
-                    onSelect={tmpl => { setActiveDraft(null); setSelectedTemplate(tmpl); setStage("editor"); }}
+                    onSelect={openTemplate}
                     drafts={drafts}
                     onOpenDraft={openDraft}
                     onDeleteDraft={removeDraft}
@@ -1127,7 +1176,7 @@ function DocAutomationPage() {
                 />
             )}
             {stage === "editor" && selectedTemplate && (
-                <StageEditor tmpl={selectedTemplate} caseObj={activeCaseObj} draft={activeDraft} onBack={() => setStage("gallery")} t={t} />
+                <StageEditor tmpl={selectedTemplate} binding={editorBinding} draft={activeDraft} onBack={() => setStage("gallery")} t={t} />
             )}
         </div>
     );

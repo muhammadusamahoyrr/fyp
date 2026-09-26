@@ -1534,14 +1534,19 @@ export async function aiPleadingUrduStream({ document = '', template = '' }, onT
  * verdict, and that is correct: the system does not know what instrument this
  * is, so `pleading_rules` reports `checked: false` rather than inventing one.
  *
+ * `caseId` is the case the DRAFT is bound to (null for a caseless draft). It
+ * was not sent at all, so a draft written under a matter was filed as a
+ * caseless document that never appeared against that matter.
+ *
  * Returns { docId, revisionId, pdfSha256, verification } or { error }.
  */
 export async function publishDraftAsDocumentV2(
-  { title, bodyHtml, authorName = '' }, key,
+  { title, bodyHtml, authorName = '', caseId = null }, key,
 ) {
   const created = await createDocumentV2({
     templateType: 'lawyer_draft',
     title: title || 'Lawyer draft',
+    caseId,
   }, key);
   if (created.error) {
     return { error: created.error, status: created.status,
