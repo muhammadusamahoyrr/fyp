@@ -1085,11 +1085,78 @@ export async function markAllNotificationsRead() {
 
 // ─── Agreements ───────────────────────────────────────────────────────────────
 
-export async function createAgreement(title, body_html, party_ids) {
+/* Create, sign and send in ONE call.
+ *
+ * WAS TWO CALLS: create, then sign. Between them the counterparty had been
+ * notified of an agreement its sender had not signed, and the wizard showed
+ * "SIGNED" as soon as the first returned. The signature travels with the
+ * request now, and the backend writes both in one transaction.
+ *
+ * `Idempotency-Key` is REQUIRED by the route. A retry after a timeout must not
+ * produce a second agreement, and the caller is the only one who knows the two
+ * attempts were the same intent.
+ *
+ * `party_ids` entries name EITHER a registered user or an email address:
+ *   { user_id: "..." }                      a party who signs from their account
+ *   { email: "x@y.pk", full_name: "..." }   invited; signs via a one-time link
+ */
+export async function createAgreement({ title, body_html, party_ids, case_id,
+                                        method, signature_data, consent,
+                                        idempotency_key }) {
   return apiFetch('/agreements', {
     method: 'POST',
-    body: JSON.stringify({ title, body_html, party_ids }),
+    headers: { 'Idempotency-Key': idempotency_key || idempotencyKey() },
+    body: JSON.stringify({ title, body_html, party_ids, case_id,
+                           method, signature_data, consent }),
   });
+}
+
+/* What an invited signer may read, with no account. The token goes in the BODY
+ * — a path or query parameter lands in logs, history and referrer headers, and
+ * this token is the whole authority to sign. */
+export async function viewAgreementByInvitation(token) {
+  return apiFetch('/agreements/invitation/view', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function signAgreementByInvitation({ token, method, signature_data,
+                                                  consent }) {
+  return apiFetch('/agreements/invitation/sign', {
+    method: 'POST',
+    body: JSON.stringify({ token, method, signature_data, consent }),
+  });
+}
+
+/* A FRESH LINK for an invited signer whose old one never arrived — filtered by
+ * their mail server, or lost when the one-time panel was closed. The response
+ * carries the new token exactly once, like the original send, and says whether
+ * the email went out. The previous link stops working. */
+export async function reissueAgreementInvitation(agreement_id, party_id) {
+  return apiFetch(
+    `/agreements/${encodeURIComponent(agreement_id)}/invitations/${encodeURIComponent(party_id)}/reissue`,
+    { method: 'POST' });
+}
+
+/* REMOVE FROM MY LIST, not delete. `DELETE /agreements/drafts/{id}` removes an
+ * unsent draft and refuses anything else, because a sent agreement is a record
+ * the other parties hold too. This hides it for the caller alone and is
+ * reversible with unarchiveAgreement. */
+export async function archiveAgreement(agreement_id) {
+  return apiFetch(`/agreements/${encodeURIComponent(agreement_id)}/archive`,
+                  { method: 'POST' });
+}
+
+export async function unarchiveAgreement(agreement_id) {
+  return apiFetch(`/agreements/${encodeURIComponent(agreement_id)}/unarchive`,
+                  { method: 'POST' });
+}
+
+export async function revokeAgreementInvitation(agreement_id, party_id) {
+  return apiFetch(
+    `/agreements/${encodeURIComponent(agreement_id)}/invitations/${encodeURIComponent(party_id)}/revoke`,
+    { method: 'POST' });
 }
 
 export async function signAgreement(agreement_id, method, signature_data) {
@@ -1157,9 +1224,11 @@ export async function updateLawyerProfile(updates) {
  * wording. Paging and filtering describe the SLICE, never the subject.
  *
  * The rows carry no `body_html`. Open an agreement to read it. */
-export async function listAgreements({ page = 1, page_size = 20, status = null } = {}) {
+export async function listAgreements({ page = 1, page_size = 20, status = null,
+                                       archived = false } = {}) {
   const p = new URLSearchParams({ page, page_size });
   if (status) p.set('status', status);
+  if (archived) p.set('archived', 'true');
   return apiFetch(`/agreements?${p}`);
 }
 

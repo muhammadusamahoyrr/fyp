@@ -503,7 +503,13 @@ test("lawyer: after signing, the list shows the server's new status", async () =
     await ui.openRow("Retainer");
     const before = __calls("listAgreements").length;
 
-    await ui.type("Your full name", "Adv Khan");
+    // THE SIGNING UI IS NO LONGER A NAME BOX. A counter-signer now gets the
+    // same draw/type/upload pad the sender always had, so the typed mode has
+    // to be selected before there is a field to type into. Driving the real
+    // control is the point -- asserting on a placeholder that no longer exists
+    // would only prove the test was written against the old screen.
+    await ui.clickButton("Type");
+    await ui.type("Type your name…", "Adv Khan");
     await ui.clickButton("Sign Agreement");
     await act(async () => {});
 

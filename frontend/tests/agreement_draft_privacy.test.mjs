@@ -50,7 +50,12 @@ test("the list endpoint is scoped by the server, not by a user id from the brows
     assert.ok(decl, "listAgreements moved; this test needs updating");
 
     const params = decl[1];
-    const ALLOWED = ["page", "page_size", "status"];
+    // `archived` joins the slice parameters, not the subject ones: the server
+    // resolves it against the REQUESTER's own id (`archived_by: user_id` in
+    // AgreementRepository.visible_to), so it selects among my agreements and
+    // cannot name anybody else's. A parameter that carried a user id would
+    // still fail this test, which is the rule that matters.
+    const ALLOWED = ["page", "page_size", "status", "archived"];
     for (const [, name] of params.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*=/g)) {
         assert.ok(ALLOWED.includes(name),
             `listAgreements takes ${name}: a list parameter may describe the ` +

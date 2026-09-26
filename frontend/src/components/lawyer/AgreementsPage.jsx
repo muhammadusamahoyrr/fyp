@@ -6,6 +6,7 @@ import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { listAgreements, getAgreement, signAgreement, declineAgreement, downloadExecutedAgreement } from "@/lib/api.js";
+import SignaturePad from "@/components/shared/SignaturePad.jsx";
 import { DraftComposer } from "./DraftComposer.jsx";
 
 const PAGE_SIZE = 25;
@@ -25,10 +26,21 @@ function mapAgreement(a, myId) {
         // by id when the document is opened -- see `openAgreement`.
         status: STATUS_LABEL[a.status] || "Pending",
         parties,
-        signedCount: parties.filter(p => p.signed).length,
+        // THE SERVER'S COUNTS FIRST. It derives them from the parties on every
+        // read, and it is the side that knows about an external signer whose
+        // row carries no user_id. Counting here is only the fallback.
+        signedCount: a.signed_count ?? parties.filter(p => p.signed).length,
+        totalParties: a.total_parties ?? parties.length,
         needsMySig: a.status === "pending" && !!me && !me.signed,
         date: a.created_at ? new Date(a.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
-        counterparts: parties.filter(p => p.user_id !== myId).map(p => p.full_name).join(" · "),
+        // An invited signer has NO user_id, so the filter keeps them -- which
+        // is right -- but `full_name` may be absent, and a blank in a
+        // dot-separated list reads as a missing party rather than an invited
+        // one.
+        counterparts: parties
+            .filter(p => p.user_id !== myId)
+            .map(p => p.full_name || p.email || "Invited signer")
+            .join(" · "),
         // NO `eto` HERE either. Like the body, it is a property of the
         // DOCUMENT and the list does not carry it -- reading it off a row
         // yielded undefined, so the subtitle silently said "Awaiting first
@@ -51,7 +63,10 @@ export function AgreementsPage() {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [active, setActive] = useState(null);
-    const [signName, setSignName] = useState("");
+    // {method, data} from SignaturePad. A lawyer counter-signing had a
+    // name box only, while the same person composing an agreement could
+    // draw or upload.
+    const [signSig, setSignSig] = useState({ method: "canvas", data: "" });
     const [busy, setBusy] = useState(false);
     // Same two-step guard as the client screen. The backend authorises decline
     // by PARTY, not by role -- a lawyer is a party and may refuse -- so the
@@ -106,7 +121,7 @@ export function AgreementsPage() {
      * fetch cannot leave somebody able to sign text they were never shown. */
     const openAgreement = useCallback(async (row) => {
         setActive(row);
-        setSignName(user?.full_name || "");
+        setSignSig({ method: "canvas", data: "" });
         setDoc({ loading: true, body: null, error: null });
 
         // THE LAST QUESTION ASKED IS THE ONLY ONE WHOSE ANSWER COUNTS.
@@ -127,12 +142,15 @@ export function AgreementsPage() {
     }, [user?.full_name]);
 
     const doSign = async () => {
-        if (!signName.trim()) { showToast("⚠️ Type your full name to sign"); return; }
+        if (!signSig.data) {
+            showToast("⚠️ Add your signature first — draw, type or upload");
+            return;
+        }
         setBusy(true);
-        const { data, error } = await signAgreement(active.id, "typed", signName.trim());
+        const { data, error } = await signAgreement(active.id, signSig.method, signSig.data);
         setBusy(false);
         if (error) { showToast("❌ " + (error.message || "Failed to sign")); return; }
-        showToast(data?.status === "executed" ? "🎉 Agreement fully executed — both parties notified" : "✅ Signed — awaiting the other party");
+        showToast(data?.status === "executed" ? "🎉 Agreement fully executed — all parties notified" : "✅ Signed — awaiting the other parties");
         setActive(null);
         reload();
     };
@@ -249,7 +267,7 @@ export function AgreementsPage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13.5, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title}</div>
                             <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 2 }}>
-                                With {a.counterparts || "—"} · {a.signedCount}/{a.parties.length} signed · {a.date}
+                                With {a.counterparts || "—"} · {a.signedCount}/{a.totalParties} signed · {a.date}
                             </div>
                         </div>
                         {a.needsMySig && (
@@ -304,10 +322,25 @@ export function AgreementsPage() {
 
                         <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-                                {active.parties.map(p => (
-                                    <div key={p.user_id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 11px", borderRadius: 9, background: p.signed ? `${T.success}14` : T.cardHi, border: `1px solid ${p.signed ? T.success + "40" : T.border}` }}>
+                                {/* KEYED BY WHATEVER IDENTIFIES THE PARTY. An
+                                    external signer has no user_id, so keying on
+                                    it alone gave every invited signer the key
+                                    `undefined` and React reused one row for all
+                                    of them. */}
+                                {active.parties.map((p, i) => (
+                                    <div key={p.user_id || p.party_id || p.email || i} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 11px", borderRadius: 9, background: p.signed ? `${T.success}14` : T.cardHi, border: `1px solid ${p.signed ? T.success + "40" : T.border}` }}>
                                         <span style={{ fontSize: 11 }}>{p.signed ? "✅" : "⏰"}</span>
-                                        <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{p.full_name}</span>
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{p.full_name || p.email || "Invited signer"}</span>
+                                        {p.external && (
+                                            /* Said on the party itself: this is
+                                               where someone decides how much to
+                                               trust the signature. */
+                                            <span title="Invited by email — identity not verified by us" style={{
+                                                fontSize: 9.5, fontWeight: 700, color: T.warn,
+                                                background: T.warn + "1F", border: `1px solid ${T.warn}40`,
+                                                borderRadius: 5, padding: "1px 5px",
+                                            }}>EMAIL{p.invitation_status === "revoked" ? " · REVOKED" : p.invitation_status === "expired" ? " · EXPIRED" : ""}</span>
+                                        )}
                                         <span style={{ fontSize: 10, color: p.signed ? T.success : T.textMuted }}>{p.signed ? "signed" : "pending"}</span>
                                     </div>
                                 ))}
@@ -335,7 +368,7 @@ export function AgreementsPage() {
                             )}
 
                             {/* Only once EXECUTED. There is no document to
-                                download before both parties have signed, and
+                                download before every party has signed, and
                                 the server refuses one -- offering the button
                                 early would promise a file that does not
                                 exist. */}
@@ -359,15 +392,20 @@ export function AgreementsPage() {
                         {active.needsMySig && doc && !doc.loading && !doc.error && (
                             <div style={{ padding: "12px 20px 16px", borderTop: `1px solid ${T.border}`, background: T.surface }}>
                                 <div style={{ fontSize: 10.5, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>
-                                    Sign — type your full legal name
+                                    Sign — draw, type or upload
                                 </div>
-                                <div style={{ display: "flex", gap: 10 }}>
-                                    <input value={signName} onChange={e => setSignName(e.target.value)} placeholder="Your full name"
-                                        style={{ flex: 1, height: 38, border: `1px solid ${T.border}`, borderRadius: 9, background: T.inputBg, color: T.text, fontSize: 13, padding: "0 12px", outline: "none", fontFamily: "inherit" }} />
+                                <SignaturePad height={150} onChange={setSignSig} />
+                                <div style={{ marginTop: 10 }}>
                                     <Btn variant="accent" disabled={busy} onClick={doSign}>{busy ? "Signing…" : "✍️ Sign Agreement"}</Btn>
                                 </div>
+                                {/* WHAT IS RECORDED, not what it amounts to in law.
+                                    "Classified under the Electronic Transactions
+                                    Ordinance 2002" is a legal conclusion no lawyer
+                                    has reviewed -- the same class of claim stripped
+                                    from the rest of this module. Phase 4.1 owns it. */}
                                 <div style={{ fontSize: 10.5, color: T.textFaint, marginTop: 7, lineHeight: 1.5 }}>
-                                    Recorded with timestamp and IP in the audit log; classified under the Electronic Transactions Ordinance 2002.
+                                    Recorded in the audit log with the time, your IP address where it
+                                    can be determined, and a digest of the text you signed.
                                 </div>
 
                                 {!declineOpen ? (
