@@ -745,7 +745,9 @@ async def review_queue(lawyer_id: str) -> list[dict]:
 
     out = []
     for d in docs:
-        d = dict(d)
+        # Through the rollback shim first, so a V2-native submission shows the
+        # checks frozen on its revision rather than none at all.
+        d = dict(await _compat(d))
         d["id"] = d.pop("_id")
         d.pop("fields", None)          # not needed in the inbox
         d.pop("file_path", None)       # server path — never expose
@@ -790,25 +792,28 @@ async def get_document(doc_id: str, requester_id: str, role: str = "client") -> 
 
 async def list_documents(case_id: str, requester_id: str, role: str = "client") -> list[dict]:
     if role == "admin":
-        return await doc_repo.find_by_case(case_id)
-    if role == "lawyer":
+        docs = await doc_repo.find_by_case(case_id)
+    elif role == "lawyer":
         case = await case_repo.find_by_id(case_id)
         if not case or case.get("lawyer_id") != requester_id:
             raise ForbiddenError()
-        return await doc_repo.find_by_case(case_id)
-    return await doc_repo.find_by_case(case_id, requester_id)
+        docs = await doc_repo.find_by_case(case_id)
+    else:
+        docs = await doc_repo.find_by_case(case_id, requester_id)
+    # Every row through the same shim as a single read. Without it a V2-native
+    # row reached `DocumentOut` with no `status` and failed validation — one
+    # such document broke the whole case listing after a rollback.
+    return [await _compat(d) for d in docs]
 
 
-# ── DOCUMENTS_V2 compatibility reader (DORMANT until Stage 4) ─────────────────
+# ── DOCUMENTS_V2 compatibility reader ─────────────────────────────────────────
 # A document created after the flag flip is V2-native: schema_version==2, with
 # no legacy file_path/fields on the row — its content lives on the current
 # revision. If the flag is ever turned OFF, the legacy read paths must still be
 # able to serve these documents READ-ONLY, or a rollback would strand them.
 #
-# This is the read shim that makes that safe. It is permanent and cheap, and it
-# is NOT yet wired into get_document/list/download — that wiring lands in Stage
-# 4 alongside the migration. Defining it now keeps Stage 0 self-contained and
-# unit-testable while changing no live behaviour.
+# Wired through `_compat` into get_document (and so the legacy download),
+# list_documents and review_queue. Active only while the flag is OFF.
 
 async def legacy_view_of_v2_document(doc: dict) -> dict:
     """Project a V2-native document into the legacy-shaped view.
@@ -825,17 +830,29 @@ async def legacy_view_of_v2_document(doc: dict) -> dict:
     if (doc or {}).get("schema_version") != 2:
         return doc
     rev_id = doc.get("current_revision_id")
-    if not rev_id:
-        return doc
-    from app.db.collections import get_document_revisions_col
-    rev = await get_document_revisions_col().find_one({"_id": rev_id})
+    rev = None
+    if rev_id:
+        from app.db.collections import get_document_revisions_col
+        rev = await get_document_revisions_col().find_one({"_id": rev_id})
     if not rev:
-        return doc
+        # Created but never rendered (or its revision is gone). Still a row a
+        # legacy reader must be able to list: `DocumentOut` requires `status`,
+        # and a V2-native row has none of its own. "pending" is the legacy
+        # word for "no PDF yet", which is exactly what this is.
+        view = dict(doc)
+        view["status"] = view.get("status") or "pending"
+        return view
     view = dict(doc)
     # Fill, never overwrite: a migrated document's legacy fields win.
-    view.setdefault("file_path", rev.get("artifact_key"))
-    if view.get("file_path") is None:
-        view["file_path"] = rev.get("artifact_key")
+    #
+    # An ABSOLUTE path, resolved through the store. The revision's
+    # `artifact_key` is store-relative (`docs/<id>.<fence>.pdf`), and the
+    # legacy download checks `Path(file_path).exists()` — which resolved the
+    # key against the working directory, found nothing, and 404'd a document
+    # whose bytes were in the store.
+    if view.get("file_path") is None and rev.get("artifact_key"):
+        from app.services import artifact_store
+        view["file_path"] = str(artifact_store.local_path(rev["artifact_key"]))
     for k, rv in (("fields", rev.get("fields")),
                   ("compliance", rev.get("compliance")),
                   ("verification", rev.get("verification"))):
