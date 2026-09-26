@@ -244,6 +244,10 @@ async def classify_grievance(text: str) -> dict:
     import asyncio
 
     from app.ai.llm import get_structured_llm
+    # Was used without being imported: every classification raised NameError,
+    # which the fail-safe below turned into "held for lawyer triage" — so no
+    # dispute ever reached ready_for_drafting.
+    from app.ai.provider_health import PURPOSE_DISPUTE_CLASSIFICATION
 
     text = (text or "").strip()
     if not text:

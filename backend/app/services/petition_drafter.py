@@ -70,6 +70,9 @@ async def _draft_facts(intake: dict, grievance: dict, petitioner: str) -> Petiti
     import asyncio
 
     from app.ai.llm import get_structured_llm
+    # Was used without being imported: every petition draft raised NameError,
+    # which the caller turns into "try again" — so no petition was ever drafted.
+    from app.ai.provider_health import PURPOSE_PETITION_DRAFTING
 
     facts_input = (
         f"Dispute category: {grievance.get('category')} "
