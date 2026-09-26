@@ -113,6 +113,7 @@ def test_known_gaps_are_declared_with_a_reason(pairs):
 
 # ── ground truth against the live corpus ──────────────────────────────────────
 
+@pytest.mark.corpus  # reads the real, non-versioned corpus — see pytest.ini
 def test_supported_and_misgrounded_sections_really_exist(index, pairs):
     """Every one of these cites a REAL, in-force section. If any does not, the
     pair is mislabelled and would poison the measurement."""
@@ -126,6 +127,7 @@ def test_supported_and_misgrounded_sections_really_exist(index, pairs):
         assert not cov.is_omitted(str(p["section"])), f"{p['id']}: repealed"
 
 
+@pytest.mark.corpus  # reads the real, non-versioned corpus — see pytest.ini
 def test_fabricated_sections_really_are_absent(index, pairs):
     for p in pairs:
         if p["label"] != "fabricated":
@@ -136,6 +138,7 @@ def test_fabricated_sections_really_are_absent(index, pairs):
             f"{p['id']}: {p['statute']} s.{p['section']} EXISTS — not fabricated"
 
 
+@pytest.mark.corpus  # reads the real, non-versioned corpus — see pytest.ini
 def test_omitted_sections_are_inside_a_declared_range(index, pairs):
     for p in pairs:
         if p["label"] != "omitted":
@@ -146,6 +149,7 @@ def test_omitted_sections_are_inside_a_declared_range(index, pairs):
             f"{p['id']}: {p['statute']} s.{p['section']} is not recorded as omitted"
 
 
+@pytest.mark.corpus  # reads the real, non-versioned corpus — see pytest.ini
 def test_declared_known_gaps_really_are_gaps(index, pairs):
     """The claim is that the verifier MISSES these. If one is now detected, the
     parser improved and the fixture must be re-labelled rather than left to
