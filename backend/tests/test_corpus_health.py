@@ -36,7 +36,11 @@ try:
 except Exception:  # pragma: no cover - environment without a built corpus
     _CLIENT = None
 
-pytestmark = pytest.mark.skipif(_CLIENT is None, reason="ChromaDB not available")
+# Every test in this file reads the real, non-versioned corpus (see pytest.ini).
+pytestmark = [
+    pytest.mark.skipif(_CLIENT is None, reason="ChromaDB not available"),
+    pytest.mark.corpus,
+]
 
 STATUTE_COLLECTIONS = ("criminal_collection", "civil_collection",
                        "family_collection", "constitutional_collection")

@@ -202,6 +202,7 @@ def chroma():
     connect_chroma()
 
 
+@pytest.mark.corpus  # reads the real, non-versioned corpus — see pytest.ini
 def test_provincial_law_is_a_material_share_of_the_corpus(chroma):
     """Guards the premise: if provincial chunks vanished, this fix is moot."""
     import collections
@@ -215,6 +216,7 @@ def test_provincial_law_is_a_material_share_of_the_corpus(chroma):
     assert provincial > 1000, f"expected substantial provincial law, got {counts}"
 
 
+@pytest.mark.corpus  # reads the real, non-versioned corpus — see pytest.ini
 def test_unknown_jurisdiction_now_reaches_provincial_statutes(chroma, monkeypatch):
     """The corpus proof, on the query that exposed the bug.
 
@@ -232,6 +234,7 @@ def test_unknown_jurisdiction_now_reaches_provincial_statutes(chroma, monkeypatc
         f"unknown jurisdiction still cannot see provincial law: {statutes}")
 
 
+@pytest.mark.corpus  # reads the real, non-versioned corpus — see pytest.ini
 def test_a_stated_province_still_narrows(chroma, monkeypatch):
     """The fix must not turn every query into an all-jurisdictions search."""
     from app.ai.pipelines import retriever
