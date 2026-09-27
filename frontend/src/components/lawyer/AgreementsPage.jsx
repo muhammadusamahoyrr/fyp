@@ -67,6 +67,7 @@ export function AgreementsPage() {
     // name box only, while the same person composing an agreement could
     // draw or upload.
     const [signSig, setSignSig] = useState({ method: "canvas", data: "" });
+    const [signConsent, setSignConsent] = useState(false);
     const [busy, setBusy] = useState(false);
     // Same two-step guard as the client screen. The backend authorises decline
     // by PARTY, not by role -- a lawyer is a party and may refuse -- so the
@@ -122,6 +123,7 @@ export function AgreementsPage() {
     const openAgreement = useCallback(async (row) => {
         setActive(row);
         setSignSig({ method: "canvas", data: "" });
+        setSignConsent(false);
         setDoc({ loading: true, body: null, error: null });
 
         // THE LAST QUESTION ASKED IS THE ONLY ONE WHOSE ANSWER COUNTS.
@@ -146,8 +148,13 @@ export function AgreementsPage() {
             showToast("⚠️ Add your signature first — draw, type or upload");
             return;
         }
+        if (!signConsent) {
+            showToast("⚠️ Confirm that you intend to sign this agreement");
+            return;
+        }
         setBusy(true);
-        const { data, error } = await signAgreement(active.id, signSig.method, signSig.data);
+        const { data, error } = await signAgreement(
+            active.id, signSig.method, signSig.data, true);
         setBusy(false);
         if (error) { showToast("❌ " + (error.message || "Failed to sign")); return; }
         showToast(data?.status === "executed" ? "🎉 Agreement fully executed — all parties notified" : "✅ Signed — awaiting the other parties");
@@ -175,7 +182,7 @@ export function AgreementsPage() {
         showToast("⬇ Downloaded");
     };
 
-    const closeModal = () => { openSeq.current += 1; setActive(null); setDoc(null); setDeclineOpen(false); setDeclineReason(""); };
+    const closeModal = () => { openSeq.current += 1; setActive(null); setDoc(null); setSignConsent(false); setDeclineOpen(false); setDeclineReason(""); };
 
     const changeFilter = (next) => {
         // ONE place, because resetting the page is not optional: keeping page
@@ -395,8 +402,13 @@ export function AgreementsPage() {
                                     Sign — draw, type or upload
                                 </div>
                                 <SignaturePad height={150} onChange={setSignSig} />
+                                <label style={{ display: "flex", gap: 9, alignItems: "flex-start", marginTop: 10, fontSize: 12, color: T.textMuted, lineHeight: 1.5, cursor: "pointer" }}>
+                                    <input type="checkbox" checked={signConsent}
+                                        onChange={e => setSignConsent(e.target.checked)} />
+                                    <span>I have read this document and intend the signature above to be my signature on it.</span>
+                                </label>
                                 <div style={{ marginTop: 10 }}>
-                                    <Btn variant="accent" disabled={busy} onClick={doSign}>{busy ? "Signing…" : "✍️ Sign Agreement"}</Btn>
+                                    <Btn variant="accent" disabled={busy || !signConsent} onClick={doSign}>{busy ? "Signing…" : "✍️ Sign Agreement"}</Btn>
                                 </div>
                                 {/* WHAT IS RECORDED, not what it amounts to in law.
                                     "Classified under the Electronic Transactions

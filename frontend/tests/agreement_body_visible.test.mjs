@@ -510,6 +510,9 @@ test("lawyer: after signing, the list shows the server's new status", async () =
     // would only prove the test was written against the old screen.
     await ui.clickButton("Type");
     await ui.type("Type your name…", "Adv Khan");
+    const consent = ui.host.querySelector('input[type="checkbox"]');
+    assert.ok(consent, "the signing consent checkbox is missing");
+    await ui.click(consent);
     await ui.clickButton("Sign Agreement");
     await act(async () => {});
 

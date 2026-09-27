@@ -455,7 +455,8 @@ async def test_audit_log_and_signature_data_do_not_cross_the_wire(people):
         client_id=CLIENT, creator_id=LAWYER, case_id=case_id)
     await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id=LAWYER,
-        method="typed", signature_data="Adv Verified", ip_address="203.0.113.9")
+        method="typed", signature_data="Adv Verified", consent=True,
+        ip_address="203.0.113.9")
 
     raw = await get_agreements_col().find_one({"_id": doc["_id"]})
     # The row really does hold the sensitive material...

@@ -236,7 +236,8 @@ async def test_submit_signature_stores_an_envelope_too(world):
     agreement_id = await _sent_agreement()
     await agreement_service.submit_signature(
         agreement_id=agreement_id, user_id=CLIENT, method="typed",
-        signature_data="Client Sig", ip_address=None, ip_verifiable=False)
+        signature_data="Client Sig", consent=True, ip_address=None,
+        ip_verifiable=False)
 
     row = await _row(agreement_id)
     client = next(p for p in row["parties"] if p["user_id"] == CLIENT)
@@ -254,7 +255,8 @@ async def test_each_party_envelope_is_bound_to_that_party(world):
     agreement_id = await _sent_agreement()
     await agreement_service.submit_signature(
         agreement_id=agreement_id, user_id=CLIENT, method="typed",
-        signature_data="Client Sig", ip_address=None, ip_verifiable=False)
+        signature_data="Client Sig", consent=True, ip_address=None,
+        ip_verifiable=False)
     row = await _row(agreement_id)
     lawyer = next(p for p in row["parties"] if p["user_id"] == LAWYER)
 
@@ -275,7 +277,8 @@ async def test_the_executed_pdf_still_prints_the_typed_name(world):
     agreement_id = await _sent_agreement()
     await agreement_service.submit_signature(
         agreement_id=agreement_id, user_id=CLIENT, method="typed",
-        signature_data="Client Sig", ip_address=None, ip_verifiable=False)
+        signature_data="Client Sig", consent=True, ip_address=None,
+        ip_verifiable=False)
 
     pdf = build_executed_pdf(await _row(agreement_id))
 

@@ -437,7 +437,8 @@ async def test_termination_racing_a_signature_leaves_no_contradiction(world):
         try:
             return await agreement_service.submit_signature(
                 agreement_id=w["agreement_id"], user_id=LAWYER,
-                method="typed", signature_data="Lawyer One", ip_address=None)
+                method="typed", signature_data="Lawyer One", consent=True,
+                ip_address=None)
         except Exception as exc:
             return exc
 

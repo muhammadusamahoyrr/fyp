@@ -1651,7 +1651,7 @@ const PageCreate = ({ template, onNavigate, onDone }) => {
                                 name: byId[pid]?.full_name || "",
                                 emailed: !!delivery[pid]?.emailed,
                                 reason: delivery[pid]?.reason || null,
-                                url: `${window.location.origin}/sign?token=${encodeURIComponent(tok)}`,
+                                url: `${window.location.origin}/sign#token=${encodeURIComponent(tok)}`,
                             }));
                             // The server converts an invited address that has an
                             // account into a registered party and notifies them in
@@ -1889,6 +1889,7 @@ const PageAllAgreements = ({ onNavigate }) => {
     // This was a typed name only; the person RECEIVING an agreement could
     // not draw or upload, while the person sending one always could.
     const [signSig, setSignSig] = useState({ method: "canvas", data: "" });
+    const [signConsent, setSignConsent] = useState(false);
     const [signBusy, setSignBusy] = useState(false);
     // Declining ends the agreement for everyone and cannot be undone, so it is
     // deliberately two steps: reveal, then confirm. A single button beside
@@ -1913,6 +1914,7 @@ const PageAllAgreements = ({ onNavigate }) => {
     const openAgreement = async (row) => {
         setViewing(row);
         setSignSig({ method: "canvas", data: "" });
+        setSignConsent(false);
         setDoc({ loading: true, body: null, error: null });
 
         // Only the latest open counts -- a late reply for a previously opened
@@ -1964,6 +1966,10 @@ const PageAllAgreements = ({ onNavigate }) => {
     };
 
     const doReissue = async (party) => {
+        if (viewing?.createdBy !== user?._id) {
+            toast.show("❌ Only the agreement creator can resend an invitation", "danger", 6000);
+            return;
+        }
         setReissuing(party.party_id);
         setReissued(null);
         const { data, error } = await reissueAgreementInvitation(viewing.id, party.party_id);
@@ -1982,7 +1988,7 @@ const PageAllAgreements = ({ onNavigate }) => {
             email: party.email,
             emailed: !!delivery.emailed,
             reason: delivery.reason || null,
-            url: `${window.location.origin}/sign?token=${encodeURIComponent(token)}`,
+            url: `${window.location.origin}/sign#token=${encodeURIComponent(token)}`,
         });
         toast.show(delivery.emailed
             ? "\u2709\ufe0f New link emailed"
@@ -2018,13 +2024,19 @@ const PageAllAgreements = ({ onNavigate }) => {
             toast.show("⚠️ Add your signature first — draw, type or upload", "warn");
             return;
         }
+        if (!signConsent) {
+            toast.show("⚠️ Confirm that you intend to sign this agreement", "warn");
+            return;
+        }
         setSignBusy(true);
-        const { data, error } = await signAgreement(viewing.id, signSig.method, signSig.data);
+        const { data, error } = await signAgreement(
+            viewing.id, signSig.method, signSig.data, true);
         setSignBusy(false);
         if (error) { toast.show("❌ " + (error.message || "Failed to sign"), "danger"); return; }
         toast.show(data?.status === "executed" ? "🎉 Agreement fully executed!" : "✅ Signed — awaiting the other parties", "success", 4000);
         openSeq.current += 1; setViewing(null); setDoc(null);
         setSignSig({ method: "canvas", data: "" });
+        setSignConsent(false);
         reload();
     };
 
@@ -2276,7 +2288,8 @@ const PageAllAgreements = ({ onNavigate }) => {
                                             signed. A registered party never had a
                                             link, and reissuing to someone who has
                                             signed would invite a second signature. */}
-                                        {p.external && !p.signed && viewing.rawStatus === "pending" && (
+                                        {p.external && !p.signed && viewing.rawStatus === "pending"
+                                            && viewing.createdBy === user?._id && (
                                             <button
                                                 disabled={reissuing === p.party_id}
                                                 onClick={() => doReissue(p)}
@@ -2397,7 +2410,12 @@ const PageAllAgreements = ({ onNavigate }) => {
                                     Sign — draw, type or upload
                                 </div>
                                 <SignaturePad height={150} onChange={setSignSig} />
-                                <Btn primary disabled={signBusy} onClick={doSign}
+                                <label style={{ display: "flex", gap: 9, alignItems: "flex-start", marginTop: 10, fontSize: 12, color: t.textMuted, lineHeight: 1.5, cursor: "pointer" }}>
+                                    <input type="checkbox" checked={signConsent}
+                                        onChange={e => setSignConsent(e.target.checked)} />
+                                    <span>I have read this document and intend the signature above to be my signature on it.</span>
+                                </label>
+                                <Btn primary disabled={signBusy || !signConsent} onClick={doSign}
                                     style={{ padding: "11px 22px", marginTop: 10, width: "100%" }}>
                                     {signBusy ? "Signing…" : "✍️ Sign Agreement"}
                                 </Btn>
@@ -2646,4 +2664,3 @@ function ModAgreements() {
 }
 
 export default ModAgreements;
-

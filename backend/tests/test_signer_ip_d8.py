@@ -127,7 +127,8 @@ async def _call_sign(request):
 
     return await sign_agreement(
         agreement_id="A1",
-        body=SignatureSubmit(method="typed", signature_data=CLIENT_SIGNATURE),
+        body=SignatureSubmit(
+            method="typed", signature_data=CLIENT_SIGNATURE, consent=True),
         request=request,
         current_user={"_id": CLIENT},
     )
@@ -319,7 +320,7 @@ async def test_signing_applies_the_same_gate(world):
     d = await _sent(ip_verifiable=True)
     await agreement_service.submit_signature(
         agreement_id=d["_id"], user_id=CLIENT, method="typed",
-        signature_data=CLIENT_SIGNATURE,
+        signature_data=CLIENT_SIGNATURE, consent=True,
         ip_address=BEHIND_PROXY, ip_verifiable=False)
 
     signed = await _entries(d["_id"], "signed")
@@ -353,7 +354,7 @@ async def test_the_certificate_does_not_print_an_unverifiable_origin(world):
     d = await _sent(ip_verifiable=False)
     await agreement_service.submit_signature(
         agreement_id=d["_id"], user_id=CLIENT, method="typed",
-        signature_data=CLIENT_SIGNATURE,
+        signature_data=CLIENT_SIGNATURE, consent=True,
         ip_address=SPOOFED, ip_verifiable=False)
 
     row = await get_agreements_col().find_one({"_id": d["_id"]})

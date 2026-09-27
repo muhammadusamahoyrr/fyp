@@ -88,7 +88,8 @@ async def test_a_three_party_agreement_stays_partial_after_two(world):
     doc = await _sent([{"user_id": CLIENT}, {"user_id": THIRD}])
     await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id=CLIENT, method="typed",
-        signature_data="The Client", ip_address=None, ip_verifiable=False)
+        signature_data="The Client", consent=True, ip_address=None,
+        ip_verifiable=False)
 
     view = await agreement_service.get_agreement(doc["_id"], LAWYER)
 
@@ -104,7 +105,8 @@ async def test_a_fully_signed_agreement_is_not_partially_signed(world):
     doc = await _sent()
     await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id=CLIENT, method="typed",
-        signature_data="The Client", ip_address=None, ip_verifiable=False)
+        signature_data="The Client", consent=True, ip_address=None,
+        ip_verifiable=False)
 
     view = await agreement_service.get_agreement(doc["_id"], LAWYER)
 
@@ -178,7 +180,8 @@ async def test_an_expired_agreement_cannot_be_signed(world):
     with pytest.raises(AppValidationError) as exc:
         await agreement_service.submit_signature(
             agreement_id=doc["_id"], user_id=CLIENT, method="typed",
-            signature_data="The Client", ip_address=None, ip_verifiable=False)
+            signature_data="The Client", consent=True, ip_address=None,
+            ip_verifiable=False)
     assert "expired" in str(exc.value).lower()
 
 
@@ -196,7 +199,8 @@ async def test_an_expired_agreement_never_becomes_executed(world):
     with pytest.raises(AppValidationError):
         await agreement_service.submit_signature(
             agreement_id=doc["_id"], user_id=CLIENT, method="typed",
-            signature_data="The Client", ip_address=None, ip_verifiable=False)
+            signature_data="The Client", consent=True, ip_address=None,
+            ip_verifiable=False)
 
     row = await get_agreements_col().find_one({"_id": doc["_id"]})
     assert row["status"] == AgreementStatus.PENDING.value
@@ -216,7 +220,8 @@ async def test_a_cancelled_agreement_never_becomes_executed(world):
     with pytest.raises(AppValidationError):
         await agreement_service.submit_signature(
             agreement_id=doc["_id"], user_id=CLIENT, method="typed",
-            signature_data="The Client", ip_address=None, ip_verifiable=False)
+            signature_data="The Client", consent=True, ip_address=None,
+            ip_verifiable=False)
 
     row = await get_agreements_col().find_one({"_id": doc["_id"]})
     assert row["status"] == AgreementStatus.CANCELLED.value
@@ -229,6 +234,7 @@ async def test_an_agreement_inside_its_window_still_signs(world):
     doc = await _sent()
     out = await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id=CLIENT, method="typed",
-        signature_data="The Client", ip_address=None, ip_verifiable=False)
+        signature_data="The Client", consent=True, ip_address=None,
+        ip_verifiable=False)
 
     assert out["status"] == AgreementStatus.EXECUTED.value

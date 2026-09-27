@@ -150,7 +150,9 @@ async def send_agreement_invitation_email(
     Returns False when SMTP is unconfigured (the caller falls back to handing
     the link to the sender); raises on a real delivery failure.
     """
-    link = f"{settings.frontend_url}/sign?token={token}"
+    # A fragment is never sent to the frontend server or in an HTTP referrer.
+    # The signing page reads it once and immediately scrubs the address bar.
+    link = f"{settings.frontend_url}/sign#token={token}"
     greeting = f"Hello {_esc(signer_name)}," if signer_name else "Hello,"
     expiry_line = (
         f"<p>This link stops working on "

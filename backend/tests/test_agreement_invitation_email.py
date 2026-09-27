@@ -109,7 +109,7 @@ async def test_an_invited_signer_is_emailed_their_link(world, sent_mail):
     invite = _to(sent_mail, GUEST)
     assert len(invite) == 1
     (_pid, token), = doc["invitation_tokens_do_not_store"].items()
-    assert f"https://app.example.pk/sign?token={token}" in invite[0]["body"]
+    assert f"https://app.example.pk/sign#token={token}" in invite[0]["body"]
 
 
 async def test_the_email_names_the_sender_and_the_agreement(world, sent_mail):
@@ -157,6 +157,7 @@ async def test_a_registered_signer_gets_an_email_too(world, sent_mail):
     note = _to(sent_mail, client["email"])
     assert len(note) == 1
     assert "/sign?token=" not in note[0]["body"]
+    assert "/sign#token=" not in note[0]["body"]
 
 
 async def test_each_invited_signer_gets_their_own_link(world, sent_mail):
@@ -402,6 +403,7 @@ async def test_an_invited_address_with_an_account_is_reported(world, sent_mail):
     note = _to(sent_mail, known["email"])
     assert len(note) == 1
     assert "/sign?token=" not in note[0]["body"]
+    assert "/sign#token=" not in note[0]["body"]
 
 
 async def test_a_genuine_outsider_is_not_reported_as_in_app(world, sent_mail):
@@ -472,6 +474,7 @@ async def test_the_notification_email_carries_no_signing_token(world, sent_mail)
 
     body = sent_mail[0]["body"]
     assert "/sign?token=" not in body
+    assert "/sign#token=" not in body
     assert "/agreements" in body
 
 

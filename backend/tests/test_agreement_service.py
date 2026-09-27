@@ -152,14 +152,15 @@ def test_signature_data_is_bounded():
 
     with pytest.raises(ValidationError):
         SignatureSubmit(method=SignatureMethod.CANVAS,
-                        signature_data="A" * (_MAX_SIGNATURE + 1))
+                        signature_data="A" * (_MAX_SIGNATURE + 1), consent=True)
 
 
 def test_a_realistic_signature_still_fits():
     from app.schemas.agreement import SignatureSubmit
 
     # ~60 KB base64 PNG — a comfortably large drawn signature
-    assert SignatureSubmit(method=SignatureMethod.CANVAS, signature_data="A" * 60_000)
+    assert SignatureSubmit(method=SignatureMethod.CANVAS,
+                           signature_data="A" * 60_000, consent=True)
 
 
 def test_empty_signature_is_rejected():
@@ -168,7 +169,16 @@ def test_empty_signature_is_rejected():
     from app.schemas.agreement import SignatureSubmit
 
     with pytest.raises(ValidationError):
-        SignatureSubmit(method=SignatureMethod.TYPED, signature_data="")
+        SignatureSubmit(method=SignatureMethod.TYPED, signature_data="", consent=True)
+
+
+def test_registered_signature_requires_an_explicit_consent_field():
+    from pydantic import ValidationError
+
+    from app.schemas.agreement import SignatureSubmit
+
+    with pytest.raises(ValidationError):
+        SignatureSubmit(method=SignatureMethod.TYPED, signature_data="Alice")
 
 
 def test_title_and_body_are_bounded():
@@ -283,10 +293,31 @@ async def test_signing_stamps_the_digest_into_the_audit_entry(two_users):
     doc = await _make(two_users)
     signed = await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id="AG-ALICE",
-        method="canvas", signature_data="sig", ip_address="1.2.3.4")
+        method="canvas", signature_data="sig", consent=True,
+        ip_address="1.2.3.4")
 
     entry = [e for e in signed["audit_log"] if e["action"] == "signed"][0]
     assert entry["body_sha256"] == doc["body_sha256"]
+    assert entry["consent"] is True
+    party = next(p for p in signed["parties"] if p["user_id"] == "AG-ALICE")
+    assert party["consent_at"] is not None
+
+
+@pytest.mark.integration
+async def test_registered_signing_refuses_false_consent_without_writing(two_users):
+    from app.core.exceptions import AppValidationError
+    from app.services import agreement_service
+
+    doc = await _make(two_users)
+    with pytest.raises(AppValidationError):
+        await agreement_service.submit_signature(
+            agreement_id=doc["_id"], user_id="AG-ALICE", method="typed",
+            signature_data="Alice", consent=False, ip_address=None)
+
+    unchanged = await agreement_service.get_agreement(doc["_id"], "AG-ALICE")
+    party = next(p for p in unchanged["parties"] if p["user_id"] == "AG-ALICE")
+    assert party["signed"] is False
+    assert not any(e["action"] == "signed" for e in unchanged["audit_log"])
 
 
 @pytest.mark.integration
@@ -313,12 +344,13 @@ async def test_a_party_cannot_sign_twice(two_users):
     doc = await _make(two_users)
     await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id="AG-ALICE",
-        method="typed", signature_data="Alice", ip_address=None)
+        method="typed", signature_data="Alice", consent=True, ip_address=None)
 
     with pytest.raises(AppValidationError):
         await agreement_service.submit_signature(
             agreement_id=doc["_id"], user_id="AG-ALICE",
-            method="typed", signature_data="Alice", ip_address=None)
+            method="typed", signature_data="Alice", consent=True,
+            ip_address=None)
 
 
 @pytest.mark.integration
@@ -331,7 +363,7 @@ async def test_a_non_party_cannot_sign(two_users):
     with pytest.raises(ForbiddenError):
         await agreement_service.submit_signature(
             agreement_id=doc["_id"], user_id="AG-BOB-IMPOSTER",
-            method="typed", signature_data="x", ip_address=None)
+            method="typed", signature_data="x", consent=True, ip_address=None)
 
 
 @pytest.mark.integration
@@ -342,10 +374,10 @@ async def test_mixed_methods_persist_the_weakest_classification(two_users):
     doc = await _make(two_users)
     await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id="AG-ALICE",
-        method="canvas", signature_data="drawn", ip_address=None)
+        method="canvas", signature_data="drawn", consent=True, ip_address=None)
     final = await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id="AG-BOB",
-        method="typed", signature_data="Bob", ip_address=None)
+        method="typed", signature_data="Bob", consent=True, ip_address=None)
 
     assert final["eto_classification"] == ETO_CLASSIFICATION[SignatureMethod.TYPED]
     assert final["status"] == AgreementStatus.EXECUTED.value
@@ -418,7 +450,7 @@ async def test_an_executed_agreement_cannot_be_declined(two_users):
     for uid in two_users:
         await agreement_service.submit_signature(
             agreement_id=doc["_id"], user_id=uid,
-            method="typed", signature_data=uid, ip_address=None)
+            method="typed", signature_data=uid, consent=True, ip_address=None)
 
     with pytest.raises(AppValidationError):
         await agreement_service.decline_agreement(
@@ -456,7 +488,8 @@ async def test_a_declined_agreement_cannot_then_be_signed(two_users):
     with pytest.raises(AppValidationError):
         await agreement_service.submit_signature(
             agreement_id=doc["_id"], user_id="AG-ALICE",
-            method="typed", signature_data="Alice", ip_address=None)
+            method="typed", signature_data="Alice", consent=True,
+            ip_address=None)
 
     after = await agreement_service.get_agreement(doc["_id"], "AG-ALICE")
     assert after["status"] == AgreementStatus.CANCELLED.value

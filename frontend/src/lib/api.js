@@ -1184,10 +1184,10 @@ export async function revokeAgreementInvitation(agreement_id, party_id) {
     { method: 'POST' });
 }
 
-export async function signAgreement(agreement_id, method, signature_data) {
+export async function signAgreement(agreement_id, method, signature_data, consent) {
   return apiFetch(`/agreements/${agreement_id}/sign`, {
     method: 'POST',
-    body: JSON.stringify({ method, signature_data }),
+    body: JSON.stringify({ method, signature_data, consent }),
   });
 }
 

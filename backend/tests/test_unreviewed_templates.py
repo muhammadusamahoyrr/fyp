@@ -187,7 +187,8 @@ async def test_a_preexisting_boilerplate_agreement_cannot_be_signed(two_users):
         with pytest.raises(AppValidationError) as exc:
             await agreement_service.submit_signature(
                 agreement_id=agreement_id, user_id="UT-ALICE",
-                method="typed", signature_data="Alice", ip_address=None)
+                method="typed", signature_data="Alice", consent=True,
+                ip_address=None)
         assert "unreviewed" in str(exc.value).lower()
 
         # And it is still not executed.
@@ -213,7 +214,8 @@ async def test_replacing_the_notice_makes_the_agreement_usable_again(two_users):
         for uid in two_users:
             result = await agreement_service.submit_signature(
                 agreement_id=doc["_id"], user_id=uid,
-                method="typed", signature_data=uid, ip_address=None)
+                method="typed", signature_data=uid, consent=True,
+                ip_address=None)
 
         assert result["status"] == AgreementStatus.EXECUTED.value
     finally:

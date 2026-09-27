@@ -220,7 +220,7 @@ async def test_signing_parks_its_notification_in_the_same_transaction(agreement_
     agreement_id = await _pending(agreement_parties)
     await agreement_service.submit_signature(
         agreement_id=agreement_id, user_id="P1-ALICE",
-        method="typed", signature_data="Alice", ip_address=None)
+        method="typed", signature_data="Alice", consent=True, ip_address=None)
 
     parked = await get_event_outbox_col().find_one(
         {"_id": f"agreement:{agreement_id}:signed:P1-ALICE:P1-BOB"})
@@ -237,7 +237,7 @@ async def test_the_signer_is_not_notified_of_their_own_signature(agreement_parti
     agreement_id = await _pending(agreement_parties)
     await agreement_service.submit_signature(
         agreement_id=agreement_id, user_id="P1-ALICE",
-        method="typed", signature_data="Alice", ip_address=None)
+        method="typed", signature_data="Alice", consent=True, ip_address=None)
 
     assert await get_event_outbox_col().find_one(
         {"_id": f"agreement:{agreement_id}:signed:P1-ALICE:P1-ALICE"}) is None
@@ -260,7 +260,7 @@ async def test_concurrent_signatures_execute_the_agreement_exactly_once(agreemen
         try:
             return await agreement_service.submit_signature(
                 agreement_id=agreement_id, user_id=uid,
-                method="typed", signature_data=uid, ip_address=None)
+                method="typed", signature_data=uid, consent=True, ip_address=None)
         except Exception as exc:  # a lost race is a legitimate outcome
             return exc
 
@@ -295,7 +295,8 @@ async def test_a_concurrent_sign_and_decline_resolve_to_one_terminal_state(agree
         try:
             return await agreement_service.submit_signature(
                 agreement_id=agreement_id, user_id="P1-ALICE",
-                method="typed", signature_data="Alice", ip_address=None)
+                method="typed", signature_data="Alice", consent=True,
+                ip_address=None)
         except Exception as exc:
             return exc
 
@@ -367,7 +368,8 @@ async def test_the_body_digest_is_stamped_into_every_audit_entry(agreement_parti
     agreement_id = await _pending(agreement_parties)
     await agreement_service.submit_signature(
         agreement_id=agreement_id, user_id="P1-ALICE",
-        method="typed", signature_data="Alice", ip_address="203.0.113.7",
+        method="typed", signature_data="Alice", consent=True,
+        ip_address="203.0.113.7",
         # D8: an address is stored only when it can be stood behind. This test
         # is about the DIGEST reaching every entry, so the origin is supplied
         # as verifiable rather than left to the fail-closed default.

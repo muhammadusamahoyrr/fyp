@@ -209,16 +209,29 @@ test("the invited signer is told their identity was not verified", () => {
               "the page must not let a signer assume their identity was checked");
 });
 
+test("the signing page reads the token from a fragment and scrubs it immediately", () => {
+    assert.ok(SIGN_PAGE.includes("window.location.hash"));
+    assert.ok(SIGN_PAGE.includes("window.history.replaceState"));
+    assert.ok(!SIGN_PAGE.includes("useSearchParams"));
+    assert.ok(!SIGN_PAGE.includes("searchParams.get('token')"));
+});
+
 // ── the links have to reach someone ─────────────────────────────────────────
 
 test("the builder surfaces the one-time links after a send", () => {
     // Nothing emails them. A link the sender never sees is an invitation
     // nobody can use, and the token cannot be recovered afterwards.
     assert.ok(BUILDER.includes("invitation_tokens_do_not_store"));
-    assert.ok(BUILDER.includes("/sign?token="));
+    assert.ok(BUILDER.includes("/sign#token="));
+    assert.ok(!BUILDER.includes("/sign?token="));
     assert.ok(/only\s*\n?\s*time these links can be shown/i.test(BUILDER)
               || BUILDER.includes("only"),
               "the panel should say the links cannot be shown again");
+});
+
+test("only the creator is offered a replacement bearer link", () => {
+    assert.ok(BUILDER.includes("viewing.createdBy === user?._id"));
+    assert.ok(BUILDER.includes("viewing?.createdBy !== user?._id"));
 });
 
 // ── lists and party chips survive a party with no account ───────────────────
@@ -356,6 +369,20 @@ test("the counter-signer's method reaches the server, not a hardcoded one", () =
     }
     assert.ok(/method: sig\.method/.test(SIGN_PAGE));
     assert.ok(/signature_data: sig\.data/.test(SIGN_PAGE));
+});
+
+test("registered counter-signers must consent and send that consent", async () => {
+    for (const [name, src] of [["client", BUILDER], ["lawyer", LAWYER]]) {
+        assert.ok(src.includes("signConsent"), `${name} has no consent state`);
+        assert.ok(src.includes("checked={signConsent}"), `${name} has no consent checkbox`);
+        assert.ok(/signAgreement\([\s\S]{0,160}signSig\.data, true\)/.test(src),
+                  `${name} does not send affirmative consent`);
+    }
+
+    const calls = captureFetch({ _id: "a1", status: "pending" });
+    const api = await loadApi();
+    await api.signAgreement("a1", "typed", "Alice", true);
+    assert.equal(JSON.parse(calls[0].options.body).consent, true);
 });
 
 test("the upload limit stated to the user is the one the server enforces", () => {

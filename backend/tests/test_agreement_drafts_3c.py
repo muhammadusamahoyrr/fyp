@@ -663,13 +663,13 @@ async def test_signing_someone_elses_draft_does_not_reveal_it_exists(world):
     with pytest.raises(NotFoundError):
         await agreement_service.submit_signature(
             agreement_id=d["_id"], user_id=CLIENT,
-            method="typed", signature_data="The Client", ip_address=None)
+            method="typed", signature_data="The Client", consent=True, ip_address=None)
 
     # Identical outcome for an id that genuinely does not exist.
     with pytest.raises(NotFoundError):
         await agreement_service.submit_signature(
             agreement_id="NO-SUCH-AGREEMENT", user_id=CLIENT,
-            method="typed", signature_data="The Client", ip_address=None)
+            method="typed", signature_data="The Client", consent=True, ip_address=None)
 
     row = await _row(d["_id"])
     assert row["status"] == AgreementStatus.DRAFT.value
@@ -711,7 +711,7 @@ async def test_the_author_gets_a_real_explanation_not_a_404(world):
     with pytest.raises(AppValidationError) as exc:
         await agreement_service.submit_signature(
             agreement_id=d["_id"], user_id=LAWYER,
-            method="typed", signature_data="Adv Verified", ip_address=None)
+            method="typed", signature_data="Adv Verified", consent=True, ip_address=None)
     assert "still a draft" in str(exc.value).lower()
 
 
