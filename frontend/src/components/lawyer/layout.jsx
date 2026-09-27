@@ -114,7 +114,11 @@ const NAV_SECTIONS = [
         items: [
             { id: "documents", label: "Documents", icon: "documents" },
             { id: "agreements", label: "Agreements", icon: "documents" },
-            { id: "overseas-disputes", label: "Overseas Disputes", icon: "gavel" },
+            // OUT OF SCOPE, 2026-09-23. "Overseas Disputes" is the lawyer side
+            // of the client's "Property Dispute" module; both are hidden
+            // together, because leaving this one visible would show a lawyer an
+            // inbox that nothing can deliver to. DisputesInboxPage.jsx is not
+            // deleted — see the note in `components/client/Dashboard.jsx`.
             { id: "causelist", label: "Cause List", icon: "gavel" },
             { id: "payments", label: "Payments", icon: "documents" },
             { id: "appointments", label: "Appointments", icon: "calendar" },

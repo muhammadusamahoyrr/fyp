@@ -50,11 +50,63 @@ class ServiceUnavailableError(HTTPException):
         )
 
 
+#: Statuses whose reason is worth a log line. 401/403/404 are deliberately
+#: absent: they are the routine noise of any authenticated API and would bury
+#: the rest. What is here is the class of refusal that means "you sent
+#: something the product will not accept, and there is a specific reason" --
+#: precisely the thing a caller may be unable to show its user.
+_LOGGED_REFUSALS = frozenset({400, 409, 422})
+
+
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    # RECORDED, not only returned. A refusal used to exist solely in the
+    # response body: if the client swallowed it -- or rendered it in a toast at
+    # the top of a page the user had scrolled away from -- the server kept only
+    # a status code. That is how "Sign & Send does nothing" survived several
+    # rounds of investigation while the server was plainly saying, every time,
+    # that the agreement still contained the unreviewed-sample notice.
+    if exc.status_code in _LOGGED_REFUSALS:
+        import logging
+        logging.getLogger(__name__).warning(
+            "%d on %s %s -- %s", exc.status_code, request.method,
+            request.url.path, str(exc.detail)[:300])
+
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": exc.detail, "status_code": exc.status_code},
         headers=getattr(exc, "headers", None) or {},
+    )
+
+
+async def validation_exception_handler(request, exc) -> JSONResponse:
+    """A 422, with the failing field written to the log.
+
+    FastAPI returns the detail to the caller and records NOTHING server-side. A
+    client that swallows the body -- or shows it in a toast at the top of a
+    page the user has scrolled away from -- leaves a 422 in the access log with
+    no way to tell which field was wrong. That is exactly how a Sign & Send
+    that "does nothing" stayed unexplained across several attempts.
+
+    ONLY THE LOCATION AND THE RULE ARE LOGGED, never the value. These payloads
+    carry signature images and agreement text: the useful part of a validation
+    failure is which field broke which constraint, and the value is both
+    enormous and the caller's private content.
+    """
+    import logging
+
+    errors = exc.errors() if hasattr(exc, "errors") else []
+    summary = "; ".join(
+        f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('type')}"
+        for e in errors
+    ) or "unspecified"
+    logging.getLogger(__name__).warning(
+        "422 on %s %s -- %s", request.method, request.url.path, summary)
+
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"error": "The request was not valid.",
+                 "status_code": 422,
+                 "detail": errors},
     )
 
 

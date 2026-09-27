@@ -8,7 +8,7 @@ import { useCase } from "./CaseContext.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
-import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getBookableSlots, listCases, listEngagements, requestEngagement, cancelEngagement, acceptEngagementTerms, declineEngagementTerms, completeEngagement, terminateEngagement } from "@/lib/api.js";
+import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getBookableSlots, listCases, listHireConsultations, listEngagements, requestEngagement, cancelEngagement, acceptEngagementTerms, declineEngagementTerms, completeEngagement, terminateEngagement } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { hireableCases as hireable, isDraftCase } from "@/lib/caseStatus.js";
 import { readIntakeValue } from "@/lib/intakeStorage.js";
@@ -115,7 +115,15 @@ const ModLawyers = () => {
     const [hireMessage, setHireMessage] = useState("");
     const [hireSubmitting, setHireSubmitting] = useState(false);
     const [myCases, setMyCases] = useState([]);
+    const [casesLoaded, setCasesLoaded] = useState(false);
     const [myEngagements, setMyEngagements] = useState([]);
+    // A hire follows a COMPLETED consultation with the same lawyer; the server
+    // refuses a request without one. `hireConsults` are the consultations the
+    // server says qualify; `hireAppointmentId` is the one the CLIENT chose.
+    // With several, nothing is chosen for them.
+    const [hireConsults, setHireConsults] = useState([]);
+    const [hireAppointmentId, setHireAppointmentId] = useState("");
+    const [hireOpening, setHireOpening] = useState(false);
 
     const refreshEngagements = () => {
         listEngagements().then(({ data }) => {
@@ -126,7 +134,8 @@ const ModLawyers = () => {
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => {
             if (data?.items) setMyCases(data.items);
-        }).catch(() => { });
+            setCasesLoaded(true);
+        }).catch(() => { setCasesLoaded(true); });
         refreshEngagements();
     }, []);
 
@@ -487,6 +496,33 @@ const ModLawyers = () => {
         setLoadingMatch(false);
     };
 
+    /* ARRIVING FROM A COMPLETED CONSULTATION (§17 R5-1, step 7).
+     *
+     * The appointment card links here with the lawyer, their name and the
+     * consultation. The lawyer is taken from the DIRECTORY when this page
+     * happens to be showing them, and otherwise built from the link itself --
+     * the directory is paged, so waiting for them to appear in it would leave
+     * the client on a page where nothing happens. `openHire` re-reads the
+     * eligible consultations from the server either way, and the request it
+     * finally sends is validated there.
+     */
+    const hireLawyerId = searchParams?.get("hire");
+    const hireLawyerName = searchParams?.get("hire_name");
+    const hireApptId = searchParams?.get("appointment");
+    const hireLinkHandled = useRef(false);
+
+    useEffect(() => {
+        // WAIT FOR THE CASES. `openHire` refuses when the client has none,
+        // and on a fresh page load that read has not returned yet -- opening
+        // before it does would tell somebody with cases to go and create one.
+        if (!hireLawyerId || !casesLoaded || hireLinkHandled.current) return;
+        hireLinkHandled.current = true;
+        const known = apiLawyers.find(l => l._id === hireLawyerId);
+        openHire(known || { _id: hireLawyerId, name: hireLawyerName || "this lawyer" },
+                 hireApptId || null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [hireLawyerId, hireApptId, casesLoaded]);
+
     // Auto-trigger match when arriving from intake, but only once backend is confirmed reachable.
     useEffect(() => {
         if (!backendUp) return;
@@ -700,7 +736,7 @@ const ModLawyers = () => {
     };
 
     // ── HIRE (ENGAGEMENT) HELPERS ─────────────────────────────────
-    const openHire = (lawyer) => {
+    const openHire = async (lawyer, preferredAppointmentId = null) => {
         if (!lawyer?._id || lawyer._id.startsWith("api-")) {
             toast.show("This lawyer is a sample profile — only listed lawyers can be hired.", "warn", 4000);
             return;
@@ -716,15 +752,70 @@ const ModLawyers = () => {
             );
             return;
         }
+        // The consultations this hire may follow, asked of the server for THIS
+        // lawyer — not read off a page of the diary, where an eligible one
+        // could sit just past the end. Only the lawyer can mark one completed.
+        if (hireOpening) return;
+        setHireOpening(true);
+        const { data, error } = await listHireConsultations(lawyer._id);
+        setHireOpening(false);
+        if (error) {
+            // A failed read is not "you have none": saying so would send the
+            // client off to book a consultation they may already have had.
+            toast.show(error.message || `Could not check your consultations with ${lawyer.name}. Please try again.`, "error", 4500);
+            return;
+        }
+        const consults = Array.isArray(data) ? data : [];
+        if (!consults.length) {
+            toast.show(
+                `Book a consultation with ${lawyer.name} first. Once they mark it completed, you can ask them to take your case.`,
+                "info", 5000
+            );
+            return;
+        }
         setHireLawyer(lawyer);
-        const urlCase = getCaseId();
-        const preselect = hireableCases.find(c => c._id === urlCase) || hireableCases[0];
-        setHireCaseId(preselect?._id || "");
+        setHireConsults(consults);
         setHireMessage("");
+        // The consultation the client came FROM, when they arrived from one and
+        // the server still lists it as eligible. Otherwise: exactly one is the
+        // only possible answer, so it is filled in; several are the client's
+        // choice and nothing is picked on their behalf.
+        const arrivedFrom = preferredAppointmentId
+            ? consults.find(a => a.id === preferredAppointmentId)
+            : null;
+        chooseConsult(arrivedFrom || (consults.length === 1 ? consults[0] : null));
         setShowHireModal(true);
     };
 
+    // The cases a consultation permits: just its own when it was booked for
+    // one, otherwise any case that can still be sent to a lawyer.
+    const casesForConsult = (consult) => {
+        if (!consult) return [];
+        return consult.case_id
+            ? hireableCases.filter(c => c._id === consult.case_id)
+            : hireableCases;
+    };
+
+    const chooseConsult = (consult) => {
+        setHireAppointmentId(consult?.id || "");
+        const options = casesForConsult(consult);
+        const urlCase = getCaseId();
+        const preselect = options.find(c => c._id === urlCase) || options[0];
+        setHireCaseId(preselect?._id || "");
+    };
+
+    const consultLabel = (a) => {
+        const when = a.scheduled_at ? new Date(a.scheduled_at).toLocaleString(undefined,
+            { dateStyle: "medium", timeStyle: "short" }) : "Unknown date";
+        const forCase = a.case_id ? myCases.find(c => c._id === a.case_id) : null;
+        return forCase ? `${when} — about ${forCase.title}` : when;
+    };
+
     const submitHire = async () => {
+        if (!hireAppointmentId) {
+            toast.show("Select the consultation this request follows.", "warn", 3500);
+            return;
+        }
         if (!hireCaseId) {
             toast.show("Select the case you want this lawyer to handle.", "warn", 3500);
             return;
@@ -733,6 +824,7 @@ const ModLawyers = () => {
         const { error } = await requestEngagement({
             case_id: hireCaseId,
             lawyer_id: hireLawyer._id,
+            appointment_id: hireAppointmentId,
             message: hireMessage.trim() || null,
         });
         setHireSubmitting(false);
@@ -769,7 +861,7 @@ const ModLawyers = () => {
             toast.show(error.message || "Could not accept the terms.", "error", 4000);
             return;
         }
-        toast.show(`${e.lawyer_name || "Your lawyer"} is now engaged. The engagement letter is ready to sign on the Agreements page.`, "success", 5000);
+        toast.show(`${e.lawyer_name || "Your lawyer"} is now engaged on your case.`, "success", 5000);
         refreshEngagements();
     };
 
@@ -830,6 +922,8 @@ const ModLawyers = () => {
     // ── HIRE MODAL ────────────────────────────────────────────────
     const HireModal = () => {
         if (!hireLawyer || typeof document === "undefined") return null;
+        const hireConsult = hireConsults.find(a => a.id === hireAppointmentId) || null;
+        const hireCaseOptions = casesForConsult(hireConsult);
         return createPortal(
             <div style={{
                 position: "fixed", inset: 0, zIndex: 9999,
@@ -858,17 +952,43 @@ const ModLawyers = () => {
                         Nothing is assigned until they accept — you'll get a notification either way.
                     </div>
 
+                    {/* Consultation picker. A choice only when there is one to
+                        make; a single consultation is simply stated. */}
+                    <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Consultation *</label>
+                        {hireConsults.length > 1 ? (
+                            <select value={hireAppointmentId}
+                                onChange={e => chooseConsult(hireConsults.find(a => a.id === e.target.value) || null)}
+                                style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${hireAppointmentId ? t.primary : t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", boxSizing: "border-box" }}>
+                                <option value="">Select the consultation this request follows…</option>
+                                {hireConsults.map(a => (
+                                    <option key={a.id} value={a.id}>{consultLabel(a)}</option>
+                                ))}
+                            </select>
+                        ) : (
+                            <div style={{ fontSize: 13, color: t.text, padding: "10px 14px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
+                                {hireConsults[0] ? consultLabel(hireConsults[0]) : ""}
+                            </div>
+                        )}
+                    </div>
+
                     {/* Case picker */}
                     <div style={{ marginBottom: 14 }}>
                         <label style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Case *</label>
                         <select value={hireCaseId} onChange={e => setHireCaseId(e.target.value)}
                             style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${hireCaseId ? t.primary : t.border}`, background: t.inputBg, color: t.text, fontSize: 13, outline: "none", boxSizing: "border-box" }}>
-                            {hireableCases.map(c => (
+                            {hireCaseOptions.map(c => (
                                 <option key={c._id} value={c._id}>
                                     {c.title} ({c.case_number})
                                 </option>
                             ))}
                         </select>
+                        {!hireConsult && hireConsults.length > 1 && (
+                            <div style={{ fontSize: 12, color: t.textMuted, marginTop: 6 }}>Choose a consultation first.</div>
+                        )}
+                        {hireConsult && !hireCaseOptions.length && (
+                            <div style={{ fontSize: 12, color: t.textMuted, marginTop: 6 }}>The case this consultation was booked for can no longer be sent to a lawyer.</div>
+                        )}
                     </div>
 
                     {/* Message */}

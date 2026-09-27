@@ -11,6 +11,7 @@ Test tiers (see pytest.ini markers):
 """
 from __future__ import annotations
 
+import base64
 import importlib
 import sys
 from pathlib import Path
@@ -24,6 +25,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 TEST_DB_SUFFIX = "_test"
+
+#: A throwaway AES-256 key for the suite. NOT a secret and not a fallback: the
+#: application refuses to store a signature when `SIGNATURE_ENCRYPTION_KEY` is
+#: unset, which is the behaviour we want in production and an obstacle in a test
+#: run that signs hundreds of agreements. Fixed rather than random so a failure
+#: is reproducible, and obviously disposable so nobody mistakes it for a real
+#: one. Set here, session-wide, because a per-test key would make a ciphertext
+#: written by one test undecryptable in the next.
+TEST_SIGNATURE_KEY = base64.b64encode(b"attorney-ai test signature key!!").decode()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _signature_encryption_key():
+    """Give the suite a signature key without touching the developer's `.env`."""
+    from app.core.config import settings
+
+    previous = getattr(settings, "signature_encryption_key", "")
+    settings.signature_encryption_key = TEST_SIGNATURE_KEY
+    yield
+    settings.signature_encryption_key = previous
 
 
 @pytest.fixture(autouse=True)
@@ -491,4 +512,41 @@ async def app_indexes(mongo):
     with its own measurement — not smuggled in beside new tests.
     """
     await ensure_app_indexes(mongo)
+    return mongo
+
+
+@pytest.fixture
+async def mongo_transactional(mongo):
+    """A database that genuinely supports multi-document transactions, or a skip.
+
+    WHY THIS EXISTS
+
+    Agreement sign and decline run inside `session.with_transaction` and FAIL
+    CLOSED when transactions are unavailable -- they refuse rather than fall
+    back to the four separate writes whose interleaving they exist to prevent.
+
+    Production is Atlas, which is a replica set, so transactions are available
+    there. `mongo` above connects to a local `mongodb://localhost:27017`, which
+    is ordinarily a STANDALONE, where transactions raise. A test asserting
+    atomic behaviour against a standalone would test the refusal path and prove
+    nothing about the transactional one.
+
+    SKIPS, LOUDLY, AND DOES NOT PRETEND. The alternative -- mocking the session
+    so the body runs without a transaction -- would assert the code's happy path
+    while removing the only property under test. A skip with a reason is honest
+    about the gap; a green test that verified nothing would not be.
+
+    To run these locally, point AAI_TEST_MONGO_URL at a single-node replica set:
+
+        mongod --replSet rs0 --dbpath <dir> --port 27018
+        mongosh --port 27018 --eval 'rs.initiate()'
+        AAI_TEST_MONGO_URL=mongodb://localhost:27018/?replicaSet=rs0 pytest ...
+    """
+    hello = await mongo.client.admin.command("hello")
+    if not (hello.get("setName") or hello.get("msg") == "isdbgrid"):
+        pytest.skip(
+            "multi-document transactions need a replica set or mongos; this "
+            "connection is a standalone. Set AAI_TEST_MONGO_URL to a "
+            "replica-set URI to run the agreement transaction tests."
+        )
     return mongo

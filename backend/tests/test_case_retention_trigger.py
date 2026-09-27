@@ -42,13 +42,21 @@ and a mocked repository would happily agree with whatever Python thought.
 from __future__ import annotations
 
 import secrets
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from app.core.constants import TERMINAL_CASE_STATUSES, CaseStatus
-from app.core.exceptions import AppValidationError
-from app.services import admin_service, engagement_service
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from support.hire_fixtures import (  # noqa: E402
+    delete_appointments_for, seed_completed_appointment,
+)
+
+from app.core.constants import TERMINAL_CASE_STATUSES, CaseStatus  # noqa: E402
+from app.core.exceptions import AppValidationError  # noqa: E402
+from app.services import admin_service, engagement_service  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -190,6 +198,7 @@ async def engagement_parties(app_indexes):
     await get_cases_col().delete_many({"_id": case_id})
     await get_engagements_col().delete_many({"case_id": case_id})
     await get_agreements_col().delete_many({"case_id": case_id})
+    await delete_appointments_for(client_id)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -224,8 +233,10 @@ async def test_completing_an_engagement_stamps_the_closure_instant(engagement_pa
     by writing the status directly — the stamp has to survive the path that
     actually closes most cases."""
     p = engagement_parties
+    appt_id = await seed_completed_appointment(p["client_id"], p["lawyer_id"])
     eid = await engagement_service.request_engagement(
         p["client_id"], {"case_id": p["case_id"], "lawyer_id": p["lawyer_id"],
+                         "appointment_id": appt_id,
                          "message": "Please take this."})
     eid = eid["id"]
     await engagement_service.propose_terms(
@@ -255,8 +266,10 @@ async def test_a_completed_engagement_cannot_also_be_terminated(engagement_parti
     admin path has.
     """
     p = engagement_parties
+    appt_id = await seed_completed_appointment(p["client_id"], p["lawyer_id"])
     eng = await engagement_service.request_engagement(
         p["client_id"], {"case_id": p["case_id"], "lawyer_id": p["lawyer_id"],
+                         "appointment_id": appt_id,
                          "message": "Please take this."})
     eid = eng["id"]
     await engagement_service.propose_terms(

@@ -21,13 +21,21 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from app.core.constants import AppointmentMode, CaseStatus
-from app.core.exceptions import AppValidationError, ConflictError, ForbiddenError, NotFoundError
-from app.services import (
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from support.hire_fixtures import seed_completed_appointment  # noqa: E402
+
+from app.core.constants import AppointmentMode, CaseStatus  # noqa: E402
+from app.core.exceptions import (  # noqa: E402
+    AppValidationError, ConflictError, ForbiddenError, NotFoundError,
+)
+from app.services import (  # noqa: E402
     appointment_service,
     case_service,
     engagement_service,
@@ -167,7 +175,9 @@ async def test_a_draft_cannot_be_sent_to_a_lawyer(party):
     with pytest.raises(AppValidationError) as exc:
         await engagement_service.request_engagement(
             party["client_id"],
-            {"case_id": case_id, "lawyer_id": party["lawyer_id"], "message": None})
+            {"case_id": case_id, "lawyer_id": party["lawyer_id"], "message": None,
+             "appointment_id": await seed_completed_appointment(
+                 party["client_id"], party["lawyer_id"])})
     assert "draft" in str(exc.value.detail).lower()
 
 
@@ -328,7 +338,9 @@ async def test_a_confirmed_case_can_be_sent_to_a_lawyer(party):
 
     eng = await engagement_service.request_engagement(
         party["client_id"],
-        {"case_id": case_id, "lawyer_id": party["lawyer_id"], "message": None})
+        {"case_id": case_id, "lawyer_id": party["lawyer_id"], "message": None,
+         "appointment_id": await seed_completed_appointment(
+             party["client_id"], party["lawyer_id"])})
     assert eng["case_id"] == case_id
 
 

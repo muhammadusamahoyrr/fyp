@@ -1012,7 +1012,26 @@ function StepSubmitted({ onBack, onComplete }) {
         <div className="rgrid-3" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 12, margin: "16px 0" }}>
           {[
             { icon: "📤", title: "Profile Submitted", sub: "Verification pending", iconRight: Ic.check(T.success, 18) },
-            { icon: "🔒", title: "Security Active", sub: "AES-256 protected.", iconRight: null },
+            // A "Security Active - AES-256 protected" card used to sit here and
+            // has been REMOVED rather than reworded, because there turned out to
+            // be nothing true and distinct for it to say.
+            //
+            // It sat under "Your complete profile has been securely submitted",
+            // so it was a claim about the WHOLE profile: name, bar number and
+            // specializations are all stored in plaintext, and only the CNIC is
+            // encrypted (Fernet, not the cipher that was named). Naming the
+            // correct cipher would have traded a false claim for a misleading
+            // one.
+            //
+            // A second attempt said "Sent over an encrypted connection", still
+            // broader than the evidence: production config requires an HTTPS
+            // frontend URL, but the application enforces neither TLS nor HSTS
+            // itself, so that is a deployment property this screen cannot
+            // promise. A third attempt restated "Profile Submitted /
+            // Verification pending" -- already the card immediately above.
+            //
+            // Three tries produced nothing this screen actually knows. Two
+            // honest cards beat three where one is filler.
             { icon: "🚀", title: "Waiting to Launch", sub: "Awaiting Approval", iconRight: null },
           ].map((card, i) => (
             <div key={i} style={{ background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: T.r.lg, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>

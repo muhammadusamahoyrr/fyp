@@ -27,6 +27,17 @@ class AppointmentRepository(BaseRepository):
             "status": AppointmentStatus.COMPLETED.value,
         }))
 
+    async def find_completed_between(self, client_id: str, lawyer_id: str) -> list[dict]:
+        """This client's completed appointments with this lawyer, newest first.
+
+        Unpaged by design: see `appointment_service.list_consultations_for_hire`.
+        """
+        return await self.find_many(
+            {"client_id": client_id, "lawyer_id": lawyer_id,
+             "status": AppointmentStatus.COMPLETED.value},
+            sort=[("scheduled_at", DESCENDING)],
+        )
+
     async def find_for_client(
         self,
         client_id: str,

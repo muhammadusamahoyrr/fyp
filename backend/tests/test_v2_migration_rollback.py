@@ -268,10 +268,14 @@ async def test_a_change_landing_between_the_read_and_the_write_is_caught(
             fired.append(entry["document_id"])
             # Somebody submits the document while rollback is deciding.
             import pymongo
-            pymongo.MongoClient(
-                "mongodb://localhost:27017")[settings.db_name]["documents"] \
-                .update_one({"_id": doc_id},
-                            {"$set": {"review_status": "submitted"}})
+            # Use the same throwaway instance selected by the `mongo` fixture.
+            # A fixed port silently writes elsewhere when AAI_TEST_MONGO_URL
+            # points the test suite at an isolated MongoDB.
+            with pymongo.MongoClient(settings.mongodb_url) as sync_client:
+                sync_client[settings.db_name]["documents"].update_one(
+                    {"_id": doc_id},
+                    {"$set": {"review_status": "submitted"}},
+                )
         return real_filter(entry)
 
     monkeypatch.setattr(mig, "_rollback_filter", _change_then_filter)

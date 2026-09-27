@@ -94,7 +94,7 @@ async def payable(app_indexes):
 
     fee = await ps.create_fee_request(
         lawyer_id, {"case_id": case_id, "amount": 50_000,
-                    "purpose": "professional_fee"})
+                    "purpose": "professional_fee", "engagement_id": eng_id})
     pid = fee.get("id") or fee["_id"]
 
     # Checkout has been started: a `provider_ref` exists and the status has

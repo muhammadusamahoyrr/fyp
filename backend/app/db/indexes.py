@@ -13,6 +13,7 @@ from app.db.appointment_index_spec import (
     APPOINTMENT_INDEX_REQUIREMENTS,
 )
 from app.db.collections import (
+    get_agreement_downloads_col,
     get_agreements_col,
     get_auth_sessions_col,
     get_answer_provenance_col,
@@ -673,6 +674,34 @@ async def _agreements_indexes() -> None:
         IndexModel([("status", ASCENDING)]),
         IndexModel([("parties.user_id", ASCENDING)]),
         IndexModel([("created_at", DESCENDING)]),
+        # The DRAFT side of `AgreementRepository.visible_to`, and the D7 cap,
+        # which counts a lawyer's live drafts on every create. Both filter on
+        # created_by AND status; without this they scan the collection, and
+        # the cap runs on a path a lawyer hits repeatedly.
+        IndexModel([("created_by", ASCENDING), ("status", ASCENDING)]),
+        # Paging is newest-first within a party's visible set.
+        IndexModel([("parties.user_id", ASCENDING), ("created_at", DESCENDING)]),
+        # Step 4: an invited signer is found ONLY by the hash of their token,
+        # on a path that runs before any authentication. Without this, every
+        # invitation view and signature is a collection scan on the endpoint
+        # most worth making cheap to abuse.
+        #
+        # PARTIAL, on the hash being a string: the overwhelming majority of
+        # parties are registered users with no `invite` at all, and they have
+        # no business in this index.
+        IndexModel([("parties.invite.token_hash", ASCENDING)],
+                   name="agreement_invitation_token",
+                   partialFilterExpression={
+                       "parties.invite.token_hash": {"$type": "string"}}),
+    ])
+
+    # One row per executed-agreement PDF served (Gate 3E). Queried two ways:
+    # "who downloaded this agreement" and "what has this user downloaded",
+    # which is why both leading keys exist rather than one compound index.
+    await get_agreement_downloads_col().create_indexes([
+        IndexModel([("agreement_id", ASCENDING)]),
+        IndexModel([("user_id", ASCENDING)]),
+        IndexModel([("downloaded_at", DESCENDING)]),
     ])
 
 
@@ -816,6 +845,25 @@ async def _engagements_indexes() -> None:
     await _try_unique_partial(
         col, [("case_id", ASCENDING)],
         "uniq_pending_engagement", ENGAGEMENT_OPEN_STATUSES,
+    )
+    # ONE HIRE ATTEMPT PER COMPLETED CONSULTATION
+    # (AGREEMENTS_PRODUCT_PLAN.md §17 NR-42, decided in R5-13).
+    #
+    # NOT SCOPED BY STATUS, deliberately. The consultation is consumed by the
+    # attempt, not by the attempt succeeding: an engagement that ends
+    # `declined` or `cancelled` still used it, and the client books again
+    # rather than re-using it. Scoping this to open or retained statuses would
+    # hand the consultation back on every refusal.
+    #
+    # `$type: "string"` is what keeps LEGACY rows out of it. A partial filter
+    # on `{"$exists": True}` would still match a row whose `appointment_id` is
+    # explicitly null, and every engagement written before §17 R5-1 has no such
+    # field at all -- so nulls and missing fields are both outside the index
+    # and any number of them may coexist.
+    await _try_unique_partial(
+        col, [("appointment_id", ASCENDING)],
+        "uniq_engagement_appointment",
+        filter_expression={"appointment_id": {"$type": "string"}},
     )
 
 

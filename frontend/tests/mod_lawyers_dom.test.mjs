@@ -738,3 +738,145 @@ test("a lawyer with no location at all cannot generate directions", async () => 
     assert.ok(!/Get Directions/.test(ui.text()));
     await ui.unmount();
 });
+
+/* ── hiring follows a completed consultation (§17 R5-1) ──────────────────── */
+
+/* The server refuses a hire request that does not name a COMPLETED
+ * consultation with the same lawyer, and it is the server that says which
+ * consultations qualify (`listHireConsultations`, scoped to one lawyer). These
+ * pin the UI side: no consultation, no request; a failed read is not "none";
+ * one consultation is filled in; several are the CLIENT's choice. */
+
+function hireableCase(id, over = {}) {
+    return { _id: id, title: `Case ${id}`, case_number: `ATT-${id}`,
+             status: "open", lawyer_id: null, ...over };
+}
+
+function consult(id, over = {}) {
+    return { id, lawyer_id: "L1", client_id: "u1", case_id: null,
+             status: "completed", scheduled_at: "2026-09-01T10:00:00Z", ...over };
+}
+
+/* The hire form is a portal on document.body, outside `ui.container`. */
+async function clickText(ui, label) {
+    const btn = [...dom.window.document.querySelectorAll("button")]
+        .find(b => b.textContent.trim().startsWith(label));
+    assert.ok(btn, `no "${label}" button was rendered`);
+    await act(async () => {
+        btn.dispatchEvent(new dom.window.MouseEvent(
+            "click", { bubbles: true, cancelable: true }));
+    });
+    await ui.settle(30);
+}
+
+function pageText() { return dom.window.document.body.textContent; }
+
+/* The select under a hire-form label ("Consultation *" or "Case *"). */
+function fieldSelect(labelText) {
+    const label = [...dom.window.document.querySelectorAll("label")]
+        .find(l => l.textContent.trim() === labelText);
+    return label ? label.parentElement.querySelector("select") : null;
+}
+
+async function choose(ui, select, value) {
+    await act(async () => {
+        setNativeValue(select, value);
+        select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await ui.settle(30);
+}
+
+async function openHireFor(consults) {
+    // A test that failed before `unmount` leaves its portal behind; start clean
+    // so one failure cannot masquerade as several.
+    for (const el of [...dom.window.document.body.children]) el.remove();
+    api.__respond("searchLawyers", { data: { items: [lawyer("L1")] } });
+    api.__respond("listCases",
+        { data: { items: [hireableCase("C1"), hireableCase("C2")] } });
+    api.__respond("listHireConsultations", consults);
+    api.__respond("requestEngagement", { data: { id: "E1" } });
+    const ui = await mountLawyers();
+    await ui.settle();
+    await openProfile(ui);
+    await clickText(ui, "Request to Hire");
+    return ui;
+}
+
+test("the server is asked for this lawyer's consultations, not a diary page",
+     async () => {
+    const ui = await openHireFor({ data: [consult("A1")] });
+    const calls = api.__calls("listHireConsultations");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args[0], "L1");
+    await ui.unmount();
+});
+
+test("without a completed consultation, no hire request can be made",
+     async () => {
+    const ui = await openHireFor({ data: [] });
+    assert.ok(!/Send Hire Request/.test(pageText()), "the hire form opened");
+    assert.match(pageText(), /Book a consultation with/);
+    assert.equal(api.__calls("requestEngagement").length, 0);
+    await ui.unmount();
+});
+
+test("a failed read is not reported as having no consultation", async () => {
+    const ui = await openHireFor(
+        { data: null, error: { message: "Network down" }, status: 0 });
+    assert.ok(!/Book a consultation with/.test(pageText()),
+              "a read failure was presented as a fact about the client");
+    assert.ok(!/Send Hire Request/.test(pageText()));
+    assert.equal(api.__calls("requestEngagement").length, 0);
+    await ui.unmount();
+});
+
+test("a single consultation is filled in and named by the request", async () => {
+    const ui = await openHireFor({ data: [consult("A1")] });
+    assert.equal(fieldSelect("Consultation *"), null,
+                 "one consultation should be stated, not offered as a choice");
+    await clickText(ui, "Send Hire Request");
+
+    const calls = api.__calls("requestEngagement");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args[0].appointment_id, "A1");
+    assert.equal(calls[0].args[0].lawyer_id, "L1");
+    await ui.unmount();
+});
+
+test("with several consultations none is chosen for the client", async () => {
+    const ui = await openHireFor({ data: [
+        consult("A-new", { scheduled_at: "2026-09-10T10:00:00Z" }),
+        consult("A-old", { scheduled_at: "2026-08-01T10:00:00Z" }),
+    ] });
+    const picker = fieldSelect("Consultation *");
+    assert.ok(picker, "several consultations were not offered as a choice");
+    assert.equal(picker.value, "", "a consultation was pre-selected");
+
+    await clickText(ui, "Send Hire Request");
+    assert.equal(api.__calls("requestEngagement").length, 0,
+                 "a request was sent before the client chose");
+    await ui.unmount();
+});
+
+test("the consultation the client chooses is the one the request names",
+     async () => {
+    const ui = await openHireFor({ data: [
+        consult("A-new", { scheduled_at: "2026-09-10T10:00:00Z" }),
+        consult("A-old", { scheduled_at: "2026-08-01T10:00:00Z" }),
+    ] });
+    await choose(ui, fieldSelect("Consultation *"), "A-old");
+    await clickText(ui, "Send Hire Request");
+
+    const calls = api.__calls("requestEngagement");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args[0].appointment_id, "A-old");
+    await ui.unmount();
+});
+
+test("a case-bound consultation offers only its own case", async () => {
+    const ui = await openHireFor({ data: [consult("A1", { case_id: "C2" })] });
+    const options = [...fieldSelect("Case *").querySelectorAll("option")]
+        .map(o => o.value);
+    assert.deepEqual(options, ["C2"]);
+    await ui.unmount();
+});

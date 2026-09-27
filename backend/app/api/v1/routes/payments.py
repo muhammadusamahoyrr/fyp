@@ -31,7 +31,9 @@ class FeeRequestBody(BaseModel):
     purpose: str = "professional_fee"      # peshi_fee | professional_fee
     note: str | None = None
     hearing_id: str | None = None
-    engagement_id: str | None = None
+    # REQUIRED: the Hire this fee is billed under (§17 R5-5). The service
+    # validates it against the case, the lawyer and the client.
+    engagement_id: str = Field(min_length=1)
 
 
 @router.post("/fee-request", response_model=PaymentOut)

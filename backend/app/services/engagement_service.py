@@ -6,6 +6,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.core.constants import (
     ENGAGEMENT_OPEN_STATUSES,
+    AgreementStatus,
     CaseStatus,
     EngagementStatus,
     NotificationType,
@@ -15,7 +16,6 @@ from app.core.exceptions import (
     ConflictError,
     ForbiddenError,
     NotFoundError,
-    ServiceUnavailableError,
 )
 from app.repositories.case_repo import CaseRepository
 from app.repositories.engagement_repo import EngagementRepository
@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 engagement_repo = EngagementRepository()
 case_repo = CaseRepository()
 user_repo = UserRepository()
+
+# The machine-readable cause written onto a letter cancelled because its
+# engagement ended. One cancellation model across the module -- plan
+# §3.G1.10 -- kept apart from `cancellation_reason`, which holds human prose.
+CANCELLATION_SOURCE_ENGAGEMENT_TERMINATED = "engagement_terminated"
 
 _FEE_TYPE_LABELS = {
     "fixed": "fixed fee",
@@ -77,7 +82,18 @@ def _fee_str(fee_amount, fee_type) -> str:
 
 async def request_engagement(client_id: str, data: dict) -> dict:
     """Client asks a lawyer to take their case. Consent-first: nothing is
-    assigned until the lawyer accepts."""
+    assigned until the lawyer accepts.
+
+    A NEW hire follows a completed consultation with the same lawyer
+    (AGREEMENTS_PRODUCT_PLAN.md §17 R5-1), so `appointment_id` is required and
+    checked FIRST: client owns it, it is with this lawyer, it is completed.
+    The appointment is the entry path only -- the engagement written below is
+    still the Hire record, and nothing here claims the case.
+    """
+    from app.services import appointment_service
+    appointment = await appointment_service.completed_consultation_for_hire(
+        data.get("appointment_id"), client_id, data["lawyer_id"])
+
     case = await case_repo.find_by_id(data["case_id"])
     if not case:
         raise NotFoundError("Case")
@@ -91,6 +107,15 @@ async def request_engagement(client_id: str, data: dict) -> dict:
     # would put a real person's time against a case that does not exist yet.
     from app.services.case_service import assert_not_draft
     assert_not_draft(case, "be sent to a lawyer")
+
+    # A consultation booked FOR a case hires for that case (§17 NR-40). One
+    # booked without a case may lead to any case of the client's, which the
+    # ownership check above has already established.
+    appt_case_id = appointment.get("case_id")
+    if appt_case_id and appt_case_id != case["_id"]:
+        raise AppValidationError(
+            "That consultation was booked for a different case. Ask the lawyer "
+            "to take the case you consulted them about.")
 
     pending = await engagement_repo.find_pending_for_case(case["_id"])
     if pending:
@@ -107,6 +132,9 @@ async def request_engagement(client_id: str, data: dict) -> dict:
         "case_id":        case["_id"],
         "client_id":      client_id,
         "lawyer_id":      lawyer["_id"],
+        # The consultation this hire followed. A reference, never the Hire:
+        # legacy engagements predate it and carry no such field.
+        "appointment_id": appointment["_id"],
         "status":         EngagementStatus.REQUESTED.value,
         "message":        data.get("message"),
         "fee_amount":     None,
@@ -119,12 +147,26 @@ async def request_engagement(client_id: str, data: dict) -> dict:
     }
     try:
         await engagement_repo.insert(doc)
-    except DuplicateKeyError:
+    except DuplicateKeyError as exc:
+        # WHICH guard rejected this, read from `keyPattern` -- a structural
+        # field -- rather than from the driver's message, which carries the
+        # duplicated values themselves. Same approach as
+        # `appointment_service._duplicate_constraint`.
+        pattern = tuple((getattr(exc, "details", None) or {}).get("keyPattern") or {})
+        if pattern == ("appointment_id",):
+            # `uniq_engagement_appointment` (§17 NR-42 / R5-13): this
+            # consultation has already been used for a hire request. The
+            # database is what decides it, so two simultaneous requests cannot
+            # both win.
+            raise ConflictError(
+                "You have already asked a lawyer to take a case after this "
+                "consultation. Book another consultation to make a new request."
+            ) from exc
         # Lost the race: a concurrent request already opened a pending engagement.
         raise ConflictError(
             "You already have a pending request for this case. "
             "Cancel it before requesting another lawyer."
-        )
+        ) from exc
 
     # Case enters "waiting for lawyer" state while the request is open
     await case_repo.update_one(
@@ -255,8 +297,8 @@ async def accept_terms(engagement_id: str, client_id: str) -> dict:
     """Client agrees to the proposed terms. THIS is what claims the case.
 
     Everything that used to happen the moment a lawyer accepted happens here
-    instead, on the client's action: the atomic claim, the move to in_progress,
-    the timeline entry and the engagement letter.
+    instead, on the client's action: the atomic claim, the move to in_progress
+    and the timeline entry. No engagement letter is generated (§17 R5-3).
     """
     eng = await engagement_repo.find_by_id(engagement_id)
     if not eng:
@@ -276,6 +318,17 @@ async def accept_terms(engagement_id: str, client_id: str) -> dict:
 
     now = datetime.now(timezone.utc)
     lawyer_id = eng["lawyer_id"]
+
+    # KYC, AGAIN (AGREEMENTS_PRODUCT_PLAN.md §17 R5-2). `request_engagement`
+    # verified the lawyer when the client asked; terms and acceptance can come
+    # much later, and the lawyer must still be an active, verified lawyer at the
+    # moment they take the case. The same rule as the request, not a second one.
+    #
+    # HERE, BEFORE EITHER CLAIM, and nowhere later. A refusal at this point has
+    # written nothing, so there is nothing to undo. Between the two claims below
+    # it would leave an engagement `accepted` with no case behind it, which is
+    # the partial acceptance the ordering exists to prevent.
+    await _get_verified_lawyer(lawyer_id)
 
     # TWO atomic steps, in this order, and the order is the whole correctness
     # argument.
@@ -331,70 +384,15 @@ async def accept_terms(engagement_id: str, client_id: str) -> dict:
     fee_type = eng.get("fee_type")
     scope_note = eng.get("scope_note")
 
-    # The engagement letter is the consent artifact, so it is generated BEFORE
-    # the engagement is called accepted, and a failure here undoes the claim.
+    # NO ENGAGEMENT LETTER (AGREEMENTS_PRODUCT_PLAN.md §17 R5-3, R3-1).
     #
-    # This used to be `except Exception: pass` — the engagement stood even when
-    # no letter was ever written, which `payment_service` had to defend against
-    # separately because a missing letter and an unsigned one both mean nobody
-    # agreed to the price. Now that the letter records terms the client has just
-    # accepted, proceeding without one would leave that agreement unrecorded.
-    try:
-        from app.services import agreement_service
-        letter = _engagement_letter_text(
-            client_name=(client or {}).get("full_name", "Client"),
-            lawyer_name=lawyer_name,
-            case_title=(case or {}).get("title", ""),
-            case_number=(case or {}).get("case_number", ""),
-            case_type=(case or {}).get("case_type", ""),
-            fee_amount=fee_amount,
-            fee_type=fee_type,
-            scope_note=scope_note,
-        )
-        agreement = await agreement_service.create_agreement(
-            title=f"Engagement Letter — {(case or {}).get('title', 'Case')} ({(case or {}).get('case_number', '')})",
-            body_html=letter,
-            parties=[{"user_id": lawyer_id}, {"user_id": client_id}],
-            creator_id=lawyer_id,
-            case_id=eng["case_id"],
-            engagement_id=engagement_id,
-        )
-        agreement_id = agreement["_id"]
-    except Exception:
-        # Undo BOTH atomic steps, in reverse. A half-formed engagement holding a
-        # claimed case is worse than a failed request the client can retry, and
-        # an engagement left saying `accepted` with no letter behind it is the
-        # exact state the billing gate had to be written to defend against.
-        await case_repo.update_one(
-            {"_id": eng["case_id"], "lawyer_id": lawyer_id},
-            {"$set": {
-                "lawyer_id": None,
-                "status": CaseStatus.PENDING_LAWYER.value,
-                "updated_at": datetime.now(timezone.utc),
-            }},
-        )
-        await engagement_repo.claim_transition(
-            engagement_id,
-            EngagementStatus.ACCEPTED.value,
-            EngagementStatus.TERMS_PROPOSED.value,
-            {"accepted_at": None},
-        )
-        logger.exception(
-            "Engagement letter generation failed for engagement %s; "
-            "acceptance rolled back and the case released",
-            engagement_id,
-        )
-        raise ServiceUnavailableError(
-            "Your acceptance could not be recorded because the engagement letter "
-            "could not be generated. Nothing has been agreed — please try again."
-        )
-
-    # The status is already `accepted` — it was the first atomic step. Only the
-    # letter it now has needs recording.
-    await engagement_repo.update_one(
-        {"_id": engagement_id},
-        {"$set": {"agreement_id": agreement_id, "updated_at": now}},
-    )
+    # Acceptance used to generate one here and roll both claims back when it
+    # could not. The engagement is now the Hire record in its own right: the
+    # client's acceptance of the proposed terms is what is recorded, billing is
+    # governed by the validated engagement (payment_service), and reviews by the
+    # retained engagement itself. So there is no agreement written, no
+    # `agreement_id` stored, and no letter failure that can undo an acceptance.
+    # Letters created before this remain as legacy records.
 
     # Taking on a case changes what this lawyer's profile MEANS.
     # `build_profile_text` folds in their five most recent cases — the
@@ -427,10 +425,8 @@ async def accept_terms(engagement_id: str, client_id: str) -> dict:
         "Your terms were accepted",
         f"{(client or {}).get('full_name', 'The client')} accepted your terms for "
         f"\"{(case or {}).get('title', 'the case')}\"."
-        + _fee_str(fee_amount, fee_type)
-        + " The engagement letter is ready for signature on the Agreements page.",
-        {"engagement_id": engagement_id, "case_id": eng["case_id"],
-         "agreement_id": agreement_id},
+        + _fee_str(fee_amount, fee_type),
+        {"engagement_id": engagement_id, "case_id": eng["case_id"]},
     )
 
     return await _public_engagement(engagement_id)
@@ -468,58 +464,6 @@ async def decline_terms(engagement_id: str, client_id: str, reason: str | None) 
     )
 
     return await _public_engagement(engagement_id)
-
-def _engagement_letter_text(
-    client_name: str,
-    lawyer_name: str,
-    case_title: str,
-    case_number: str,
-    case_type: str,
-    fee_amount,
-    fee_type,
-    scope_note: str | None,
-) -> str:
-    """Plain-text engagement letter body — rendered pre-wrap in both dashboards."""
-    today = datetime.now(timezone.utc).strftime("%d %B %Y")
-    fee_line = (
-        f"PKR {fee_amount:,.0f} ({_FEE_TYPE_LABELS.get(fee_type or '', 'as agreed')})"
-        if fee_amount else "As mutually agreed between the parties"
-    )
-    scope = scope_note or (
-        "Legal representation and advice in the matter described above, including "
-        "preparation and filing of documents, court appearances, and case management."
-    )
-    return f"""ENGAGEMENT LETTER
-
-Date: {today}
-
-This Engagement Letter records the terms on which the Advocate agrees to represent the Client in the matter below.
-
-PARTIES
-Client:   {client_name}
-Advocate: {lawyer_name}
-
-MATTER
-Case:        {case_title}
-Case Number: {case_number}
-Case Type:   {case_type.title() if case_type else "—"}
-
-SCOPE OF ENGAGEMENT
-{scope}
-
-PROFESSIONAL FEE
-{fee_line}
-
-Court fees, filing charges, and other out-of-pocket expenses are payable by the Client in addition to the professional fee, unless agreed otherwise in writing.
-
-TERMS
-1. The Advocate shall act in the Client's best interest with professional diligence and keep the Client informed of material developments, including hearing outcomes.
-2. The Client shall provide truthful, complete information and documents relevant to the matter.
-3. Either party may end the engagement by written notice; fees for work already performed remain payable.
-4. Confidential information shared for this engagement shall not be disclosed except as required by law.
-
-This letter is executed electronically by both parties under the Electronic Transactions Ordinance 2002. Each party's electronic signature below has the same effect as a handwritten signature."""
-
 
 async def decline_engagement(engagement_id: str, lawyer_id: str, reason: str | None) -> dict:
     eng = await engagement_repo.find_by_id(engagement_id)
@@ -779,46 +723,223 @@ async def terminate_engagement(engagement_id: str, user_id: str, reason: str) ->
             "shown to the other party."
         )
 
-    now = datetime.now(timezone.utc)
     reason = reason.strip()
-    await engagement_repo.set_status(
-        engagement_id,
-        EngagementStatus.TERMINATED.value,
-        {
+    client_name, lawyer_name = await _party_names(eng)
+    ender = lawyer_name if party == "lawyer" else client_name
+
+    # ONE TRANSACTION. Before gate 3A this was four independent writes -- status,
+    # case release, milestone, notify -- so a crash between them left an
+    # engagement `terminated` with its case still assigned, and a client still
+    # holding a lawyer who believed they had withdrawn. That is the Gate 2
+    # defect's mirror, in the code Gate 2 did not touch.
+    async def _txn(session):
+        return await _terminate_in_transaction(
+            session, engagement_id=engagement_id, expected=eng, party=party,
+            reason=reason, ender=ender,
+        )
+
+    from app.services.agreement_service import (
+        _run_in_transaction,
+        _TransitionConflict,
+    )
+    try:
+        await _run_in_transaction(_txn)
+    except _TransitionConflict as conflict:
+        raise AppValidationError(conflict.message) from conflict
+
+    # Post-commit only: prompt delivery. The relay in main.py is the guarantee.
+    try:
+        from app.services import event_outbox
+        await event_outbox.drain_once()
+    except Exception:
+        pass
+
+    return await _public_engagement(engagement_id)
+
+
+async def _terminate_in_transaction(session, *, engagement_id: str, expected: dict,
+                                    party: str, reason: str, ender: str) -> None:
+    """Terminate, release, cancel the pending letter, notify -- atomically.
+
+    TERMINATION IS A SAFETY EXIT AND MUST NOT BE BLOCKED BY THE AGREEMENT SIDE.
+    This inverts the rule Gate 2 applies to declining, deliberately: declining
+    is an action ABOUT a letter, so a broken letter link aborts it; terminating
+    is an action about the ENGAGEMENT, and a client who wants out of a
+    representation cannot be held there because a letter row is missing,
+    superseded or corrupt. A broken link records an anomaly and the termination
+    completes.
+    """
+    from app.db.collections import (
+        get_agreements_col,
+        get_cases_col,
+        get_engagements_col,
+    )
+    from app.services import event_outbox
+
+    now = datetime.now(timezone.utc)
+    case_id = expected["case_id"]
+    lawyer_id = expected["lawyer_id"]
+
+    # 1. The engagement, conditional on the state the preflight saw. A second
+    #    terminate, or a concurrent completion, matches nothing and loses.
+    moved = await get_engagements_col().update_one(
+        {"_id": engagement_id, "status": EngagementStatus.ACCEPTED.value},
+        {"$set": {
+            "status":             EngagementStatus.TERMINATED.value,
             "terminated_at":      now,
             "terminated_by":      party,
             "termination_reason": reason,
+            "responded_at":       now,
+            "updated_at":         now,
+        }},
+        session=session,
+    )
+    if moved.modified_count == 0:
+        from app.services.agreement_service import _TransitionConflict
+        raise _TransitionConflict(
+            "This engagement is no longer active, so it cannot be terminated. "
+            "Reload it to see its current state."
+        )
+
+    # 2. The case. Read the disposition under this session rather than inferring
+    #    it from a zero match, which cannot tell "somebody else holds it" from
+    #    "nobody does" -- the distinction Gate 2 learned to make.
+    case = await get_cases_col().find_one({"_id": case_id}, session=session)
+    if case is None:
+        disposition = "missing"
+    elif case.get("lawyer_id") == lawyer_id:
+        disposition = "released"
+    elif case.get("lawyer_id") is None:
+        disposition = "already_unassigned"
+    else:
+        disposition = "reassigned"
+
+    if disposition == "released":
+        await get_cases_col().update_one(
+            {"_id": case_id, "lawyer_id": lawyer_id},
+            {"$set": {"lawyer_id": None,
+                      "status": CaseStatus.OPEN.value,
+                      "updated_at": now}},
+            session=session,
+        )
+        # The milestone belongs to the RELEASE. A case now run by another
+        # lawyer must not gain an entry about an engagement that is not its own.
+        await get_cases_col().update_one(
+            {"_id": case_id},
+            {"$push": {"milestones": {
+                "title": f"Engagement ended by the {party}",
+                "description": reason,
+                "date": now,
+                "completed": True,
+                "completed_at": now,
+            }}},
+            session=session,
+        )
+
+    # 3. The pending letter. Cancelled only when the link is sound AND it is
+    #    still pending -- an EXECUTED letter matches nothing and survives
+    #    untouched, because a properly formed instrument is not unmade by the
+    #    relationship later ending.
+    anomaly = await _cancel_pending_letter(
+        session, expected=expected, engagement_id=engagement_id,
+        party=party, reason=reason, now=now,
+    )
+    if anomaly:
+        # Discoverable rather than silent. The termination still stands.
+        await get_engagements_col().update_one(
+            {"_id": engagement_id},
+            {"$set": {"letter_anomaly": anomaly, "letter_anomaly_at": now}},
+            session=session,
+        )
+        logger.error(
+            "engagement %s terminated with a broken letter link (%s); "
+            "termination completed and the anomaly recorded",
+            engagement_id, anomaly,
+        )
+
+    # 4. The notification, parked INSIDE this transaction. The direct `_notify`
+    #    call that used to live here is REPLACED, not supplemented -- keeping
+    #    both would double-send.
+    recipient = _other_party_id(expected, party)
+    title = _quoted((case or {}).get("title", "the case"))
+    body = (
+        f"{ender} ended the engagement for {title}. Reason: {reason}"
+        + (" Your case is open again and you can engage another lawyer."
+           if disposition == "released" and party == "lawyer" else "")
+    )
+    logical_id = f"engagement:{engagement_id}:terminated:{recipient}"
+    await event_outbox.park_in_transaction(
+        session, logical_id, "notifications",
+        {
+            "logical_event_id": logical_id,
+            "recipient_id": recipient,
+            "ntype": NotificationType.ENGAGEMENT_TERMINATED.value,
+            "title": "Engagement ended",
+            "body": body,
+            "data": {"engagement_id": engagement_id, "case_id": case_id},
         },
     )
 
-    # Release the case. Scoped to this lawyer so a concurrent reassignment
-    # cannot be undone by a late termination of a superseded engagement.
-    await case_repo.update_one(
-        {"_id": eng["case_id"], "lawyer_id": eng["lawyer_id"]},
-        {"$set": {
-            "lawyer_id":  None,
-            "status":     CaseStatus.OPEN.value,
-            "updated_at": now,
-        }},
-    )
 
-    client_name, lawyer_name = await _party_names(eng)
-    case = await case_repo.find_by_id(eng["case_id"])
-    await case_repo.add_milestone(eng["case_id"], {
-        "title": f"Engagement ended by the {party}",
-        "description": reason,
-        "date": now,
-        "completed": True,
-        "completed_at": now,
-    })
-    await _notify(
-        _other_party_id(eng, party),
-        NotificationType.ENGAGEMENT_TERMINATED,
-        "Engagement ended",
-        f"{lawyer_name if party == 'lawyer' else client_name} ended the engagement for "
-        f"{_quoted((case or {}).get('title', 'the case'))}. Reason: {reason}"
-        + ("" if party == "client" else
-           " Your case is open again and you can engage another lawyer."),
-        {"engagement_id": engagement_id, "case_id": eng["case_id"]},
+async def _cancel_pending_letter(session, *, expected: dict, engagement_id: str,
+                                 party: str, reason: str, now) -> str | None:
+    """Cancel this engagement's still-pending letter. Returns an anomaly, or None.
+
+    Anomalies are REPORTED, never raised: see `_terminate_in_transaction`. The
+    return values are `letter_missing` and `letter_superseded` -- a present
+    but broken legacy link. No letter at all is not an anomaly (§17 R5-3);
+    an executed or already-cancelled letter is NOT an anomaly, merely nothing
+    to do.
+    """
+    from app.db.collections import get_agreements_col
+    from app.services.agreement_service import body_digest
+
+    agreement_id = expected.get("agreement_id")
+    if not agreement_id:
+        # No letter to cancel. Every engagement accepted since §17 R5-3 is in
+        # this state BY DESIGN -- acceptance no longer generates a letter -- so
+        # it is not an anomaly and nothing is recorded. Only a legacy link
+        # that is present but broken (below) is worth a human's attention.
+        return None
+
+    letter = await get_agreements_col().find_one(
+        {"_id": agreement_id}, session=session)
+    if letter is None:
+        return "letter_missing"
+    if letter.get("engagement_id") != engagement_id:
+        # Points at a different engagement: superseded. Cancelling it would end
+        # a letter belonging to somebody else's relationship.
+        return "letter_superseded"
+
+    digest = letter.get("body_sha256") or body_digest(letter.get("body_html", ""))
+
+    # Conditional on `pending`. An executed letter does not match and is left
+    # exactly as it is; an already-cancelled one does not match either, so no
+    # second audit entry is appended.
+    await get_agreements_col().update_one(
+        {"_id": agreement_id, "status": AgreementStatus.PENDING.value},
+        {
+            "$set": {
+                "status": AgreementStatus.CANCELLED.value,
+                # The one cancellation model -- plan §3.G1.10.
+                "cancellation_source": CANCELLATION_SOURCE_ENGAGEMENT_TERMINATED,
+                "cancellation_reason": reason,
+                "cancelled_at": now,
+                "cancelled_by": expected["client_id"] if party == "client"
+                else expected["lawyer_id"],
+                "updated_at": now,
+            },
+            "$push": {"audit_log": {
+                "action": "cancelled",
+                "actor_id": expected["client_id"] if party == "client"
+                else expected["lawyer_id"],
+                "timestamp": now,
+                "ip_address": None,
+                "reason": reason,
+                "note": "engagement terminated",
+                "body_sha256": digest,
+            }},
+        },
+        session=session,
     )
-    return await _public_engagement(engagement_id)
+    return None

@@ -25,14 +25,22 @@ test performs.
 """
 import asyncio
 import secrets
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from app.core.constants import (
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from support.hire_fixtures import seed_completed_appointment  # noqa: E402
+
+from app.core.constants import (  # noqa: E402
     AppointmentMode, AppointmentStatus, CaseStatus, EngagementStatus,
 )
-from app.core.exceptions import AppValidationError, ConflictError, ForbiddenError
+from app.core.exceptions import (  # noqa: E402
+    AppValidationError, ConflictError, ForbiddenError,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -285,13 +293,20 @@ async def _a_case(parties) -> str:
     return case["_id"]
 
 
+async def _hire(parties, case_id) -> dict:
+    """A request payload backed by a completed consultation (§17 R5-1)."""
+    appt_id = await seed_completed_appointment(
+        parties["client_id"], parties["lawyer_id"])
+    return {"case_id": case_id, "lawyer_id": parties["lawyer_id"],
+            "appointment_id": appt_id}
+
+
 async def test_an_engagement_can_be_requested(parties):
     from app.services import engagement_service
 
     case_id = await _a_case(parties)
     eng = await engagement_service.request_engagement(
-        parties["client_id"], {"case_id": case_id,
-                               "lawyer_id": parties["lawyer_id"]})
+        parties["client_id"], await _hire(parties, case_id))
 
     assert eng["status"] == EngagementStatus.REQUESTED.value
     assert eng["case_id"] == case_id
@@ -302,7 +317,7 @@ async def test_a_second_request_for_the_same_case_is_refused(parties):
     from app.services import engagement_service
 
     case_id = await _a_case(parties)
-    payload = {"case_id": case_id, "lawyer_id": parties["lawyer_id"]}
+    payload = await _hire(parties, case_id)
     await engagement_service.request_engagement(parties["client_id"], payload)
 
     with pytest.raises(ConflictError, match="pending request"):
@@ -318,7 +333,7 @@ async def test_an_engagement_race_is_refused_by_the_unique_index(
     from app.services import engagement_service
 
     case_id = await _a_case(parties)
-    payload = {"case_id": case_id, "lawyer_id": parties["lawyer_id"]}
+    payload = await _hire(parties, case_id)
     await engagement_service.request_engagement(parties["client_id"], payload)
 
     async def _none_pending(self, _case_id):
@@ -338,7 +353,7 @@ async def test_concurrent_requests_leave_exactly_one_open(parties, monkeypatch):
     from app.services import engagement_service
 
     case_id = await _a_case(parties)
-    payload = {"case_id": case_id, "lawyer_id": parties["lawyer_id"]}
+    payload = await _hire(parties, case_id)
 
     async def _none_pending(self, _case_id):
         return None
@@ -363,22 +378,27 @@ async def test_concurrent_requests_leave_exactly_one_open(parties, monkeypatch):
 
 
 async def test_a_cancelled_request_allows_another(parties, monkeypatch):
-    """The guard is PARTIAL — scoped to `requested`. Cancelling must let the
-    client approach a different lawyer."""
+    """The CASE guard is PARTIAL — scoped to `requested`. Cancelling must let
+    the client approach a lawyer again.
+
+    The retry needs a FRESH consultation: since §17 R5-13 the first attempt
+    consumed the first one, cancelled or not (that rule has its own tests in
+    test_hire_consultation_uniqueness.py). What this test still proves is that
+    `uniq_pending_engagement` releases the case.
+    """
     from app.db.collections import get_engagements_col
     from app.services import engagement_service
 
     case_id = await _a_case(parties)
-    payload = {"case_id": case_id, "lawyer_id": parties["lawyer_id"]}
     first = await engagement_service.request_engagement(
-        parties["client_id"], payload)
+        parties["client_id"], await _hire(parties, case_id))
 
     await get_engagements_col().update_one(
         {"_id": first["id"]},
         {"$set": {"status": EngagementStatus.CANCELLED.value}})
 
     again = await engagement_service.request_engagement(
-        parties["client_id"], payload)
+        parties["client_id"], await _hire(parties, case_id))
     assert again["status"] == EngagementStatus.REQUESTED.value
 
 
@@ -395,8 +415,7 @@ async def test_requesting_on_someone_elses_case_is_refused(parties):
 
     with pytest.raises(ForbiddenError):
         await engagement_service.request_engagement(
-            parties["client_id"],
-            {"case_id": other, "lawyer_id": parties["lawyer_id"]})
+            parties["client_id"], await _hire(parties, other))
 
 
 async def test_requesting_on_an_assigned_case_is_refused(parties):
@@ -409,8 +428,7 @@ async def test_requesting_on_an_assigned_case_is_refused(parties):
 
     with pytest.raises(ConflictError, match="already has a lawyer"):
         await engagement_service.request_engagement(
-            parties["client_id"],
-            {"case_id": case_id, "lawyer_id": parties["lawyer_id"]})
+            parties["client_id"], await _hire(parties, case_id))
 
 
 # ── mark_no_show ─────────────────────────────────────────────────────────────
