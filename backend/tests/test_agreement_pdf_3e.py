@@ -115,7 +115,8 @@ async def _executed(body: str = "Fees are 40% of recovery.") -> dict:
     d = await _sent(body)
     await agreement_service.submit_signature(
         agreement_id=d["_id"], user_id=CLIENT, method="typed",
-        signature_data=CLIENT_SIGNATURE, ip_address="198.51.100.7",
+        signature_data=CLIENT_SIGNATURE, consent=True,
+        ip_address="198.51.100.7",
         ip_verifiable=True)
     return d
 
@@ -340,7 +341,7 @@ async def test_a_signature_containing_markup_does_not_break_the_document(world):
     d = await _sent()
     await agreement_service.submit_signature(
         agreement_id=d["_id"], user_id=CLIENT, method="typed",
-        signature_data='A & B <Ltd>', ip_address=None)
+        signature_data='A & B <Ltd>', consent=True, ip_address=None)
 
     pdf, _ = await agreement_service.executed_pdf(d["_id"], CLIENT)
     assert "A & B <Ltd>" in pdf_text(pdf)

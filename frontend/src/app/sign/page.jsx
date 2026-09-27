@@ -4,15 +4,14 @@
  *
  * It lives OUTSIDE `(client)`/`(lawyer)` on purpose: those groups are wrapped in
  * ProtectedRoute, and the whole point of an invitation is that the person
- * holding it has nowhere to log in to. The token in the query string is the
- * entire authority to sign one slot, so it is read once, kept in memory, and
+ * holding it has nowhere to log in to. The token in the URL fragment is the
+ * entire authority to sign one slot, so it is read once, scrubbed, kept in memory, and
  * sent in the request BODY — never appended to another URL, never stored.
  *
  * What this page must not do is imply the signer's identity was checked. We can
  * show a link was created for an address; we cannot show who opened it, and the
  * copy here says so in both the header and the consent line. */
-import React, { Suspense, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import React, { useEffect, useRef, useState } from 'react';
 import { DARK } from '@/components/shared/themes.js';
 import { viewAgreementByInvitation, signAgreementByInvitation } from '@/lib/api.js';
 import SignaturePad from '@/components/shared/SignaturePad.jsx';
@@ -64,10 +63,10 @@ const Notice = ({ tone = 'warn', children }) => (
 );
 
 function InvitationSigner() {
-  const params = useSearchParams();
   // Held in a ref, not state: it should never end up in a render key, a log
-  // line or a dependency array that someone later serialises.
-  const tokenRef = useRef(params.get('token') || '');
+  // line or a dependency array that someone later serialises. The fragment is
+  // not sent to the frontend server, and is scrubbed before the first request.
+  const tokenRef = useRef('');
 
   const [state, setState] = useState({ loading: true, error: '', doc: null });
   // {method, data} from SignaturePad. This page offered a typed name only,
@@ -79,6 +78,12 @@ function InvitationSigner() {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    tokenRef.current = fragment.get('token') || '';
+    if (window.location.hash) {
+      window.history.replaceState(
+        null, '', `${window.location.pathname}${window.location.search}`);
+    }
     if (!tokenRef.current) {
       setState({ loading: false, error: 'This link is missing its signing token. Ask the sender for a new one.', doc: null });
       return;
@@ -240,10 +245,5 @@ function InvitationSigner() {
 }
 
 export default function SignPage() {
-  // useSearchParams needs a Suspense boundary for the static export.
-  return (
-    <Suspense fallback={<Shell><Card><div style={{ color: t.textMuted, fontSize: 13.5 }}>Loading…</div></Card></Shell>}>
-      <InvitationSigner />
-    </Suspense>
-  );
+  return <InvitationSigner />;
 }

@@ -2010,6 +2010,7 @@ async def sign_by_invitation(*, token: str, method: str, signature_data: str,
     agreement, party = await _party_for_token(token)
     agreement_id = agreement["_id"]
     party_id = party["party_id"]
+    expected_token_hash = (party.get("invite") or {}).get("token_hash")
 
     if agreement.get("status") != AgreementStatus.PENDING.value:
         raise AppValidationError(
@@ -2030,8 +2031,12 @@ async def sign_by_invitation(*, token: str, method: str, signature_data: str,
         claimed = await col.update_one(
             {"_id": agreement_id,
              "status": AgreementStatus.PENDING.value,
+             "expires_at": {"$gt": now},
              "parties": {"$elemMatch": {"party_id": party_id,
-                                        "signed": {"$ne": True}}}},
+                                        "signed": {"$ne": True},
+                                        "invite.token_hash": expected_token_hash,
+                                        "invite.revoked_at": None,
+                                        "invite.expires_at": {"$gt": now}}}},
             {"$set": {
                 "parties.$.signed": True,
                 "parties.$.signed_at": now,
@@ -2160,9 +2165,10 @@ async def reissue_invitation(*, agreement_id: str, party_id: str,
     if not agreement:
         raise NotFoundError("Agreement")
 
-    # Same authorisation as revoking: this is an act on somebody else's ability
-    # to sign, so it belongs to the people already on the document.
-    if actor_id not in {p.get("user_id") for p in agreement.get("parties", [])}             and agreement.get("created_by") != actor_id:
+    # A reissue RETURNS fresh bearer authority for this external slot. Giving
+    # that token to any other registered party would let them sign as the
+    # invited person, so only the sender who created the invitation may do it.
+    if agreement.get("created_by") != actor_id:
         raise ForbiddenError("Access denied to this agreement")
 
     if agreement.get("status") != AgreementStatus.PENDING.value:
@@ -2243,9 +2249,14 @@ async def submit_signature(
     user_id: str,
     method: str,
     signature_data: str,
+    consent: bool,
     ip_address: str | None,
     ip_verifiable: bool = False,
 ) -> dict:
+    if not consent:
+        raise AppValidationError(
+            "Signing requires explicit consent to sign electronically.")
+
     agreement = await agreement_repo.find_by_id(agreement_id)
     if not agreement:
         raise NotFoundError("Agreement")
@@ -2320,6 +2331,7 @@ async def submit_signature(
                     signature_data, agreement_id=agreement_id,
                     party_ref=user_id),
                 "parties.$.eto_classification": eto,
+                "parties.$.consent_at": now,
                 "updated_at": now,
             }},
             session=session,
@@ -2353,6 +2365,7 @@ async def submit_signature(
                     # D8, as in `sign_and_send_draft`.
                     "ip_address": ip_address if ip_verifiable else None,
                     "note": eto,
+                    "consent": True,
                     # WHAT was signed, not merely that it was.
                     "body_sha256": digest,
                 }},

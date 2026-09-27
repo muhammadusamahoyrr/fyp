@@ -223,6 +223,7 @@ async def sign_agreement(
         user_id=current_user["_id"],
         method=body.method.value,
         signature_data=body.signature_data,
+        consent=body.consent,
         ip_address=client_ip(request),
         ip_verifiable=ip_is_verifiable(request),
     )

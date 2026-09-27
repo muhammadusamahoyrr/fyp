@@ -246,7 +246,8 @@ async def test_all_three_signatures_execute_the_agreement(world):
         token=token, method="typed", signature_data="A Guest", consent=True)
     await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id=CLIENT, method="typed",
-        signature_data="The Client", ip_address=None, ip_verifiable=False)
+        signature_data="The Client", consent=True, ip_address=None,
+        ip_verifiable=False)
 
     row = await _row(doc["_id"])
 
@@ -261,7 +262,8 @@ async def test_it_does_not_execute_until_every_party_has_signed(world):
     doc, _pid, _token = await _sent_with_guest()
     await agreement_service.submit_signature(
         agreement_id=doc["_id"], user_id=CLIENT, method="typed",
-        signature_data="The Client", ip_address=None, ip_verifiable=False)
+        signature_data="The Client", consent=True, ip_address=None,
+        ip_verifiable=False)
 
     row = await _row(doc["_id"])
 
@@ -293,6 +295,45 @@ async def test_signing_twice_with_one_token_is_refused(world):
     with pytest.raises(AppValidationError):
         await agreement_service.sign_by_invitation(
             token=token, method="typed", signature_data="Again", consent=True)
+
+
+@pytest.mark.parametrize("race", ["revoked", "reissued", "expired"])
+async def test_token_state_is_rechecked_inside_the_signing_transaction(
+        world, monkeypatch, race):
+    """A token that dies after preflight must not win the stale-read race."""
+    from app.core.exceptions import AppValidationError
+    from app.db.collections import get_agreements_col
+    from app.services import agreement_service
+
+    doc, party_id, token = await _sent_with_guest()
+    original_runner = agreement_service._run_in_transaction
+
+    async def race_before_transaction(operation):
+        if race == "revoked":
+            field, value = "parties.$.invite.revoked_at", datetime.now(timezone.utc)
+        elif race == "reissued":
+            field, value = "parties.$.invite.token_hash", inv.token_hash(inv.new_token())
+        else:
+            field, value = (
+                "parties.$.invite.expires_at",
+                datetime.now(timezone.utc) - timedelta(seconds=1),
+            )
+        await get_agreements_col().update_one(
+            {"_id": doc["_id"], "parties.party_id": party_id},
+            {"$set": {field: value}},
+        )
+        return await original_runner(operation)
+
+    monkeypatch.setattr(
+        agreement_service, "_run_in_transaction", race_before_transaction)
+
+    with pytest.raises(AppValidationError):
+        await agreement_service.sign_by_invitation(
+            token=token, method="typed", signature_data="A Guest", consent=True)
+
+    row = await _row(doc["_id"])
+    guest = next(p for p in row["parties"] if p.get("party_id") == party_id)
+    assert guest["signed"] is False
 
 
 async def test_an_expired_invitation_is_refused(world):

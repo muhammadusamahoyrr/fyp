@@ -90,9 +90,12 @@ class AgreementCreateAndSend(AgreementCreate):
 
 
 class SignatureSubmit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     method: SignatureMethod
     # base64 image or typed name string
     signature_data: str = Field(..., min_length=1, max_length=_MAX_SIGNATURE)
+    consent: bool
 
 
 class AgreementDecline(BaseModel):

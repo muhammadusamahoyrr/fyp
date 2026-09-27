@@ -91,7 +91,7 @@ async def test_a_real_invitation_email_is_delivered(world):
 
     print(f"\n  recipient : {recipient}")
     print(f"  delivered : {delivery['emailed']}  reason={delivery['reason']}")
-    print(f"  link      : {settings.frontend_url}/sign?token={token}")
+    print(f"  link      : {settings.frontend_url}/sign#token={token}")
 
     assert delivery["emailed"] is True, (
         f"the invitation was not emailed: {delivery['reason']}")
