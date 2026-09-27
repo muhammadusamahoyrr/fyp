@@ -231,13 +231,14 @@ async def test_a_registered_counterparty_cannot_reissue_or_receive_a_token(
 
     doc = await _sent(world)
     (party_id, _old), = doc["invitation_tokens_do_not_store"].items()
+    before = len(sent_mail)
 
     with pytest.raises(ForbiddenError):
         await agreement_service.reissue_invitation(
             agreement_id=doc["_id"], party_id=party_id,
             actor_id=world["client"])
 
-    assert len(sent_mail) == 1, "a refused reissue sent a second invitation"
+    assert len(sent_mail) == before, "a refused reissue sent another invitation"
 
 
 async def test_it_refuses_once_that_person_has_signed(world, sent_mail):
