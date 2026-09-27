@@ -12,18 +12,29 @@ jobs:
       run:
         working-directory: backend
 
+    env:
+      # TEST-ONLY values. Settings REQUIRES both, and their absence failed test
+      # collection before a single test ran -- every run since at least
+      # 2026-09-05 died in the unit step and the integration step never ran.
+      # These keys protect nothing: they exist only in this CI job and encrypt
+      # only throwaway test data. Never reuse them anywhere else.
+      SECRET_KEY: ci-test-only-not-a-secret-0f3c9a1e7b2d4c6a8e0f1a3b5c7d9e1f
+      ENCRYPTION_KEY: ByF5j6V-gNj5ET4SS3nINM8oB1YFSOywjB1kallqieE=  # test-only Fernet key
+      # The agreement transaction tests need a replica set (see the Mongo step).
+      AAI_TEST_MONGO_URL: mongodb://localhost:27017/?replicaSet=rs0&directConnection=true
+      # The pytest plugin that records what the transaction tests did.
+      PYTHONPATH: ${{ github.workspace }}/.github/ci
+
     services:
-      # Integration tests (checkpointer, document ACL) need a real Mongo. Without
-      # it they self-skip, which would quietly hide the security tests — so CI
-      # provides one rather than letting them disappear.
-      mongo:
-        image: mongo:7
-        ports: ["27017:27017"]
+      # Appointment integration tests need a CONFIGURED lock backend.
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
         options: >-
-          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
 
     steps:
       - uses: actions/checkout@v4
@@ -56,14 +67,103 @@ jobs:
         # rather than a missing dependency and cost a round trip to diagnose.
         run: python -m pytest --version
 
-      - name: Unit + E2E tests (no external services)
-        # The bulk of the suite: offline, deterministic, no DB, no LLM.
-        run: python -m pytest -m "not integration and not llm"
+      - name: Install the OCR engine (tesseract)
+        # The OCR service checks for a `tesseract` binary with English support
+        # before using any OCR result; the runner image has none, so OCR tests
+        # stop at "engine unavailable". `tesseract-ocr` includes English.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+          tesseract --version | head -1
+          tesseract --list-langs | grep -x eng
 
-      - name: Integration tests (MongoDB)
+      - name: Start MongoDB as a single-node replica set
+        # NOT a service container: services cannot pass `--replSet`, and on a
+        # standalone the agreement transaction tests self-skip. Tests start only
+        # after this step has proved the node is a WRITABLE PRIMARY.
+        working-directory: .
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:7 --replSet rs0 --bind_ip_all
+          for i in $(seq 1 60); do
+            docker exec mongo mongosh --quiet --eval "db.adminCommand('ping').ok" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec mongo mongosh --quiet --eval \
+            "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]})"
+          for i in $(seq 1 60); do
+            [ "$(docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary')" = "true" ] && break
+            sleep 2
+          done
+          docker exec mongo mongosh --quiet --eval \
+            "const h = db.hello(); printjson({setName: h.setName, isWritablePrimary: h.isWritablePrimary}); if (!h.isWritablePrimary) quit(1)"
+
+      - name: Verify Redis is reachable
+        run: |
+          python -c "import redis; assert redis.Redis.from_url('redis://localhost:6379/0').ping(); print('redis: PONG')"
+
+      - name: Report corpus tests excluded from CI
+        # The `corpus` tests read the real knowledge corpus (ChromaDB), which is
+        # not in git, so CI cannot run them. They are excluded BY MARKER, and
+        # this step says so on every run rather than letting the suite look
+        # complete. Coverage for them is DEFERRED, not fixed.
+        run: |
+          summary=$(python -m pytest -o addopts="" --collect-only -q -m corpus | tail -1)
+          echo "::warning title=Corpus tests NOT run in CI::${summary} -- they need the non-versioned knowledge corpus; coverage deferred."
+          {
+            echo "### Corpus-dependent tests NOT run in CI"
+            echo ""
+            echo "\`${summary}\` -- these read the real ChromaDB corpus, which is not in git."
+            echo "Excluded by the \`corpus\` marker (backend/pytest.ini). Coverage is **deferred**, not fixed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Unit + E2E tests (no external services)
+        # The bulk of the suite: offline, deterministic, no LLM. Excludes ONLY
+        # the explicitly marked corpus tests.
+        env:
+          TXN_GUARD_REPORT: ${{ runner.temp }}/txn-unit.json
+        run: python -m pytest -m "not integration and not llm and not corpus" -p txn_guard
+
+      - name: Integration tests (MongoDB replica set + Redis)
         env:
           # Names must match app/core/config.py Settings fields (pydantic-settings
           # reads them case-insensitively): mongodb_url and db_name.
           MONGODB_URL: mongodb://localhost:27017
           DB_NAME: attorney_ai_test
-        run: python -m pytest -m integration
+          REDIS_URL: redis://localhost:6379/0
+          TXN_GUARD_REPORT: ${{ runner.temp }}/txn-integration.json
+        run: python -m pytest -m "integration and not corpus" -p txn_guard
+
+      - name: Agreement transaction tests must have run
+        # Fails on ANY replica-set skip, or on zero executed transaction tests
+        # while the `mongo_transactional` fixture exists. See .github/ci/.
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: |
+          python .github/ci/check_txn_guard.py \
+            "${{ runner.temp }}/txn-unit.json" \
+            "${{ runner.temp }}/txn-integration.json"
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install (exactly the committed lockfile)
+        run: npm ci
+
+      - name: Tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build

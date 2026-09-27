@@ -65,8 +65,24 @@ def _contain(path: Path) -> Path:
     return resolved
 
 
+# Neither separator, on ANY platform. `\` is a path separator on Windows and an
+# ordinary filename character on POSIX, so the same id would be contained on one
+# host and resolve differently on another. Keys are portable across hosts that
+# share the volume, so the store holds one rule everywhere: an id is a single
+# path component. Server-minted ids (token_urlsafe, uuid5) never contain either.
+_SEPARATORS = ("/", "\\")
+
+
+def _require_portable_id(revision_id: str) -> None:
+    """Refuse a revision id containing a path separator, before any FS work."""
+    if any(sep in str(revision_id) for sep in _SEPARATORS):
+        raise ArtifactStoreError(
+            f"revision id must be a single path component: {revision_id!r}")
+
+
 def render_id(revision_id: str, fence: int, worker_id: str) -> str:
     """A render target unique to (revision, fence, worker) — never shared."""
+    _require_portable_id(revision_id)
     return f"{revision_id}.{fence}.{worker_id}"
 
 
@@ -82,6 +98,7 @@ def final_key(revision_id: str, fence: int) -> str:
     revision row: portable across hosts sharing the volume, and meaningful if a
     future object-store backend swaps in.
     """
+    _require_portable_id(revision_id)
     return f"docs/{revision_id}.{fence}.pdf"
 
 
@@ -118,6 +135,7 @@ def publish(revision_id: str, fence: int, worker_id: str) -> str:
     differing existing final is a violation and raises. The FS never inspects
     the fence — it is only a filename component.
     """
+    _require_portable_id(revision_id)   # before ensure_dirs(): no FS work first
     ensure_dirs()
     src = staging_path(revision_id, fence, worker_id)
     key = final_key(revision_id, fence)
@@ -153,6 +171,7 @@ def _staging_for_final(revision_id: str, fence: int) -> Path:
     Same volume because `os.replace` is only atomic within a filesystem; tmp/
     lives under the store root for exactly that reason.
     """
+    _require_portable_id(revision_id)
     ensure_dirs()
     name = f"{revision_id}.{fence}.{uuid.uuid4().hex}.staging.pdf"
     return _contain(_tmp_dir() / name)
@@ -181,6 +200,7 @@ def write_final(revision_id: str, fence: int, data: bytes) -> str:
     success (a retry, or a concurrent worker with the same source), and
     differing bytes raise.
     """
+    _require_portable_id(revision_id)   # before ensure_dirs(): no FS work first
     ensure_dirs()
     key = final_key(revision_id, fence)
     dst = _final_path(key)
