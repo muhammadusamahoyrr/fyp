@@ -217,8 +217,8 @@ async def _load_for_actor(appt_id: str, user_id: str, user_role: str) -> dict:
     # Only the log gets to know which of the two it was.
     exists = await appt_repo.find_by_id(appt_id) is not None
     logger.info(
-        "appointment_access_denied appointment_id=%s role=%s reason=%s",
-        appt_id, user_role, "not_a_party" if exists else "no_such_appointment")
+        "appointment_access_denied role=%s reason=%s",
+        user_role, "not_a_party" if exists else "no_such_appointment")
     raise ForbiddenError(_APPT_DENIED)
 
 
