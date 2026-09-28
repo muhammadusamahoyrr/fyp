@@ -920,3 +920,35 @@ test("standalone V2 drafting creates a caseless document without extraction", as
     assert.equal(api.__calls("generateRevisionV2")[0].args[0], "standalone-1");
     await p.unmount();
 });
+
+test("Regenerate appends to the same V2 document", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("extractDocumentFields", {
+        data: { fields: { sender_name: "Ayesha", demand: "500000" } },
+    });
+    api.__respond("createDocumentV2", { data: { id: "doc-1" } });
+    let version = 0;
+    api.__respond("generateRevisionV2", () => {
+        version += 1;
+        return { data: { revision_id: `rev-${version}`,
+                         pdf_sha256: String(version).repeat(64), version } };
+    });
+
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Select"));
+    await press(p, findButton(p.container, "Use Template"));
+    await press(p, findButton(p.container, "Generate Draft"));
+    await press(p, findButton(p.container, "generate →"));
+    await p.settle(350);
+
+    await press(p, findButton(p.container, "Regenerate"));
+    await press(p, findButton(p.container, "generate →"));
+    await p.settle(350);
+
+    assert.equal(api.__calls("createDocumentV2").length, 1,
+        "Regenerate created a second document identity");
+    assert.deepEqual(api.__calls("generateRevisionV2").map(c => c.args[0]),
+                     ["doc-1", "doc-1"]);
+    await p.unmount();
+});

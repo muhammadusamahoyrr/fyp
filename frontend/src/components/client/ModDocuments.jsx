@@ -144,6 +144,11 @@ const ModDocuments = () => {
     // server matches it against the document's own — so a draft that moved
     // in another tab is refused rather than submitted blind.
     const [docVersion, setDocVersion] = useState(null);
+    // A revision stays on one identity only while its case and instrument do.
+    // Changing either creates a new document rather than disguising a different
+    // legal instrument as version 2 of the old one.
+    const [documentTemplateType, setDocumentTemplateType] = useState(null);
+    const [documentIdentityTitle, setDocumentIdentityTitle] = useState(null);
 
     // ONE KEY PER LOGICAL ACTION, held across retries of THAT action.
     //
@@ -339,6 +344,16 @@ const ModDocuments = () => {
         return () => { live = false; };
     }, []);
 
+    // Restoring happens independently of the catalogue request. Once both have
+    // arrived, restore the actual backend template into the picker so a returned
+    // document can be revised after a refresh without choosing an instrument
+    // again (or accidentally choosing a different one).
+    useEffect(() => {
+        if (!documentTemplateType || !templates?.length) return;
+        const spec = templates.find(x => x.template_type === documentTemplateType);
+        if (spec) setSelectedType(spec);
+    }, [documentTemplateType, templates]);
+
     // If the linked case already has a lawyer, the document goes to them
     useEffect(() => {
         const c = cases.find(x => (x._id || x.id) === genCaseId);
@@ -391,6 +406,9 @@ const ModDocuments = () => {
         if (restored.docTitle) setDocTitle(restored.docTitle);
         setDocRevisionId(restored.docRevisionId);
         setDocPdfSha256(restored.docPdfSha256);
+        setDocVersion(restored.docVersion);
+        setDocumentTemplateType(restored.templateType);
+        setDocumentIdentityTitle(restored.docTitle || null);
         setCompliance(restored.compliance ?? null);
         setVerification(restored.verification ?? null);
         setGenDone(restored.genDone);
@@ -443,6 +461,8 @@ const ModDocuments = () => {
         setDocRevisionId(null);
         setDocPdfSha256(null);
         setDocVersion(null);
+        setDocumentTemplateType(null);
+        setDocumentIdentityTitle(null);
         setGenDone(false);
         setReviewSent(false);
         setReviewStatus(null);
@@ -689,23 +709,16 @@ const ModDocuments = () => {
         }
         // No fallback: an unmapped type is refused above, never coerced to a plaint.
         const backendType = templateKey;
-        setGenerating(true); setGenPct(10); setGenDone(false); setDocId(null);
-        // Clear the revision being previewed BEFORE rendering a new one.
-        //
-        // Without this the preview keeps asking for the old revision id while a
-        // new one is generated, and the moment the document id changes it would
-        // pair a new document with an old revision — a request that either
-        // 404s or, worse, renders bytes from the wrong draft under the new
-        // document's heading. A regeneration produces a NEW revision; nothing
-        // about the previous one survives it on screen.
-        setDocRevisionId(null); setDocPdfSha256(null); setDocVersion(null);
+        setGenerating(true); setGenPct(10); setGenDone(false);
+        // Keep the last successful revision visible and addressable until its
+        // replacement succeeds. Clearing the identity here made every
+        // "Regenerate" create a second document and reduced version history to
+        // a decorative one-row list.
         // A new extraction replaces the previous review outright. Keeping the
         // old rows would show the client fields read from a run they have
         // already abandoned.
         setReviewRows(null); setRawFields(null);
         setGenCaseId(caseId);
-        // A regenerated document restarts the review pipeline
-        setReviewSent(false); setReviewStatus(null); setLawyerNote(""); setUserApproved(false);
         // A NEW intent unless this is a retry of the one that just failed.
         // `retryKey` is passed only by the retry button, which reuses the key so
         // a render that already happened is replayed rather than repeated.
@@ -806,9 +819,11 @@ const ModDocuments = () => {
                 setDocRevisionId(null);
                 setDocPdfSha256(null);
                 if (genRes.data?.title) setDocTitle(genRes.data.title);
+                setDocumentIdentityTitle(genRes.data?.title || docTitle || null);
                 setCompliance(genRes.data?.compliance || null);
                 setVerification(genRes.data?.verification || null);
                 setFieldShape(null);   // the legacy path produces no shape report
+                setDocumentTemplateType(backendType);
             } else if (viaV2.error) {
                 setGenerating(false);
                 setDocIssue(viaV2.issue);
@@ -830,12 +845,18 @@ const ModDocuments = () => {
                 setDocRevisionId(viaV2.revisionId);
                 setDocPdfSha256(viaV2.pdfSha256);
                 setDocVersion(viaV2.version);
+                setDocumentTemplateType(backendType);
+                setDocumentIdentityTitle(viaV2.title);
                 setCompliance(viaV2.compliance || null);
                 setVerification(viaV2.verification || null);
                 setFieldShape(viaV2.fieldShape || null);
             }
 
             setGenPct(100);
+            // Only a successful replacement restarts review. If extraction or
+            // rendering fails, the returned/rejected state and lawyer note are
+            // still true and must remain visible.
+            setReviewSent(false); setReviewStatus(null); setLawyerNote(""); setUserApproved(false);
             // A new revision invalidates any submission intent formed against
             // the previous one — otherwise a retry of the old submit would send
             // a version the user is no longer looking at.
@@ -864,25 +885,36 @@ const ModDocuments = () => {
      * a second of either.
      */
     const _generateViaV2 = async ({ caseId, backendType, fields, key }) => {
-        const created = await createDocumentV2({
-            templateType: backendType,
-            title: docTitle || `${selectedType?.label || "Document"} draft`,
-            caseId,
-        }, key);
-        if (created.error) {
-            if (created.status === 404 && errorCode(created.error) === "feature_disabled") {
-                return { unavailable: true };
+        const requestedTitle = docTitle || `${selectedType?.label || "Document"} draft`;
+        const canAppend = Boolean(docId
+            && genCaseId === caseId
+            && documentTemplateType === backendType
+            && documentIdentityTitle === requestedTitle);
+        let documentId = canAppend ? docId : null;
+
+        if (!documentId) {
+            const created = await createDocumentV2({
+                templateType: backendType,
+                title: requestedTitle,
+                caseId,
+            }, key);
+            if (created.error) {
+                if (created.status === 404 && errorCode(created.error) === "feature_disabled") {
+                    return { unavailable: true };
+                }
+                return { error: true, issue: _v2Issue(created) };
             }
-            return { error: true, issue: _v2Issue(created) };
+            documentId = created.data.id;
         }
 
-        const documentId = created.data.id;
         const rev = await generateRevisionV2(
             documentId, { fields, templateType: backendType }, key);
         if (rev.error) return { error: true, issue: _v2Issue(rev) };
 
         return {
             documentId,
+            appended: canAppend,
+            title: requestedTitle,
             revisionId: rev.data.revision_id,
             pdfSha256: rev.data.pdf_sha256,
             version: rev.data.version,
@@ -1578,7 +1610,7 @@ const ModDocuments = () => {
                                 {!userApproved ? (
                                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                                         <BtnPrimary onClick={() => { setUserApproved(true); toast.show("Marked as approved by you. Send it to a lawyer for their review.", "success", 4000); }} style={{ width: "100%", fontSize: 12, padding: "10px", borderRadius: 10, justifyContent: "center" }}>✅ Approve Draft</BtnPrimary>
-                                        <BtnOutline onClick={() => { setEditMode(true); toast.show("✏️ Edit mode enabled", "info"); }} style={{ width: "100%", fontSize: 12, padding: "10px", borderRadius: 10 }}>✏️ Edit / Modify</BtnOutline>
+                                        <BtnOutline onClick={() => goTo(1)} style={{ width: "100%", fontSize: 12, padding: "10px", borderRadius: 10 }}>✏️ Change answers</BtnOutline>
                                     </div>
                                 ) : (
                                     <BtnPrimary onClick={() => goTo(3)} style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 10, justifyContent: "center", boxShadow: `0 4px 16px ${t.primaryGlow}` }}>

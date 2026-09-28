@@ -121,6 +121,7 @@ export function restoreStateFromDocument(detail) {
         // `null` rather than undefined for a caseless document, so a caller can
         // tell "no case" from "the field was not returned".
         caseId: detail.case_id ?? null,
+        templateType: detail.template_type || revision?.template_type || null,
         docTitle: detail.title || "",
         docRevisionId: revisionId,
         docPdfSha256: pdfSha256,

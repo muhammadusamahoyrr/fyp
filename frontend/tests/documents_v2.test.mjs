@@ -309,14 +309,17 @@ test("a new generation is a new intent", () => {
         "a stale submit intent survives a regeneration");
 });
 
-test("regenerating clears the revision being previewed", () => {
-    // Otherwise the preview pairs a new document id with an old revision id —
-    // a request that either 404s or renders the wrong draft under the new
-    // document's heading.
+test("regenerating keeps the identity and appends a revision", () => {
+    // The backend's revision history is real only if Regenerate calls generate
+    // on the existing identity. A changed case or instrument must still create
+    // a new identity.
     const fn = client.slice(client.indexOf("const handleGenerate"));
     const body = fn.slice(0, fn.indexOf("const _generateViaV2"));
-    assert.match(body,
-        /setDocRevisionId\(null\); setDocPdfSha256\(null\); setDocVersion\(null\)/);
+    assert.doesNotMatch(body, /setDocId\(null\)/);
+    assert.match(client, /const canAppend = Boolean\(docId/);
+    assert.match(client, /documentId = canAppend \? docId : null/);
+    assert.match(client, /documentTemplateType === backendType/);
+    assert.match(client, /documentIdentityTitle === requestedTitle/);
 });
 
 test("each V2 error class is handled and none is reported as success", () => {
