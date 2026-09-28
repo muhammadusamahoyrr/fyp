@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -102,10 +103,50 @@ INSTRUCTIONS:
 3. If all key facts for this situation are present, respond with exactly: DONE
 
 Your question MUST be specific to what THIS user described — reference details from their description.
-Ask in the same language the user used (English or Urdu). No explanations — just the question.
+{language_rule} No explanations — just the question.
 
 GOOD example: "You mentioned your landlord beat you — did you sustain injuries that required medical attention?"
 BAD example: "What is the nature and severity of harm?" (too generic, ignores what user said)"""
+
+# WHICH LANGUAGE THE QUESTIONS ARE IN IS DECIDED HERE, NOT BY THE MODEL.
+#
+# The prompt used to say "ask in the same language the user used" and leave it
+# at that. Every round re-decided from mixed evidence — English domain
+# templates, English earlier questions, Romanised Urdu descriptions, answers
+# like "222222" that carry no language — so one intake got its first question
+# in English and its second in Urdu, and another got all four in Urdu for an
+# English description.
+_LANGUAGE_RULES = {
+    "en": "Write the question in English only.",
+    "ur": "Write the question in Urdu only, in Urdu script (not Roman Urdu).",
+}
+_URDU_SCRIPT = re.compile(r"[؀-ۿ]")
+_LATIN = re.compile(r"[A-Za-z]")
+
+
+def _script_of(text: str) -> str | None:
+    """'ur' or 'en' by which script dominates; None when there are no letters."""
+    urdu, latin = len(_URDU_SCRIPT.findall(text or "")), len(_LATIN.findall(text or ""))
+    if not urdu and not latin:
+        return None
+    return "ur" if urdu > latin else "en"
+
+
+def _clarify_language(qa_list: list, description: str, requested: str | None) -> str:
+    """The one language every question of this intake is asked in.
+
+    Pinned by the FIRST question once one exists, so a later round cannot flip
+    it (the app language can be toggled mid-intake). Before that: Urdu when the
+    client wrote in Urdu script or runs the app in Urdu, otherwise English.
+    """
+    if qa_list:
+        pinned = _script_of(qa_list[0].get("q") or "")
+        if pinned:
+            return pinned
+    if _script_of(description) == "ur" or requested == "ur":
+        return "ur"
+    return "en"
+
 
 _FALLBACK_QUESTIONS = {
     "criminal": "Can you describe what happened, including the date and location of the incident?",
@@ -169,7 +210,9 @@ async def save_step(token: str, step: int, data: dict, client_id: str) -> dict:
 
 # ─── P2: Multi-round clarification ───────────────────────────────────────────
 
-async def get_clarification(token: str, client_id: str, answer: str | None) -> dict:
+async def get_clarification(
+    token: str, client_id: str, answer: str | None, language: str | None = None,
+) -> dict:
     """
     Multi-round AI clarification, up to _MAX_CLARIFY_ROUNDS (4).
     Call 1 (answer=None): get Q1 (most critical missing fact).
@@ -248,13 +291,29 @@ async def get_clarification(token: str, client_id: str, answer: str | None) -> d
         f"Domain key facts:\n{template}"
     )
 
+    lang   = _clarify_language(qa_list, desc, language)
+    system = _CLARIFY_SYSTEM.replace("{language_rule}", _LANGUAGE_RULES[lang])
+
     try:
         llm      = get_llm(purpose=PURPOSE_INTAKE_EXTRACTION)
-        response = await asyncio.to_thread(llm.invoke, [
-            {"role": "system", "content": _CLARIFY_SYSTEM},
-            {"role": "user",   "content": user_msg},
-        ])
+        messages = [{"role": "system", "content": system},
+                    {"role": "user",   "content": user_msg}]
+        response = await asyncio.to_thread(llm.invoke, messages)
         text = response.content.strip()
+        # The rule is an instruction, and a model can still drift. One retry
+        # with the rule restated; after that the question is used as it is,
+        # because no question at all costs the client more than a mixed one.
+        if not text.upper().startswith("DONE") and _script_of(text) not in (None, lang):
+            response = await asyncio.to_thread(llm.invoke, messages + [
+                {"role": "assistant", "content": text},
+                {"role": "user", "content": _LANGUAGE_RULES[lang]
+                 + " Rewrite the same question accordingly."},
+            ])
+            retry = response.content.strip()
+            if _script_of(retry) == lang:
+                text = retry
+            else:
+                logger.warning("intake clarification stayed off-language (%s)", lang)
     except Exception:
         # LLM failed — let user proceed rather than trapping them in a loop.
         #

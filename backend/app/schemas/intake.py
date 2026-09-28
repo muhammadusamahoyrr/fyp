@@ -223,6 +223,9 @@ class IntakeClarifyRequest(BaseModel):
     # document and an unbounded prompt. 5k matches step 5's notes — far above a
     # real answer to "was an FIR filed?".
     answer: str | None = Field(default=None, max_length=5_000)
+    # The app's display language. Optional: an older client sends none and the
+    # description's script decides. See intake_service._clarify_language.
+    language: Literal["en", "ur"] | None = None
 
 
 class IntakeClarifyResponse(BaseModel):

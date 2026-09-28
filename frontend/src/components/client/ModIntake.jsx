@@ -138,7 +138,7 @@ const ModIntake = () => {
     const t      = useT();
     const toast  = useToast();
     const router = useRouter();
-    const { T }  = useLang();
+    const { T, lang } = useLang();
     const isMobile = useIsMobile();
     const { completeIntake, addNotification } = useCase();
     const { user } = useAuth();
@@ -689,7 +689,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
     useEffect(() => {
         if (step !== 3 || clarifyDone || clarifyRound !== 0 || clarifyLoading || !intakeToken) return;
         setClarifyLoading(true);
-        intakeClarify(intakeToken, null).then(({ data, error }) => {
+        intakeClarify(intakeToken, null, lang).then(({ data, error }) => {
             if (error || !data) { setClarifyDone(true); setClarifyRound(5); }
             else if (data.done)  { setClarifyDone(true); setClarifyRound(5); }
             else if (data.question) { setClarifyQ1(data.question); setClarifyRound(1); }
@@ -755,7 +755,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
         if (intakeToken) {
             setClarifyLoading(true);
             setClarifyRound(0);
-            const { data, error } = await intakeClarify(intakeToken, null);
+            const { data, error } = await intakeClarify(intakeToken, null, lang);
             if (error || !data) {
                 // API failure — skip clarification so user can still proceed
                 setClarifyDone(true);
@@ -787,7 +787,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
         }
         if (!intakeToken) { setClarifyRound(5); setClarifyDone(true); return; }
         setClarifyLoading(true);
-        const { data, error } = await intakeClarify(intakeToken, getCurrentAnswer());
+        const { data, error } = await intakeClarify(intakeToken, getCurrentAnswer(), lang);
         if (error || !data || data.done || !data.question) {
             setClarifyDone(true);
             setClarifyRound(5);
@@ -830,7 +830,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
             // ran without the client's final answer — and nothing said so. They
             // had just typed it, so its absence is invisible to them.
             const { error: clarifyErr, status: clarifyStatus } =
-                await intakeClarify(intakeToken, lastAnswer);
+                await intakeClarify(intakeToken, lastAnswer, lang);
             alreadyConverting = clarifyStatus === 409;
             if (clarifyErr && !alreadyConverting) {
                 toast.show(

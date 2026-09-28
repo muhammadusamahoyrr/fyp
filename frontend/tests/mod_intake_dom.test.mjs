@@ -940,3 +940,20 @@ test("any other /clarify failure still stops before analysis", async () => {
         "analysis ran without the client's final answer");
     await unmount();
 });
+
+test("every clarify call carries the app language, so the server can pin it", async () => {
+    // The server used to leave the language to the model, which mixed English
+    // and Urdu questions within one intake. It now decides — from this value
+    // and the description — and needs the value on every call.
+    reset();
+    seedToken();
+    api.__respond("intakeGet", { data: answeredOnStep3() });
+    const { container, unmount } = await mountIntake();
+
+    await click(findButton(container, "Complete & Continue"));
+
+    const calls = api.__calls("intakeClarify");
+    assert.ok(calls.length >= 1);
+    for (const c of calls) assert.equal(c.args[2], "en", "a clarify call omitted the language");
+    await unmount();
+});

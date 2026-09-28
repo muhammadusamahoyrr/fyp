@@ -7,6 +7,7 @@ from app.ai.llm import get_llm
 from app.ai.provider_health import PURPOSE_FACT_GAP
 from app.ai.nodes._history import format_history
 from app.ai.nodes._resume import merge_user_reply
+from app.ai.nodes._language import question_language_instruction
 
 _MAX_CLARIFICATION_ATTEMPTS = 2
 _MIN_FACTS_FOR_SIMPLE_PATH  = 1
@@ -65,7 +66,7 @@ Your question MUST reference details the user already provided.
 GOOD: "You mentioned a property dispute in Lahore — is there a registered sale deed or only a verbal agreement?"
 BAD: "Is there a written contract?" (generic, ignores what user said)
 
-Ask in the same language the user used (English or Urdu). Do NOT add explanations or multiple questions."""
+{language_instruction} Do NOT add explanations or multiple questions."""
 
 
 async def fact_gap_node(state: AgentState) -> dict:
@@ -107,6 +108,7 @@ async def fact_gap_node(state: AgentState) -> dict:
     system = _SYSTEM_TEMPLATE.format(
         case_type=case_type,
         template_section=template_section,
+        language_instruction=question_language_instruction(state.get("language")),
     )
 
     history = format_history(state, max_turns=4)

@@ -357,10 +357,12 @@ export async function confirmIntakeOcrPage(
 }
 
 // answer = null on first call (get Q1); answer = string on second call (get Q2 or done)
-export async function intakeClarify(sessionToken, answer = null) {
+// `language` is the app's display language ('en' | 'ur'). The server pins the
+// questions to one language; without it the model chose per round and mixed.
+export async function intakeClarify(sessionToken, answer = null, language = null) {
   return apiFetch(`/intake/${sessionToken}/clarify`, {
     method: 'POST',
-    body: JSON.stringify({ answer }),
+    body: JSON.stringify(language ? { answer, language } : { answer }),
   });
 }
 
