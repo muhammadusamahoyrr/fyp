@@ -20,6 +20,17 @@ const API_TARGET = process.env.API_PROXY_TARGET || 'http://127.0.0.1:8000';
 const nextConfig = {
   outputFileTracingRoot: __dirname,
 
+  /* THE PROXY MUST OUTWAIT THE SLOWEST ROUTE IT FORWARDS.
+   *
+   * Next gives a rewrite 30s by default, then answers 500 with a plain-text
+   * body. Intake conversion (classification + full AI analysis) and document
+   * generation run longer than that: the backend finished and saved the work
+   * while the browser was told it had crashed. 180s covers them with room.
+   */
+  experimental: {
+    proxyTimeout: 180_000,
+  },
+
   /* A PRODUCTION BUILD MUST NOT SHARE `.next` WITH A RUNNING DEV SERVER.
    *
    * Both write there. Running `next build` while `next dev` is up replaces the
