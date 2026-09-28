@@ -874,3 +874,49 @@ test("a scalar template without an extractor opens an honest manual form", async
     assert.match(p.text(), /Accused name/);
     await p.unmount();
 });
+
+test("standalone V2 drafting creates a caseless document without extraction", async () => {
+    api.__respond("listCases", { data: [] });
+    api.__respond("getCases", { data: [] });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "bail_application", label: "Bail Application",
+                 category: "Criminal", description: "Application for bail.",
+                 fields: ["accused_name"], structured_fields: [],
+                 drafting_mode: "manual" }],
+    });
+    api.__respond("createDocumentV2", { data: { id: "standalone-1" } });
+    api.__respond("generateRevisionV2", {
+        data: { revision_id: "standalone-rev-1", pdf_sha256: "a".repeat(64), version: 1 },
+    });
+
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Select — enter details"));
+    await press(p, findButton(p.container, "Use Template"));
+
+    const casePicker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "__no_case__"));
+    assert.ok(casePicker, "standalone choice is missing");
+    await act(async () => {
+        casePicker.value = "__no_case__";
+        casePicker.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate Draft"));
+
+    const accusedLabel = [...p.container.querySelectorAll("label")]
+        .find(label => label.textContent.includes("Accused name"));
+    const accused = accusedLabel?.querySelector("input");
+    assert.ok(accused, "manual field was not rendered");
+    await act(async () => {
+        Object.getOwnPropertyDescriptor(
+            dom.window.HTMLInputElement.prototype, "value").set.call(accused, "Ali Khan");
+        accused.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate with my corrections"));
+
+    assert.equal(api.__calls("extractDocumentFields").length, 0);
+    assert.equal(api.__calls("createDocumentV2")[0].args[0].caseId, null);
+    assert.equal(api.__calls("generateRevisionV2")[0].args[0], "standalone-1");
+    await p.unmount();
+});

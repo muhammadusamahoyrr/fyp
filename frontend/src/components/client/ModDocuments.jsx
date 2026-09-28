@@ -375,16 +375,11 @@ const ModDocuments = () => {
      * disagree — opening a case-B document moved the internal case to B while
      * the selector stayed on A, and generation read the selector.
      *
-     * STANDALONE CREATION IS NOT SUPPORTED ON THIS SCREEN, and that is a
-     * deliberate choice rather than an omission. Every path here is
-     * case-driven: extraction reads the case description, and with
-     * DOCUMENTS_V2 off the legacy generator requires a case id too. Offering
-     * the option would be a control nobody could complete. Standalone
-     * documents created elsewhere are still opened and restored — see the
-     * no-case bucket in `documentResume`.
+     * A standalone V2 document uses manual field entry because there is no case
+     * description to extract. The legacy fallback reports that limitation.
      */
     const selection = caseSelection({
-        selectedCaseId, cases, casesReady, allowStandaloneCreation: false,
+        selectedCaseId, cases, casesReady, allowStandaloneCreation: true,
     });
     const resumeCaseId = selection.activeCaseId;
 
@@ -689,7 +684,7 @@ const ModDocuments = () => {
         // selector, so extraction pulled case A's facts into a document
         // belonging to case B.
         const caseId = resumeCaseId;
-        if (!caseId) {
+        if (!caseId && !selection.isStandalone) {
             toast.show("⚠️ No case found — complete your legal intake first", "warn"); return;
         }
         // No fallback: an unmapped type is refused above, never coerced to a plaint.
@@ -768,7 +763,7 @@ const ModDocuments = () => {
     const confirmFieldsAndGenerate = async (retryKey = null) => {
         const caseId = genCaseId ?? resumeCaseId;
         const backendType = selectedType?.template_type;
-        if (!caseId || !backendType) return;
+        if ((!caseId && !selection.isStandalone) || !backendType) return;
 
         const fields = toSubmittedFields(reviewRows || []);
         if (!Object.keys(fields).length) {
@@ -791,6 +786,14 @@ const ModDocuments = () => {
                 // carries no revision id or hash, so the preview falls back to
                 // "the current file" and the lawyer-side staleness guard has
                 // nothing to check. That is the pre-V2 behaviour, unchanged.
+                if (!caseId) {
+                    setGenerating(false);
+                    setDocIssue({
+                        message: "Standalone drafting requires Documents V2. Link a case or enable V2 before generating this document.",
+                        retryable: false,
+                    });
+                    return;
+                }
                 const genRes = await generateDocument(caseId, backendType, fields);
                 setGenPct(90);
                 if (genRes.error) {
@@ -1174,25 +1177,18 @@ const ModDocuments = () => {
                                         </>
                                     )}
                                 </div>
-                                {cases.length > 0 && (
-                                    <div>
-                                        <Lbl>Linked Case</Lbl>
-                                        <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5, fontFamily: "'Inter',sans-serif" }}>
-                                            {/* NO standalone option. Documents
-                                                drafted here are always linked to
-                                                a case; offering "no case" would
-                                                be a control that cannot complete,
-                                                because extraction reads the case
-                                                and the legacy generator requires
-                                                a case id. Standalone documents
-                                                made elsewhere are still opened
-                                                and restored. */}
-                                            <option value="">Select a case…</option>
-                                            {cases.map(c => <option key={c._id || c.id} value={c._id || c.id}>{c.title || c.case_type || (c._id || c.id)}</option>)}
-                                        </select>
-                                    </div>
-                                )}
                                 <div><Lbl>Document Title</Lbl><ThemedInput value={docTitle} onChange={e => setDocTitle(e.target.value)} placeholder={selectedType ? `${selectedType.label} draft` : "Choose a document type"} /></div>
+                                <div>
+                                    <Lbl>Linked Case</Lbl>
+                                    <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5, fontFamily: "'Inter',sans-serif" }}>
+                                        <option value="">Select a case…</option>
+                                        <option value={NO_CASE}>Standalone — no linked case</option>
+                                        {cases.map(c => <option key={c._id || c.id} value={c._id || c.id}>{c.title || c.case_type || (c._id || c.id)}</option>)}
+                                    </select>
+                                    {selection.isStandalone && (
+                                        <div style={{ fontSize: 10.5, color: t.textMuted, marginTop: 5 }}>No case facts will be read automatically; you will enter the document details yourself.</div>
+                                    )}
+                                </div>
                                 <div><Lbl>Case Reference No.</Lbl><ThemedInput value={caseRef} onChange={e => setCaseRef(e.target.value)} placeholder="e.g. CASE-2026-00142" /></div>
                                 <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                                     <div><Lbl>Jurisdiction</Lbl>
@@ -1429,8 +1425,8 @@ const ModDocuments = () => {
                                 <BtnPrimary onClick={() => handleGenerate()} disabled={generating || !canGenerate} style={{ width: "100%", marginTop: 13, fontSize: 13, padding: "13px", borderRadius: 12, justifyContent: "center" }}>
                                     {generating
                                         ? "⏳ Generating…"
-                                        : !activeCaseId
-                                            ? "Link a case to generate"
+                                        : !selection.canGenerate
+                                            ? "Choose a case or standalone drafting"
                                             : unsupportedType
                                                 ? `${selectedType?.label} isn't supported yet`
                                                 : "✨ Generate Draft"}
