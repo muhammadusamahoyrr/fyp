@@ -276,9 +276,9 @@ test("one key per logical action, held across retries", () => {
     // state, so a re-render between failure and retry cannot lose them.
     assert.match(client, /const generateKeyRef = useRef\(null\)/);
     assert.match(client, /const submitKeyRef = useRef\(null\)/);
-    assert.match(client, /generateKeyRef\.current = retryKey \|\| idempotencyKey\(\)/);
+    assert.match(client, /generateKeyRef\.current = asKey\(retryKey\) \|\| idempotencyKey\(\)/);
     assert.match(client,
-        /submitKeyRef\.current = retryKey \|\| submitKeyRef\.current \|\| idempotencyKey\(\)/);
+        /submitKeyRef\.current = asKey\(retryKey\) \|\| submitKeyRef\.current \|\| idempotencyKey\(\)/);
 });
 
 test("an automatic retry never mints a new key", () => {
@@ -425,7 +425,7 @@ test("withdrawal carries its own idempotency key", () => {
     // replay of the submission it undoes, and return the submission receipt —
     // a success response for the opposite of what was asked.
     const body = clientFn("withdrawFromReview");
-    assert.match(body, /withdrawKeyRef\.current = retryKey \|\| withdrawKeyRef\.current \|\| idempotencyKey\(\)/);
+    assert.match(body, /withdrawKeyRef\.current = asKey\(retryKey\) \|\| withdrawKeyRef\.current \|\| idempotencyKey\(\)/);
     assert.match(body, /withdrawDocumentV2\(docId, withdrawKeyRef\.current\)/);
     assert.ok(!/submitKeyRef\.current\)/.test(body.split("if (error)")[0]),
         "the withdrawal is sent under the submit key");
@@ -1036,4 +1036,15 @@ test("the lawyer is not told to reload when reloading cannot help", () => {
     // rather than with a regex that has to model the line break.
     assert.ok(body.includes("Ask the client to start a new document"));
     assert.ok(body.includes("will not change this"));
+});
+
+test("no V2 path ends in a slash the dev proxy would redirect away", () => {
+    // Next.js 308s `/api/v1/documents/v2/` to the slashless URL before
+    // proxying; the backend then matched only a legacy GET and answered 405.
+    // Every V2 create from the browser failed while direct API calls passed.
+    // A literal continued with `+` is only the first half of its URL.
+    const paths = [...api.matchAll(/apiFetch\(\s*[`'"](\/documents\/v2[^`'"?]*)[`'"?](?!\s*\+)/g)]
+        .map(m => m[1]);
+    assert.ok(paths.includes("/documents/v2"), "create no longer posts to the collection");
+    for (const p of paths) assert.ok(!p.endsWith("/"), `${p} ends in a slash`);
 });

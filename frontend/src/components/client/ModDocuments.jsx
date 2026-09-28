@@ -78,6 +78,14 @@ const GEN_STEPS_LABELS = ["Extracting case data…", "Applying AI recommendation
  * category this file did not anticipate would otherwise vanish from the picker,
  * which is the same class of bug as the hardcoded template lists this replaced.
  */
+/* A retry key, or null. The handlers below take an optional key, and a button
+ * wired as `onClick={handler}` hands them the click EVENT instead. That object
+ * became the Idempotency-Key — sent as "[object Object]", which the server
+ * refuses (422: no spaces) — so Generate and Submit failed on every click. */
+function asKey(retryKey) {
+    return typeof retryKey === "string" && retryKey ? retryKey : null;
+}
+
 function _byCategory(items) {
     const groups = new Map();
     for (const spec of items) {
@@ -505,7 +513,7 @@ const ModDocuments = () => {
         setDocIssue(null);
 
         // The same rule as generation: one key per intent, reused by a retry.
-        submitKeyRef.current = retryKey || submitKeyRef.current || idempotencyKey();
+        submitKeyRef.current = asKey(retryKey) || submitKeyRef.current || idempotencyKey();
 
         // V2 only when this document HAS a revision and a hash — i.e. it was
         // generated through V2. Submitting without them is what the server
@@ -567,7 +575,7 @@ const ModDocuments = () => {
         if (!docId || reviewStatus !== "submitted") return;
         setWithdrawing(true);
         setDocIssue(null);
-        withdrawKeyRef.current = retryKey || withdrawKeyRef.current || idempotencyKey();
+        withdrawKeyRef.current = asKey(retryKey) || withdrawKeyRef.current || idempotencyKey();
 
         const { error, status } = await withdrawDocumentV2(docId, withdrawKeyRef.current);
         setWithdrawing(false);
@@ -704,7 +712,7 @@ const ModDocuments = () => {
         // A NEW intent unless this is a retry of the one that just failed.
         // `retryKey` is passed only by the retry button, which reuses the key so
         // a render that already happened is replayed rather than repeated.
-        generateKeyRef.current = retryKey || idempotencyKey();
+        generateKeyRef.current = asKey(retryKey) || idempotencyKey();
         setViewRev(null);   // a new draft is what the pane should show
         setDocIssue(null);
 
@@ -756,7 +764,7 @@ const ModDocuments = () => {
 
         const fields = toSubmittedFields(reviewRows || []);
         setGenerating(true); setGenPct(55); setDocIssue(null);
-        generateKeyRef.current = retryKey || generateKeyRef.current || idempotencyKey();
+        generateKeyRef.current = asKey(retryKey) || generateKeyRef.current || idempotencyKey();
 
         try {
             // Phase 2 — the revision itself.
@@ -877,6 +885,38 @@ const ModDocuments = () => {
         code: errorCode(error),
         retryable: isRetryable(status, error),
     });
+
+    /* A V2 failure the user must act on, on whichever step raised it.
+     *
+     * Not a toast: a draft that failed to generate, or a submission that did
+     * not land, is something the user will otherwise assume succeeded. It was
+     * rendered on step 2 only, while generation runs on step 1 — so a refused
+     * generate cleared the spinner and showed nothing at all.
+     *
+     * `retry` receives the issue. It reuses the SAME key, so a request that did
+     * reach the server before the connection dropped is replayed, not repeated. */
+    const docIssueBanner = (retry) => docIssue && (
+        <div style={{
+            marginBottom: 12, padding: "10px 14px", borderRadius: 10,
+            background: "#f59e0b14", border: "1px solid #f59e0b55",
+            color: t.text, fontSize: 12.5,
+            display: "flex", alignItems: "center", gap: 12,
+        }}>
+            <span style={{ flex: 1 }}>⚠ {docIssue.message}</span>
+            {docIssue.retryable && (
+                <button
+                    onClick={() => { const issue = docIssue; setDocIssue(null); retry(issue); }}
+                    style={{
+                        background: t.primary, color: "#fff", border: "none",
+                        borderRadius: 8, padding: "6px 14px",
+                        fontSize: 12, fontWeight: 700, cursor: "pointer",
+                        whiteSpace: "nowrap",
+                    }}>
+                    Retry
+                </button>
+            )}
+        </div>
+    );
 
     /* ── Header actions ── */
     const { setHeaderActions } = useHeaderActions();
@@ -1190,14 +1230,21 @@ const ModDocuments = () => {
                                 a two-second fix rather than a new revision. */}
                             {reviewRows && !genDone && (
                                 <div style={{ marginTop: 14 }}>
+                                    {/* The same fields retry under the same key. */}
+                                    {docIssueBanner(() => confirmFieldsAndGenerate(generateKeyRef.current))}
                                     <FieldReview
                                         t={t}
                                         rows={reviewRows}
                                         missing={missingFields(reviewRows)}
                                         edited={hasEdits(reviewRows, rawFields)}
                                         busy={generating}
-                                        onEdit={(name, value) =>
-                                            setReviewRows(rows => editRow(rows, name, value))}
+                                        onEdit={(name, value) => {
+                                            // Changed fields are a NEW render. The key of a
+                                            // failed attempt would be refused as reuse (409).
+                                            generateKeyRef.current = null;
+                                            setDocIssue(null);
+                                            setReviewRows(rows => editRow(rows, name, value));
+                                        }}
                                         onGenerate={() => confirmFieldsAndGenerate()}
                                         onBack={() => { setReviewRows(null); setRawFields(null); }} />
                                 </div>
@@ -1349,7 +1396,7 @@ const ModDocuments = () => {
                             )}
 
                             {!genDone ? (
-                                <BtnPrimary onClick={handleGenerate} disabled={generating || !canGenerate} style={{ width: "100%", marginTop: 13, fontSize: 13, padding: "13px", borderRadius: 12, justifyContent: "center" }}>
+                                <BtnPrimary onClick={() => handleGenerate()} disabled={generating || !canGenerate} style={{ width: "100%", marginTop: 13, fontSize: 13, padding: "13px", borderRadius: 12, justifyContent: "center" }}>
                                     {generating
                                         ? "⏳ Generating…"
                                         : !activeCaseId
@@ -1414,43 +1461,13 @@ const ModDocuments = () => {
                                 </button>
                             </div>
 
-                            {/* A V2 failure the user must act on.
-                                Not a toast: a draft that failed to generate, or
-                                a submission that did not land, is something the
-                                user will otherwise assume succeeded — and a
-                                client who believes a lawyer has their document
-                                waits for a reply nobody is going to send.
-
-                                The retry reuses the SAME key, so a request that
-                                did reach the server before the connection
-                                dropped is replayed rather than repeated. */}
-                            {docIssue && (
-                                <div style={{
-                                    marginBottom: 12, padding: "10px 14px", borderRadius: 10,
-                                    background: "#f59e0b14", border: "1px solid #f59e0b55",
-                                    color: t.text, fontSize: 12.5,
-                                    display: "flex", alignItems: "center", gap: 12,
-                                }}>
-                                    <span style={{ flex: 1 }}>⚠ {docIssue.message}</span>
-                                    {docIssue.retryable && (
-                                        <button
-                                            onClick={() => {
-                                                setDocIssue(null);
-                                                if (docIssue.onRetry === "withdraw") withdrawFromReview(withdrawKeyRef.current);
-                                                else if (docId) submitToLawyer(submitKeyRef.current);
-                                                else handleGenerate(generateKeyRef.current);
-                                            }}
-                                            style={{
-                                                background: t.primary, color: "#fff", border: "none",
-                                                borderRadius: 8, padding: "6px 14px",
-                                                fontSize: 12, fontWeight: 700, cursor: "pointer",
-                                                whiteSpace: "nowrap",
-                                            }}>
-                                            Retry
-                                        </button>
-                                    )}
-                                </div>
-                            )}
+                            {/* A client who believes a lawyer has their document
+                                waits for a reply nobody is going to send. */}
+                            {docIssueBanner(issue => {
+                                if (issue.onRetry === "withdraw") withdrawFromReview(withdrawKeyRef.current);
+                                else if (docId) submitToLawyer(submitKeyRef.current);
+                                else handleGenerate(generateKeyRef.current);
+                            })}
 
                             <div style={{ flex: 1, border: `1.5px solid ${t.border}`, borderRadius: 12, overflow: "hidden", background: "#fff", minHeight: 460 }}>
                                 {previewUrl ? (
@@ -1645,7 +1662,10 @@ const ModDocuments = () => {
                                 ))}
                             </Card>
 
-                            <BtnPrimary onClick={submitToLawyer} disabled={submitting} style={{ width: "100%", fontSize: 13, padding: "14px", borderRadius: 12, justifyContent: "center", boxShadow: `0 6px 20px ${t.primaryGlow}`, opacity: !selLawyer || submitting ? 0.6 : 1 }}>
+                            {/* A submission that did not land must say so HERE:
+                                this is the step it was pressed on. */}
+                            {docIssueBanner(() => submitToLawyer(submitKeyRef.current))}
+                            <BtnPrimary onClick={() => submitToLawyer()} disabled={submitting} style={{ width: "100%", fontSize: 13, padding: "14px", borderRadius: 12, justifyContent: "center", boxShadow: `0 6px 20px ${t.primaryGlow}`, opacity: !selLawyer || submitting ? 0.6 : 1 }}>
                                 {submitting ? "⏳ Submitting…" : "📤 Submit to Lawyer"}
                             </BtnPrimary>
                             <div style={{ fontSize: 11, color: t.textMuted, lineHeight: 1.6, textAlign: "center" }}>

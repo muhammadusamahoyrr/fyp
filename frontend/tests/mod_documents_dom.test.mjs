@@ -770,3 +770,79 @@ test("cases arriving late do not destroy the document already open", async () =>
                  "the open document was cleared when the case list arrived");
     await p.unmount();
 });
+
+/* ── a refused generate must be visible where it was refused ────────────────
+ *
+ * The V2 failure banner lived on step 2 only, and generation runs on step 1.
+ * A refused create (every browser create, while the proxy turned it into a
+ * 405) cleared the spinner and showed nothing: the button looked dead. */
+
+function findButton(container, text) {
+    return [...container.querySelectorAll("button")]
+        .find(b => (b.textContent || "").includes(text));
+}
+
+async function press(p, el) {
+    await act(async () => {
+        el.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    });
+    await p.settle();
+}
+
+test("a refused V2 generate is shown on the field review, not swallowed", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "legal_notice", label: "Legal Notice",
+                 category: "Civil", fields: ["sender_name", "demand"] }],
+    });
+    api.__respond("extractDocumentFields", {
+        data: { fields: { sender_name: "Ayesha Khan", demand: "500000" } },
+    });
+    api.__respond("createDocumentV2", {
+        data: null, status: 405, error: { message: "Method Not Allowed" },
+    });
+
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Select"));
+    await press(p, findButton(p.container, "Use Template"));
+
+    const picker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "legal_notice"));
+    assert.ok(picker, "the document-type picker did not render");
+    await act(async () => {
+        picker.value = "legal_notice";
+        picker.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await p.settle();
+
+    await press(p, findButton(p.container, "Generate Draft"));
+    const generate = findButton(p.container, "generate →");
+    assert.ok(generate, "the field review did not open");
+    await press(p, generate);
+
+    assert.equal(api.__calls("createDocumentV2").length, 1);
+    // The button used to pass its click EVENT as the retry key, which reached
+    // the server as "[object Object]" and was refused (422).
+    // (`idempotencyKey` is itself stubbed here, so only "not the event" is
+    // checkable; the real key's format is covered in documents_v2.test.mjs.)
+    const key = api.__calls("createDocumentV2")[0].args[1];
+    assert.ok(!(key && typeof key === "object" && "nativeEvent" in key),
+        "the click event was sent as the idempotency key");
+    assert.match(p.text(), /Method Not Allowed/,
+        "the refusal reached nobody: step 1 rendered no error");
+    await p.unmount();
+});
+
+test("no handler that takes a retry key is wired straight to onClick", async () => {
+    // `onClick={submitToLawyer}` passes the click event as `retryKey`; it became
+    // the Idempotency-Key and every Submit to Lawyer was refused.
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/components/client/ModDocuments.jsx",
+                                      import.meta.url), "utf8");
+    const keyed = [...src.matchAll(/const (\w+) = async \(retryKey/g)].map(m => m[1]);
+    assert.ok(keyed.includes("submitToLawyer") && keyed.includes("handleGenerate"));
+    for (const fn of keyed) {
+        assert.ok(!src.includes(`onClick={${fn}}`), `${fn} receives the click event as its key`);
+    }
+});

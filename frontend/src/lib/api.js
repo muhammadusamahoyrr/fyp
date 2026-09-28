@@ -1997,7 +1997,8 @@ function v2Headers(key) {
 export async function createDocumentV2(
   { templateType, title, caseId = null }, key,
 ) {
-  return apiFetch('/documents/v2/', {
+  // No trailing slash: Next.js 308-redirects one away before proxying.
+  return apiFetch('/documents/v2', {
     method: 'POST',
     headers: v2Headers(key),
     body: JSON.stringify({ template_type: templateType, title, case_id: caseId }),

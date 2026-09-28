@@ -338,7 +338,12 @@ class CreateBody(BaseModel):
     case_id: str | None = None
 
 
-@router.post("/", status_code=201)
+# "" like every other router's root. "/" alone was unreachable from the browser:
+# Next.js redirects `/api/v1/documents/v2/` to the slashless URL (308), which
+# matched only the legacy `GET /documents/{doc_id}` and came back 405, so every
+# V2 create through the frontend failed. "/" stays for existing direct callers.
+@router.post("", status_code=201)
+@router.post("/", status_code=201, include_in_schema=False)
 async def create_document_v2(
     body: CreateBody,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
