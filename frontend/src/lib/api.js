@@ -709,13 +709,36 @@ export async function getWsTicket() {
   return data?.ticket ?? null;
 }
 
+// Keep sockets on the same public origin as the page unless an explicit
+// WebSocket origin is configured.  A relative HTTP API base (`/api/v1`) must
+// not be treated as a socket base: doing so sends `/ws` to Next without a
+// usable absolute URL and breaks tunnels/HTTPS.  The matching Next rewrite
+// forwards this same-origin path to the backend.
+export function websocketUrl(path) {
+  const configured = process.env.NEXT_PUBLIC_WS_URL?.replace(/\/$/, '');
+  const cleanPath = `/${String(path || '').replace(/^\/+/, '')}`;
+  if (configured) return `${configured}${cleanPath}`;
+
+  if (typeof window !== 'undefined' && window.location) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${cleanPath}`;
+  }
+
+  // Used only outside a browser (mainly tests/SSR); sockets are never opened
+  // during SSR, but returning a deterministic URL keeps the helper total.
+  if (/^https?:\/\//i.test(BASE)) {
+    return `${BASE.replace(/\/api\/v1\/?$/, '').replace(/^http/i, 'ws')}${cleanPath}`;
+  }
+  return cleanPath;
+}
+
 // Opens the notification socket. Returns the WebSocket or null.
 export async function openNotificationSocket(onMessage) {
   const ticket = await getWsTicket();
   if (!ticket) return null;
 
-  const wsBase = BASE.replace(/\/api\/v1$/, '').replace(/^http/, 'ws');
-  const ws = new WebSocket(`${wsBase}/ws/notifications?ticket=${encodeURIComponent(ticket)}`);
+  const ws = new WebSocket(
+    `${websocketUrl('/ws/notifications')}?ticket=${encodeURIComponent(ticket)}`);
   ws.onmessage = (ev) => {
     try { onMessage(JSON.parse(ev.data)); } catch { }
   };

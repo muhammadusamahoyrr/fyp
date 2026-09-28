@@ -156,6 +156,7 @@ function NeedsOutcome({ t, onRecorded }) {
     const [cursor, setCursor] = useState(null);
     const [busyId, setBusyId] = useState(null);
     const [loadingMore, setLoadingMore] = useState(false);
+    const [moreError, setMoreError] = useState(null);
 
     /** Re-read from the first page.
      *
@@ -182,10 +183,14 @@ function NeedsOutcome({ t, onRecorded }) {
 
     const loadMore = async () => {
         if (!cursor || loadingMore) return;
+        setMoreError(null);
         setLoadingMore(true);
         const { data, error } = await listPendingOutcomes({ page_size: 25, cursor });
         setLoadingMore(false);
-        if (error || !data) return;          // the rows already shown stay
+        if (error || !data) {
+            setMoreError(error?.message || "Could not load more outcomes. Please try again.");
+            return;                          // the rows already shown stay
+        }
         setItems(prev => [...prev, ...(data.items || [])]);
         setCursor(data.next_cursor || null);
     };
@@ -299,6 +304,11 @@ function NeedsOutcome({ t, onRecorded }) {
                 }}>
                     {loadingMore ? "Loading…" : "Load more"}
                 </button>
+            )}
+            {moreError && (
+                <div role="alert" style={{ fontSize: 12, color: "#e8526a", padding: "4px 2px" }}>
+                    {moreError}
+                </div>
             )}
         </div>
     );

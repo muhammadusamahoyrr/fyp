@@ -14,10 +14,14 @@ exists. Nothing imports them; moving them changes no behaviour.
 
 ## Running one
 
-Start the backend first:
+Start the backend and frontend first. The scripts deliberately use the Next
+origin by default, so the same `/api/v1` and `/ws` rewrites used by a browser
+are part of the smoke test:
 
 ```
 backend/venv/Scripts/uvicorn.exe app.main:app --port 8000
+cd frontend
+npm run dev
 ```
 
 Then, from `backend/`:
@@ -33,6 +37,10 @@ Then, from `backend/`:
 ```
 ./venv/Scripts/python.exe scripts/manual_smoke/smoke_full_e2e.py
 ```
+
+For backend-only diagnosis, opt out explicitly with
+`SMOKE_ORIGIN=http://127.0.0.1:8000`. A release smoke should not use that
+override, because it would again bypass the browser-facing proxy.
 
 ## If you want these in CI
 

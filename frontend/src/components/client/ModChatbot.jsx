@@ -5,7 +5,7 @@ import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useCase } from "@/components/shared/CaseContext.jsx";
 import {
-    getToken, rateAnswer, getWsTicket, openSourceDocument, cancelClientTurn,
+    getToken, rateAnswer, getWsTicket, websocketUrl, openSourceDocument, cancelClientTurn,
     searchConversations,
     listConversations, createConversation, getConversation,
     renameConversation, deleteConversation,
@@ -30,8 +30,6 @@ import {
     CITATION_GROUPS, REPEALED, normaliseCitations, citationsInGroup,
     citationSummary, shortRequestId, copyText, auditNotice,
 } from "@/lib/trust.js";
-
-const WS_BASE = (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_WS_URL) || "ws://localhost:8000";
 
 /* Calibrated-confidence bands come from the server (ai/answer_confidence.py).
    The client shows the BAND only — the raw calibrated figure runs far lower than
@@ -299,7 +297,7 @@ const ModChatbot = () => {
         }
         if (!ticket) { socket.abandon(claim); return; }
 
-        const url = `${WS_BASE}/ws/chat/${sid}?ticket=${encodeURIComponent(ticket)}`;
+        const url = `${websocketUrl(`/ws/chat/${encodeURIComponent(sid)}`)}?ticket=${encodeURIComponent(ticket)}`;
 
         setWsStatus("connecting");
         const ws = new WebSocket(url);
@@ -547,7 +545,11 @@ const ModChatbot = () => {
             sessionId, { beforeSeq: olderCursor, pageSize: PAGE_SIZE });
         if (!openGeneration.isCurrent(ticket)) return;   // the user moved on
         setLoadingOlder(false);
-        if (error || !data) return;
+        if (error || !data) {
+            toast.show(error?.message || "Could not load earlier messages. Please try again.",
+                       "error", 3500);
+            return;
+        }
 
         // `mergeMessages` sorts by the server-allocated `seq`, so which side
         // the older page is passed on does not decide the order — the sequence
@@ -556,7 +558,7 @@ const ModChatbot = () => {
         setMsgs(current => mergeMessages(current, toClientMessages(data.messages)));
         setOlderCursor(data.older_cursor ?? null);
         setHasOlder(!!data.has_older);
-    }, [olderCursor, loadingOlder, openGeneration]);
+    }, [olderCursor, loadingOlder, openGeneration, toast]);
 
     /* ── Opening a conversation ───────────────────────────────────────── */
     const openConversation = useCallback(async (sessionId) => {

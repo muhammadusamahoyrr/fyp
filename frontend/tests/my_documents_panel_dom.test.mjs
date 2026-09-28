@@ -260,6 +260,22 @@ test("opening a document that has gone does not call back", async () => {
     await p.unmount();
 });
 
+test("opening a document that has gone shows a retryable error", async () => {
+    api.__respond("myDocumentsV2", {
+        data: { items: [row("gone")], has_more: false },
+    });
+    api.__respond("getDocumentV2", {
+        error: { message: "Document could not be reached" },
+    });
+    const p = await mount();
+
+    await p.click("Open");
+
+    assert.match(p.text(), /Document could not be reached/);
+    assert.ok(p.container.querySelector('[role="alert"]'));
+    await p.unmount();
+});
+
 /* ── the panel never scopes by owner itself ───────────────────────────────── */
 
 test("the component sends no owner id", async () => {

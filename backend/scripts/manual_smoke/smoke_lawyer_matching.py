@@ -33,10 +33,11 @@ from app.db.chroma import connect_chroma  # noqa: E402
 from _smoke_env import (  # noqa: E402
     assert_server_shares_database,
     cleanup,
+    smoke_origins,
     use_test_database,
 )
 
-BASE = "http://localhost:8000/api/v1"
+BASE, _ = smoke_origins()
 
 # Fixed IDs so re-runs upsert instead of duplicate-insert
 ADMIN_ID  = "test-admin-001"

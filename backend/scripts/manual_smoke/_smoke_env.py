@@ -34,7 +34,23 @@ Start the server against the same database:
 """
 from __future__ import annotations
 
+import os
+
 TEST_DB_SUFFIX = "_test"
+
+
+def smoke_origins() -> tuple[str, str]:
+    """Return browser-facing HTTP and WebSocket origins for manual smokes.
+
+    The default is Next, not FastAPI.  Calling port 8000 directly proved only
+    that the backend worked and missed broken rewrites and same-origin socket
+    URLs.  Direct-backend diagnosis remains available through SMOKE_ORIGIN.
+    """
+    origin = os.getenv("SMOKE_ORIGIN", "http://127.0.0.1:3000").rstrip("/")
+    if not origin.startswith(("http://", "https://")):
+        raise SystemExit("SMOKE_ORIGIN must start with http:// or https://")
+    ws_origin = ("wss://" if origin.startswith("https://") else "ws://") + origin.split("//", 1)[1]
+    return f"{origin}/api/v1", ws_origin
 
 
 def use_test_database(allow_production: bool = False) -> str:

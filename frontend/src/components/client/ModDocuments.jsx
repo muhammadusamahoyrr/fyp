@@ -1005,15 +1005,16 @@ const ModDocuments = () => {
                                     // guard rejecting it.
                                     if (id && id !== docId) {
                                         const { data, error } = await getDocumentV2(id);
-                                        if (error || !data) return;
+                                        if (error || !data) return { error: error || new Error("Could not open that document.") };
                                         const restored = restoreStateFromDocument(data);
-                                        if (!restored) return;
+                                        if (!restored) return { error: new Error("That document response was incomplete.") };
                                         applyRestored(restored);
                                     }
                                     setViewRev({
                                         revision_id: actions.revisionId,
                                         pdf_sha256: actions.pdfSha256,
                                     });
+                                    return { error: null };
                                 }} />
                         </div>
 

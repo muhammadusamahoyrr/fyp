@@ -4,12 +4,16 @@ import json
 import random
 import secrets
 import string
+import sys
+from pathlib import Path
 
 import httpx
 import websockets
 
-BASE    = "http://127.0.0.1:8000/api/v1"
-WS_BASE = "ws://127.0.0.1:8000"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _smoke_env import smoke_origins  # noqa: E402
+
+BASE, WS_BASE = smoke_origins()
 
 def rand_email():
     s = "".join(random.choices(string.ascii_lowercase, k=6))

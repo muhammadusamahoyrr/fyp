@@ -275,6 +275,7 @@ function AILegalPage() {
     const firstName = user?.full_name?.split(" ")[0] || "Counselor";
     const [apiCases, setApiCases] = useState([]);
     const [msgs, setMsgs] = useState([]);
+    const [conversationError, setConversationError] = useState(null);
 
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => {
@@ -519,11 +520,15 @@ function AILegalPage() {
         if (!id || !olderCursor || loadingOlder) return;
         const ticket = openGeneration.current();
         setLoadingOlder(true);
+        setConversationError(null);
         const { data, error } = await getResearchConversation(
             id, { beforeSeq: olderCursor, pageSize: THREAD_PAGE_SIZE });
         if (!openGeneration.isCurrent(ticket)) return;
         setLoadingOlder(false);
-        if (error || !data) return;
+        if (error || !data) {
+            setConversationError(error?.message || "Could not load earlier messages. Please try again.");
+            return;
+        }
 
         // `mergeMessages` sorts by the server-allocated `seq`, so the order is
         // decided by the sequence rather than by which side this is passed on.
@@ -575,13 +580,12 @@ function AILegalPage() {
 
     const openConversation = useCallback(async (id) => {
         if (!id) return;
+        setConversationError(null);
         const ticket = openGeneration.next();
         const thread = await loadThread(id, ticket);
         if (!openGeneration.isCurrent(ticket)) return;   // the user moved on
         if (!thread) {
-            writeActiveSession("research", user?._id, null);
-            setMsgs([]);
-            setPendingQuestion(null);
+            setConversationError("Could not open that conversation. Your existing chat has not been cleared; please try again.");
             return;
         }
         const { header, messages: restored } = thread;
@@ -606,8 +610,12 @@ function AILegalPage() {
 
 
     const startConversation = useCallback(async (caseId) => {
+        setConversationError(null);
         const { data, error } = await createResearchConversation({ caseId: caseId || null });
-        if (error || !data?.session_id) return null;
+        if (error || !data?.session_id) {
+            setConversationError(error?.message || "Could not start a new conversation. Please try again.");
+            return null;
+        }
         sessionIdRef.current = data.session_id;
         setSessionId(data.session_id);
         writeActiveSession("research", user?._id, data.session_id);
@@ -1153,6 +1161,17 @@ function AILegalPage() {
                     justifyContent: hasMessages ? "flex-start" : "center",
                     padding: hasMessages ? "68px 24px 16px" : "0 24px"
                 }}>
+
+                    {conversationError && (
+                        <div role="alert" style={{
+                            width: "100%", maxWidth: 800, marginBottom: 12,
+                            padding: "10px 13px", borderRadius: 10,
+                            color: "#e8526a", background: "rgba(232,82,106,0.10)",
+                            border: "1px solid rgba(232,82,106,0.35)", fontSize: 12,
+                        }}>
+                            {conversationError}
+                        </div>
+                    )}
 
                     {!hasMessages ? (
                         /* Welcome screen */

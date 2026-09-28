@@ -43,10 +43,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _smoke_env import (  # noqa: E402
     assert_server_shares_database,
     cleanup,
+    smoke_origins,
     use_test_database,
 )
 
-BASE     = "http://127.0.0.1:8000/api/v1"
+BASE, _  = smoke_origins()
 TIMEOUT  = 180.0
 POLL_MAX = 8
 POLL_SEC = 4

@@ -16,7 +16,7 @@
  * be a weaker answer to a question already answered properly, and the first
  * thing to drift.
  */
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
 import { myDocumentsV2, downloadDocumentFile, getDocumentV2 } from "@/lib/api.js";
 import { useMyDocuments, rowActions } from "@/lib/useMyDocuments.js";
@@ -24,6 +24,8 @@ import { documentStatusView } from "@/lib/documentStatus.js";
 import { restoreStateFromDocument } from "@/lib/documentResume.js";
 
 export default function MyDocumentsPanel({ t, onOpen, onPreview }) {
+    const [actionError, setActionError] = useState(null);
+    const [openingId, setOpeningId] = useState(null);
     const fetchPage = useCallback(
         ({ cursor, limit }) => myDocumentsV2({ cursor, limit }), []);
 
@@ -34,10 +36,35 @@ export default function MyDocumentsPanel({ t, onOpen, onPreview }) {
        hash, the review status and any recovery explanation. Restoring a subset
        produces a screen that looks ready and fails the moment it is used. */
     const open = async (row) => {
+        setActionError(null);
+        setOpeningId(row.id);
         const { data, error: err } = await getDocumentV2(row.id);
-        if (err || !data) return;
+        setOpeningId(null);
+        if (err || !data) {
+            setActionError(err?.message || "Could not open that document. Please try again.");
+            return;
+        }
         const restored = restoreStateFromDocument(data);
-        if (restored && onOpen) onOpen(restored);
+        if (!restored) {
+            setActionError("That document response was incomplete, so it was not opened.");
+            return;
+        }
+        if (onOpen) onOpen(restored);
+    };
+
+    const preview = async (row, actions) => {
+        setActionError(null);
+        setOpeningId(row.id);
+        try {
+            const result = await onPreview?.(row.id, actions);
+            if (result?.error) {
+                setActionError(result.error.message || String(result.error));
+            }
+        } catch (err) {
+            setActionError(err?.message || "Could not preview that document. Please try again.");
+        } finally {
+            setOpeningId(null);
+        }
     };
 
     const card = {
@@ -79,6 +106,12 @@ export default function MyDocumentsPanel({ t, onOpen, onPreview }) {
                 </div>
             )}
 
+            {actionError && (
+                <div role="alert" style={{ padding: "9px 12px", borderRadius: 10, background: `${t.danger}10`, border: `1px solid ${t.danger}30`, color: t.text, fontSize: 11.5, marginBottom: 10 }}>
+                    {actionError}
+                </div>
+            )}
+
             {isEmpty && (
                 <div style={{ fontSize: 12, color: t.textMuted, padding: "10px 0", lineHeight: 1.6 }}>
                     You have not generated any documents yet. When you do, they
@@ -112,12 +145,12 @@ export default function MyDocumentsPanel({ t, onOpen, onPreview }) {
                         </div>
 
                         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                            <button onClick={() => open(row)}
+                            <button onClick={() => open(row)} disabled={openingId === row.id}
                                 style={{ padding: "5px 10px", borderRadius: 8, border: `1px solid ${t.border}`, background: "transparent", color: t.text, fontSize: 11, cursor: "pointer", fontFamily: "'Inter',sans-serif" }}>
-                                Open
+                                {openingId === row.id ? "Opening…" : "Open"}
                             </button>
                             {actions.canPreview && onPreview && (
-                                <button onClick={() => onPreview(row.id, actions)}
+                                <button onClick={() => preview(row, actions)} disabled={openingId === row.id}
                                     style={{ padding: "5px 10px", borderRadius: 8, border: `1px solid ${t.border}`, background: "transparent", color: t.text, fontSize: 11, cursor: "pointer", fontFamily: "'Inter',sans-serif" }}>
                                     Preview
                                 </button>
