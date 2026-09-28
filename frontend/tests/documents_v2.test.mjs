@@ -956,6 +956,19 @@ test("a saved document downloads by revision and hash", () => {
     assert.match(body, /expectedPdfSha256: row\.pdf_sha256/);
 });
 
+test("a lawyer can reopen, preview and inspect versions of an owned document", () => {
+    assert.match(myDocs, /getDocumentV2\(row\.id\)/);
+    assert.match(myDocs, /fetchRevisionPreview\(active\.id/);
+    assert.match(myDocs, /<RevisionHistory/);
+    assert.match(myDocs, /expectedPdfSha256: pdfSha256/);
+});
+
+test("a failed lawyer-owned download is visible", () => {
+    const fn = myDocs.slice(myDocs.indexOf("const download = async"));
+    const body = fn.slice(0, fn.indexOf("\n    };"));
+    assert.match(body, /if \(result\?\.error\) setActionIssue/);
+});
+
 test("a document with no bytes is not offered as a download", () => {
     // An unexplained failure reads as the file having been lost.
     assert.match(myDocs, /row\.downloadable \?/);
