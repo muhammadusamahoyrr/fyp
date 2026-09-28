@@ -92,6 +92,26 @@ function dedicatedToolHref(spec) {
     return tab ? `/tools?tab=${encodeURIComponent(tab)}` : "/tools";
 }
 
+/* The words for what extraction managed, or null when there is nothing to say.
+ * "failed" and "empty" produce the same blank form and mean opposite things:
+ * one is the AI not reading the case, the other the case not saying. */
+export function extractionNotice(result) {
+    const status = result?.extraction_status;
+    const parts = [];
+    if (status === "failed") {
+        parts.push("The AI could not read your case this time. Fill in the fields yourself, "
+            + "or go back and try Generate Draft again.");
+    } else if (status === "empty") {
+        parts.push("The AI read your case but found none of these details in it. "
+            + "Fill in the fields yourself before generating.");
+    }
+    if (result?.truncated) {
+        parts.push("Your case description is very long, so the AI read only its first part — "
+            + "check that the details below are complete.");
+    }
+    return parts.length ? { kind: status === "ok" ? "truncated" : status, message: parts.join(" ") } : null;
+}
+
 function _byCategory(items) {
     const groups = new Map();
     for (const spec of items) {
@@ -171,6 +191,10 @@ const ModDocuments = () => {
     // A V2 failure the user must see and act on, rather than a toast that
     // vanishes. Null on the happy path.
     const [docIssue, setDocIssue] = useState(null);
+    // What the AI managed to read from the case, in words, shown above the
+    // field review. A failed read used to arrive as blank fields that looked
+    // exactly like "your case does not say" — see extractionNotice().
+    const [extractNotice, setExtractNotice] = useState(null);
     const [selectedCat, setSelectedCat] = useState("All");
     const [searchQ, setSearchQ] = useState("");
     const [selectedType, setSelectedType] = useState(null);   // chosen doc type
@@ -717,7 +741,7 @@ const ModDocuments = () => {
         // A new extraction replaces the previous review outright. Keeping the
         // old rows would show the client fields read from a run they have
         // already abandoned.
-        setReviewRows(null); setRawFields(null);
+        setReviewRows(null); setRawFields(null); setExtractNotice(null);
         setGenCaseId(caseId);
         // A NEW intent unless this is a retry of the one that just failed.
         // `retryKey` is passed only by the retry button, which reuses the key so
@@ -740,6 +764,7 @@ const ModDocuments = () => {
                     setGenerating(false); return;
                 }
                 fields = extractRes.data?.fields || {};
+                setExtractNotice(extractionNotice(extractRes.data));
             } else {
                 setGenPct(45);
             }
@@ -1289,6 +1314,15 @@ const ModDocuments = () => {
                                 <div style={{ marginTop: 14 }}>
                                     {/* The same fields retry under the same key. */}
                                     {docIssueBanner(() => confirmFieldsAndGenerate(generateKeyRef.current))}
+                                    {extractNotice && (
+                                        <div role="status" data-extraction={extractNotice.kind} style={{
+                                            marginBottom: 12, padding: "10px 14px", borderRadius: 10,
+                                            background: "#f59e0b14", border: "1px solid #f59e0b55",
+                                            color: t.text, fontSize: 12.5, lineHeight: 1.55,
+                                        }}>
+                                            ⚠ {extractNotice.message}
+                                        </div>
+                                    )}
                                     <FieldReview
                                         t={t}
                                         source={genCaseId && draftingMode(selectedType) === "ai" ? "ai" : "manual"}

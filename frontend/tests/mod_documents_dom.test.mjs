@@ -952,3 +952,45 @@ test("Regenerate appends to the same V2 document", async () => {
                      ["doc-1", "doc-1"]);
     await p.unmount();
 });
+
+/* ── the AI's reading of the case is reported, not disguised ───────────────
+ *
+ * A failed extraction used to reach the client as blank fields — the same form
+ * as a case that simply does not mention them. */
+
+test("extractionNotice tells a failed read from an empty one", async () => {
+    const { extractionNotice } = await import("../src/components/client/ModDocuments.jsx");
+    assert.equal(extractionNotice({ extraction_status: "ok", truncated: false }), null);
+    assert.match(extractionNotice({ extraction_status: "failed" }).message, /could not read your case/);
+    assert.match(extractionNotice({ extraction_status: "empty" }).message, /found none of these details/);
+    assert.match(extractionNotice({ extraction_status: "ok", truncated: true }).message, /only its first part/);
+    assert.equal(extractionNotice(undefined), null);   // an older server: no status, no claim
+});
+
+test("a failed AI read is announced above the field review", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "legal_notice", label: "Legal Notice", category: "Civil",
+                 fields: ["sender_name", "demand"], drafting_mode: "ai" }],
+    });
+    api.__respond("extractDocumentFields", {
+        data: { fields: {}, extraction_status: "failed", truncated: false },
+    });
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Select"));
+    await press(p, findButton(p.container, "Use Template"));
+    const picker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "legal_notice"));
+    await act(async () => {
+        picker.value = "legal_notice";
+        picker.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate Draft"));
+
+    const notice = p.container.querySelector('[data-extraction="failed"]');
+    assert.ok(notice, "a failed read produced a silent blank form");
+    assert.match(notice.textContent, /could not read your case/);
+    await p.unmount();
+});

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,6 +121,10 @@ class DocumentExtractResult(BaseModel):
     # Extracted template fields — dynamically-keyed per template, kept as dict.
     fields: dict[str, Any] | None = None
     case_id: str
+    # "failed" means the AI could not read the case -- NOT that the case is
+    # silent on these fields ("empty"). The client says which.
+    extraction_status: Literal["ok", "empty", "failed"] = "ok"
+    truncated: bool = False
 
 
 class QuickNoticeResult(BaseModel):

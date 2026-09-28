@@ -254,6 +254,20 @@ async def list_templates(
     return items
 
 
+@router.get("/requirements/{template_type}")
+async def pleading_requirements(
+    template_type: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """What the Code requires of an instrument, as a checklist to confirm.
+
+    For the lawyer's prose drafts, which the field-based compliance check
+    cannot judge. Every item is `to_confirm`; nothing is marked satisfied.
+    Uncovered types answer `covered: false` rather than 404 — "no rules encoded"
+    is a normal answer, not a missing resource.
+    """
+    from app.services import pleading_rules
+    return pleading_rules.requirements_for(template_type[:64])
 
 
 # Registered LAST on purpose. FastAPI matches in registration order, so this

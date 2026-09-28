@@ -22,6 +22,7 @@ import {
     caseActionsBlocked, boundCaseId,
 } from "@/lib/draftCaseBinding.js";
 import { verificationView } from "@/lib/draftVerification.js";
+import { pleadingRequirements } from "@/lib/api.js";
 
 // ============================================================
 // TOOLBAR BUTTON
@@ -241,12 +242,73 @@ function CitationStrip({ t, draftCheck, stale, documentCheck }) {
     );
 }
 
+/* WHAT THE CODE REQUIRES OF THIS INSTRUMENT — for the lawyer to confirm.
+ *
+ * A prose draft cannot be judged by the field-based compliance check, and
+ * deciding from free text that a clause is "satisfied" would be a false pass in
+ * a court document. So this lists the requirements with their rule and a hint,
+ * and says plainly that nothing was checked. The ticks are the lawyer's own
+ * working notes for this session; they are not saved and certify nothing. */
+function RequirementsChecklist({ t, report }) {
+    const [open, setOpen] = useState(false);
+    const [ticked, setTicked] = useState(() => new Set());
+    if (!report?.covered || !report.items?.length) return null;
+    const toggle = i => setTicked(prev => {
+        const next = new Set(prev);
+        next.has(i) ? next.delete(i) : next.add(i);
+        return next;
+    });
+    return (
+        <div data-requirements style={{
+            flexShrink: 0, padding: "5px 24px", fontSize: 11, borderBottom: `1px solid ${t.border}`,
+            background: t.surface, color: t.textMuted,
+        }}>
+            <button type="button" onClick={() => setOpen(o => !o)} style={{
+                background: "transparent", border: "none", padding: 0, cursor: "pointer",
+                color: t.textDim, fontSize: 11, fontWeight: 700,
+            }}>
+                {open ? "▾" : "▸"} Requirements checklist · {report.basis} — {ticked.size}/{report.items.length} confirmed by you
+            </button>
+            <span> · not checked automatically: confirm each against your draft.</span>
+            {open && (
+                <ul style={{ listStyle: "none", margin: "6px 0 2px", padding: 0 }}>
+                    {report.items.map((item, i) => (
+                        <li key={i} style={{ display: "flex", gap: 8, padding: "3px 0", alignItems: "flex-start" }}>
+                            <input type="checkbox" checked={ticked.has(i)} onChange={() => toggle(i)}
+                                   aria-label={`Confirmed: ${item.clause}`} style={{ marginTop: 2 }} />
+                            <span>
+                                <b style={{ color: t.textDim }}>{item.clause}</b> — {item.requirement}
+                                {item.conditional_on && <i> (only if applicable)</i>}
+                                {item.hint && <span style={{ color: t.textFaint }}> · {item.hint}</span>}
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
 function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
     // The case this document is bound to — fixed when the editor opened, never
     // the page selector's current value. See lib/draftCaseBinding.js.
     const caseObj = binding.caseObj;
     const caseId = boundCaseId(binding);
     const caseBlocked = caseActionsBlocked(binding);
+    // The instrument this draft is, when the system knows one. A reopened draft
+    // may carry only the template's name, so the catalogue is asked by name too.
+    const requirementsType = tmpl?.template_type
+        || TEMPLATES.find(x => x.name === tmpl?.name)?.template_type || null;
+    const [requirements, setRequirements] = useState(null);
+    useEffect(() => {
+        if (!requirementsType) { setRequirements(null); return; }
+        let live = true;
+        pleadingRequirements(requirementsType).then(({ data }) => {
+            // Optional aid: a failed load shows no checklist rather than an error.
+            if (live) setRequirements(data || null);
+        });
+        return () => { live = false; };
+    }, [requirementsType]);
     // A saved draft stores editor HTML; a fresh template is plain text
     const initialHtml = draft ? draft.content : buildContent(tmpl, caseObj).replace(/\n/g, "<br>");
     const [aiMessages, setAiMessages] = useState([]);
@@ -769,6 +831,7 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                 copy saved to Documents (frozen; describes that copy). */}
             <CitationStrip t={t} draftCheck={savedCheck} stale={checkStale}
                 documentCheck={published?.verification ?? null} />
+            <RequirementsChecklist t={t} report={requirements} />
 
             {/* ── Rich-text Toolbar ── */}
             <div style={{

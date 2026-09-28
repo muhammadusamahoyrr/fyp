@@ -2052,6 +2052,12 @@ export async function getDocumentV2(docId) {
  *
  * Every entry names its builder's real fields, so a form built from this cannot
  * ask for a key the renderer ignores. */
+/* What the Code requires of an instrument, as a checklist to confirm. For
+ * prose drafts: every item comes back `to_confirm`, never "satisfied". */
+export async function pleadingRequirements(templateType) {
+  return apiFetch(`/documents/requirements/${encodeURIComponent(templateType)}`);
+}
+
 export async function listTemplates(
   { includeSystem = false, includeLawyerAuthored = false } = {},
 ) {
