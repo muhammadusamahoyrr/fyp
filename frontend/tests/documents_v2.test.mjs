@@ -116,6 +116,17 @@ const client = readFileSync(
     new URL("../src/components/client/ModDocuments.jsx", import.meta.url), "utf8");
 const lawyer = readFileSync(
     new URL("../src/components/lawyer/DocumentsPage.jsx", import.meta.url), "utf8");
+const tools = readFileSync(
+    new URL("../src/components/client/ModTools.jsx", import.meta.url), "utf8");
+
+test("structured document cards open the matching deterministic tool", () => {
+    assert.match(client, /inheritance_settlement:\s*["']calc["']/);
+    assert.match(client, /wasiyyat_nama:\s*["']wasiyyat["']/);
+    assert.match(client, /labour_demand:\s*["']calculators["']/);
+    assert.match(client, /href=\{dedicatedToolHref\(d\)\}/);
+    assert.match(tools, /new URLSearchParams\(window\.location\.search\)/);
+    assert.match(tools, /TABS\.some\(item => item\.id === requested\)/);
+});
 
 test("the client cannot pretend to format a PDF", () => {
     // The Edit toggle revealed bold/italic/underline buttons calling

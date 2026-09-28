@@ -106,7 +106,7 @@ def test_the_client_holds_no_template_list_of_its_own(source):
     Whichever one a screen reads, the other is free to drift — and the one that
     drifted offered documents nothing could build.
     """
-    for ghost in ("DOC_TYPES_DATA", "DOC_TYPE_MAP"):
+    for ghost in ("DOC_TYPES_DATA", "DOC_TYPE_MAP", "DRAFTS_DATA"):
         assert ghost not in source, (
             f"{ghost} is back — the client is deciding again what the backend "
             f"can build")

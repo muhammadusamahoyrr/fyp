@@ -383,6 +383,17 @@ Extract these fields from the case description (JSON only):
 }
 
 
+def supports_field_extraction(template_type: str) -> bool:
+    """Whether the case-to-fields extractor knows this exact instrument.
+
+    Rendering support and extraction support are deliberately different facts:
+    several builders are fed by deterministic calculators or by a manual form.
+    Publishing this capability lets a client choose the honest input path
+    instead of offering an AI button that can only fail after it is pressed.
+    """
+    return template_type in _EXTRACT_PROMPTS
+
+
 async def extract_fields(case_id: str, client_id: str, template_type: str) -> dict:
     """
     Step 1 of the flow: read case description from MongoDB, run LLM to extract

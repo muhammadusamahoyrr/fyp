@@ -118,6 +118,12 @@ test.beforeEach(() => {
     // Signed in through the stub, so the REAL CaseProvider actually fetches.
     api.__respond("bootstrapAuth", true);
     api.__respond("getMe", { data: { _id: "u1", role: "client" } });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "legal_notice", label: "Legal Notice",
+                 category: "Civil", description: "A formal legal notice.",
+                 fields: ["sender_name", "demand"], structured_fields: [],
+                 drafting_mode: "ai" }],
+    });
 });
 
 test.after(() => {
@@ -625,7 +631,7 @@ async function _gotoDraftStep(p) {
     // Step 0 lists templates; "Select" then "Use Template" reaches the form
     // where the readiness strip and its retry live.
     const select = [...p.container.querySelectorAll("button")]
-        .find(b => b.textContent.trim() === "Select");
+        .find(b => b.textContent.trim().startsWith("Select"));
     assert.ok(select, "no template Select control");
     await act(async () => {
         select.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
@@ -845,4 +851,26 @@ test("no handler that takes a retry key is wired straight to onClick", async () 
     for (const fn of keyed) {
         assert.ok(!src.includes(`onClick={${fn}}`), `${fn} receives the click event as its key`);
     }
+});
+
+test("a scalar template without an extractor opens an honest manual form", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "bail_application", label: "Bail Application",
+                 category: "Criminal", description: "Application for bail.",
+                 fields: ["accused_name", "grounds"], structured_fields: [],
+                 drafting_mode: "manual" }],
+    });
+
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Select — enter details"));
+    await press(p, findButton(p.container, "Use Template"));
+    await press(p, findButton(p.container, "Generate Draft"));
+
+    assert.equal(api.__calls("extractDocumentFields").length, 0,
+        "a missing backend prompt was called anyway");
+    assert.match(p.text(), /no safe automatic extractor/i);
+    assert.match(p.text(), /Accused name/);
+    await p.unmount();
 });

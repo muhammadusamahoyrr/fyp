@@ -52,22 +52,6 @@ const Lbl = ({ children }) => {
 /* ══════════════════════════════════════════════════════
    MODULE: DOCUMENT AUTOMATION — 5-Step Wizard
 ══════════════════════════════════════════════════════ */
-const DRAFTS_DATA = [
-    { name: "Special Power of Attorney", cat: "Civil" },
-    { name: "Order I, Rule 10 — Intervenor App.", cat: "Civil" },
-    { name: "Joint Venture Agreement", cat: "Corporate" },
-    { name: "Condonation Application", cat: "Civil" },
-    { name: "Certified Copy Application", cat: "Civil" },
-    { name: "Articles of Association — SMC", cat: "Corporate" },
-    { name: "Employment Termination Letter", cat: "Employment" },
-    { name: "Non-Disclosure Agreement", cat: "Corporate" },
-    { name: "Bail Application", cat: "Criminal" },
-    { name: "Suit for Recovery of Money", cat: "Civil" },
-    { name: "Property Transfer Deed", cat: "Property" },
-    { name: "Labour Court Complaint", cat: "Employment" },
-];
-
-
 const GEN_STEPS_LABELS = ["Extracting case data…", "Applying AI recommendations…", "Populating template…", "Formatting document…", "Generating draft…"];
 
 
@@ -84,6 +68,28 @@ const GEN_STEPS_LABELS = ["Extracting case data…", "Applying AI recommendation
  * refuses (422: no spaces) — so Generate and Submit failed on every click. */
 function asKey(retryKey) {
     return typeof retryKey === "string" && retryKey ? retryKey : null;
+}
+
+function draftingMode(spec) {
+    if (spec?.drafting_mode) return spec.drafting_mode;
+    if (spec?.structured_fields?.length) return "dedicated";
+    // Compatibility with a backend deployed just before this catalogue field:
+    // its old entries were exactly the AI-assisted set used by this screen.
+    return "ai";
+}
+
+// Structured templates are produced by deterministic tools, not by the generic
+// free-text drafter. Keep this small routing map next to that boundary so every
+// catalogue card opens the tool that can actually create its document.
+const DEDICATED_TOOL_TABS = {
+    inheritance_settlement: "calc",
+    wasiyyat_nama: "wasiyyat",
+    labour_demand: "calculators",
+};
+
+function dedicatedToolHref(spec) {
+    const tab = DEDICATED_TOOL_TABS[spec?.template_type];
+    return tab ? `/tools?tab=${encodeURIComponent(tab)}` : "/tools";
 }
 
 function _byCategory(items) {
@@ -110,7 +116,6 @@ const ModDocuments = () => {
 
     /* ── State ── */
     const [step, setStep] = useState(0);                       // 0–4
-    const [selectedDraft, setSelectedDraft] = useState(null);
     const [selectedCaseId, setSelectedCaseId] = useState("");
     const [docId, setDocId] = useState(null);
     // Object URL of the REAL generated PDF, rendered inline. Replaces the
@@ -229,7 +234,7 @@ const ModDocuments = () => {
         { label: "Submit to Lawyer", icon: "⚖️" },
         { label: "Final & Export", icon: "📤" },
     ];
-    const categories = ["All", "Civil", "Criminal", "Corporate", "Employment", "Property"];
+    const categories = ["All", ...new Set((templates || []).map(x => x.category).filter(Boolean))];
     const catIcons = { All: "📋", Civil: "⚖️", Criminal: "🔒", Corporate: "🏢", Employment: "💼", Property: "🏠" };
     const statusColors = { Draft: "gray", "Under Review": "warn", Approved: "success", Returned: "warn", Rejected: "danger", Final: "info" };
     // The shared view, not a ternary chain. The chain's default arm displayed
@@ -610,9 +615,9 @@ const ModDocuments = () => {
         toast.show("↩️ Withdrawn — the document is yours again", "success", 3500);
     };
 
-    const filteredDrafts = DRAFTS_DATA.filter(d =>
-        (selectedCat === "All" || d.cat === selectedCat) &&
-        d.name.toLowerCase().includes(searchQ.toLowerCase())
+    const filteredDrafts = (templates || []).filter(d =>
+        (selectedCat === "All" || d.category === selectedCat) &&
+        d.label.toLowerCase().includes(searchQ.toLowerCase())
     );
 
     /* ── Helpers ── */
@@ -626,7 +631,7 @@ const ModDocuments = () => {
 
     const goTo = n => setStep(n);
     const nextStep = () => {
-        if (step === 0 && selectedDraft === null) {
+        if (step === 0 && !selectedType) {
             toast.show("⚠️ Select a template first", "warn"); return;
         }
         // The final step is only reachable once the lawyer has actually approved
@@ -637,9 +642,10 @@ const ModDocuments = () => {
     };
     const prevStep = () => { if (step > 0) setStep(s => s - 1); };
 
-    const pickDraft = i => {
-        setSelectedDraft(i);
-        if (selectedType) setDocTitle(DRAFTS_DATA[i].name + " — " + selectedType.label);
+    const pickDraft = spec => {
+        if (!spec || draftingMode(spec) === "dedicated") return;
+        setSelectedType(spec);
+        setDocTitle(`${spec.label} draft`);
     };
     // `spec` is the catalogue entry, not a label. handleGenerate needs the
     // template_type the server keys builders by, and deriving it from a display
@@ -647,9 +653,7 @@ const ModDocuments = () => {
     // builder.
     const pickType = spec => {
         setSelectedType(spec);
-        if (selectedDraft !== null) {
-            setDocTitle(DRAFTS_DATA[selectedDraft].name + " — " + spec.label);
-        }
+        setDocTitle(`${spec.label} draft`);
     };
 
     // The one fact the whole draft step depends on: is there a case to draft
@@ -658,12 +662,10 @@ const ModDocuments = () => {
     const activeCaseId = selection.activeCaseId || "";
     const activeCase = cases.find(c => (c._id || c.id) === activeCaseId);
     const activeCaseTitle = activeCase?.title || activeCase?.case_type || "your case";
-    // Nothing in the catalogue is unsupported: it is built FROM the builder
-    // map, so an entry cannot exist without something able to render it. The
-    // flag stays as a named constant rather than being deleted, because the
-    // readiness strip and the button both branch on it and a bare `false` at
-    // two call sites is harder to reason about than one explained name.
-    const unsupportedType = false;
+    // Structured calculations cannot safely be collected as text. Those
+    // builders stay visible but route to their deterministic calculator; they
+    // are not passed arbitrary client-authored JSON by this generic form.
+    const unsupportedType = draftingMode(selectedType) === "dedicated";
     // A document type MUST be chosen. Without this, an unset type used to fall
     // through to a civil plaint (see backendType below), silently handing the
     // user a real, filable plaint they never asked for.
@@ -717,16 +719,22 @@ const ModDocuments = () => {
         setDocIssue(null);
 
         try {
-            // Phase 1 — AI field extraction. Deliberately outside the
-            // idempotent unit: it is a read, it produces no revision, and
-            // re-running it costs nothing anyone is billed for.
-            const extractRes = await extractDocumentFields(caseId, backendType);
-            setGenPct(45);
-            if (extractRes.error) {
-                toast.show("❌ " + (extractRes.error?.detail || "Field extraction failed"), "danger");
-                setGenerating(false); return;
+            // Case-backed templates with a reviewed prompt get AI assistance.
+            // Everything else gets an honest manual form generated from the
+            // builder's declared scalar fields. We never call an extractor the
+            // backend says does not exist.
+            let fields = {};
+            if (caseId && draftingMode(selectedType) === "ai") {
+                const extractRes = await extractDocumentFields(caseId, backendType);
+                setGenPct(45);
+                if (extractRes.error) {
+                    toast.show("❌ " + (extractRes.error?.detail || "Field extraction failed"), "danger");
+                    setGenerating(false); return;
+                }
+                fields = extractRes.data?.fields || {};
+            } else {
+                setGenPct(45);
             }
-            const fields = extractRes.data?.fields || {};
 
             // STOP HERE AND ASK.
             //
@@ -763,6 +771,13 @@ const ModDocuments = () => {
         if (!caseId || !backendType) return;
 
         const fields = toSubmittedFields(reviewRows || []);
+        if (!Object.keys(fields).length) {
+            setDocIssue({
+                message: "Enter at least one document detail before generating.",
+                retryable: false,
+            });
+            return;
+        }
         setGenerating(true); setGenPct(55); setDocIssue(null);
         generateKeyRef.current = asKey(retryKey) || generateKeyRef.current || idempotencyKey();
 
@@ -1020,7 +1035,7 @@ const ModDocuments = () => {
 
                         {/* Stats bar */}
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 14 }}>
-                            {[["Templates", String(DRAFTS_DATA.length), "📄", t.primary], ["Categories", String(new Set(DRAFTS_DATA.map(d => d.cat)).size), "📁", t.success]].map(([label, val, ico, col]) => (
+                            {[["Templates", String((templates || []).length), "📄", t.primary], ["Categories", String(Math.max(0, categories.length - 1)), "📁", t.success]].map(([label, val, ico, col]) => (
                                 <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderRadius: 14, background: t.card, border: `1px solid ${t.border}` }}>
                                     <div>
                                         <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 4 }}>{label}</div>
@@ -1044,11 +1059,14 @@ const ModDocuments = () => {
 
                         {/* Template grid — 3 columns, full width */}
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
-                            {filteredDrafts.length ? filteredDrafts.map(d => {
-                                const gi = DRAFTS_DATA.indexOf(d);
-                                const sel = selectedDraft === gi;
+                            {templates === null ? (
+                                <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 48, color: t.textMuted, fontSize: 13 }}>Loading available templates…</div>
+                            ) : filteredDrafts.length ? filteredDrafts.map(d => {
+                                const sel = selectedType?.template_type === d.template_type;
+                                const mode = draftingMode(d);
+                                const dedicated = mode === "dedicated";
                                 return (
-                                    <div key={gi} onClick={() => pickDraft(gi)} style={{ background: sel ? t.primaryGlow : t.card, border: `2px solid ${sel ? t.primary : t.border}`, borderRadius: 18, padding: 18, cursor: "pointer", transition: "all 0.2s", position: "relative", display: "flex", flexDirection: "column", minHeight: 200, boxShadow: sel ? `0 0 0 1px ${t.primary}, ${t.shadowCard}` : t.shadowCard }}
+                                    <div key={d.template_type} onClick={() => pickDraft(d)} style={{ background: sel ? t.primaryGlow : t.card, border: `2px solid ${sel ? t.primary : t.border}`, borderRadius: 18, padding: 18, cursor: dedicated ? "default" : "pointer", transition: "all 0.2s", position: "relative", display: "flex", flexDirection: "column", minHeight: 200, boxShadow: sel ? `0 0 0 1px ${t.primary}, ${t.shadowCard}` : t.shadowCard }}
                                         onMouseEnter={e => { if (!sel) { e.currentTarget.style.borderColor = t.primary + "60"; e.currentTarget.style.background = t.primaryGlow + "50"; } }}
                                         onMouseLeave={e => { if (!sel) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.card; } }}
                                     >
@@ -1059,12 +1077,17 @@ const ModDocuments = () => {
                                         {/* Icon */}
                                         <div style={{ width: 46, height: 46, borderRadius: 12, background: sel ? `${t.primary}25` : `${t.danger}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, marginBottom: 10, marginTop: 4 }}>{sel ? "📗" : "📕"}</div>
                                         {/* Category */}
-                                        <Badge type={catBadgeColor(d.cat)} style={{ marginBottom: 7, alignSelf: "flex-start", fontSize: 10 }}>{d.cat}</Badge>
+                                        <Badge type={catBadgeColor(d.category)} style={{ marginBottom: 7, alignSelf: "flex-start", fontSize: 10 }}>{d.category}</Badge>
                                         {/* Name */}
-                                        <div style={{ fontSize: 13, fontWeight: 700, color: sel ? t.primary : t.text, lineHeight: 1.35, marginBottom: 6, flex: 1 }}>{d.name}</div>
+                                        <div style={{ fontSize: 13, fontWeight: 700, color: sel ? t.primary : t.text, lineHeight: 1.35, marginBottom: 6 }}>{d.label}</div>
+                                        <div style={{ fontSize: 10.5, color: t.textMuted, lineHeight: 1.5, marginBottom: 10, flex: 1 }}>{d.description}</div>
                                         {/* Action */}
                                         <div style={{ display: "flex", gap: 7 }}>
-                                            <button onClick={e => { e.stopPropagation(); sel ? nextStep() : pickDraft(gi); }} style={{ flex: 1, padding: "7px", borderRadius: 10, border: `1.5px solid ${sel ? t.primary : t.border}`, background: sel ? t.primary : t.card, color: sel ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif", transition: "all 0.2s" }}>{sel ? "✓ Use Template" : "Select"}</button>
+                                            {dedicated ? (
+                                                <a href={dedicatedToolHref(d)} onClick={e => e.stopPropagation()} style={{ flex: 1, padding: "7px", borderRadius: 10, border: `1.5px solid ${t.border}`, color: t.primary, textAlign: "center", textDecoration: "none", fontSize: 11, fontWeight: 700 }}>Open dedicated calculator</a>
+                                            ) : (
+                                                <button onClick={e => { e.stopPropagation(); sel ? nextStep() : pickDraft(d); }} style={{ flex: 1, padding: "7px", borderRadius: 10, border: `1.5px solid ${sel ? t.primary : t.border}`, background: sel ? t.primary : t.card, color: sel ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif", transition: "all 0.2s" }}>{sel ? "✓ Use Template" : mode === "ai" ? "Select — AI assisted" : "Select — enter details"}</button>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -1072,12 +1095,12 @@ const ModDocuments = () => {
                         </div>
 
                         {/* Bottom CTA bar — shows when template selected */}
-                        {selectedDraft !== null && (
+                        {selectedType && (
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", marginTop: 16, borderRadius: 14, background: t.primaryGlow, border: `1.5px solid ${t.primary}` }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                                     <div style={{ width: 34, height: 34, borderRadius: 9, background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📗</div>
                                     <div>
-                                        <div style={{ fontSize: 12, fontWeight: 700, color: t.text }}>{DRAFTS_DATA[selectedDraft].name}</div>
+                                        <div style={{ fontSize: 12, fontWeight: 700, color: t.text }}>{selectedType.label}</div>
                                         <div style={{ fontSize: 10, color: t.textMuted }}>Template selected · Ready to proceed</div>
                                     </div>
                                 </div>
@@ -1123,8 +1146,8 @@ const ModDocuments = () => {
                                                 {_byCategory(templates).map(([category, items]) => (
                                                     <optgroup key={category} label={category}>
                                                         {items.map(spec => (
-                                                            <option key={spec.template_type} value={spec.template_type}>
-                                                                {spec.label}
+                                                            <option key={spec.template_type} value={spec.template_type} disabled={draftingMode(spec) === "dedicated"}>
+                                                                {spec.label}{draftingMode(spec) === "dedicated" ? " — dedicated calculator" : ""}
                                                             </option>
                                                         ))}
                                                     </optgroup>
@@ -1143,10 +1166,14 @@ const ModDocuments = () => {
                                                     {selectedType.description}
                                                 </div>
                                             )}
+                                            {unsupportedType && (
+                                                <a href={dedicatedToolHref(selectedType)} style={{ display: "inline-block", marginTop: 8, color: t.primary, fontSize: 11.5, fontWeight: 700 }}>
+                                                    Open the dedicated calculator →
+                                                </a>
+                                            )}
                                         </>
                                     )}
                                 </div>
-                                <div><Lbl>Document Title</Lbl><ThemedInput value={docTitle} onChange={e => setDocTitle(e.target.value)} placeholder={`${selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "Employment Dispute"} — ${selectedType?.label || "Plaint"}`} /></div>
                                 {cases.length > 0 && (
                                     <div>
                                         <Lbl>Linked Case</Lbl>
@@ -1165,6 +1192,7 @@ const ModDocuments = () => {
                                         </select>
                                     </div>
                                 )}
+                                <div><Lbl>Document Title</Lbl><ThemedInput value={docTitle} onChange={e => setDocTitle(e.target.value)} placeholder={selectedType ? `${selectedType.label} draft` : "Choose a document type"} /></div>
                                 <div><Lbl>Case Reference No.</Lbl><ThemedInput value={caseRef} onChange={e => setCaseRef(e.target.value)} placeholder="e.g. CASE-2026-00142" /></div>
                                 <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                                     <div><Lbl>Jurisdiction</Lbl>
@@ -1235,6 +1263,7 @@ const ModDocuments = () => {
                                     {docIssueBanner(() => confirmFieldsAndGenerate(generateKeyRef.current))}
                                     <FieldReview
                                         t={t}
+                                        source={genCaseId && draftingMode(selectedType) === "ai" ? "ai" : "manual"}
                                         rows={reviewRows}
                                         missing={missingFields(reviewRows)}
                                         edited={hasEdits(reviewRows, rawFields)}
@@ -1887,7 +1916,7 @@ const ModDocuments = () => {
                             {/* Document summary */}
                             <Card>
                                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 10 }}>Document Summary</div>
-                                {[["Type", selectedType?.label || "—"], ["Template", selectedDraft !== null ? DRAFTS_DATA[selectedDraft].name : "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Required particulars", null]].map(([k, v]) => (
+                                {[["Type", selectedType?.label || "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Required particulars", null]].map(([k, v]) => (
                                     <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
                                         <span style={{ color: t.textMuted }}>{k}</span>
                                         {k === "Status" ? <Badge type="info">Final</Badge> : k === "Required particulars" ? <Badge type={_PARTICULARS_BADGE[finalParticulars.tone]}>{finalParticulars.label}</Badge> : <span style={{ fontWeight: 600, color: t.text, textAlign: "right", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>}
@@ -2038,4 +2067,3 @@ const ModTracking = () => {
 };
 
 export default ModDocuments;
-
