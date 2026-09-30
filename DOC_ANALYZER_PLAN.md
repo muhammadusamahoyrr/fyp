@@ -320,7 +320,7 @@ The same envelope covers original uploads and canonical-text blobs.
 - **Algorithm:** AES-256-GCM (`cryptography`'s `AESGCM`), for both content encryption and data-key wrapping.
 - **Keys:**
   - **One fresh 32-byte data key (DEK) per blob**, used for exactly one encryption. So a content nonce can never repeat under a DEK.
-  - Master keys come from the environment as `ANALYZER_KEK_<id>` (base64). **At startup each is decoded and must be exactly 32 bytes**, or the analyzer refuses to start. `ANALYZER_KEK_ACTIVE` names the one used for new blobs.
+  - Master keys come from one setting, `ANALYZER_KEKS="id:base64,id:base64"` (a single field, because pydantic settings cannot load dynamically named variables from `.env`). **At startup each is decoded and must be exactly 32 bytes**, ids must be unique, and `ANALYZER_KEK_ACTIVE` must name one of them, or the analyzer is not ready. `ANALYZER_KEK_ACTIVE` names the one used for new blobs.
 - **Two separate 96-bit random nonces:**
   - `content_nonce` for the blob;
   - `wrap_nonce` for wrapping the DEK.

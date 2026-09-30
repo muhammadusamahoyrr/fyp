@@ -7,6 +7,8 @@ provide on its own:
     fenced stage commit, are single transactions (plan §5, §6.3). A standalone
     mongod cannot run them, and a non-atomic fallback would reintroduce exactly
     the crash windows those transactions close.
+  * ITS MASTER KEYS. Files are stored encrypted (blob_store); without a
+    valid key an upload could be accepted and then never read.
   * ITS UNIQUE INDEXES. One source per idempotency key, one open run per
     source, one purge per source. Without them the code races and nothing
     resolves the race.
@@ -57,11 +59,13 @@ async def transactions_supported() -> bool:
 async def check() -> list[str]:
     """Every reason the analyzer must not run here. Empty means ready."""
     from app.db.indexes import validate_analyzer_indexes
+    from app.services.analyzer import blob_store
 
     problems: list[str] = []
     if not await transactions_supported():
         problems.append(TRANSACTIONS_UNAVAILABLE)
     problems.extend(str(p) for p in await validate_analyzer_indexes())
+    problems.extend(blob_store.keyring_problems())
     return problems
 
 

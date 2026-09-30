@@ -159,10 +159,27 @@ async def test_one_purge_per_source(app_indexes):
 # ── readiness: fail closed, and only the analyzer ────────────────────────────
 
 @pytest.fixture(autouse=True)
-def _fresh_readiness():
+def _fresh_readiness(monkeypatch):
+    # Valid test master keys, so each test isolates the ONE problem it asserts.
+    import base64
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "analyzer_keks", "k1:" + base64.b64encode(b"" * 32).decode())
+    monkeypatch.setattr(settings, "analyzer_kek_active", "k1")
     readiness._reset_for_tests()
     yield
     readiness._reset_for_tests()
+
+
+async def test_invalid_master_keys_close_the_analyzer(app_indexes, monkeypatch):
+    from app.core.config import settings
+
+    async def replica():
+        return True
+    monkeypatch.setattr(readiness, "transactions_supported", replica)
+    monkeypatch.setattr(settings, "analyzer_keks", "")
+    problems = await readiness.refresh()
+    assert len(problems) == 1 and problems[0].startswith("analyzer_keys_invalid")
+    assert readiness.is_ready() is False
 
 
 def test_never_checked_is_not_ready():

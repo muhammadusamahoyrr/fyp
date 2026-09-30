@@ -186,6 +186,12 @@ class Settings(BaseSettings):
     # the analyzer FAILS CLOSED (its routes answer 503) rather than run the
     # multi-document steps non-atomically. The rest of the app is unaffected.
     doc_analyzer: bool = False
+    # Master keys for the analyzer's encrypted files (plan §6.4):
+    # "id:base64,id:base64", each decoding to exactly 32 bytes, and the id
+    # used for new files. Required when DOC_ANALYZER is on; readiness refuses
+    # otherwise. Never logged. Old ids stay listed until nothing uses them.
+    analyzer_keks: str = ""
+    analyzer_kek_active: str = ""
 
     # Retention DELETION for intakes and their uploaded evidence — its own
     # switch, deliberately not shared with the V2 one above. The two stores hold
