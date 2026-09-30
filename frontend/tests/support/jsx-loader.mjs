@@ -154,7 +154,23 @@ async function synthesiseApiStub() {
         'import { spy, __calls, __respond, __reset } from "./api-stub-core.mjs";',
         "export { __calls, __respond, __reset };",
     ];
+    // Pure, synchronous helpers are the REAL ones. As async spies they
+    // returned a Promise: `errorCode(e) === "generation_failed"` was never
+    // true and `isRetryable(...)` was always truthy, so the component branches
+    // that depend on them could not be tested at all.
+    const realApi = JSON.stringify(pathToFileURL(path.join(SRC, "lib", "api.js")).href);
+    const PURE = ["errorCode", "isRetryable"];
+    lines.push(`export { ${PURE.join(", ")} } from ${realApi};`);
     for (const name of names) {
+        if (PURE.includes(name)) continue;
+        // The real key minter is synchronous and returns a string. An async
+        // spy hands components a Promise, which e.g. sessionStorage then
+        // stores as "[object Promise]" -- a harness fault, not a product one.
+        if (name === "idempotencyKey") {
+            lines.push("let __keySeq = 0;");
+            lines.push("export function idempotencyKey() { __keySeq += 1; return `test-key-${__keySeq}`; }");
+            continue;
+        }
         lines.push(`export const ${name} = spy(${JSON.stringify(name)}, ` +
                    `{ data: null, error: null });`);
     }

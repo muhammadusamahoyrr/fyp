@@ -50,6 +50,8 @@ export function useLang() {
 export function useIsMobile(breakpoint = 768) {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
+    // Absent in some embedded browsers and in jsdom; treat as desktop.
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
     const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
     const onChange = () => setIsMobile(mq.matches);
     onChange();

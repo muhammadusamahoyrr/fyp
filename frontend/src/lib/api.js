@@ -2009,7 +2009,9 @@ export function isRetryable(status, error) {
   // are treated must not quietly make either of these retryable. An
   // idempotency mismatch is a client bug that retrying hides; a review limit is
   // permanent for that document, and retrying it loops forever.
-  if (['idempotency_mismatch', 'review_limit_reached'].includes(errorCode(error))) {
+  // `generation_failed` is a FINISHED failure bound to its key: the same key
+  // replays it forever. Callers retry it only with a fresh key.
+  if (['idempotency_mismatch', 'review_limit_reached', 'generation_failed'].includes(errorCode(error))) {
     return false;
   }
   return !status || status === 0 || status === 503 || status === 504;
@@ -2035,6 +2037,86 @@ export async function generateRevisionV2(docId, { fields = {}, templateType = nu
     method: 'POST',
     headers: v2Headers(key),
     body: JSON.stringify({ fields, template_type: templateType }),
+  });
+}
+
+// Client prompt -> reviewed plan -> immutable V2 document.  The planner is an
+// intake layer only; generation still ends in the same revision engine used by
+// every other V2 document flow.
+export async function createDraftPlanV2(
+  { prompt, templateType = null, title = null, caseId = null }, key,
+) {
+  return apiFetch('/documents/v2/plans', {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      prompt, template_type: templateType, title, case_id: caseId,
+    }),
+  });
+}
+
+export async function getDraftPlanV2(planId) {
+  return apiFetch(`/documents/v2/plans/${encodeURIComponent(planId)}`);
+}
+
+export async function answerDraftPlanV2(planId, { expectedVersion, answers }) {
+  return apiFetch(`/documents/v2/plans/${encodeURIComponent(planId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ expected_version: expectedVersion, answers }),
+  });
+}
+
+export async function confirmDraftPlanV2(
+  planId, { expectedVersion, skipMissing = false },
+) {
+  return apiFetch(`/documents/v2/plans/${encodeURIComponent(planId)}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({
+      expected_version: expectedVersion, skip_missing: skipMissing,
+    }),
+  });
+}
+
+export async function generateDraftPlanV2(planId, { expectedVersion }, key) {
+  return apiFetch(`/documents/v2/plans/${encodeURIComponent(planId)}/generate`, {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({ expected_version: expectedVersion }),
+  });
+}
+
+export async function getDocumentWorkspaceV2(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/workspace`);
+}
+
+export async function assistDocumentWorkspaceV2(docId, {
+  bodyHtml = null, fields = null, instruction,
+  expectedRevisionId, expectedVersion, expectedContentEpoch,
+}) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/workspace/assist`, {
+    method: 'POST',
+    body: JSON.stringify({
+      body_html: bodyHtml, fields, instruction,
+      expected_revision_id: expectedRevisionId,
+      expected_version: expectedVersion,
+      expected_content_epoch: expectedContentEpoch,
+    }),
+  });
+}
+
+export async function saveDocumentWorkspaceV2(docId, {
+  bodyHtml = null, fields = null, title = null,
+  expectedRevisionId, expectedVersion, expectedContentEpoch,
+}, key) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/workspace/revisions`, {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      body_html: bodyHtml, fields, title,
+      expected_revision_id: expectedRevisionId,
+      expected_version: expectedVersion,
+      expected_content_epoch: expectedContentEpoch,
+    }),
   });
 }
 

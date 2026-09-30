@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 
 import {
     rememberDraft, recallDraft, forgetDraft,
-    restoreStateFromDocument, DRAFT_KEY_PREFIX,
+    restoreStateFromDocument, DRAFT_KEY_PREFIX, isReloadNavigation,
 } from "../src/lib/documentResume.js";
 
 /* A localStorage that behaves, and one that does not. Both are real: private
@@ -44,6 +44,18 @@ function hostileStorage() {
         removeItem() { throw new Error("SecurityError"); },
     };
 }
+
+test("only a hard browser refresh is identified as a reload", () => {
+    assert.equal(isReloadNavigation({
+        getEntriesByType: () => [{ type: "reload" }],
+    }), true);
+    assert.equal(isReloadNavigation({
+        getEntriesByType: () => [{ type: "navigate" }],
+    }), false);
+    assert.equal(isReloadNavigation({ navigation: { type: 1 } }), true);
+    assert.equal(isReloadNavigation({ navigation: { type: 0 } }), false);
+    assert.equal(isReloadNavigation(null), false);
+});
 
 /* ── remembering which document ───────────────────────────────────────────── */
 

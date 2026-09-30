@@ -53,11 +53,29 @@ test("every mutating V2 call takes an idempotency key", () => {
     // A key minted per transmission rather than per intent makes the whole
     // mechanism unreachable from the UI — the same bug the chat surfaces had.
     for (const fn of ["createDocumentV2", "generateRevisionV2", "submitDocumentV2",
-                      "reviewDocumentV2", "withdrawDocumentV2"]) {
+                      "reviewDocumentV2", "withdrawDocumentV2",
+                      "createDraftPlanV2", "generateDraftPlanV2",
+                      "saveDocumentWorkspaceV2"]) {
         const body = api.slice(api.indexOf(`export async function ${fn}`));
-        const head = body.slice(0, body.indexOf("\n}"));
+        const nextExport = body.indexOf("\nexport async function", 1);
+        const head = nextExport === -1 ? body : body.slice(0, nextExport);
         assert.match(head, /v2Headers\(key\)/, `${fn} sends no Idempotency-Key`);
     }
+});
+
+test("the client drafting workspace uses server plans and stored checks", () => {
+    const drafts = readFileSync(
+        new URL("../src/components/client/documents/DocsDrafts.jsx", import.meta.url), "utf8");
+    for (const call of ["createDraftPlanV2", "answerDraftPlanV2",
+                        "confirmDraftPlanV2", "generateDraftPlanV2",
+                        "getDocumentWorkspaceV2", "assistDocumentWorkspaceV2",
+                        "saveDocumentWorkspaceV2"]) {
+        assert.match(drafts, new RegExp(`${call}\\(`), `${call} is not connected`);
+    }
+    assert.match(drafts, /complianceSummary\(revision\?\.compliance\)/);
+    assert.match(drafts, /verificationView\(revision\?\.verification\)/);
+    assert.ok(!/Required clauses present|Citations verified|SAMPLE_GROUPS|SampleNda/.test(drafts),
+        "sample content or an invented green check remains in the real workspace");
 });
 
 test("no read-only V2 call sends an idempotency key", () => {
@@ -123,7 +141,12 @@ test("structured document cards open the matching deterministic tool", () => {
     assert.match(client, /inheritance_settlement:\s*["']calc["']/);
     assert.match(client, /wasiyyat_nama:\s*["']wasiyyat["']/);
     assert.match(client, /labour_demand:\s*["']calculators["']/);
-    assert.match(client, /href=\{dedicatedToolHref\(d\)\}/);
+    // The catalogue cards live in DocumentsHome; ModDocuments hands it the
+    // routing function, so both halves of the link are checked.
+    const home = readFileSync(
+        new URL("../src/components/client/DocumentsHome.jsx", import.meta.url), "utf8");
+    assert.match(client, /dedicatedToolHref=\{dedicatedToolHref\}/);
+    assert.match(home, /href=\{dedicatedToolHref\(spec\)\}/);
     assert.match(tools, /new URLSearchParams\(window\.location\.search\)/);
     assert.match(tools, /TABS\.some\(item => item\.id === requested\)/);
 });

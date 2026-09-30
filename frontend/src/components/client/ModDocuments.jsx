@@ -1,7 +1,7 @@
 'use client';
 // Paste your ModDocuments.jsx code here
 import React, { useState, Fragment, useEffect, useRef } from "react";
-import { useT, useHeaderActions } from "./theme.js";
+import { useT, ThemeCtx } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import Ic from "./Ic.jsx";
 import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/shared/shared.jsx";
@@ -9,16 +9,27 @@ import { useCase } from "./CaseContext.jsx";
 import { confirmedCases } from "@/lib/caseStatus.js";
 import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
 import MyDocumentsPanel from "./MyDocumentsPanel.jsx";
+import DocumentsHome from "./DocumentsHome.jsx";
+import DocsDrafts from "./documents/DocsDrafts.jsx";
+import DocsAnalyzer from "./documents/DocsAnalyzer.jsx";
+import DocsVault from "./documents/DocsVault.jsx";
+import { Btn, Pill, Label, Paper, TOKEN_STYLE, VALUE_STYLE, docsTheme } from "./documents/ui.jsx";
+import { useIsMobile } from "@/lib/i18n.jsx";
+import { useAuth } from "@/context/AuthContext.jsx";
 import FieldReview from "./FieldReview.jsx";
-import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits }
+import { buildReviewRows, toSubmittedFields, missingFields, editRow, hasEdits, humanise as humaniseField }
     from "@/lib/fieldReview.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { complianceSummary } from "@/lib/complianceSummary.js";
 import { verificationView } from "@/lib/draftVerification.js";
-import { rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
+import { isReloadNavigation, rememberDraft, restoreStateFromDocument } from "@/lib/documentResume.js";
 import { loadDocumentDetail, reviewStateFromDetail } from "@/lib/documentLoader.js";
 import { useDocumentResume, NO_CASE } from "@/lib/useDocumentResume.js";
 import { caseSelection } from "@/lib/caseSelection.js";
+import {
+    DOCUMENTS_VIEW_EVENT, peekPendingDocumentsView, takePendingDocumentsView,
+    announceDocumentsView,
+} from "@/lib/documentsNav.js";
 import {
     extractDocumentFields, generateDocument, downloadDocumentFile,
     fetchRevisionPreview, submitDocumentForReview,
@@ -127,7 +138,11 @@ function _byCategory(items) {
 }
 
 const ModDocuments = () => {
-    const t = useT();
+    // The Documents screens use the approved mockup's palette in dark mode
+    // (see documents/ui.jsx), and hand it down so every child — including
+    // shared panels — draws in the same colours.
+    const t = docsTheme(useT());
+    const { user } = useAuth();
     const toast = useToast();
     const { cases: allCases, casesReady, casesError, casesReloading, reloadCases } = useCase();
     // A draft has not been confirmed by the client, so it must not be offered
@@ -195,8 +210,6 @@ const ModDocuments = () => {
     // field review. A failed read used to arrive as blank fields that looked
     // exactly like "your case does not say" — see extractionNotice().
     const [extractNotice, setExtractNotice] = useState(null);
-    const [selectedCat, setSelectedCat] = useState("All");
-    const [searchQ, setSearchQ] = useState("");
     const [selectedType, setSelectedType] = useState(null);   // chosen doc type
     // What the server can actually render, fetched rather than hardcoded.
     //
@@ -208,10 +221,6 @@ const ModDocuments = () => {
     const [templates, setTemplates] = useState(null);   // null = still loading
     const [templateIssue, setTemplateIssue] = useState(null);
     const [docTitle, setDocTitle] = useState("");
-    const [caseRef, setCaseRef] = useState("");
-    const [jurisdiction, setJurisdiction] = useState("Lahore High Court");
-    const [language, setLanguage] = useState("English");
-    const [instructions, setInstructions] = useState("");
     const [generating, setGenerating] = useState(false);
     const [genPct, setGenPct] = useState(0);
     const [genDone, setGenDone] = useState(false);
@@ -263,9 +272,6 @@ const ModDocuments = () => {
         { label: "Submit to Lawyer", icon: "⚖️" },
         { label: "Final & Export", icon: "📤" },
     ];
-    const categories = ["All", ...new Set((templates || []).map(x => x.category).filter(Boolean))];
-    const catIcons = { All: "📋", Civil: "⚖️", Criminal: "🔒", Corporate: "🏢", Employment: "💼", Property: "🏠" };
-    const statusColors = { Draft: "gray", "Under Review": "warn", Approved: "success", Returned: "warn", Rejected: "danger", Final: "info" };
     // The shared view, not a ternary chain. The chain's default arm displayed
     // every status nobody had enumerated as "Under Review" — which is how both
     // migration recovery states came to be shown as work in progress.
@@ -497,6 +503,75 @@ const ModDocuments = () => {
         setStep(0);
     };
 
+    /* Leave the open document and start over from the catalogue.
+     *
+     * The document is NOT deleted and stays in My Documents; this only takes
+     * it off screen. The template choice and every held key go too — a key
+     * kept from the previous document would make the server replay that
+     * document's generate or submit for the new one. */
+    const startNewDocument = () => {
+        clearOpenDocument();
+        setSelectedType(null);
+        setDocTitle("");
+        setExtractNotice(null);
+        setDocIssue(null);
+        setCompliance(null);
+        setVerification(null);
+        setFieldShape(null);
+        setLawyerNote("");
+        setUserApproved(false);
+        setExported(false);
+        generateKeyRef.current = null;
+        submitKeyRef.current = null;
+        withdrawKeyRef.current = null;
+    };
+
+    /* The sidebar's Documents menu. A request made before this mounted is
+     * read on the first render, so it wins over the refresh-resume that would
+     * otherwise jump to the last draft.
+     *
+     * NOT consumed on mount. The module can mount more than once for one
+     * visit (the dashboard keys it by tab, and providers settle in stages),
+     * and the mount that consumed it was not the one that met the restore.
+     * It is consumed when it has done its job: it held back a restore, or the
+     * user picked a template. */
+    const [initialView] = useState(peekPendingDocumentsView);
+    const stayHomeRef = useRef(Boolean(initialView));
+    // A hard browser refresh is a fresh entry to Documents. The previous
+    // document remains available in My Documents, but must not take over the
+    // page and drop the user directly into its review step.
+    const skipReloadResumeRef = useRef(isReloadNavigation());
+    // Which screen the module shows. "flow" is the template flow (home and
+    // its steps); the others are whole screens of their own.
+    const [view, setView] = useState("flow");
+    const [draftsSeed, setDraftsSeed] = useState(null);
+    useEffect(() => { announceDocumentsView(view === "flow" ? "new" : view); }, [view]);
+    // Details typed in the template's Customize editor, carried into the
+    // drafting form so nothing typed there is lost.
+    const prefillRef = useRef(null);
+    const showView = view => {
+        if (view === "drafts" || view === "analyzer" || view === "vault") {
+            setView(view);
+            return;
+        }
+        if (view === "new" || view === "mine") { startNewDocument(); setView("flow"); }
+        if (view === "mine" && typeof document !== "undefined") {
+            // After the home renders, bring the user's documents into view.
+            setTimeout(() => document.getElementById("my-documents")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+        }
+    };
+    useEffect(() => {
+        if (initialView) showView(initialView);
+        const onView = e => {
+            takePendingDocumentsView();
+            showView(e?.detail?.view);
+        };
+        window.addEventListener(DOCUMENTS_VIEW_EVENT, onView);
+        return () => window.removeEventListener(DOCUMENTS_VIEW_EVENT, onView);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     useDocumentResume({
         caseId: resumeCaseId,
         // From the CONTEXT, not from `Array.isArray(cases)`. `cases` is
@@ -504,7 +579,7 @@ const ModDocuments = () => {
         // even been called — the hook then treated "still asking" as "this user
         // has no cases" and restored a standalone draft a beat before the real
         // case arrived.
-        ready: casesReady,
+        ready: casesReady && !skipReloadResumeRef.current,
         // WHICH case the open document belongs to, not merely that one is open.
         // A boolean meant the first loaded document blocked restoration for
         // every case thereafter, so switching matters kept showing the first
@@ -515,6 +590,15 @@ const ModDocuments = () => {
         getDocument: (id) => loadDocumentDetail(id, {
             getV2: getDocumentV2, getLegacy: getDocumentLegacy }),
         onRestore: (restored, forCase) => {
+            // Opened from the sidebar's menu: stay on the home screen. The
+            // draft is still one click away in My Documents.
+            // Cleared only when it actually holds a draft back: an earlier
+            // "nothing to restore" (the case list still empty) is not it.
+            if (restored && stayHomeRef.current) {
+                stayHomeRef.current = false;
+                takePendingDocumentsView();
+                return;
+            }
             if (restored) {
                 applyRestored(restored);
                 return;
@@ -654,18 +738,6 @@ const ModDocuments = () => {
         toast.show("↩️ Withdrawn — the document is yours again", "success", 3500);
     };
 
-    const filteredDrafts = (templates || []).filter(d =>
-        (selectedCat === "All" || d.category === selectedCat) &&
-        d.label.toLowerCase().includes(searchQ.toLowerCase())
-    );
-
-    /* ── Helpers ── */
-    const catBadgeColor = c => c === "Civil" ? "success" : c === "Criminal" ? "danger" : c === "Employment" ? "warn" : "gray";
-    const pillStyle = active => ({
-        padding: "7px 15px", borderRadius: 50, fontSize: 12, fontWeight: active ? 700 : 500, cursor: "pointer",
-        border: `1.5px solid ${active ? t.primary : t.border}`, background: active ? t.primaryGlow : "transparent",
-        color: active ? t.primary : t.textMuted, transition: "all 0.2s", fontFamily: "'Inter',sans-serif",
-    });
     const tbBtn = { padding: "5px 10px", borderRadius: 8, border: `1px solid ${t.border}`, background: t.card, color: t.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif" };
 
     const goTo = n => setStep(n);
@@ -685,6 +757,22 @@ const ModDocuments = () => {
         if (!spec || draftingMode(spec) === "dedicated") return;
         setSelectedType(spec);
         setDocTitle(`${spec.label} draft`);
+    };
+    /* Proceed from the catalogue to drafting. Takes the spec when the caller
+     * selects and proceeds in one action (the details panel): reading
+     * `selectedType` there would see the selection from before this render. */
+    const useTemplate = (spec, prefill = null) => {
+        const chosen = spec || selectedType;
+        if (!chosen) { toast.show("⚠️ Select a template first", "warn"); return; }
+        takePendingDocumentsView();
+        if (draftingMode(chosen) === "dedicated") return;
+        if (spec && spec.template_type !== selectedType?.template_type) pickDraft(spec);
+        const typed = Object.fromEntries(Object.entries(prefill || {})
+            .map(([k, v]) => [k, typeof v === "string" ? v.trim() : v])
+            .filter(([, v]) => v));
+        prefillRef.current = Object.keys(typed).length ? typed : null;
+        setView("flow");
+        setStep(1);
     };
     // `spec` is the catalogue entry, not a label. handleGenerate needs the
     // template_type the server keys builders by, and deriving it from a display
@@ -781,6 +869,9 @@ const ModDocuments = () => {
             // This is the last point where the mistake is cheap: after this it
             // is an immutable revision, and after submission it is in a
             // lawyer's queue.
+            // What the client typed in Customize wins over what was read from
+            // the case: they wrote it on purpose, for this document.
+            if (prefillRef.current) fields = { ...fields, ...prefillRef.current };
             setRawFields(fields);
             setReviewRows(buildReviewRows(fields, selectedType?.fields || []));
             setGenerating(false);
@@ -851,7 +942,15 @@ const ModDocuments = () => {
                 setDocumentTemplateType(backendType);
             } else if (viaV2.error) {
                 setGenerating(false);
-                setDocIssue(viaV2.issue);
+                if (viaV2.issue?.code === "generation_failed") {
+                    // The revision under this key FAILED and is final: replaying
+                    // the same key returns the same failure forever. A retry is
+                    // a new attempt, so the key is spent and Retry mints a new one.
+                    generateKeyRef.current = null;
+                    setDocIssue({ ...viaV2.issue, retryable: true });
+                } else {
+                    setDocIssue(viaV2.issue);
+                }
                 // NOT reported as generated. A draft the user believes exists
                 // and then submits is worse than a visible failure.
                 return;
@@ -993,67 +1092,120 @@ const ModDocuments = () => {
         </div>
     );
 
-    /* ── Header actions ── */
-    const { setHeaderActions } = useHeaderActions();
-    useEffect(() => {
-        setHeaderActions(
-            <>
-                {step > 0 && <BtnOutline onClick={prevStep} style={{ fontSize: 11, padding: "7px 14px" }}>← Back</BtnOutline>}
-                {step > 0 && step < 4 && <BtnPrimary onClick={nextStep} style={{ fontSize: 11, padding: "7px 18px" }}>Continue →</BtnPrimary>}
-            </>
-        );
-        return () => setHeaderActions(null);
-    }, [step, setHeaderActions]);
-
-    /* ── Stepper ── */
-    const Stepper = () => (
-        <div style={{ display: "flex", alignItems: "center", paddingBottom: 22, flexShrink: 0 }}>
-            {STEPS.map((s, i) => {
-                const done = i < step, active = i === step;
-                return (
-                    <Fragment key={s.label}>
-                        <div onClick={() => i < step && goTo(i)} style={{ display: "flex", alignItems: "center", gap: 7, cursor: i < step ? "pointer" : "default", padding: "4px 8px", borderRadius: 50 }}>
-                            <div style={{
-                                width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-                                fontSize: done ? 11 : 12, fontWeight: 800, flexShrink: 0, transition: "all 0.25s",
-                                background: done ? t.primary : active ? t.primaryGlow : "transparent",
-                                color: done ? (t.mode === "dark" ? "#1A2E35" : "#fff") : active ? t.primary : t.textMuted,
-                                border: `2px solid ${done ? t.primary : active ? t.primary : t.border}`,
-                                boxShadow: active ? `0 0 0 4px ${t.primaryGlow}` : "none",
-                            }}>{done ? "✓" : s.icon}</div>
-                            <span style={{ fontSize: 12.5, fontWeight: active ? 700 : 500, color: done ? t.primary : active ? t.text : t.textMuted, whiteSpace: "nowrap" }}>{s.label}</span>
-                        </div>
-                        {i < STEPS.length - 1 && <div style={{ flex: 1, height: 2, background: done ? t.primary : t.border, margin: "0 4px", minWidth: 12, transition: "background 0.4s" }} />}
-                    </Fragment>
-                );
-            })}
+    /* ── Where the user is in the template flow ──
+     *
+     * The five-circle stepper at the top is gone: the documents screens have
+     * their own header now. The step is still said in words, next to the way
+     * back to the Documents home. */
+    const STEP_LABELS = ["Templates", "Draft details", "Review", "Send to lawyer", "Final & export"];
+    const isMobile = useIsMobile();
+    const flowHeader = step > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingBottom: 18 }}>
+            <button type="button" onClick={() => startNewDocument()}
+                style={{ background: "none", border: "none", color: t.primary, fontSize: 14, cursor: "pointer", padding: "6px 2px", fontFamily: "'Inter',sans-serif" }}>
+                ← Documents
+            </button>
+            <span style={{ color: t.textMuted }}>/</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{selectedType?.label || docTitle || "Document"}</span>
+            <Pill tone="info">Step {step} of 4 · {STEP_LABELS[step]}</Pill>
+            <div style={{ flex: 1 }} />
+            <Btn onClick={prevStep} style={{ minHeight: 38 }}>← Back</Btn>
+            {step < 4 && <Btn kind="primary" onClick={nextStep} style={{ minHeight: 38 }}>Continue →</Btn>}
         </div>
     );
 
-    /* ── Workflow sidebar — always visible from step 1+ ── */
-    const FLOW = [
-        { label: "Template Selection", active: step === 0, done: step > 0 },
-        { label: "AI Generate Draft", active: step === 1 && !genDone, done: genDone },
-        { label: "Draft Status: Created", active: step === 1 && genDone && !userApproved, done: userApproved },
-        { label: "User Review", active: step === 2 && !userApproved, done: step > 2 || userApproved },
-        { label: "Submit to Lawyer", active: step === 3 && !reviewSent, done: reviewSent },
-        { label: "Lawyer Review", active: reviewSent && reviewStatus === "submitted", done: reviewSent && reviewStatus !== "submitted" && reviewStatus !== null },
-        { label: "Lawyer Decision", active: false, done: ["approved", "returned", "rejected"].includes(reviewStatus) },
-        { label: "Final Version", active: reviewStatus === "approved" && !exported, done: exported },
-        { label: "Export", active: exported, done: exported },
-    ];
 
-    return (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-            <Stepper />
+    /* ── Shared pieces of the flow steps (mockup workspace layout) ── */
+    const STATUS_TONE = { info: "info", ok: "low", warn: "medium", danger: "high", muted: "muted" };
+    const workspaceGrid = { display: "grid", gridTemplateColumns: isMobile ? "minmax(0,1fr)" : "minmax(0,1fr) 360px", gap: 18, alignItems: "start" };
+    const sidePanel = { display: "flex", flexDirection: "column", gap: 14, position: isMobile ? "static" : "sticky", top: 0 };
+    const panelCard = { background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, padding: 16 };
+    const selectStyle = { background: t.inputBg, border: `1px solid ${t.border}`, color: t.text, borderRadius: 10, padding: "10px 12px", width: "100%", outline: "none", fontSize: 13.5, fontFamily: "'Inter',sans-serif" };
+    const docPane = children => (
+        <div style={{ borderRadius: 16, background: t.mode === "dark" ? "rgba(0,0,0,0.22)" : "rgba(26,46,53,0.05)", border: `1px solid ${t.border}`, padding: isMobile ? 8 : 18, display: "flex", justifyContent: "center" }}>
+            {children}
+        </div>
+    );
+    // The PDF itself, as tall as the screen allows — a 460px letterbox hid
+    // most of every page.
+    const pdfFrame = (title, emptyText) => (previewUrl ? (
+        <iframe title={title} src={previewUrl} style={{ width: "100%", height: "max(520px, calc(100vh - 230px))", border: "none", display: "block", borderRadius: 8, background: "#fff" }} />
+    ) : (
+        <div style={{ width: "100%", minHeight: 420, display: "flex", alignItems: "center", justifyContent: "center", padding: 40, boxSizing: "border-box", textAlign: "center", color: t.textMuted, fontSize: 13.5, background: t.card, borderRadius: 8 }}>
+            {previewIssue || emptyText}
+        </div>
+    ));
+    // Before generation: the document's outline, filled live from the review
+    // rows — values in green, what is still missing as a marked placeholder.
+    const paperRows = reviewRows
+        ? reviewRows.filter(r => r.used)
+        : (selectedType?.fields || []).filter(f => !(selectedType?.structured_fields || []).includes(f))
+            .map(name => ({ name, label: humaniseField(name), value: "" }));
+    const fieldsPaper = (
+        <Paper title={(selectedType?.label || "Your document").toUpperCase()} width={640}>
+            {selectedType?.description && <p style={{ margin: "0 0 14px" }}>{selectedType.description}</p>}
+            {paperRows.map(r => (
+                <p key={r.name} style={{ margin: "0 0 8px" }}>
+                    <b>{r.label}: </b>
+                    {String(r.value || "").trim()
+                        ? <span style={VALUE_STYLE}>{r.value}</span>
+                        : <span style={TOKEN_STYLE}>{r.label}</span>}
+                </p>
+            ))}
+            <p style={{ margin: "16px 0 0", fontFamily: "'Inter',sans-serif", fontSize: 12, color: "#5b6b6f" }}>
+                {reviewRows ? "Check each detail on the right, then generate the PDF." : "Press Generate Draft to fill these details."}
+            </p>
+        </Paper>
+    );
+    const checkRow = (label, badge) => (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
+            <span style={{ fontSize: 13, color: t.text }}>{label}</span>{badge}
+        </div>
+    );
 
-            <div style={{ flex: 1, overflow: "auto", paddingBottom: 8 }} className="aFadeUp" key={step}>
+    const backHome = () => { startNewDocument(); setView("flow"); };
+    const frame = content => (
+        <ThemeCtx.Provider value={t}>
+            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: t.bg, color: t.text }}>
+                {content}
+            </div>
+        </ThemeCtx.Provider>
+    );
+    if (view === "drafts") {
+        return frame(<DocsDrafts seed={draftsSeed} templates={templates} cases={cases} onBack={backHome}
+            onOpenView={v => setView(v)}
+            onOpenDocument={restored => { setView("flow"); setViewRev(null); applyRestored(restored); }} />);
+    }
+    if (view === "analyzer") {
+        return frame(<DocsAnalyzer onBack={backHome} onOpenView={v => setView(v)} userName={user?.full_name} />);
+    }
+    if (view === "vault") {
+        return frame(<DocsVault onBack={backHome}
+            onOpen={restored => { setView("flow"); setViewRev(null); applyRestored(restored); }} />);
+    }
+
+    return frame(
+        <div data-lenis-prevent style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: isMobile ? "60px 14px 20px" : "30px 40px 32px", boxSizing: "border-box" }}>
+            {flowHeader}
+
+            <div style={{ paddingBottom: 8 }} className="aFadeUp" key={step}>
 
                 {/* ════════════════════════════════════════════════
             STEP 1 — Template Selection (full width)
         ════════════════════════════════════════════════ */}
                 {step === 0 && (
                     <div>
+                        <DocumentsHome
+                            templates={templates}
+                            templateIssue={templateIssue}
+                            cases={cases}
+                            draftingMode={draftingMode}
+                            dedicatedToolHref={dedicatedToolHref}
+                            onUse={useTemplate}
+                            onPlan={seed => { setDraftsSeed({ ...seed, at: Date.now() }); setView("drafts"); }}
+                            onOpenView={v => setView(v)}
+                            continueSlot={(
+                                <>
                         {/* EVERY DOCUMENT THIS CLIENT OWNS, on the dashboard.
                             It was first placed inside the step-3 review pane,
                             which is only reachable part-way through creating a
@@ -1061,7 +1213,7 @@ const ModDocuments = () => {
                             the flow you would use precisely because you could
                             not find them. A mounted test caught it; nothing
                             about the source looked wrong. */}
-                        <div style={{ marginBottom: 14 }}>
+                        <div id="my-documents" style={{ scrollMarginTop: 12 }}>
                             <MyDocumentsPanel
                                 t={t}
                                 onOpen={restored => {
@@ -1093,225 +1245,124 @@ const ModDocuments = () => {
                                 }} />
                         </div>
 
-                        {/* Stats bar */}
-                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 14 }}>
-                            {[["Templates", String((templates || []).length), "📄", t.primary], ["Categories", String(Math.max(0, categories.length - 1)), "📁", t.success]].map(([label, val, ico, col]) => (
-                                <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderRadius: 14, background: t.card, border: `1px solid ${t.border}` }}>
-                                    <div>
-                                        <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 4 }}>{label}</div>
-                                        <div style={{ fontSize: 22, fontWeight: 800, color: t.text, fontFamily: "'Playfair Display',serif" }}>{val}</div>
-                                    </div>
-                                    <div style={{ width: 40, height: 40, borderRadius: 12, background: `${col}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>{ico}</div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Filters + search row */}
-                        <div style={{ display: "flex", gap: 7, marginBottom: 14, alignItems: "center", flexWrap: "wrap" }}>
-                            {categories.map(c => (
-                                <button key={c} onClick={() => setSelectedCat(c)} style={pillStyle(selectedCat === c)}>{catIcons[c]} {c}</button>
-                            ))}
-                            <div style={{ flex: 1, minWidth: 200, display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", borderRadius: 12, border: `1.5px solid ${t.border}`, background: t.card }}>
-                                <Ic n="search" s={14} c={t.textMuted} />
-                                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search legal drafts…" style={{ flex: 1, background: "transparent", border: "none", outline: "none", fontFamily: "'Inter',sans-serif", fontSize: 12.5, color: t.text }} />
-                            </div>
-                        </div>
-
-                        {/* Template grid — 3 columns, full width */}
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
-                            {templates === null ? (
-                                <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 48, color: t.textMuted, fontSize: 13 }}>Loading available templates…</div>
-                            ) : filteredDrafts.length ? filteredDrafts.map(d => {
-                                const sel = selectedType?.template_type === d.template_type;
-                                const mode = draftingMode(d);
-                                const dedicated = mode === "dedicated";
-                                return (
-                                    <div key={d.template_type} onClick={() => pickDraft(d)} style={{ background: sel ? t.primaryGlow : t.card, border: `2px solid ${sel ? t.primary : t.border}`, borderRadius: 18, padding: 18, cursor: dedicated ? "default" : "pointer", transition: "all 0.2s", position: "relative", display: "flex", flexDirection: "column", minHeight: 200, boxShadow: sel ? `0 0 0 1px ${t.primary}, ${t.shadowCard}` : t.shadowCard }}
-                                        onMouseEnter={e => { if (!sel) { e.currentTarget.style.borderColor = t.primary + "60"; e.currentTarget.style.background = t.primaryGlow + "50"; } }}
-                                        onMouseLeave={e => { if (!sel) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.card; } }}
-                                    >
-                                        {/* Selected badge */}
-                                        {sel && <div style={{ position: "absolute", top: 12, left: 12, width: 22, height: 22, borderRadius: "50%", background: t.primary, color: t.mode === "dark" ? "#1A2E35" : "#fff", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 2px 8px ${t.primaryGlow}` }}>✓</div>}
-                                        {/* PDF badge */}
-                                        <div style={{ position: "absolute", top: 12, right: 12 }}><Badge type="gray">PDF</Badge></div>
-                                        {/* Icon */}
-                                        <div style={{ width: 46, height: 46, borderRadius: 12, background: sel ? `${t.primary}25` : `${t.danger}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, marginBottom: 10, marginTop: 4 }}>{sel ? "📗" : "📕"}</div>
-                                        {/* Category */}
-                                        <Badge type={catBadgeColor(d.category)} style={{ marginBottom: 7, alignSelf: "flex-start", fontSize: 10 }}>{d.category}</Badge>
-                                        {/* Name */}
-                                        <div style={{ fontSize: 13, fontWeight: 700, color: sel ? t.primary : t.text, lineHeight: 1.35, marginBottom: 6 }}>{d.label}</div>
-                                        <div style={{ fontSize: 10.5, color: t.textMuted, lineHeight: 1.5, marginBottom: 10, flex: 1 }}>{d.description}</div>
-                                        {/* Action */}
-                                        <div style={{ display: "flex", gap: 7 }}>
-                                            {dedicated ? (
-                                                <a href={dedicatedToolHref(d)} onClick={e => e.stopPropagation()} style={{ flex: 1, padding: "7px", borderRadius: 10, border: `1.5px solid ${t.border}`, color: t.primary, textAlign: "center", textDecoration: "none", fontSize: 11, fontWeight: 700 }}>Open dedicated calculator</a>
-                                            ) : (
-                                                <button onClick={e => { e.stopPropagation(); sel ? nextStep() : pickDraft(d); }} style={{ flex: 1, padding: "7px", borderRadius: 10, border: `1.5px solid ${sel ? t.primary : t.border}`, background: sel ? t.primary : t.card, color: sel ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif", transition: "all 0.2s" }}>{sel ? "✓ Use Template" : mode === "ai" ? "Select — AI assisted" : "Select — enter details"}</button>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            }) : <div style={{ gridColumn: "span 3", textAlign: "center", padding: 48, color: t.textMuted, fontSize: 13 }}>No templates found.</div>}
-                        </div>
-
-                        {/* Bottom CTA bar — shows when template selected */}
-                        {selectedType && (
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", marginTop: 16, borderRadius: 14, background: t.primaryGlow, border: `1.5px solid ${t.primary}` }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                                    <div style={{ width: 34, height: 34, borderRadius: 9, background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📗</div>
-                                    <div>
-                                        <div style={{ fontSize: 12, fontWeight: 700, color: t.text }}>{selectedType.label}</div>
-                                        <div style={{ fontSize: 10, color: t.textMuted }}>Template selected · Ready to proceed</div>
-                                    </div>
-                                </div>
-                                <BtnPrimary onClick={nextStep} style={{ fontSize: 12, padding: "10px 22px", borderRadius: 12, boxShadow: `0 4px 16px ${t.primaryGlow}` }}>
-                                    Continue to AI Generation →
-                                </BtnPrimary>
-                            </div>
-                        )}
+                                </>
+                            )} />
                     </div>
                 )}
 
                 {/* ════════════════════════════════════════════════
-            STEP 2 — AI Generate Draft
+            STEP 2 — Draft details (workspace: document + panel)
         ════════════════════════════════════════════════ */}
                 {step === 1 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div style={workspaceGrid}>
+                        <div>{genDone && docId
+                            ? docPane(pdfFrame("Document preview", "Loading document preview…"))
+                            : docPane(fieldsPaper)}</div>
 
-                        {/* Doc identity */}
-                        <Card>
-                            <STitle icon="sparkle" sub="Configure your document before AI drafting">Generation Settings</STitle>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-                                <div>
-                                    <Lbl>Document Type</Lbl>
-                                    {templates === null ? (
-                                        <div style={{ fontSize: 12, color: t.textMuted, padding: "10px 0" }}>
-                                            Loading the available documents…
-                                        </div>
-                                    ) : templateIssue ? (
-                                        <div style={{ fontSize: 12, color: t.warn, padding: "10px 13px", borderRadius: 10, background: `${t.warn}12`, border: `1px solid ${t.warn}35` }}>
-                                            {templateIssue}
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <select
-                                                value={selectedType?.template_type || ""}
-                                                onChange={e => {
-                                                    const spec = templates.find(
-                                                        x => x.template_type === e.target.value);
-                                                    if (spec) pickType(spec);
-                                                }}
-                                                style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5, fontFamily: "'Inter',sans-serif" }}>
-                                                <option value="">Select a document type…</option>
-                                                {_byCategory(templates).map(([category, items]) => (
-                                                    <optgroup key={category} label={category}>
-                                                        {items.map(spec => (
-                                                            <option key={spec.template_type} value={spec.template_type} disabled={draftingMode(spec) === "dedicated"}>
-                                                                {spec.label}{draftingMode(spec) === "dedicated" ? " — dedicated calculator" : ""}
-                                                            </option>
-                                                        ))}
-                                                    </optgroup>
-                                                ))}
-                                            </select>
-                                            {/* The server's own description of what this
-                                                builder emits. Shown because several of
-                                                them are narrower than their name suggests
-                                                — the Vakalatnama entry is an execution
-                                                checklist and says so, and a user who picks
-                                                it expecting an appointment instrument needs
-                                                to read that BEFORE drafting, not after
-                                                filing. */}
-                                            {selectedType?.description && (
-                                                <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.6, marginTop: 7, padding: "9px 12px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
-                                                    {selectedType.description}
-                                                </div>
-                                            )}
-                                            {unsupportedType && (
-                                                <a href={dedicatedToolHref(selectedType)} style={{ display: "inline-block", marginTop: 8, color: t.primary, fontSize: 11.5, fontWeight: 700 }}>
-                                                    Open the dedicated calculator →
-                                                </a>
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-                                <div><Lbl>Document Title</Lbl><ThemedInput value={docTitle} onChange={e => setDocTitle(e.target.value)} placeholder={selectedType ? `${selectedType.label} draft` : "Choose a document type"} /></div>
-                                <div>
-                                    <Lbl>Linked Case</Lbl>
-                                    <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5, fontFamily: "'Inter',sans-serif" }}>
-                                        <option value="">Select a case…</option>
-                                        <option value={NO_CASE}>Standalone — no linked case</option>
-                                        {cases.map(c => <option key={c._id || c.id} value={c._id || c.id}>{c.title || c.case_type || (c._id || c.id)}</option>)}
-                                    </select>
-                                    {selection.isStandalone && (
-                                        <div style={{ fontSize: 10.5, color: t.textMuted, marginTop: 5 }}>No case facts will be read automatically; you will enter the document details yourself.</div>
-                                    )}
-                                </div>
-                                <div><Lbl>Case Reference No.</Lbl><ThemedInput value={caseRef} onChange={e => setCaseRef(e.target.value)} placeholder="e.g. CASE-2026-00142" /></div>
-                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                                    <div><Lbl>Jurisdiction</Lbl>
-                                        <select value={jurisdiction} onChange={e => setJurisdiction(e.target.value)} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5 }}>
-                                            <option>Lahore High Court</option><option>Islamabad High Court</option><option>Sindh High Court</option><option>Supreme Court</option>
-                                        </select>
+                        <div style={sidePanel}>
+                            <div style={panelCard}>
+                                <div style={{ fontSize: 15, fontWeight: 700, color: t.text, marginBottom: 12 }}>Draft details</div>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                                    <div>
+                                        <Lbl>Document Type</Lbl>
+                                        {templates === null ? (
+                                            <div style={{ fontSize: 12.5, color: t.textMuted, padding: "10px 0" }}>
+                                                Loading the available documents…
+                                            </div>
+                                        ) : templateIssue ? (
+                                            <div style={{ fontSize: 12.5, color: t.warn, padding: "10px 13px", borderRadius: 10, background: `${t.warn}12`, border: `1px solid ${t.warn}35` }}>
+                                                {templateIssue}
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <select
+                                                    value={selectedType?.template_type || ""}
+                                                    onChange={e => {
+                                                        const spec = templates.find(
+                                                            x => x.template_type === e.target.value);
+                                                        if (spec) pickType(spec);
+                                                    }}
+                                                    style={selectStyle}>
+                                                    <option value="">Select a document type…</option>
+                                                    {_byCategory(templates).map(([category, items]) => (
+                                                        <optgroup key={category} label={category}>
+                                                            {items.map(spec => (
+                                                                <option key={spec.template_type} value={spec.template_type} disabled={draftingMode(spec) === "dedicated"}>
+                                                                    {spec.label}{draftingMode(spec) === "dedicated" ? " — dedicated calculator" : ""}
+                                                                </option>
+                                                            ))}
+                                                        </optgroup>
+                                                    ))}
+                                                </select>
+                                                {/* The server's own description of what this
+                                                    builder emits: several are narrower than their
+                                                    name suggests, and the user must read that
+                                                    BEFORE drafting, not after filing. */}
+                                                {selectedType?.description && (
+                                                    <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.6, marginTop: 7 }}>
+                                                        {selectedType.description}
+                                                    </div>
+                                                )}
+                                                {unsupportedType && (
+                                                    <a href={dedicatedToolHref(selectedType)} style={{ display: "inline-block", marginTop: 8, color: t.primary, fontSize: 12, fontWeight: 700 }}>
+                                                        Open the dedicated calculator →
+                                                    </a>
+                                                )}
+                                            </>
+                                        )}
                                     </div>
-                                    <div><Lbl>Language</Lbl>
-                                        <select value={language} onChange={e => setLanguage(e.target.value)} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5 }}>
-                                            <option>English</option><option>Urdu</option><option>Both</option>
+                                    <div><Lbl>Document Title</Lbl><ThemedInput value={docTitle} onChange={e => setDocTitle(e.target.value)} placeholder={selectedType ? `${selectedType.label} draft` : "Choose a document type"} /></div>
+                                    <div>
+                                        <Lbl>Linked Case</Lbl>
+                                        <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)} style={selectStyle}>
+                                            <option value="">Select a case…</option>
+                                            <option value={NO_CASE}>Standalone — no linked case</option>
+                                            {cases.map(c => <option key={c._id || c.id} value={c._id || c.id}>{c.title || c.case_type || (c._id || c.id)}</option>)}
                                         </select>
+                                        {selection.isStandalone && (
+                                            <div style={{ fontSize: 11.5, color: t.textMuted, marginTop: 5 }}>No case facts will be read automatically; you will enter the document details yourself.</div>
+                                        )}
                                     </div>
                                 </div>
-                                <div><Lbl>Special Instructions</Lbl>
-                                    <textarea value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="e.g. Emphasise wrongful termination, cite Labour Act 1934, include salary dues…" rows={3} style={{ background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 12, padding: "11px 13px", width: "100%", outline: "none", fontSize: 12.5, resize: "vertical", fontFamily: "'Inter',sans-serif", lineHeight: 1.6, boxSizing: "border-box" }} />
+
+                                {/* Readiness strip — reflects real state, never a
+                                    hardcoded "Ready": a panel that asserts state it
+                                    never checks turns a working feature into a dead
+                                    button. */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 12px", borderRadius: 10, background: canGenerate ? t.primaryGlow2 : t.inputBg, border: `1px solid ${canGenerate ? t.primary + "40" : t.border}`, marginTop: 14 }}>
+                                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: canGenerate ? t.success : t.warn, flexShrink: 0 }} />
+                                    <span style={{ fontSize: 12, color: t.textMuted, flex: 1, minWidth: 160 }}>
+                                        {canGenerate
+                                            ? (selection.isStandalone ? "Standalone · ready to draft" : `Linked to "${activeCaseTitle}" · ready to draft`)
+                                            : selection.blockedReason === "loading"
+                                            ? "Loading your cases…"
+                                            : selection.blockedReason === "standalone_unsupported"
+                                            ? "Documents drafted here are always linked to a case. Choose one above."
+                                            : casesError
+                                            ? (casesReloading
+                                                ? "Trying your cases again…"
+                                                : "We could not load your cases. This does not mean they are gone — only that we could not reach them just now.")
+                                            : "No case linked yet — complete your Legal Intake first, or draft standalone."}
+                                    </span>
+                                    {/* A way out of the error: `reloadCases` touches the
+                                        case list alone, so the draft on screen survives. */}
+                                    {casesError && (
+                                        <button
+                                            onClick={() => reloadCases()}
+                                            disabled={casesReloading}
+                                            style={{ padding: "5px 11px", borderRadius: 9, border: `1px solid ${t.border}`, background: "transparent", color: t.text, fontSize: 11.5, fontWeight: 600, cursor: casesReloading ? "default" : "pointer", fontFamily: "'Inter',sans-serif", opacity: casesReloading ? 0.6 : 1, whiteSpace: "nowrap" }}>
+                                            {casesReloading ? "Retrying…" : "Try again"}
+                                        </button>
+                                    )}
+                                    <Badge type={canGenerate ? "success" : "warn"}>{canGenerate ? "✓ Ready" : "Not ready"}</Badge>
                                 </div>
                             </div>
 
-                            {/* Readiness strip — reflects real state.
-                                This used to be hardcoded to "Case data extracted · AI
-                                recommendations ready / ✓ Ready" regardless of whether a
-                                case existed. It told users everything was ready, they
-                                pressed Generate, and handleGenerate bailed before making
-                                any request because there was no case to generate from.
-                                A panel that asserts state it never checks turns a working
-                                feature into a dead button. */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 13px", borderRadius: 10, background: canGenerate ? t.primaryGlow : t.inputBg, border: `1px solid ${canGenerate ? t.primary + "30" : t.border}`, marginTop: 12 }}>
-                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: canGenerate ? t.success : t.warn, flexShrink: 0 }} />
-                                <span style={{ fontSize: 11.5, color: t.textMuted, flex: 1 }}>
-                                    {canGenerate
-                                        ? `Linked to "${activeCaseTitle}" · ready to draft`
-                                        : selection.blockedReason === "loading"
-                                        ? "Loading your cases…"
-                                        : selection.blockedReason === "standalone_unsupported"
-                                        ? "Documents drafted here are always linked to a case. Choose one above."
-                                        : casesError
-                                        ? (casesReloading
-                                            ? "Trying your cases again…"
-                                            : "We could not load your cases. This does not mean they are gone — only that we could not reach them just now.")
-                                        : "No case linked yet — complete your Legal Intake first, then come back to draft a document."}
-                                </span>
-                                {/* A WAY OUT OF THE ERROR, not just a description
-                                    of it. Without this the only recovery is a full
-                                    page reload, which also throws away whatever
-                                    document is open. `reloadCases` touches the case
-                                    list alone, so the draft on screen survives.
-                                    Disabled while in flight — the guard in
-                                    `reloadCases` already joins concurrent callers,
-                                    and the disabled state is what says so. */}
-                                {casesError && (
-                                    <button
-                                        onClick={() => reloadCases()}
-                                        disabled={casesReloading}
-                                        style={{ padding: "5px 11px", borderRadius: 9, border: `1px solid ${t.border}`, background: "transparent", color: t.text, fontSize: 11, fontWeight: 600, cursor: casesReloading ? "default" : "pointer", fontFamily: "'Inter',sans-serif", opacity: casesReloading ? 0.6 : 1, whiteSpace: "nowrap" }}>
-                                        {casesReloading ? "Retrying…" : "Try again"}
-                                    </button>
-                                )}
-                                <Badge type={canGenerate ? "success" : "warn"}>{canGenerate ? "✓ Ready" : "Not ready"}</Badge>
-                            </div>
-
-                            {/* THE EXTRACTION, BEFORE IT BECOMES A DOCUMENT.
-                                Shown in place of the progress bar: this is the
-                                last point where a wrong party name or amount is
-                                a two-second fix rather than a new revision. */}
+                            {/* THE EXTRACTION, BEFORE IT BECOMES A DOCUMENT —
+                                the last point where a wrong name or amount is a
+                                two-second fix rather than a new revision. */}
                             {reviewRows && !genDone && (
-                                <div style={{ marginTop: 14 }}>
+                                <div style={panelCard}>
                                     {/* The same fields retry under the same key. */}
                                     {docIssueBanner(() => confirmFieldsAndGenerate(generateKeyRef.current))}
                                     {extractNotice && (
@@ -1342,40 +1393,27 @@ const ModDocuments = () => {
                                 </div>
                             )}
 
-                            {/* Progress bar */}
                             {(generating || genDone) && (
-                                <div style={{ marginTop: 12 }}>
+                                <div style={panelCard}>
                                     <div style={{ height: 6, borderRadius: 6, background: t.inputBg, overflow: "hidden", marginBottom: 6 }}>
-                                        <div style={{ height: "100%", background: t.grad1, borderRadius: 6, width: `${genPct}%`, transition: "width 0.4s ease" }} />
+                                        <div style={{ height: "100%", background: t.primary, borderRadius: 6, width: `${genPct}%`, transition: "width 0.4s ease" }} />
                                     </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: t.textMuted }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: t.textMuted }}>
                                         <span>{genDone ? "✅ Draft created successfully" : GEN_STEPS[Math.min(Math.floor(genPct / 20), 4)]}</span>
                                         <span>{genPct}%</span>
                                     </div>
                                 </div>
                             )}
 
-                            {/* What the Code requires, and what this draft is missing.
-                                Deterministic and cited — Order VII Rule 1 CPC lists the
-                                particulars a plaint must contain, and Order VI Rule 3
-                                makes the Appendix A forms mandatory. Advisory: it reports,
-                                it does not block. */}
-                            {/* A value that went nowhere.
-                                 *
-                                 * The document rendered with an empty line exactly
-                                 * where the user believes they supplied something,
-                                 * and until now nothing anywhere said so — the key
-                                 * was dropped in silence. Shown ABOVE compliance
-                                 * because it is a fact about what was submitted,
-                                 * which the reader needs before reading a verdict
-                                 * on what was produced from it. */}
+                            {/* A value that went nowhere: the document rendered an
+                                empty line where the user believes they supplied
+                                something. Shown before any verdict. */}
                             {genDone && fieldShape?.unknown?.length > 0 && (
-                                <div style={{ marginTop: 12, padding: "11px 14px", borderRadius: 12,
-                                    background: `${t.warn}12`, border: `1.5px solid ${t.warn}45` }}>
-                                    <div style={{ fontSize: 12.5, fontWeight: 700, color: t.warn, marginBottom: 4 }}>
+                                <div style={{ padding: "11px 14px", borderRadius: 12, background: `${t.warn}12`, border: `1.5px solid ${t.warn}45` }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.warn, marginBottom: 4 }}>
                                         {fieldShape.unknown.length} answer{fieldShape.unknown.length === 1 ? " was" : "s were"} not used
                                     </div>
-                                    <div style={{ fontSize: 11, color: t.textMuted, lineHeight: 1.6 }}>
+                                    <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.6 }}>
                                         This document type does not have {fieldShape.unknown.length === 1 ? "a field" : "fields"} called{" "}
                                         {fieldShape.unknown.join(", ")}. Whatever was entered there is
                                         not in the draft — check the document before submitting it.
@@ -1384,47 +1422,31 @@ const ModDocuments = () => {
                             )}
 
                             {genDone && compliance?.checked && (
-                                <div style={{ marginTop: 13, padding: 13, borderRadius: 11,
-                                    background: compliance.complete ? `${t.success}12` : `${t.warn}12`,
-                                    border: `1.5px solid ${compliance.complete ? t.success : t.warn}45` }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-                                        <span style={{ fontSize: 12.5, fontWeight: 700, color: compliance.complete ? t.success : t.warn }}>
-                                            {compliance.complete
-                                                ? "✓ Contains every particular the Code requires"
-                                                : `${compliance.missing} required particular${compliance.missing === 1 ? "" : "s"} missing`}
-                                        </span>
+                                <div style={{ padding: 14, borderRadius: 12, background: compliance.complete ? `${t.success}12` : `${t.warn}12`, border: `1.5px solid ${compliance.complete ? t.success : t.warn}45` }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: compliance.complete ? t.success : t.warn, marginBottom: 6 }}>
+                                        {compliance.complete
+                                            ? "✓ Contains every particular the Code requires"
+                                            : `${compliance.missing} required particular${compliance.missing === 1 ? "" : "s"} missing`}
                                     </div>
-                                    <div style={{ fontSize: 10.5, color: t.textMuted, marginBottom: compliance.complete ? 0 : 9 }}>
-                                        Checked against {compliance.basis}
-                                    </div>
+                                    <div style={{ fontSize: 11.5, color: t.textMuted, marginBottom: compliance.complete ? 0 : 9 }}>Checked against {compliance.basis}</div>
                                     {compliance.items.filter(i => i.status === "missing").map(i => (
                                         <div key={i.clause} style={{ marginBottom: 8, paddingLeft: 10, borderLeft: `2px solid ${t.warn}55` }}>
-                                            <div style={{ fontSize: 11.5, color: t.text, fontWeight: 600 }}>
-                                                {i.clause} — {i.requirement}
-                                            </div>
-                                            <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>{i.hint}</div>
+                                            <div style={{ fontSize: 12, color: t.text, fontWeight: 600 }}>{i.clause} — {i.requirement}</div>
+                                            <div style={{ fontSize: 11.5, color: t.textMuted, marginTop: 2 }}>{i.hint}</div>
                                         </div>
                                     ))}
-                                    <div style={{ fontSize: 10, color: t.textMuted, marginTop: 6, fontStyle: "italic" }}>
-                                        {compliance.advisory}
-                                    </div>
+                                    <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6, fontStyle: "italic" }}>{compliance.advisory}</div>
                                 </div>
                             )}
 
-                            {/* Citation verification. Deliberately NOT a green tick:
-                                this checks only that an authority EXISTS, never that
-                                it supports the point it is cited for, and the corpus
-                                cannot speak to every statute. So the "cannot check"
-                                count is always on screen next to the verified count —
-                                a panel that showed only "4 verified" would read as a
-                                clean bill of health the check never gave. A run that
-                                failed says so rather than showing nothing, because a
-                                silent panel looks identical to a clean one. */}
+                            {/* Citation verification. Never a bare green tick: it
+                                checks existence only, so the "cannot check" count
+                                is always shown next to the verified one. */}
                             {genDone && verification && (
-                                <div style={{ marginTop: 13, padding: 13, borderRadius: 11,
+                                <div style={{ padding: 14, borderRadius: 12,
                                     background: (verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? `${t.danger}12` : `${t.textMuted}0e`,
                                     border: `1.5px solid ${(verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? `${t.danger}55` : `${t.textMuted}33`}` }}>
-                                    <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 7,
+                                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6,
                                         color: (verification.counts?.not_in_corpus > 0 || verification.counts?.omitted > 0) ? t.danger : t.text }}>
                                         {verification.ran === false
                                             ? "Citations were not checked"
@@ -1436,51 +1458,38 @@ const ModDocuments = () => {
                                                         ? "No citations found to check"
                                                         : "Citations checked for existence"}
                                     </div>
-
                                     {verification.ran === false ? (
-                                        <div style={{ fontSize: 11, color: t.textMuted }}>
-                                            {verification.summary}
-                                        </div>
+                                        <div style={{ fontSize: 12, color: t.textMuted }}>{verification.summary}</div>
                                     ) : (
                                         <>
-                                            <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 9 }}>
+                                            <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 9 }}>
                                                 {verification.counts?.verified || 0} found in the corpus ·{" "}
-                                                {verification.counts?.omitted > 0 && (
-                                                    <>{verification.counts.omitted} repealed · </>
-                                                )}
+                                                {verification.counts?.omitted > 0 && <>{verification.counts.omitted} repealed · </>}
                                                 {verification.counts?.unverifiable || 0} this corpus cannot check
                                             </div>
-
                                             {(verification.checks || [])
                                                 .filter(c => c.status !== "VERIFIED")
                                                 .map((c, i) => (
                                                     <div key={`${c.canonical}-${i}`} style={{ marginBottom: 8, paddingLeft: 10,
                                                         borderLeft: `2px solid ${(c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? `${t.danger}66` : `${t.textMuted}44`}` }}>
-                                                        <div style={{ fontSize: 11.5, fontWeight: 600,
-                                                            color: (c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? t.danger : t.text }}>
+                                                        <div style={{ fontSize: 12, fontWeight: 600, color: (c.status === "NOT_IN_CORPUS" || c.status === "OMITTED") ? t.danger : t.text }}>
                                                             {c.canonical}
                                                             <span style={{ fontWeight: 500, color: t.textMuted }}>
-                                                                {c.status === "OMITTED" ? " — REPEALED"
-                                                                    : c.status === "NOT_IN_CORPUS" ? " — not found"
-                                                                        : " — cannot verify"}
+                                                                {c.status === "OMITTED" ? " — REPEALED" : c.status === "NOT_IN_CORPUS" ? " — not found" : " — cannot verify"}
                                                             </span>
                                                         </div>
-                                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 2 }}>{c.detail}</div>
+                                                        <div style={{ fontSize: 11.5, color: t.textMuted, marginTop: 2 }}>{c.detail}</div>
                                                     </div>
                                                 ))}
                                         </>
                                     )}
-
-                                    <div style={{ fontSize: 10, color: t.textMuted, marginTop: 6, fontStyle: "italic" }}>
+                                    <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6, fontStyle: "italic" }}>
                                         Existence only — a real provision cited for something it does not
                                         say still shows as found. Read every authority before filing.
                                     </div>
-                                    {/* The adopted scope statement, shipped from the backend so this
-                                        panel and the lawyer's review panel cannot drift apart about
-                                        what was promised. See backend/app/core/claims.py. */}
+                                    {/* The adopted scope statement, shipped from the backend. */}
                                     {verification.scope && (
-                                        <div style={{ fontSize: 10, color: t.textMuted, marginTop: 8,
-                                            paddingTop: 8, borderTop: `1px solid ${t.textMuted}22`, lineHeight: 1.5 }}>
+                                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${t.textMuted}22`, lineHeight: 1.5 }}>
                                             {verification.scope}
                                         </div>
                                     )}
@@ -1488,7 +1497,7 @@ const ModDocuments = () => {
                             )}
 
                             {!genDone ? (
-                                <BtnPrimary onClick={() => handleGenerate()} disabled={generating || !canGenerate} style={{ width: "100%", marginTop: 13, fontSize: 13, padding: "13px", borderRadius: 12, justifyContent: "center" }}>
+                                <Btn kind="primary" onClick={() => handleGenerate()} disabled={generating || !canGenerate} style={{ width: "100%", minHeight: 46 }}>
                                     {generating
                                         ? "⏳ Generating…"
                                         : !selection.canGenerate
@@ -1496,509 +1505,359 @@ const ModDocuments = () => {
                                             : unsupportedType
                                                 ? `${selectedType?.label} isn't supported yet`
                                                 : "✨ Generate Draft"}
-                                </BtnPrimary>
+                                </Btn>
                             ) : (
-                                <div style={{ display: "flex", gap: 8, marginTop: 13 }}>
-                                    <BtnOutline onClick={() => { setGenDone(false); setGenPct(0); }} style={{ flex: 1, fontSize: 11, padding: "11px", borderRadius: 12 }}>🔄 Regenerate</BtnOutline>
-                                    <BtnPrimary onClick={() => { goTo(2); }} style={{ flex: 2, fontSize: 12, padding: "11px", borderRadius: 12, justifyContent: "center" }}>Review Draft →</BtnPrimary>
+                                <div style={{ display: "flex", gap: 8 }}>
+                                    <Btn onClick={() => { setGenDone(false); setGenPct(0); }} style={{ flex: 1 }}>🔄 Regenerate</Btn>
+                                    <Btn kind="primary" onClick={() => { goTo(2); }} style={{ flex: 2 }}>Review Draft →</Btn>
                                 </div>
                             )}
-                        </Card>
-
+                        </div>
                     </div>
                 )}
 
                 {/* ════════════════════════════════════════════════
-            STEP 3 — User Review
+            STEP 3 — Review (workspace: the real PDF + checks)
         ════════════════════════════════════════════════ */}
                 {step === 2 && (
-                    <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 18 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <Pill tone="info">{selectedType?.label || "Document"}</Pill>
+                            <Pill tone={STATUS_TONE[statusView.tone] || "muted"}>{docStatus}</Pill>
+                            {docVersion != null && <Pill tone="muted">Version {docVersion}</Pill>}
+                            <span style={{ flex: 1 }} />
+                            {/* "Change answers", not "Edit": THE DOCUMENT IS A PDF.
+                                Changing the answers and regenerating IS the edit,
+                                and it maps onto how the document is versioned. */}
+                            <Btn onClick={() => goTo(1)} title="Go back and change your answers, then regenerate" style={{ minHeight: 38 }}>✏️ Change answers</Btn>
+                            <Btn onClick={() => { if (docId) { downloadDocumentFile(docId, docTitle || "document", {
+                                    revisionId: viewRev?.revision_id || docRevisionId,
+                                    expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
+                                }); } else { toast.show("⚠️ Generate the document first", "warn"); } }} style={{ minHeight: 38 }}>📥 Download</Btn>
+                        </div>
 
-                        {/* Left: editable document */}
-                        <Card style={{ display: "flex", flexDirection: "column", minHeight: 540 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                                <div style={{ width: 36, height: 36, borderRadius: 10, background: t.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>📄</div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: 700, color: t.text, fontSize: 14 }}>{docTitle || "Generated Document"}</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType?.label || "—"} · {caseRef || "No ref"}</div>
-                                </div>
-                                <Badge type={statusColors[docStatus]}>{docStatus}</Badge>
-                                {/* "Change answers", not "Edit".
-                                    THE DOCUMENT IS A PDF IN AN IFRAME. The old
-                                    Edit toggle revealed a formatting toolbar
-                                    whose buttons called document.execCommand on
-                                    it — bold, italic, underline — none of which
-                                    can touch a PDF, and none of which were ever
-                                    saved or regenerated. A control that looks
-                                    like it edits and does not is worse than no
-                                    control: the user believes their changes
-                                    exist and submits a document that never
-                                    contained them.
-
-                                    Changing the answers and regenerating IS the
-                                    edit, and it is the only one this format
-                                    supports. It also maps exactly onto how the
-                                    document is versioned: a change produces a
-                                    new revision, not a mutated file. */}
-                                <button
-                                    onClick={() => goTo(1)}
-                                    title="Go back and change your answers, then regenerate"
-                                    style={{
-                                        padding: "6px 13px", borderRadius: 10,
-                                        border: `1.5px solid ${t.border}`,
-                                        background: t.card, color: t.textMuted,
-                                        fontSize: 11, fontWeight: 700, cursor: "pointer",
-                                    }}>
-                                    ✏️ Change answers
-                                </button>
-                            </div>
-
-                            {/* A client who believes a lawyer has their document
-                                waits for a reply nobody is going to send. */}
-                            {docIssueBanner(issue => {
-                                if (issue.onRetry === "withdraw") withdrawFromReview(withdrawKeyRef.current);
-                                else if (docId) submitToLawyer(submitKeyRef.current);
-                                else handleGenerate(generateKeyRef.current);
-                            })}
-
-                            <div style={{ flex: 1, border: `1.5px solid ${t.border}`, borderRadius: 12, overflow: "hidden", background: "#fff", minHeight: 460 }}>
-                                {previewUrl ? (
-                                    <iframe title="Document preview" src={previewUrl} style={{ width: "100%", height: 460, border: "none", display: "block" }} />
-                                ) : (
-                                    <div style={{ padding: 40, textAlign: "center", color: t.textMuted, fontSize: 13, minHeight: 460, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                        {previewIssue
-                                            ? previewIssue
-                                            : docId ? "Loading document preview…"
-                                                : "Generate the document to preview it here."}
+                        <div style={workspaceGrid}>
+                            <div>
+                                {/* A client who believes a lawyer has their document
+                                    waits for a reply nobody is going to send. */}
+                                {docIssueBanner(issue => {
+                                    if (issue.onRetry === "withdraw") withdrawFromReview(withdrawKeyRef.current);
+                                    else if (docId) submitToLawyer(submitKeyRef.current);
+                                    else handleGenerate(generateKeyRef.current);
+                                })}
+                                {viewRev && (
+                                    <div style={{ marginBottom: 10, padding: "9px 12px", borderRadius: 10, background: `${t.warn}12`, border: `1px solid ${t.warn}35`, fontSize: 12.5, color: t.text, display: "flex", alignItems: "center", gap: 10 }}>
+                                        <span style={{ flex: 1 }}>
+                                            Showing an earlier version (v{viewRev.version}). Submitting still sends the latest.
+                                        </span>
+                                        <Btn onClick={() => setViewRev(null)} style={{ minHeight: 32, fontSize: 12 }}>Back to latest</Btn>
                                     </div>
                                 )}
+                                {docPane(pdfFrame("Document preview", docId ? "Loading document preview…" : "Generate the document to preview it here."))}
                             </div>
 
-                            {viewRev && (
-                                <div style={{ marginTop: 10, padding: "9px 12px", borderRadius: 10, background: `${t.warn}12`, border: `1px solid ${t.warn}35`, fontSize: 11.5, color: t.text, display: "flex", alignItems: "center", gap: 10 }}>
-                                    <span style={{ flex: 1 }}>
-                                        Showing an earlier version (v{viewRev.version}). Submitting still sends the latest.
-                                    </span>
-                                    <button
-                                        onClick={() => setViewRev(null)}
-                                        style={{ background: "transparent", border: `1px solid ${t.border}`, borderRadius: 8, padding: "5px 11px", fontSize: 11, fontWeight: 700, color: t.text, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "'Inter',sans-serif" }}>
-                                        Back to latest
-                                    </button>
-                                </div>
-                            )}
-
-                            <RevisionHistory
-                                docId={docId} t={t} reloadKey={docRevisionId}
-                                currentRevisionId={viewRev?.revision_id || docRevisionId}
-                                onPreview={rev => setViewRev(
-                                    rev.revision_id === docRevisionId ? null : rev)} />
-
-                            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                                <BtnOutline onClick={() => { if (docId) { downloadDocumentFile(docId, docTitle || "document", {
-                                        revisionId: viewRev?.revision_id || docRevisionId,
-                                        expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
-                                    }); } else { toast.show("⚠️ Generate the document first", "warn"); } }} style={{ flex: 1, fontSize: 11, padding: "9px", borderRadius: 10 }}>📥 Download</BtnOutline>
-                            </div>
-                        </Card>
-
-                        {/* Right: review controls + workflow */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-                            {/* Compliance — REAL records computed at generation.
-                                These replaced four hardcoded green ticks that
-                                showed "Verified" on every document regardless of
-                                content. compliance/verification are frozen on the
-                                document when it was generated. */}
-                            <Card>
-                                <STitle icon="check" sub="Frozen at generation">Legal Compliance</STitle>
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 9, background: t.inputBg, border: `1px solid ${t.border}`, marginBottom: 6 }}>
-                                    <span style={{ fontSize: 11.5, color: t.text }}>Statutory particulars</span>
-                                    {compliance?.checked
-                                        ? <Badge type={compliance.complete ? "success" : "warn"}>{compliance.complete ? "✓ Complete" : `${compliance.missing} missing`}</Badge>
-                                        : <Badge type="gray">Not encoded</Badge>}
-                                </div>
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 9, background: t.inputBg, border: `1px solid ${t.border}` }}>
-                                    <span style={{ fontSize: 11.5, color: t.text }}>Citation check</span>
-                                    {/* One set of rules for every citation display (lib/
-                                        draftVerification.js). This fell through to a green
-                                        "✓ 0 found" for a draft citing nothing checkable and
-                                        for one citing only statutes outside the corpus. */}
-                                    {verification
-                                        ? (() => { const v = verificationView(verification);
-                                            return <Badge type={_CITATION_BADGE[v.tone]}>{v.tone === "ok" ? "✓ " : ""}{v.headline}</Badge>; })()
-                                        : <Badge type="gray">—</Badge>}
-                                </div>
-                                <div style={{ fontSize: 10, color: t.textMuted, marginTop: 8, fontStyle: "italic" }}>
-                                    Existence only — read every authority before filing. A lawyer must review this.
-                                </div>
-                            </Card>
-
-                            {/* User review decision */}
-                            <Card>
-                                <STitle icon="eye" sub="Your review decision">User Review</STitle>
-                                <div style={{ padding: "10px 12px", borderRadius: 10, background: userApproved ? `${t.success}12` : t.inputBg, border: `1.5px solid ${userApproved ? t.success : t.border}`, marginBottom: 10, textAlign: "center" }}>
-                                    <div style={{ fontSize: 18, marginBottom: 4 }}>{userApproved ? "✅" : "👀"}</div>
-                                    <div style={{ fontSize: 12, fontWeight: 600, color: userApproved ? t.success : t.text }}>{userApproved ? "Approved by you" : "Awaiting your review"}</div>
-                                    <div style={{ fontSize: 10, color: t.textMuted, marginTop: 2 }}>{userApproved ? "Ready to submit to lawyer" : "Review the document and approve or edit"}</div>
-                                </div>
-                                {!userApproved ? (
-                                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                                        <BtnPrimary onClick={() => { setUserApproved(true); toast.show("Marked as approved by you. Send it to a lawyer for their review.", "success", 4000); }} style={{ width: "100%", fontSize: 12, padding: "10px", borderRadius: 10, justifyContent: "center" }}>✅ Approve Draft</BtnPrimary>
-                                        <BtnOutline onClick={() => goTo(1)} style={{ width: "100%", fontSize: 12, padding: "10px", borderRadius: 10 }}>✏️ Change answers</BtnOutline>
+                            <div style={sidePanel}>
+                                {/* Compliance — REAL records frozen at generation,
+                                    never a hardcoded "Verified". */}
+                                <div style={panelCard}>
+                                    <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>Checks</div>
+                                    <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 12 }}>Frozen when this version was generated</div>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                        {checkRow("Statutory particulars", compliance?.checked
+                                            ? <Badge type={compliance.complete ? "success" : "warn"}>{compliance.complete ? "✓ Complete" : `${compliance.missing} missing`}</Badge>
+                                            : <Badge type="gray">Not encoded</Badge>)}
+                                        {/* One set of rules for every citation display
+                                            (lib/draftVerification.js). */}
+                                        {checkRow("Citation check", verification
+                                            ? (() => { const v = verificationView(verification);
+                                                return <Badge type={_CITATION_BADGE[v.tone]}>{v.tone === "ok" ? "✓ " : ""}{v.headline}</Badge>; })()
+                                            : <Badge type="gray">—</Badge>)}
                                     </div>
-                                ) : (
-                                    <BtnPrimary onClick={() => goTo(3)} style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 10, justifyContent: "center", boxShadow: `0 4px 16px ${t.primaryGlow}` }}>
-                                        ⚖️ Submit to Lawyer →
-                                    </BtnPrimary>
-                                )}
-                            </Card>
+                                    <div style={{ fontSize: 11.5, color: t.textMuted, marginTop: 10, fontStyle: "italic" }}>
+                                        Existence only — read every authority before filing. A lawyer must review this.
+                                    </div>
+                                </div>
 
+                                <div style={panelCard}>
+                                    <div style={{ fontSize: 15, fontWeight: 700, color: t.text, marginBottom: 10 }}>Your review</div>
+                                    <div style={{ padding: "12px", borderRadius: 12, background: userApproved ? `${t.success}12` : t.inputBg, border: `1px solid ${userApproved ? t.success : t.border}`, marginBottom: 10 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 600, color: userApproved ? t.success : t.text }}>{userApproved ? "✅ Approved by you" : "👀 Awaiting your review"}</div>
+                                        <div style={{ fontSize: 12, color: t.textMuted, marginTop: 2 }}>{userApproved ? "Ready to send to a lawyer" : "Read the document, then approve it or change your answers"}</div>
+                                    </div>
+                                    {!userApproved ? (
+                                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                            <Btn kind="primary" onClick={() => { setUserApproved(true); toast.show("Marked as approved by you. Send it to a lawyer for their review.", "success", 4000); }}>✅ Approve Draft</Btn>
+                                            <Btn onClick={() => goTo(1)}>✏️ Change answers</Btn>
+                                        </div>
+                                    ) : (
+                                        <Btn kind="primary" onClick={() => goTo(3)} style={{ width: "100%" }}>⚖️ Send to a lawyer →</Btn>
+                                    )}
+                                </div>
 
+                                <div style={panelCard}>
+                                    <RevisionHistory
+                                        docId={docId} t={t} reloadKey={docRevisionId}
+                                        currentRevisionId={viewRev?.revision_id || docRevisionId}
+                                        onPreview={rev => setViewRev(
+                                            rev.revision_id === docRevisionId ? null : rev)} />
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}
 
                 {/* ════════════════════════════════════════════════
-            STEP 4 — Submit to Lawyer → Lawyer Review
+            STEP 4 — Send for lawyer review (mockup screen 4)
         ════════════════════════════════════════════════ */}
-                {step === 3 && !reviewSent && (
-                    <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 18 }}>
-
-                        {/* Left: lawyer selection */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                            {/* Doc strip */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "13px 18px", borderRadius: 14, background: `linear-gradient(135deg,${t.primaryGlow},${t.card})`, border: `1px solid ${t.primary}30` }}>
-                                <div style={{ width: 38, height: 46, borderRadius: 8, background: t.card, border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{docTitle || "Employment Dispute"}</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType?.label || "—"} · {caseRef || "No ref"}</div>
+                {step === 3 && !reviewSent && (() => {
+                    const chosen = revLawyers.find(x => x._id === selLawyer);
+                    const lawyerName = chosen?.name || (caseLawyerId ? "your case lawyer" : null);
+                    const cv = verification ? verificationView(verification) : null;
+                    const ready = [
+                        { ok: Boolean(docId), label: "Draft generated", sub: docId ? `Version ${docVersion ?? 1}` : "Generate it first", fix: 1 },
+                        { ok: userApproved, label: "Approved by you", sub: userApproved ? "You read and approved it" : "Read the draft and approve it", fix: 2 },
+                        compliance?.checked
+                            ? { ok: compliance.complete, label: "Required particulars", sub: compliance.complete ? "Every particular is present" : `${compliance.missing} missing`, fix: 1 }
+                            : { ok: null, label: "Required particulars", sub: "Not encoded for this document type" },
+                        cv ? { ok: cv.tone === "ok" ? true : cv.tone === "neutral" ? null : false, label: "Citations", sub: cv.headline } : null,
+                    ].filter(Boolean);
+                    const notes = ["Check the amounts", "Check the dates and deadlines", "Is this enforceable?", "Explain it in plain words"];
+                    const stepLbl = (n, text) => <Label style={{ marginBottom: 10 }}>{n} · {text}</Label>;
+                    return (
+                        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0,1fr)" : "minmax(280px,380px) minmax(0,1fr)", gap: 18, alignItems: "start" }}>
+                            <div style={sidePanel}>
+                                <div style={{ ...panelCard, display: "flex", gap: 12, alignItems: "center" }}>
+                                    <div style={{ width: 42, height: 50, borderRadius: 8, background: "#fdecec", color: "#b3261e", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>PDF</div>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 14.5, fontWeight: 700, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{docTitle || selectedType?.label || "Your document"}</div>
+                                        <div style={{ fontSize: 12, color: t.textMuted }}>{selectedType?.label || "—"}{docVersion != null ? ` · v${docVersion}` : ""}</div>
+                                    </div>
                                 </div>
-                                <Badge type="success">✓ User Approved</Badge>
-                            </div>
-
-                            <Card>
-                                <STitle icon="scale" sub={caseLawyerId ? "Your case lawyer will review this document" : "Select a verified lawyer to review your document"}>Choose Lawyer</STitle>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                                    {caseLawyerId && (
-                                        <div style={{ fontSize: 11.5, color: t.textMuted, padding: "8px 12px", borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}30`, lineHeight: 1.55 }}>
-                                            This case already has an engaged lawyer — documents for it are reviewed by them.
-                                        </div>
-                                    )}
-                                    {(caseLawyerId ? revLawyers.filter(l => l._id === caseLawyerId) : revLawyers).map(l => (
-                                        <div key={l._id} onClick={() => setSelLawyer(l._id)} style={{ display: "flex", alignItems: "center", gap: 13, padding: "13px 15px", borderRadius: 13, border: `2px solid ${selLawyer === l._id ? t.primary : t.border}`, background: selLawyer === l._id ? t.primaryGlow : t.inputBg, cursor: "pointer", transition: "all 0.2s", position: "relative" }}>
-                                            <div style={{ width: 44, height: 44, borderRadius: "50%", background: selLawyer === l._id ? t.primary : `${t.primary}18`, border: `2px solid ${selLawyer === l._id ? t.primary : t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: selLawyer === l._id ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.primary, flexShrink: 0, transition: "all 0.2s" }}>{l.avatar}</div>
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>{l.name}</div>
-                                                <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 4, textTransform: "capitalize" }}>{l.spec}</div>
-                                                <div style={{ display: "flex", gap: 10, fontSize: 11 }}>
-                                                    {l.rating > 0 && <span style={{ color: t.warn }}>⭐ {l.rating}</span>}
-                                                    <span style={{ color: l.avail ? t.success : t.textMuted }}>{l.avail ? "● Available" : "○ Busy"}</span>
-                                                </div>
+                                <div style={panelCard}>
+                                    <div style={{ fontSize: 15, fontWeight: 700, color: t.text, marginBottom: 10 }}>Ready to send?</div>
+                                    {ready.map(r => (
+                                        <div key={r.label} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 0", borderTop: `1px solid ${t.border}` }}>
+                                            <span aria-hidden="true" style={{ width: 22, height: 22, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, background: r.ok === true ? `${t.success}25` : r.ok === false ? `${t.warn}25` : t.inputBg, color: r.ok === true ? t.success : r.ok === false ? t.warn : t.textMuted }}>{r.ok === true ? "✓" : r.ok === false ? "!" : "–"}</span>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{r.label}</div>
+                                                <div style={{ fontSize: 12, color: t.textMuted }}>{r.sub}</div>
                                             </div>
-                                            {selLawyer === l._id && <div style={{ position: "absolute", top: 8, right: 8, width: 20, height: 20, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff" }}>✓</div>}
+                                            {r.ok === false && r.fix != null && (
+                                                <button type="button" onClick={() => goTo(r.fix)} style={{ background: "none", border: "none", color: t.primary, fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Fix</button>
+                                            )}
                                         </div>
                                     ))}
-                                    {caseLawyerId && !revLawyers.some(l => l._id === caseLawyerId) && (
-                                        <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "13px 15px", borderRadius: 13, border: `2px solid ${t.primary}`, background: t.primaryGlow }}>
-                                            <div style={{ width: 44, height: 44, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff", flexShrink: 0 }}>⚖️</div>
-                                            <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Your engaged case lawyer</div>
-                                        </div>
-                                    )}
-                                    {!caseLawyerId && !revLawyers.length && (
-                                        <div style={{ fontSize: 12, color: t.textMuted, textAlign: "center", padding: "18px 0" }}>Loading verified lawyers…</div>
-                                    )}
                                 </div>
-                            </Card>
+                                <div style={{ fontSize: 12.5, color: t.textMuted, lineHeight: 1.55, padding: "0 4px" }}>
+                                    Don't need a lawyer? You can download the draft from the review step — it stays marked as not reviewed.
+                                </div>
+                            </div>
 
-                            <Card>
-                                <STitle icon="edit" sub="Optional notes for the reviewer">Note to Lawyer</STitle>
-                                <textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="e.g. Please check wrongful termination clauses, verify PKR 500,000 compensation, confirm notice period…" rows={3} style={{ width: "100%", background: t.inputBg, border: `1.5px solid ${t.border}`, color: t.text, borderRadius: 11, padding: "11px 13px", fontSize: 12.5, outline: "none", resize: "vertical", fontFamily: "'Inter',sans-serif", lineHeight: 1.65, boxSizing: "border-box" }} onFocus={e => e.target.style.borderColor = t.primary} onBlur={e => e.target.style.borderColor = t.border} />
-                            </Card>
-                        </div>
-
-                        {/* Right: config + send */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-                            {/* Selected lawyer preview */}
-                            <Card style={{ minHeight: 90, display: "flex", alignItems: !selLawyer ? "center" : "flex-start" }}>
-                                {!selLawyer ? (
-                                    <div style={{ textAlign: "center", color: t.textMuted, fontSize: 12, width: "100%" }}><div style={{ fontSize: 24, marginBottom: 5 }}>👤</div>Select a lawyer</div>
-                                ) : (() => {
-                                    const l = revLawyers.find(x => x._id === selLawyer);
-                                    return (
-                                        <div style={{ width: "100%" }}>
-                                            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 8 }}>Reviewing Lawyer</div>
-                                            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", borderRadius: 11, background: t.primaryGlow, border: `1px solid ${t.primary}40` }}>
-                                                <div style={{ width: 34, height: 34, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff", flexShrink: 0 }}>{l?.avatar || "⚖️"}</div>
-                                                <div>
-                                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.text }}>{l?.name || "Your case lawyer"}</div>
-                                                    <div style={{ fontSize: 10, color: t.primary, textTransform: "capitalize" }}>{l?.spec || (caseLawyerId ? "Engaged on this case" : "")}</div>
-                                                </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                                <div style={panelCard}>
+                                    {stepLbl(1, caseLawyerId ? "Your case lawyer" : "Choose a lawyer")}
+                                    <div role="radiogroup" aria-label="Reviewing lawyer" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                        {caseLawyerId && (
+                                            <div style={{ fontSize: 12, color: t.textMuted, padding: "8px 12px", borderRadius: 10, background: t.primaryGlow2, lineHeight: 1.55 }}>
+                                                This case already has an engaged lawyer — documents for it are reviewed by them.
                                             </div>
-                                        </div>
-                                    );
-                                })()}
-                            </Card>
-
-                            {/* Urgency — tells the lawyer how quickly you need this back */}
-                            <Card>
-                                <STitle icon="clock" sub="How urgent is this review?">Urgency</STitle>
-                                {[["Normal", "No rush", t.success], ["Priority", "Needed soon", t.warn], ["Urgent", "Time-critical", t.danger]].map(([lvl, desc, col]) => (
-                                    <div key={lvl} onClick={() => setUrgency(lvl)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${urgency === lvl ? col : t.border}`, background: urgency === lvl ? `${col}10` : t.inputBg, cursor: "pointer", marginBottom: 7, transition: "all 0.2s" }}>
-                                        <div style={{ width: 13, height: 13, borderRadius: "50%", border: `2px solid ${urgency === lvl ? col : t.border}`, background: urgency === lvl ? col : "transparent", flexShrink: 0 }} />
-                                        <div style={{ flex: 1 }}>
-                                            <div style={{ fontSize: 12, fontWeight: urgency === lvl ? 700 : 500, color: urgency === lvl ? col : t.text }}>{lvl}</div>
-                                            <div style={{ fontSize: 10, color: t.textFaint }}>{desc}</div>
-                                        </div>
+                                        )}
+                                        {(caseLawyerId ? revLawyers.filter(l => l._id === caseLawyerId) : revLawyers).map(l => {
+                                            const on = selLawyer === l._id;
+                                            return (
+                                                <button key={l._id} type="button" role="radio" aria-checked={on} onClick={() => setSelLawyer(l._id)}
+                                                    style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left", padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${on ? t.primary : t.border}`, background: on ? t.primaryGlow2 : t.inputBg, cursor: "pointer", color: t.text, fontFamily: "'Inter',sans-serif" }}>
+                                                    <span style={{ width: 40, height: 40, borderRadius: "50%", background: on ? t.primary : t.primaryGlow2, color: on ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>{l.avatar}</span>
+                                                    <span style={{ flex: 1, minWidth: 0 }}>
+                                                        <span style={{ display: "block", fontSize: 14, fontWeight: 700 }}>{l.name}</span>
+                                                        <span style={{ display: "block", fontSize: 12, color: t.textMuted, textTransform: "capitalize" }}>{l.spec}</span>
+                                                    </span>
+                                                    {l.rating > 0 && <span style={{ fontSize: 12, color: t.warn }}>⭐ {l.rating}</span>}
+                                                    <span style={{ fontSize: 12, color: l.avail ? t.success : t.textMuted, whiteSpace: "nowrap" }}>{l.avail ? "● Available" : "○ Busy"}</span>
+                                                </button>
+                                            );
+                                        })}
+                                        {caseLawyerId && !revLawyers.some(l => l._id === caseLawyerId) && (
+                                            <div style={{ padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${t.primary}`, background: t.primaryGlow2, fontSize: 14, fontWeight: 700, color: t.text }}>⚖️ Your engaged case lawyer</div>
+                                        )}
+                                        {!caseLawyerId && !revLawyers.length && (
+                                            <div style={{ fontSize: 12.5, color: t.textMuted, textAlign: "center", padding: "18px 0" }}>Loading verified lawyers…</div>
+                                        )}
                                     </div>
-                                ))}
-                            </Card>
+                                </div>
 
-                            {/* A submission that did not land must say so HERE:
-                                this is the step it was pressed on. */}
-                            {docIssueBanner(() => submitToLawyer(submitKeyRef.current))}
-                            <BtnPrimary onClick={() => submitToLawyer()} disabled={submitting} style={{ width: "100%", fontSize: 13, padding: "14px", borderRadius: 12, justifyContent: "center", boxShadow: `0 6px 20px ${t.primaryGlow}`, opacity: !selLawyer || submitting ? 0.6 : 1 }}>
-                                {submitting ? "⏳ Submitting…" : "📤 Submit to Lawyer"}
-                            </BtnPrimary>
-                            <div style={{ fontSize: 11, color: t.textMuted, lineHeight: 1.6, textAlign: "center" }}>
-                                The lawyer is notified immediately and you'll get a notification when they respond.
-                            </div>
-                        </div>
-                    </div>
-                )}
+                                <div style={panelCard}>
+                                    {stepLbl(2, "How soon?")}
+                                    <div role="radiogroup" aria-label="Urgency" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                        {[["Normal", "No rush", t.success], ["Priority", "Needed soon", t.warn], ["Urgent", "Time-critical", t.danger]].map(([lvl, desc, col]) => (
+                                            <button key={lvl} type="button" role="radio" aria-checked={urgency === lvl} onClick={() => setUrgency(lvl)}
+                                                style={{ flex: "1 1 120px", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${urgency === lvl ? col : t.border}`, background: urgency === lvl ? `${col}14` : t.inputBg, cursor: "pointer", textAlign: "left", fontFamily: "'Inter',sans-serif" }}>
+                                                <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: urgency === lvl ? col : t.text }}>{lvl}</span>
+                                                <span style={{ display: "block", fontSize: 11.5, color: t.textMuted }}>{desc}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
 
-                {/* ── Lawyer Review in Progress ── */}
-                {step === 3 && reviewSent && (
-                    <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+                                <div style={panelCard}>
+                                    {stepLbl(3, "Anything they should look at?")}
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                                        {notes.map(n => (
+                                            <button key={n} type="button" onClick={() => setReviewNote(v => (v.trim() ? `${v.trim()}\n${n}` : n))}
+                                                style={{ minHeight: 32, padding: "0 12px", borderRadius: 999, border: `1px solid ${t.border}`, background: t.inputBg, color: t.text, fontSize: 12.5, cursor: "pointer", fontFamily: "'Inter',sans-serif" }}>+ {n}</button>
+                                        ))}
+                                    </div>
+                                    <label htmlFor="review-note" style={{ position: "absolute", left: -9999 }}>Note to the lawyer</label>
+                                    <textarea id="review-note" value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Optional — what should the lawyer pay attention to?" rows={3}
+                                        style={{ width: "100%", background: t.inputBg, border: `1px solid ${t.border}`, color: t.text, borderRadius: 10, padding: "10px 12px", fontSize: 13.5, outline: "none", resize: "vertical", fontFamily: "'Inter',sans-serif", lineHeight: 1.6, boxSizing: "border-box" }} />
+                                </div>
 
-                        {/* Left: live tracking */}
-                        <Card>
-                            <div style={{ textAlign: "center", padding: "18px 0 16px", borderBottom: `1px solid ${t.border}`, marginBottom: 16 }}>
-                                <div style={{ width: 60, height: 60, borderRadius: "50%", background: t.primaryGlow, border: `2px solid ${t.primary}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, margin: "0 auto 12px" }}>📬</div>
-                                <div style={{ fontSize: 16, fontWeight: 800, color: t.text, fontFamily: "'Playfair Display',serif", marginBottom: 5 }}>Submitted for Legal Review</div>
-                                <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 6, padding: "7px 14px", borderRadius: 50, background: t.primaryGlow, border: `1px solid ${t.primary}40` }}>
-                                    <div style={{ width: 24, height: 24, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff" }}>⚖️</div>
-                                    <span style={{ fontSize: 13, fontWeight: 700, color: t.primary }}>{revLawyerName}</span>
+                                {/* A submission that did not land must say so HERE. */}
+                                {docIssueBanner(() => submitToLawyer(submitKeyRef.current))}
+                                <div style={{ ...panelCard, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", position: isMobile ? "static" : "sticky", bottom: 0 }}>
+                                    <span aria-hidden="true" style={{ color: t.textMuted }}>🔒</span>
+                                    <div style={{ flex: 1, minWidth: 200 }}>
+                                        <div style={{ fontSize: 13.5, fontWeight: 600, color: t.text }}>
+                                            {lawyerName ? `Sending version ${docVersion ?? 1} to ${lawyerName} · ${urgency}` : "Choose a lawyer to send this version"}
+                                        </div>
+                                        <div style={{ fontSize: 12, color: t.textMuted }}>This version is frozen for review — later edits make a new version.</div>
+                                    </div>
+                                    <Btn onClick={() => goTo(2)}>Keep editing</Btn>
+                                    <Btn kind="primary" onClick={() => submitToLawyer()} disabled={submitting || !selLawyer}>
+                                        {submitting ? "⏳ Submitting…" : "📤 Send for review"}
+                                    </Btn>
                                 </div>
                             </div>
+                        </div>
+                    );
+                })()}
 
-                            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 14 }}>Review Progress</div>
-                            <div style={{ position: "relative" }}>
-                                <div style={{ position: "absolute", left: 13, top: 26, bottom: 26, width: 2, background: `linear-gradient(${t.primary}, ${t.border})`, borderRadius: 2 }} />
+                {/* ── With the lawyer, and what they decided (mockup screen 5) ── */}
+                {step === 3 && reviewSent && (
+                    <div style={workspaceGrid}>
+                        <div>{docPane(pdfFrame("Submitted document", "Loading the submitted document…"))}</div>
+
+                        <div style={sidePanel}>
+                            <div style={panelCard}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                                    <span style={{ width: 40, height: 40, borderRadius: "50%", background: t.primaryGlow2, color: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, flexShrink: 0 }}>⚖️</span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 14.5, fontWeight: 700, color: t.text }}>{revLawyerName || "Your lawyer"}</div>
+                                        <div style={{ fontSize: 12, color: t.textMuted }}>{urgency} review</div>
+                                    </div>
+                                    <Pill tone={STATUS_TONE[statusView.tone] || "muted"}>{statusView.label}</Pill>
+                                </div>
                                 {[
-                                    { ico: "✅", label: "Document submitted", sub: "Done", done: true, active: false },
-                                    { ico: "🔔", label: "Lawyer notified", sub: "Done", done: true, active: false },
-                                    {
-                                        ico: statusView.isRecovery ? "⚠️" : "🔍",
-                                        label: "Lawyer review",
-                                        // NEVER "Complete" for a recovery state: the review is
-                                        // exactly what could not be carried over.
-                                        sub: statusView.isRecovery ? statusView.headline
-                                            : reviewStatus === "submitted" ? "In progress — updates automatically"
-                                            : "Complete",
-                                        done: !statusView.isRecovery && reviewStatus !== "submitted",
-                                        active: reviewStatus === "submitted",
-                                    },
-                                    {
-                                        ico: statusView.isRecovery ? "⚠️" : reviewStatus === "approved" ? "✅" : reviewStatus === "returned" ? "↩️" : reviewStatus === "rejected" ? "❌" : "⚖️",
-                                        label: statusView.isRecovery ? statusView.headline : reviewStatus === "approved" ? "Approved by lawyer" : reviewStatus === "returned" ? "Returned with changes" : reviewStatus === "rejected" ? "Rejected by lawyer" : "Lawyer decision",
-                                        sub: statusView.isRecovery ? "Could not be carried over"
-                                            : reviewStatus === "submitted" ? "Pending" : "Recorded",
-                                        done: ["approved", "returned", "rejected"].includes(reviewStatus), active: false,
-                                    },
+                                    { label: "Document submitted", done: true },
+                                    { label: "Lawyer notified", done: true },
+                                    { label: statusView.isRecovery ? statusView.headline : "Lawyer review",
+                                      // NEVER "Complete" for a recovery state.
+                                      sub: statusView.isRecovery ? "Could not be carried over"
+                                        : reviewStatus === "submitted" ? "In progress — updates automatically" : "Complete",
+                                      done: !statusView.isRecovery && reviewStatus !== "submitted", active: reviewStatus === "submitted" },
+                                    { label: reviewStatus === "approved" ? "Approved by lawyer" : reviewStatus === "returned" ? "Returned with changes" : reviewStatus === "rejected" ? "Rejected by lawyer" : "Lawyer decision",
+                                      sub: reviewStatus === "submitted" ? "Pending" : statusView.isRecovery ? "—" : "Recorded",
+                                      done: ["approved", "returned", "rejected"].includes(reviewStatus) },
                                 ].map((item, i) => (
-                                    <div key={i} style={{ display: "flex", gap: 13, marginBottom: 14, alignItems: "flex-start", position: "relative" }}>
-                                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: item.done ? t.primary : item.active ? t.primaryGlow : t.inputBg, border: `2px solid ${item.done ? t.primary : item.active ? t.primary : t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0, zIndex: 1, boxShadow: item.active ? `0 0 0 4px ${t.primaryGlow}` : "none" }}>{item.ico}</div>
-                                        <div style={{ flex: 1, paddingTop: 3 }}>
-                                            <div style={{ fontSize: 12.5, fontWeight: item.done || item.active ? 700 : 500, color: item.done ? t.primary : item.active ? t.text : t.textMuted }}>{item.label}</div>
-                                            <div style={{ fontSize: 10, color: item.active ? t.primary : t.textFaint, marginTop: 1 }}>{item.sub}</div>
-                                        </div>
-                                        {item.active && <div style={{ width: 8, height: 8, borderRadius: "50%", background: t.primary, marginTop: 10, flexShrink: 0, boxShadow: `0 0 0 3px ${t.primaryGlow}` }} />}
+                                    <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 0" }}>
+                                        <span aria-hidden="true" style={{ width: 20, height: 20, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, background: item.done ? t.primary : item.active ? t.primaryGlow : t.inputBg, color: item.done ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.primary, border: `1.5px solid ${item.done || item.active ? t.primary : t.border}` }}>{item.done ? "✓" : ""}</span>
+                                        <span style={{ fontSize: 13, color: item.done || item.active ? t.text : t.textMuted, fontWeight: item.active ? 700 : 500, flex: 1 }}>{item.label}</span>
+                                        {item.sub && <span style={{ fontSize: 11.5, color: item.active ? t.primary : t.textMuted }}>{item.sub}</span>}
                                     </div>
                                 ))}
                             </div>
 
-                            {/* Real status-driven actions */}
                             {reviewStatus === "submitted" && (
-                                <div style={{ marginTop: 4 }}>
-                                    <div style={{ padding: "12px 14px", borderRadius: 12, background: t.primaryGlow, border: `1px solid ${t.primary}30`, fontSize: 11.5, color: t.textMuted, lineHeight: 1.6, marginBottom: 8 }}>
+                                <div style={panelCard}>
+                                    <div style={{ fontSize: 12.5, color: t.textMuted, lineHeight: 1.6, marginBottom: 10 }}>
                                         ⏳ Waiting for {revLawyerName} to review. This page checks automatically —
                                         you'll also get a notification the moment they respond.
                                     </div>
-                                    <button
-                                        onClick={() => withdrawFromReview()}
-                                        disabled={withdrawing}
-                                        style={{ width: "100%", padding: "10px", borderRadius: 11, border: `1px solid ${t.border}`, background: "transparent", color: t.textMuted, fontSize: 12, fontWeight: 600, cursor: withdrawing ? "default" : "pointer", fontFamily: "'Inter',sans-serif", opacity: withdrawing ? 0.6 : 1 }}>
+                                    <Btn onClick={() => withdrawFromReview()} disabled={withdrawing} style={{ width: "100%" }}>
                                         {withdrawing ? "Withdrawing…" : "↩️ Withdraw from review"}
-                                    </button>
+                                    </Btn>
                                 </div>
                             )}
                             {statusView.isRecovery && (
-                                <div style={{ marginTop: 4 }}>
-                                    <div style={{ padding: "12px 14px", borderRadius: 12, background: `${t.warn}10`, border: `1px solid ${t.warn}30`, marginBottom: 8 }}>
-                                        <div style={{ fontSize: 11, fontWeight: 700, color: t.warn, marginBottom: 4 }}>
-                                            ⚠️ {statusView.headline}
-                                        </div>
-                                        {/* The API's words. A client did nothing wrong here and
-                                            cannot be expected to know what the status means; left
-                                            to infer, they assume their work is gone. */}
-                                        <div style={{ fontSize: 12, color: t.text, lineHeight: 1.6 }}>
-                                            {statusView.explanation}
-                                        </div>
-                                    </div>
-                                    <BtnPrimary
-                                        onClick={() => { setReviewSent(false); setReviewStatus(null); setReviewRecovery(null); goTo(1); }}
-                                        style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 11, justifyContent: "center" }}>
+                                <div style={{ ...panelCard, borderColor: `${t.warn}55` }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.warn, marginBottom: 4 }}>⚠️ {statusView.headline}</div>
+                                    {/* The API's words — see lib/documentStatus.js. */}
+                                    <div style={{ fontSize: 13, color: t.text, lineHeight: 1.6, marginBottom: 10 }}>{statusView.explanation}</div>
+                                    <Btn kind="primary" onClick={() => { setReviewSent(false); setReviewStatus(null); setReviewRecovery(null); goTo(1); }} style={{ width: "100%" }}>
                                         ✏️ {statusView.actionLabel} →
-                                    </BtnPrimary>
+                                    </Btn>
                                 </div>
                             )}
                             {(reviewStatus === "returned" || reviewStatus === "rejected") && (
-                                <div style={{ marginTop: 4 }}>
-                                    <div style={{ padding: "12px 14px", borderRadius: 12, background: reviewStatus === "returned" ? `${t.warn}10` : `${t.danger}10`, border: `1px solid ${reviewStatus === "returned" ? t.warn : t.danger}30`, marginBottom: 8 }}>
-                                        <div style={{ fontSize: 11, fontWeight: 700, color: reviewStatus === "returned" ? t.warn : t.danger, marginBottom: 4 }}>
-                                            {reviewStatus === "returned" ? "↩️ Lawyer requested changes" : "❌ Lawyer rejected this document"}
-                                        </div>
-                                        <div style={{ fontSize: 12, color: t.text, lineHeight: 1.6 }}>{lawyerNote || "No note provided."}</div>
+                                <div style={{ ...panelCard, borderColor: `${reviewStatus === "returned" ? t.warn : t.danger}55` }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: reviewStatus === "returned" ? t.warn : t.danger, marginBottom: 8 }}>
+                                        {reviewStatus === "returned" ? "↩️ Lawyer requested changes" : "❌ Lawyer rejected this document"}
+                                    </div>
+                                    <div style={{ display: "flex", gap: 10 }}>
+                                        <span style={{ width: 32, height: 32, borderRadius: "50%", background: t.primaryGlow2, color: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>⚖️</span>
+                                        <div style={{ fontSize: 13.5, color: t.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{lawyerNote || "No note provided."}</div>
                                     </div>
                                     {reviewStatus === "returned" && (
-                                        <BtnPrimary onClick={() => { setReviewSent(false); setReviewStatus(null); goTo(1); }} style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 11, justifyContent: "center" }}>
+                                        <Btn kind="primary" onClick={() => { setReviewSent(false); setReviewStatus(null); goTo(1); }} style={{ width: "100%", marginTop: 12 }}>
                                             ✏️ Revise & Regenerate →
-                                        </BtnPrimary>
+                                        </Btn>
                                     )}
                                 </div>
                             )}
                             {reviewStatus === "approved" && (
-                                <BtnPrimary onClick={() => goTo(4)} style={{ width: "100%", fontSize: 13, padding: "13px", borderRadius: 12, justifyContent: "center", marginTop: 4, boxShadow: `0 4px 18px ${t.primaryGlow}` }}>
-                                    🏛 View Final Version →
-                                </BtnPrimary>
+                                <Btn kind="primary" onClick={() => goTo(4)} style={{ width: "100%", minHeight: 46 }}>🏛 View Final Version →</Btn>
                             )}
-                        </Card>
 
-                        {/* Right: submission details + export */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                            <Card>
-                                <STitle icon="file" sub="Submission overview">Details</STitle>
-                                <div style={{ padding: "9px 12px", borderRadius: 10, background: t.primaryGlow, border: `1px solid ${t.primary}30`, marginBottom: 10 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.text, marginBottom: 1 }}>{docTitle || "Employment Dispute"}</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>{selectedType?.label || "—"} · {caseRef || "No ref"}</div>
-                                </div>
-                                {[["Lawyer", revLawyerName], ["Urgency", urgency], ["Type", selectedType?.label || "—"], ["Status", null]].map(([k, v]) => (
-                                    <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
-                                        <span style={{ color: t.textMuted }}>{k}</span>
-                                        {k === "Status" ? <Badge type={statusColors[docStatus]}>{docStatus}</Badge>
-                                            : k === "Urgency" ? <Badge type={urgency === "Urgent" ? "danger" : urgency === "Priority" ? "warn" : "success"}>{urgency}</Badge>
-                                                : <span style={{ fontWeight: 600, color: t.text }}>{v}</span>}
+                            <div style={panelCard}>
+                                {[["Lawyer", revLawyerName || "—"], ["Urgency", urgency], ["Type", selectedType?.label || "—"]].map(([k, v]) => (
+                                    <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "6px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12.5 }}>
+                                        <span style={{ color: t.textMuted }}>{k}</span><span style={{ fontWeight: 600, color: t.text, textAlign: "right" }}>{v}</span>
                                     </div>
                                 ))}
-                                {reviewNote ? <div style={{ marginTop: 9, padding: "9px 11px", borderRadius: 9, background: t.inputBg, fontSize: 11, color: t.textMuted, fontStyle: "italic" }}>📝 "{reviewNote.slice(0, 90)}{reviewNote.length > 90 ? "…" : ""}"</div> : null}
-                            </Card>
-
-                            <Card>
-                                <STitle icon="dl" sub="Download the generated PDF">Export</STitle>
-                                <BtnOutline
-                                    onClick={() => { if (docId) { downloadDocumentFile(docId, docTitle || "document", {
+                                {reviewNote ? <div style={{ marginTop: 9, fontSize: 12, color: t.textMuted, fontStyle: "italic", whiteSpace: "pre-wrap" }}>📝 {reviewNote.slice(0, 160)}{reviewNote.length > 160 ? "…" : ""}</div> : null}
+                                <Btn onClick={() => { if (docId) { downloadDocumentFile(docId, docTitle || "document", {
                                         revisionId: viewRev?.revision_id || docRevisionId,
                                         expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
                                     }); } else { toast.show("Generate the document first", "warn"); } }}
-                                    disabled={!docId}
-                                    style={{ width: "100%", fontSize: 12, padding: "11px", borderRadius: 11, justifyContent: "center" }}>
+                                    disabled={!docId} style={{ width: "100%", marginTop: 12 }}>
                                     {docId ? "📥 Download PDF" : "Generate the document first"}
-                                </BtnOutline>
-                            </Card>
-
-                            <div style={{ padding: "12px 15px", borderRadius: 13, background: `${t.success}10`, border: `1px solid ${t.success}30`, display: "flex", gap: 11, alignItems: "center" }}>
-                                <div style={{ width: 30, height: 30, borderRadius: "50%", background: `${t.success}20`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>🔔</div>
-                                <div>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.text, marginBottom: 2 }}>You'll be notified</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>Alert when {revLawyerName} completes review.</div>
-                                </div>
+                                </Btn>
                             </div>
                         </div>
                     </div>
                 )}
 
                 {/* ════════════════════════════════════════════════
-            STEP 5 — Final Version + Export
+            STEP 5 — Final version + export
         ════════════════════════════════════════════════ */}
                 {step === 4 && (
-                    <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 18 }}>
-
-                        {/* Left: final document */}
-                        <Card style={{ display: "flex", flexDirection: "column" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                                <div style={{ width: 36, height: 36, borderRadius: 10, background: `${t.success}20`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🏛</div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: 700, color: t.text, fontSize: 14 }}>Final Legal Document</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>{docTitle || "Employment Dispute"}</div>
-                                </div>
-                                <Badge type="info">Final</Badge>
+                    <div style={workspaceGrid}>
+                        {/* The REAL approved PDF, rendered inline. */}
+                        <div>{docPane(pdfFrame("Approved document", "Loading the approved document…"))}</div>
+                        <div style={sidePanel}>
+                            <div style={{ ...panelCard, textAlign: "center" }}>
+                                <div style={{ fontSize: 36, marginBottom: 6 }}>🎉</div>
+                                <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, color: t.text }}>Document complete</div>
+                                <div style={{ fontSize: 12.5, color: t.textMuted, margin: "4px 0 10px" }}>Reviewed and approved by {revLawyerName || "your lawyer"}</div>
+                                <Pill tone="low">● Final version</Pill>
                             </div>
-
-                            {/* Final doc preview — the REAL approved PDF, rendered inline. */}
-                            <div style={{ flex: 1, border: `1.5px solid ${t.success}40`, borderRadius: 12, background: "#fff", overflow: "hidden", minHeight: 420 }}>
-                                {previewUrl ? (
-                                    <iframe title="Approved document" src={previewUrl} style={{ width: "100%", height: 420, border: "none", display: "block" }} />
-                                ) : (
-                                    <div style={{ padding: 40, textAlign: "center", color: t.textMuted, fontSize: 13, minHeight: 420, display: "flex", alignItems: "center", justifyContent: "center" }}>Loading the approved document…</div>
-                                )}
-                            </div>
-
-                            {/* Export actions */}
-                            <div style={{ marginTop: 14 }}>
-                                {/* Only Download was ever wired. Generate PDF / Email /
-                                    Print each toasted a completed action and did none of
-                                    it — and the PDF already exists by this point, so
-                                    "generate" was meaningless too. */}
-                                <div style={{ marginBottom: 8 }}>
-                                    <BtnOutline
-                                        onClick={() => { if (docId) { setExported(true); downloadDocumentFile(docId, docTitle || "document", {
-                                        revisionId: viewRev?.revision_id || docRevisionId,
-                                        expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
-                                    }); } else { toast.show("Generate the document first", "warn"); } }}
-                                        disabled={!docId}
-                                        style={{ width: "100%", fontSize: 12, padding: "12px", borderRadius: 11, justifyContent: "center" }}>
-                                        {docId ? "📥 Download PDF" : "Generate the document first"}
-                                    </BtnOutline>
-                                </div>
-                            </div>
-                        </Card>
-
-                        {/* Right: summary + completed workflow */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-                            {/* Completion badge */}
-                            <div style={{ textAlign: "center", padding: "20px 16px", borderRadius: 16, background: `linear-gradient(135deg,${t.primaryGlow},${t.card})`, border: `1px solid ${t.primary}30` }}>
-                                <div style={{ fontSize: 42, marginBottom: 10 }}>🎉</div>
-                                <div style={{ fontSize: 14, fontWeight: 800, color: t.text, fontFamily: "'Playfair Display',serif", marginBottom: 5 }}>Document Complete</div>
-                                <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 12 }}>Reviewed and approved by {revLawyerName || "your lawyer"}</div>
-                                <Badge type="info" style={{ fontSize: 12, padding: "5px 14px" }}>● Final Version</Badge>
-                            </div>
-
-                            {/* Document summary */}
-                            <Card>
-                                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 10 }}>Document Summary</div>
-                                {[["Type", selectedType?.label || "—"], ["Case Ref", caseRef || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Required particulars", null]].map(([k, v]) => (
-                                    <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12 }}>
+                            <div style={panelCard}>
+                                {[["Type", selectedType?.label || "—"], ["Reviewer", revLawyerName || "—"], ["Status", null], ["Required particulars", null]].map(([k, v]) => (
+                                    <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: `1px solid ${t.border}`, fontSize: 12.5 }}>
                                         <span style={{ color: t.textMuted }}>{k}</span>
-                                        {k === "Status" ? <Badge type="info">Final</Badge> : k === "Required particulars" ? <Badge type={_PARTICULARS_BADGE[finalParticulars.tone]}>{finalParticulars.label}</Badge> : <span style={{ fontWeight: 600, color: t.text, textAlign: "right", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</span>}
+                                        {k === "Status" ? <Badge type="info">Final</Badge> : k === "Required particulars" ? <Badge type={_PARTICULARS_BADGE[finalParticulars.tone]}>{finalParticulars.label}</Badge> : <span style={{ fontWeight: 600, color: t.text, textAlign: "right" }}>{v}</span>}
                                     </div>
                                 ))}
-                            </Card>
-
-                            {/* Completed workflow */}
-                            <Card>
-                                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, marginBottom: 12 }}>Workflow Complete</div>
-                                {FLOW.map((f, i) => (
-                                    <div key={i} style={{ display: "flex", gap: 9, marginBottom: i < FLOW.length - 1 ? 8 : 0 }}>
-                                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
-                                            <div style={{ width: 18, height: 18, borderRadius: "50%", background: t.primary, border: `2px solid ${t.primary}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 800, color: t.mode === "dark" ? "#1A2E35" : "#fff" }}>✓</div>
-                                            {i < FLOW.length - 1 && <div style={{ width: 1, height: 12, background: t.primary, marginTop: 1 }} />}
-                                        </div>
-                                        <div style={{ fontSize: 10.5, color: t.primary, fontWeight: 500, paddingTop: 1 }}>{f.label}</div>
-                                    </div>
-                                ))}
-                            </Card>
+                            </div>
+                            {/* Only Download was ever wired — the PDF already exists. */}
+                            <Btn kind="primary"
+                                onClick={() => { if (docId) { setExported(true); downloadDocumentFile(docId, docTitle || "document", {
+                                    revisionId: viewRev?.revision_id || docRevisionId,
+                                    expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
+                                }); } else { toast.show("Generate the document first", "warn"); } }}
+                                disabled={!docId} style={{ width: "100%", minHeight: 46 }}>
+                                {docId ? "📥 Download PDF" : "Generate the document first"}
+                            </Btn>
                         </div>
                     </div>
                 )}

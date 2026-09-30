@@ -134,6 +134,35 @@ test.after(() => {
 
 /* ── the defect: restoration never ran ────────────────────────────────────── */
 
+test("a browser reload stays on Documents home instead of reopening review", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "doc-remembered", dom.window.localStorage);
+    api.__respond("getDocumentV2", { data: {
+        id: "doc-remembered", case_id: "case-1", title: "Do not auto-open me",
+        review_status: "none", current_version: 1,
+        current_revision: { revision_id: "rev-1", pdf_sha256: "a".repeat(64) },
+    } });
+
+    const originalGetEntriesByType = globalThis.performance.getEntriesByType;
+    Object.defineProperty(globalThis.performance, "getEntriesByType", {
+        value: () => [{ type: "reload" }], configurable: true,
+    });
+    let p;
+    try {
+        p = await mountDocuments();
+        assert.equal(api.__calls("getDocumentV2").length, 0,
+                     "reload fetched and reopened the remembered document");
+        assert.match(p.text(), /Start from a template/);
+        assert.doesNotMatch(p.text(), /Do not auto-open me/);
+    } finally {
+        if (p) await p.unmount();
+        Object.defineProperty(globalThis.performance, "getEntriesByType", {
+            value: originalGetEntriesByType, configurable: true,
+        });
+    }
+});
+
 test("a remembered document is fetched on mount", async () => {
     // THE BUG. Restoration keyed off `genCaseId`, which only a generation ever
     // sets. After a refresh it was null, the effect returned early, and
@@ -628,17 +657,11 @@ test("a failed case load says so rather than 'no case linked'", async () => {
 /* ── visible recovery from a failed case load ─────────────────────────────── */
 
 async function _gotoDraftStep(p) {
-    // Step 0 lists templates; "Select" then "Use Template" reaches the form
-    // where the readiness strip and its retry live.
-    const select = [...p.container.querySelectorAll("button")]
-        .find(b => b.textContent.trim().startsWith("Select"));
-    assert.ok(select, "no template Select control");
-    await act(async () => {
-        select.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-    });
+    // Step 0 lists templates; one "Use template" reaches the form where the
+    // readiness strip and its retry live.
     const use = [...p.container.querySelectorAll("button")]
-        .find(b => b.textContent.includes("Use Template"));
-    assert.ok(use, "no Use Template control");
+        .find(b => b.textContent.trim() === "Use template");
+    assert.ok(use, "no Use template control");
     await act(async () => {
         use.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
         await new Promise(r => setTimeout(r, 30));
@@ -810,8 +833,7 @@ test("a refused V2 generate is shown on the field review, not swallowed", async 
     });
 
     const p = await mountDocuments();
-    await press(p, findButton(p.container, "Select"));
-    await press(p, findButton(p.container, "Use Template"));
+    await press(p, findButton(p.container, "Use template"));
 
     const picker = [...p.container.querySelectorAll("select")]
         .find(s => [...s.options].some(o => o.value === "legal_notice"));
@@ -864,8 +886,7 @@ test("a scalar template without an extractor opens an honest manual form", async
     });
 
     const p = await mountDocuments();
-    await press(p, findButton(p.container, "Select — enter details"));
-    await press(p, findButton(p.container, "Use Template"));
+    await press(p, findButton(p.container, "Use template"));
     await press(p, findButton(p.container, "Generate Draft"));
 
     assert.equal(api.__calls("extractDocumentFields").length, 0,
@@ -890,8 +911,7 @@ test("standalone V2 drafting creates a caseless document without extraction", as
     });
 
     const p = await mountDocuments();
-    await press(p, findButton(p.container, "Select — enter details"));
-    await press(p, findButton(p.container, "Use Template"));
+    await press(p, findButton(p.container, "Use template"));
 
     const casePicker = [...p.container.querySelectorAll("select")]
         .find(s => [...s.options].some(o => o.value === "__no_case__"));
@@ -936,8 +956,7 @@ test("Regenerate appends to the same V2 document", async () => {
     });
 
     const p = await mountDocuments();
-    await press(p, findButton(p.container, "Select"));
-    await press(p, findButton(p.container, "Use Template"));
+    await press(p, findButton(p.container, "Use template"));
     await press(p, findButton(p.container, "Generate Draft"));
     await press(p, findButton(p.container, "generate →"));
     await p.settle(350);
@@ -978,8 +997,7 @@ test("a failed AI read is announced above the field review", async () => {
         data: { fields: {}, extraction_status: "failed", truncated: false },
     });
     const p = await mountDocuments();
-    await press(p, findButton(p.container, "Select"));
-    await press(p, findButton(p.container, "Use Template"));
+    await press(p, findButton(p.container, "Use template"));
     const picker = [...p.container.querySelectorAll("select")]
         .find(s => [...s.options].some(o => o.value === "legal_notice"));
     await act(async () => {
@@ -992,5 +1010,152 @@ test("a failed AI read is announced above the field review", async () => {
     const notice = p.container.querySelector('[data-extraction="failed"]');
     assert.ok(notice, "a failed read produced a silent blank form");
     assert.match(notice.textContent, /could not read your case/);
+    await p.unmount();
+});
+
+/* ── the template preview starts drafting in one action ──────────────────────
+ *
+ * "Use this template" in the preview selects and proceeds in the same click.
+ * The parent must use the spec it is handed: its own `selectedType` is still
+ * the previous value during that click, and reading it bounced the user back
+ * with "Select a template first". */
+function findByLabel(container, label) {
+    return [...container.querySelectorAll("button")]
+        .find(b => (b.getAttribute("aria-label") || "") === label);
+}
+
+test("starting from the template preview opens drafting with that template", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+
+    const p = await mountDocuments();
+    await press(p, findByLabel(p.container, "Preview Legal Notice"));
+    // The preview is portalled to <body> (see documents/ui.jsx ModalPortal).
+    const start = findButton(document.body, "Use this template");
+    assert.ok(start, "the template preview did not open");
+    await press(p, start);
+
+    const picker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "legal_notice"));
+    assert.ok(picker, "did not reach the drafting step");
+    assert.equal(picker.value, "legal_notice", "the chosen template was not carried over");
+    await p.unmount();
+});
+
+/* ── the sidebar's "New document" wins over the refresh-resume ───────────────
+ *
+ * With a remembered draft, opening Documents jumps to that draft's step. That
+ * is right after a refresh and wrong when the user just chose "New document"
+ * in the sidebar: they landed on the old draft's review with no way back to
+ * the catalogue. The request is made before the module mounts. */
+function rememberedReturnedDraft() {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "doc-remembered", dom.window.localStorage);
+    api.__respond("getDocumentV2", {
+        data: {
+            id: "doc-remembered", title: "A restored notice",
+            review_status: "returned", current_version: 2,
+            current_revision: { revision_id: "rev-2", pdf_sha256: "a".repeat(64) },
+        },
+    });
+}
+
+test("without a sidebar request, a remembered draft still resumes", async () => {
+    rememberedReturnedDraft();
+    const p = await mountDocuments();
+    assert.equal(p.container.querySelector("#tpl-search"), null,
+        "the refresh-resume no longer opens the remembered draft");
+    await p.unmount();
+});
+
+test("a sidebar 'New document' request keeps the catalogue on screen", async () => {
+    rememberedReturnedDraft();
+    const nav = await import("../src/lib/documentsNav.js");
+    nav.requestDocumentsView("new");
+
+    const p = await mountDocuments();
+    assert.ok(p.container.querySelector("#tpl-search"),
+        "the remembered draft replaced the catalogue the user asked for");
+    assert.equal(nav.peekPendingDocumentsView(), null,
+        "the request outlived the restore it held back");
+    await p.unmount();
+
+    // One-shot: the next visit resumes the draft again.
+    const again = await mountDocuments();
+    assert.equal(again.container.querySelector("#tpl-search"), null);
+    await again.unmount();
+});
+
+/* ── M2: a finished generation failure is not replayed forever ─────────────
+ *
+ * The server stores a failed revision under its key; the same key returns the
+ * same 503 generation_failed on every retry. Only an UNKNOWN outcome (503
+ * generation_incomplete / network) is retried under the same key. */
+
+async function reachManualGenerate(p) {
+    await press(p, findButton(p.container, "Use template"));
+    const casePicker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "__no_case__"));
+    await act(async () => {
+        casePicker.value = "__no_case__";
+        casePicker.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate Draft"));
+    const accused = [...p.container.querySelectorAll("label")]
+        .find(label => label.textContent.includes("Accused name"))?.querySelector("input");
+    await act(async () => {
+        Object.getOwnPropertyDescriptor(
+            dom.window.HTMLInputElement.prototype, "value").set.call(accused, "Ali Khan");
+        accused.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate with my corrections"));
+}
+
+function manualTemplateResponses(firstRevision) {
+    api.__respond("listCases", { data: [] });
+    api.__respond("getCases", { data: [] });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "bail_application", label: "Bail Application",
+                 category: "Criminal", description: "Application for bail.",
+                 fields: ["accused_name"], structured_fields: [],
+                 drafting_mode: "manual" }],
+    });
+    api.__respond("createDocumentV2", { data: { id: "standalone-1" } });
+    let n = 0;
+    api.__respond("generateRevisionV2", () => {
+        n += 1;
+        return n === 1 ? firstRevision
+            : { data: { revision_id: "rev-ok", pdf_sha256: "b".repeat(64), version: 1 } };
+    });
+}
+
+test("Retry after generation_failed is a new attempt under a new key", async () => {
+    manualTemplateResponses({ data: null, status: 503,
+        error: { code: "generation_failed", message: "Document generation failed." } });
+    const p = await mountDocuments();
+    await reachManualGenerate(p);
+    assert.match(p.text(), /Document generation failed/);
+    await press(p, findButton(p.container, "Retry"));
+
+    const keys = api.__calls("generateRevisionV2").map(c => c.args[2]);
+    assert.equal(keys.length, 2, "Retry did not reach the server");
+    assert.ok(keys[0] && keys[1]);
+    assert.notEqual(keys[0], keys[1], "a final failure was replayed under the same key");
+    await p.unmount();
+});
+
+test("Retry after an unknown outcome still reuses the same key", async () => {
+    manualTemplateResponses({ data: null, status: 503,
+        error: { code: "generation_incomplete", message: "Still working; retry." } });
+    const p = await mountDocuments();
+    await reachManualGenerate(p);
+    await press(p, findButton(p.container, "Retry"));
+
+    const keys = api.__calls("generateRevisionV2").map(c => c.args[2]);
+    assert.equal(keys.length, 2);
+    assert.equal(keys[0], keys[1], "an in-flight render was duplicated under a new key");
     await p.unmount();
 });
