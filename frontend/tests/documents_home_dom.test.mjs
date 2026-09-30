@@ -2,8 +2,8 @@
  *
  * DocumentsHome is presentation only, so what matters is the intent it hands
  * ModDocuments. The Vault and Drafts read real server state. The Analyzer is not
- * connected to a backend yet, so it must say so and never present sample output
- * as the user's own. */
+ * connected to a backend yet: it is a fictional demonstration, and the P-1 tests
+ * below keep every view of it from claiming more than exists. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -472,49 +472,48 @@ test("placeholderCounts", () => {
     assert.deepEqual(placeholderCounts({ party_a: " x " }, { party_a: "x" }, keys), { total: 2, filled: 1, applied: 1, remaining: 1 });
 });
 
-/* ── analyzer (not connected) ─────────────────────────────────────────────── */
+/* ── analyzer: a fictional demonstration (plan P-1) ─────────────────────── */
 
-test("the analyzer never reads the user's own file", async () => {
+test("the analyzer offers no way to hand over a real file", async () => {
     const p = await mount(DocsAnalyzer, { onBack: () => {} });
-    assert.match(p.container.textContent, /not connected yet/);
-    const input = p.container.querySelector('input[type="file"]');
-    const file = new dom.window.File(["x"], "my-lease.pdf", { type: "application/pdf" });
-    await act(async () => {
-        Object.defineProperty(input, "files", { value: [file], configurable: true });
-        input.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    });
-    assert.doesNotMatch(p.container.textContent, /my-lease/);
+    assert.equal(p.container.querySelector('input[type="file"]'), null, "a file picker is on screen");
+    assert.match(p.container.textContent, /Real document upload is not available yet\./);
+    // A drop must not navigate the tab to the file, and must say it was not read.
+    const zone = p.container.querySelector("[data-upload-unavailable]");
+    const drop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
+    await act(async () => { zone.dispatchEvent(drop); });
+    assert.equal(drop.defaultPrevented, true, "a dropped file would open in the tab");
     assert.ok(toasts.some(m => /your file was not read/.test(m)), "the user was not told their file was not read");
-    assert.equal(buttons(p.container, "Analyze as").length, 0, "the user's file reached the analyze step");
+    assert.equal(buttons(p.container, "Open fictional analysis")[0].disabled, true, "something other than the sample is ready");
     await p.unmount();
 });
 
-test("the sample is labelled as a sample once loaded", async () => {
+test("the sample is labelled as fictional once loaded", async () => {
     const p = await mount(DocsAnalyzer, { onBack: () => {}, userName: "Test User" });
-    const analyze = buttons(p.container, "Analyze Document")[0];
-    assert.equal(analyze.disabled, true, "Analyze must wait for a document");
-    await click(buttons(p.container, "Try the sample rent agreement")[0]);
-    assert.match(p.container.textContent, /\(sample\)/);
-    assert.equal(buttons(p.container, "Analyze Document")[0].disabled, false);
+    const analyze = buttons(p.container, "Open fictional analysis")[0];
+    assert.equal(analyze.disabled, true, "Analyze must wait for the sample");
+    await click(buttons(p.container, "Use the fictional sample rent agreement")[0]);
+    assert.match(p.container.textContent, /\(fictional sample\)/);
+    assert.equal(buttons(p.container, "Open fictional analysis")[0].disabled, false);
     await p.unmount();
 });
 
-test("the start screen greets the user and offers upload and focus", async () => {
+test("the start screen greets the user and explains what exists", async () => {
     const { greetingFor } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
     const p = await mount(DocsAnalyzer, { onBack: () => {}, userName: "Test User" });
     assert.match(p.container.textContent, /Good (Morning|Afternoon|Evening), Test!/);
-    assert.match(p.container.textContent, /Upload a Legal Document/);
-    assert.match(p.container.textContent, /Drag & Drop Documents Here/);
-    assert.match(p.container.textContent, /Tell AI What To Focus On/);
+    assert.match(p.container.textContent, /Document review/);
+    assert.match(p.container.textContent, /Open the sample review/);
     assert.ok(p.container.querySelector('[aria-label="Analysis history"]'));
     await p.unmount();
     assert.equal(greetingFor(new Date(2026, 0, 1, 9)).text, "Good Morning");
     assert.equal(greetingFor(new Date(2026, 0, 1, 14)).text, "Good Afternoon");
     assert.equal(greetingFor(new Date(2026, 0, 1, 21)).night, true);
     // Each time of day has its own line, as in the reference design.
-    assert.equal(greetingFor(new Date(2026, 0, 1, 14)).sub, "Get instant insights from your file.");
+    assert.equal(greetingFor(new Date(2026, 0, 1, 14)).sub, "See how a document review will look.");
     assert.equal(greetingFor(new Date(2026, 0, 1, 14)).icon, "cloud");
-    assert.equal(greetingFor(new Date(2026, 0, 1, 21)).sub, "Let's dig into the file.");
+    assert.equal(greetingFor(new Date(2026, 0, 1, 21)).sub, "Take a look at a fictional document review.");
+    assert.equal(greetingFor(new Date(2026, 0, 1, 9)).sub, "Explore a fictional document review.");
 });
 test("the editor opens in its light teal look", async () => {
     const { EDITOR_LIGHT } = await import("../src/components/client/documents/TemplateEditor.jsx");
@@ -528,51 +527,29 @@ test("the editor opens in its light teal look", async () => {
     await p.unmount();
 });
 
-/* ── analysis dashboard (sample) ──────────────────────────────────────────── */
+/* ── analysis dashboard (fictional sample) ────────────────────────────────── */
+
+const DASHBOARD_PROPS = { sample: "Shop rent agreement", side: "Tenant", depth: "deep",
+    onDepth: () => {}, onBack: () => {}, onReanalyze: () => {} };
 
 test("the analysis dashboard has a tab per finding, with counts", async () => {
     const { AnalysisDashboard } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
     const depth = [];
-    const p = await mount(AnalysisDashboard, { sample: "Shop rent agreement", side: "Tenant", depth: "deep",
-        onDepth: k => depth.push(k), onBack: () => {}, onReanalyze: () => {} });
+    const p = await mount(AnalysisDashboard, { ...DASHBOARD_PROPS, onDepth: k => depth.push(k) });
     const tabs = [...p.container.querySelectorAll('[role="tab"]')].map(b => b.textContent.trim());
-    // Headings follow the reference design's wording.
-    assert.deepEqual(tabs, ["Summary", "Key Clauses3", "Risks4", "Obligations4", "Compliance4", "Precedents0", "Document", "Ask AI"]);
+    assert.deepEqual(tabs, ["Summary", "Key Clauses3", "Risks4", "Obligations4", "Illustrative checks4", "Document"]);
     assert.match(p.container.textContent, /Aggregated Dashboard/);
     assert.match(p.container.textContent, /Aggregated Executive Summary/);
     assert.match(p.container.textContent, /\d+ high\/critical/);
-    assert.match(p.container.textContent, /\(sample\)/, "the dashboard must say whose analysis this is");
+    assert.match(p.container.textContent, /\(fictional sample\)/, "the dashboard must say whose analysis this is");
     await click(buttons(p.container, "Quick scan")[0]);
     assert.deepEqual(depth, ["quick"]);
     await p.unmount();
 });
 
-test("precedents are never invented", async () => {
-    const { AnalysisDashboard } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
-    const p = await mount(AnalysisDashboard, { sample: "Shop rent agreement", side: "Tenant", depth: "deep",
-        onDepth: () => {}, onBack: () => {}, onReanalyze: () => {} });
-    assert.ok(p.container.querySelector("[data-precedents-empty]"), "precedents must show the not-connected state");
-    assert.doesNotMatch(p.container.textContent, /\b(PLD|SCMR|CLC|YLR|MLD)\b|\d{4} SC\b|\bv(s)?\.\s/,
-        "a case citation appeared on a sample analysis");
-    await p.unmount();
-});
-
-test("asking about the sample says honestly that it cannot answer yet", async () => {
-    const { AnalysisDashboard } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
-    const p = await mount(AnalysisDashboard, { sample: "Shop rent agreement", side: "Tenant", depth: "deep",
-        onDepth: () => {}, onBack: () => {}, onReanalyze: () => {} });
-    await click([...p.container.querySelectorAll('[role="tab"]')].find(b => b.textContent.includes("Ask AI")));
-    await type(p.container.querySelector("#ask-doc"), "Can I leave early?");
-    await click(byLabel(p.container, "Send question"));
-    assert.match(p.container.textContent, /Can I leave early\?/);
-    assert.match(p.container.textContent, /can't answer yet/);
-    await p.unmount();
-});
-
 test("a finding opens its clause on the Document tab", async () => {
     const { AnalysisDashboard } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
-    const p = await mount(AnalysisDashboard, { sample: "Shop rent agreement", side: "Tenant", depth: "deep",
-        onDepth: () => {}, onBack: () => {}, onReanalyze: () => {} });
+    const p = await mount(AnalysisDashboard, DASHBOARD_PROPS);
     await click([...p.container.querySelectorAll('[role="tab"]')].find(b => b.textContent.trim().startsWith("Risks")));
     await click(buttons(p.container, "View in document")[0]);
     const selected = [...p.container.querySelectorAll('[role="tab"]')].find(b => b.getAttribute("aria-selected") === "true");
@@ -585,9 +562,101 @@ test("the sample in History opens its dashboard in one click", async () => {
     const p = await mount(DocsAnalyzer, { onBack: () => {} });
     await click(p.container.querySelector("[data-history-sample]"));
     assert.match(p.container.textContent, /Aggregated Dashboard/);
-    assert.match(p.container.textContent, /\(sample\)/);
+    assert.match(p.container.textContent, /\(fictional sample\)/);
     await p.unmount();
 });
+
+/* ── P-1 honesty: nothing on any analyzer view claims more than exists ───── *
+ *
+ * Every view of the sample is collected -- the start screen (empty + loaded),
+ * the animated reading view with each of its tabs, and the dashboard with each
+ * of its tabs -- and each must carry the banner (result views) and none of the
+ * forbidden claims or controls. Both layouts are mounted because each had its
+ * own Ask box and its own dead actions. */
+
+const FORBIDDEN_TEXT = [
+    [/verified/i, "a legal source is called verified"],
+    [/missing/i, "an absence is asserted (the real analyzer says 'not located')"],
+    [/never used for training|private to you/i, "an unbacked privacy promise"],
+    [/one click/i, "a one-click lawyer promise"],
+    [/Precedents?/, "a Precedents surface"],
+    [/Ask (AI|about)/i, "an Ask surface"],
+    [/\.DOC\b|\bDOC\b|photo|50 ?MB/i, "an advertised upload capability"],
+    [/Governing law detected/i, "a detected-law claim"],
+    [/Job offer letter|Freelancer NDA/, "a sample that cannot run"],
+    [/Analyze Document|insights from your file|review your documents|dig into the file/i, "a promise to analyse the user's own file"],
+];
+const FORBIDDEN_CONTROLS = ["Fix in a new draft", "Send to lawyer", "Resources", "Add Resource",
+    "Select Files", "Ask", "Send question", "Precedents", "اردو"];
+
+function assertHonest(container, where) {
+    const text = container.textContent;
+    for (const [re, why] of FORBIDDEN_TEXT) {
+        assert.doesNotMatch(text, re, `${where}: ${why}`);
+    }
+    const labels = [...container.querySelectorAll("button, [role=tab]")]
+        .map(b => (b.getAttribute("aria-label") || b.textContent || "").trim());
+    for (const name of FORBIDDEN_CONTROLS) {
+        assert.ok(!labels.some(l => l === name || l.startsWith(name + " ") || l === `${name}0`),
+            `${where}: dead control "${name}" is back`);
+    }
+    assert.equal(container.querySelector('input[type="file"]'), null, `${where}: a file picker is back`);
+    assert.equal(container.querySelector("textarea"), null, `${where}: an input that goes nowhere is back`);
+}
+
+const hasBanner = el => {
+    const b = el.querySelector("[data-fictional-banner]");
+    return Boolean(b && /Fictional demonstration — no uploaded document was analysed\./.test(b.textContent));
+};
+
+async function visitTabs(p, where) {
+    const names = [...p.container.querySelectorAll('[role="tab"]')].map(b => b.textContent.trim());
+    assert.ok(names.length > 1, `${where}: no tabs to visit`);
+    for (const name of names) {
+        await click([...p.container.querySelectorAll('[role="tab"]')].find(b => b.textContent.trim() === name));
+        assertHonest(p.container, `${where} / ${name}`);
+        assert.ok(hasBanner(p.container), `${where} / ${name}: the fictional banner is missing from a result view`);
+    }
+}
+
+test("P-1: the start screen, empty and with the sample loaded, is honest", async () => {
+    const p = await mount(DocsAnalyzer, { onBack: () => {}, userName: "Test User" });
+    assertHonest(p.container, "start screen");
+    assert.ok(hasBanner(p.container));
+    await click(buttons(p.container, "Use the fictional sample rent agreement")[0]);
+    assertHonest(p.container, "start screen (sample loaded)");
+    await p.unmount();
+});
+
+test("P-1: the reading view carries the banner and no dead actions, on every tab", async () => {
+    const p = await mount(DocsAnalyzer, { onBack: () => {} });
+    await click(buttons(p.container, "Use the fictional sample rent agreement")[0]);
+    await click(buttons(p.container, "Open fictional analysis")[0]);
+    assert.match(p.container.textContent, /Reading the fictional sample/, "the reading view did not open");
+    await visitTabs(p, "reading view");
+    await p.unmount();
+});
+
+test("P-1: the dashboard carries the banner and no invented claims, on every tab", async () => {
+    const { AnalysisDashboard } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
+    const p = await mount(AnalysisDashboard, DASHBOARD_PROPS);
+    await visitTabs(p, "dashboard");
+    // Sources are marked as not checked (they show on Summary, Risks and Checks).
+    await click([...p.container.querySelectorAll('[role="tab"]')].find(b => b.textContent.trim() === "Summary"));
+    assert.match(p.container.textContent, /Illustrative only — legal source not checked\./);
+    await p.unmount();
+});
+
+test("P-1: the sample's legal source lines are all illustrative", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/components/client/documents/DocsAnalyzer.jsx", import.meta.url), "utf8");
+    // Every `cite:` and every `law:` is the illustrative marker (or null).
+    const cites = [...src.matchAll(/\b(cite|law):\s*([^,}]+)/g)].map(m => m[2].trim());
+    assert.ok(cites.length >= 6, "the sample's sources were not found");
+    for (const c of cites) assert.ok(c === "ILLUSTRATIVE" || c === "null", `a real-looking source slipped in: ${c}`);
+    assert.doesNotMatch(src, /color:\s*t\.success\s*}}>\{(r\.cite|c\.law)\}/, "a source line is styled as a success");
+});
+
 test("the analyzer history column collapses and comes back", async () => {
     const p = await mount(DocsAnalyzer, { onBack: () => {} });
     assert.ok(p.container.querySelector('[aria-label="Analysis history"]'));

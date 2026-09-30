@@ -1,11 +1,16 @@
 'use client';
-/* Document analyzer — "read it with me", then the analysis dashboard.
+/* Document analyzer — a FICTIONAL DEMONSTRATION until the backend exists.
  *
- * NOT CONNECTED YET: there is no analysis endpoint. So the user's own file is
- * NEVER analysed here — choosing one says the analyzer is not connected. Only
- * the named samples run, and every result on screen is labelled as the
- * sample's. Showing invented risks against a real person's lease would be
- * advice nobody gave. */
+ * There is no analysis endpoint (see DOC_ANALYZER_PLAN.md). So:
+ *   - nothing offers to take the user's own file: upload says it is not
+ *     available, and there is no file picker to choose one with;
+ *   - the one sample (a shop tenancy) is fictional, and every view of its
+ *     result carries a banner saying no uploaded document was analysed;
+ *   - no line claims a legal source was checked, no check says a clause is
+ *     absent (the real analyzer will only say "not located"), and no control
+ *     pretends to do something that does not exist yet (Ask, Precedents, Fix,
+ *     Send to lawyer, Resources, Add document).
+ * documents_home_dom.test.mjs ("P-1: …") asserts each of these stays true. */
 import React, { useEffect, useRef, useState } from "react";
 import { useT } from "../theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
@@ -15,11 +20,17 @@ import {
     SERIF, SEVERITY, onPrimary, splitLayout,
 } from "./ui.jsx";
 
+/* Shown wherever the sample names a legal source. The sample's law is not
+ * checked against anything: our library holds none of these statutes yet. */
+export const ILLUSTRATIVE = "Illustrative only — legal source not checked.";
+export const FICTIONAL = "Fictional demonstration — no uploaded document was analysed.";
+export const SAMPLE_NAME = "Shop rent agreement";
+
 const RISKS = [
-    { id: 6, at: 2, sev: "high", title: "Clause 6 · Eviction on 7 days’ notice", why: "The landlord can end the lease for any reason within a week — you could lose the shop and your fit-out.", fix: "Require a stated ground and at least 60 days’ notice; give the tenant the same right.", cite: "Punjab Rented Premises Act, 2009 · verified" },
-    { id: 9, at: 3, sev: "high", title: "Clause 9 · Deposit is non-refundable", why: "Three months’ rent (PKR 255,000) is lost even if you hand the shop back in good order.", fix: "Refund within 30 days of handover, less documented damage.", cite: "Contract Act, 1872 · verified" },
-    { id: 4, at: 4, sev: "medium", title: "Clause 4 · Rent increase at any time", why: "Up to 20% whenever the landlord chooses, with no limit on how often.", fix: "One increase, on renewal only, capped at 10%.", cite: "Punjab Rented Premises Act, 2009 · verified" },
-    { id: 5, at: 5, sev: "medium", title: "Clause 5 · Structural repairs on you", why: "Roof, walls and foundations are normally the owner’s job.", fix: "Tenant does day-to-day repairs; landlord does structural ones.", cite: "Punjab Rented Premises Act, 2009 · verified" },
+    { id: 6, at: 2, sev: "high", title: "Clause 6 · Eviction on 7 days’ notice", why: "The landlord can end the lease for any reason within a week — you could lose the shop and your fit-out.", fix: "Require a stated ground and at least 60 days’ notice; give the tenant the same right.", cite: ILLUSTRATIVE },
+    { id: 9, at: 3, sev: "high", title: "Clause 9 · Deposit is non-refundable", why: "Three months’ rent (PKR 255,000) is lost even if you hand the shop back in good order.", fix: "Refund within 30 days of handover, less documented damage.", cite: ILLUSTRATIVE },
+    { id: 4, at: 4, sev: "medium", title: "Clause 4 · Rent increase at any time", why: "Up to 20% whenever the landlord chooses, with no limit on how often.", fix: "One increase, on renewal only, capped at 10%.", cite: ILLUSTRATIVE },
+    { id: 5, at: 5, sev: "medium", title: "Clause 5 · Structural repairs on you", why: "Roof, walls and foundations are normally the owner’s job.", fix: "Tenant does day-to-day repairs; landlord does structural ones.", cite: ILLUSTRATIVE },
 ];
 const CLAUSES = [
     [1, "1. The Landlord lets the shop at [shop address], Lahore, to the Tenant for eleven (11) months from 1 October 2026."],
@@ -31,22 +42,19 @@ const CLAUSES = [
     [9, "9. The security deposit of three months’ rent is non-refundable."],
     [11, "11. Signed at Lahore in the presence of two witnesses."],
 ];
-const MISSING = [
-    ["Tenant's right to end the lease", "Only the landlord can terminate. Add a notice period for you too."],
-    ["Registration with the Rent Registrar", "The 2009 Act expects the agreement to be filed with the Rent Registrar."],
+// Illustrative checks for the fictional sample. The real analyzer reports
+// "not located automatically", never a bare absence (DOC_ANALYZER_PLAN.md §4.5).
+const SAMPLE_CHECKS = [
+    ["Tenant's right to end the lease", "Not located in this fictional sample: only the landlord has a notice clause."],
+    ["Registration with the Rent Registrar", "A reminder, not a finding: whether it was registered cannot be seen from the text."],
 ];
 const TERMS = [
     ["Monthly rent", "PKR 85,000"], ["Due", "5th of each month"], ["Term", "11 months"],
     ["Starts", "1 Oct 2026"], ["Deposit", "PKR 255,000"], ["Landlord notice", "7 days"],
 ];
 const SUMMARY = "An 11-month shop lease in Lahore at PKR 85,000 a month. It favours the landlord: eviction on 7 days' notice, a non-refundable deposit, open-ended rent increases and structural repairs on you.";
-const SAMPLES = [
-    ["Shop rent agreement", "Lahore · 4 pages · landlord-friendly"],
-    ["Job offer letter", "Sales role · probation & notice"],
-    ["Freelancer NDA", "Karachi · one-way · 6 months"],
-];
 const READING = [0, 6, 6, 9, 4, 5, 0];
-const STATUS = ["Starting…", "Reading the text", "Checking clause 6", "Checking clause 9", "Checking clause 4", "Checking clause 5", "Comparing with the checklist"];
+const STATUS = ["Starting…", "Reading the text", "Checking clause 6", "Checking clause 9", "Checking clause 4", "Checking clause 5", "Comparing with the illustrative checklist"];
 
 function RiskCard({ t, r, open, onPick, fixLabel = "Fix" }) {
     const c = SEVERITY[r.sev];
@@ -61,7 +69,7 @@ function RiskCard({ t, r, open, onPick, fixLabel = "Fix" }) {
                 <>
                     <span style={{ display: "block", marginTop: 7, fontSize: 13, lineHeight: 1.55 }}>{r.why}</span>
                     <span style={{ display: "block", marginTop: 7, padding: "8px 10px", borderRadius: 8, background: t.primaryGlow2, fontSize: 13 }}><b>{fixLabel}:</b> {r.fix}</span>
-                    <span style={{ display: "block", marginTop: 5, fontSize: 12, color: t.success }}>{r.cite}</span>
+                    <span style={{ display: "block", marginTop: 5, fontSize: 12, color: t.textMuted }}>{r.cite}</span>
                 </>
             )}
         </button>
@@ -83,10 +91,10 @@ function Tabs({ t, tabs, value, onChange }) {
 
 /* ── The finished analysis: a dashboard with a tab per kind of finding ──────
  *
- * Every figure here belongs to THE SAMPLE (see the file header). Precedents
- * are deliberately empty: inventing case names and citations for a sample
- * would put fake law on screen, and fake citations are exactly the failure
- * this product exists to prevent. */
+ * Every figure here belongs to THE FICTIONAL SAMPLE (see the file header).
+ * There is no Precedents tab: we hold no case law, and inventing case names
+ * for a sample would put fake law on screen. No Ask tab either, until the
+ * document itself can be searched (plan P5). */
 const KEY_CLAUSES = [
     { id: 6, title: "Termination by the landlord", quote: "The Landlord may terminate this tenancy by giving seven (7) days’ notice, for any reason.",
       issues: ["The landlord can end the lease for any reason", "Only 7 days’ notice", "The tenant has no matching right"] },
@@ -102,12 +110,12 @@ const OBLIGATIONS = [
     { party: "Landlord", text: "Give seven days’ notice before terminating.", deadline: "Before termination", status: "Pending" },
 ];
 const COMPLIANCE = [
-    { title: "Registration with the Rent Registrar", status: "missing", detail: "The agreement is expected to be filed with the Rent Registrar.", law: "Punjab Rented Premises Act, 2009" },
-    { title: "Tenant’s right to end the lease", status: "missing", detail: "Only the landlord can terminate. Add a notice period for the tenant too.", law: "Contract Act, 1872" },
-    { title: "Stamp duty", status: "check", detail: "A lease must be on stamp paper of the right value. Check it before signing.", law: "Stamp Act, 1899" },
+    { title: "Registration with the Rent Registrar", status: "reminder", detail: "Whether the agreement was presented to the Rent Registrar cannot be seen from its text.", law: ILLUSTRATIVE },
+    { title: "Tenant’s right to end the lease", status: "not_located", detail: "Only the landlord has a notice clause in this fictional sample.", law: ILLUSTRATIVE },
+    { title: "Stamp duty", status: "check", detail: "Stamp paper would be checked here in a real review.", law: ILLUSTRATIVE },
     { title: "Signed before two witnesses", status: "present", detail: "Clause 11 records signature at Lahore before two witnesses.", law: null },
 ];
-const COMPLIANCE_TONE = { missing: ["high", "Missing"], check: ["medium", "Check"], present: ["low", "Present"] };
+const COMPLIANCE_TONE = { not_located: ["high", "Not located"], reminder: ["medium", "Reminder"], check: ["medium", "Check"], present: ["low", "Found"] };
 
 const DI = {
     spark: <path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" />,
@@ -131,6 +139,17 @@ export const ANALYZER_FONT = "'Nunito Sans', 'Avenir Next', Avenir, system-ui, s
 
 const DIcon = ({ d, s = 17 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>;
 
+/* On every view of the sample and its result. Not dismissible: the result is
+ * fictional for as long as it is on screen. */
+export function FictionalBanner({ t, style }) {
+    return (
+        <div role="note" data-fictional-banner
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10, background: "rgba(242,184,75,0.14)", border: "1px solid rgba(242,184,75,0.55)", color: t.text, fontSize: 13.5, fontWeight: 600, fontFamily: ANALYZER_FONT, ...style }}>
+            <span aria-hidden="true">⚠</span> {FICTIONAL}
+        </div>
+    );
+}
+
 function SectionHead({ t, icon, tone, title, sub, count }) {
     const c = SEVERITY[tone] || SEVERITY.info;
     return (
@@ -147,28 +166,22 @@ function SectionHead({ t, icon, tone, title, sub, count }) {
 
 export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onReanalyze }) {
     const t = useT();
-    const toast = useToast();
     const isMobile = useIsMobile();
     const [tab, setTab] = useState("summary");
     const [hl, setHl] = useState(null);          // clause highlighted on the Document tab
-    const [ask, setAsk] = useState("");
-    const [chat, setChat] = useState([]);
-    const notYet = what => () => toast.show(`${what} isn't connected yet — coming soon.`, "warn", 3000);
     const light = t.mode !== "dark";
     const issueBox = light ? { background: "#fdf7e6", color: "#7a5200" } : { background: "rgba(242,184,75,0.12)", color: "#f7cf7d" };
     const recBox = light ? { background: "#e8f1fc", color: "#1d4f91" } : { background: "rgba(90,169,230,0.13)", color: "#b9dcf7" };
     const high = RISKS.filter(r => r.sev === "high").length;
-    const missing = COMPLIANCE.filter(c => c.status === "missing").length;
+    const notLocated = COMPLIANCE.filter(c => c.status === "not_located").length;
 
     const TABS = [
         ["summary", "Summary", DI.spark, null],
         ["clauses", "Key Clauses", DI.clause, KEY_CLAUSES.length],
         ["risks", "Risks", DI.risk, RISKS.length],
         ["obligations", "Obligations", DI.check, OBLIGATIONS.length],
-        ["compliance", "Compliance", DI.shield, COMPLIANCE.length],
-        ["precedents", "Precedents", DI.gavel, 0],
+        ["compliance", "Illustrative checks", DI.shield, COMPLIANCE.length],
         ["document", "Document", DI.doc, null],
-        ["ask", "Ask AI", DI.chat, null],
     ];
     const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, padding: "18px 20px" };
     const showInDoc = id => { setHl(id); setTab("document"); };
@@ -207,7 +220,7 @@ export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onRean
                             </div>
                             <p style={{ margin: "8px 0 12px", fontSize: 14, color: t.textDim || t.text, lineHeight: 1.6 }}>{r.why}</p>
                             <div style={{ ...recBox, borderRadius: 10, padding: "10px 14px", fontSize: 13.5, lineHeight: 1.55 }}><b>Recommendation:</b> {r.fix}</div>
-                            <div style={{ fontSize: 12, color: t.success, marginTop: 8 }}>{r.cite}</div>
+                            <div style={{ fontSize: 12, color: t.textMuted, marginTop: 8 }}>{r.cite}</div>
                         </article>
                     );
                 })}
@@ -233,7 +246,7 @@ export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onRean
     );
     const complianceSection = (
         <section key="compliance" aria-label="Compliance">
-            <SectionHead t={t} icon={DI.shield} tone="low" title="Compliance" sub={`${missing} missing · checked against the rent-agreement playbook`} count={COMPLIANCE.length} />
+            <SectionHead t={t} icon={DI.shield} tone="low" title="Illustrative checks" sub={`${notLocated} not located in this fictional sample · no playbook has been applied`} count={COMPLIANCE.length} />
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {COMPLIANCE.map(c => {
                     const [tone, label] = COMPLIANCE_TONE[c.status];
@@ -242,23 +255,12 @@ export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onRean
                             <div style={{ flex: 1 }}>
                                 <h3 style={{ margin: 0, fontSize: 16.5, fontWeight: 600, color: t.text }}>{c.title}</h3>
                                 <p style={{ margin: "6px 0 4px", fontSize: 14, color: t.textDim || t.text, lineHeight: 1.55 }}>{c.detail}</p>
-                                {c.law && <div style={{ fontSize: 12, color: t.success }}>{c.law}</div>}
+                                {c.law && <div style={{ fontSize: 12, color: t.textMuted }}>{c.law}</div>}
                             </div>
                             <Pill tone={tone} style={{ fontSize: 11, letterSpacing: ".04em" }}>{label.toUpperCase()}</Pill>
                         </article>
                     );
                 })}
-            </div>
-        </section>
-    );
-    const precedentsSection = (
-        <section key="precedents" aria-label="Precedents">
-            <SectionHead t={t} icon={DI.gavel} tone="low" title="Precedents" sub="Case law that bears on these clauses" count={0} />
-            <div data-precedents-empty style={{ ...card, textAlign: "center", padding: "30px 24px" }}>
-                <div style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 6 }}>Precedent matching isn't connected yet</div>
-                <div style={{ fontSize: 13.5, color: t.textMuted, lineHeight: 1.6, maxWidth: 560, margin: "0 auto" }}>
-                    When it is, cases will come from the judgments in Attorney.AI's library and each citation will be checked before it is shown. No case is listed until then — a made-up citation is worse than none.
-                </div>
             </div>
         </section>
     );
@@ -280,46 +282,12 @@ export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onRean
             </Paper>
         </section>
     );
-    const send = () => {
-        const q = ask.trim();
-        if (!q) return;
-        setChat(c => [...c, { who: "you", text: q }, { who: "ai", text: "I can't answer yet — the analyzer isn't connected, so there is no reading of your document to answer from. This is a preview of how asking will work." }]);
-        setAsk("");
-    };
-    const askSection = (
-        <section key="ask" aria-label="Ask about this document">
-            <SectionHead t={t} icon={DI.chat} tone="low" title="Ask about this document" sub="Chat with the analysis of your document" />
-            <div style={{ ...card, padding: 0, overflow: "hidden" }}>
-                <div data-lenis-prevent style={{ minHeight: 240, maxHeight: 420, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
-                    {chat.length === 0 ? (
-                        <div style={{ margin: "auto", textAlign: "center", color: t.textMuted, fontSize: 14 }}>
-                            <div style={{ color: t.primary, marginBottom: 8, display: "flex", justifyContent: "center" }}><DIcon d={DI.spark} s={26} /></div>
-                            Start asking questions about this document — e.g. “can I leave early?”
-                        </div>
-                    ) : chat.map((m, i) => (
-                        <div key={i} style={{ alignSelf: m.who === "you" ? "flex-end" : "flex-start", maxWidth: "80%", padding: "10px 14px", borderRadius: 14, fontSize: 14, lineHeight: 1.55, background: m.who === "you" ? t.primary : t.inputBg, color: m.who === "you" ? onPrimary(t) : t.text, border: m.who === "you" ? "none" : `1px solid ${t.border}` }}>{m.text}</div>
-                    ))}
-                </div>
-                <div style={{ borderTop: `1px solid ${t.border}`, padding: 12 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 6px 6px 14px", borderRadius: 12, background: t.inputBg, border: `1px solid ${ask ? t.primary : (t.inputBorder || t.border)}` }}>
-                        <label htmlFor="ask-doc" style={{ position: "absolute", left: -9999 }}>Ask a question about this document</label>
-                        <input id="ask-doc" value={ask} onChange={e => setAsk(e.target.value)} onKeyDown={e => { if (e.key === "Enter") send(); }}
-                            placeholder="Ask a question about this document…"
-                            style={{ flex: 1, minHeight: 34, background: "transparent", border: "none", outline: "none", color: t.text, fontSize: 14, fontFamily: ANALYZER_FONT }} />
-                        <button type="button" aria-label="Send question" onClick={send} disabled={!ask.trim()}
-                            style={{ width: 38, height: 38, borderRadius: 10, border: "none", background: t.primary, color: onPrimary(t), cursor: ask.trim() ? "pointer" : "not-allowed", opacity: ask.trim() ? 1 : 0.5, display: "flex", alignItems: "center", justifyContent: "center" }}><DIcon d={DI.send} s={16} /></button>
-                    </div>
-                    <div style={{ fontSize: 11.5, color: t.textMuted, textAlign: "center", marginTop: 8 }}>Attorney.AI can make mistakes — check important answers with a lawyer.</div>
-                </div>
-            </div>
-        </section>
-    );
 
     const stats = [
         ["Risks", RISKS.length, `${high} high/critical`, "high", DI.risk, "risks"],
         ["Obligations", OBLIGATIONS.length, `${OBLIGATIONS.length} with deadlines`, "info", DI.check, "obligations"],
         ["Key Clauses", KEY_CLAUSES.length, `${KEY_CLAUSES.length} with issues`, "medium", DI.clause, "clauses"],
-        ["Compliance", COMPLIANCE.length, `${missing} missing`, "low", DI.shield, "compliance"],
+        ["Checks", COMPLIANCE.length, `${notLocated} not located`, "low", DI.shield, "compliance"],
     ];
     const seg = on => ({ minHeight: 34, padding: "0 14px", borderRadius: 8, border: "none", background: on ? t.card : "transparent", color: on ? t.primary : t.textMuted, fontWeight: on ? 600 : 500, fontSize: 17, cursor: "pointer", fontFamily: ANALYZER_FONT, boxShadow: on ? "0 1px 3px rgba(0,0,0,.2)" : "none" });
 
@@ -334,24 +302,16 @@ export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onRean
                 <h1 style={{ margin: 0, fontSize: 30, fontWeight: 600, letterSpacing: "-0.2px", color: t.text, fontFamily: ANALYZER_FONT }}>Document Analyzer</h1>
                 <PreviewBadge what="The analyzer" />
             </div>
+            <div style={{ padding: isMobile ? "0 14px 10px" : "0 22px 10px", background: t.surface }}><FictionalBanner t={t} /></div>
 
             {/* Action row */}
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: isMobile ? "4px 14px 12px" : "6px 22px 14px", borderBottom: `1px solid ${t.border}`, background: t.surface }}>
-                <button type="button" onClick={notYet("Resources")}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 42, padding: "0 12px 0 14px", borderRadius: 10, border: `1px solid ${t.border}`, background: t.card, color: t.text, fontSize: 18, fontWeight: 500, cursor: "pointer", fontFamily: ANALYZER_FONT }}>
-                    <DIcon d={DI.book} s={17} /> Resources
-                    <span style={{ minWidth: 24, height: 24, borderRadius: 999, background: t.primaryGlow2, color: t.primary, fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", marginLeft: 8 }}>1</span>
-                </button>
                 <button type="button" onClick={onBack}
                     style={{ display: "inline-flex", alignItems: "center", gap: 8, minHeight: 42, padding: "0 10px", borderRadius: 10, border: "none", background: "transparent", color: t.textMuted, fontSize: 18, fontWeight: 400, cursor: "pointer", fontFamily: ANALYZER_FONT }}>
                     <DIcon d={DI.back} s={16} /> Back to Document Analyzer
                 </button>
-                {/* Pushes Add Resource and Re-analyze to the right edge. */}
+                {/* Pushes Re-analyze to the right edge. */}
                 <span aria-hidden="true" style={{ flex: 1 }} />
-                <button type="button" onClick={notYet("Adding another document")}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 42, padding: "0 18px", borderRadius: 10, border: "none", background: "linear-gradient(135deg, #1f8a5b, #0f7f73)", color: "#fff", fontSize: 18, fontWeight: 500, cursor: "pointer", fontFamily: ANALYZER_FONT }}>
-                    <DIcon d={DI.upload} s={16} /> Add Resource
-                </button>
                 <button type="button" onClick={onReanalyze}
                     style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 42, padding: "0 18px", borderRadius: 10, border: `1px solid ${t.border}`, background: t.card, color: t.textMuted, fontSize: 18, fontWeight: 400, cursor: "pointer", fontFamily: ANALYZER_FONT }}>
                     <DIcon d={DI.redo} s={16} /> Re-analyze
@@ -364,14 +324,10 @@ export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onRean
                     <div style={{ flex: 1, minWidth: 240 }}>
                         <h1 style={{ margin: 0, fontFamily: ANALYZER_FONT, fontSize: 36, fontWeight: 600, letterSpacing: "-0.3px", color: t.text }}>Aggregated Dashboard</h1>
                         <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, fontSize: 16, fontWeight: 600, letterSpacing: ".12em", textTransform: "uppercase", color: t.primary }}>
-                            <DIcon d={DI.redo} s={17} /> Analyzing 1 document
+                            <DIcon d={DI.redo} s={17} /> Fictional sample · 1 document
                         </div>
                         {/* Whose analysis this is, kept out of the heading line but never dropped. */}
-                        <div style={{ marginTop: 4, fontSize: 12.5, color: t.textMuted }}>{sample} (sample) · as the {side}</div>
-                    </div>
-                    <div role="group" aria-label="Language" style={{ display: "flex", gap: 2, padding: 4, borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
-                        <button type="button" aria-pressed="true" style={seg(true)}>English</button>
-                        <button type="button" aria-pressed="false" onClick={notYet("Urdu analysis")} style={seg(false)}>اردو</button>
+                        <div style={{ marginTop: 4, fontSize: 12.5, color: t.textMuted }}>{sample} (fictional sample) · as the {side}</div>
                     </div>
                     <div role="group" aria-label="Scan depth" style={{ display: "flex", gap: 2, padding: 4, borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
                         {[["quick", "Quick scan"], ["medium", "Medium"], ["deep", "Deep scan"]].map(([k, name]) => (
@@ -419,7 +375,7 @@ export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onRean
                                     <h2 style={{ margin: 0, fontFamily: ANALYZER_FONT, fontSize: 26, fontWeight: 500, color: t.text }}>Aggregated Executive Summary</h2>
                                 </div>
                                 <p style={{ margin: "0 0 10px", fontSize: 15, lineHeight: 1.7, color: t.text }}>{SUMMARY}</p>
-                                <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 14 }}>Governing law detected: Punjab Rented Premises Act, 2009.</div>
+                                <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 14 }}>Fictional sample — governing law was not determined.</div>
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
                                     {TERMS.map(([k, v]) => (
                                         <div key={k} style={{ padding: "10px 12px", borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
@@ -433,16 +389,13 @@ export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onRean
                             {risksSection}
                             {obligationsSection}
                             {complianceSection}
-                            {precedentsSection}
                         </>
                     )}
                     {tab === "clauses" && clausesSection}
                     {tab === "risks" && risksSection}
                     {tab === "obligations" && obligationsSection}
                     {tab === "compliance" && complianceSection}
-                    {tab === "precedents" && precedentsSection}
                     {tab === "document" && documentSection}
-                    {tab === "ask" && askSection}
                 </div>
             </div>
         </div>
@@ -454,11 +407,13 @@ export function AnalysisDashboard({ sample, side, depth, onDepth, onBack, onRean
  * The user's own file is still never analysed (see the file header): a file
  * chosen or dropped is announced as not read. The sample is reachable from
  * History and from the drop zone, and is named "(sample)" wherever it shows. */
+// The lines under the greeting describe what this screen actually offers:
+// a fictional review. They used to promise insights "from your file".
 export function greetingFor(date = new Date()) {
     const h = date.getHours();
-    if (h < 5 || h >= 18) return { text: "Good Evening", sub: "Let's dig into the file.", icon: "moon", night: true };
-    if (h < 12) return { text: "Good Morning", sub: "Let's review your documents.", icon: "sun", night: false };
-    return { text: "Good Afternoon", sub: "Get instant insights from your file.", icon: "cloud", night: false };
+    if (h < 5 || h >= 18) return { text: "Good Evening", sub: "Take a look at a fictional document review.", icon: "moon", night: true };
+    if (h < 12) return { text: "Good Morning", sub: "Explore a fictional document review.", icon: "sun", night: false };
+    return { text: "Good Afternoon", sub: "See how a document review will look.", icon: "cloud", night: false };
 }
 
 const Moon = () => (
@@ -481,14 +436,13 @@ const SunCloud = () => (
 
 const HISTORY_CLEARED_KEY = "attorney.analyzer.historyCleared";
 
-function UploadScreen({ userName, stage, sample, side, onSide, depth, onDepth, focusText, onFocusText,
-    onPickFile, onDropFiles, onPickSample, onClearSample, onAnalyze, onOpenSample, onNewReview }) {
+function UploadScreen({ userName, stage, sample, side, onSide, depth, onDepth,
+    onDropAttempt, onPickSample, onClearSample, onAnalyze, onOpenSample, onNewReview }) {
     const t = useT();
     const isMobile = useIsMobile();
     const [historyOpen, setHistoryOpen] = useState(true);
     const [groupOpen, setGroupOpen] = useState(true);
     const [collapsed, setCollapsed] = useState(false);
-    const [dragging, setDragging] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const [cleared, setCleared] = useState(() => {
         try { return window.localStorage.getItem(HISTORY_CLEARED_KEY) === "1"; } catch { return false; }
@@ -585,7 +539,7 @@ function UploadScreen({ userName, stage, sample, side, onSide, depth, onDepth, f
                                     style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 14px", borderRadius: 10, border: "none", background: "transparent", color: t.text, fontSize: 13.5, cursor: "pointer", fontFamily: ANALYZER_FONT, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                                     onMouseEnter={e => { e.currentTarget.style.background = t.inputBg; }}
                                     onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
-                                    {SAMPLES[0][0]} (sample)
+                                    {SAMPLE_NAME} (fictional sample)
                                 </button>
                             )}
                         </>
@@ -613,39 +567,38 @@ function UploadScreen({ userName, stage, sample, side, onSide, depth, onDepth, f
                         </div>
                         <PreviewBadge what="The analyzer" />
                     </div>
+                    <FictionalBanner t={t} />
 
-                    {/* Upload */}
+                    {/* Upload — not available yet, and says so. No file picker:
+                        a control that accepts a file it cannot read invites the
+                        user to hand over a real lease for nothing. */}
                     <section style={{ ...bigCard, display: "flex", gap: isMobile ? 16 : 24, flexDirection: isMobile ? "column" : "row", alignItems: "stretch" }}>
                         <div style={{ flex: isMobile ? "none" : "0 0 260px", display: "flex", flexDirection: "column", gap: 10 }}>
                             <span style={{ width: 42, height: 42, borderRadius: 11, background: "linear-gradient(135deg, #1f8a5b, #0f7f73)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><DIcon d={DI.spark} s={19} /></span>
-                            <h2 style={{ margin: "4px 0 0", fontSize: 17, fontWeight: 700, color: t.text, lineHeight: 1.3 }}>Upload a Legal Document</h2>
-                            <p style={{ margin: 0, fontSize: 13, color: t.textMuted, lineHeight: 1.55 }}>Upload contracts, agreements, policies or legal files for AI-powered review.</p>
+                            <h2 style={{ margin: "4px 0 0", fontSize: 17, fontWeight: 700, color: t.text, lineHeight: 1.3 }}>Document review</h2>
+                            <p style={{ margin: 0, fontSize: 13, color: t.textMuted, lineHeight: 1.55 }}>Reviewing your own documents is being built. Until then, a fictional sample shows how a review will look.</p>
                         </div>
-                        <div
-                            onDragOver={e => { e.preventDefault(); setDragging(true); }}
-                            onDragLeave={() => setDragging(false)}
-                            onDrop={e => { e.preventDefault(); setDragging(false); onDropFiles(e.dataTransfer?.files); }}
-                            style={{ flex: 1, minWidth: 0, minHeight: isMobile ? 200 : 260, borderRadius: 16, border: `2px dashed ${dragging ? t.primary : t.borderHi || t.border}`, background: dragging ? t.primaryGlow2 : "transparent", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: "20px 18px", textAlign: "center" }}>
+                        {/* A file dropped here must not navigate the tab to it, so the
+                            drop is swallowed -- and the user is told it was not read. */}
+                        <div data-upload-unavailable
+                            onDragOver={e => e.preventDefault()}
+                            onDrop={e => { e.preventDefault(); onDropAttempt(); }}
+                            style={{ flex: 1, minWidth: 0, minHeight: isMobile ? 180 : 220, borderRadius: 16, border: `1px solid ${t.border}`, background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: "20px 18px", textAlign: "center" }}>
                             {ready ? (
                                 <>
                                     <span style={{ width: 44, height: 54, borderRadius: 8, background: "#fdecec", color: "#b3261e", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>PDF</span>
-                                    <div style={{ fontSize: 15.5, fontWeight: 700, color: t.text }}>{sample}.pdf <span style={{ fontSize: 13, fontWeight: 500, color: t.textMuted }}>(sample)</span></div>
-                                    <div style={{ fontSize: 13.5, color: t.textMuted }}>4 pages · text found · ready to analyze</div>
+                                    <div style={{ fontSize: 15.5, fontWeight: 700, color: t.text }}>{sample} <span style={{ fontSize: 13, fontWeight: 500, color: t.textMuted }}>(fictional sample)</span></div>
+                                    <div style={{ fontSize: 13.5, color: t.textMuted }}>Fictional text · ready to open</div>
                                     <Btn onClick={onClearSample} style={{ minHeight: 38 }}>Remove</Btn>
                                 </>
                             ) : (
                                 <>
-                                    <span style={{ color: t.primary, opacity: 0.55 }}><DIcon d={DI.upload} s={26} /></span>
-                                    <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>Drag & Drop Documents Here</div>
-                                    <div style={{ fontSize: 11.5, color: t.textMuted, letterSpacing: ".06em" }}>OR</div>
-                                    <button type="button" onClick={onPickFile}
-                                        style={{ minHeight: 38, padding: "0 20px", borderRadius: 10, border: `1px solid ${t.text}`, background: "transparent", color: t.primary, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: ANALYZER_FONT }}>
-                                        Select Files
-                                    </button>
-                                    <div style={{ fontSize: 12, color: t.textMuted }}>PDF • DOCX • DOC • Max 50MB</div>
+                                    <span style={{ color: t.textMuted, opacity: 0.7 }}><DIcon d={DI.upload} s={26} /></span>
+                                    <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>Real document upload is not available yet.</div>
+                                    <div style={{ fontSize: 13, color: t.textMuted, maxWidth: 420, lineHeight: 1.55 }}>Nothing you have is read or stored here.</div>
                                     <button type="button" onClick={onPickSample}
-                                        style={{ background: "none", border: "none", color: t.primary, fontSize: 12, fontWeight: 600, cursor: "pointer", marginTop: 0 }}>
-                                        No document handy? Try the sample rent agreement →
+                                        style={{ minHeight: 38, padding: "0 20px", borderRadius: 10, border: `1px solid ${t.primary}`, background: "transparent", color: t.primary, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: ANALYZER_FONT }}>
+                                        Use the fictional sample rent agreement
                                     </button>
                                 </>
                             )}
@@ -656,13 +609,9 @@ function UploadScreen({ userName, stage, sample, side, onSide, depth, onDepth, f
                     <section style={{ ...bigCard, display: "flex", flexDirection: "column", gap: 18 }}>
                         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
                             <span style={{ color: t.primary, alignSelf: "center" }}><DIcon d={DI.spark} s={19} /></span>
-                            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: t.text }}>Tell AI What To Focus On</h2>
-                            <span style={{ fontSize: 13, color: t.textMuted }}>(optional)</span>
+                            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: t.text }}>Open the sample review</h2>
+                            <span style={{ fontSize: 13, color: t.textMuted }}>(fictional)</span>
                         </div>
-                        <label htmlFor="an-focus" style={{ position: "absolute", left: -9999 }}>What should the review focus on</label>
-                        <textarea id="an-focus" rows={4} value={focusText} onChange={e => onFocusText(e.target.value)}
-                            placeholder="Review risks in this contract… check compliance issues… Summarize this agreement…"
-                            style={{ width: "100%", boxSizing: "border-box", resize: "vertical", borderRadius: 14, border: `1px solid ${t.inputBorder || t.border}`, background: t.inputBg, color: t.text, padding: "12px 16px", fontSize: 14, lineHeight: 1.6, fontFamily: ANALYZER_FONT, outline: "none" }} />
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12, flexWrap: "wrap" }}>
                             <label htmlFor="an-side" style={{ fontSize: 12.5, color: t.textMuted }}>Your side</label>
                             <select id="an-side" value={side} onChange={e => onSide(e.target.value)} style={select}>
@@ -675,9 +624,9 @@ function UploadScreen({ userName, stage, sample, side, onSide, depth, onDepth, f
                                 <option value="deep">✦ Deep</option>
                             </select>
                             <button type="button" onClick={onAnalyze} disabled={!ready}
-                                title={ready ? "Analyze the sample" : "Add a document first"}
+                                title={ready ? "Open the fictional sample" : "Choose the fictional sample first"}
                                 style={{ minHeight: 42, padding: "0 20px", borderRadius: 12, border: "none", background: "linear-gradient(135deg, #1f8a5b, #0f7f73)", color: "#fff", fontSize: 14.5, fontWeight: 700, cursor: ready ? "pointer" : "not-allowed", opacity: ready ? 1 : 0.5, display: "flex", alignItems: "center", gap: 10, fontFamily: ANALYZER_FONT }}>
-                                <DIcon d={<><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>} s={16} /> Analyze Document
+                                <DIcon d={<><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>} s={16} /> Open fictional analysis
                             </button>
                         </div>
                     </section>
@@ -693,36 +642,20 @@ export default function DocsAnalyzer({ onBack, userName }) {
     const t = useT();
     const toast = useToast();
     const L = splitLayout(useIsMobile());
-    const fileRef = useRef(null);
     const timers = useRef([]);
-    const [stage, setStage] = useState("empty");   // empty | ready | analyzing | done (dashboard)
-    const [sample, setSample] = useState(SAMPLES[0][0]);
+    // empty | ready | analyzing | done (dashboard). Only the fictional sample
+    // ever reaches "ready": there is no way to hand over a real file.
+    const [stage, setStage] = useState("empty");
+    const sample = SAMPLE_NAME;
     const [side, setSide] = useState("Tenant");
     const [depth, setDepth] = useState("medium");
-    const [focus, setFocus] = useState({ risks: true, missing: true, money: true, law: false, summary: false });
     const [step, setStep] = useState(0);
     const [sel, setSel] = useState(null);
     const [tab, setTab] = useState("risks");
-    const [focusText, setFocusText] = useState("");
 
     useEffect(() => () => timers.current.forEach(clearTimeout), []);
-    const notYet = what => () => toast.show(`${what} isn't connected yet — coming soon.`, "warn", 3000);
     const reset = () => { timers.current.forEach(clearTimeout); setStage("empty"); setStep(0); setSel(null); };
-    // Only the rent agreement has sample findings. The other two would show
-    // that lease's risks under another document's name.
-    const pickSample = name => {
-        if (name !== SAMPLES[0][0]) {
-            toast.show(`Only the “${SAMPLES[0][0]}” sample is available in this preview.`, "warn", 3500);
-            return;
-        }
-        setSample(name); setStage("ready");
-    };
-    const notRead = () => toast.show("The analyzer isn't connected yet, so your file was not read. Try the sample to see how it will work.", "warn", 5000);
-    const onFile = e => {
-        // The user's own file is not analysed: there is nothing to analyse it with.
-        if (e.target.files?.length) toast.show("The analyzer isn't connected yet, so your file was not read. Try a sample to see how it will work.", "warn", 5000);
-        e.target.value = "";
-    };
+    const notRead = () => toast.show("Real document upload is not available yet, so your file was not read.", "warn", 5000);
     const analyze = () => {
         timers.current.forEach(clearTimeout);
         setStage("analyzing"); setStep(0); setSel(null); setTab("risks");
@@ -734,19 +667,14 @@ export default function DocsAnalyzer({ onBack, userName }) {
 
     if (stage === "empty" || stage === "ready") {
         return (
-            <>
-                <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,image/*" onChange={onFile} style={{ display: "none" }} />
-                <UploadScreen userName={userName} stage={stage} sample={sample}
-                    side={side} onSide={setSide} depth={depth} onDepth={setDepth}
-                    focusText={focusText} onFocusText={setFocusText}
-                    onPickFile={() => fileRef.current?.click()}
-                    onDropFiles={files => { if (files?.length) notRead(); }}
-                    onPickSample={() => pickSample(SAMPLES[0][0])}
-                    onClearSample={reset}
-                    onAnalyze={analyze}
-                    onOpenSample={() => { setSample(SAMPLES[0][0]); setStep(6); setStage("done"); }}
-                    onNewReview={reset} />
-            </>
+            <UploadScreen userName={userName} stage={stage} sample={sample}
+                side={side} onSide={setSide} depth={depth} onDepth={setDepth}
+                onDropAttempt={notRead}
+                onPickSample={() => setStage("ready")}
+                onClearSample={reset}
+                onAnalyze={analyze}
+                onOpenSample={() => { setStep(6); setStage("done"); }}
+                onNewReview={reset} />
         );
     }
     if (stage === "done") {
@@ -755,165 +683,68 @@ export default function DocsAnalyzer({ onBack, userName }) {
             onBack={reset} onReanalyze={analyze} />;
     }
 
-    const analyzing = stage === "analyzing" || stage === "done";
-    const found = RISKS.filter(r => analyzing && step >= r.at);
-    const reading = stage === "analyzing" ? READING[step] : 0;
-    const segBtn = on => ({ flex: 1, minHeight: 40, borderRadius: 10, border: `1px solid ${on ? t.primary : t.border}`, background: on ? t.primaryGlow2 : t.card, color: t.text, fontSize: 13.5, fontWeight: 600, cursor: "pointer", fontFamily: ANALYZER_FONT });
-    const panelTitle = stage === "empty" ? "What should I look for?" : stage === "ready" ? "Ready when you are" : stage === "analyzing" ? "Reading your document…" : "Here is what I found";
-    const panelSub = stage === "empty" ? "Sensible defaults are set — change anything."
-        : stage === "ready" ? "Sample loaded · 4 pages · text found"
-        : `As the ${side.toLowerCase()} · ${depth === "deep" ? "deep review" : depth === "medium" ? "medium review" : "quick scan"}`;
+    // Only "analyzing" reaches here: the stages above return early.
+    const found = RISKS.filter(r => step >= r.at);
+    const reading = READING[step];
+    const panelSub = `As the ${side.toLowerCase()} · ${depth === "deep" ? "deep review" : depth === "medium" ? "medium review" : "quick scan"}`;
 
     return (
         <div data-lenis-prevent style={{ ...L.root, fontFamily: ANALYZER_FONT }}>
-            <ScreenHeader onBack={onBack} title="Document analyzer"
-                actions={<>
-                    {stage === "ready" && <Btn onClick={reset} style={{ minHeight: 38 }}>Replace file</Btn>}
-                </>}>
-                {stage !== "empty" && <span style={{ fontSize: 13, color: t.textMuted }}>· {sample} (sample)</span>}
+            <ScreenHeader onBack={onBack} title="Document analyzer">
+                <span style={{ fontSize: 13, color: t.textMuted }}>· {sample} (fictional sample)</span>
                 <PreviewBadge what="The analyzer" />
             </ScreenHeader>
-            <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,image/*" onChange={onFile} style={{ display: "none" }} />
+            <div style={{ padding: "10px clamp(14px, 3vw, 28px) 0" }}><FictionalBanner t={t} /></div>
 
             <div style={L.row}>
                 <section data-lenis-prevent style={{ ...L.col("1 1 460px"), overflowY: "auto", background: t.bg, display: "flex", flexDirection: "column" }}>
-                    {stage === "empty" ? (
-                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 18, padding: "24px clamp(14px, 3vw, 28px)" }}>
-                            {/* The dashboard only exists after an analysis, and only
-                                the sample can be analysed — so offer it up front
-                                instead of behind a sample card and a second button. */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "14px 18px", borderRadius: 14, background: t.primaryGlow2, border: `1px solid ${t.primary}55` }}>
-                                <div style={{ flex: 1, minWidth: 220 }}>
-                                    <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>See what an analysis looks like</div>
-                                    <div style={{ fontSize: 13, color: t.textMuted }}>Open the full dashboard for the sample shop rent agreement — risks, obligations, compliance and more.</div>
-                                </div>
-                                <Btn kind="primary" onClick={() => { setSample(SAMPLES[0][0]); setStep(6); setStage("done"); }}>See a sample analysis →</Btn>
-                            </div>
-                            <button type="button" onClick={() => fileRef.current?.click()}
-                                style={{ flex: 1, minHeight: 300, border: `2px dashed ${t.border}`, borderRadius: 22, background: t.surface, color: t.text, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 40, flexWrap: "wrap", padding: 30, fontFamily: ANALYZER_FONT }}>
-                                <div aria-hidden="true" style={{ position: "relative", width: 170, height: 210, flexShrink: 0 }}>
-                                    <div style={{ position: "absolute", left: 22, top: 14, width: 140, height: 190, borderRadius: 10, background: t.card, transform: "rotate(6deg)" }} />
-                                    <div style={{ position: "absolute", left: 6, top: 4, width: 140, height: 190, borderRadius: 10, background: "#f4f7f7", boxShadow: "0 10px 30px rgba(0,0,0,.35)", padding: "18px 16px", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 9 }}>
-                                        {[["70%", "#c9d4d6"], ["100%", "#dde5e6"], ["92%", "#fbd3d3"], ["100%", "#dde5e6"], ["80%", "#fbe6b4"], ["100%", "#dde5e6"], ["88%", "#dde5e6"], ["60%", "#bfe9e3"]].map(([w, c], i) => (
-                                            <span key={i} style={{ height: i ? 6 : 8, width: w, borderRadius: 3, background: c, alignSelf: i ? "auto" : "center" }} />
-                                        ))}
-                                    </div>
-                                </div>
-                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 10, textAlign: "left", maxWidth: 380 }}>
-                                    <div style={{ fontFamily: ANALYZER_FONT, fontSize: 28, fontWeight: 600, lineHeight: 1.2 }}>Drop a document.<br />I'll read it with you.</div>
-                                    <div style={{ fontSize: 14, color: t.textMuted, lineHeight: 1.6 }}>You'll see each clause light up as I check it — risks for your side, what's missing, and the law behind it.</div>
-                                    <span style={{ marginTop: 6, display: "inline-flex", alignItems: "center", minHeight: 44, padding: "0 18px", borderRadius: 11, background: t.primary, color: onPrimary(t), fontWeight: 600, fontSize: 14 }}>Select file</span>
-                                    <span style={{ fontSize: 12.5, color: t.textMuted }}>PDF · DOCX · DOC · photo or scan · max 50 MB</span>
-                                </div>
-                            </button>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                                <Label>No document handy? Try one</Label>
-                                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                                    {SAMPLES.map(([name, sub]) => (
-                                        <button key={name} type="button" onClick={() => pickSample(name)}
-                                            style={{ flex: "1 1 180px", display: "flex", flexDirection: "column", gap: 6, textAlign: "left", padding: 14, borderRadius: 14, background: t.card, border: `1px solid ${t.border}`, color: t.text, cursor: "pointer", fontFamily: ANALYZER_FONT }}>
-                                            <span style={{ fontSize: 14, fontWeight: 600 }}>{name}</span>
-                                            <span style={{ fontSize: 12.5, color: t.textMuted }}>{sub}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        <div style={{ display: "flex", justifyContent: "center", padding: "22px 12px" }}>
-                            <Paper title="TENANCY AGREEMENT" width={600} style={{ fontSize: 14, lineHeight: 1.7 }}>
-                                {CLAUSES.map(([id, text]) => {
-                                    const r = found.find(x => x.id === id);
-                                    const c = r ? SEVERITY[r.sev] : null;
-                                    const isReading = reading === id;
-                                    return (
-                                        <button key={id} type="button" onClick={() => { if (r) { setSel(id); setTab("risks"); } }}
-                                            style={{ display: "block", width: "100%", textAlign: "left", font: "inherit", color: "inherit", border: "none", borderRadius: 6, padding: "5px 8px", margin: "0 -8px 6px", cursor: r ? "pointer" : "default", background: isReading ? "#e6f4ff" : c ? c.paper : "transparent", outline: isReading ? "2px solid #5aa9e6" : sel === id && c ? `2px solid ${c.line}` : "none" }}>
-                                            {r && <span style={{ fontFamily: ANALYZER_FONT, fontSize: 10.5, fontWeight: 700, padding: "1px 6px", borderRadius: 4, marginRight: 6, background: c.bg, color: c.fg }}>{r.sev.toUpperCase()}</span>}
-                                            {text}
-                                        </button>
-                                    );
-                                })}
-                            </Paper>
-                        </div>
-                    )}
+                    <div style={{ display: "flex", justifyContent: "center", padding: "22px 12px" }}>
+                        <Paper title="TENANCY AGREEMENT" width={600} style={{ fontSize: 14, lineHeight: 1.7 }}>
+                            {CLAUSES.map(([id, text]) => {
+                                const r = found.find(x => x.id === id);
+                                const c = r ? SEVERITY[r.sev] : null;
+                                const isReading = reading === id;
+                                return (
+                                    <button key={id} type="button" onClick={() => { if (r) { setSel(id); setTab("risks"); } }}
+                                        style={{ display: "block", width: "100%", textAlign: "left", font: "inherit", color: "inherit", border: "none", borderRadius: 6, padding: "5px 8px", margin: "0 -8px 6px", cursor: r ? "pointer" : "default", background: isReading ? "#e6f4ff" : c ? c.paper : "transparent", outline: isReading ? "2px solid #5aa9e6" : sel === id && c ? `2px solid ${c.line}` : "none" }}>
+                                        {r && <span style={{ fontFamily: ANALYZER_FONT, fontSize: 10.5, fontWeight: 700, padding: "1px 6px", borderRadius: 4, marginRight: 6, background: c.bg, color: c.fg }}>{r.sev.toUpperCase()}</span>}
+                                        {text}
+                                    </button>
+                                );
+                            })}
+                        </Paper>
+                    </div>
                 </section>
 
                 <aside style={{ ...L.col("0 1 440px"), borderLeft: `1px solid ${t.border}`, background: t.surface, display: "flex", flexDirection: "column", minHeight: 0 }}>
                     <div style={{ padding: "18px 20px 14px", borderBottom: `1px solid ${t.border}`, display: "flex", alignItems: "center", gap: 12 }}>
                         <div style={{ width: 38, height: 38, borderRadius: 11, background: t.primaryGlow2, color: t.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{Icon.spark}</div>
-                        <div><div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{panelTitle}</div><div style={{ fontSize: 12.5, color: t.textMuted }}>{panelSub}</div></div>
+                        <div><div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>Reading the fictional sample…</div><div style={{ fontSize: 12.5, color: t.textMuted }}>{panelSub}</div></div>
                     </div>
 
-                    {!analyzing ? (
-                        <>
-                            <div data-lenis-prevent style={{ flex: 1, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 18 }}>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                    <Label>Your side</Label>
-                                    <div style={{ display: "flex", gap: 8 }}>{["Tenant", "Landlord", "Neutral"].map(x => <button key={x} type="button" aria-pressed={side === x} onClick={() => setSide(x)} style={segBtn(side === x)}>{x}</button>)}</div>
-                                    <div style={{ fontSize: 12.5, color: t.textMuted }}>Risks are judged for this party.</div>
-                                </div>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                    <Label>Look for</Label>
-                                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                        {[["risks", "Risks for me"], ["missing", "Missing clauses"], ["money", "Money & deadlines"], ["law", "Law compliance"], ["summary", "Plain summary"]].map(([k, name]) => (
-                                            <Chip key={k} active={focus[k]} onClick={() => setFocus(f => ({ ...f, [k]: !f[k] }))}>{focus[k] ? "✓" : "+"} {name}</Chip>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                    <Label>Depth</Label>
-                                    <div style={{ display: "flex", gap: 8 }}>{[["quick", "Quick scan"], ["deep", "Deep review"]].map(([k, name]) => <button key={k} type="button" aria-pressed={depth === k} onClick={() => setDepth(k)} style={segBtn(depth === k)}>{name}</button>)}</div>
-                                    <div style={{ fontSize: 12.5, color: t.textMuted }}>{depth === "deep" ? "Every clause, missing clauses and dates · about a minute." : "Summary and the top 3 risks · about 20 seconds."}</div>
-                                </div>
-                                <Card style={{ marginTop: "auto", padding: "12px 14px", fontSize: 12.5, color: t.textMuted, lineHeight: 1.55 }}>
-                                    Private to you, never used for training. Guidance, not legal advice — send the result to a lawyer in one click.
-                                </Card>
+                    <div style={{ padding: "14px 20px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div style={{ height: 6, borderRadius: 3, background: t.border, overflow: "hidden" }}><div style={{ height: "100%", width: `${Math.round(Math.min(step, 6) / 6 * 100)}%`, background: t.primary, transition: "width .4s" }} /></div>
+                        <div aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                            <span style={{ flex: 1, color: t.text }}>{STATUS[step]}</span>
+                            <span style={{ color: SEVERITY.high.fg }}>{found.filter(r => r.sev === "high").length} high</span>
+                            <span style={{ color: SEVERITY.medium.fg }}>{found.filter(r => r.sev === "medium").length} medium</span>
+                        </div>
+                        <Tabs t={t} value={tab} onChange={setTab} tabs={[["risks", "Risks"], ["checks", `Illustrative checks · ${SAMPLE_CHECKS.length}`], ["summary", "Summary"], ["terms", "Key terms"]]} />
+                    </div>
+                    <div data-lenis-prevent style={{ flex: 1, overflowY: "auto", padding: "12px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+                        {tab === "risks" && <>
+                            {found.map((r, i) => <RiskCard key={r.id} t={t} r={r} onPick={() => setSel(sel === r.id ? null : r.id)}
+                                open={sel === r.id || (sel === null && i === found.length - 1)} />)}
+                            <div style={{ padding: "12px 14px", borderRadius: 12, border: `1px dashed ${t.border}`, fontSize: 13, color: t.textMuted }}>Reading the next clause…</div>
+                        </>}
+                        {tab === "checks" && SAMPLE_CHECKS.map(([title, sub]) => <Card key={title} style={{ padding: "12px 14px" }}><div style={{ fontSize: 14, fontWeight: 600, color: t.text }}>{title}</div><div style={{ fontSize: 13, color: t.textMuted, marginTop: 4 }}>{sub}</div></Card>)}
+                        {tab === "summary" && <div style={{ fontSize: 14, lineHeight: 1.65, color: t.text }}>{SUMMARY}</div>}
+                        {tab === "terms" && (
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+                                {TERMS.map(([k, v]) => <Card key={k} style={{ padding: "10px 12px" }}><div style={{ fontSize: 12, color: t.textMuted }}>{k}</div><div style={{ fontSize: 14, fontWeight: 600, marginTop: 2, color: t.text }}>{v}</div></Card>)}
                             </div>
-                            <div style={{ padding: "14px 20px", borderTop: `1px solid ${t.border}` }}>
-                                {stage === "ready"
-                                    ? <Btn kind="primary" onClick={analyze} style={{ width: "100%" }}>Analyze as {side}</Btn>
-                                    : <Btn disabled style={{ width: "100%" }}>Add a document to start</Btn>}
-                            </div>
-                        </>
-                    ) : (
-                        <>
-                            <div style={{ padding: "14px 20px 0", display: "flex", flexDirection: "column", gap: 10 }}>
-                                <div style={{ height: 6, borderRadius: 3, background: t.border, overflow: "hidden" }}><div style={{ height: "100%", width: `${Math.round(Math.min(step, 6) / 6 * 100)}%`, background: t.primary, transition: "width .4s" }} /></div>
-                                <div aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-                                    <span style={{ flex: 1, color: t.text }}>{stage === "done" ? `Done · ${RISKS.length} risks, ${MISSING.length} missing clauses` : STATUS[step]}</span>
-                                    <span style={{ color: SEVERITY.high.fg }}>{found.filter(r => r.sev === "high").length} high</span>
-                                    <span style={{ color: SEVERITY.medium.fg }}>{found.filter(r => r.sev === "medium").length} medium</span>
-                                </div>
-                                <Tabs t={t} value={tab} onChange={setTab} tabs={[["risks", "Risks"], ["missing", `Missing · ${MISSING.length}`], ["summary", "Summary"], ["terms", "Key terms"]]} />
-                            </div>
-                            <div data-lenis-prevent style={{ flex: 1, overflowY: "auto", padding: "12px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
-                                {tab === "risks" && <>
-                                    {found.map((r, i) => <RiskCard key={r.id} t={t} r={r} onPick={() => setSel(sel === r.id ? null : r.id)}
-                                        open={sel === r.id || (sel === null && stage === "analyzing" && i === found.length - 1)} />)}
-                                    {stage === "analyzing" && <div style={{ padding: "12px 14px", borderRadius: 12, border: `1px dashed ${t.border}`, fontSize: 13, color: t.textMuted }}>Reading the next clause…</div>}
-                                </>}
-                                {tab === "missing" && MISSING.map(([title, sub]) => <Card key={title} style={{ padding: "12px 14px" }}><div style={{ fontSize: 14, fontWeight: 600, color: t.text }}>{title}</div><div style={{ fontSize: 13, color: t.textMuted, marginTop: 4 }}>{sub}</div></Card>)}
-                                {tab === "summary" && <div style={{ fontSize: 14, lineHeight: 1.65, color: t.text }}>{SUMMARY}</div>}
-                                {tab === "terms" && (
-                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-                                        {TERMS.map(([k, v]) => <Card key={k} style={{ padding: "10px 12px" }}><div style={{ fontSize: 12, color: t.textMuted }}>{k}</div><div style={{ fontSize: 14, fontWeight: 600, marginTop: 2, color: t.text }}>{v}</div></Card>)}
-                                    </div>
-                                )}
-                            </div>
-                            <div style={{ padding: "12px 20px 14px", borderTop: `1px solid ${t.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
-                                <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 6px 6px 12px", borderRadius: 12, background: t.inputBg, border: `1px solid ${t.border}` }}>
-                                    <label htmlFor="askdoc" style={{ position: "absolute", left: -9999 }}>Ask about this document</label>
-                                    <input id="askdoc" placeholder="Ask about this document… e.g. can I leave early?" style={{ flex: 1, background: "transparent", border: "none", color: t.text, fontFamily: ANALYZER_FONT, fontSize: 13.5, outline: "none", minHeight: 32 }} />
-                                    <button type="button" aria-label="Ask" onClick={notYet("Asking about a document")} style={{ width: 36, height: 36, borderRadius: 9, border: "none", background: t.primaryGlow2, color: t.primary, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>{Icon.arrow}</button>
-                                </div>
-                                <div style={{ display: "flex", gap: 8 }}>
-                                    <Btn kind="primary" onClick={notYet("Fixing in a new draft")} style={{ flex: 1 }}>Fix in a new draft</Btn>
-                                    <Btn onClick={notYet("Sending to a lawyer from the analyzer")}>Send to lawyer</Btn>
-                                </div>
-                            </div>
-                        </>
-                    )}
+                        )}
+                    </div>
                 </aside>
             </div>
         </div>
