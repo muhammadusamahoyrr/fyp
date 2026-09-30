@@ -227,6 +227,7 @@ async def create_document(
         "template_type": template_type,
         "title": title,
         "rev_seq": 0,
+        "content_epoch": 0,
         "current_revision_id": None,
         "current_version": 0,
         "review_status": "none",
@@ -422,6 +423,9 @@ async def _resolve_lost_promotion(revision_id: str, worker_id: str,
 async def generate_revision(
     *, document_id: str, template_type: str, fields: dict, idempotency_key: str,
     worker_id: str | None = None,
+    expected_revision_id: str | None = None,
+    expected_version: int | None = None,
+    expected_content_epoch: int | None = None,
 ) -> dict:
     """Generate the next revision of a document. Idempotent under retry."""
     worker_id = worker_id or WORKER_ID
@@ -442,7 +446,41 @@ async def generate_revision(
     _require_composable_template(template_type)
     _require_substance(template_type, fields)
 
-    version = await revision_repo.reserve_version(document_id)
+    guarded = any(value is not None for value in (
+        expected_revision_id, expected_version, expected_content_epoch))
+    if guarded and any(value is None for value in (
+            expected_revision_id, expected_version, expected_content_epoch)):
+        raise AppValidationError(
+            "A guarded revision needs the expected revision, version and content epoch.")
+
+    if guarded:
+        version = await revision_repo.reserve_version_if_current(
+            document_id,
+            expected_revision_id=str(expected_revision_id),
+            expected_version=int(expected_version),
+            expected_content_epoch=int(expected_content_epoch),
+        )
+        if version is None:
+            # A simultaneous retry with the SAME key may have lost the epoch
+            # reservation to the request that is about to insert its pending
+            # revision.  Give that claim a short bounded window to appear and
+            # replay it.  A genuinely stale edit has no such row and remains a
+            # conflict.  This preserves both optimistic concurrency and
+            # idempotency under a double-click.
+            deadline = asyncio.get_running_loop().time() + 1.0
+            while asyncio.get_running_loop().time() < deadline:
+                winner = await revision_repo.find_by_idempotency(
+                    document_id, idempotency_key)
+                if winner:
+                    _require_same_revision_request(winner, template_type, fields)
+                    return await _await_terminal(
+                        document_id, idempotency_key, winner)
+                await asyncio.sleep(0.05)
+            raise ConflictError(
+                "This document changed since you opened the editor. Reload it "
+                "before saving so another revision is not overwritten.")
+    else:
+        version = await revision_repo.reserve_version(document_id)
     revision_id = secrets.token_urlsafe(16)
     now = _now()
     fence = 0
@@ -457,6 +495,7 @@ async def generate_revision(
         "lease_expires_at": revision_repo.lease_deadline(now),
         "fence": fence,
         "fields": fields,
+        "based_on_revision_id": expected_revision_id,
         "artifact_key": None,
         "pdf_sha256": None,
         "text_sha256": None,

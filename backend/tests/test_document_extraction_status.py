@@ -78,6 +78,12 @@ async def test_a_json_list_is_not_accepted_as_fields(world):
     assert (await _extract())["extraction_status"] == "failed"
 
 
+async def test_free_text_extraction_rejects_non_object_json(world):
+    world["replies"] = ['["not", "a", "field map"]']
+    assert await document_service.extract_fields_from_text(
+        "Draft a notice for unpaid rent", "legal_notice") == {}
+
+
 async def test_a_long_case_is_read_past_3000_characters(world):
     tail = "RELIEF: recover PKR 200,000 with costs."
     world["description"] = "x" * 5_000 + tail

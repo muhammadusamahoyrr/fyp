@@ -573,7 +573,11 @@ async def extract_fields_from_text(text: str, template_type: str) -> dict:
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        return json.loads(raw)
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                f"expected a JSON object, got {type(parsed).__name__}")
+        return parsed
     except AppValidationError:
         raise
     except Exception as exc:

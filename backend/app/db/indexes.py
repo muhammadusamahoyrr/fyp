@@ -20,6 +20,7 @@ from app.db.collections import (
     get_appointments_col,
     get_cases_col,
     get_deletion_tombstones_col,
+    get_document_draft_plans_col,
     get_document_revisions_col,
     get_event_outbox_col,
     get_review_events_col,
@@ -463,6 +464,17 @@ async def _documents_v2_indexes() -> None:
     await revisions.create_indexes([
         IndexModel([("document_id", ASCENDING), ("created_at", DESCENDING)]),
         IndexModel([("status", ASCENDING), ("lease_expires_at", ASCENDING)]),
+    ])
+
+    # Prompt plans are short-lived workflow state, not legal artifacts.  The
+    # unique owner/key pair makes a lost create response replay the same plan;
+    # expiry removes abandoned prompts without touching generated documents.
+    await _create_from_spec(get_document_draft_plans_col(),
+                            "document_draft_plans")
+    await get_document_draft_plans_col().create_indexes([
+        IndexModel([("owner_id", ASCENDING), ("updated_at", DESCENDING)]),
+        IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0,
+                   name="ttl_document_draft_plans"),
     ])
 
     # _id IS the logical_event_id, so the ledger row is idempotent on upsert.

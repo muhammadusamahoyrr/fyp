@@ -206,6 +206,16 @@ def get_document_revisions_col() -> AsyncIOMotorCollection:
     return get_database()["document_revisions"]
 
 
+def get_document_draft_plans_col() -> AsyncIOMotorCollection:
+    """Owner-scoped prompt plans that lead into the V2 revision engine.
+
+    A plan is mutable only until it is confirmed.  The generated document and
+    its immutable revisions remain the source of truth for the legal artifact;
+    this collection holds intake/planning state, never an alternative document.
+    """
+    return get_database()["document_draft_plans"]
+
+
 def get_review_events_col() -> AsyncIOMotorCollection:
     """Append-only ledger: one row per materialised submit/approve/return/reject/withdraw."""
     return get_database()["review_events"]
