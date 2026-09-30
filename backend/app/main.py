@@ -255,6 +255,13 @@ async def lifespan(app: FastAPI):
     # guarantee that silently is not held.
     await enforce_v2_correctness_indexes()
 
+    # The Document Analyzer checks its own prerequisites (transactions, its
+    # indexes) and FAILS CLOSED ON ITS OWN: a failure closes the analyzer's
+    # routes with 503 and leaves the rest of the app running. Off: no check.
+    if settings.doc_analyzer:
+        from app.services.analyzer import readiness as analyzer_readiness
+        await analyzer_readiness.refresh()
+
     # Appointments have no feature flag, so this is fail-closed and
     # unconditional.
     #

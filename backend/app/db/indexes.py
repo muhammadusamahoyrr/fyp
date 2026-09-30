@@ -46,6 +46,7 @@ from app.db.collections import (
     get_ws_tickets_col,
 )
 
+from app.db.analyzer_index_spec import ANALYZER_INDEX_REQUIREMENTS
 from app.db.v2_index_spec import (
     CODE_UNREADABLE,
     CORRECTNESS,
@@ -86,6 +87,27 @@ async def _create_from_spec(col, collection_name: str) -> None:
                 "index_create_failed collection=%s index=%s error_class=%s. "
                 "Dedupe the collection and recreate the index; it must be "
                 "valid before DOCUMENTS_V2 is enabled.",
+                spec.collection, spec.name, type(exc).__name__)
+
+
+async def _analyzer_indexes() -> None:
+    """The Document Analyzer's indexes, from its manifest.
+
+    Created whether or not DOC_ANALYZER is on -- the collections are empty
+    until it is, so this costs nothing -- so that turning the flag on meets
+    indexes that already exist. Failures log (class only) and continue, like
+    `_create_from_spec`; readiness is what refuses.
+    """
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    for spec in ANALYZER_INDEX_REQUIREMENTS:
+        try:
+            await db[spec.collection].create_indexes([spec.model()])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "index_create_failed collection=%s index=%s error_class=%s. "
+                "It must be valid before DOC_ANALYZER is enabled.",
                 spec.collection, spec.name, type(exc).__name__)
 
 
@@ -186,12 +208,21 @@ async def validate_v2_indexes() -> list[IndexProblem]:
     that throws on a transient read failure reports "unhealthy" for a reason
     that has nothing to do with the indexes.
     """
+    return await _validate_specs(V2_INDEX_REQUIREMENTS)
+
+
+async def _validate_specs(requirements) -> list[IndexProblem]:
+    """Every spec in `requirements` that the live database does not satisfy.
+
+    Shared by the V2 and analyzer manifests so both are judged by one
+    comparison (`evaluate`) and one unreadable-collection rule.
+    """
     from app.db.mongodb import get_database
 
     db = get_database()
     problems: list[IndexProblem] = []
 
-    collections = sorted({spec.collection for spec in V2_INDEX_REQUIREMENTS})
+    collections = sorted({spec.collection for spec in requirements})
     info_by_collection: dict[str, dict] = {}
     for collection in collections:
         try:
@@ -205,7 +236,7 @@ async def validate_v2_indexes() -> list[IndexProblem]:
                          f"(error_class={type(exc).__name__}); check database "
                          "connectivity and the application's read permissions")))
 
-    for spec in V2_INDEX_REQUIREMENTS:
+    for spec in requirements:
         info = info_by_collection.get(spec.collection)
         if info is None:
             continue   # already reported as unreadable
@@ -214,6 +245,15 @@ async def validate_v2_indexes() -> list[IndexProblem]:
             problems.append(problem)
 
     return problems
+
+
+async def validate_analyzer_indexes() -> list[IndexProblem]:
+    """Every requirement in `ANALYZER_INDEX_REQUIREMENTS` that is not satisfied.
+
+    Reads only. Refusal is not decided here: `services.analyzer.readiness`
+    turns a non-empty result into a closed analyzer when DOC_ANALYZER is on.
+    """
+    return await _validate_specs(ANALYZER_INDEX_REQUIREMENTS)
 
 
 async def check_v2_correctness_indexes() -> list[str]:
@@ -407,6 +447,7 @@ async def create_all_indexes() -> None:
     await _checkpoint_indexes()
     await _provenance_indexes()
     await _documents_v2_indexes()
+    await _analyzer_indexes()
     await _ocr_revision_indexes()
 
 

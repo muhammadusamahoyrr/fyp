@@ -258,3 +258,33 @@ def get_ocr_revisions_col() -> AsyncIOMotorCollection:
     engine build, config) — inserted, never updated, so what was read and what
     produced it stay answerable after the fact."""
     return get_database()["ocr_revisions"]
+
+
+# ── Document Analyzer (DOC_ANALYZER_PLAN.md) ─────────────────────────────────
+# Dormant unless DOC_ANALYZER is on. Indexes: app/db/analyzer_index_spec.py.
+
+def get_analysis_sources_col() -> AsyncIOMotorCollection:
+    """One uploaded document: owner, encrypted file, attestation, tombstone.
+
+    `deleted_at` is the tombstone every read checks first, and `generation`
+    is bumped by deletion so a worker's commit can no longer match (plan §6.3).
+    """
+    return get_database()["analysis_sources"]
+
+
+def get_analysis_runs_col() -> AsyncIOMotorCollection:
+    """One analysis of a source, walked through the state machine in
+    `services/analyzer/states.py` under a lease and a fence (plan §5)."""
+    return get_database()["analysis_runs"]
+
+
+def get_analysis_blobs_col() -> AsyncIOMotorCollection:
+    """Envelope headers of encrypted files (nonces, wrapped data key, key id).
+    The ciphertext itself is on disk; nothing here is decryptable alone."""
+    return get_database()["analysis_blobs"]
+
+
+def get_analysis_deletion_outbox_col() -> AsyncIOMotorCollection:
+    """Purge jobs, written in the SAME transaction as the source tombstone so a
+    crash can never leave a deleted source whose files are never removed."""
+    return get_database()["analysis_deletion_outbox"]

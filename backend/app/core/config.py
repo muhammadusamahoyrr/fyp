@@ -179,6 +179,14 @@ class Settings(BaseSettings):
     # tombstone-first and crash-safe (services/document_deletion.py).
     documents_v2_deletion_enabled: bool = False
 
+    # ── DOC_ANALYZER — real document analysis (DOC_ANALYZER_PLAN.md) ──────────
+    # OFF by default. When off, the analyzer routes answer 404 and nothing is
+    # written. When ON it additionally requires a transactional database
+    # (replica set / Atlas) and valid analyzer indexes; if either is missing
+    # the analyzer FAILS CLOSED (its routes answer 503) rather than run the
+    # multi-document steps non-atomically. The rest of the app is unaffected.
+    doc_analyzer: bool = False
+
     # Retention DELETION for intakes and their uploaded evidence — its own
     # switch, deliberately not shared with the V2 one above. The two stores hold
     # different things and were approved separately; one flag would mean turning

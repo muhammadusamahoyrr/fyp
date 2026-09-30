@@ -183,3 +183,5 @@ backend/ocr_eval/fixtures/*
 # Clearing them needs an ownership change with elevation, which is not
 # something a working-tree cleanup should do on its own.
 backend/.test-tmp/
+# Throwaway single-node replica set (scripts/dev_mongo_replset.py).
+backend/.mongo-rs/
