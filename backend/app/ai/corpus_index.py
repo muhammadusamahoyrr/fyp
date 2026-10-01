@@ -106,6 +106,65 @@ _leading_num = re.compile(r"^(\d+)")
 # Two forms are needed and they are not interchangeable:
 #   canonical_section("489 F") -> "489-F"   what a human reads
 #   section_key("489-F")       -> "489F"    what the corpus is keyed on
+# ── provision headings: which DIFFERENT provisions share one number ─────────
+#
+# A section number is not an identity in this corpus. The CPC's First Schedule
+# Orders restart their rule numbering and were stored in the same
+# `section_number` field as the body sections, so "CPC 3" holds "Subordination
+# of Courts" AND several Order rules; the Constitution's numbers also carry
+# Schedule items, the TPA's its footnotes, the Police Act's its forms.
+# Measured on the corpus (2026-10-01): CPC 90 of 159 numbers, Constitution 137
+# of 296, TPA 103 of 175, Police Act 80 of 187, CrPC 18 of 418, PPC 4 of 483.
+#
+# So existence of a NUMBER cannot verify a PROVISION there. Each chunk that
+# opens with its own "N. Heading" contributes that heading; headings of one
+# number are grouped by trigram similarity (copies of the same provision in
+# several collections differ by extraction noise, not by meaning). More than
+# one group means the number is ambiguous and a citation to it is not
+# checkable by number alone.
+
+_HEADING = re.compile(r"\s*(\d{1,6}[A-Z]?)\s*[.\-]\s*([A-Z][^.\n—–:]{3,80})")
+HEADING_SIMILARITY = 0.35
+
+
+def trigrams(text: str) -> set[str]:
+    """Letter trigrams of `text`, case- and punctuation-blind."""
+    compact = re.sub(r"[^a-z]", "", (text or "").lower())
+    return {compact[i:i + 3] for i in range(len(compact) - 2)}
+
+
+def similarity(a: str, b: str) -> float:
+    """Symmetric trigram Jaccard: 0 (unrelated) .. 1 (same letters)."""
+    ta, tb = trigrams(a), trigrams(b)
+    return len(ta & tb) / len(ta | tb) if ta and tb else 0.0
+
+
+def heading_of(text: str, section: str) -> str | None:
+    """The provision heading a chunk opens with, if it opens with ITS number.
+
+    The number must be the chunk's own. Failing an exact match, one or two
+    leading digits are accepted as a footnote marker glued on by the PDF text
+    layer ("2107. Leases how made" is footnote 2 + s.107). At worst that adds a
+    heading, which can only make a number look MORE ambiguous -- the safe side.
+    """
+    m = _HEADING.match(text or "")
+    if not m:
+        return None
+    number, wanted = m.group(1).upper(), str(section).strip().upper()
+    if number != wanted and not (number.endswith(wanted) and 1 <= len(number) - len(wanted) <= 2):
+        return None
+    return m.group(2).strip()
+
+
+def group_headings(headings) -> tuple[str, ...]:
+    """One representative per DIFFERENT provision, in first-seen order."""
+    reps: list[str] = []
+    for h in headings:
+        if h and not any(similarity(h, r) >= HEADING_SIMILARITY for r in reps):
+            reps.append(h)
+    return tuple(reps)
+
+
 _SECTION_PARTS = re.compile(r"^\s*(\d{1,4})\s*[-–—]?\s*([A-Za-z]{1,2})?\s*$")
 
 
@@ -177,6 +236,18 @@ class StatuteCoverage:
     # is_omitted, the verifier's branch — reads the plain set, so enriching the
     # data cannot break them.
     omission_records: dict = field(default_factory=dict, compare=False)
+    # Stored section -> one heading per DIFFERENT provision found under that
+    # number (see group_headings). Empty when unknown, which is treated as
+    # unambiguous: absence of heading data never manufactures doubt.
+    provisions: dict = field(default_factory=dict, compare=False)
+
+    def headings(self, section: str) -> tuple[str, ...]:
+        raw = str(section).strip().upper()
+        return self.provisions.get(raw) or self.provisions.get(section_key(raw)) or ()
+
+    def ambiguous(self, section: str) -> bool:
+        """Does this number hold more than one different provision here?"""
+        return len(self.headings(section)) > 1
 
     @property
     def in_range(self) -> frozenset[int]:
@@ -348,6 +419,7 @@ def build_index() -> CorpusIndex:
     client = get_chroma()
     raw: dict[str, set[str]] = {}
     dropped: dict[str, int] = {}
+    seen_headings: dict[tuple[str, str], list[str]] = {}
 
     for name in _COLLECTIONS:
         try:
@@ -355,7 +427,12 @@ def build_index() -> CorpusIndex:
         except Exception as exc:                   # collection may not exist yet
             logger.warning("corpus_index: skipping %s (%s)", name, exc)
             continue
-        for md in col.get(include=["metadatas"])["metadatas"] or []:
+        got = col.get(include=["metadatas", "documents"])
+        metadatas = got.get("metadatas") or []
+        # Documents feed only the provision headings; without them a chunk
+        # still counts for coverage, it just contributes no heading.
+        documents = got.get("documents") or [None] * len(metadatas)
+        for md, doc in zip(metadatas, documents):
             statute = (md.get("statute") or "").strip()
             section = str(md.get("section_number") or "").strip().upper()
             # A misattributed chunk's section_number belongs to whichever heading
@@ -371,6 +448,9 @@ def build_index() -> CorpusIndex:
                 dropped[statute] = dropped.get(statute, 0) + 1
                 continue
             raw.setdefault(statute, set()).add(section)
+            heading = heading_of(doc or "", section)
+            if heading:
+                seen_headings.setdefault((statute, section), []).append(heading)
 
     coverage: dict[str, StatuteCoverage] = {}
     for statute, sections in raw.items():
@@ -386,6 +466,8 @@ def build_index() -> CorpusIndex:
             artifacts=dropped.get(statute, 0),
             omitted=omitted_for(statute),
             omission_records=dict(get_records().get(statute, {})),
+            provisions={sec: group_headings(hs) for (st, sec), hs in seen_headings.items()
+                        if st == statute},
         )
 
     idx = CorpusIndex(coverage)

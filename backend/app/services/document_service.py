@@ -142,7 +142,12 @@ def _unavailable_verification(reason: str, checked_at=None) -> dict:
         "needs_human_check": True,
         "checks": [],
         "counts": {"total": 0, "verified": 0, "not_in_corpus": 0,
-                   "unverifiable": 0},
+                   "unverifiable": 0, "section_not_checkable": 0,
+                   "content_mismatch": 0, "unparseable": 0},
+        # Not "no_citations_found": nothing was looked at, so nothing was found
+        # or missed. The shared verifier's outcomes never describe this case.
+        "outcome": "not_run",
+        "gaps": [],
         # Present even when the checker could not run. The scope statement is
         # what we promise, not a by-product of a successful check — and an
         # outage is exactly when a reader most needs to see it.

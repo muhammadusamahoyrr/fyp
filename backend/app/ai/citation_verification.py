@@ -45,13 +45,15 @@ must not present the result as more than it is.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.ai.corpus_index import (
+    HEADING_SIMILARITY,
     CorpusIndex,
     canonical_section,
     get_index,
     is_lettered,
+    similarity,
 )
 
 VERIFIED = "VERIFIED"
@@ -62,6 +64,29 @@ UNVERIFIABLE = "UNVERIFIABLE"
 # survives inspection. The number is real, the text was real, and only currency
 # betrays it — so a lawyer skimming the draft has nothing to notice.
 OMITTED = "OMITTED"
+# The NUMBER exists, but this corpus holds more than one different provision
+# under it (CPC body sections share numbers with Order rules; Constitution
+# Articles with Schedule items; TPA sections with footnotes). Existence of the
+# number therefore says nothing about the provision the draft means, and
+# calling it VERIFIED is the false green this status exists to stop. Not a
+# flag: we do not know it is wrong -- we know we cannot tell.
+SECTION_NOT_CHECKABLE = "SECTION_NOT_CHECKABLE"
+
+# WHY a citation was not verified -- the `gaps` a reader must close by hand.
+GAP_OUT_OF_CORPUS = "out_of_corpus"          # existence unknown, not disproven
+GAP_NOT_CHECKABLE = "section_not_checkable"  # several provisions share the number
+GAP_ORDER_RULE = "order_rule_not_checkable"
+GAP_SCHEDULE_ARTICLE = "schedule_article_not_indexed"
+GAP_LETTERED = "lettered_provision_not_held"
+GAP_UNPARSEABLE = "unparseable"              # a section marker with no statute we can name
+
+# A description written beside a citation -- "section 302 PPC (punishment of
+# qatl-i-amd)" -- compared with the provision's own heading. A mismatch is a
+# REVIEW WARNING, never a verdict: headings are short and a paraphrase can
+# score low. It never changes a status and never counts as a flag.
+CONTENT_CONSISTENT = "consistent"
+CONTENT_MISMATCH = "mismatch"
+CONTENT_NOT_CHECKED = "not_checked"
 
 # Short forms lawyers actually write, mapped to the corpus's own spelling.
 _ABBREV = {
@@ -180,6 +205,9 @@ _SECTION_LIST = (
     rf"(?:{_SECTION_SEP}(?:{_MARKER_INNER}\s*)?{_SECTION_NUM_INNER})*)"
 )
 _SPLIT_SECTION = re.compile(_SECTION_NUM)
+# A marker repeated INSIDE a list ("... and Article 151"). Not \b-anchored:
+# "§" is not a word character. Only ever run on the separators between members.
+_LIST_MARKER = re.compile(rf"(?<![A-Za-z])({_MARKER_ALT})", re.I)
 
 # The one statute whose provisions are Articles rather than sections.
 _ARTICLE_STATUTES = {"Constitution of Pakistan 1973"}
@@ -278,6 +306,9 @@ class CitationCheck:
     status: str
     detail: str
     in_evidence: bool | None = None  # was it in THIS answer's retrieved set?
+    gap: str | None = None           # why it is not verified (GAP_*), else None
+    claim: str = ""                  # a description written beside the citation
+    content: str = CONTENT_NOT_CHECKED
 
     @property
     def is_flag(self) -> bool:
@@ -296,6 +327,9 @@ class CitationCheck:
             "status": self.status,
             "detail": self.detail,
             "in_evidence": self.in_evidence,
+            "gap": self.gap,
+            "claim": self.claim,
+            "content": self.content,
         }
 
 
@@ -342,6 +376,19 @@ class ParsedCitation:
     # them is interchangeable with another.
     unit: str = "section"
     order: str = ""             # set only for unit == "order_rule"
+    claim: str = ""             # "(punishment of qatl-i-amd)" written right after it
+
+
+# A description in parentheses immediately after a citation. It must contain a
+# word of 3+ letters, so a subsection "(2)" or clause "(b)" is never a claim.
+_CLAIM = re.compile(r"\s*\(([^()\n]{3,120})\)")
+
+
+def _claim_after(text: str, end: int) -> str:
+    m = _CLAIM.match(text or "", end)
+    if not m or not re.search(r"[A-Za-z]{3,}", m.group(1)):
+        return ""
+    return m.group(1).strip()
 
 
 def parse_statute_citations(text: str, index: CorpusIndex | None = None
@@ -357,7 +404,7 @@ def parse_statute_citations(text: str, index: CorpusIndex | None = None
     out: list[ParsedCitation] = []
     seen: set[tuple[str, str, str]] = set()
 
-    def add(fam: str, sec: str, raw: str, marker: str) -> None:
+    def add(fam: str, sec: str, raw: str, marker: str, claim: str = "") -> None:
         # Canonicalise first, so "489-F", "489F" and "489 F" become one citation
         # rather than three, and so the verdict logic below always sees the same
         # shape. This is the same canonical form answer_citations uses.
@@ -382,23 +429,65 @@ def parse_statute_citations(text: str, index: CorpusIndex | None = None
         if key in seen:
             return
         seen.add(key)
-        out.append(ParsedCitation(canon, sec, raw.strip(), unit))
+        out.append(ParsedCitation(canon, sec, raw.strip(), unit, claim=claim))
 
-    def add_list(fam: str, sections: str, raw: str, marker: str) -> None:
-        """Every member of a section list, as its own citation.
+    def add_list(m, fam: str, marker_group: int, list_group: int,
+                 statute_after: bool) -> None:
+        """Every member of a section list, as its own citation -- one UNIT only.
 
         The patterns capture the whole run ("302, 324 and 337") in one group,
         because a repeated capture group keeps only its last match — which is
         how earlier members used to vanish while the report still looked
         complete. Splitting here is what makes each one independently checked.
+
+        A LIST NEVER CHANGES UNIT. The grammar admits a repeated marker inside
+        a list ("section 302 and section 324"), and Article is a marker, so
+        "PPC Section 489-F and Article 151 of the Limitation Act" used to be
+        one list: PPC s.151 came back VERIFIED (a provision nobody cited) and
+        Limitation Act s.151 NOT_IN_CORPUS (Article 151 of its Schedule,
+        accused of fabrication). The run is now cut where the unit changes. A
+        statute named AFTER the list owns its LAST run; one named BEFORE owns
+        its FIRST. The other run is not attributed to this statute: its text is
+        left outside `raw`, so it is reported as a gap or picked up by the
+        pattern it really belongs to -- never verified against the wrong Act.
+
+        A description belongs to the citation it follows; for several members
+        it is ambiguous which one it describes, so only a single member gets it.
         """
-        for part in _SPLIT_SECTION.finditer(sections or ""):
-            add(fam, part.group(1), raw, marker)
+        sections = m.group(list_group) or ""
+        base = m.start(list_group)
+        marker = m.group(marker_group)
+        runs: list[tuple[str, list]] = []
+        cursor = 0
+        for part in _SPLIT_SECTION.finditer(sections):
+            found = _LIST_MARKER.findall(sections[cursor:part.start()])
+            if found:
+                marker = found[-1]
+            if not runs or _unit(runs[-1][0]) != _unit(marker):
+                runs.append((marker, []))
+            runs[-1][1].append(part)
+            cursor = part.end()
+        if not runs:
+            return
+        if len(runs) == 1:
+            run_marker, parts = runs[0]
+            raw, claim_ok = m.group(0), True
+        elif statute_after:
+            run_marker, parts = runs[-1]
+            own = list(_LIST_MARKER.finditer(sections, 0, parts[0].start()))
+            start = base + (own[-1].start() if own else parts[0].start())
+            raw, claim_ok = text[start:m.end()], True
+        else:
+            run_marker, parts = runs[0]
+            raw, claim_ok = text[m.start():base + parts[-1].end()], False
+        claim = _claim_after(text, m.end()) if claim_ok and len(parts) == 1 else ""
+        for part in parts:
+            add(fam, part.group(1), raw, run_marker, claim)
 
     for m in _FAMILY_FIRST.finditer(text or ""):
-        add_list(m.group(1), m.group(3), m.group(0), m.group(2))
+        add_list(m, m.group(1), 2, 3, statute_after=False)
     for m in _SECTION_FIRST.finditer(text or ""):
-        add_list(m.group(3), m.group(2), m.group(0), m.group(1))
+        add_list(m, m.group(3), 1, 2, statute_after=True)
 
     # Named statutes the corpus knows, e.g. "Section 12 of the Punjab Tenancy
     # Act 1887". Built from the index so a re-ingest widens coverage for free.
@@ -413,18 +502,18 @@ def parse_statute_citations(text: str, index: CorpusIndex | None = None
             re.I,
         )
         for m in pat.finditer(text or ""):
-            add_list(statute, m.group(2), m.group(0), m.group(1))
+            add_list(m, statute, 1, 2, statute_after=True)
 
     # Acronyms for statutes the corpus does not hold. Seen, so they can be
     # reported UNVERIFIABLE instead of vanishing.
     for m in _UNHELD_FIRST.finditer(text or ""):
-        add_list(m.group(3), m.group(2), m.group(0), m.group(1))
+        add_list(m, m.group(3), 1, 2, statute_after=True)
     for m in _UNHELD_FAMILY.finditer(text or ""):
-        add_list(m.group(1), m.group(3), m.group(0), m.group(2))
+        add_list(m, m.group(1), 2, 3, statute_after=False)
 
     # Last: anything shaped like a named act, whether or not we hold it.
     for m in _NAMED_ACT.finditer(text or ""):
-        add_list(m.group(3), m.group(2), m.group(0), m.group(1))
+        add_list(m, m.group(3), 1, 2, statute_after=True)
 
     # Order/Rule citations — a separate space, reported rather than dropped.
     for m in _ORDER_RULE.finditer(text or ""):
@@ -443,7 +532,72 @@ def parse_statute_citations(text: str, index: CorpusIndex | None = None
 
 def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
                      evidence: set[str] | None) -> CitationCheck:
+    check = _statute_verdict_core(cite, index, evidence)
+    return replace(check, claim=cite.claim) if cite.claim and not check.claim else check
+
+
+def _existing(raw: str, canonical: str, statute: str, section: str, unit: str,
+              cov, claim: str, in_ev, extra: str = "") -> CitationCheck:
+    """The number is in the corpus. Is the PROVISION?
+
+    Unambiguous number: VERIFIED (existence), plus a content check of any
+    description written beside the citation against the provision's heading.
+    Ambiguous number: the description is the only way to say which provision
+    is meant -- VERIFIED if it matches exactly one, else SECTION_NOT_CHECKABLE.
+    """
+    headings = cov.headings(section)
+    if len(headings) > 1:
+        matches = [h for h in headings if _describes(claim, h)] if claim else []
+        if len(matches) == 1:
+            return CitationCheck(
+                raw, "statute", canonical, VERIFIED,
+                f"Several different provisions are filed under this number in the "
+                f"corpus; the description given matches one of them (\"{matches[0]}\"). "
+                f"Existence only -- this does not confirm it supports the proposition.",
+                in_ev, claim=claim, content=CONTENT_CONSISTENT)
+        shown = "; ".join(f"\"{h}\"" for h in headings[:3])
+        return CitationCheck(
+            raw, "statute", canonical, SECTION_NOT_CHECKABLE,
+            f"This corpus files {len(headings)} different provisions under "
+            f"{canonical} ({shown}{'; ...' if len(headings) > 3 else ''}), so the number "
+            f"alone cannot show which one is meant or that it exists as cited. "
+            f"Check it against the bare act.",
+            in_ev, gap=GAP_NOT_CHECKABLE, claim=claim)
+    content = CONTENT_NOT_CHECKED
+    note = ""
+    if claim and headings:
+        content = CONTENT_CONSISTENT if _describes(claim, headings[0]) else CONTENT_MISMATCH
+        if content == CONTENT_MISMATCH:
+            note = (f" REVIEW: the description given (\"{claim}\") does not match "
+                    f"this provision's heading (\"{headings[0]}\").")
+    return CitationCheck(
+        raw, "statute", canonical, VERIFIED,
+        f"Present in the corpus ({cov.describe(unit)}). Existence only -- this "
+        f"does not confirm the section supports the proposition.{extra}{note}",
+        in_ev, claim=claim, content=content)
+
+
+def _describes(claim: str, heading: str) -> bool:
+    """Does a written description plausibly name this provision?
+
+    Containment either way, else trigram similarity of the heading with the
+    claim. Deliberately loose: a false MISMATCH only costs a review warning,
+    but a false MATCH on an ambiguous number would verify the wrong provision,
+    and that path additionally requires exactly one heading to match.
+    """
+    a = re.sub(r"[^a-z0-9]+", " ", (claim or "").lower()).strip()
+    b = re.sub(r"[^a-z0-9]+", " ", (heading or "").lower()).strip()
+    if not a or not b:
+        return False
+    if a in b or b in a:
+        return True
+    return similarity(a, b) >= HEADING_SIMILARITY
+
+
+def _statute_verdict_core(cite: ParsedCitation, index: CorpusIndex,
+                          evidence: set[str] | None) -> CitationCheck:
     statute, section, raw = cite.statute, cite.section, cite.raw
+    claim = cite.claim
 
     # An Order/Rule citation cannot be resolved by number: the corpus merged the
     # First Schedule's rules into the same field as the body sections, so the
@@ -458,7 +612,8 @@ def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
             f"their rule numbering, and this corpus stores those rules in the "
             f"same field as the body sections — so this number cannot be "
             f"resolved to one provision. Check it against the bare Code.",
-            (canonical in evidence) if evidence is not None else None)
+            (canonical in evidence) if evidence is not None else None,
+            gap=GAP_ORDER_RULE)
 
     prefix = "Art." if cite.unit == "article" else "s."
     canonical = f"{statute} {prefix}{section}"
@@ -473,13 +628,13 @@ def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
             raw, "statute", canonical, UNVERIFIABLE,
             f"Articles of the {statute} are in its Schedule, which this corpus "
             f"does not index — only its sections. Absence here says nothing. "
-            f"Check the Schedule directly.", in_ev)
+            f"Check the Schedule directly.", in_ev, gap=GAP_SCHEDULE_ARTICLE)
 
     if cov is None:
         return CitationCheck(
             raw, "statute", canonical, UNVERIFIABLE,
             f"This corpus does not contain {statute}. Verify against the "
-            f"official text before filing.", in_ev)
+            f"official text before filing.", in_ev, gap=GAP_OUT_OF_CORPUS)
 
     # LETTERED PROVISIONS — decided here, before any base-number logic runs.
     #
@@ -497,19 +652,16 @@ def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
     # country, on evidence that does not exist.
     if is_lettered(section):
         if cov.has(section):
-            return CitationCheck(
-                raw, "statute", canonical, VERIFIED,
-                f"Present in the corpus. Existence only — this does not confirm "
-                f"the section supports the proposition, and the repeal map does "
-                f"not cover lettered provisions, so its current status is "
-                f"unverified.", in_ev)
+            return _existing(raw, canonical, statute, section, cite.unit, cov, claim, in_ev,
+                             extra=" The repeal map does not cover lettered provisions, "
+                                   "so its current status is unverified.")
         return CitationCheck(
             raw, "statute", canonical, UNVERIFIABLE,
             f"{statute} {prefix}{section} is a lettered provision inserted by "
             f"amendment, and this corpus holds almost none of them — absence "
             f"here is not evidence of anything. It is NOT s.{section.split('-')[0]}, "
             f"which is a different provision. Verify against the bare act.",
-            in_ev)
+            in_ev, gap=GAP_LETTERED)
 
     # Before existence: a repealed section may still have a shell chunk, and
     # returning VERIFIED for it would put a dead provision into a live filing.
@@ -529,10 +681,7 @@ def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
             f"with the provision now in force.", in_ev)
 
     if cov.has(section):
-        return CitationCheck(
-            raw, "statute", canonical, VERIFIED,
-            f"Present in the corpus ({cov.describe(cite.unit)}). Existence only — this "
-            f"does not confirm the section supports the proposition.", in_ev)
+        return _existing(raw, canonical, statute, section, cite.unit, cov, claim, in_ev)
 
     if cov.dense:
         return CitationCheck(
@@ -546,7 +695,7 @@ def _statute_verdict(cite: ParsedCitation, index: CorpusIndex,
         raw, "statute", canonical, UNVERIFIABLE,
         f"Not found, but the corpus holds {statute} only partially "
         f"({cov.describe(cite.unit)}) — absence here is not evidence. Verify manually.",
-        in_ev)
+        in_ev, gap=GAP_OUT_OF_CORPUS)
 
 
 def verify_statutes(text: str, evidence_chunks: list[dict] | None = None,
@@ -595,11 +744,69 @@ async def verify_cases(text: str) -> list[CitationCheck]:
     return out
 
 
+# A section/article marker with a number that no statute pattern claimed, e.g.
+# "under section 12" with no Act named. Reported as a gap rather than silently
+# dropped -- except where it plainly refers to the document itself.
+_LOOSE_MARKER = re.compile(rf"(?<![A-Za-z])(?:{_MARKER_ALT})\s*({_SECTION_NUM_INNER})", re.I)
+_SELF_REFERENCE = re.compile(
+    r"\s*(?:\([0-9a-z]+\)\s*)?(?:of|in|under)\s+(?:this|the\s+present|these)\s+"
+    r"(?:agreement|deed|contract|lease|policy|document|instrument|schedule|annexure|terms)\b",
+    re.I)
+
+
+def unattributed_markers(text: str, checks: list[CitationCheck]) -> list[str]:
+    """Section markers with a number but no statute any parser could name."""
+    text = text or ""
+    covered: list[tuple[int, int]] = []
+    for c in checks:
+        start = 0
+        while c.raw and (i := text.find(c.raw, start)) >= 0:
+            covered.append((i, i + len(c.raw)))
+            start = i + 1
+    out: list[str] = []
+    for m in _LOOSE_MARKER.finditer(text):
+        if any(a <= m.start() < b for a, b in covered):
+            continue
+        if _SELF_REFERENCE.match(text, m.end()):
+            continue
+        if m.group(1) in _STATUTE_YEARS:
+            continue
+        raw = m.group(0).strip()
+        if raw not in out:
+            out.append(raw)
+    return out
+
+
 @dataclass
 class VerificationResult:
     """Everything checked in one draft, plus what the check could not cover."""
 
     checks: list[CitationCheck] = field(default_factory=list)
+    # Section markers no statute could be attached to (GAP_UNPARSEABLE).
+    unparsed: list[str] = field(default_factory=list)
+
+    @property
+    def not_checkable(self) -> list[CitationCheck]:
+        return [c for c in self.checks if c.status == SECTION_NOT_CHECKABLE]
+
+    @property
+    def content_mismatches(self) -> list[CitationCheck]:
+        """Review warnings: a written description that does not match the heading."""
+        return [c for c in self.checks if c.content == CONTENT_MISMATCH]
+
+    @property
+    def outcome(self) -> str:
+        """`no_citations_found` is NOT a pass: there was nothing to check."""
+        return "checked" if self.checks else "no_citations_found"
+
+    @property
+    def gaps(self) -> list[dict]:
+        """Everything this check did NOT establish, for a human to close."""
+        out = [{"raw": c.raw, "canonical": c.canonical, "reason": c.gap}
+               for c in self.checks if c.gap]
+        out.extend({"raw": raw, "canonical": None, "reason": GAP_UNPARSEABLE}
+                   for raw in self.unparsed)
+        return out
 
     @property
     def flags(self) -> list[CitationCheck]:
@@ -619,8 +826,13 @@ class VerificationResult:
 
     @property
     def needs_human_check(self) -> bool:
-        """True whenever a human still has to look something up — usually true."""
-        return bool(self.flags or self.unverifiable)
+        """True whenever a human still has to look something up — usually true.
+
+        Including when nothing was found to check: an assertion of law with no
+        authority behind it is not a verified assertion.
+        """
+        return bool(self.flags or self.unverifiable or self.not_checkable
+                    or self.content_mismatches or self.unparsed or not self.checks)
 
     def summary(self) -> str:
         if not self.checks:
@@ -632,8 +844,16 @@ class VerificationResult:
         not_found = [c for c in self.checks if c.status == NOT_IN_CORPUS]
         if not_found:
             parts.append(f"{len(not_found)} NOT FOUND in a statute we hold in full")
+        if self.not_checkable:
+            parts.append(f"{len(self.not_checkable)} NOT CHECKABLE (several provisions "
+                         f"share the number in this corpus)")
         if self.unverifiable:
             parts.append(f"{len(self.unverifiable)} outside what this corpus can check")
+        if self.content_mismatches:
+            parts.append(f"{len(self.content_mismatches)} description(s) differ from the "
+                         f"provision heading — review")
+        if self.unparsed:
+            parts.append(f"{len(self.unparsed)} section reference(s) with no identifiable statute")
         return "; ".join(parts) + "."
 
     def to_dict(self) -> dict:
@@ -646,12 +866,20 @@ class VerificationResult:
                                       if c.status == NOT_IN_CORPUS]),
                 "omitted": len(self.repealed),
                 "unverifiable": len(self.unverifiable),
+                "section_not_checkable": len(self.not_checkable),
+                "content_mismatch": len(self.content_mismatches),
+                "unparseable": len(self.unparsed),
             },
+            "outcome": self.outcome,
+            "gaps": self.gaps,
             "needs_human_check": self.needs_human_check,
             "summary": self.summary(),
             "limits": (
                 "Existence and repeal only. A real, in-force provision cited "
-                "for something it does not say still reads as VERIFIED. Repeal "
+                "for something it does not say still reads as VERIFIED, unless a "
+                "description written beside it contradicts its heading (a review "
+                "warning, not a verdict). A number that holds several different "
+                "provisions in this corpus is NOT CHECKABLE by number alone. Repeal "
                 "detection reads each Act's own declarations and is a LOWER "
                 "BOUND — footnote-style omissions are not parsed. Case law can "
                 "never be marked absent, because the corpus is too narrow for "
@@ -665,4 +893,4 @@ async def verify_text(text: str, evidence_chunks: list[dict] | None = None,
     """Verify every authority — statutory and case law — in a draft."""
     checks = verify_statutes(text, evidence_chunks, index)
     checks.extend(await verify_cases(text))
-    return VerificationResult(checks=checks)
+    return VerificationResult(checks=checks, unparsed=unattributed_markers(text, checks))
