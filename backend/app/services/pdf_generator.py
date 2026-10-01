@@ -36,6 +36,19 @@ from reportlab.platypus import (
 from reportlab.graphics.barcode.qr import QrCodeWidget
 from reportlab.graphics.shapes import Drawing
 
+# BUILD REPORTLAB'S NAMED-COLOUR TABLE NOW, ONCE, IN THE IMPORTING THREAD.
+# reportlab builds it lazily on the first toColor("black"): it assigns an empty
+# dict to its cache and then iterates `colors.__dict__` to fill it. PDFs are
+# rendered in worker threads (asyncio.to_thread); if another thread adds a
+# global to that module mid-iteration (a first warning creating
+# __warningregistry__ is enough), the loop dies with "dictionary changed size
+# during iteration" and the half-filled cache is kept for the life of the
+# process -- every later PDF then fails on "Invalid color value 'black'". Seen
+# in a full test run: one such failure, then 147 PDF tests down. Filling the
+# cache here, at import, means the loop never runs in a worker. agreement_pdf
+# imports this module, so it is covered too.
+colors.getAllNamedColors()
+
 from app.core.config import settings
 from app.services import citation_format
 
