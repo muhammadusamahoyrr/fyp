@@ -167,6 +167,23 @@ async def cancel_analysis_run(run_id: str, current_user: dict = Depends(require_
     return await _run(confirmation.cancel_run(owner_id=str(current_user["_id"]), run_id=run_id))
 
 
+@router.get("")
+@router.get("/", include_in_schema=False)
+async def list_document_analyses(limit: int = 20, before: str | None = None,
+                                 current_user: dict = Depends(require_client)):
+    """History: the caller's live analyses, newest first."""
+    _require_available()
+    return await _run(lifecycle.list_analyses(owner_id=str(current_user["_id"]),
+                                              limit=limit, before=before))
+
+
+@router.get("/runs/{run_id}/text")
+async def get_analysis_text(run_id: str, current_user: dict = Depends(require_client)):
+    """Text, clauses and sentences with offsets, for the text viewer."""
+    _require_available()
+    return await _run(confirmation.get_text(owner_id=str(current_user["_id"]), run_id=run_id))
+
+
 @router.get("/attestation")
 async def attestation_text(current_user: dict = Depends(require_client)):
     """The wording the UI must show, and the version to send back."""

@@ -507,9 +507,11 @@ app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(cases.router, prefix=API_PREFIX)
 app.include_router(intake.router, prefix=API_PREFIX)
 app.include_router(lawyers.router, prefix=API_PREFIX)
+# BEFORE `documents.router`: that router's GET /documents/{doc_id} would
+# otherwise answer GET /documents/analyses with doc_id="analyses".
+app.include_router(document_analyses.router, prefix=API_PREFIX)  # 404 while DOC_ANALYZER is off
 app.include_router(documents.router, prefix=API_PREFIX)
 app.include_router(document_draft_plans.router, prefix=API_PREFIX)
-app.include_router(document_analyses.router, prefix=API_PREFIX)  # 404 while DOC_ANALYZER is off
 app.include_router(documents_v2.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(inheritance.router, prefix=API_PREFIX)
 app.include_router(agreements.router, prefix=API_PREFIX)

@@ -174,3 +174,42 @@ async def get_analysis(*, owner_id: str, source_id: str) -> dict:
     runs = [r async for r in get_analysis_runs_col()
             .find({"source_id": source_id}).sort("created_at", -1).limit(50)]
     return _public_source(source, runs)
+
+
+HISTORY_PAGE = 20
+
+
+async def list_analyses(*, owner_id: str, limit: int = HISTORY_PAGE,
+                        before: str | None = None) -> dict:
+    """The owner's live analyses, newest first, each with its latest run.
+
+    Cursor pagination on (created_at, _id): `before` is the `next` value of
+    the previous page. Deleted sources are absent the moment they are
+    tombstoned (served by the owner/deleted_at/created_at index).
+    """
+    limit = max(1, min(int(limit), 50))
+    query: dict = {"owner_id": owner_id, "deleted_at": None}
+    if before:
+        anchor = await get_analysis_sources_col().find_one(
+            {"_id": before, "owner_id": owner_id}, {"created_at": 1})
+        if anchor is None:
+            raise AnalyzerNotFound("Unknown page.")
+        query["$or"] = [{"created_at": {"$lt": anchor["created_at"]}},
+                        {"created_at": anchor["created_at"], "_id": {"$gt": before}}]
+    sources = [s async for s in get_analysis_sources_col().find(query)
+               .sort([("created_at", -1), ("_id", 1)]).limit(limit + 1)]
+    more = len(sources) > limit
+    items = []
+    for source in sources[:limit]:
+        latest = await get_analysis_runs_col().find_one(
+            {"source_id": source["_id"]}, sort=[("created_at", -1)])
+        items.append({
+            "id": source["_id"],
+            "file": {k: source["file"].get(k) for k in ("display_name", "kind", "size")},
+            "created_at": source["created_at"], "expires_at": source["expires_at"],
+            "latest_run": None if latest is None else {
+                "id": latest["_id"], "status": latest["status"],
+                "state_version": latest["state_version"],
+                "error_code": latest.get("error_code")},
+        })
+    return {"items": items, "next": sources[limit - 1]["_id"] if more else None}

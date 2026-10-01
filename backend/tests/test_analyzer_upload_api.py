@@ -42,8 +42,11 @@ from tests._analyzer_support import (  # noqa: F401 -- `http`, `form_calls` are 
 async def test_off_means_not_found_everywhere(http, monkeypatch):
     client, actor = http
     monkeypatch.setattr(settings, "doc_analyzer", False)
+    # The bare list path included: the generic GET /documents/{doc_id} must
+    # never answer it (router order in main.py).
     for response in (await upload(client), await client.get("/documents/analyses/attestation"),
-                     await client.get("/documents/analyses/whatever")):
+                     await client.get("/documents/analyses/whatever"),
+                     await client.get("/documents/analyses")):
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "feature_disabled"
     await assert_nothing_stored(actor["_id"])

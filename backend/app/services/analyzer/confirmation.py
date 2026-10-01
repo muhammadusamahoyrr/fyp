@@ -330,3 +330,35 @@ async def confirm_terms(*, owner_id: str, run_id: str, expected_state_version: i
                            set_fields={"context_version_id": context_id}, inside=inside)
     return {"id": run_id, "status": moved["status"], "state_version": moved["state_version"],
             "context_version_id": context_id}
+
+
+async def get_text(*, owner_id: str, run_id: str) -> dict:
+    """The canonical-text viewer's data: text + clauses + sentences + pages.
+
+    Offsets index `text` exactly, so the client highlights by slicing -- it
+    never receives, or needs, any quote that was not cut from this text.
+    """
+    from app.db.collections import get_analysis_clauses_col, get_analysis_sentences_col
+
+    run = await _owned_live_run(owner_id, run_id)
+    fence = run.get("published", {}).get("segment")
+    if fence is None:
+        raise AnalyzerConflict("not_segmented", "This analysis has not been read yet.")
+    key = {"run_id": run_id, "stage": "segment", "fence": fence}
+    clauses = [c async for c in get_analysis_clauses_col().find(
+        key, {"_id": 0, "clause_id": 1, "number": 1, "heading": 1, "start": 1, "end": 1,
+              "text_version_id": 1}).sort("ordinal", 1)]
+    sentences = [s async for s in get_analysis_sentences_col().find(
+        key, {"_id": 0, "sentence_id": 1, "clause_id": 1, "start": 1, "end": 1,
+              "page_spans": 1}).sort("ordinal", 1)]
+    version = await get_analysis_text_versions_col().find_one({"_id": clauses[0]["text_version_id"]})
+    text = (await blob_store.read(version["blob_id"], source_id=run["source_id"],
+                                  purpose="canonical_text")).decode("utf-8")
+    for c in clauses:
+        c.pop("text_version_id", None)
+    return {
+        "text": text, "clauses": clauses, "sentences": sentences,
+        "text_version": {"version": version["version"], "origin": version["origin"],
+                         "corrected": bool(version.get("corrected")),
+                         "page_map_available": bool(version.get("page_map_available"))},
+    }
