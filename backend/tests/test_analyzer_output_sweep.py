@@ -14,6 +14,7 @@ import pytest
 from app.ai import extraction as X
 from app.db.collections import (
     get_analysis_runs_col,
+    get_analysis_text_blocks_col,
     get_analysis_text_pages_col,
     get_analysis_text_versions_col,
 )
@@ -28,6 +29,10 @@ def _now():
 @pytest.fixture
 async def ready(http, mongo_transactional):
     await get_analysis_runs_col().delete_many({"is_open": True})
+    # The sweep reads a bounded batch of aged rows: rows left by earlier runs
+    # in this persistent test database must not crowd this test's out.
+    for col in (get_analysis_text_pages_col(), get_analysis_text_blocks_col()):
+        await col.delete_many({})
     return http
 
 

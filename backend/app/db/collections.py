@@ -303,6 +303,14 @@ def get_analysis_text_pages_col() -> AsyncIOMotorCollection:
     return get_database()["analysis_text_pages"]
 
 
+def get_analysis_text_blocks_col() -> AsyncIOMotorCollection:
+    """Structure of a DOCX text version (app.ai.docx_structure): one row per
+    block -- type, style, outline/list level, rendered label, table
+    coordinates and offsets into the canonical text, never the text itself.
+    Keyed (text_version_id, stage, fence, ordinal), like the page map."""
+    return get_database()["analysis_text_blocks"]
+
+
 def get_analysis_clauses_col() -> AsyncIOMotorCollection:
     """Clauses of a run's text version: offsets into the canonical text,
     keyed by (run_id, stage, fence, ordinal)."""

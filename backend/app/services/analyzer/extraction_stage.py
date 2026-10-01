@@ -13,8 +13,14 @@
      add up the page map is declared unavailable rather than guessed.
   4. Enforce the analyzer's limits: <= 40 PDF pages, <= 300,000 characters,
      some readable text.
+     A DOCX is read STRUCTURED (app.ai.docx_structure): the canonical text is
+     generated from its blocks -- Word numbering labels, headings, table cells
+     -- and each block is stored as offsets into that text. Blocks the child
+     returns are verified here; any that do not fit the text are discarded
+     and the version records `structure: unavailable` rather than a guess.
   5. Publish through `worker.commit_stage` (fenced, transactional, source
-     guarded): a new immutable text version + its encrypted text + page rows.
+     guarded): a new immutable text version + its encrypted text + page rows
+     (+ block rows for a DOCX).
        - no OCR used  -> confirmed version, run -> queued_segmentation
        - OCR used     -> UNCONFIRMED version, run -> needs_ocr_confirmation
          (OCR output never reaches analysis until a person confirms it).
@@ -36,6 +42,7 @@ from app.ai import extraction as X
 from app.db.collections import (
     get_analysis_blobs_col,
     get_analysis_sources_col,
+    get_analysis_text_blocks_col,
     get_analysis_text_pages_col,
     get_analysis_text_versions_col,
 )
@@ -68,6 +75,7 @@ class Assembled:
     used_ocr: bool = False
     page_map_available: bool = True
     summary: dict = field(default_factory=dict)
+    blocks: list[dict] = field(default_factory=list)   # DOCX structure; offsets only
 
 
 def _fail(code: str, summary: dict | None = None) -> Assembled:
@@ -114,7 +122,13 @@ def assemble(result, text: str, *, kind: str) -> Assembled:
         body = text.strip()
         pages = [{"page": None, "start": 0, "end": len(body), "coverage": X.PAGE_TEXT_FOUND,
                   "origin": "native"}] if body else []
-        assembled = Assembled(ok=True, text=body, pages=pages, page_map_available=False)
+        lead = len(text) - len(text.lstrip())
+        blocks = checked_blocks(getattr(result, "blocks", None) or [], lead, len(body))
+        if blocks is None:
+            summary["limitations"].append("structure_unavailable")
+            blocks = []
+        assembled = Assembled(ok=True, text=body, pages=pages, page_map_available=False,
+                              blocks=blocks)
     elif kind == "image":
         body = ocr.get(1, "")
         pages = [{"page": 1, "start": 0, "end": len(body), "coverage": "ocr",
@@ -158,6 +172,32 @@ def assemble(result, text: str, *, kind: str) -> Assembled:
     if len(assembled.text) > MAX_TEXT_CHARS:
         return _fail("text_too_long", summary)
     return assembled
+
+
+BLOCK_TYPES = ("heading", "paragraph", "list_item", "table_cell")
+_BLOCK_KEYS = ("block_id", "order", "type", "style_id", "style_name", "outline_level",
+               "start", "end", "text_start", "list", "table")
+
+
+def checked_blocks(blocks: list, lead: int, length: int) -> list[dict] | None:
+    """The child's blocks, shifted onto the stripped text -- or None if ANY is
+    malformed. Structure is all or nothing: a partly wrong map is worse than
+    none, because a wrong clause label would be cited as if it were right."""
+    out, ids = [], set()
+    for b in blocks:
+        if not isinstance(b, dict) or set(b) != set(_BLOCK_KEYS) or b["type"] not in BLOCK_TYPES:
+            return None
+        try:
+            start, end, text_start = (int(b["start"]) - lead, int(b["end"]) - lead,
+                                      int(b["text_start"]) - lead)
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= start <= text_start <= end <= length or b["block_id"] in ids:
+            return None
+        ids.add(b["block_id"])
+        out.append({**{k: b[k] for k in _BLOCK_KEYS}, "start": start, "end": end,
+                    "text_start": text_start})
+    return out
 
 
 # ── the private work file ────────────────────────────────────────────────────
@@ -209,7 +249,8 @@ async def _extract(lease: Lease, source: dict):
         ocr = {"enabled": True, "language": "eng"} if settings.english_ocr_enabled else None
         return await extraction_runner.extract_isolated(
             str(work), content_type=source["file"]["mime"], timeout=EXTRACT_TIMEOUT_SECONDS,
-            ocr=ocr, memory_limit_mb=CHILD_MEMORY_MB)
+            ocr=ocr, memory_limit_mb=CHILD_MEMORY_MB,
+            structure=source["file"]["kind"] == "docx")
     finally:
         try:
             await asyncio.to_thread(work.unlink)
@@ -248,6 +289,13 @@ async def run_extract(lease: Lease) -> str:
              "ordinal": ordinal},
             {"$setOnInsert": {"source_id": lease.source_id, "created_at": written_at, **page}},
             upsert=True)
+    block_rows = get_analysis_text_blocks_col()
+    for ordinal, block in enumerate(built.blocks):
+        await block_rows.update_one(
+            {"text_version_id": text_version_id, "stage": STAGE, "fence": lease.fence,
+             "ordinal": ordinal},
+            {"$setOnInsert": {"source_id": lease.source_id, "created_at": written_at, **block}},
+            upsert=True)
 
     confirmed = not built.used_ocr
     version_doc = {
@@ -255,6 +303,9 @@ async def run_extract(lease: Lease) -> str:
         "blob_id": header["_id"], "text_hash": hashlib.sha256(encoded).hexdigest(),
         "char_count": len(built.text), "origin": "native" if confirmed else "ocr_unconfirmed",
         "confirmed": confirmed, "page_map_available": built.page_map_available,
+        "extractor_version": result.extractor_version,
+        "structure": ({"available": bool(built.blocks), "blocks": len(built.blocks)}
+                      if source["file"]["kind"] == "docx" else None),
         "published": {STAGE: lease.fence}, "created_at": _now(),
     }
 

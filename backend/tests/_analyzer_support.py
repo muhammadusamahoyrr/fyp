@@ -19,7 +19,6 @@ from app.ai.ocr import OcrPageResult
 from app.core.config import settings
 from app.db.collections import (
     get_analysis_blobs_col,
-    get_analysis_deletion_outbox_col,
     get_analysis_runs_col,
     get_analysis_sources_col,
 )
@@ -56,13 +55,26 @@ async def http(mongo, app_indexes, monkeypatch, tmp_path):
     finally:
         app.dependency_overrides.clear()
         readiness._reset_for_tests()
-        # Everything this owner produced, in all four collections, so the
-        # persistent test database never carries one test's jobs into another.
+        # Everything this owner produced, in every source-scoped collection, so
+        # the persistent test database never carries one test's rows into
+        # another. (Stage outputs used to be left behind; once more than a
+        # sweep's batch of them had aged, the output-sweep tests could no
+        # longer reach their own rows.)
         ids = [x["_id"] async for x in get_analysis_sources_col().find({"owner_id": owner}, {"_id": 1})]
-        await get_analysis_deletion_outbox_col().delete_many({"source_id": {"$in": ids}})
-        await get_analysis_blobs_col().delete_many({"source_id": {"$in": ids}})
+        for col in SOURCE_SCOPED():
+            await col.delete_many({"source_id": {"$in": ids}})
         for col in (get_analysis_sources_col(), get_analysis_runs_col()):
             await col.delete_many({"owner_id": owner})
+
+
+def SOURCE_SCOPED():
+    """Every analyzer collection whose rows belong to a source (all keyed source_id)."""
+    from app.db import collections as C
+    return (C.get_analysis_deletion_outbox_col(), C.get_analysis_blobs_col(),
+            C.get_analysis_text_pages_col(), C.get_analysis_text_blocks_col(),
+            C.get_analysis_text_versions_col(), C.get_analysis_clauses_col(),
+            C.get_analysis_sentences_col(), C.get_analysis_context_versions_col(),
+            C.get_analysis_findings_col())
 
 
 def files_on_disk() -> list:

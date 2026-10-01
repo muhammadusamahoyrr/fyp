@@ -49,6 +49,7 @@ from app.db.collections import (
     get_analysis_runs_col,
     get_analysis_sentences_col,
     get_analysis_sources_col,
+    get_analysis_text_blocks_col,
     get_analysis_text_pages_col,
     get_analysis_text_versions_col,
 )
@@ -194,6 +195,7 @@ async def purge_source(source_id: str) -> str:
     # 4. The runs and every stage output of the source (published or not).
     await runs.delete_many({"source_id": source_id})
     await get_analysis_text_pages_col().delete_many({"source_id": source_id})
+    await get_analysis_text_blocks_col().delete_many({"source_id": source_id})
     await get_analysis_text_versions_col().delete_many({"source_id": source_id})
     await get_analysis_clauses_col().delete_many({"source_id": source_id})
     await get_analysis_sentences_col().delete_many({"source_id": source_id})
@@ -241,5 +243,6 @@ async def housekeeping_tick() -> dict | None:
         "orphans": await blob_store.sweep_orphans(),
         "work_files": extraction_stage.sweep_work_files(),
         "unpublished_pages": await outputs.sweep_unpublished_pages(),
+        "unpublished_blocks": await outputs.sweep_unpublished_blocks(),
         "unpublished_run_outputs": await outputs.sweep_unpublished_run_outputs(),
     }

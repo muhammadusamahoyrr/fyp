@@ -124,6 +124,30 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         why=("The unpublished-output sweep reads only rows older than its "
              "cutoff; without this it scans every page row on every tick."),
     ),
+    # ── analysis_text_blocks (DOCX structure) ─────────────────────────────────
+    IndexSpec(
+        collection="analysis_text_blocks",
+        name="uniq_analysis_text_block_row",
+        keys=(("text_version_id", ASCENDING), ("stage", ASCENDING),
+              ("fence", ASCENDING), ("ordinal", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("Stage output identity, as for page rows: a retried write under "
+             "the same fence is idempotent, another fence cannot overwrite it."),
+    ),
+    IndexSpec(
+        collection="analysis_text_blocks",
+        name="analysis_text_blocks_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes a source's blocks, including unpublished ones.",
+    ),
+    IndexSpec(
+        collection="analysis_text_blocks",
+        name="analysis_text_blocks_created",
+        keys=(("created_at", ASCENDING),),
+        kind=QUERY,
+        why="The unpublished-output sweep reads only rows older than its cutoff.",
+    ),
     # ── analysis_context_versions ────────────────────────────────────────────
     IndexSpec(
         collection="analysis_context_versions",

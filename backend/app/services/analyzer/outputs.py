@@ -7,7 +7,8 @@ an unpublished row is invisible -- but a lost lease, a refused commit, a
 cancel or a crash between the writes and the commit leaves such rows behind
 for good.
 
-`sweep_unpublished_pages` (owner: the text version) and
+`sweep_unpublished_pages` and `sweep_unpublished_blocks` (owner: the text
+version) and
 `sweep_unpublished_run_outputs` (owner: the run -- clauses, sentences) remove
 a row when BOTH hold:
 
@@ -29,6 +30,7 @@ from app.db.collections import (
     get_analysis_findings_col,
     get_analysis_runs_col,
     get_analysis_sentences_col,
+    get_analysis_text_blocks_col,
     get_analysis_text_pages_col,
     get_analysis_text_versions_col,
 )
@@ -37,8 +39,16 @@ DEFAULT_AGE = timedelta(hours=1)
 
 
 async def sweep_unpublished_pages(*, older_than: timedelta = DEFAULT_AGE, limit: int = 1000) -> int:
+    return await _sweep_by_text_version(get_analysis_text_pages_col(), older_than, limit)
+
+
+async def sweep_unpublished_blocks(*, older_than: timedelta = DEFAULT_AGE, limit: int = 5000) -> int:
+    """DOCX block rows; owned by the text version exactly as page rows are."""
+    return await _sweep_by_text_version(get_analysis_text_blocks_col(), older_than, limit)
+
+
+async def _sweep_by_text_version(pages, older_than: timedelta, limit: int) -> int:
     cutoff = datetime.now(timezone.utc) - older_than
-    pages = get_analysis_text_pages_col()
     candidates = [r async for r in pages.find(
         {"created_at": {"$lt": cutoff}},
         {"_id": 1, "text_version_id": 1, "stage": 1, "fence": 1}).limit(limit)]
