@@ -279,10 +279,31 @@ def _judgment_cited(answer: str, chunk: dict) -> bool:
     return False
 
 
+def _number_is_ambiguous(chunk: dict, section: str, index=None) -> bool:
+    """Does the corpus file several different provisions under this number?
+
+    The same index the shared verifier (citation_verification) reads, so chat
+    and drafting cannot disagree about it. Fail-open to False: if the index
+    cannot be built, this layer behaves exactly as it did before -- it never
+    invents doubt it cannot support, and never raises into an answer.
+    """
+    try:
+        idx = index
+        if idx is None:
+            from app.ai.corpus_index import get_index
+            idx = get_index()
+        cov = idx.coverage((chunk.get("statute") or "").strip())
+        return bool(cov and cov.ambiguous(section))
+    except Exception:
+        logger.debug("answer_citations: ambiguity lookup unavailable", exc_info=True)
+        return False
+
+
 def annotate_citations(
     answer: str,
     statute_chunks: list[dict] | None,
     case_law_chunks: list[dict] | None = None,
+    index=None,
 ) -> list[dict]:
     """Citations for one answer, each labelled with where it came from.
 
@@ -299,9 +320,22 @@ def annotate_citations(
 
     entries: list[dict] = []
     matched_keys: set[tuple[str, str]] = set()
+    ambiguous_keys: set[tuple[str, str]] = set()   # cited, but the number is shared
 
     for citation in cited:
         chunk = evidence.get(citation.key)
+        if chunk is not None and _number_is_ambiguous(chunk, citation.section, index):
+            # The evidence chunk carries the cited NUMBER, but the corpus files
+            # several different provisions under it (CPC body sections share
+            # numbers with Order rules). Showing it as the matched source would
+            # be the false green the shared verifier refuses; it is listed as
+            # unresolved, without linking a chunk that may be another provision.
+            entry = _statute_entry(citation.statute, citation.section, "unresolved")
+            entry["reason"] = "section_not_checkable"
+            entries.append(entry)
+            matched_keys.add(citation.key)
+            ambiguous_keys.add(citation.key)
+            continue
         if chunk is not None:
             matched_keys.add(citation.key)
             entries.append(_statute_entry(
@@ -331,7 +365,7 @@ def annotate_citations(
     # to show as long as it is not presented as what the answer cited.
     spare = 0
     for (norm, section), chunk in evidence.items():
-        if (norm, section) in matched_keys:
+        if (norm, section) in matched_keys and (norm, section) not in ambiguous_keys:
             continue
         if spare >= _MAX_RETRIEVED:
             break
