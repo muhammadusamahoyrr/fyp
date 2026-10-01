@@ -535,6 +535,56 @@ Deferred:
 - quotas;
 - consensus scoring.
 
+### 10.1 Ordered backlog (agreed 2026-10-01)
+
+Priority: **stop false-green verification → improve extraction → add AI
+features.** Sources: the review of seven external Pakistani legal-AI projects
+(two independent reviews; corrections noted) and P3.0 step 1.
+
+1. **Shared citation contract — on its own branch from `master`, not here.**
+   It is a live safety bug in AI Chat and Drafting (a CPC Order *rule* was
+   shown as `VERIFIED` "s.3"), independent of the disabled analyzer:
+   - `VERIFIED` only for an exact statute + exact provision match;
+   - CPC sections and Order/Rule provisions never mixed;
+   - `NO_CITATIONS_FOUND` is not a success;
+   - explicit `out_of_corpus` ("existence unknown, not disproven"),
+     `unparseable`, `section_not_checkable`, `content_mismatch`, and a `gaps`
+     list of everything not checked;
+   - a description/meaning mismatch is a review warning, never an automatic
+     hallucination verdict;
+   - one verifier for AI Chat, Drafting and the Analyzer;
+   - a CPC `s.3` regression test.
+   Concept credit: `pk-eli-mcp` (Apache-2.0; pattern from korean-law-mcp, MIT)
+   — reimplemented, not copied.
+2. AI Chat / Drafting smoke test of (1).
+3. **P3.0 step 2:** headings and form-line segmentation (DOCX heading blocks
+   as clause boundaries; "Name: …" lines as their own units).
+4. Definitions and cross-reference graph.
+5. Authority metadata: source snapshot date, official vs mirror
+   classification, currency status / last currency check, shown on reports
+   ("newer amendments may not be included").
+6. Sentence-ID based AI summary / attention items / obligations (P3.1+).
+7. Ask Document — only after grounded-answer evaluation passes; hybrid
+   retrieval (BM25 + dense + exact section routing), written independently.
+8. Last: secondary-corpus comparison (Ansvar, `pk-eli-mcp`) as an offline
+   job whose discrepancies become admin review tasks, never automatic legal
+   updates; fine-tuned models (PakistaniLawPhi-3, pakistan-bail-law-ai) only
+   as benchmark competitors on a labelled set.
+
+**Facts from the external review that constrain the above:**
+- QanoonDaan is PolyForm Strict 1.0.0: concepts only, no code reuse.
+- LEGAL-AI-ADVISOR and the Muzammil analyzer have no licence: no code reuse.
+- The published `@ansvar/pakistani-law-mcp` 1.0.0 package does NOT contain
+  its database (`package.json` lists `data/database.db`; the tarball has
+  none) and its repository returns 404. A local corpus means rebuilding it
+  with its ingest scripts; its remote endpoint must never receive client
+  queries.
+- `pk-eli-mcp` serves the same two datasets already audited here
+  (AyeshaJadoon statutes, OCR text; Ibtehaj10 judgments), snapshot dates
+  2025-01-30 / 2024-07-26.
+- None of the seven projects binds findings to document evidence or to a
+  lawyer approval; replacing this engine with any of them would regress it.
+
 ---
 
 ## 11. Decisions
