@@ -369,9 +369,9 @@ export async function intakeClarify(sessionToken, answer = null, language = null
 // ─── Multipart fetch wrapper ──────────────────────────────────────────────────
 // Mirrors apiFetch for FormData uploads: attaches Bearer token + retries on 401.
 // Never sets Content-Type — browser must set it to inject the multipart boundary.
-async function apiFetchMultipart(path, formData) {
+async function apiFetchMultipart(path, formData, extraHeaders = {}) {
   const token = getToken();
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const headers = { ...extraHeaders, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 
   let res;
   try {
@@ -1976,6 +1976,76 @@ export async function searchResearchConversations(q, { limit = 25 } = {}) {
 // key is minted ONCE PER INTENT rather than per transmission — a retry of the
 // same intent must reuse it, or the whole mechanism is unreachable from the UI
 // in exactly the way it was on the chat surfaces.
+
+/* ── Document Analyzer (DOC_ANALYZER_PLAN.md) ───────────────────────────────
+ *
+ * Every call answers 404 `feature_disabled` while DOC_ANALYZER is off and 503
+ * `analyzer_unavailable` when the server cannot run it safely; the screen
+ * falls back to the fictional demonstration in both cases.
+ *
+ * The synthetic-data confirmation and the Idempotency-Key travel as HEADERS:
+ * the server checks them before it parses (or receives) the uploaded file. */
+
+export async function analyzerAttestation() {
+  return apiFetch('/documents/analyses/attestation');
+}
+
+export async function createAnalysis(file, { side = 'tenant', depth = 'medium' } = {},
+                                     attestationVersion, key) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('side', side);
+  form.append('depth', depth);
+  return apiFetchMultipart('/documents/analyses', form, {
+    'X-Synthetic-Data-Attested': 'true',
+    'X-Synthetic-Attestation-Version': attestationVersion,
+    'Idempotency-Key': key,
+  });
+}
+
+export async function listAnalyses({ before = null, limit = 20 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before) params.set('before', before);
+  return apiFetch(`/documents/analyses?${params.toString()}`);
+}
+
+export async function getAnalysisRun(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function getAnalysisText(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/text`);
+}
+
+export async function confirmAnalysisOcr(runId, expectedStateVersion, text = null) {
+  const body = { expected_state_version: expectedStateVersion };
+  if (text !== null) body.text = text;
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/ocr-text`,
+                  { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function confirmAnalysisDocument(runId, expectedStateVersion, documentType, jurisdiction) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/document`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_state_version: expectedStateVersion,
+                           document_type: documentType, jurisdiction }),
+  });
+}
+
+export async function confirmAnalysisTerms(runId, expectedStateVersion, terms) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/terms`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_state_version: expectedStateVersion, terms }),
+  });
+}
+
+export async function cancelAnalysisRun(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+}
+
+export async function deleteAnalysis(sourceId) {
+  return apiFetch(`/documents/analyses/${encodeURIComponent(sourceId)}`, { method: 'DELETE' });
+}
 
 /* A key for one intent. Mint it where the user acts, not where the request is
    sent, and pass the SAME one to every retry of that action. */

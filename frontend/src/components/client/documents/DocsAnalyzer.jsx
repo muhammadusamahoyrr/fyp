@@ -10,11 +10,19 @@
  *     absent (the real analyzer will only say "not located"), and no control
  *     pretends to do something that does not exist yet (Ask, Precedents, Fix,
  *     Send to lawyer, Resources, Add document).
- * documents_home_dom.test.mjs ("P-1: …") asserts each of these stays true. */
+ * documents_home_dom.test.mjs ("P-1: …") asserts each of these stays true.
+ *
+ * LIVE MODE. When the server offers the real analyzer (GET
+ * /documents/analyses/attestation answers 200), `AnalyzerLive` is shown
+ * instead -- it reads and maps a synthetic document and says it does not
+ * review risks yet. Off (404), unavailable (503) or no answer: this
+ * fictional demonstration, unchanged. */
 import React, { useEffect, useRef, useState } from "react";
 import { useT } from "../theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useIsMobile } from "@/lib/i18n.jsx";
+import { analyzerAttestation } from "@/lib/api.js";
+import AnalyzerLive from "./AnalyzerLive.jsx";
 import {
     Btn, Chip, Pill, Label, Card, Paper, PreviewBadge, ScreenHeader, Icon,
     SERIF, SEVERITY, onPrimary, splitLayout,
@@ -638,7 +646,7 @@ function UploadScreen({ userName, stage, sample, side, onSide, depth, onDepth,
     );
 }
 
-export default function DocsAnalyzer({ onBack, userName }) {
+function FictionalAnalyzer({ onBack, userName }) {
     const t = useT();
     const toast = useToast();
     const L = splitLayout(useIsMobile());
@@ -749,4 +757,21 @@ export default function DocsAnalyzer({ onBack, userName }) {
             </div>
         </div>
     );
+}
+
+
+/* Live when the server says so; the fictional demonstration otherwise. */
+export default function DocsAnalyzer(props) {
+    const [live, setLive] = useState(undefined);      // undefined = still asking
+    const [showDemo, setShowDemo] = useState(false);
+    useEffect(() => {
+        let mounted = true;
+        Promise.resolve(analyzerAttestation())
+            .then(r => { if (mounted) setLive(r?.data?.version && r?.data?.text ? r.data : null); })
+            .catch(() => { if (mounted) setLive(null); });
+        return () => { mounted = false; };
+    }, []);
+    if (live === undefined) return null;
+    if (live && !showDemo) return <AnalyzerLive attestation={live} onShowDemo={() => setShowDemo(true)} />;
+    return <FictionalAnalyzer {...props} />;
 }
