@@ -313,3 +313,10 @@ def get_analysis_sentences_col() -> AsyncIOMotorCollection:
     """Sentences with page_spans. Every later finding cites these ids; the
     quote shown is cut from the text at their offsets, never model output."""
     return get_database()["analysis_sentences"]
+
+
+def get_analysis_context_versions_col() -> AsyncIOMotorCollection:
+    """What a person confirmed about a text version: document type, province
+    and decisive key terms with their evidence. Immutable; a change is a new
+    version. Runs point at the context version they analyse."""
+    return get_database()["analysis_context_versions"]

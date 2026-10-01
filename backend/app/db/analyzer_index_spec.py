@@ -124,6 +124,16 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         why=("The unpublished-output sweep reads only rows older than its "
              "cutoff; without this it scans every page row on every tick."),
     ),
+    # ── analysis_context_versions ────────────────────────────────────────────
+    IndexSpec(
+        collection="analysis_context_versions",
+        name="uniq_analysis_context_version_seq",
+        keys=(("source_id", ASCENDING), ("version", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("One context version number per source. A changed type, province "
+             "or term is a NEW version (plan §4.3); the index guarantees two "
+             "confirmations can never both publish the same number."),
+    ),
     # ── analysis_clauses / analysis_sentences ───────────────────────────────
     IndexSpec(
         collection="analysis_clauses",

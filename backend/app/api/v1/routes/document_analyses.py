@@ -130,6 +130,37 @@ async def confirm_ocr_text(run_id: str, body: OcrTextBody = Body(...),
         expected_state_version=body.expected_state_version, corrected_text=body.text))
 
 
+class DocumentBody(BaseModel):
+    expected_state_version: int = Field(ge=0)
+    document_type: str = Field(max_length=32)
+    jurisdiction: str = Field(max_length=32)
+
+
+class TermsBody(BaseModel):
+    expected_state_version: int = Field(ge=0)
+    #: {term: {"value": ..., "sentence_ids": [...]}}; null value = "not stated".
+    terms: dict
+
+
+@router.post("/runs/{run_id}/document")
+async def confirm_document(run_id: str, body: DocumentBody = Body(...),
+                           current_user: dict = Depends(require_client)):
+    _require_available()
+    return await _run(confirmation.confirm_document(
+        owner_id=str(current_user["_id"]), run_id=run_id,
+        expected_state_version=body.expected_state_version,
+        document_type=body.document_type, jurisdiction=body.jurisdiction))
+
+
+@router.post("/runs/{run_id}/terms")
+async def confirm_terms(run_id: str, body: TermsBody = Body(...),
+                        current_user: dict = Depends(require_client)):
+    _require_available()
+    return await _run(confirmation.confirm_terms(
+        owner_id=str(current_user["_id"]), run_id=run_id,
+        expected_state_version=body.expected_state_version, confirmed=body.terms))
+
+
 @router.post("/runs/{run_id}/cancel")
 async def cancel_analysis_run(run_id: str, current_user: dict = Depends(require_client)):
     _require_available()

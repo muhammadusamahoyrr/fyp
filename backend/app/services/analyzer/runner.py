@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from app.services.analyzer import extraction_stage, segmentation_stage, states, worker
+from app.services.analyzer import extraction_stage, segmentation_stage, states, terms_stage, worker
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 HANDLERS = {
     "extracting": extraction_stage.run_extract,
     "segmenting": segmentation_stage.run_segment,
+    "extracting_terms": terms_stage.run_terms,
 }
 
 _QUEUED_FOR = {active: queued for queued, active in states.ACTIVE_FOR_QUEUED.items()}

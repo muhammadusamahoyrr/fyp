@@ -106,6 +106,7 @@ Any state → failed | cancelled | superseded
 - **Entering a `needs_*` state releases the lease** (`lease_owner = null`) and increments `state_version`. A worker never holds a lease while waiting for a person.
 - Confirmation endpoints are CAS updates on `{run_id, status: needs_X, state_version: expected}`. On success they write the confirmation and move the run to the next `queued_*` state in the same update.
 - A second confirmation with a stale `state_version` gets 409.
+- **A non-tenancy document skips the terms steps.** Confirming `document_type: other` moves the run from `needs_document_confirmation` straight to `queued_analysis`: there are no decisive terms to confirm for it, and no playbook applies to it in this version. *(Implemented in slice 3.)*
 - **Re-analysis with a new side, depth or focus** creates a new run starting at `queued_analysis` on the same confirmed context version. It does not repeat extraction or confirmations.
 - **An OCR correction** creates a new **text version**. **A correction of type, province or terms** creates a new **context version** on the same text (the text did not change). Either way, runs on the old version get lifecycle metadata `superseded_at`. **Their generated payload is never modified**: superseded is a label on the run, not an edit of its findings.
 

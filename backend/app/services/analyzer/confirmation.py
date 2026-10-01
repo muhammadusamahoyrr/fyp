@@ -26,12 +26,13 @@ from pymongo import ReturnDocument
 
 from app.db.collections import (
     get_analysis_blobs_col,
+    get_analysis_context_versions_col,
     get_analysis_runs_col,
     get_analysis_sources_col,
     get_analysis_text_pages_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import blob_store, deletion, states
+from app.services.analyzer import blob_store, deletion, states, terms
 from app.services.analyzer.errors import AnalyzerConflict, AnalyzerNotFound, UploadRejected
 from app.services.analyzer.extraction_stage import MAX_TEXT_CHARS
 from app.services.analyzer.txn import run_in_transaction
@@ -86,7 +87,42 @@ async def get_run(*, owner_id: str, run_id: str) -> dict:
             "notice": ("Some pages were read from an image. Check the text -- "
                        "especially names, amounts and dates -- before continuing."),
         }
+    if run["status"] == "needs_document_confirmation":
+        proposal = run.get("document_proposal", {})
+        quotes = await _quotes(run, {i for p in proposal.values() for i in p.get("sentence_ids", [])})
+        view["document_review"] = {
+            key: {"value": p["value"],
+                  "evidence": [{"sentence_id": i, "text": quotes.get(i)}
+                               for i in p.get("sentence_ids", [])]}
+            for key, p in proposal.items()}
+    if run["status"] == "needs_terms_confirmation":
+        cands = run.get("terms_candidates", {})
+        quotes = await _quotes(run, {i for cs in cands.values() for c in cs for i in c["sentence_ids"]})
+        view["terms_review"] = {
+            "decisive": list(terms.DECISIVE),
+            "candidates": {term: [{"value": c["value"], "raw": c["raw"],
+                                   "evidence": [{"sentence_id": i, "text": quotes.get(i)}
+                                                for i in c["sentence_ids"]]} for c in cs]
+                           for term, cs in cands.items()}}
     return view
+
+
+async def _quotes(run: dict, sentence_ids: set) -> dict:
+    """sentence_id -> its exact text, cut from the canonical text by offset.
+
+    Server-derived, always: no stored or model-produced quote is ever shown.
+    """
+    from app.services.analyzer.terms_stage import published_sentences
+
+    if not sentence_ids:
+        return {}
+    rows = [s for s in await published_sentences(run) if s["sentence_id"] in sentence_ids]
+    if not rows:
+        return {}
+    version = await get_analysis_text_versions_col().find_one({"_id": rows[0]["text_version_id"]})
+    text = (await blob_store.read(version["blob_id"], source_id=run["source_id"],
+                                  purpose="canonical_text")).decode("utf-8")
+    return {s["sentence_id"]: text[s["start"]:s["end"]] for s in rows}
 
 
 # ── confirm OCR text ─────────────────────────────────────────────────────────
@@ -193,3 +229,104 @@ async def cancel_run(*, owner_id: str, run_id: str) -> dict:
         raise AnalyzerConflict("not_cancellable", f"This analysis is already {run['status']}.")
     return {"id": run_id, "status": run["status"], "cancel_requested": True,
             "state_version": run["state_version"]}
+
+
+# ── document and terms confirmation ──────────────────────────────────────────
+
+DOCUMENT_TYPES = ("tenancy", "other")
+JURISDICTIONS = ("punjab", "other")
+_STALE = "This analysis has moved on. Reload it and try again."
+
+
+async def _advance(run: dict, *, from_status: str, expected_state_version: int,
+                   next_status: str, set_fields: dict, inside) -> dict:
+    """One transaction: source guard, `inside` writes, CAS on the run."""
+    async def op(session):
+        await deletion.guard_source(session, source_id=run["source_id"],
+                                    generation=run.get("source_generation", 0))
+        await inside(session)
+        moved = await get_analysis_runs_col().find_one_and_update(
+            {"_id": run["_id"], "status": from_status, "state_version": expected_state_version,
+             "cancel_requested": {"$ne": True}},
+            {"$set": {"status": next_status, "is_open": states.is_open(next_status),
+                      "updated_at": _now(), **set_fields},
+             "$inc": {"state_version": 1}},
+            session=session, return_document=ReturnDocument.AFTER)
+        if moved is None:
+            raise _Moved()
+        return moved
+
+    try:
+        return await run_in_transaction(op)
+    except (_Moved, deletion.StaleSource):
+        raise AnalyzerConflict("state_changed", _STALE) from None
+
+
+async def _insert_context(session, run: dict, context_id: str, fields: dict) -> None:
+    seq = await get_analysis_sources_col().find_one_and_update(
+        {"_id": run["source_id"]}, {"$inc": {"context_version_seq": 1}},
+        session=session, return_document=ReturnDocument.AFTER)
+    await get_analysis_context_versions_col().insert_one(
+        {"_id": context_id, "source_id": run["source_id"], "run_id": run["_id"],
+         "version": seq["context_version_seq"], "created_at": _now(), **fields}, session=session)
+
+
+def _expect(run: dict, status: str, version: int) -> None:
+    if run["status"] != status or run["state_version"] != version:
+        raise AnalyzerConflict("state_changed", _STALE)
+
+
+async def confirm_document(*, owner_id: str, run_id: str, expected_state_version: int,
+                           document_type: str, jurisdiction: str) -> dict:
+    run = await _owned_live_run(owner_id, run_id)
+    _expect(run, "needs_document_confirmation", expected_state_version)
+    if document_type not in DOCUMENT_TYPES:
+        raise UploadRejected("invalid_document_type", "Choose tenancy or other.")
+    if jurisdiction not in JURISDICTIONS:
+        raise UploadRejected("invalid_jurisdiction", "Choose Punjab or other.")
+    # Only a tenancy has decisive terms to confirm; anything else skips them.
+    next_status = "queued_terms" if document_type == "tenancy" else "queued_analysis"
+    context_id, now = uuid.uuid4().hex, _now()
+
+    async def inside(session):
+        await _insert_context(session, run, context_id, {
+            "text_version_id": run["text_version_id"], "document_type": document_type,
+            "jurisdiction": jurisdiction, "confirmed_key_terms": {}, "confirmed_by": owner_id,
+            "confirmed_at": {"document": now}, "proposal": run.get("document_proposal")})
+
+    moved = await _advance(run, from_status="needs_document_confirmation",
+                           expected_state_version=expected_state_version,
+                           next_status=next_status, set_fields={"context_version_id": context_id},
+                           inside=inside)
+    return {"id": run_id, "status": moved["status"], "state_version": moved["state_version"],
+            "context_version_id": context_id}
+
+
+async def confirm_terms(*, owner_id: str, run_id: str, expected_state_version: int,
+                        confirmed: dict) -> dict:
+    from app.services.analyzer.terms_stage import published_sentences
+
+    run = await _owned_live_run(owner_id, run_id)
+    _expect(run, "needs_terms_confirmation", expected_state_version)
+    known = {s["sentence_id"] for s in await published_sentences(run)}
+    try:
+        clean = terms.validate_confirmed(confirmed, known_sentence_ids=known)
+    except ValueError as exc:
+        raise UploadRejected("invalid_terms", str(exc)) from None
+    previous = await get_analysis_context_versions_col().find_one({"_id": run["context_version_id"]})
+    context_id, now = uuid.uuid4().hex, _now()
+
+    async def inside(session):
+        # A NEW context version: the document confirmation stays as it was.
+        await _insert_context(session, run, context_id, {
+            "text_version_id": previous["text_version_id"],
+            "document_type": previous["document_type"], "jurisdiction": previous["jurisdiction"],
+            "confirmed_key_terms": clean, "confirmed_by": owner_id, "derived_from": previous["_id"],
+            "confirmed_at": {**previous.get("confirmed_at", {}), "terms": now}})
+
+    moved = await _advance(run, from_status="needs_terms_confirmation",
+                           expected_state_version=expected_state_version,
+                           next_status="queued_analysis",
+                           set_fields={"context_version_id": context_id}, inside=inside)
+    return {"id": run_id, "status": moved["status"], "state_version": moved["state_version"],
+            "context_version_id": context_id}
