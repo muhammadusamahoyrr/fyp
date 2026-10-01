@@ -120,6 +120,9 @@ async def create_analysis(*, owner_id: str, idempotency_key: str, content: bytes
         "is_open": True,
         "state_version": 0,
         "fence": 0,
+        # The source generation this run belongs to. Every stage commit is
+        # guarded on it, so a run outlived by a delete can never publish.
+        "source_generation": 0,
         "lease_owner": None,
         "lease_expires_at": None,
         "cancel_requested": False,
