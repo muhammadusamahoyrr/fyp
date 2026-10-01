@@ -301,3 +301,34 @@ test("the fictional sample stays one click away", async () => {
     assert.ok(p.container.querySelector("[data-fictional-banner]"));
     await p.unmount();
 });
+
+// ── NDA and employment (P2B) ────────────────────────────────────────────────
+
+test("the document step offers every supported type and preselects the proposal", async () => {
+    const p = await openRun({ id: "r1", status: "needs_document_confirmation", state_version: 4,
+        document_review: { document_type: { value: "nda", evidence: [] }, jurisdiction: { value: "unknown", evidence: [] } } });
+    const select = p.container.querySelector('select[aria-label="Document type"]');
+    assert.deepEqual([...select.options].map(o => o.value), ["tenancy", "nda", "employment", "other"]);
+    assert.equal(select.value, "nda");
+    await p.unmount();
+});
+
+test("an NDA's terms follow the server's decisive list and yes/no answers", async () => {
+    const p = await openRun({ id: "r1", status: "needs_terms_confirmation", state_version: 6,
+        terms_review: { decisive: ["nda_mutual", "confidentiality_years", "non_compete"], candidates: {
+            nda_mutual: [{ value: true, raw: "mutual", evidence: [{ sentence_id: "s0", text: "MUTUAL NDA" }] }],
+            confidentiality_years: [], non_compete: [], non_compete_months: [] } } });
+    assert.match(p.container.textContent, /Confidentiality lasts \(years\) \*/);
+    assert.doesNotMatch(p.container.textContent, /Length of the tenancy/);
+    const fieldset = p.container.querySelector('[data-term="non_compete"]');
+    await change(fieldset.querySelector('input[aria-label$="other value"]'), "no");
+    api.__respond("confirmAnalysisTerms", { data: { status: "queued_analysis" } });
+    await click(buttons(p.container, "Confirm the terms")[0]);
+    const terms = api.__calls("confirmAnalysisTerms")[0].args[2];
+    assert.deepEqual(terms, {
+        nda_mutual: { value: true, sentence_ids: ["s0"] },
+        confidentiality_years: { value: null, sentence_ids: [] },
+        non_compete: { value: false, sentence_ids: [] },
+    });
+    await p.unmount();
+});

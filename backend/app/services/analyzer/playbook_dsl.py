@@ -34,6 +34,13 @@ CONTEXT_SCHEMA: dict[str, type] = {
     "terms.rent_amount": int,
     "terms.security_deposit": int,
     "terms.landlord_notice_days": int,
+    "terms.nda_mutual": bool,
+    "terms.confidentiality_years": int,
+    "terms.non_compete": bool,
+    "terms.non_compete_months": int,
+    "terms.probation_months": int,
+    "terms.notice_days": int,
+    "terms.salary_amount": int,
 }
 
 _COMPARE = {"eq", "ne", "gt", "lt", "gte", "lte"}

@@ -202,6 +202,11 @@ def segment(text: str, pages: list[dict]) -> tuple[list[Clause], list[Sentence]]
 
 # ── document proposals (rules propose, the user confirms) ────────────────────
 
+_NDA = [r"non[\s-]?disclosure agreement", r"confidentiality agreement", r"non[\s-]?disclosure",
+        r"confidential information"]
+_EMPLOYMENT = [r"employment agreement", r"employment contract", r"contract of employment",
+               r"appointment letter", r"letter of appointment", r"offer of employment",
+               r"probation(?:ary)? period"]
 _TENANCY = [r"tenancy agreement", r"rent(?:al)? agreement", r"lease agreement",
             r"rent deed", r"lease deed"]
 _PUNJAB = [r"punjab", r"lahore", r"rawalpindi", r"faisalabad", r"multan", r"gujranwala",
@@ -233,7 +238,13 @@ def propose_document(text: str, sentences: list[Sentence]) -> dict:
         tenancy = (_evidence(text, sentences, [r"landlord"], 1)
                    + _evidence(text, sentences, [r"tenant"], 1)) if both else []
     punjab = _evidence(text, sentences, _PUNJAB)
+    found = {"tenancy": tenancy, "nda": _evidence(text, sentences, _NDA),
+             "employment": _evidence(text, sentences, _EMPLOYMENT)}
+    # The type with the most supporting sentences; ties go to the order
+    # listed. "other" when nothing matched. The person confirms either way.
+    best = max(("tenancy", "employment", "nda"), key=lambda k: len(found[k]))
+    doc_type = best if found[best] else "other"
     return {
-        "document_type": {"value": "tenancy" if tenancy else "other", "sentence_ids": tenancy},
+        "document_type": {"value": doc_type, "sentence_ids": found.get(doc_type, [])},
         "jurisdiction": {"value": "punjab" if punjab else "unknown", "sentence_ids": punjab},
     }

@@ -99,7 +99,7 @@ async def get_run(*, owner_id: str, run_id: str) -> dict:
         cands = run.get("terms_candidates", {})
         quotes = await _quotes(run, {i for cs in cands.values() for c in cs for i in c["sentence_ids"]})
         view["terms_review"] = {
-            "decisive": list(terms.DECISIVE),
+            "decisive": run.get("terms_decisive") or list(terms.DECISIVE),
             "candidates": {term: [{"value": c["value"], "raw": c["raw"],
                                    "evidence": [{"sentence_id": i, "text": quotes.get(i)}
                                                 for i in c["sentence_ids"]]} for c in cs]
@@ -233,7 +233,7 @@ async def cancel_run(*, owner_id: str, run_id: str) -> dict:
 
 # ── document and terms confirmation ──────────────────────────────────────────
 
-DOCUMENT_TYPES = ("tenancy", "other")
+DOCUMENT_TYPES = ("tenancy", "nda", "employment", "other")
 JURISDICTIONS = ("punjab", "other")
 _STALE = "This analysis has moved on. Reload it and try again."
 
@@ -281,11 +281,11 @@ async def confirm_document(*, owner_id: str, run_id: str, expected_state_version
     run = await _owned_live_run(owner_id, run_id)
     _expect(run, "needs_document_confirmation", expected_state_version)
     if document_type not in DOCUMENT_TYPES:
-        raise UploadRejected("invalid_document_type", "Choose tenancy or other.")
+        raise UploadRejected("invalid_document_type", "Choose tenancy, NDA, employment or other.")
     if jurisdiction not in JURISDICTIONS:
         raise UploadRejected("invalid_jurisdiction", "Choose Punjab or other.")
-    # Only a tenancy has decisive terms to confirm; anything else skips them.
-    next_status = "queued_terms" if document_type == "tenancy" else "queued_analysis"
+    # Types with decisive terms confirm them; "other" goes straight to the checks.
+    next_status = "queued_terms" if document_type in terms.TYPES else "queued_analysis"
     context_id, now = uuid.uuid4().hex, _now()
 
     async def inside(session):
@@ -309,11 +309,12 @@ async def confirm_terms(*, owner_id: str, run_id: str, expected_state_version: i
     run = await _owned_live_run(owner_id, run_id)
     _expect(run, "needs_terms_confirmation", expected_state_version)
     known = {s["sentence_id"] for s in await published_sentences(run)}
+    previous = await get_analysis_context_versions_col().find_one({"_id": run["context_version_id"]})
     try:
-        clean = terms.validate_confirmed(confirmed, known_sentence_ids=known)
+        clean = terms.validate_confirmed(confirmed, known_sentence_ids=known,
+                                         document_type=previous["document_type"])
     except ValueError as exc:
         raise UploadRejected("invalid_terms", str(exc)) from None
-    previous = await get_analysis_context_versions_col().find_one({"_id": run["context_version_id"]})
     context_id, now = uuid.uuid4().hex, _now()
 
     async def inside(session):

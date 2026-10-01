@@ -132,3 +132,16 @@ def test_landlord_and_tenant_together_suggest_a_tenancy():
     text = "The Landlord agrees. The Tenant shall pay."
     _, sentences = seg.segment(text, [])
     assert seg.propose_document(text, sentences)["document_type"]["value"] == "tenancy"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("MUTUAL NON-DISCLOSURE AGREEMENT. The parties exchange Confidential Information.", "nda"),
+    ("EMPLOYMENT AGREEMENT. The employee serves a probation period of three months.", "employment"),
+    ("RENT AGREEMENT. The Landlord lets the shop to the Tenant.", "tenancy"),
+    ("A memorandum about office furniture.", "other"),
+])
+def test_document_type_proposals_cover_the_supported_types(text, expected):
+    _, sentences = seg.segment(text, [])
+    proposal = seg.propose_document(text, sentences)
+    assert proposal["document_type"]["value"] == expected
+    assert bool(proposal["document_type"]["sentence_ids"]) == (expected != "other")

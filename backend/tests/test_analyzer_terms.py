@@ -88,3 +88,69 @@ def test_bad_answers_are_refused(change, message):
             answer[k] = v
     with pytest.raises(ValueError, match=message):
         terms.validate_confirmed(answer, known_sentence_ids=KNOWN)
+
+
+# ── NDA and employment (P2B) ─────────────────────────────────────────────────
+
+def cands_for(text, doc_type):
+    _, sentences = seg.segment(text, [])
+    rows = [{"sentence_id": s.sentence_id, "start": s.start, "end": s.end} for s in sentences]
+    return terms.candidates(text, rows, doc_type)
+
+
+NDA = """MUTUAL NON-DISCLOSURE AGREEMENT
+1. Each party may disclose Confidential Information to the other.
+2. The confidentiality obligations survive for three (3) years after termination.
+3. The Receiving Party shall not compete with the Disclosing Party for twelve (12) months.
+"""
+
+EMPLOYMENT = """EMPLOYMENT AGREEMENT
+1. The Employee is appointed on probation for three (3) months.
+2. The salary is Rs. 150,000 per month.
+3. Either party may terminate this agreement on one month's notice.
+4. The Employee shall not compete with the Employer for six months after leaving.
+"""
+
+
+def test_nda_terms_are_proposed():
+    c = cands_for(NDA, "nda")
+    assert set(c) == {"nda_mutual", "confidentiality_years", "non_compete", "non_compete_months"}
+    assert values(c, "nda_mutual") == [True]
+    assert values(c, "confidentiality_years") == [3]
+    assert values(c, "non_compete") == [True]
+    assert values(c, "non_compete_months") == [12]
+
+
+def test_employment_terms_are_proposed_and_conversions_show_their_words():
+    c = cands_for(EMPLOYMENT, "employment")
+    assert values(c, "probation_months") == [3]
+    assert values(c, "salary_amount") == [150000]
+    [notice] = c["notice_days"]
+    assert notice["value"] == 30 and "month" in notice["raw"], "a converted value must show what it was read from"
+    assert values(c, "non_compete") == [True] and values(c, "non_compete_months") == [6]
+
+
+def test_a_type_only_gets_its_own_terms():
+    assert "rent_amount" not in cands_for(EMPLOYMENT, "employment")
+    assert "non_compete" not in cands_for(NDA.replace("compete", "operate"), "tenancy")
+
+
+def test_decisive_terms_are_per_type():
+    assert terms.decisive_for("nda") == ("nda_mutual", "confidentiality_years", "non_compete")
+    ok = {"nda_mutual": {"value": True, "sentence_ids": []},
+          "confidentiality_years": {"value": None, "sentence_ids": []},
+          "non_compete": {"value": False, "sentence_ids": []}}
+    assert terms.validate_confirmed(ok, known_sentence_ids=set(), document_type="nda")["non_compete"]["value"] is False
+    with pytest.raises(ValueError, match="unknown terms"):        # tenancy terms on an NDA
+        terms.validate_confirmed(DECISIVE_OK, known_sentence_ids=KNOWN, document_type="nda")
+    with pytest.raises(ValueError, match="decisive"):             # an NDA answer left incomplete
+        terms.validate_confirmed({k: v for k, v in ok.items() if k != "non_compete"},
+                                 known_sentence_ids=set(), document_type="nda")
+    with pytest.raises(ValueError, match="unknown terms"):
+        terms.validate_confirmed({**ok, "rent_amount": {"value": 1, "sentence_ids": []}},
+                                 known_sentence_ids=set(), document_type="nda")
+    with pytest.raises(ValueError, match="no key terms"):
+        terms.validate_confirmed(ok, known_sentence_ids=set(), document_type="other")
+    with pytest.raises(ValueError, match="whole number"):
+        terms.validate_confirmed({**ok, "confidentiality_years": {"value": 0, "sentence_ids": []}},
+                                 known_sentence_ids=set(), document_type="nda")

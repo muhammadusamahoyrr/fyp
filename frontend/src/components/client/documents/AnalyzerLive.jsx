@@ -87,8 +87,22 @@ const TERM_LABEL = {
     rent_amount: "Rent amount (PKR)",
     security_deposit: "Security deposit (PKR)",
     landlord_notice_days: "Landlord's notice (days)",
+    nda_mutual: "Both parties share confidential information (mutual)",
+    confidentiality_years: "Confidentiality lasts (years)",
+    non_compete: "Contains a non-compete",
+    non_compete_months: "Non-compete lasts (months)",
+    probation_months: "Probation (months)",
+    notice_days: "Notice to end employment (days)",
+    salary_amount: "Salary (PKR)",
 };
-const DECISIVE = ["term_months", "rent_period", "tenancy_year_to_year"];
+/* True/false terms: "Other" accepts yes / no. */
+const BOOLEAN_TERMS = new Set(["tenancy_year_to_year", "nda_mutual", "non_compete"]);
+const DOCUMENT_TYPE_OPTIONS = [
+    ["tenancy", "Tenancy / rent agreement"],
+    ["nda", "Non-disclosure agreement (NDA)"],
+    ["employment", "Employment agreement / offer letter"],
+    ["other", "Something else"],
+];
 
 /* A file the server would refuse anyway is refused here first, with the same reason. */
 export function checkFile(file) {
@@ -228,7 +242,8 @@ function OcrStep({ t, run, onDone }) {
 
 function DocumentStep({ t, run, onDone }) {
     const review = run.document_review;
-    const [docType, setDocType] = useState(review.document_type.value === "tenancy" ? "tenancy" : "other");
+    const proposed = review.document_type.value;
+    const [docType, setDocType] = useState(DOCUMENT_TYPE_OPTIONS.some(([v]) => v === proposed) ? proposed : "other");
     const [province, setProvince] = useState(review.jurisdiction.value === "punjab" ? "punjab" : "other");
     const [busy, setBusy] = useState(false);
     const [issue, setIssue] = useState(null);
@@ -245,8 +260,7 @@ function DocumentStep({ t, run, onDone }) {
             <div>
                 <Label>Document type</Label>
                 <select aria-label="Document type" value={docType} onChange={e => setDocType(e.target.value)} style={select}>
-                    <option value="tenancy">Tenancy / rent agreement</option>
-                    <option value="other">Something else</option>
+                    {DOCUMENT_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
                 <Evidence t={t} items={review.document_type.evidence} />
             </div>
@@ -267,6 +281,7 @@ function DocumentStep({ t, run, onDone }) {
 function TermsStep({ t, run, onDone }) {
     const review = run.terms_review;
     const terms = Object.keys(review.candidates);
+    const decisive = review.decisive || [];        // the server says which terms must be answered
     const [answers, setAnswers] = useState(() => Object.fromEntries(terms.map(term => {
         const first = review.candidates[term][0];
         return [term, first ? { choice: "0" } : { choice: "none" }];
@@ -280,7 +295,7 @@ function TermsStep({ t, run, onDone }) {
         if (a.choice === "own") {
             const raw = (a.own || "").trim();
             if (term === "rent_period") return { value: raw || null, sentence_ids: [] };
-            if (term === "tenancy_year_to_year") return { value: raw === "yes" ? true : raw === "no" ? false : null, sentence_ids: [] };
+            if (BOOLEAN_TERMS.has(term)) return { value: raw === "yes" ? true : raw === "no" ? false : null, sentence_ids: [] };
             return { value: raw === "" ? null : Number(raw), sentence_ids: [] };
         }
         const c = review.candidates[term][Number(a.choice)];
@@ -288,7 +303,7 @@ function TermsStep({ t, run, onDone }) {
     };
     const submit = async () => {
         setBusy(true); setIssue(null);
-        const payload = Object.fromEntries(terms.filter(term => DECISIVE.includes(term) || answers[term].choice !== "none")
+        const payload = Object.fromEntries(terms.filter(term => decisive.includes(term) || answers[term].choice !== "none")
             .map(term => [term, valueOf(term)]));
         const r = await confirmAnalysisTerms(run.id, run.state_version, payload);
         setBusy(false);
@@ -300,7 +315,7 @@ function TermsStep({ t, run, onDone }) {
             <div style={{ fontSize: 13, color: t.textMuted }}>These decide which checks apply later. Pick what the document says, or "Not stated".</div>
             {terms.map(term => (
                 <fieldset key={term} data-term={term} style={{ border: `1px solid ${t.border}`, borderRadius: 10, padding: 12 }}>
-                    <legend style={{ fontSize: 13.5, fontWeight: 600 }}>{TERM_LABEL[term] || term}{DECISIVE.includes(term) ? " *" : ""}</legend>
+                    <legend style={{ fontSize: 13.5, fontWeight: 600 }}>{TERM_LABEL[term] || term}{decisive.includes(term) ? " *" : ""}</legend>
                     {review.candidates[term].map((c, i) => (
                         <label key={i} style={{ display: "block", fontSize: 13.5, margin: "4px 0" }}>
                             <input type="radio" name={term} checked={answers[term].choice === String(i)} onChange={() => set(term, { choice: String(i) })} />

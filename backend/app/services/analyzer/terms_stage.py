@@ -1,8 +1,9 @@
-"""The key-terms stage: confirmed tenancy -> term candidates with evidence.
+"""The key-terms stage: confirmed document type -> term candidates with evidence.
 
-Runs after the person confirmed the document is a tenancy (the context
-version says so). Proposes candidates for the decisive and supporting terms
-(terms.py), each citing the published sentences that state it, and pauses
+Runs after the person confirmed the document is a tenancy, an NDA or an
+employment agreement (the context version says so). Proposes candidates for
+that type's decisive and supporting terms (terms.py), each citing the
+published sentences that state it, and pauses
 in `needs_terms_confirmation`. Nothing here decides anything: only the terms
 the person confirms reach a context version.
 """
@@ -31,16 +32,18 @@ async def run_terms(lease: Lease) -> str:
     run = lease.run
     context = await get_analysis_context_versions_col().find_one(
         {"_id": run.get("context_version_id"), "source_id": lease.source_id})
-    if context is None or context.get("document_type") != "tenancy":
-        await worker.finish_without_result(lease, status="failed", error_code="no_tenancy_context")
-        return "failed:no_tenancy_context"
+    if context is None or context.get("document_type") not in terms.TYPES:
+        await worker.finish_without_result(lease, status="failed", error_code="no_terms_for_type")
+        return "failed:no_terms_for_type"
     version = await get_analysis_text_versions_col().find_one({"_id": context["text_version_id"]})
     text = (await blob_store.read(version["blob_id"], source_id=lease.source_id,
                                   purpose="canonical_text")).decode("utf-8")
-    proposed = terms.candidates(text, await published_sentences(run))
+    doc_type = context["document_type"]
+    proposed = terms.candidates(text, await published_sentences(run), doc_type)
     try:
         await worker.commit_stage(lease, stage=STAGE, next_status="needs_terms_confirmation",
-                                  set_fields={"terms_candidates": proposed})
+                                  set_fields={"terms_candidates": proposed,
+                                              "terms_decisive": list(terms.decisive_for(doc_type))})
     except (LostLease, deletion.StaleSource) as exc:
         if isinstance(exc, LostLease) and await worker.finish_without_result(
                 lease, status="cancelled"):

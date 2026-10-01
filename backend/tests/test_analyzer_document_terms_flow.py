@@ -149,3 +149,41 @@ async def test_a_deleted_analysis_cannot_be_confirmed(at_document):
     assert response.status_code == 404
     assert await get_analysis_context_versions_col().count_documents(
         {"source_id": created["source_id"]}) == 0
+
+
+NDA_PAGES = ["MUTUAL NON-DISCLOSURE AGREEMENT made at Lahore.",
+             "1. The confidentiality obligations survive for three (3) years. "
+             "2. Neither party shall compete with the other for twelve (12) months."]
+
+
+async def test_an_nda_is_proposed_and_confirmed_with_its_own_terms(http, mongo_transactional):
+    client, _ = http
+    await get_analysis_runs_col().delete_many({"is_open": True})
+    created = (await upload(client, content=pdf_with(NDA_PAGES))).json()
+    rid = created["run_id"]
+    assert await runner.process_one("w1") == "queued_segmentation"
+    assert await runner.process_one("w1") == "needs_document_confirmation"
+    run = await view(client, rid)
+    assert run["document_review"]["document_type"]["value"] == "nda"
+    await post(client, rid, "document", {"expected_state_version": run["state_version"],
+                                         "document_type": "nda", "jurisdiction": "punjab"})
+    assert await runner.process_one("w1") == "needs_terms_confirmation"
+    run = await view(client, rid)
+    review = run["terms_review"]
+    assert review["decisive"] == ["nda_mutual", "confidentiality_years", "non_compete"]
+    assert [c["value"] for c in review["candidates"]["confidentiality_years"]] == [3]
+    assert "rent_period" not in review["candidates"]
+
+    tenancy_answer = await post(client, rid, "terms", {"expected_state_version": run["state_version"],
+                                                       "terms": TERMS})
+    assert tenancy_answer.status_code == 422, "tenancy terms were accepted for an NDA"
+    answer = {"nda_mutual": {"value": True, "sentence_ids": []},
+              "confidentiality_years": {"value": 3, "sentence_ids": []},
+              "non_compete": {"value": True, "sentence_ids": []}}
+    done = await post(client, rid, "terms", {"expected_state_version": run["state_version"],
+                                             "terms": answer})
+    assert done.status_code == 200 and done.json()["status"] == "queued_analysis"
+    assert await runner.process_one("w1") == "done"
+    context = await get_analysis_context_versions_col().find_one({"_id": done.json()["context_version_id"]})
+    assert context["document_type"] == "nda"
+    assert context["confirmed_key_terms"]["confidentiality_years"]["value"] == 3
