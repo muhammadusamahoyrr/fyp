@@ -8,6 +8,8 @@ Test tiers (see pytest.ini markers):
                    _isolate_test_database below.
   * llm          — calls a real provider. Non-deterministic and costs tokens,
                    so it is never part of the default run.
+  * network      — reaches the public internet. Like `llm`, skipped unless
+                   AAI_LIVE_TESTS=1.
 """
 from __future__ import annotations
 
@@ -25,6 +27,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 TEST_DB_SUFFIX = "_test"
+
+
+# ── live tiers are opt-in ────────────────────────────────────────────────────
+#
+# `llm` (a real model provider) and `network` (the public internet, e.g. the
+# official law publishers) tests run ONLY with AAI_LIVE_TESTS=1. Without it
+# they are skipped, so a plain `pytest` never spends tokens or depends on a
+# third party.
+
+LIVE = os.environ.get("AAI_LIVE_TESTS") == "1"
+LIVE_MARKERS = ("llm", "network")
+
+
+def pytest_collection_modifyitems(config, items):
+    if LIVE:
+        return
+    skip = pytest.mark.skip(reason="live tier: set AAI_LIVE_TESTS=1 to run")
+    for item in items:
+        if any(item.get_closest_marker(m) for m in LIVE_MARKERS):
+            item.add_marker(skip)
+
 
 #: A throwaway AES-256 key for the suite. NOT a secret and not a fallback: the
 #: application refuses to store a signature when `SIGNATURE_ENCRYPTION_KEY` is
