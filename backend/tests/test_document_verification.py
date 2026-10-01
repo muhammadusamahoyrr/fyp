@@ -45,13 +45,21 @@ async def _noop_async(*a, **k):
 @pytest.mark.asyncio
 async def test_record_states_the_corpus_it_was_checked_against():
     """A verdict that cannot say what it was checked against cannot be defended
-    later — the corpus grows, so the record has to freeze its own basis."""
+    later — the corpus grows, so the record has to freeze its own basis.
+
+    Against a controlled index: this used to read the developer's local corpus
+    and skip wherever there was none (CI), so it asserted nothing there."""
+    from app.ai.corpus_index import CorpusIndex, StatuteCoverage, set_index
+
+    ppc = StatuteCoverage(statute="PPC 1860", sections=frozenset(str(i) for i in range(1, 512)),
+                          numbered=frozenset(range(1, 512)), highest=511, artifacts=0)
+    set_index(CorpusIndex({"PPC 1860": ppc}))
     rec = await document_service._verification_record(
         {"body": "liable under PPC Section 302"})
-    if not rec["ran"]:
-        pytest.skip("corpus unavailable in this environment")
-    assert rec["corpus"]["statutes"] > 0
-    assert rec["corpus"]["statutes_dense_enough_to_flag"] > 0
+    assert rec["ran"] is True
+    assert rec["corpus"]["statutes"] == 1
+    assert rec["corpus"]["statutes_dense_enough_to_flag"] == 1
+    assert rec["corpus"]["sections_indexed"] == 511
     assert rec["checked_at"] is not None
     assert "still reads as VERIFIED" in rec["limits"]
 
