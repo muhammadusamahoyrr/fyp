@@ -223,7 +223,7 @@ async def purge_due(*, limit: int = 20) -> dict:
 async def housekeeping_tick() -> dict | None:
     """One pass of expiry + purge + orphan sweep. Inert unless enabled and ready."""
     from app.core.config import settings
-    from app.services.analyzer import extraction_stage, readiness
+    from app.services.analyzer import extraction_stage, outputs, readiness
 
     if not settings.doc_analyzer or not readiness.is_ready():
         return None
@@ -232,4 +232,5 @@ async def housekeeping_tick() -> dict | None:
         "purge": await purge_due(),
         "orphans": await blob_store.sweep_orphans(),
         "work_files": extraction_stage.sweep_work_files(),
+        "unpublished_pages": await outputs.sweep_unpublished_pages(),
     }

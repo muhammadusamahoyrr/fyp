@@ -116,6 +116,14 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="The purge removes a source's page maps, including unpublished ones.",
     ),
+    IndexSpec(
+        collection="analysis_text_pages",
+        name="analysis_text_pages_created",
+        keys=(("created_at", ASCENDING),),
+        kind=QUERY,
+        why=("The unpublished-output sweep reads only rows older than its "
+             "cutoff; without this it scans every page row on every tick."),
+    ),
     # ── analysis_deletion_outbox ─────────────────────────────────────────────
     IndexSpec(
         collection="analysis_deletion_outbox",

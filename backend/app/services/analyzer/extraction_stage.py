@@ -241,11 +241,13 @@ async def run_extract(lease: Lease) -> str:
     header = await blob_store.write(encoded, source_id=lease.source_id, purpose="canonical_text",
                                     mime="text/plain; charset=utf-8")
     pages = get_analysis_text_pages_col()
+    written_at = _now()      # lets outputs.sweep_unpublished_pages age-protect in-flight rows
     for ordinal, page in enumerate(built.pages):
         await pages.update_one(
             {"text_version_id": text_version_id, "stage": STAGE, "fence": lease.fence,
              "ordinal": ordinal},
-            {"$setOnInsert": {"source_id": lease.source_id, **page}}, upsert=True)
+            {"$setOnInsert": {"source_id": lease.source_id, "created_at": written_at, **page}},
+            upsert=True)
 
     confirmed = not built.used_ocr
     version_doc = {

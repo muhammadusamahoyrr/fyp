@@ -117,12 +117,13 @@ async def confirm_ocr_text(*, owner_id: str, run_id: str, expected_state_version
     if corrected:
         pages = [{"page": None, "start": 0, "end": len(text), "origin": "confirmed",
                   "coverage": "corrected"}]
+    now = _now()
     for ordinal, page in enumerate(pages):
         await get_analysis_text_pages_col().update_one(
             {"text_version_id": version_id, "stage": STAGE, "fence": fence, "ordinal": ordinal},
-            {"$setOnInsert": {"source_id": run["source_id"], **page}}, upsert=True)
+            {"$setOnInsert": {"source_id": run["source_id"], "created_at": now, **page}},
+            upsert=True)
 
-    now = _now()
 
     async def op(session):
         await deletion.guard_source(session, source_id=run["source_id"],
