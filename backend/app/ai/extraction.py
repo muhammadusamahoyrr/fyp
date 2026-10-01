@@ -225,6 +225,11 @@ class ExtractionResult:
     #: prompt is built from, and unconfirmed OCR output must never arrive there
     #: by riding along in a field that looks like extracted text.
     ocr_pages: list = field(default_factory=list)
+    #: Structured DOCX blocks (app.ai.docx_structure), populated ONLY when a
+    #: caller asked for structure. Offsets into `text`, never text itself, and
+    #: NOT part of `as_dict()`: the report contract of every other caller is
+    #: unchanged.
+    blocks: list = field(default_factory=list)
     extractor_version: str = EXTRACTOR_VERSION
     config_version: str = CONFIG_VERSION
 

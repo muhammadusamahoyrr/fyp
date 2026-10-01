@@ -336,7 +336,8 @@ async def _run_file(item: dict, timeout: float, *,
     fid = str(item.get("file_id") or "")
     job = json.dumps({
         "files": [{"file_id": fid, "path": str(item.get("path") or ""),
-                   "content_type": str(item.get("content_type") or "")}],
+                   "content_type": str(item.get("content_type") or ""),
+                   "structure": bool(item.get("structure"))}],
         "budget_seconds": timeout,
         # Absent unless the caller asked. The child does no OCR work, and
         # imports no OCR module, when this is missing.
@@ -406,6 +407,11 @@ async def _run_file(item: dict, timeout: float, *,
             return _failure(ERR_INTERNAL), ""
         result = _result_from_payload(entry["result"])
         result.ocr_pages = _ocr_results_from_payload(entry.get("ocr"))
+        if item.get("structure"):
+            blocks = entry.get("blocks")
+            if not isinstance(blocks, list) or not all(isinstance(b, dict) for b in blocks):
+                return _failure(ERR_INTERNAL), ""
+            result.blocks = blocks
         return result, entry["text"]
     except (ValueError, TypeError, KeyError, AttributeError):
         logger.warning("extraction: malformed child response")
@@ -524,7 +530,8 @@ def _refuse_stale(
 
 async def extract_isolated(path: str, *, content_type: str = "", timeout: float,
                            ocr: dict | None = None,
-                           memory_limit_mb: int | None = None) -> tuple[ExtractionResult, str]:
+                           memory_limit_mb: int | None = None,
+                           structure: bool = False) -> tuple[ExtractionResult, str]:
     """One file in its own killable child, with optional hard memory cap.
 
     For callers that need neither batching nor de-duplication (the Document
@@ -533,7 +540,8 @@ async def extract_isolated(path: str, *, content_type: str = "", timeout: float,
     process-tree kill and the response validation are exactly intake's.
     """
     async with _get_semaphore():
-        return await _run_file({"file_id": "f", "path": path, "content_type": content_type},
+        return await _run_file({"file_id": "f", "path": path, "content_type": content_type,
+                                "structure": structure},
                                timeout, ocr=ocr, memory_limit_mb=memory_limit_mb)
 
 
