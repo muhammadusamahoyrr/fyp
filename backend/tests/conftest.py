@@ -8,6 +8,8 @@ Test tiers (see pytest.ini markers):
                    _isolate_test_database below.
   * llm          — calls a real provider. Non-deterministic and costs tokens,
                    so it is never part of the default run.
+  * network      — reaches the public internet. Like `llm`, skipped unless
+                   AAI_LIVE_TESTS=1; the default run is held to loopback.
 """
 from __future__ import annotations
 
@@ -24,6 +26,111 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 TEST_DB_SUFFIX = "_test"
+
+
+# ── live tiers are opt-in; the default run never leaves the machine ──────────
+#
+# `llm` (a real model provider) and `network` (the public internet, e.g. the
+# official law publishers) tests run ONLY with AAI_LIVE_TESTS=1. Without it
+# they are skipped, and every other test is held to loopback: a hostname
+# lookup for anything that is not this machine is refused, so a test cannot
+# quietly depend on Groq, a hosted Redis or any other remote service through
+# the developer's `.env`. Each refused lookup is listed at the end of the run,
+# so a hidden dependency is reported rather than masked.
+
+LIVE = os.environ.get("AAI_LIVE_TESTS") == "1"
+LIVE_MARKERS = ("llm", "network")
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "ip6-localhost"}
+BLOCKED_LOOKUPS: list[str] = []
+
+
+class ExternalNetworkBlocked(OSError):
+    """Raised instead of resolving a non-local host during the default run."""
+
+
+def _is_local(host) -> bool:
+    if host is None:
+        return True
+    if isinstance(host, bytes):
+        host = host.decode("ascii", "replace")
+    host = str(host).strip("[]").lower()
+    return host in _LOCAL_HOSTS or host.startswith("127.")
+
+
+# ── production settings never reach the tests ────────────────────────────────
+#
+# Settings read `.env`, and the developer's `.env` points at production
+# services: a hosted Redis, Gmail SMTP, Langfuse cloud, model providers,
+# Safepay. Before this, a full run made ~185 lookups to such hosts (the guard
+# above refused them; they would otherwise have connected). Environment
+# variables take precedence over `.env`, so they are neutralised HERE, at
+# import -- before any test imports `app.core.config` and builds `settings`.
+# The guard stays as defence in depth. Tests that need a service configure it
+# explicitly (monkeypatch), as they always should have.
+#
+# Kept: a Redis URL that is already in the ENVIRONMENT and points at this
+# machine (CI runs a local Redis for the integration tier). The live tier
+# keeps the model-provider keys, which are what it exists to exercise.
+
+PRODUCTION_SETTINGS_NEUTRALISED = {
+    "SMTP_HOST": "", "SMTP_USER": "", "SMTP_PASSWORD": "",
+    "LANGFUSE_PUBLIC_KEY": "", "LANGFUSE_SECRET_KEY": "", "LANGFUSE_HOST": "",
+    "SAFEPAY_API_KEY": "", "SAFEPAY_SECRET_KEY": "", "SAFEPAY_WEBHOOK_SECRET": "",
+    # Model files come from the local cache; a missing one fails like no network.
+    "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+}
+MODEL_PROVIDER_KEYS = ("GROQ_API_KEY", "GROQ_API_KEY_2", "GEMINI_API_KEY", "OPENROUTER_API_KEY")
+
+
+def _neutralise_production_settings() -> None:
+    from urllib.parse import urlparse
+
+    os.environ.update(PRODUCTION_SETTINGS_NEUTRALISED)
+    redis = os.environ.get("REDIS_URL", "")
+    if not (redis and _is_local(urlparse(redis).hostname or "")):
+        os.environ["REDIS_URL"] = ""
+    if not LIVE:
+        for key in MODEL_PROVIDER_KEYS:
+            os.environ[key] = ""
+
+
+_neutralise_production_settings()
+
+
+def pytest_configure(config):
+    if LIVE:
+        return
+    import socket
+
+    real = socket.getaddrinfo
+
+    def guarded(host, *args, **kwargs):
+        if not _is_local(host):
+            BLOCKED_LOOKUPS.append(str(host))
+            raise ExternalNetworkBlocked(
+                f"tests may not reach {host!r}; mark the test llm/network and run with AAI_LIVE_TESTS=1")
+        return real(host, *args, **kwargs)
+
+    socket.getaddrinfo = guarded
+
+
+def pytest_collection_modifyitems(config, items):
+    if LIVE:
+        return
+    skip = pytest.mark.skip(reason="live tier: set AAI_LIVE_TESTS=1 to run")
+    for item in items:
+        if any(item.get_closest_marker(m) for m in LIVE_MARKERS):
+            item.add_marker(skip)
+
+
+def pytest_terminal_summary(terminalreporter):
+    if BLOCKED_LOOKUPS:
+        from collections import Counter
+
+        terminalreporter.section("external network lookups refused")
+        for host, n in Counter(BLOCKED_LOOKUPS).most_common():
+            terminalreporter.write_line(f"{n:6d}  {host}")
+
 
 
 @pytest.fixture(autouse=True)

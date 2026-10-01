@@ -68,6 +68,13 @@ class _Stub:
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
+                # Read the request body BEFORE replying. A handler that leaves
+                # it unread closes a socket with data still in its receive
+                # buffer; Windows then sends RST instead of FIN, and if that
+                # reaches the client before it reads the reply, the client
+                # sees WinError 10053 "connection aborted". It is a race, so
+                # it passed in isolation and failed under full-suite load.
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 outer.hits += 1
                 status, payload = outer.script.pop(0) if outer.script else (200, _schema_response({"is_grounded": True, "reason": "ok"}))
                 body = json.dumps(payload).encode()
@@ -188,6 +195,19 @@ def test_structured_output_failover_records_both_and_names_the_fallback_author()
     assert events[1]["outcome"] == "success" and events[1]["provider"] == "groq2"
     assert events[1]["is_fallback"] is True
     assert author["provider"] == "groq2", "the fallback wrote the answer"
+
+
+def test_the_stub_survives_large_requests_without_resetting_the_connection():
+    """Regression: the stub used to leave the request body unread, which made
+    the client's read fail with a connection reset under load. A large body
+    makes that race near-certain on Windows, so this would catch it again."""
+    import httpx
+
+    with _Stub([]) as stub:
+        for _ in range(25):
+            r = httpx.post(f"{stub.base_url}/chat/completions", json={"pad": "x" * 200_000}, timeout=10)
+            assert r.status_code == 200
+        assert stub.hits == 25
 
 
 def test_retry_after_header_is_honoured_through_the_real_client():
