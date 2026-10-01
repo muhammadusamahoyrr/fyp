@@ -22,6 +22,7 @@ that no test ever runs.
 import pytest
 from pymongo import ASCENDING
 
+from app.core.constants import AgreementStatus
 from app.core.security import hash_password
 
 pytestmark = pytest.mark.integration
@@ -30,10 +31,11 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 async def reviewed(mongo):
     """One lawyer, three clients who may review, and an accepted engagement each."""
-    from app.db.collections import (get_engagements_col, get_lawyer_reviews_col,
-                                    get_users_col)
+    from app.db.collections import (get_agreements_col, get_engagements_col,
+                                    get_lawyer_reviews_col, get_users_col)
 
-    for col in (get_users_col(), get_engagements_col(), get_lawyer_reviews_col()):
+    for col in (get_users_col(), get_engagements_col(), get_lawyer_reviews_col(),
+                get_agreements_col()):
         await col.delete_many({"_id": {"$regex": "^RV-"}})
     await get_lawyer_reviews_col().delete_many({"lawyer_id": "RV-LAWYER"})
 
@@ -67,13 +69,32 @@ async def reviewed(mongo):
          "full_name": "Bilal Ahmed Sheikh", "is_active": True,
          "password_hash": hash_password("Str0ngPass1")},
     ])
+    # Each engagement carries an EXECUTED letter.
+    #
+    # Review eligibility now requires one (plan Phase 2 R5). Before that, these
+    # engagements were `accepted` with no letter at all, which is exactly the
+    # state a DECLINED letter used to leave behind -- so the fixture was
+    # granting review rights to a shape that should never have had them. The
+    # letter is what makes these three real clients rather than merely
+    # negotiated ones.
+    await get_agreements_col().insert_many([
+        {"_id": f"RV-AGR-{c}", "title": "Engagement Letter",
+         "body_html": "Terms.", "status": AgreementStatus.EXECUTED.value,
+         "case_id": f"RV-CASE-{c}", "engagement_id": f"RV-ENG-{c}",
+         "parties": [{"user_id": c, "signed": True},
+                     {"user_id": "RV-LAWYER", "signed": True}],
+         "audit_log": [], "created_by": "RV-LAWYER"}
+        for c in ("RV-C1", "RV-C2", "RV-C3")
+    ])
     await get_engagements_col().insert_many([
         {"_id": f"RV-ENG-{c}", "client_id": c, "lawyer_id": "RV-LAWYER",
-         "case_id": f"RV-CASE-{c}", "status": "accepted"}
+         "case_id": f"RV-CASE-{c}", "status": "accepted",
+         "agreement_id": f"RV-AGR-{c}"}
         for c in ("RV-C1", "RV-C2", "RV-C3")
     ])
     yield
-    for col in (get_users_col(), get_engagements_col(), get_lawyer_reviews_col()):
+    for col in (get_users_col(), get_engagements_col(), get_lawyer_reviews_col(),
+                get_agreements_col()):
         await col.delete_many({"_id": {"$regex": "^RV-"}})
     await get_lawyer_reviews_col().delete_many({"lawyer_id": "RV-LAWYER"})
 

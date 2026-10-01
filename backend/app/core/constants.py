@@ -153,9 +153,15 @@ ENGAGEMENT_OPEN_STATUSES = (
     EngagementStatus.TERMS_PROPOSED.value,
 )
 
-# An engagement that became a real working relationship. Membership here is what
-# proves a client actually retained a lawyer, so it gates reviews and billing —
-# an engagement that has since ended still happened, and still counts.
+# An engagement that became a real working relationship. An engagement that has
+# since ended still happened, and still counts.
+#
+# The review gate is membership here (`engagement_repo.
+# exists_retained_relationship`, AGREEMENTS_PRODUCT_PLAN.md §17 R5-6). Billing
+# uses the same set minus `terminated`, which retains the relationship but
+# authorises no NEW fee (`payment_service._NEW_FEE_ENGAGEMENT_STATUSES`, R5-5).
+# Neither requires an executed engagement letter any more: new engagements have
+# none (R5-3).
 ENGAGEMENT_RETAINED_STATUSES = (
     EngagementStatus.ACCEPTED.value,
     EngagementStatus.COMPLETED.value,

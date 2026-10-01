@@ -17,7 +17,6 @@ from pymongo.errors import DuplicateKeyError
 from app.core.config import settings
 from app.core.constants import (
     ENGAGEMENT_RETAINED_STATUSES,
-    AgreementStatus,
     EngagementStatus,
     NotificationType,
     PaymentKind,
@@ -31,7 +30,6 @@ from app.core.exceptions import (
     NotFoundError,
 )
 from app.db.collections import (
-    get_agreements_col,
     get_engagements_col,
     get_payment_events_col,
     get_payments_col,
@@ -76,65 +74,61 @@ def _public(doc: dict) -> dict:
 
 # ── Fee requests (client → lawyer) ─────────────────────────────────────────────
 
-async def _require_executed_engagement_letter(case_id: str, lawyer_id: str) -> None:
-    """Refuse to bill a client who has not signed the engagement letter.
+# The engagements a NEW fee request may be raised under. Derived from the
+# retained set rather than stated as a second list: `terminated` is retained --
+# it happened, and fees raised before it stay payable -- but it no longer
+# authorises NEW fees (AGREEMENTS_PRODUCT_PLAN.md §17 R5-5 / C-B). V1 cannot
+# tell whether a fee raised after termination is for work done before it, so
+# no fee is raised after it at all; there is no grace period and no cap.
+_NEW_FEE_ENGAGEMENT_STATUSES = tuple(
+    s for s in ENGAGEMENT_RETAINED_STATUSES
+    if s != EngagementStatus.TERMINATED.value
+)
 
-    The letter records the fee the lawyer set and the scope they agreed to. It
-    is generated automatically when an engagement is accepted and signed by both
-    parties through the e-sign service — so an EXECUTED letter is the only place
-    in this system where the CLIENT has agreed to a price.
 
-    Without this check the client's consent was decorative. Verified live before
-    the guard existed: a lawyer accepted an engagement, set a fee of Rs 500,000
-    that the client had never seen, and raised a fee request against it while the
-    letter sat unsigned — HTTP 200. The client meanwhile could not cancel or
-    decline (422, 'accepted' is a terminal state), so the only party who had
-    agreed to that number was the one being paid.
+async def _require_billable_engagement(
+    engagement_id: str | None, case: dict, lawyer_id: str,
+) -> dict:
+    """The engagement a new fee is billed under, validated -- or a refusal.
 
-    A MISSING letter is refused for the same reason as an unsigned one: both mean
-    no consent is on record. It matters because letter generation is wrapped in
-    `except Exception: pass` in engagement_service — the engagement stands even
-    when the letter never gets written, and that silent gap must not become a
-    billing loophole.
+    The engagement is the Hire (§17 R5-10), so it is what authorises billing.
+    `case.lawyer_id` alone cannot: termination clears it, and it says nothing
+    about WHICH relationship a fee belongs to. The id arrives from the caller,
+    so every link is checked against the stored row rather than trusted:
+
+        this lawyer's -> this case's -> this case's client -> billable now
+
+    A missing engagement and another lawyer's are refused identically, so the
+    endpoint cannot be used to learn which engagement ids exist.
     """
-    # Ended engagements still count. The letter's own terms say fees for work
-    # already performed remain payable, so scoping this to `accepted` would have
-    # made completing or terminating an engagement a way to escape the bill for
-    # work that was actually done — and would equally have stranded a lawyer who
-    # finished the matter before invoicing. What must not change is WHICH
-    # engagements qualify at all: the client has to have accepted the terms.
-    eng = await get_engagements_col().find_one(
-        {"case_id": case_id, "lawyer_id": lawyer_id,
-         "status": {"$in": list(ENGAGEMENT_RETAINED_STATUSES)}},
-        sort=[("created_at", -1)],
-    )
-    if not eng:
+    if not engagement_id:
         raise AppValidationError(
-            "No accepted engagement was found for this case, so there is no "
-            "agreed fee to bill against."
-        )
-
-    agreement_id = eng.get("agreement_id")
-    agreement = (
-        await get_agreements_col().find_one({"_id": agreement_id})
-        if agreement_id else None
-    )
-    status = (agreement or {}).get("status")
-
-    if status != AgreementStatus.EXECUTED.value:
-        # Name the actual state: "not signed yet" and "never generated" need
-        # different actions from the lawyer, and a single vague error would send
-        # them chasing the wrong one.
-        detail = (
-            "the engagement letter has not been generated for this engagement"
-            if agreement is None else
-            f"the engagement letter is still '{status}' — it must be signed by "
-            "both you and the client"
-        )
+            "Cannot raise a fee request: name the engagement this fee is "
+            "billed under.")
+    eng = await get_engagements_col().find_one({"_id": engagement_id})
+    if not eng or eng.get("lawyer_id") != lawyer_id:
+        raise ForbiddenError(
+            "Cannot raise a fee request: that engagement is not yours to bill "
+            "under.")
+    if eng.get("case_id") != case["_id"]:
         raise AppValidationError(
-            f"Cannot raise a fee request: {detail}. The client has to agree to "
-            "the fee in writing before they can be billed for it."
-        )
+            "Cannot raise a fee request: that engagement is for a different "
+            "case.")
+    if eng.get("client_id") != case.get("client_id"):
+        raise AppValidationError(
+            "Cannot raise a fee request: that engagement is with a different "
+            "client from the one on this case.")
+    status = eng.get("status")
+    if status == EngagementStatus.TERMINATED.value:
+        raise AppValidationError(
+            "Cannot raise a fee request: this engagement has been terminated, "
+            "so no new fees can be raised under it. Fee requests raised before "
+            "it ended remain payable.")
+    if status not in _NEW_FEE_ENGAGEMENT_STATUSES:
+        raise AppValidationError(
+            "Cannot raise a fee request: the client has not accepted this "
+            f"engagement's terms (it is '{status}').")
+    return eng
 
 
 async def create_fee_request(lawyer_id: str, data: dict) -> dict:
@@ -152,15 +146,25 @@ async def create_fee_request(lawyer_id: str, data: dict) -> dict:
     case = await case_repo.find_by_id(data["case_id"])
     if not case:
         raise NotFoundError("Case")
-    if case.get("lawyer_id") != lawyer_id:
-        raise ForbiddenError("You are not the assigned lawyer on this case")
     client_id = case.get("client_id")
     if not client_id:
         raise AppValidationError("This case has no client to bill")
 
-    # Consent gate. Runs before anything is written, so a refused request leaves
-    # no half-made payment record behind.
-    await _require_executed_engagement_letter(case["_id"], lawyer_id)
+    # The Hire. Checked BEFORE the case's current lawyer, so a terminated
+    # engagement -- whose termination cleared `case.lawyer_id` -- is refused
+    # for what it is rather than as "not the assigned lawyer".
+    engagement = await _require_billable_engagement(
+        data.get("engagement_id"), case, lawyer_id)
+
+    # And the case must still be this engagement's. An accepted or completed
+    # engagement keeps its lawyer on the case; one whose lawyer is no longer
+    # attached does not bill it, whatever the engagement row says.
+    if case.get("lawyer_id") != engagement["lawyer_id"]:
+        raise ForbiddenError("You are not the assigned lawyer on this case")
+
+    # No letter gate (§17 R5-3, R3-25). The validated engagement above IS the
+    # consent on record: the client accepted its terms. It runs before anything
+    # is written, so a refused request leaves no half-made payment behind.
 
     lawyer = await user_repo.find_by_id(lawyer_id)
     client = await user_repo.find_by_id(client_id)
@@ -180,7 +184,8 @@ async def create_fee_request(lawyer_id: str, data: dict) -> dict:
         "payer_id":      client_id,
         "payee_id":      lawyer_id,
         "case_id":       case["_id"],
-        "engagement_id": data.get("engagement_id"),
+        # The VALIDATED engagement, never the caller's string as received.
+        "engagement_id": engagement["_id"],
         "hearing_id":    data.get("hearing_id"),
         "amount":        float(amount),
         "currency":      "PKR",

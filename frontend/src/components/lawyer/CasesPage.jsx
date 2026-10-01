@@ -1589,8 +1589,8 @@ function EngagementInbox({ requests, onChanged }) {
                 >
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                         <div style={{ fontSize: 12, color: T.textMuted, background: T.primaryGlow2, border: `1px solid ${T.primary}30`, borderRadius: 10, padding: "10px 12px", lineHeight: 1.6 }}>
-                            Nothing is assigned yet. The client sees this fee before agreeing to it, and
-                            the engagement letter is generated from these terms once they accept.
+                            Nothing is assigned yet. The client sees this fee before agreeing to it,
+                            and the case is assigned to you only when they accept these terms.
                         </div>
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <FieldInput label="Fee (PKR)" type="number" value={feeAmount} onChange={setFeeAmount} placeholder="e.g. 50000" />

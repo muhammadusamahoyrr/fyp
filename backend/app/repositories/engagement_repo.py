@@ -50,15 +50,21 @@ class EngagementRepository(BaseRepository):
             "status": EngagementStatus.ACCEPTED.value,
         })
 
-    async def exists_accepted(self, client_id: str, lawyer_id: str) -> bool:
-        """True if this client ever actually retained this lawyer.
+    async def exists_retained_relationship(self, client_id: str, lawyer_id: str) -> bool:
+        """True if this client retained this lawyer: an engagement in
+        `ENGAGEMENT_RETAINED_STATUSES` (accepted, completed or terminated).
 
-        Used to gate reviews. Matches ended engagements too: a relationship that
-        finished, or that one side walked out of, is still a relationship the
-        client lived through — and it is the completed ones a client is most
-        likely to have something worth saying about. Scoping this to `accepted`
-        alone would have silently removed the right to review the moment the
-        engagement gained an exit.
+        The review gate (AGREEMENTS_PRODUCT_PLAN.md §17 R5-6). Renamed from
+        `exists_executed_relationship`, which ALSO required the engagement's
+        letter to be executed (remediation plan §2 R5). New engagements have no
+        letter (R5-3), so that requirement would refuse every review of a lawyer
+        a client actually hired; R5 is superseded and the join is gone.
+
+        Still matches ENDED engagements. A relationship that finished, or that
+        one side walked out of, is still a relationship the client lived
+        through, and the completed ones are what a client most wants to write
+        about. `requested`, `terms_proposed`, `declined` and `cancelled` never
+        became a relationship, and do not qualify.
         """
         return bool(await self.find_one({
             "client_id": client_id,

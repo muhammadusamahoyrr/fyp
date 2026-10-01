@@ -33,8 +33,15 @@ const SIDE_ITEMS = [
     { id: "profile", icon: "user", label: "Profile", ur: "پروفائل" },
     { id: "intake", icon: "brief", label: "Legal Intake", ur: "قانونی درخواست" },
     { id: "chatbot", icon: "bot", label: "AI Chat", ur: "اے آئی چیٹ" },
-    { id: "tools", icon: "scale", label: "Legal Tools", ur: "قانونی اوزار" },
-    { id: "disputes", icon: "brief", label: "Property Dispute", ur: "جائیداد کا تنازع" },
+    // OUT OF SCOPE, 2026-09-23. "Legal Tools" (`tools`) and "Property Dispute"
+    // (`disputes`) are hidden from navigation at the owner's decision: neither
+    // is in the current scope, so neither should be reachable from a screen.
+    // The modules themselves are NOT deleted -- ModTools.jsx and
+    // ModDisputes.jsx still exist and still work -- because this is a scope
+    // decision, not an abandonment, and restoring them is putting these two
+    // lines back. The lawyer-side counterpart ("Overseas Disputes", which is
+    // where a client's property dispute arrives) is hidden in
+    // `components/lawyer/layout.jsx` for the same reason.
     { id: "lawyers", icon: "search", label: "Lawyers", ur: "وکلاء" },
     { id: "agreements", icon: "pen", label: "Agreements", ur: "معاہدے" },
     { id: "documents", icon: "file", label: "Documents", ur: "دستاویزات" },
@@ -233,7 +240,7 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
             "/dashboard": "overview",
             "/intake": "intake",
             "/chat": "chatbot",
-            "/tools": "tools",
+            // "/tools" deliberately absent — see SIDE_ITEMS.
             "/lawyers": "lawyers",
             "/documents": "documents",
             "/agreements": "agreements",
@@ -387,7 +394,8 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                                                 chatbot: "/chat", lawyers: "/lawyers",
                                                 cases: "/cases", documents: "/documents",
                                                 agreements: "/agreements", tracking: "/tracking",
-                                                profile: "/profile", tools: "/tools",
+                                                profile: "/profile",
+                                                // `tools` deliberately absent — see SIDE_ITEMS.
                                             };
                                             const path = TAB_PATH[item.id];
                                             if (path) navRouter.push(path);

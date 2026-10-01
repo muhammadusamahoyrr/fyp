@@ -62,6 +62,7 @@ def test_default_scope_stays_retrievable():
     assert len(out) == 1
 
 
+@pytest.mark.corpus  # reads the real, non-versioned corpus — see pytest.ini
 def test_reference_only_excluded_from_bm25_index():
     """Excluded at index construction, not after retrieval.
 

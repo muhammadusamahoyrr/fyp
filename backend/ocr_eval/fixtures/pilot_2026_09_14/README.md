@@ -68,13 +68,20 @@ S&GAD, for public access. Official legislation translations; no personal data.
 
 BLOCKED means not established. It is not a guess recorded as a fact.
 
-## Recovery
+## Verifiability (NOT recovery)
 
     archive   _backup_2026_09_14.tar   (2140160 bytes)
     sha256    b66addd2cf41aa95182f126cb8709dad81fc00c83ff7b851d37394d3db4ad05f
 
-NOT uploaded anywhere. Store it wherever the project keeps large artefacts and
-verify against this hash before reuse.
+A HASH MAKES AN ARTEFACT VERIFIABLE, NOT RECOVERABLE. It proves a copy you
+already hold is the right one; it cannot reconstruct bytes nobody kept. The
+earlier wording in this file said "recoverable", which was wrong.
+
+THE LOCAL ARCHIVE IS NOT DURABLE. It sits on one ignored path on one machine,
+so a reinstall, a clean checkout or a disk failure loses the dataset and the
+hash then proves only that it is gone. It becomes durable when copied to a
+separately approved location — and that copy has NOT been made and NOTHING has
+been uploaded, because no location has been authorised.
 
 ## Human work outstanding
 
