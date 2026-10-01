@@ -42,6 +42,8 @@ LABELS = {"general_review": ["General document review"],
           "legal_playbook": ["Legal playbook applied", "Applicability requires lawyer review"]}
 MAX_EVIDENCE = 5
 _SLUG = re.compile(r"^[a-z][a-z0-9_]{0,48}$")
+#: country.area[.practice...]: pk.punjab.tenancy, pk.contract.nda, pk.employment
+QUALIFICATION = re.compile(r"^[a-z]{2}(?:\.[a-z][a-z0-9_]{1,30}){1,3}$")
 
 
 @dataclass
@@ -63,6 +65,7 @@ class Pack:
     version: int
     scope: str
     requires_approval: bool
+    required_qualification: str | None
     title: str
     applies_if: dict | None
     checks: list[Check]
@@ -138,7 +141,8 @@ def parse_pack(raw_text: str, source: str = "pack") -> Pack:
         raise PlaybookError(f"{source}: not valid YAML ({exc})") from None
     if not isinstance(data, dict):
         raise PlaybookError(f"{source}: a pack is a mapping")
-    allowed = {"id", "version", "scope", "requires_approval", "title", "applies_if", "checks"}
+    allowed = {"id", "version", "scope", "requires_approval", "required_qualification",
+               "title", "applies_if", "checks"}
     if set(data) - allowed:
         raise PlaybookError(f"{source}: unknown keys {sorted(set(data) - allowed)}")
     if not isinstance(data.get("id"), str) or not _SLUG.match(data["id"]):
@@ -153,6 +157,15 @@ def parse_pack(raw_text: str, source: str = "pack") -> Pack:
         raise PlaybookError(f"{source}: requires_approval must be true or false")
     if scope == "legal_playbook" and not requires:
         raise PlaybookError(f"{source}: a legal playbook always requires lawyer approval")
+    qualification = data.get("required_qualification")
+    if scope == "legal_playbook":
+        # Approval is bound to a jurisdiction and practice area, not just to
+        # "a verified lawyer": the pack names the qualification it needs.
+        if not isinstance(qualification, str) or not QUALIFICATION.match(qualification):
+            raise PlaybookError(f"{source}: a legal playbook must name its required_qualification "
+                                "(e.g. pk.punjab.tenancy)")
+    elif qualification is not None:
+        raise PlaybookError(f"{source}: a general pack needs no reviewer qualification")
     if data.get("applies_if") is not None:
         validate(data["applies_if"], f"{source}.applies_if")
     if scope == "legal_playbook" and data.get("applies_if") is None:
@@ -165,6 +178,7 @@ def parse_pack(raw_text: str, source: str = "pack") -> Pack:
     if len(ids) != len(set(ids)):
         raise PlaybookError(f"{source}: check ids must be unique")
     return Pack(id=data["id"], version=data["version"], scope=scope, requires_approval=requires,
+                required_qualification=qualification,
                 title=str(data.get("title") or data["id"]), applies_if=data.get("applies_if"),
                 checks=parsed, content_hash=content_hash(raw_text))
 
@@ -189,7 +203,7 @@ async def approved_hashes(packs: list[Pack]) -> set[tuple[str, str]]:
     if not wanted:
         return set()
     return {(a["pack_id"], a["content_hash"]) async for a in
-            get_analysis_playbook_approvals_col().find({"$or": wanted})}
+            get_analysis_playbook_approvals_col().find({"$or": wanted, "active": True})}
 
 
 # ── running ──────────────────────────────────────────────────────────────────

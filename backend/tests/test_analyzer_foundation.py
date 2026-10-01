@@ -90,7 +90,7 @@ def test_partial_filters_are_plain_equality():
     # Mongo version; `is_open: true` is.
     for spec in ANALYZER_INDEX_REQUIREMENTS:
         if spec.partial_filter:
-            assert spec.partial_filter == {"is_open": True}, spec.name
+            assert spec.partial_filter in ({"is_open": True}, {"active": True}), spec.name
 
 
 def test_no_ttl_index_on_sources():
@@ -102,12 +102,11 @@ def test_no_ttl_index_on_sources():
 def test_names_are_unique_and_every_collection_is_covered():
     names = [s.name for s in ANALYZER_INDEX_REQUIREMENTS]
     assert len(names) == len(set(names))
-    assert analyzer_collections() == ("analysis_blobs", "analysis_clauses",
-                                      "analysis_context_versions",
-                                      "analysis_deletion_outbox", "analysis_findings",
-                                      "analysis_playbook_approvals", "analysis_runs",
-                                      "analysis_sentences", "analysis_sources",
-                                      "analysis_text_pages", "analysis_text_versions")
+    assert analyzer_collections() == (
+        "analysis_approval_audit", "analysis_blobs", "analysis_clauses",
+        "analysis_context_versions", "analysis_deletion_outbox", "analysis_findings",
+        "analysis_playbook_approvals", "analysis_reviewer_qualifications", "analysis_runs",
+        "analysis_sentences", "analysis_sources", "analysis_text_pages", "analysis_text_versions")
 
 
 # ── the indexes, against a real database ─────────────────────────────────────

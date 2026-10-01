@@ -22,8 +22,16 @@ from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 
 from app.core.config import settings
-from app.dependencies import require_client
-from app.services.analyzer import confirmation, deletion, lifecycle, readiness, upload_rules
+from app.core.constants import UserRole
+from app.dependencies import require_admin, require_client, require_lawyer, role_required
+from app.services.analyzer import (
+    approvals,
+    confirmation,
+    deletion,
+    lifecycle,
+    readiness,
+    upload_rules,
+)
 from app.services.analyzer.errors import AnalyzerError
 
 router = APIRouter(prefix="/documents/analyses", tags=["document-analyses"])
@@ -189,6 +197,94 @@ async def get_analysis_report(run_id: str, current_user: dict = Depends(require_
     """Findings with scope labels and server-cut evidence. 409 until done."""
     _require_available()
     return await _run(confirmation.get_report(owner_id=str(current_user["_id"]), run_id=run_id))
+
+
+# ── legal playbook review (P2B) ──────────────────────────────────────────────
+#
+# Literal paths, registered BEFORE the generic /{source_id} routes below, which
+# would otherwise capture "playbooks" or "approval-audit" as a source id.
+
+require_reviewer = role_required(UserRole.LAWYER, UserRole.ADMIN)
+
+
+class ApprovalBody(BaseModel):
+    #: The hash of the text the reviewer READ (from GET /playbooks/{id}).
+    content_hash: str = Field(min_length=64, max_length=64)
+    #: The capacity in which they approve, e.g. "Advocate High Court, Punjab".
+    reviewer_role: str = Field(min_length=1, max_length=200)
+
+
+class ReasonBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class QualificationBody(BaseModel):
+    user_id: str = Field(min_length=1, max_length=200)
+    qualification: str = Field(min_length=4, max_length=100)
+    #: What the grant rests on: enrolment, bar, practice area.
+    basis: str = Field(min_length=1, max_length=500)
+
+
+@router.get("/playbooks")
+async def list_playbooks(current_user: dict = Depends(require_reviewer)):
+    """Every pack with its hash, required qualification and active approvals."""
+    _require_available()
+    return await approvals.list_playbooks()
+
+
+@router.get("/playbooks/{pack_id}")
+async def get_playbook(pack_id: str, current_user: dict = Depends(require_reviewer)):
+    """The exact text to review, and the hash an approval must quote."""
+    _require_available()
+    try:
+        return approvals.playbook_text(pack_id)
+    except AnalyzerError as exc:
+        _fail(exc.status, exc.code, exc.message)
+
+
+@router.post("/playbooks/{pack_id}/approvals", status_code=201)
+async def approve_playbook(pack_id: str, body: ApprovalBody = Body(...),
+                           current_user: dict = Depends(require_lawyer)):
+    """The caller approves this exact text, as themselves."""
+    _require_available()
+    record = await _run(approvals.record_approval(
+        reviewer=current_user, pack_id=pack_id, content_hash=body.content_hash,
+        reviewer_role=body.reviewer_role))
+    return {"approval_id": record["_id"], "pack_id": record["pack_id"],
+            "content_hash": record["content_hash"], "approved_at": record["approved_at"]}
+
+
+@router.post("/playbook-approvals/{approval_id}/revoke")
+async def revoke_playbook_approval(approval_id: str, body: ReasonBody = Body(...),
+                                   current_user: dict = Depends(require_reviewer)):
+    _require_available()
+    return await _run(approvals.revoke_approval(actor=current_user, approval_id=approval_id,
+                                                reason=body.reason))
+
+
+@router.post("/reviewer-qualifications", status_code=201)
+async def grant_reviewer_qualification(body: QualificationBody = Body(...),
+                                       current_user: dict = Depends(require_admin)):
+    _require_available()
+    grant = await _run(approvals.grant_qualification(
+        admin=current_user, user_id=body.user_id, qualification=body.qualification,
+        basis=body.basis))
+    return {"grant_id": grant["_id"], "user_id": grant["user_id"],
+            "qualification": grant["qualification"]}
+
+
+@router.post("/reviewer-qualifications/{grant_id}/revoke")
+async def revoke_reviewer_qualification(grant_id: str, body: ReasonBody = Body(...),
+                                        current_user: dict = Depends(require_admin)):
+    _require_available()
+    return await _run(approvals.revoke_qualification(admin=current_user, grant_id=grant_id,
+                                                     reason=body.reason))
+
+
+@router.get("/approval-audit")
+async def approval_audit(limit: int = 100, current_user: dict = Depends(require_admin)):
+    _require_available()
+    return await approvals.audit_trail(limit=limit)
 
 
 @router.get("/attestation")

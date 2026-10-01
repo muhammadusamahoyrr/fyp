@@ -210,11 +210,27 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
     ),
     IndexSpec(
         collection="analysis_playbook_approvals",
-        name="uniq_analysis_playbook_approval",
+        name="uniq_analysis_playbook_approval_active",
         keys=(("pack_id", ASCENDING), ("content_hash", ASCENDING)),
-        kind=CORRECTNESS, unique=True,
-        why=("One approval per exact playbook text. The engine looks a pack up "
-             "by (id, hash): an edited pack has a new hash and no approval."),
+        kind=CORRECTNESS, unique=True, partial_filter={"active": True},
+        why=("At most one ACTIVE approval per exact playbook text. Partial on "
+             "active so a revoked approval stays as history and the same text "
+             "can be approved again. The engine reads (id, hash, active)."),
+    ),
+    # ── reviewer qualifications and the approval audit trail ────────────────
+    IndexSpec(
+        collection="analysis_reviewer_qualifications",
+        name="uniq_analysis_reviewer_qualification_active",
+        keys=(("user_id", ASCENDING), ("qualification", ASCENDING)),
+        kind=CORRECTNESS, unique=True, partial_filter={"active": True},
+        why="One active grant of a qualification per reviewer; revoked grants stay as history.",
+    ),
+    IndexSpec(
+        collection="analysis_approval_audit",
+        name="analysis_approval_audit_recent",
+        keys=(("at", DESCENDING),),
+        kind=QUERY,
+        why="The audit trail, newest first.",
     ),
     # ── analysis_deletion_outbox ─────────────────────────────────────────────
     IndexSpec(
@@ -242,3 +258,10 @@ def analyzer_requirements_for(collection: str) -> tuple[IndexSpec, ...]:
 
 def analyzer_collections() -> tuple[str, ...]:
     return tuple(sorted({s.collection for s in ANALYZER_INDEX_REQUIREMENTS}))
+
+
+#: Indexes an earlier version created that must not remain: the old FULL
+#: unique on approvals would refuse re-approving a text after a revocation.
+OBSOLETE_ANALYZER_INDEXES: tuple[tuple[str, str], ...] = (
+    ("analysis_playbook_approvals", "uniq_analysis_playbook_approval"),
+)

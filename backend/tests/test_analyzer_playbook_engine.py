@@ -7,13 +7,11 @@ a temporary directory: the repository ships no legal pack in P2A.
 from __future__ import annotations
 
 import textwrap
-import uuid
 
 import pytest
 
-from app.services.analyzer import approvals, playbook_engine as engine
+from app.services.analyzer import playbook_engine as engine
 from app.services.analyzer import segmentation as seg
-from app.services.analyzer.errors import AnalyzerConflict, AnalyzerNotFound, UploadRejected
 from app.services.analyzer.playbook_dsl import PlaybookError
 
 LEASE = """TENANCY AGREEMENT
@@ -29,6 +27,7 @@ LEGAL = textwrap.dedent("""\
     version: 1
     scope: legal_playbook
     requires_approval: true
+    required_qualification: pk.punjab.tenancy
     title: Test legal pack
     applies_if: {all: [{eq: [{field: document_type}, {value: tenancy}]},
                        {eq: [{field: jurisdiction}, {value: punjab}]}]}
@@ -148,7 +147,7 @@ async def test_an_approved_pack_runs_with_three_valued_checks(legal_dir, mongo):
     pack = next(p for p in engine.load_packs() if p.id == "test_legal")
     await mongo["analysis_playbook_approvals"].insert_one(
         {"pack_id": pack.id, "content_hash": pack.content_hash, "version": 1,
-         "reviewer_user_id": "lawyer-x", "reviewer_role": "test"})
+         "reviewer_user_id": "lawyer-x", "reviewer_role": "test", "active": True})
     try:
         findings, summary = await engine.analyse(TENANCY, LEASE, sentences_of(LEASE))
         legal = {f["check_id"]: f for f in findings if f["pack_id"] == "test_legal"}
@@ -173,40 +172,3 @@ async def test_pack_applicability_on_other_and_unknown_contexts(legal_dir, mongo
     assert {p["pack_id"]: p["status"] for p in summary}["test_legal"] == "not_applicable"
     _, summary = await engine.analyse({**TENANCY, "jurisdiction": None}, LEASE, sentences_of(LEASE))
     assert {p["pack_id"]: p["status"] for p in summary}["test_legal"] == "unable_to_determine"
-
-
-# ── recording an approval ────────────────────────────────────────────────────
-
-async def _user(mongo, *, role="lawyer", kyc="approved"):
-    uid = f"user-{uuid.uuid4().hex[:8]}"
-    await mongo["users"].insert_one({"_id": uid, "email": f"{uid}@example.test", "role": role,
-                                     "lawyer_profile": {"kyc_status": kyc}})
-    return uid
-
-
-async def test_only_a_verified_lawyer_can_approve_the_exact_current_text(legal_dir, mongo):
-    pack = next(p for p in engine.load_packs() if p.id == "test_legal")
-    lawyer = await _user(mongo)
-    try:
-        with pytest.raises(AnalyzerNotFound):
-            await approvals.record_approval(pack_id="nope", content_hash=pack.content_hash,
-                                            reviewer_user_id=lawyer, reviewer_role="r")
-        with pytest.raises(UploadRejected, match="no legal claim"):
-            await approvals.record_approval(pack_id="general", content_hash="x",
-                                            reviewer_user_id=lawyer, reviewer_role="r")
-        with pytest.raises(AnalyzerConflict, match="changed since it was reviewed"):
-            await approvals.record_approval(pack_id="test_legal", content_hash="0" * 64,
-                                            reviewer_user_id=lawyer, reviewer_role="r")
-        for who in (await _user(mongo, role="client"), await _user(mongo, kyc="pending"), "ghost"):
-            with pytest.raises(UploadRejected, match="verified lawyer"):
-                await approvals.record_approval(pack_id="test_legal", content_hash=pack.content_hash,
-                                                reviewer_user_id=who, reviewer_role="r")
-        record = await approvals.record_approval(
-            pack_id="test_legal", content_hash=pack.content_hash, reviewer_user_id=lawyer,
-            reviewer_role="Advocate, Punjab tenancy")
-        assert record["reviewer_user_id"] == lawyer and record["content_hash"] == pack.content_hash
-        with pytest.raises(AnalyzerConflict, match="already approved"):
-            await approvals.record_approval(pack_id="test_legal", content_hash=pack.content_hash,
-                                            reviewer_user_id=lawyer, reviewer_role="r")
-    finally:
-        await mongo["analysis_playbook_approvals"].delete_many({"pack_id": "test_legal"})

@@ -46,7 +46,7 @@ from app.db.collections import (
     get_ws_tickets_col,
 )
 
-from app.db.analyzer_index_spec import ANALYZER_INDEX_REQUIREMENTS
+from app.db.analyzer_index_spec import ANALYZER_INDEX_REQUIREMENTS, OBSOLETE_ANALYZER_INDEXES
 from app.db.v2_index_spec import (
     CODE_UNREADABLE,
     CORRECTNESS,
@@ -101,6 +101,11 @@ async def _analyzer_indexes() -> None:
     from app.db.mongodb import get_database
 
     db = get_database()
+    for collection, name in OBSOLETE_ANALYZER_INDEXES:
+        try:
+            await db[collection].drop_index(name)
+        except Exception:  # noqa: BLE001 -- absent is the goal
+            pass
     for spec in ANALYZER_INDEX_REQUIREMENTS:
         try:
             await db[spec.collection].create_indexes([spec.model()])

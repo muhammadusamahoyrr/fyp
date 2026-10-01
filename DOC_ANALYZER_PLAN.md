@@ -212,8 +212,22 @@ The analyzer is not limited to tenancies. Every analysis runs through one
 | `Legal playbook applied` | The result of an APPROVED legal pack's rule. |
 | `Applicability requires lawyer review` | Always shown with a legal result: the rule was applied mechanically to confirmed terms. |
 
+**Approval is bound to a qualification, not just to "a verified lawyer"
+(P2B).** Each legal pack names its `required_qualification`
+(`pk.punjab.tenancy`, `pk.contract.nda`, `pk.employment`). An admin grants a
+qualification to a verified lawyer with a stated basis
+(`analysis_reviewer_qualifications`); only a holder of the pack's exact
+qualification can approve it, and only as themselves. Revoking a
+qualification deactivates the approvals its holder gave under it. Every
+grant, revocation and approval writes an append-only row in
+`analysis_approval_audit` in the same transaction as the change.
+Endpoints: `GET /playbooks`, `GET /playbooks/{id}` (the exact text and hash
+to review), `POST /playbooks/{id}/approvals`, `POST
+/playbook-approvals/{id}/revoke`, `POST /reviewer-qualifications`, `POST
+/reviewer-qualifications/{id}/revoke`, `GET /approval-audit`.
+
 **Approval is data, not a flag.** `analysis_playbook_approvals` holds
-`{pack_id, version, content_hash, reviewer_user_id, reviewer_role, approved_at}`.
+`{pack_id, version, content_hash, qualification, reviewer_user_id, reviewer_role, approved_at, active}`.
 A legal pack runs only if an approval exists for its **exact** content
 hash; editing a single character of the pack changes the hash and
 withdraws it. An applicable but unapproved pack is reported as

@@ -333,3 +333,15 @@ def get_analysis_playbook_approvals_col() -> AsyncIOMotorCollection:
     """A qualified reviewer's approval of ONE exact playbook text (by hash).
     A legal pack runs only if its current hash is approved here."""
     return get_database()["analysis_playbook_approvals"]
+
+
+def get_analysis_reviewer_qualifications_col() -> AsyncIOMotorCollection:
+    """Which reviewer may approve which kind of legal playbook (e.g.
+    pk.punjab.tenancy), granted and revoked by an admin, with the basis."""
+    return get_database()["analysis_reviewer_qualifications"]
+
+
+def get_analysis_approval_audit_col() -> AsyncIOMotorCollection:
+    """Append-only: every grant, revocation and approval, written in the same
+    transaction as the change it records."""
+    return get_database()["analysis_approval_audit"]
