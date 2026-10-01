@@ -249,6 +249,22 @@ never run.
   shown as legally approved**, until a qualified lawyer approves each signed
   hash.
 
+**Authority library (added after P2B).** Citations do NOT come from the
+chat corpus, whose section labels are unreliable (TPA s.107's only "107"
+chunk is a footnote; the Registration and Contract Acts are absent).
+`backend/app/services/analyzer/authority_library.yaml` holds the exact text
+of every cited provision, cut by explicit headings from pinned official PDFs
+(Punjab Code; Pakistan Code) by `scripts/build_analyzer_authorities.py`,
+which refuses if a file's SHA-256 changes. Rules:
+- a legal pack whose citation does not resolve does not load;
+- an approval binds the pack hash AND `authorities_hash` (the cited
+  provisions' text hashes); a change to either stops the pack, and a
+  re-approval supersedes the stale one in the same, audited transaction;
+- each finding stores the resolved source (publisher, URL, file hash, pages,
+  text hash) at analysis time, so a report keeps saying what was applied;
+- the reviewer reads the cited official text via `GET /playbooks/{id}`
+  (`cited_provisions`); the live drift check is the opt-in `network` test.
+
 ### 4.6 LLM explanation layer
 
 - **Input:** clause batches (the size is measured), the run's user side, and sentences with their IDs.
@@ -536,6 +552,16 @@ Deferred:
 **Release gate (not blocking P1):** the P2 tenancy playbook **must not be merged or released** until a lawyer qualified in Punjab tenancy law approves the signed playbook hash, recorded as an authenticated user. A supervisor's academic approval is not a substitute unless the supervisor is so qualified. The reviewer does not need to be named before P1 starts.
 
 ## 12. Changelog
+
+**2026-10-01 (after P2B):**
+- Authority library from official sources (§4.5a). Verifying the Punjab
+  Rented Premises Act against Punjab Code corrected two errors in the
+  secondary copy first quoted (s.6(1)(d) "of rent", s.6(1)(f) "; and").
+- Approvals also bind the cited text (`authorities_hash`).
+- The test suite is held to loopback; `llm`/`network` tests run only with
+  `AAI_LIVE_TESTS=1` (manual `live` CI job). The earlier "Groq network flake"
+  was a localhost stub that never read the request body (Windows RST race),
+  not a provider call.
 
 **v3.3 → v3.4 (sixth review):**
 - The reader query is explicit: `(text_version_id | run_id, stage, published_fence)`.
