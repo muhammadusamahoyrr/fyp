@@ -13,12 +13,12 @@ Gates, in order, before any byte of the file is used:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from starlette.datastructures import UploadFile
 
 from app.core.config import settings
 from app.dependencies import require_client
-from app.services.analyzer import lifecycle, readiness, upload_rules
+from app.services.analyzer import deletion, lifecycle, readiness, upload_rules
 from app.services.analyzer.errors import AnalyzerError
 
 router = APIRouter(prefix="/documents/analyses", tags=["document-analyses"])
@@ -113,3 +113,15 @@ async def get_document_analysis(source_id: str, current_user: dict = Depends(req
     _require_available()
     return await _run(lifecycle.get_analysis(owner_id=str(current_user["_id"]),
                                              source_id=source_id))
+
+
+@router.delete("/{source_id}", status_code=204)
+async def delete_document_analysis(source_id: str, current_user: dict = Depends(require_client)):
+    """Tombstone + purge job in one transaction; hidden from every read at once.
+
+    Not found, not the owner and already deleted all answer 404, so the route
+    reveals nothing about analyses that are not the caller's.
+    """
+    _require_available()
+    await _run(deletion.delete_analysis(owner_id=str(current_user["_id"]), source_id=source_id))
+    return Response(status_code=204)

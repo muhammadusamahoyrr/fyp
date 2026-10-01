@@ -213,6 +213,25 @@ async def _documents_v2_relay():
             logging.getLogger(__name__).exception("DOCUMENTS_V2 relay sweep failed")
 
 
+async def _analyzer_housekeeping():
+    """Document Analyzer: expire (7 days), purge tombstoned sources, sweep
+    unreferenced encrypted files. Every step is idempotent and claim/CAS
+    guarded, so it runs on every worker without a lock. Inert unless
+    DOC_ANALYZER is on AND readiness passed; re-checked each tick."""
+    import asyncio
+    import logging
+    from app.services.analyzer.deletion import housekeeping_tick
+
+    while True:
+        try:
+            await asyncio.sleep(60)
+            await housekeeping_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("analyzer housekeeping failed")
+
+
 async def _warmup_models():
     """Heavy AI warmups (Whisper STT + intent embeddings). Runs in the background
     so startup and health checks aren't blocked and a model failure can't take
@@ -350,6 +369,7 @@ async def lifespan(app: FastAPI):
     # default cannot silently leave the outbox undrained. It no-ops while the
     # feature flag is off.
     scheduler_tasks.append(_asyncio.create_task(_documents_v2_relay()))
+    scheduler_tasks.append(_asyncio.create_task(_analyzer_housekeeping()))
 
     # EVENT OUTBOX relay: ungated, and NOT covered by the v2 relay above, which
     # returns immediately while DOCUMENTS_V2 is off. Agreement transitions park
