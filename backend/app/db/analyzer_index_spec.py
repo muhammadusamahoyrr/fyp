@@ -185,6 +185,37 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="The unpublished-output sweep reads only rows older than its cutoff.",
     ),
+    # ── analysis_findings / analysis_playbook_approvals ──────────────────────
+    IndexSpec(
+        collection="analysis_findings",
+        name="uniq_analysis_findings_row",
+        keys=(("run_id", ASCENDING), ("stage", ASCENDING), ("fence", ASCENDING),
+              ("ordinal", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why="Run-output identity (plan §5): idempotent retries, no cross-fence overwrite.",
+    ),
+    IndexSpec(
+        collection="analysis_findings",
+        name="analysis_findings_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every finding of a source.",
+    ),
+    IndexSpec(
+        collection="analysis_findings",
+        name="analysis_findings_created",
+        keys=(("created_at", ASCENDING),),
+        kind=QUERY,
+        why="The unpublished-output sweep reads only rows older than its cutoff.",
+    ),
+    IndexSpec(
+        collection="analysis_playbook_approvals",
+        name="uniq_analysis_playbook_approval",
+        keys=(("pack_id", ASCENDING), ("content_hash", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("One approval per exact playbook text. The engine looks a pack up "
+             "by (id, hash): an edited pack has a new hash and no approval."),
+    ),
     # ── analysis_deletion_outbox ─────────────────────────────────────────────
     IndexSpec(
         collection="analysis_deletion_outbox",

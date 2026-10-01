@@ -362,3 +362,34 @@ async def get_text(*, owner_id: str, run_id: str) -> dict:
                          "corrected": bool(version.get("corrected")),
                          "page_map_available": bool(version.get("page_map_available"))},
     }
+
+
+SCOPE_NOTICE = {
+    "general_review": ("General document review: drafting-completeness checks. "
+                       "None is a legal requirement."),
+    "legal_playbook": ("Legal playbook applied to the terms you confirmed. "
+                       "Applicability requires lawyer review."),
+}
+
+
+async def get_report(*, owner_id: str, run_id: str) -> dict:
+    """The finished run's findings, with evidence cut from the text here."""
+    from app.db.collections import get_analysis_findings_col
+
+    run = await _owned_live_run(owner_id, run_id)
+    fence = run.get("published", {}).get("analyze")
+    if run["status"] != "done" or fence is None:
+        raise AnalyzerConflict("not_ready", "This analysis has not finished.")
+    rows = [f async for f in get_analysis_findings_col().find(
+        {"run_id": run_id, "stage": "analyze", "fence": fence}, {"_id": 0}).sort("ordinal", 1)]
+    quotes = await _quotes(run, {i for f in rows for i in f.get("sentence_ids", [])})
+    findings = [{
+        "pack_id": f["pack_id"], "scope": f["scope"], "labels": f["labels"],
+        "check_id": f["check_id"], "kind": f["kind"], "title": f["title"], "why": f["why"],
+        "severity": f["severity"], "check_result": f["check_result"], "reason": f.get("reason"),
+        "authority": f.get("authority") or [],
+        "evidence": [{"sentence_id": i, "text": quotes.get(i)} for i in f.get("sentence_ids", [])],
+    } for f in rows]
+    report = run.get("report", {})
+    return {"id": run_id, "packs": report.get("packs", []), "counts": report.get("counts", {}),
+            "scope_notice": SCOPE_NOTICE, "findings": findings}

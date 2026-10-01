@@ -1,4 +1,4 @@
-# Document Analyzer — Research & Design Plan (v3.4)
+# Document Analyzer — Research & Design Plan (v3.5)
 
 **Date:** 2026-09-30 · **v3.4** incorporates six reviews (changelog in §12). **Implementation-ready for P1.**
 **Status:** plan only. Nothing here is implemented.
@@ -189,6 +189,51 @@ severity      high | medium | low | null
     - {id: yearly_rent,      applies_if: {eq: [rent_period, yearly]}}
   pending_lawyer_input: "applicable provincial exemptions/amendments"
 ```
+
+### 4.5a Playbook framework and scope (P2A / P2B)
+
+The analyzer is not limited to tenancies. Every analysis runs through one
+**playbook engine**, and every result says which kind of review produced it.
+
+**Packs.** A pack is a versioned YAML file of checks:
+
+| Pack | Kind | Runs when | Approval needed |
+|---|---|---|---|
+| `general` | general checks | every document | none: it makes no legal claim |
+| `tenancy_punjab` | legal checks + reminders | confirmed `tenancy` + `punjab` | **signed hash**, lawyer qualified in Punjab tenancy law |
+| `nda` | legal checks | confirmed `nda` | signed hash, relevant lawyer |
+| `employment` | legal checks | confirmed `employment` | signed hash, relevant lawyer |
+
+**Scope labels, on every result:**
+
+| Label | Meaning |
+|---|---|
+| `General document review` | A drafting-completeness check (are parties named, is there a date, a signature block, a termination clause...). Not a legal requirement and never phrased as one. |
+| `Legal playbook applied` | The result of an APPROVED legal pack's rule. |
+| `Applicability requires lawyer review` | Always shown with a legal result: the rule was applied mechanically to confirmed terms. |
+
+**Approval is data, not a flag.** `analysis_playbook_approvals` holds
+`{pack_id, version, content_hash, reviewer_user_id, reviewer_role, approved_at}`.
+A legal pack runs only if an approval exists for its **exact** content
+hash; editing a single character of the pack changes the hash and
+withdraws it. An applicable but unapproved pack is reported as
+**"not applied — awaiting lawyer approval"**, never silently skipped and
+never run.
+
+**Unsupported documents** get the general pack only, labelled
+`General document review`.
+
+**Phases.**
+- **P2A:** the engine (typed DSL with three-valued logic, so a missing term
+  yields `unable_to_determine`; YAML loader with schema validation and a
+  content hash; locators that return sentence ids; findings stored as run
+  outputs keyed `(run_id, stage, fence, ordinal)`), the `general` pack, the
+  approvals mechanism, the analysis stage that takes `queued_analysis` to
+  `done`, and a report endpoint with server-cut evidence.
+- **P2B:** the `tenancy_punjab`, `nda` and `employment` packs as content.
+  They can be built and tested in code, but **not merged or released, nor
+  shown as legally approved**, until a qualified lawyer approves each signed
+  hash.
 
 ### 4.6 LLM explanation layer
 
@@ -431,7 +476,9 @@ Every route checks the owner or an active share. **No usage quota.** Technical b
 | **P-1 · Honesty fix** (frontend only) | See the scope below | Tests assert none of the removed claims/actions return |
 | **P0 · Decisions & contracts** | Approve the retention policy. Pin provider + model, operator ZDR checklist. Write the deletion contract and the state machine as specs. Prepare the synthetic doc set | Signed-off decisions; specs reviewed |
 | **P1 · Read and map** | File store, durable worker (§5), extraction, OCR confirmation, text versions, segmentation with page spans, document + terms confirmation, history, cancel, **deletion + outbox implemented and tested** | Restart/recovery, delete-race and cancel tests green; DOCX bomb refused; Urdu refused honestly; owner isolation |
-| **P2 · Punjab tenancy playbook** | Ingest PRPA 2009, Registration Act 1908, TPA 1882. DSL. `legal_check` + `reminder` with evidence. Sign-off by an authenticated reviewer | Rule/limb tests; signed hash matches |
+| **P2A · Playbook engine + general review** | Engine, `general` pack, approvals by exact hash, analysis stage (`queued_analysis` → `done`), report with scope labels (§4.5a) | DSL/locator/stage tests; an unapproved legal pack is reported, never run |
+| **P2B · Legal packs** | `tenancy_punjab` (ingest PRPA 2009, Registration Act 1908, TPA 1882), `nda`, `employment` | Lawyer-approved signed hashes before merge/release |
+| ~~P2 · Punjab tenancy playbook~~ (superseded by P2A/P2B) | Ingest PRPA 2009, Registration Act 1908, TPA 1882. DSL. `legal_check` + `reminder` with evidence. Sign-off by an authenticated reviewer | Rule/limb tests; signed hash matches |
 | **P3 · AI explanation** | Batched `model_risk` via sentence IDs, server spans, no citations, merge | Span validity 100%; injection fixtures pass |
 | **P3b · Lawyer sharing** (optional for the demo) | §6.2 shares + review events | Share-scope tests |
 | **P4 · Evaluation** | §10 metrics; tune batch size | Numbers per rule |

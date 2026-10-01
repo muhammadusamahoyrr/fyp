@@ -320,3 +320,16 @@ def get_analysis_context_versions_col() -> AsyncIOMotorCollection:
     and decisive key terms with their evidence. Immutable; a change is a new
     version. Runs point at the context version they analyse."""
     return get_database()["analysis_context_versions"]
+
+
+def get_analysis_findings_col() -> AsyncIOMotorCollection:
+    """Playbook results of a run (general and approved legal packs), keyed
+    (run_id, stage, fence, ordinal). Sentence ids only -- quotes are cut from
+    the canonical text when read."""
+    return get_database()["analysis_findings"]
+
+
+def get_analysis_playbook_approvals_col() -> AsyncIOMotorCollection:
+    """A qualified reviewer's approval of ONE exact playbook text (by hash).
+    A legal pack runs only if its current hash is approved here."""
+    return get_database()["analysis_playbook_approvals"]

@@ -83,8 +83,8 @@ async def test_the_whole_confirmation_path(at_document):
     assert second["derived_from"] == first["_id"] and stored["context_version_id"] == second["_id"]
     assert second["confirmed_key_terms"]["term_months"] == {"value": 11, "sentence_ids": [evidence_id]}
     assert set(second["confirmed_at"]) == {"document", "terms"}
-    # queued_analysis has no handler yet (P2/P3): it waits.
-    assert await runner.process_one("w1") is None
+    # The analysis stage (P2A) takes it the rest of the way.
+    assert await runner.process_one("w1") == "done"
 
 
 async def test_a_non_tenancy_skips_the_terms(at_document):
