@@ -24,24 +24,18 @@ from app.db.collections import (
 )
 from app.services.analyzer import blob_store, deletion, extraction_stage, runner, worker
 from app.services.analyzer.extraction_stage import assemble
-from tests._analyzer_support import files_on_disk, http, upload  # noqa: F401 -- fixture
+from tests._analyzer_support import (  # noqa: F401 -- `http` is a fixture
+    _fake_extraction,
+    files_on_disk,
+    http,
+    pdf_with,
+    result_of,
+    upload,
+)
 
 
 def _now():
     return datetime.now(timezone.utc)
-
-
-def result_of(pages: list[tuple[int, str, str]], *, outcome=X.OUTCOME_SUCCEEDED,
-              pages_total=None, ocr: dict | None = None, error_code=None):
-    """pages: (number, state, text). Builds text exactly as extract_pdf does."""
-    chunks = [t for _, state, t in pages if state in (X.PAGE_TEXT_FOUND, X.PAGE_TEXT_SUSPECT)]
-    r = X.ExtractionResult(outcome=outcome, completeness="complete", error_code=error_code,
-                           pages_total=pages_total or len(pages))
-    r.page_reports = [X.PageReport(n, state, chars=len(t) if t else 0) for n, state, t in pages]
-    r.pages_with_text = len(chunks)
-    r.ocr_pages = [OcrPageResult(page_number=n, status="ocr_completed_unconfirmed", text=t)
-                   for n, t in (ocr or {}).items()]
-    return r, "\n".join(chunks)
 
 
 # ── assembly ─────────────────────────────────────────────────────────────────
@@ -116,17 +110,6 @@ def test_ocr_that_refused_the_language_is_not_text():
 
 # ── the stage, end to end (replica set) ──────────────────────────────────────
 
-def pdf_with(pages: list[str]) -> bytes:
-    from reportlab.pdfgen import canvas
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf)
-    for line in pages:
-        c.drawString(72, 720, line)
-        c.showPage()
-    c.save()
-    return buf.getvalue()
-
-
 @pytest.fixture
 async def ready(http, mongo_transactional):
     client, actor = http
@@ -194,17 +177,6 @@ async def test_a_pdf_over_40_pages_fails_and_publishes_nothing(ready):
     assert run["status"] == "failed" and run["error_code"] == "too_many_pages"
     assert "published" not in run and run["is_open"] is False
     assert await get_analysis_text_versions_col().count_documents({"source_id": created["source_id"]}) == 0
-
-
-def _fake_extraction(monkeypatch, *, before_return=None, ocr=None, pages=None):
-    from app.ai import extraction_runner
-
-    async def fake(path, **kwargs):
-        if before_return:
-            await before_return()
-        return result_of(pages or [(1, X.PAGE_TEXT_FOUND, "Clause 1.")], ocr=ocr)
-
-    monkeypatch.setattr(extraction_runner, "extract_isolated", fake)
 
 
 async def test_ocr_text_waits_for_a_person(ready, monkeypatch):

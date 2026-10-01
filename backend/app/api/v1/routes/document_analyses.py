@@ -17,12 +17,13 @@ never parsed, received into memory or spooled to a temporary file.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, Response
+from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 
 from app.core.config import settings
 from app.dependencies import require_client
-from app.services.analyzer import deletion, lifecycle, readiness, upload_rules
+from app.services.analyzer import confirmation, deletion, lifecycle, readiness, upload_rules
 from app.services.analyzer.errors import AnalyzerError
 
 router = APIRouter(prefix="/documents/analyses", tags=["document-analyses"])
@@ -104,6 +105,35 @@ async def create_document_analysis(
     finally:
         await form.close()
     return {**result, "status": "queued_extract"}
+
+
+class OcrTextBody(BaseModel):
+    expected_state_version: int = Field(ge=0)
+    #: Omit to confirm the proposed text as it is; send the full corrected
+    #: text to replace it (a new version either way).
+    text: str | None = Field(default=None, max_length=400_000)
+
+
+@router.get("/runs/{run_id}")
+async def get_analysis_run(run_id: str, current_user: dict = Depends(require_client)):
+    """Poll a run. While it waits for OCR confirmation, includes the text to check."""
+    _require_available()
+    return await _run(confirmation.get_run(owner_id=str(current_user["_id"]), run_id=run_id))
+
+
+@router.post("/runs/{run_id}/ocr-text")
+async def confirm_ocr_text(run_id: str, body: OcrTextBody = Body(...),
+                           current_user: dict = Depends(require_client)):
+    _require_available()
+    return await _run(confirmation.confirm_ocr_text(
+        owner_id=str(current_user["_id"]), run_id=run_id,
+        expected_state_version=body.expected_state_version, corrected_text=body.text))
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_analysis_run(run_id: str, current_user: dict = Depends(require_client)):
+    _require_available()
+    return await _run(confirmation.cancel_run(owner_id=str(current_user["_id"]), run_id=run_id))
 
 
 @router.get("/attestation")

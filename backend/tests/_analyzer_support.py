@@ -7,12 +7,15 @@ and test_analyzer_deletion.py so both drive the real app the same way.
 from __future__ import annotations
 
 import base64
+import io
 import uuid
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
+from app.ai import extraction as X
+from app.ai.ocr import OcrPageResult
 from app.core.config import settings
 from app.db.collections import (
     get_analysis_blobs_col,
@@ -103,3 +106,40 @@ def form_calls(monkeypatch):
 async def assert_nothing_stored(owner: str):
     assert await stored_for(owner) == (0, 0, 0)
     assert files_on_disk() == [], "a refused upload left a file on disk"
+
+
+# ── extraction fixtures (shared by the stage and confirmation tests) ──────────
+
+def result_of(pages: list[tuple[int, str, str]], *, outcome=X.OUTCOME_SUCCEEDED,
+              pages_total=None, ocr: dict | None = None, error_code=None):
+    """pages: (number, state, text). Builds text exactly as extract_pdf does."""
+    chunks = [t for _, state, t in pages if state in (X.PAGE_TEXT_FOUND, X.PAGE_TEXT_SUSPECT)]
+    r = X.ExtractionResult(outcome=outcome, completeness="complete", error_code=error_code,
+                           pages_total=pages_total or len(pages))
+    r.page_reports = [X.PageReport(n, state, chars=len(t) if t else 0) for n, state, t in pages]
+    r.pages_with_text = len(chunks)
+    r.ocr_pages = [OcrPageResult(page_number=n, status="ocr_completed_unconfirmed", text=t)
+                   for n, t in (ocr or {}).items()]
+    return r, "\n".join(chunks)
+
+
+def pdf_with(pages: list[str]) -> bytes:
+    from reportlab.pdfgen import canvas
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    for line in pages:
+        c.drawString(72, 720, line)
+        c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def _fake_extraction(monkeypatch, *, before_return=None, ocr=None, pages=None):
+    from app.ai import extraction_runner
+
+    async def fake(path, **kwargs):
+        if before_return:
+            await before_return()
+        return result_of(pages or [(1, X.PAGE_TEXT_FOUND, "Clause 1.")], ocr=ocr)
+
+    monkeypatch.setattr(extraction_runner, "extract_isolated", fake)
