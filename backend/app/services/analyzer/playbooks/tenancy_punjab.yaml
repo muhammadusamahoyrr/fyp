@@ -1,0 +1,193 @@
+# Punjab tenancy checklist -- DRAFT FOR LAWYER REVIEW. NOT APPROVED.
+#
+# Runs only after a reviewer holding pk.punjab.tenancy approves this exact
+# text (DOC_ANALYZER_PLAN.md §4.5a). Every authority is quoted verbatim in
+# SOURCES.md with where it was read; the reviewer must check each against the
+# current official text, including amendments, before approving.
+#
+# Wording rules: a check reports whether the document APPEARS to contain an
+# item ("Found" / "Not located automatically"). It never says the item is
+# missing, never says the document is unlawful, and every result carries
+# "Applicability requires lawyer review".
+id: tenancy_punjab
+version: 1
+scope: legal_playbook
+requires_approval: true
+required_qualification: pk.punjab.tenancy
+title: Punjab tenancy checklist
+applies_if:
+  all:
+    - eq: [{field: document_type}, {value: tenancy}]
+    - eq: [{field: jurisdiction}, {value: punjab}]
+checks:
+  # ── s.5: the Rent Registrar ─────────────────────────────────────────────
+  - id: rent_registrar_presentation
+    kind: reminder
+    title: Presenting the agreement to the Rent Registrar
+    why: >-
+      Section 5(2) requires the landlord to present the tenancy agreement
+      before the Rent Registrar. Whether that was done cannot be seen from the
+      document itself. Section 5(4) adds that entry with the Rent Registrar does
+      not replace registration under the law on registration of documents.
+    authority:
+      - {statute: Punjab Rented Premises Act 2009, section: "5(2)"}
+      - {statute: Punjab Rented Premises Act 2009, section: "5(4)"}
+
+  # ── s.6(1): contents of a tenancy agreement ("as far as possible") ─────
+  - id: s6_particulars_of_parties
+    kind: legal_check
+    severity: low
+    title: Particulars of the landlord and the tenant
+    why: >-
+      Section 6(1)(a): the agreement should contain, as far as possible,
+      particulars of the landlord and the tenant (for example identity card
+      numbers, parentage and addresses).
+    locate:
+      any_of: ['cnic', 'c\.n\.i\.c\.?', 'national identity card', 's/o', 'd/o', 'w/o',
+               'son of', 'daughter of', 'wife of', 'resident of']
+    authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(a)"}
+
+  - id: s6_description_of_premises
+    kind: legal_check
+    severity: low
+    title: Description of the premises
+    why: Section 6(1)(b) -- the agreement should describe the premises, as far as possible.
+    locate:
+      any_of: ['situated (?:at|in)', 'located at', 'bearing (?:no\.?|number)', 'measuring',
+               '(?:house|shop|flat|plot|office|apartment|unit) (?:no\.?|number)',
+               'marlas?', 'kanals?', 'sq(?:uare)?\.? ?(?:ft|feet|yards?|metres?|meters?)']
+    authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(b)"}
+
+  - id: s6_period_of_tenancy
+    kind: legal_check
+    severity: low
+    title: Period of the tenancy
+    why: Section 6(1)(c) -- the agreement should state the period of the tenancy, as far as possible.
+    locate:
+      any_of: ['\d+\s*(?:\(\d+\)\s*)?(?:months?|years?)',
+               '(?:one|two|three|four|five|six|eleven|twelve)\s*(?:\(\d+\)\s*)?(?:months?|years?)']
+      all_of: ['term|period|tenancy|lease[sd]?|lets?|letting|let out']
+    authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(c)"}
+
+  - id: s6_rate_of_rent
+    kind: legal_check
+    severity: low
+    title: Rate of rent
+    why: Section 6(1)(d) -- the agreement should state the rate of rent, as far as possible.
+    locate:
+      any_of: ['(?:rs\.?|pkr|rupees)\s*\d[\d,]*']
+      all_of: ['rent']
+    authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
+
+  - id: s6_rate_of_enhancement
+    kind: legal_check
+    severity: low
+    title: Rate of enhancement of rent
+    why: >-
+      Section 6(1)(d) -- the agreement should state the rate of enhancement,
+      as far as possible. Section 6(2) provides a default where rent is fixed
+      for only part of a fixed tenure.
+    locate:
+      any_of: ['enhanc\w*', 'increase\w*', 'escalat\w*', 'revis\w*']
+      all_of: ['rent']
+    authority:
+      - {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
+      - {statute: Punjab Rented Premises Act 2009, section: "6(2)"}
+
+  - id: s6_due_date
+    kind: legal_check
+    severity: low
+    title: Due date for paying rent
+    why: >-
+      Section 6(1)(d) -- the agreement should state the due date. If it does
+      not, s.7(2) sets a default: not later than the tenth day of the
+      following month.
+    locate:
+      any_of: ['payable (?:by|on|before|in advance)', '\d+(?:st|nd|rd|th)? (?:day )?of (?:each|every|the) month',
+               'in advance', 'on or before']
+    authority:
+      - {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
+      - {statute: Punjab Rented Premises Act 2009, section: "7(2)"}
+
+  - id: s6_mode_of_payment
+    kind: legal_check
+    severity: low
+    title: Mode of paying rent
+    why: >-
+      Section 6(1)(d) -- the agreement should state the mode of payment. If it
+      does not, s.7(3) sets a default: money order or deposit in the
+      landlord's bank account.
+    locate:
+      any_of: ['cash', 'cheque', 'check', 'bank (?:transfer|deposit|account)', 'online',
+               'money order', 'pay order', 'demand draft']
+    authority:
+      - {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
+      - {statute: Punjab Rented Premises Act 2009, section: "7(3)"}
+
+  - id: s6_bank_particulars
+    kind: reminder
+    title: Landlord's bank account particulars, if paid through a bank
+    why: >-
+      Section 6(1)(e): if the rent is to be paid through a bank, the agreement
+      should contain the particulars of the landlord's bank account.
+    authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(e)"}
+
+  - id: s6_purpose
+    kind: legal_check
+    severity: low
+    title: Purpose of the letting
+    why: Section 6(1)(f) -- the agreement should state the purpose for which the premises is let out, as far as possible.
+    locate:
+      any_of: ['purpose', 'for (?:residential|commercial|business|office|shop|godown|warehouse) (?:use|purposes?)',
+               'used (?:only )?(?:as|for)', 'residential', 'commercial']
+    authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(f)"}
+
+  - id: s6_advance_security_pagri
+    kind: legal_check
+    severity: low
+    title: Advance rent, security or pagri, if any
+    why: >-
+      Section 6(1)(g) -- the agreement should state the amount of advance rent,
+      security or pagri, if any. If none was taken, there may be nothing to find.
+    locate:
+      any_of: ['advance (?:rent|payment)', 'security(?: deposit| amount)?', 'pagri', 'deposit']
+    authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(g)"}
+
+  # ── registration (three limbs, each its own reminder) ───────────────────
+  - id: registration_term_over_one_year
+    kind: reminder
+    title: Registration -- term exceeding one year
+    why: >-
+      The confirmed term exceeds one year. Section 17(1)(d) of the Registration
+      Act and s.107 of the Transfer of Property Act require such a lease to be
+      registered (s.107: "can be made only by a registered instrument"),
+      subject to any exemption under the proviso to s.17(1) and to s.107's
+      territorial operation (s.1 TPA). A lawyer should confirm.
+    applies_if: {gt: [{field: terms.term_months}, {value: 12}]}
+    authority:
+      - {statute: Registration Act 1908, section: "17(1)(d)"}
+      - {statute: Transfer of Property Act 1882, section: "107"}
+
+  - id: registration_year_to_year
+    kind: reminder
+    title: Registration -- lease from year to year
+    why: >-
+      The lease was confirmed as one from year to year. Section 17(1)(d) of the
+      Registration Act and s.107 of the Transfer of Property Act require such a
+      lease to be registered, subject to the same exemptions. A lawyer should confirm.
+    applies_if: {eq: [{field: terms.tenancy_year_to_year}, {value: true}]}
+    authority:
+      - {statute: Registration Act 1908, section: "17(1)(d)"}
+      - {statute: Transfer of Property Act 1882, section: "107"}
+
+  - id: registration_yearly_rent
+    kind: reminder
+    title: Registration -- yearly rent reserved
+    why: >-
+      The rent was confirmed as yearly. Section 17(1)(d) of the Registration Act
+      and s.107 of the Transfer of Property Act require a lease reserving a
+      yearly rent to be registered, subject to the same exemptions. A lawyer should confirm.
+    applies_if: {eq: [{field: terms.rent_period}, {value: yearly}]}
+    authority:
+      - {statute: Registration Act 1908, section: "17(1)(d)"}
+      - {statute: Transfer of Property Act 1882, section: "107"}

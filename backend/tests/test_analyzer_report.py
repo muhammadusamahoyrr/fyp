@@ -54,8 +54,12 @@ async def test_a_finished_run_reports_general_findings_with_exact_evidence(ready
 
     assert await runner.process_one("w1") == "done"
     report = (await client.get(f"/documents/analyses/runs/{rid}/report")).json()
-    assert [p["pack_id"] for p in report["packs"]] == ["general"]
-    assert report["packs"][0]["status"] == "applied"
+    # The shipped tenancy DRAFT applies to this Punjab tenancy but is not
+    # approved: it is reported as such, and contributes no findings.
+    assert {p["pack_id"]: p["status"] for p in report["packs"]} == {
+        "general": "applied", "tenancy_punjab": "awaiting_approval",
+        "nda": "not_applicable", "employment": "not_applicable"}
+    assert {f["pack_id"] for f in report["findings"]} == {"general"}
     assert "None is a legal requirement" in report["scope_notice"]["general_review"]
 
     by_id = {f["check_id"]: f for f in report["findings"]}

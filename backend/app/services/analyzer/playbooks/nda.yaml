@@ -1,0 +1,53 @@
+# Non-disclosure agreement checklist -- DRAFT FOR LAWYER REVIEW. NOT APPROVED.
+#
+# Runs only after a reviewer holding pk.contract.nda approves this exact text.
+# Authorities are quoted verbatim in SOURCES.md. Kept deliberately small: only
+# points that rest on a provision whose text was read.
+id: nda
+version: 1
+scope: legal_playbook
+requires_approval: true
+required_qualification: pk.contract.nda
+title: Non-disclosure agreement checklist
+applies_if: {eq: [{field: document_type}, {value: nda}]}
+checks:
+  - id: non_compete_restraint
+    kind: legal_check
+    severity: medium
+    title: A restraint on carrying on a profession, trade or business
+    why: >-
+      You confirmed the agreement contains a non-compete. Section 27 of the
+      Contract Act makes every agreement restraining anyone from exercising a
+      lawful profession, trade or business void to that extent, with a narrow
+      exception for a sale of goodwill. Whether this clause is affected depends
+      on its terms and requires lawyer review.
+    applies_if: {eq: [{field: terms.non_compete}, {value: true}]}
+    locate:
+      any_of: ['non[\s-]?compet\w*', 'not (?:to )?compete', 'compet(?:e|es|ing|ition|itions|itor|itors)', 'solicit\w*', 'restrain\w*']
+    authority: {statute: Contract Act 1872, section: "27"}
+
+  - id: limits_on_legal_proceedings
+    kind: legal_check
+    severity: medium
+    title: A limit on bringing legal proceedings
+    why: >-
+      Section 28 of the Contract Act makes an agreement void to the extent it
+      absolutely restricts a party from enforcing their rights in the ordinary
+      tribunals, or limits the time to do so -- arbitration agreements excepted.
+      "Found" means wording of this kind appears; whether it is affected
+      requires lawyer review.
+    locate:
+      any_of: ['waive\w* (?:the |any |its |his |her |their )?right to (?:sue|bring|institute)',
+               'no (?:suit|claim|action|proceedings?) shall (?:be )?(?:brought|instituted|filed|lie)',
+               'shall not (?:be entitled to )?(?:sue|bring|institute)',
+               '(?:suit|claim|action|proceedings?) (?:must|shall) be (?:brought|instituted|filed) within']
+    authority: {statute: Contract Act 1872, section: "28"}
+
+  - id: duration_of_confidentiality
+    kind: reminder
+    title: How long confidentiality lasts was not stated
+    why: >-
+      You marked the length of the confidentiality obligation as not stated.
+      A lawyer can advise whether an open-ended obligation suits this
+      agreement. (This is a drafting point, not a statutory requirement.)
+    applies_if: {not: [{exists: [{field: terms.confidentiality_years}]}]}

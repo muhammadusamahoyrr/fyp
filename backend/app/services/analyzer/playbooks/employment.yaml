@@ -1,0 +1,52 @@
+# Employment agreement checklist -- DRAFT FOR LAWYER REVIEW. NOT APPROVED.
+#
+# Runs only after a reviewer holding pk.employment approves this exact text.
+# Only the Contract Act is cited: no employment statute's text was read
+# (SOURCES.md, "Not cited, deliberately"). The statutory-protection item is an
+# uncited reminder for the reviewer to replace with the correct provisions.
+id: employment
+version: 1
+scope: legal_playbook
+requires_approval: true
+required_qualification: pk.employment
+title: Employment agreement checklist
+applies_if: {eq: [{field: document_type}, {value: employment}]}
+checks:
+  - id: non_compete_restraint
+    kind: legal_check
+    severity: medium
+    title: A restraint on working in a profession, trade or business
+    why: >-
+      You confirmed the agreement contains a non-compete. Section 27 of the
+      Contract Act makes every agreement restraining anyone from exercising a
+      lawful profession, trade or business void to that extent. Whether this
+      clause is affected -- for example during employment as against after it
+      ends -- requires lawyer review.
+    applies_if: {eq: [{field: terms.non_compete}, {value: true}]}
+    locate:
+      any_of: ['non[\s-]?compet\w*', 'not (?:to )?compete', 'compet(?:e|es|ing|ition|itions|itor|itors)', 'solicit\w*', 'restrain\w*']
+    authority: {statute: Contract Act 1872, section: "27"}
+
+  - id: limits_on_legal_proceedings
+    kind: legal_check
+    severity: medium
+    title: A limit on bringing legal proceedings
+    why: >-
+      Section 28 of the Contract Act makes an agreement void to the extent it
+      absolutely restricts a party from enforcing their rights in the ordinary
+      tribunals, or limits the time to do so -- arbitration agreements excepted.
+      Whether this wording is affected requires lawyer review.
+    locate:
+      any_of: ['waive\w* (?:the |any |its |his |her |their )?right to (?:sue|bring|institute)',
+               'no (?:suit|claim|action|proceedings?) shall (?:be )?(?:brought|instituted|filed|lie)',
+               'shall not (?:be entitled to )?(?:sue|bring|institute)',
+               '(?:suit|claim|action|proceedings?) (?:must|shall) be (?:brought|instituted|filed) within']
+    authority: {statute: Contract Act 1872, section: "28"}
+
+  - id: statutory_protections
+    kind: reminder
+    title: Statutory employment protections may apply
+    why: >-
+      Depending on the employer and the kind of work, employment laws may give
+      protections (for example on notice, probation or termination) that apply
+      whatever this agreement says. A lawyer should confirm which apply.

@@ -199,6 +199,11 @@ function ReportView({ t, runId }) {
                             <div style={{ fontSize: 12, color: t.textMuted, margin: "4px 0" }}>{f.labels.join(" · ")}</div>
                             <div style={{ fontSize: 13 }}>{f.why}</div>
                             {f.reason && <div style={{ fontSize: 12.5, color: t.textMuted }}>{f.reason}</div>}
+                            {f.authority?.length > 0 && (
+                                <div data-authority style={{ fontSize: 12.5, color: t.textMuted }}>
+                                    Cites: {f.authority.map(x => `${x.statute}, s.${x.section}`).join("; ")}
+                                </div>
+                            )}
                             {f.evidence.length > 0 && <Evidence t={t} items={f.evidence} />}
                         </Card>
                     ))}

@@ -52,7 +52,7 @@ checks:
     why: Most agreements say what is paid, how much and when -- or that nothing is.
     locate:
       any_of: ['rent', 'fee(?:s)?', 'salary', 'payment', 'consideration', 'price',
-               '(?:rs\.?|pkr|rupees)\s*\d']
+               '(?:rs\.?|pkr|rupees)\s*\d[\d,]*']
 
   - id: termination
     kind: general_check

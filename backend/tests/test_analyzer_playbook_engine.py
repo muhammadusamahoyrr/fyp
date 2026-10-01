@@ -64,10 +64,11 @@ def sentences_of(text):
 
 # ── loading ──────────────────────────────────────────────────────────────────
 
-def test_the_shipped_packs_load_and_only_general_exists_in_p2a():
-    packs = engine.load_packs()
-    assert [p.id for p in packs] == ["general"]
-    assert packs[0].scope == "general_review" and packs[0].requires_approval is False
+def test_the_shipped_packs_load():
+    packs = {p.id: p for p in engine.load_packs()}
+    assert set(packs) == {"general", "tenancy_punjab", "nda", "employment"}
+    assert packs["general"].scope == "general_review" and packs["general"].requires_approval is False
+    assert all(p.requires_approval for k, p in packs.items() if k != "general")
 
 
 def test_the_hash_ignores_line_endings_and_nothing_else():
@@ -105,7 +106,7 @@ def test_a_general_pack_may_not_cite_law():
 # ── running the general pack ─────────────────────────────────────────────────
 
 def test_the_general_pack_finds_what_is_there_and_says_not_located_otherwise():
-    [general] = engine.load_packs()
+    general = next(p for p in engine.load_packs() if p.id == "general")
     findings = engine.run_pack(general, TENANCY, LEASE, sentences_of(LEASE))
     by_id = {f["check_id"]: f for f in findings}
     for present in ("parties_named", "date_stated", "signature_block", "duration_stated",
@@ -120,7 +121,7 @@ def test_the_general_pack_finds_what_is_there_and_says_not_located_otherwise():
 
 def test_locators_match_whole_words_only():
     text = "The determination of the price is final."      # 'terminat' inside a word
-    [general] = engine.load_packs()
+    general = next(p for p in engine.load_packs() if p.id == "general")
     by_id = {f["check_id"]: f for f in engine.run_pack(general, TENANCY, text, sentences_of(text))}
     assert by_id["termination"]["check_result"] == "not_located"
 
@@ -172,3 +173,12 @@ async def test_pack_applicability_on_other_and_unknown_contexts(legal_dir, mongo
     assert {p["pack_id"]: p["status"] for p in summary}["test_legal"] == "not_applicable"
     _, summary = await engine.analyse({**TENANCY, "jurisdiction": None}, LEASE, sentences_of(LEASE))
     assert {p["pack_id"]: p["status"] for p in summary}["test_legal"] == "unable_to_determine"
+
+
+def test_an_amount_alone_is_located_despite_the_word_guards():
+    # Regression: '\d' followed by another digit failed the whole-word guard,
+    # so "Rs. 85,000" was never matched by the amount pattern itself.
+    text = "The total is Rs. 85,000 only."
+    general = next(p for p in engine.load_packs() if p.id == "general")
+    by_id = {f["check_id"]: f for f in engine.run_pack(general, TENANCY, text, sentences_of(text))}
+    assert by_id["payment_terms"]["check_result"] == "present"

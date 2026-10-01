@@ -270,6 +270,27 @@ test("a checked document shows its report, worded honestly, and its text", async
     await p.unmount();
 });
 
+test("an approved legal finding shows its labels and citations", async () => {
+    api.__respond("getAnalysisReport", { data: { ...REPORT,
+        packs: [{ pack_id: "tenancy_punjab", title: "Punjab tenancy checklist", status: "applied" }],
+        findings: [{ pack_id: "tenancy_punjab", scope: "legal_playbook",
+            labels: ["Legal playbook applied", "Applicability requires lawyer review"],
+            check_id: "registration_term_over_one_year", kind: "reminder", title: "Registration -- term exceeding one year",
+            why: "The confirmed term exceeds one year.", check_result: null, evidence: [],
+            authority: [{ statute: "Registration Act 1908", section: "17(1)(d)" },
+                        { statute: "Transfer of Property Act 1882", section: "107" }] }] } });
+    api.__respond("getAnalysisText", { data: { text: "x", clauses: [], sentences: [],
+        text_version: { page_map_available: false, corrected: false } } });
+    const p = await openRun({ id: "r1", status: "done", state_version: 9 });
+    const card = p.container.querySelector('[data-finding="registration_term_over_one_year"]');
+    assert.match(card.textContent, /Legal playbook applied · Applicability requires lawyer review/);
+    assert.equal(card.querySelector("[data-result]").textContent, "Reminder");
+    assert.equal(card.querySelector("[data-authority]").textContent,
+                 "Cites: Registration Act 1908, s.17(1)(d); Transfer of Property Act 1882, s.107");
+    assert.match(p.container.textContent, /Applicability requires lawyer review\./);
+    await p.unmount();
+});
+
 // ── history ─────────────────────────────────────────────────────────────────
 
 test("history deletes only after confirming", async () => {
