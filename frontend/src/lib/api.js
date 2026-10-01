@@ -2039,6 +2039,10 @@ export async function confirmAnalysisTerms(runId, expectedStateVersion, terms) {
   });
 }
 
+export async function getAnalysisReport(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/report`);
+}
+
 export async function cancelAnalysisRun(runId) {
   return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
 }

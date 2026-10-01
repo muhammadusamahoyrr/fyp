@@ -5,9 +5,11 @@
  * renders this screen. Off (404) or unsafe (503) keeps the fictional
  * demonstration, unchanged.
  *
- * What this version does, and says so: it READS and MAPS a document --
- * extraction, scanned-text check, clauses and sentences, document type,
- * key terms. It does not review risks yet; nothing here claims it does.
+ * What this version does, and says so: it reads and maps a document, then
+ * runs GENERAL drafting checks (labelled "General document review" -- none
+ * is a legal requirement). A legal checklist runs only once a qualified
+ * lawyer has approved its exact text; until then the report says it exists
+ * and was not run.
  *
  * Demo data only: the server's own warning is shown, the file picker stays
  * disabled until the user ticks the confirmation, and the confirmation is
@@ -18,7 +20,8 @@ import { useT } from "../theme.js";
 import { Btn, Card, Label } from "./ui.jsx";
 import {
     cancelAnalysisRun, confirmAnalysisDocument, confirmAnalysisOcr, confirmAnalysisTerms,
-    createAnalysis, deleteAnalysis, getAnalysisRun, getAnalysisText, idempotencyKey, listAnalyses,
+    createAnalysis, deleteAnalysis, getAnalysisReport, getAnalysisRun, getAnalysisText,
+    idempotencyKey, listAnalyses,
 } from "@/lib/api.js";
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -36,8 +39,9 @@ export const STAGE_LABEL = {
     queued_terms: "Waiting to find key terms",
     extracting_terms: "Finding key terms",
     needs_terms_confirmation: "Confirm the key terms",
-    queued_analysis: "Read and mapped",
-    done: "Done",
+    queued_analysis: "Waiting to check the document",
+    analyzing: "Checking the document",
+    done: "Checked",
     failed: "Could not be read",
     cancelled: "Cancelled",
     superseded: "Replaced by a newer version",
@@ -45,9 +49,9 @@ export const STAGE_LABEL = {
 
 /* Statuses where the server is working and the screen should keep asking. */
 const WORKING = new Set(["queued_extract", "extracting", "queued_segmentation", "segmenting",
-    "queued_terms", "extracting_terms"]);
+    "queued_terms", "extracting_terms", "queued_analysis", "analyzing"]);
 const OPEN = new Set([...WORKING, "needs_ocr_confirmation", "needs_document_confirmation",
-    "needs_terms_confirmation", "queued_analysis"]);
+    "needs_terms_confirmation"]);
 export const shouldPoll = status => WORKING.has(status);
 
 export const ERROR_TEXT = {
@@ -59,6 +63,20 @@ export const ERROR_TEXT = {
     page_map_unavailable: "The pages of this document could not be mapped reliably.",
     text_not_confirmed: "The scanned text was not confirmed.",
     internal_error: "Something went wrong while reading the document.",
+    playbook_invalid: "A checklist could not be loaded, so the document was not checked.",
+};
+
+/* How each result is worded. Never "missing": a check that found nothing
+ * says the reader did not locate it, not that the document lacks it. */
+export const RESULT_TEXT = {
+    present: "Found",
+    not_located: "Not located automatically",
+    unable_to_determine: "Could not check",
+    not_applicable: "Does not apply",
+};
+const PACK_STATUS_TEXT = {
+    awaiting_approval: "A legal checklist for this kind of document exists but has not been approved by a qualified lawyer yet, so it was not run.",
+    unable_to_determine: "Whether a legal checklist applies could not be decided from what you confirmed.",
 };
 export const errorText = code => ERROR_TEXT[code] || "The document could not be read.";
 
@@ -123,6 +141,55 @@ function TextViewer({ t, runId }) {
                     </div>
                 ))}
             </div>
+        </section>
+    );
+}
+
+/* ── the report ──────────────────────────────────────────────────────────── */
+
+function ReportView({ t, runId }) {
+    const [report, setReport] = useState(null);
+    const [issue, setIssue] = useState(null);
+    useEffect(() => {
+        let live = true;
+        getAnalysisReport(runId).then(r => {
+            if (!live) return;
+            if (r.error) setIssue(msgOf(r.error, "The report could not be loaded."));
+            else setReport(r.data);
+        });
+        return () => { live = false; };
+    }, [runId]);
+    if (issue) return <div role="alert">{issue}</div>;
+    if (!report) return <div style={{ color: t.textMuted }}>Loading the report…</div>;
+    const shown = report.findings.filter(f => f.check_result !== "not_applicable");
+    const groups = ["general_review", "legal_playbook"]
+        .map(scope => [scope, shown.filter(f => f.scope === scope)])
+        .filter(([, items]) => items.length);
+    const notices = report.packs.filter(p => PACK_STATUS_TEXT[p.status]);
+    return (
+        <section data-report aria-label="Report" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {notices.map(p => (
+                <Card key={p.pack_id} role="note" data-pack-status={p.status} style={{ padding: 12, fontSize: 13.5 }}>
+                    <b>{p.title}:</b> {PACK_STATUS_TEXT[p.status]}
+                </Card>
+            ))}
+            {groups.map(([scope, items]) => (
+                <div key={scope} data-scope={scope}>
+                    <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 6 }}>{report.scope_notice[scope]}</div>
+                    {items.map(f => (
+                        <Card key={`${f.pack_id}.${f.check_id}`} data-finding={f.check_id} style={{ padding: 12, marginBottom: 8 }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                                <b style={{ flex: 1 }}>{f.title}</b>
+                                <span data-result>{f.kind === "reminder" ? "Reminder" : RESULT_TEXT[f.check_result]}</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: t.textMuted, margin: "4px 0" }}>{f.labels.join(" · ")}</div>
+                            <div style={{ fontSize: 13 }}>{f.why}</div>
+                            {f.reason && <div style={{ fontSize: 12.5, color: t.textMuted }}>{f.reason}</div>}
+                            {f.evidence.length > 0 && <Evidence t={t} items={f.evidence} />}
+                        </Card>
+                    ))}
+                </div>
+            ))}
         </section>
     );
 }
@@ -299,11 +366,9 @@ function RunView({ t, runId, onBack }) {
             {status === "needs_ocr_confirmation" && <OcrStep t={t} run={run} onDone={reload} />}
             {status === "needs_document_confirmation" && <DocumentStep t={t} run={run} onDone={reload} />}
             {status === "needs_terms_confirmation" && <TermsStep t={t} run={run} onDone={reload} />}
-            {status === "queued_analysis" && (
+            {status === "done" && (
                 <>
-                    <Card style={{ padding: 14, fontSize: 13.5 }} data-no-review-yet>
-                        The document has been read and mapped. Reviewing its risks is not available yet — nothing here is a legal assessment.
-                    </Card>
+                    <ReportView t={t} runId={runId} />
                     <TextViewer t={t} runId={runId} />
                 </>
             )}
@@ -368,7 +433,7 @@ export default function AnalyzerLive({ attestation, onShowDemo }) {
             <Card role="note" data-synthetic-warning style={{ padding: 14, fontSize: 13.5, borderColor: "#e0a100" }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>Demo version</div>
                 <div>{attestation.text}</div>
-                <div style={{ marginTop: 6, color: t.textMuted }}>This version reads and maps a document. It does not review risks yet.</div>
+                <div style={{ marginTop: 6, color: t.textMuted }}>This version runs general drafting checks. Legal checklists run only after a qualified lawyer has approved them.</div>
             </Card>
             <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13.5 }}>
                 <input type="checkbox" checked={attested} onChange={e => setAttested(e.target.checked)} data-attest />

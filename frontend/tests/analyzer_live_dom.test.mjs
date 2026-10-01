@@ -92,7 +92,7 @@ test("live mode shows the server's warning and no fictional banner", async () =>
     const p = await liveScreen();
     assert.ok(p.container.querySelector("[data-analyzer-live]"));
     assert.match(p.container.querySelector("[data-synthetic-warning]").textContent, /do not upload real client or confidential documents/);
-    assert.match(p.container.textContent, /does not review risks yet/);
+    assert.match(p.container.textContent, /general drafting checks\. Legal checklists run only after a qualified lawyer has approved them/);
     assert.equal(p.container.querySelector("[data-fictional-banner]"), null);
     await p.unmount();
 });
@@ -228,13 +228,43 @@ test("the terms step answers every decisive term with its evidence", async () =>
     await p.unmount();
 });
 
-test("a read and mapped document says no review exists yet and shows its text", async () => {
+const REPORT = {
+    id: "r1",
+    packs: [{ pack_id: "general", title: "General document review", status: "applied" },
+            { pack_id: "tenancy_punjab", title: "Punjab tenancy checklist", status: "awaiting_approval" }],
+    scope_notice: { general_review: "General document review: drafting-completeness checks. None is a legal requirement.",
+                    legal_playbook: "Legal playbook applied to the terms you confirmed. Applicability requires lawyer review." },
+    findings: [
+        { pack_id: "general", scope: "general_review", labels: ["General document review"], check_id: "parties_named",
+          kind: "general_check", title: "The parties are named", why: "Most agreements say who is bound.",
+          check_result: "present", evidence: [{ sentence_id: "s0", text: "Between the Landlord and the Tenant." }] },
+        { pack_id: "general", scope: "general_review", labels: ["General document review"], check_id: "governing_law",
+          kind: "general_check", title: "The governing law is named", why: "Many agreements name it.",
+          check_result: "not_located", evidence: [] },
+        { pack_id: "general", scope: "general_review", labels: ["General document review"], check_id: "skipped_one",
+          kind: "general_check", title: "Hidden check", why: "x", check_result: "not_applicable", evidence: [] },
+    ],
+};
+
+test("a checked document shows its report, worded honestly, and its text", async () => {
+    api.__respond("getAnalysisReport", { data: REPORT });
     api.__respond("getAnalysisText", { data: { text: "1. One.\n2. Two.", clauses: [
         { clause_id: "c0", start: 0, end: 7 }, { clause_id: "c1", start: 8, end: 15 }],
         sentences: [], text_version: { page_map_available: true, corrected: false } } });
-    const p = await openRun({ id: "r1", status: "queued_analysis", state_version: 8 });
-    assert.ok(p.container.querySelector("[data-no-review-yet]"));
-    assert.match(p.container.textContent, /not available yet — nothing here is a legal assessment/);
+    const p = await openRun({ id: "r1", status: "done", state_version: 9 });
+    const report = p.container.querySelector("[data-report]");
+    assert.ok(report, "the report is not shown");
+    assert.match(report.textContent, /None is a legal requirement/);
+    const result = id => report.querySelector(`[data-finding="${id}"] [data-result]`).textContent;
+    assert.equal(result("parties_named"), "Found");
+    assert.equal(result("governing_law"), "Not located automatically");
+    assert.equal(report.querySelector('[data-finding="skipped_one"]'), null, "a not-applicable check was shown");
+    assert.match(report.querySelector('[data-finding="parties_named"]').textContent, /Between the Landlord and the Tenant\./);
+    assert.match(report.querySelector('[data-finding="parties_named"]').textContent, /General document review/);
+    assert.doesNotMatch(report.textContent, /missing/i);
+    const notice = report.querySelector('[data-pack-status="awaiting_approval"]');
+    assert.match(notice.textContent, /not been approved by a qualified lawyer yet, so it was not run/);
+    assert.equal(report.querySelector('[data-scope="legal_playbook"]'), null, "an unapproved legal pack's results were shown");
     const clauses = [...p.container.querySelectorAll("[data-clause]")].map(c => c.textContent);
     assert.deepEqual(clauses, ["1. One.", "2. Two."]);
     await p.unmount();
