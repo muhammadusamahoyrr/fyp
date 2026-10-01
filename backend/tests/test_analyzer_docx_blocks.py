@@ -86,7 +86,7 @@ async def test_a_numbered_docx_is_stored_with_its_structure_and_splits_by_clause
     client, _ = ready
     created, run, version, text, rows = await extracted_docx(client, nda(tmp_path / "nda.docx"))
 
-    assert version["extractor_version"] == "2+docx-blocks.1"
+    assert version["extractor_version"] == f"{X.EXTRACTOR_VERSION}+docx-blocks.1"
     assert version["structure"] == {"available": True, "blocks": 12}
     assert run["extraction"]["limitations"] == []
     assert "1.1 Confidential Information means" in text and "(b) It shall return" in text

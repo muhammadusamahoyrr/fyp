@@ -49,7 +49,7 @@ from pathlib import Path
 # change (what counts as complete, what text is produced); bump CONFIG_VERSION
 # when only the limits below move. A stored result whose versions differ from
 # the running code must be treated as re-extractable, never as agreeing with it.
-EXTRACTOR_VERSION = "2"
+EXTRACTOR_VERSION = "3"  # 3: DOCX table cells are no longer dropped (id() reuse)
 CONFIG_VERSION = "2"  # parent-enforced per-file and queue-inclusive batch deadlines
 
 # ── outcomes ────────────────────────────────────────────────────────────────
@@ -766,9 +766,17 @@ def _render_table(table, budget: list[int], depth: int = 0) -> list[str]:
     wrong answer. Identity of the underlying `tc` element is what distinguishes
     "the same cell again" from "a different cell with the same text", so that is
     what is tracked.
+
+    IDENTITY MEANS THE ELEMENT, NOT `id()`. lxml builds a Python proxy for an
+    XML node on access and frees it when nothing references it, so `id()` of a
+    freed proxy is soon reused by a proxy for a DIFFERENT cell. Keying `seen`
+    by `id(cell._tc)` therefore treated unrelated cells as already rendered
+    and dropped them silently -- most of a 10x3 table. Holding the element
+    itself keeps its proxy alive, and lxml returns that same proxy for the
+    same node for as long as it is referenced.
     """
     lines: list[str] = []
-    seen: set[int] = set()
+    seen: set = set()
 
     for row in table.rows:
         try:
@@ -777,7 +785,7 @@ def _render_table(table, budget: list[int], depth: int = 0) -> list[str]:
             continue
         values: list[str] = []
         for cell in cells:
-            key = id(cell._tc)
+            key = cell._tc
             if key in seen:
                 continue
             seen.add(key)

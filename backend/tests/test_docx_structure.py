@@ -11,6 +11,7 @@ import pytest
 from app.ai import docx_structure as S
 from app.ai.extraction import (
     ERR_PACKAGE_INVALID,
+    EXTRACTOR_VERSION,
     OUTCOME_REFUSED,
     PARTIAL_OR_UNCERTAIN,
     ExtractionResult,
@@ -287,8 +288,8 @@ def test_extract_docx_is_unchanged_and_carries_no_blocks(tmp_path):
     legacy = extract_docx(path)
     assert legacy.blocks == [] and "blocks" not in legacy.as_dict()
     assert set(ExtractionResult(outcome="x", completeness="y").as_dict()) == set(legacy.as_dict())
-    assert legacy.extractor_version == "2"
-    assert S.extract_docx_structured(path).extractor_version == "2+docx-blocks.1"
+    assert legacy.extractor_version == EXTRACTOR_VERSION
+    assert S.extract_docx_structured(path).extractor_version == f"{EXTRACTOR_VERSION}+docx-blocks.1"
 
 
 def test_extraction_is_deterministic(tmp_path):
@@ -328,8 +329,8 @@ async def test_the_child_returns_blocks_only_when_asked(tmp_path):
     structured, text = await extract_isolated(str(path), content_type=mime, timeout=60, structure=True)
     assert text == S.extract_docx_structured(path).text
     assert structured.blocks == S.extract_docx_structured(path).blocks
-    assert structured.extractor_version == "2+docx-blocks.1"
+    assert structured.extractor_version == f"{EXTRACTOR_VERSION}+docx-blocks.1"
 
     plain, plain_text = await extract_isolated(str(path), content_type=mime, timeout=60)
     assert plain.blocks == [] and plain_text == extract_docx(path).text
-    assert plain.extractor_version == "2"
+    assert plain.extractor_version == EXTRACTOR_VERSION
