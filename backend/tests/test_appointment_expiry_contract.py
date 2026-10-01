@@ -1221,6 +1221,11 @@ async def test_a_configured_but_unreachable_backend_refuses_startup(
         flags, monkeypatch):
     """Distinct from 'not configured', because the fix is different: one is a
     missing setting, the other is a dead or wrong endpoint."""
+    from app.core.config import settings
+
+    # Configured explicitly: this test used to inherit the developer's real
+    # hosted Redis URL from `.env`, which tests no longer see.
+    monkeypatch.setattr(settings, "redis_url", FAKE_REDIS_URL)
     flags(appointment_expiry_enabled=True)
     monkeypatch.setattr(scheduler, "_index_ready", lambda job: _true())
     monkeypatch.setattr(scheduler, "_every_pending_row_has_a_stored_deadline",
@@ -1238,6 +1243,9 @@ async def test_a_configured_but_unreachable_backend_refuses_startup(
 
 
 async def test_a_reachable_backend_lets_startup_continue(flags, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "redis_url", FAKE_REDIS_URL)    # see above
     flags(appointment_expiry_enabled=True)
     monkeypatch.setattr(scheduler, "_index_ready", lambda job: _true())
     monkeypatch.setattr(scheduler, "_every_pending_row_has_a_stored_deadline",

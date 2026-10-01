@@ -57,6 +57,46 @@ def _is_local(host) -> bool:
     return host in _LOCAL_HOSTS or host.startswith("127.")
 
 
+# ── production settings never reach the tests ────────────────────────────────
+#
+# Settings read `.env`, and the developer's `.env` points at production
+# services: a hosted Redis, Gmail SMTP, Langfuse cloud, model providers,
+# Safepay. Before this, a full run made ~185 lookups to such hosts (the guard
+# above refused them; they would otherwise have connected). Environment
+# variables take precedence over `.env`, so they are neutralised HERE, at
+# import -- before any test imports `app.core.config` and builds `settings`.
+# The guard stays as defence in depth. Tests that need a service configure it
+# explicitly (monkeypatch), as they always should have.
+#
+# Kept: a Redis URL that is already in the ENVIRONMENT and points at this
+# machine (CI runs a local Redis for the integration tier). The live tier
+# keeps the model-provider keys, which are what it exists to exercise.
+
+PRODUCTION_SETTINGS_NEUTRALISED = {
+    "SMTP_HOST": "", "SMTP_USER": "", "SMTP_PASSWORD": "",
+    "LANGFUSE_PUBLIC_KEY": "", "LANGFUSE_SECRET_KEY": "", "LANGFUSE_HOST": "",
+    "SAFEPAY_API_KEY": "", "SAFEPAY_SECRET_KEY": "", "SAFEPAY_WEBHOOK_SECRET": "",
+    # Model files come from the local cache; a missing one fails like no network.
+    "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+}
+MODEL_PROVIDER_KEYS = ("GROQ_API_KEY", "GROQ_API_KEY_2", "GEMINI_API_KEY", "OPENROUTER_API_KEY")
+
+
+def _neutralise_production_settings() -> None:
+    from urllib.parse import urlparse
+
+    os.environ.update(PRODUCTION_SETTINGS_NEUTRALISED)
+    redis = os.environ.get("REDIS_URL", "")
+    if not (redis and _is_local(urlparse(redis).hostname or "")):
+        os.environ["REDIS_URL"] = ""
+    if not LIVE:
+        for key in MODEL_PROVIDER_KEYS:
+            os.environ[key] = ""
+
+
+_neutralise_production_settings()
+
+
 def pytest_configure(config):
     if LIVE:
         return
