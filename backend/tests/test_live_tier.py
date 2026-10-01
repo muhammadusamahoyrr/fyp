@@ -1,6 +1,7 @@
 """The LIVE tier: real provider and public-internet checks. Opt-in only.
 
-Skipped unless AAI_LIVE_TESTS=1 (tests/conftest.py). Run on demand, or by the manual `live` job in
+Skipped unless AAI_LIVE_TESTS=1 (tests/conftest.py); the default run is held
+to loopback. Run on demand, or by the manual `live` job in
 .github/workflows/tests.yml:
 
     AAI_LIVE_TESTS=1 python -m pytest -m "llm or network" tests/test_live_tier.py
