@@ -154,6 +154,22 @@ def _signature_encryption_key():
 
 
 @pytest.fixture(autouse=True)
+def _empty_corpus_index():
+    """Every test starts with an EMPTY corpus index unless it installs its own.
+
+    `get_index()` otherwise builds the index from the developer's local Chroma
+    directory on first use, so citation results depended on whose machine ran
+    the test (CI has no corpus and always got an empty index). A test that
+    needs coverage passes `index=` or calls `set_index` with a controlled one.
+    """
+    from app.ai.corpus_index import CorpusIndex, set_index
+
+    set_index(CorpusIndex({}))
+    yield
+    set_index(None)
+
+
+@pytest.fixture(autouse=True)
 def _no_background_embeds(monkeypatch):
     """Stop KYC approvals and profile edits from embedding for real.
 
