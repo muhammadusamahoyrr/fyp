@@ -302,7 +302,7 @@ with session.start_transaction():
 - **Enforcement is immediate, without waiting for the fan-out:**
   - **Every read endpoint** (owner routes, share routes, run/report fetches, file downloads) first checks `source.deleted_at == null`. Otherwise it returns 404.
   - **Every worker commit** fails, because the commit transaction writes the source guarded on `deleted_at: null` + `generation` (§5).
-  - So nothing is visible, and nothing can be published, from the instant the transaction commits.
+  - So from the instant the transaction commits, every **new** read returns 404 and nothing can be published. (A response that was already being sent before the commit cannot be recalled; deletion governs what happens after it, not what was read before it.)
 - **The outbox worker then fans out, idempotently and resumably:**
   1. Mark all runs of the source `cancel_requested` (and `cancelled` if not active).
   2. Revoke all shares.
@@ -347,7 +347,7 @@ The same envelope covers original uploads and canonical-text blobs.
 - **Synthetic documents only for the demo.** "Anonymised" real documents can still leak names, addresses or account numbers without local redaction, which we don't have.
 - **Enforced, not just stated:**
   - **UI:** before a file can be chosen, the user must tick an unticked-by-default checkbox, next to a visible warning: *"Demo only — do not upload real client or confidential documents. I confirm this document is synthetic (made up for testing)."* The upload control stays disabled until it is ticked.
-  - **Backend:** `POST /documents/analyses` requires the form field `synthetic_data_attested` to be exactly `true`. If it is absent, false or anything else, the request gets **422 `synthetic_attestation_required`**, and it is rejected **before the file is read or stored**.
+  - **Backend:** `POST /documents/analyses` requires the **headers** `X-Synthetic-Data-Attested: true` (exactly) and `X-Synthetic-Attestation-Version: <known version>`. Anything else gets **422 `synthetic_attestation_required`**. Headers, not form fields, so the check (and the Idempotency-Key format check) runs **before the multipart body is parsed**: a refused request's file is never parsed, received into memory or spooled to a temporary file. A form field claiming the attestation does not count.
   - **Record:** the source stores `attestation {synthetic: true, attested_by: user_id, attested_at, ui_text_version}`. `ui_text_version` identifies the exact warning wording the user saw.
   - The attestation is part of the idempotency fingerprint. It is not a substitute for the demo's other safeguards (ZDR, retention, deletion).
 - **Pinned client:** the analyzer uses a separate client that **never goes through `llm.py`'s fallback chain**.
@@ -365,7 +365,7 @@ The same envelope covers original uploads and canonical-text blobs.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/documents/analyses` | upload + run options + `synthetic_data_attested=true` (§7), `Idempotency-Key` → **202** `{source_id, run_id}` |
+| POST | `/documents/analyses` | multipart upload + run options; headers `X-Synthetic-Data-Attested: true`, `X-Synthetic-Attestation-Version` (§7) and `Idempotency-Key` (8-200 of `[A-Za-z0-9._:-]`), all checked before the body is parsed → **202** `{source_id, run_id}` |
 | GET | `/documents/analyses` | history |
 | GET | `/documents/analyses/{source_id}` | source, text versions, runs |
 | GET | `/documents/analyses/runs/{run_id}` | status, `state_version`, progress, report (polled) |
@@ -479,7 +479,7 @@ Deferred:
 - The reader query is explicit: `(text_version_id | run_id, stage, published_fence)`.
 - "Synthetic documents only" is **enforced**:
   - a UI confirmation plus warning;
-  - a required backend `synthetic_data_attested: true` (422 otherwise, before the file is read);
+  - a required backend attestation (422 otherwise, before the file is read; moved to headers in the P1 follow-up so it is checked before the body is parsed);
   - the attestation (user, time, wording version) is recorded on the source.
 - Commit plan: P1 slice 1 is split into four commits (config/collections/indexes → encrypted blob store → validated/idempotent upload + lifecycle → atomic deletion + purge outbox).
 
@@ -489,7 +489,7 @@ Deferred:
 - Decisions confirmed. The P2 merge/release is gated on a qualified lawyer's approval of the signed playbook hash.
 
 **v3.1 → v3.2 (fourth review):**
-- **Atomic deletion:** the tombstone, the generation bump and the outbox row are now one transaction. Every read endpoint checks `deleted_at` immediately. The fan-out (cancel runs, revoke shares, wait for leases, delete) is an idempotent, resumable outbox job. The expiry sweep uses the same transaction.
+- **Atomic deletion:** the tombstone, the generation bump and the outbox row are now one transaction. Every new read checks `deleted_at` and returns 404 from the commit on. The fan-out (cancel runs, revoke shares, wait for leases, delete) is an idempotent, resumable outbox job. The expiry sweep uses the same transaction.
 - **Output identity:** outputs are keyed `(run_id, stage, fence)` / `(text_version_id, stage, fence)` with unique indexes. The published fence is the visibility rule. (v3.1 wrongly said `(owner id, fence)`.)
 - **Encryption envelope:**
   - separate content and wrap nonces;

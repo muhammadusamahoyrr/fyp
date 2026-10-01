@@ -25,10 +25,12 @@ from app.db.collections import (
 )
 from app.services.analyzer import blob_store, readiness
 
-from tests._analyzer_support import (  # noqa: F401 -- `http` is a fixture
+from tests._analyzer_support import (  # noqa: F401 -- `http`, `form_calls` are fixtures
+    ATTESTED,
     PDF,
     assert_nothing_stored,
     files_on_disk,
+    form_calls,
     http,
     stored_for,
     upload,
@@ -63,34 +65,70 @@ async def test_lawyers_cannot_upload(http):
     assert (await upload(client)).status_code == 403
 
 
-@pytest.mark.parametrize("fields", [
+# An old-Word (.doc) header: refused by content, so it proves where a
+# request was stopped.
+OLE2 = bytes.fromhex("d0cf11e0a1b11ae1") + bytes(64)
+
+
+@pytest.mark.parametrize("attest", [
     {},
-    {"synthetic_data_attested": "false", "attestation_version": "synthetic-v1"},
-    {"synthetic_data_attested": "True", "attestation_version": "synthetic-v1"},
-    {"synthetic_data_attested": "true"},
-    {"synthetic_data_attested": "true", "attestation_version": "synthetic-v0"},
+    {"X-Synthetic-Data-Attested": "false", "X-Synthetic-Attestation-Version": "synthetic-v1"},
+    {"X-Synthetic-Data-Attested": "True", "X-Synthetic-Attestation-Version": "synthetic-v1"},
+    {"X-Synthetic-Data-Attested": "true"},                                          # no version
+    {"X-Synthetic-Data-Attested": "true", "X-Synthetic-Attestation-Version": "synthetic-v0"},  # stale
 ])
-async def test_no_attestation_no_upload(http, fields):
+async def test_no_attestation_no_upload_and_the_body_is_never_parsed(http, form_calls, attest):
     client, actor = http
-    response = await upload(client, fields=fields)
+    response = await upload(client, attest=attest)
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "synthetic_attestation_required"
+    assert form_calls == [], "the multipart body was parsed for an unattested upload"
     await assert_nothing_stored(actor["_id"])
 
 
-async def test_the_attestation_is_checked_before_anything_else(http):
+async def test_the_attestation_in_the_form_does_not_count(http, form_calls):
+    # The old transport. Fields in the body cannot attest: they would have to
+    # be parsed first, which is exactly what must not happen.
+    client, actor = http
+    response = await upload(client, attest={}, synthetic_data_attested="true",
+                            attestation_version="synthetic-v1")
+    assert response.json()["error"]["code"] == "synthetic_attestation_required"
+    assert form_calls == []
+    await assert_nothing_stored(actor["_id"])
+
+
+async def test_the_attestation_is_checked_before_anything_else(http, form_calls):
     # Missing key AND a .doc file AND no attestation: the attestation answers.
     client, actor = http
-    response = await upload(client, fields={}, key=None, content=b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 64)
+    response = await upload(client, attest={}, key=None, content=OLE2)
     assert response.json()["error"]["code"] == "synthetic_attestation_required"
+    assert form_calls == []
 
 
-async def test_an_idempotency_key_is_required(http):
+@pytest.mark.parametrize("key", [None, "", "short", "x" * 201, "has space-1234", "semi;colon-1234"])
+async def test_a_malformed_idempotency_key_is_refused_before_the_body(http, form_calls, key):
     client, actor = http
-    for key in (None, "x" * 201):
-        response = await upload(client, key=key)
-        assert response.status_code == 422
-        assert response.json()["error"]["code"] == "missing_idempotency_key"
+    response = await upload(client, key=key)
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_idempotency_key"
+    assert form_calls == [], "the multipart body was parsed for an invalid key"
+    await assert_nothing_stored(actor["_id"])
+
+
+@pytest.mark.parametrize("key", ["0f8fad5b-d9cb-469f-a165-70867728950e", "k-1790000000000-a1b2c3d4e5", "x" * 200])
+async def test_well_formed_keys_pass_the_gate(http, form_calls, key):
+    client, _ = http
+    # A .doc fails AFTER the gate: proof the key was accepted and the body parsed.
+    response = await upload(client, key=key, content=OLE2)
+    assert response.json()["error"]["code"] == "doc_not_supported"
+    assert len(form_calls) == 1
+
+
+async def test_an_oversized_body_is_refused_before_parsing(http, form_calls):
+    client, actor = http
+    response = await upload(client, content=b"%PDF-" + b"0" * (11 * 1024 * 1024))
+    assert response.status_code == 413
+    assert form_calls == []
     await assert_nothing_stored(actor["_id"])
 
 
@@ -103,14 +141,6 @@ async def test_a_refused_file_type_stores_nothing(http):
     await assert_nothing_stored(actor["_id"])
 
 
-async def test_an_oversized_body_is_refused_before_the_form_is_parsed(http):
-    client, actor = http
-    response = await upload(client, content=b"%PDF-" + b"0" * (11 * 1024 * 1024))
-    assert response.status_code == 413
-    assert response.json()["error"]["code"] == "file_too_large"
-    await assert_nothing_stored(actor["_id"])
-
-
 async def test_a_body_without_a_declared_length_is_refused(http):
     client, actor = http
 
@@ -119,7 +149,7 @@ async def test_a_body_without_a_declared_length_is_refused(http):
 
     response = await client.post("/documents/analyses", content=chunks(),
                                  headers={"Content-Type": "multipart/form-data; boundary=x",
-                                          "Idempotency-Key": uuid.uuid4().hex})
+                                          "Idempotency-Key": uuid.uuid4().hex, **ATTESTED})
     assert response.status_code == 411
     await assert_nothing_stored(actor["_id"])
 
@@ -195,7 +225,7 @@ async def test_a_different_request_under_a_used_key_is_a_conflict(http, mongo_tr
 
 async def test_concurrent_first_attempts_create_exactly_one(http, mongo_transactional):
     client, actor = http
-    responses = await asyncio.gather(*(upload(client, key="racing") for _ in range(4)))
+    responses = await asyncio.gather(*(upload(client, key="racing-intent") for _ in range(4)))
     assert {r.status_code for r in responses} == {202}
     assert len({r.json()["source_id"] for r in responses}) == 1
     assert await stored_for(actor["_id"]) == (1, 1, 1)

@@ -25,6 +25,7 @@ exactly like one that never existed or belongs to someone else.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -36,12 +37,27 @@ from app.db.collections import (
     get_analysis_sources_col,
 )
 from app.services.analyzer import blob_store, states
-from app.services.analyzer.errors import AnalyzerConflict, AnalyzerNotFound
+from app.services.analyzer.errors import AnalyzerConflict, AnalyzerNotFound, UploadRejected
 from app.services.analyzer.txn import run_in_transaction
 from app.services.analyzer.upload_rules import ValidatedFile, request_fingerprint
 
 RETENTION = timedelta(days=7)
 MAX_KEY_LENGTH = 200
+MIN_KEY_LENGTH = 8
+_KEY = re.compile(r"^[A-Za-z0-9._:-]+$")
+
+
+def check_idempotency_key(key: str | None) -> str:
+    """8-200 characters of [A-Za-z0-9._:-] -- a UUID or the client's k-<ts>-<rand>.
+
+    Validated from the header alone, before the request body is parsed.
+    """
+    if (not key or not MIN_KEY_LENGTH <= len(key) <= MAX_KEY_LENGTH
+            or not _KEY.match(key)):
+        raise UploadRejected(
+            "invalid_idempotency_key",
+            "The Idempotency-Key header is required: 8-200 letters, digits or . _ : -")
+    return key
 
 
 def _now() -> datetime:

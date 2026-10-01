@@ -5,7 +5,9 @@ TOMBSTONE + OUTBOX, ONE TRANSACTION. The source gets `deleted_at` and a
 transaction ABORTS if the source update matched nothing (not found, not the
 owner, already deleted) -- before the outbox write, so no stray job exists.
 A crash can therefore never leave a deleted source whose files are never
-removed, nor a purge job for a source that was not deleted.
+removed, nor a purge job for a source that was not deleted. From the commit
+on, every NEW read returns 404; a response already being sent before the
+commit cannot be recalled.
 
 WHY A LATE WORKER SAVE CANNOT UNDO IT. Every worker stage commit calls
 `guard_source` inside its own transaction. The guard WRITES the source

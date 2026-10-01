@@ -24,7 +24,8 @@ from app.services.analyzer import blob_store, readiness
 
 PDF = b"%PDF-1.4\nTENANCY AGREEMENT (synthetic)\n1. The Landlord lets the shop.\n%%EOF\n"
 KEY = "k1:" + base64.b64encode(b"\x33" * 32).decode()
-ATTESTED = {"synthetic_data_attested": "true", "attestation_version": "synthetic-v1"}
+# Headers, not form fields: they are checked before the body is parsed.
+ATTESTED = {"X-Synthetic-Data-Attested": "true", "X-Synthetic-Attestation-Version": "synthetic-v1"}
 
 
 @pytest.fixture
@@ -74,12 +75,29 @@ async def stored_for(owner: str) -> tuple[int, int, int]:
     return sources, runs, blobs
 
 
-async def upload(client, *, content=PDF, name="lease.pdf", fields=None, key="auto", **kw):
-    data = dict(ATTESTED if fields is None else fields)
-    data.update(kw)
-    headers = {} if key is None else {"Idempotency-Key": uuid.uuid4().hex if key == "auto" else key}
-    return await client.post("/documents/analyses", data=data, headers=headers,
+async def upload(client, *, content=PDF, name="lease.pdf", attest=None, key="auto", **fields):
+    """POST an upload. `attest` replaces the attestation headers; `fields` are form fields."""
+    headers = dict(ATTESTED if attest is None else attest)
+    if key is not None:
+        headers["Idempotency-Key"] = uuid.uuid4().hex if key == "auto" else key
+    return await client.post("/documents/analyses", data=fields, headers=headers,
                              files={"file": (name, content, "application/octet-stream")})
+
+
+@pytest.fixture
+def form_calls(monkeypatch):
+    """Count `Request.form()` calls, to prove a refusal never parsed the body."""
+    from starlette.requests import Request
+
+    calls = []
+    real = Request.form
+
+    def spy(self, *args, **kwargs):
+        calls.append(self.url.path)
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Request, "form", spy)
+    return calls
 
 
 async def assert_nothing_stored(owner: str):

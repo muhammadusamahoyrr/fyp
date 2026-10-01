@@ -1,13 +1,17 @@
 """Document Analyzer HTTP surface (DOC_ANALYZER_PLAN.md §8). Client-only.
 
-Gates, in order, before any byte of the file is used:
+Gates, in order. Gates 1-5 read only HEADERS: a request refused by any of
+them is answered before `request.form()` is called, so its multipart body is
+never parsed, received into memory or spooled to a temporary file.
 
   1. DOC_ANALYZER off                      -> 404 feature_disabled
   2. readiness failed (no transactions, bad indexes or keys) -> 503
-  3. no Content-Length / body over the cap -> 411 / 413, BEFORE the multipart
-     body is parsed (Starlette 0.41 has no per-file size limit of its own)
-  4. synthetic_data_attested != "true"     -> 422 synthetic_attestation_required
-  5. Idempotency-Key missing / too long    -> 422
+  3. X-Synthetic-Data-Attested != "true" or an unknown
+     X-Synthetic-Attestation-Version       -> 422 synthetic_attestation_required
+  4. Idempotency-Key missing or malformed  -> 422 invalid_idempotency_key
+  5. no Content-Length / body over the cap -> 411 / 413
+     (Starlette 0.41 has no per-file size limit of its own)
+  ---- only now is the multipart body parsed ----
   6. options invalid                       -> 422
   7. content rules (upload_rules.validate) -> 422 / 413
 """
@@ -70,19 +74,21 @@ async def _read_capped(file: UploadFile) -> bytes:
 async def create_document_analysis(
     request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    attested: str | None = Header(default=None, alias="X-Synthetic-Data-Attested"),
+    attestation_version: str | None = Header(default=None, alias="X-Synthetic-Attestation-Version"),
     current_user: dict = Depends(require_client),
 ):
     _require_available()
+    try:
+        # Headers only, all before the body: see the module docstring.
+        attestation = upload_rules.check_attestation(attested, attestation_version)
+        lifecycle.check_idempotency_key(idempotency_key)
+    except AnalyzerError as exc:
+        _fail(exc.status, exc.code, exc.message)
     _body_within_cap(request)
 
     form = await request.form(max_files=1, max_fields=8)
     try:
-        # The attestation comes first: without it nothing else is looked at.
-        attestation = upload_rules.check_attestation(
-            form.get("synthetic_data_attested"), form.get("attestation_version"))
-        if not idempotency_key or len(idempotency_key) > lifecycle.MAX_KEY_LENGTH:
-            _fail(422, "missing_idempotency_key",
-                  "The Idempotency-Key header is required (at most 200 characters).")
         options = upload_rules.normalise_options(form.get("side"), form.get("depth"))
         file = form.get("file")
         if not isinstance(file, UploadFile):
@@ -117,7 +123,7 @@ async def get_document_analysis(source_id: str, current_user: dict = Depends(req
 
 @router.delete("/{source_id}", status_code=204)
 async def delete_document_analysis(source_id: str, current_user: dict = Depends(require_client)):
-    """Tombstone + purge job in one transaction; hidden from every read at once.
+    """Tombstone + purge job in one transaction; every NEW read 404s from the commit on.
 
     Not found, not the owner and already deleted all answer 404, so the route
     reveals nothing about analyses that are not the caller's.

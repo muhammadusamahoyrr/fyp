@@ -134,7 +134,11 @@ def normalise_options(side: str | None, depth: str | None) -> dict:
 
 
 def check_attestation(attested: str | None, version: str | None) -> dict:
-    """The synthetic-data attestation, or a refusal. Checked BEFORE the file."""
+    """The synthetic-data attestation, or a refusal.
+
+    Arrives as headers (X-Synthetic-Data-Attested / X-Synthetic-Attestation-
+    Version) and is checked BEFORE the multipart body is parsed.
+    """
     if attested != "true":
         raise UploadRejected(
             "synthetic_attestation_required",
