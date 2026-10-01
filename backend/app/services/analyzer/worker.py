@@ -198,7 +198,7 @@ class Liveness:
 
 
 @contextlib.asynccontextmanager
-async def keep_alive(lease: Lease, *, every: timedelta = HEARTBEAT_EVERY):
+async def keep_alive(lease: Lease, *, every: timedelta | None = None):
     """Heartbeat `lease` in the background for the duration of a stage.
 
     The stage checks `alive.lost` / `alive.cancel` when its work returns. It
@@ -206,6 +206,7 @@ async def keep_alive(lease: Lease, *, every: timedelta = HEARTBEAT_EVERY):
     worker stop early instead of finishing work nobody can publish.
     """
     alive = Liveness()
+    every = every or HEARTBEAT_EVERY        # read at call time, not import time
 
     async def beat():
         while not alive._stop.is_set():
