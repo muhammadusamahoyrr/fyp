@@ -124,6 +124,57 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         why=("The unpublished-output sweep reads only rows older than its "
              "cutoff; without this it scans every page row on every tick."),
     ),
+    # ── analysis_clauses / analysis_sentences ───────────────────────────────
+    IndexSpec(
+        collection="analysis_clauses",
+        name="uniq_analysis_clauses_row",
+        keys=(("run_id", ASCENDING), ("stage", ASCENDING), ("fence", ASCENDING),
+              ("ordinal", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("Run-output identity (plan §5). Keyed by RUN, not text version: "
+             "fences are per run, so two runs segmenting one text version "
+             "would otherwise collide. A retried write under the same fence is "
+             "idempotent; another fence cannot overwrite it."),
+    ),
+    IndexSpec(
+        collection="analysis_clauses",
+        name="analysis_clauses_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every clause row of a source.",
+    ),
+    IndexSpec(
+        collection="analysis_clauses",
+        name="analysis_clauses_created",
+        keys=(("created_at", ASCENDING),),
+        kind=QUERY,
+        why="The unpublished-output sweep reads only rows older than its cutoff.",
+    ),
+    IndexSpec(
+        collection="analysis_sentences",
+        name="uniq_analysis_sentences_row",
+        keys=(("run_id", ASCENDING), ("stage", ASCENDING), ("fence", ASCENDING),
+              ("ordinal", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("Run-output identity (plan §5). Keyed by RUN, not text version: "
+             "fences are per run, so two runs segmenting one text version "
+             "would otherwise collide. A retried write under the same fence is "
+             "idempotent; another fence cannot overwrite it."),
+    ),
+    IndexSpec(
+        collection="analysis_sentences",
+        name="analysis_sentences_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every sentence row of a source.",
+    ),
+    IndexSpec(
+        collection="analysis_sentences",
+        name="analysis_sentences_created",
+        keys=(("created_at", ASCENDING),),
+        kind=QUERY,
+        why="The unpublished-output sweep reads only rows older than its cutoff.",
+    ),
     # ── analysis_deletion_outbox ─────────────────────────────────────────────
     IndexSpec(
         collection="analysis_deletion_outbox",

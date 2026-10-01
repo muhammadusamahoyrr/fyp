@@ -1,0 +1,87 @@
+"""The segmentation stage: confirmed text -> clauses, sentences, proposals.
+
+  1. Refuse unless the run's text version is CONFIRMED (unconfirmed OCR text
+     never reaches here) and its decrypted bytes match the recorded hash.
+  2. Segment deterministically (segmentation.py) against the published page
+     map, so every sentence carries its page spans.
+  3. Write clause and sentence rows keyed (run_id, stage, fence, ordinal).
+  4. Publish through the fenced, source-guarded commit and pause the run in
+     `needs_document_confirmation`, carrying the document-type and province
+     PROPOSALS with the sentence ids behind them. The person decides.
+"""
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime, timezone
+
+from app.db.collections import (
+    get_analysis_clauses_col,
+    get_analysis_sentences_col,
+    get_analysis_text_pages_col,
+    get_analysis_text_versions_col,
+)
+from app.services.analyzer import blob_store, deletion, segmentation, worker
+from app.services.analyzer.worker import Lease, LostLease
+
+STAGE = "segment"
+
+
+async def _published_pages(version: dict) -> list[dict]:
+    stage, fence = next(iter(version.get("published", {}).items()), (None, None))
+    if stage is None:
+        return []
+    return [p async for p in get_analysis_text_pages_col().find(
+        {"text_version_id": version["_id"], "stage": stage, "fence": fence}).sort("ordinal", 1)]
+
+
+async def run_segment(lease: Lease) -> str:
+    version = await get_analysis_text_versions_col().find_one(
+        {"_id": lease.run.get("text_version_id"), "source_id": lease.source_id})
+    if version is None or not version.get("confirmed"):
+        await worker.finish_without_result(lease, status="failed", error_code="text_not_confirmed")
+        return "failed:text_not_confirmed"
+
+    raw = await blob_store.read(version["blob_id"], source_id=lease.source_id,
+                                purpose="canonical_text")
+    if hashlib.sha256(raw).hexdigest() != version["text_hash"]:
+        await worker.finish_without_result(lease, status="failed", error_code="text_integrity")
+        return "failed:text_integrity"
+    text = raw.decode("utf-8")
+
+    try:
+        clauses, sentences = segmentation.segment(text, await _published_pages(version))
+    except ValueError as exc:                     # too_many_clauses / too_many_sentences
+        await worker.finish_without_result(lease, status="failed", error_code=str(exc))
+        return f"failed:{exc}"
+    if not sentences:
+        await worker.finish_without_result(lease, status="failed", error_code="no_sentences")
+        return "failed:no_sentences"
+
+    now = datetime.now(timezone.utc)
+    key = {"run_id": lease.run_id, "stage": STAGE, "fence": lease.fence}
+    common = {"source_id": lease.source_id, "text_version_id": version["_id"], "created_at": now}
+    for c in clauses:
+        await get_analysis_clauses_col().update_one(
+            {**key, "ordinal": c.ordinal},
+            {"$setOnInsert": {**common, "clause_id": c.clause_id, "number": c.number,
+                              "heading": c.heading, "start": c.start, "end": c.end}},
+            upsert=True)
+    for s in sentences:
+        await get_analysis_sentences_col().update_one(
+            {**key, "ordinal": s.ordinal},
+            {"$setOnInsert": {**common, "sentence_id": s.sentence_id, "clause_id": s.clause_id,
+                              "start": s.start, "end": s.end, "page_spans": s.page_spans}},
+            upsert=True)
+
+    try:
+        await worker.commit_stage(
+            lease, stage=STAGE, next_status="needs_document_confirmation",
+            set_fields={"segmentation": {"clauses": len(clauses), "sentences": len(sentences),
+                                         "text_version_id": version["_id"]},
+                        "document_proposal": segmentation.propose_document(text, sentences)})
+    except (LostLease, deletion.StaleSource) as exc:
+        if isinstance(exc, LostLease) and await worker.finish_without_result(
+                lease, status="cancelled"):
+            return "cancelled"
+        return "lost"
+    return "needs_document_confirmation"

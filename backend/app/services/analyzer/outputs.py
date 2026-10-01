@@ -7,13 +7,15 @@ an unpublished row is invisible -- but a lost lease, a refused commit, a
 cancel or a crash between the writes and the commit leaves such rows behind
 for good.
 
-`sweep_unpublished_pages` removes a page row when BOTH hold:
+`sweep_unpublished_pages` (owner: the text version) and
+`sweep_unpublished_run_outputs` (owner: the run -- clauses, sentences) remove
+a row when BOTH hold:
 
   * it is older than a cutoff (an attempt still in flight is never touched;
     the cutoff is far longer than the stage's lease), and
-  * no text version publishes it: the version does not exist (the commit
-    never happened), or it exists but publishes a different fence for that
-    stage (a losing attempt's rows).
+  * its owner does not publish it: the owner does not exist (the commit never
+    happened), or it publishes a different fence for that stage (a losing
+    attempt's rows).
 
 Rows of a deleted source are not this sweep's concern: the purge removes all
 of a source's rows, published or not.
@@ -22,7 +24,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from app.db.collections import get_analysis_text_pages_col, get_analysis_text_versions_col
+from app.db.collections import (
+    get_analysis_clauses_col,
+    get_analysis_runs_col,
+    get_analysis_sentences_col,
+    get_analysis_text_pages_col,
+    get_analysis_text_versions_col,
+)
 
 DEFAULT_AGE = timedelta(hours=1)
 
@@ -45,3 +53,26 @@ async def sweep_unpublished_pages(*, older_than: timedelta = DEFAULT_AGE, limit:
         return 0
     result = await pages.delete_many({"_id": {"$in": unpublished}})
     return result.deleted_count
+
+
+async def _sweep_by_run(col, cutoff, limit) -> int:
+    candidates = [r async for r in col.find(
+        {"created_at": {"$lt": cutoff}}, {"_id": 1, "run_id": 1, "stage": 1, "fence": 1}).limit(limit)]
+    if not candidates:
+        return 0
+    run_ids = list({r["run_id"] for r in candidates})
+    published = {r["_id"]: r.get("published", {}) async for r in
+                 get_analysis_runs_col().find({"_id": {"$in": run_ids}}, {"published": 1})}
+    unpublished = [r["_id"] for r in candidates
+                   if published.get(r["run_id"], {}).get(r["stage"]) != r["fence"]]
+    if not unpublished:
+        return 0
+    return (await col.delete_many({"_id": {"$in": unpublished}})).deleted_count
+
+
+async def sweep_unpublished_run_outputs(*, older_than: timedelta = DEFAULT_AGE,
+                                        limit: int = 5000) -> int:
+    """Clause and sentence rows no run publishes (see module docstring)."""
+    cutoff = datetime.now(timezone.utc) - older_than
+    return (await _sweep_by_run(get_analysis_clauses_col(), cutoff, limit)
+            + await _sweep_by_run(get_analysis_sentences_col(), cutoff, limit))

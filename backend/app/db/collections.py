@@ -301,3 +301,15 @@ def get_analysis_text_pages_col() -> AsyncIOMotorCollection:
     """Page map of a text version: (page, start, end, coverage, origin) rows,
     keyed by (text_version_id, stage, fence, ordinal)."""
     return get_database()["analysis_text_pages"]
+
+
+def get_analysis_clauses_col() -> AsyncIOMotorCollection:
+    """Clauses of a run's text version: offsets into the canonical text,
+    keyed by (run_id, stage, fence, ordinal)."""
+    return get_database()["analysis_clauses"]
+
+
+def get_analysis_sentences_col() -> AsyncIOMotorCollection:
+    """Sentences with page_spans. Every later finding cites these ids; the
+    quote shown is cut from the text at their offsets, never model output."""
+    return get_database()["analysis_sentences"]

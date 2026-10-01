@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import logging
 
-from app.services.analyzer import extraction_stage, states, worker
+from app.services.analyzer import extraction_stage, segmentation_stage, states, worker
 
 logger = logging.getLogger(__name__)
 
 #: active state -> the coroutine that does that stage's work
 HANDLERS = {
     "extracting": extraction_stage.run_extract,
+    "segmenting": segmentation_stage.run_segment,
 }
 
 _QUEUED_FOR = {active: queued for queued, active in states.ACTIVE_FOR_QUEUED.items()}

@@ -181,12 +181,18 @@ async def test_empty_or_oversized_corrections_are_refused(paused):
     assert response.status_code == 422 and response.json()["error"]["code"] == "text_too_long"
 
 
-async def test_confirmed_text_waits_for_segmentation_which_is_not_built_yet(paused):
+async def test_confirmed_text_goes_on_to_segmentation(paused):
     client, _, created = paused
     run = await view(client, created["run_id"])
     await confirm(client, created["run_id"], run["state_version"])
-    assert await runner.process_one("w1") is None, "a stage without a handler was claimed"
-    assert (await view(client, created["run_id"]))["status"] == "queued_segmentation"
+    assert await runner.process_one("w1") == "needs_document_confirmation"
+
+
+async def test_unconfirmed_ocr_text_is_never_segmented(paused):
+    client, _, created = paused
+    # The paused run holds only an unconfirmed version; nothing may claim it.
+    assert await runner.process_one("w1") is None
+    assert (await view(client, created["run_id"]))["status"] == "needs_ocr_confirmation"
 
 
 # ── cancel paths ─────────────────────────────────────────────────────────────
