@@ -331,7 +331,8 @@ async def _finish_cleanup(task: asyncio.Task):
 
 
 async def _run_file(item: dict, timeout: float, *,
-                    ocr: dict | None = None) -> tuple[ExtractionResult, str]:
+                    ocr: dict | None = None,
+                    memory_limit_mb: int | None = None) -> tuple[ExtractionResult, str]:
     fid = str(item.get("file_id") or "")
     job = json.dumps({
         "files": [{"file_id": fid, "path": str(item.get("path") or ""),
@@ -347,6 +348,9 @@ async def _run_file(item: dict, timeout: float, *,
     # OpenMP fan out would multiply this child's CPU footprint against the very
     # pool pressure the child exists to relieve.
     env.setdefault("OMP_NUM_THREADS", "1")
+    if memory_limit_mb:
+        from app.ai.process_limits import ENV_VAR
+        env[ENV_VAR] = str(int(memory_limit_mb))
 
     proc = None
     spawn = None
@@ -516,6 +520,21 @@ def _refuse_stale(
             checked[claim.file_id] = (_failure(ERR_STALE_INPUT), "")
 
     return checked
+
+
+async def extract_isolated(path: str, *, content_type: str = "", timeout: float,
+                           ocr: dict | None = None,
+                           memory_limit_mb: int | None = None) -> tuple[ExtractionResult, str]:
+    """One file in its own killable child, with optional hard memory cap.
+
+    For callers that need neither batching nor de-duplication (the Document
+    Analyzer runs one file per run under its own lease). Shares the same
+    concurrency semaphore and the same `_run_file`, so the timeout, the
+    process-tree kill and the response validation are exactly intake's.
+    """
+    async with _get_semaphore():
+        return await _run_file({"file_id": "f", "path": path, "content_type": content_type},
+                               timeout, ocr=ocr, memory_limit_mb=memory_limit_mb)
 
 
 async def extract_one(path: str, file_id: str = "f",

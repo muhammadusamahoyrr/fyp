@@ -89,6 +89,33 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="Key rotation: which blobs are still wrapped under a given KEK.",
     ),
+    # ── analysis_text_versions / analysis_text_pages ─────────────────────────
+    IndexSpec(
+        collection="analysis_text_versions",
+        name="uniq_analysis_text_version_seq",
+        keys=(("source_id", ASCENDING), ("version", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("One text version number per source. Versions are allocated "
+             "inside the fenced commit, but the index is what guarantees two "
+             "commits can never both publish 'version 2'."),
+    ),
+    IndexSpec(
+        collection="analysis_text_pages",
+        name="uniq_analysis_text_page_row",
+        keys=(("text_version_id", ASCENDING), ("stage", ASCENDING),
+              ("fence", ASCENDING), ("ordinal", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("Stage output identity (plan §5): a retried write of the same "
+             "row under the same fence is idempotent; another fence can never "
+             "overwrite it. Readers take only the published fence."),
+    ),
+    IndexSpec(
+        collection="analysis_text_pages",
+        name="analysis_text_pages_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes a source's page maps, including unpublished ones.",
+    ),
     # ── analysis_deletion_outbox ─────────────────────────────────────────────
     IndexSpec(
         collection="analysis_deletion_outbox",

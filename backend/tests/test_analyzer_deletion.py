@@ -220,7 +220,8 @@ async def test_queued_and_paused_runs_are_cancelled_first(http, mongo_transactio
     real_delete_many = type(get_analysis_runs_col()).delete_many
 
     async def spy(self, flt, *a, **k):              # look at the runs just before removal
-        seen["runs"] = [r async for r in self.find(flt)]
+        if self.name == "analysis_runs":            # the purge empties other collections too
+            seen["runs"] = [r async for r in self.find(flt)]
         return await real_delete_many(self, flt, *a, **k)
 
     monkeypatch.setattr(type(get_analysis_runs_col()), "delete_many", spy)

@@ -232,6 +232,24 @@ async def _analyzer_housekeeping():
             logging.getLogger(__name__).exception("analyzer housekeeping failed")
 
 
+async def _analyzer_worker():
+    """Document Analyzer stages (extraction, ...). Lease/fence guarded, so it
+    runs on every worker without a lock; inert unless DOC_ANALYZER is on and
+    readiness passed. Polls every 5 s; each tick drains up to 5 runs."""
+    import asyncio
+    import logging
+    from app.services.analyzer.runner import tick
+
+    while True:
+        try:
+            await asyncio.sleep(5)
+            await tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("analyzer worker tick failed")
+
+
 async def _warmup_models():
     """Heavy AI warmups (Whisper STT + intent embeddings). Runs in the background
     so startup and health checks aren't blocked and a model failure can't take
@@ -370,6 +388,7 @@ async def lifespan(app: FastAPI):
     # feature flag is off.
     scheduler_tasks.append(_asyncio.create_task(_documents_v2_relay()))
     scheduler_tasks.append(_asyncio.create_task(_analyzer_housekeeping()))
+    scheduler_tasks.append(_asyncio.create_task(_analyzer_worker()))
 
     # EVENT OUTBOX relay: ungated, and NOT covered by the v2 relay above, which
     # returns immediately while DOCUMENTS_V2 is off. Agreement transitions park

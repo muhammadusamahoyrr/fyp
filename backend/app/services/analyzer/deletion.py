@@ -45,6 +45,8 @@ from app.db.collections import (
     get_analysis_deletion_outbox_col,
     get_analysis_runs_col,
     get_analysis_sources_col,
+    get_analysis_text_pages_col,
+    get_analysis_text_versions_col,
 )
 from app.services.analyzer import blob_store, states
 from app.services.analyzer.errors import AnalyzerNotFound
@@ -185,8 +187,10 @@ async def purge_source(source_id: str) -> str:
         await blob_store.remove_file(header["_id"])
         await blobs.delete_one({"_id": header["_id"]})
 
-    # 4. The runs (their outputs join this list as later stages add them).
+    # 4. The runs and every stage output of the source (published or not).
     await runs.delete_many({"source_id": source_id})
+    await get_analysis_text_pages_col().delete_many({"source_id": source_id})
+    await get_analysis_text_versions_col().delete_many({"source_id": source_id})
 
     # 5. A bare tombstone: nothing derived from the document survives.
     await sources.update_one(
@@ -219,7 +223,7 @@ async def purge_due(*, limit: int = 20) -> dict:
 async def housekeeping_tick() -> dict | None:
     """One pass of expiry + purge + orphan sweep. Inert unless enabled and ready."""
     from app.core.config import settings
-    from app.services.analyzer import readiness
+    from app.services.analyzer import extraction_stage, readiness
 
     if not settings.doc_analyzer or not readiness.is_ready():
         return None
@@ -227,4 +231,5 @@ async def housekeeping_tick() -> dict | None:
         "expired": await expire_due(),
         "purge": await purge_due(),
         "orphans": await blob_store.sweep_orphans(),
+        "work_files": extraction_stage.sweep_work_files(),
     }

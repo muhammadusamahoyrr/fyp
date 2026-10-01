@@ -288,3 +288,16 @@ def get_analysis_deletion_outbox_col() -> AsyncIOMotorCollection:
     """Purge jobs, written in the SAME transaction as the source tombstone so a
     crash can never leave a deleted source whose files are never removed."""
     return get_database()["analysis_deletion_outbox"]
+
+
+def get_analysis_text_versions_col() -> AsyncIOMotorCollection:
+    """Immutable canonical texts of a source (the text itself is an encrypted
+    blob). OCR proposals are versions with confirmed=False until a person
+    confirms them; a correction is a NEW version, never an edit."""
+    return get_database()["analysis_text_versions"]
+
+
+def get_analysis_text_pages_col() -> AsyncIOMotorCollection:
+    """Page map of a text version: (page, start, end, coverage, origin) rows,
+    keyed by (text_version_id, stage, fence, ordinal)."""
+    return get_database()["analysis_text_pages"]

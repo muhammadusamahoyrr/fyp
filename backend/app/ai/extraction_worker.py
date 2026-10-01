@@ -1,7 +1,7 @@
 """Child-process entry point for evidence extraction. JSON on stdin, JSON on stdout.
 
-Imports ONLY `app.ai.extraction`, `app.ai.ocr`, `app.ai.ocr_routing` and the
-standard library. That is a hard constraint, not a style preference:
+Imports ONLY `app.ai.extraction`, `app.ai.ocr`, `app.ai.ocr_routing`,
+`app.ai.process_limits` and the standard library. That is a hard constraint, not a style preference:
 `app.ai.tools` pulls in langchain and costs ~2.5 s to import, and
 `app.core.config` builds settings and database clients. A worker that touched
 either would add seconds to every conversion and open connections a short-lived
@@ -131,6 +131,15 @@ def _ocr(item: dict, extracted, request: dict, deadline) -> dict:
 
 
 def main() -> int:
+    # A caller-requested memory cap is applied FIRST, before any parser is
+    # imported or any byte of the job is read. If it cannot be applied the
+    # child refuses rather than run uncapped (process_limits).
+    try:
+        from app.ai.process_limits import apply_from_env
+        apply_from_env()
+    except Exception:
+        print(json.dumps({"ok": False, "error_code": "internal_error"}))
+        return 0
     try:
         job = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError:

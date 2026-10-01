@@ -29,9 +29,11 @@ Pure state + Mongo; the stage handlers that do the work live elsewhere.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import socket
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from pymongo import ReturnDocument
@@ -184,3 +186,46 @@ async def finish_without_result(lease: Lease, *, status: str, error_code: str | 
     result = await get_analysis_runs_col().update_one(
         _owned_filter(lease, now), {"$set": fields, "$inc": {"state_version": 1}})
     return result.modified_count == 1
+
+
+@dataclass
+class Liveness:
+    """What the background heartbeat learned while a stage was working."""
+    lost: bool = False
+    cancel: bool = False
+    beats: int = 0
+    _stop: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+@contextlib.asynccontextmanager
+async def keep_alive(lease: Lease, *, every: timedelta = HEARTBEAT_EVERY):
+    """Heartbeat `lease` in the background for the duration of a stage.
+
+    The stage checks `alive.lost` / `alive.cancel` when its work returns. It
+    is advisory -- the fenced commit is still the authority -- but it lets a
+    worker stop early instead of finishing work nobody can publish.
+    """
+    alive = Liveness()
+
+    async def beat():
+        while not alive._stop.is_set():
+            try:
+                await asyncio.wait_for(alive._stop.wait(), timeout=every.total_seconds())
+                return
+            except TimeoutError:
+                pass
+            outcome = await heartbeat(lease)
+            alive.beats += 1
+            if outcome == "lost":
+                alive.lost = True
+                return
+            if outcome == "cancel":
+                alive.cancel = True
+
+    task = asyncio.create_task(beat())
+    try:
+        yield alive
+    finally:
+        alive._stop.set()
+        with contextlib.suppress(Exception):
+            await task
