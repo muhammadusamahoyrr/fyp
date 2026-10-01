@@ -3,20 +3,28 @@
 Offline and deterministic: the library is a committed file built from pinned
 official sources (scripts/build_analyzer_authorities.py). Re-checking it
 against the live publishers is the opt-in `network` test in test_live_tier.py.
+
+The last test is the full lifecycle of the REAL Punjab tenancy pack through
+the HTTP API, with an approval that exists only in the test database:
+qualification-bound approval, the pack running, the report freezing what it
+applied, and each way the approval stops counting. Replica set.
 """
 from __future__ import annotations
 
 import hashlib
 import importlib.util
 import re
+import uuid
 from pathlib import Path
 
 import pytest
 import yaml
 
-from app.services.analyzer import authorities, playbook_engine as engine
+from app.services.analyzer import authorities, playbook_engine as engine, runner
 from app.services.analyzer.authorities import AuthorityError
 from app.services.analyzer.playbook_dsl import PlaybookError
+from tests._analyzer_support import http  # noqa: F401 -- fixture
+from tests.test_analyzer_report import to_analysis
 
 BACKEND = Path(__file__).resolve().parents[1]
 RAW = authorities.LIBRARY_PATH.read_text(encoding="utf-8")
@@ -120,3 +128,148 @@ def test_the_authorities_hash_follows_only_the_cited_text(tmp_path):
     assert after["tenancy_punjab"] != before["tenancy_punjab"]          # cites s.7(2), 7(3)
     assert after["nda"] == before["nda"] and after["employment"] == before["employment"]
 
+
+# ── the real tenancy pack, end to end ────────────────────────────────────────
+
+APPROVAL_COLLECTIONS = ("analysis_playbook_approvals", "analysis_reviewer_qualifications",
+                        "analysis_approval_audit")
+
+
+@pytest.fixture
+async def lifecycle(http, mongo_transactional):
+    db = mongo_transactional
+    for name in APPROVAL_COLLECTIONS:
+        await db[name].delete_many({})
+    await db["analysis_runs"].delete_many({"is_open": True})
+    yield http, db
+    for name in APPROVAL_COLLECTIONS:
+        await db[name].delete_many({})
+
+
+async def person(db, role="lawyer"):
+    uid = f"user-{uuid.uuid4().hex[:8]}"
+    await db["users"].insert_one({"_id": uid, "email": f"{uid}@example.com", "role": role,
+                                  "lawyer_profile": {"kyc_status": "approved"}})
+    return {"_id": uid, "role": role, "is_active": True}
+
+
+async def as_(actor, who, call):
+    owner = dict(actor)
+    actor.clear(); actor.update(who)
+    try:
+        return await call
+    finally:
+        actor.clear(); actor.update(owner)
+
+
+async def report_for(client):
+    created = await to_analysis(client)
+    assert await runner.process_one("w1") == "done"
+    return (await client.get(f"/documents/analyses/runs/{created['run_id']}/report")).json()
+
+
+def tenancy_status(report):
+    return {p["pack_id"]: p for p in report["packs"]}["tenancy_punjab"]
+
+
+async def test_the_real_tenancy_pack_from_approval_to_withdrawal(lifecycle, tmp_path):
+    (client, actor), db = lifecycle
+    base = "/documents/analyses"
+    admin, nda_lawyer, tenancy_lawyer = await person(db, "admin"), await person(db), await person(db)
+    for who, qualification in ((nda_lawyer, "pk.contract.nda"), (tenancy_lawyer, "pk.punjab.tenancy")):
+        r = await as_(actor, admin, client.post(f"{base}/reviewer-qualifications", json={
+            "user_id": who["_id"], "qualification": qualification, "basis": "test grant"}))
+        assert r.status_code == 201, r.text
+    tenancy_grant = r.json()["grant_id"]
+
+    # The reviewer reads the pack AND the official text it cites.
+    review = (await as_(actor, tenancy_lawyer, client.get(f"{base}/playbooks/tenancy_punjab"))).json()
+    cited = {(c["statute"], c["section"]) for c in review["cited_provisions"]}
+    assert ("Registration Act 1908", "17(1)") in cited and ("Transfer of Property Act 1882", "1") in cited
+    assert all(c["source"]["url"].startswith("https://") for c in review["cited_provisions"])
+    body = {"content_hash": review["content_hash"], "authorities_hash": review["authorities_hash"],
+            "reviewer_role": "Advocate High Court (test)"}
+
+    assert tenancy_status(await report_for(client))["status"] == "awaiting_approval"
+
+    # Wrong qualification: refused.
+    r = await as_(actor, nda_lawyer, client.post(f"{base}/playbooks/tenancy_punjab/approvals", json=body))
+    assert r.status_code == 422 and r.json()["error"]["code"] == "reviewer_not_qualified"
+    # Right qualification, but quoting cited text that is not what would run: refused.
+    r = await as_(actor, tenancy_lawyer, client.post(f"{base}/playbooks/tenancy_punjab/approvals",
+                                                     json={**body, "authorities_hash": "0" * 64}))
+    assert r.status_code == 409 and r.json()["error"]["code"] == "hash_mismatch"
+    r = await as_(actor, tenancy_lawyer, client.post(f"{base}/playbooks/tenancy_punjab/approvals", json=body))
+    assert r.status_code == 201, r.text
+
+    # Approved: the correct pack runs, and the report freezes what it applied.
+    report = await report_for(client)
+    applied = tenancy_status(report)
+    assert applied["status"] == "applied"
+    assert (applied["content_hash"], applied["authorities_hash"]) == \
+           (review["content_hash"], review["authorities_hash"])
+    legal = [f for f in report["findings"] if f["pack_id"] == "tenancy_punjab"]
+    assert legal and all(f["labels"] == ["Legal playbook applied", "Applicability requires lawyer review"]
+                         for f in legal)
+    rate = next(f for f in legal if f["check_id"] == "s6_rate_of_rent")
+    assert rate["check_result"] == "present"
+    [source] = rate["authority"]
+    assert source["located"] and source["section"] == "6(1)(d)" and source["pages"] == [5]
+    assert source["source"]["publisher"] == "Punjab Code, Government of the Punjab"
+    frozen_run = report["id"]
+    frozen = (await client.get(f"{base}/runs/{frozen_run}/report")).json()
+
+    # The official text it cites changes: the pack stops running...
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(authorities, "LIBRARY_PATH", edited_library(
+            tmp_path, "Punjab Rented Premises Act 2009", "6",
+            authorities.load_library().resolve("Punjab Rented Premises Act 2009", "6").text + " (amended)"))
+        assert tenancy_status(await report_for(client))["status"] == "awaiting_approval"
+        # ...and the earlier report still says exactly what was applied then.
+        assert (await client.get(f"{base}/runs/{frozen_run}/report")).json() == frozen
+
+    # The pack itself is edited: it stops running.
+    edited = tmp_path / "packs"
+    edited.mkdir()
+    for name in ("general.yaml", "tenancy_punjab.yaml"):
+        (edited / name).write_text((engine.PLAYBOOK_DIR / name).read_text(encoding="utf-8"), encoding="utf-8")
+    with open(edited / "tenancy_punjab.yaml", "a", encoding="utf-8") as f:
+        f.write("# edited\n")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(engine, "PLAYBOOK_DIR", edited)
+        assert tenancy_status(await report_for(client))["status"] == "awaiting_approval"
+    assert tenancy_status(await report_for(client))["status"] == "applied"
+
+    # The reviewer's qualification is revoked: the approval is withdrawn with it.
+    r = await as_(actor, admin, client.post(f"{base}/reviewer-qualifications/{tenancy_grant}/revoke",
+                                            json={"reason": "test revocation"}))
+    assert r.status_code == 200 and len(r.json()["approvals_deactivated"]) == 1
+    assert tenancy_status(await report_for(client))["status"] == "awaiting_approval"
+
+    audit = (await as_(actor, admin, client.get(f"{base}/approval-audit"))).json()
+    assert [a["action"] for a in audit][:2] == ["revoke_qualification", "approve_playbook"]
+
+
+async def test_reapproval_against_new_cited_text_supersedes_the_stale_one(lifecycle, tmp_path, monkeypatch):
+    from app.services.analyzer import approvals
+
+    (_, _), db = lifecycle
+    admin, lawyer = await person(db, "admin"), await person(db)
+    await approvals.grant_qualification(admin=admin, user_id=lawyer["_id"],
+                                        qualification="pk.punjab.tenancy", basis="test")
+    pack = next(p for p in engine.load_packs() if p.id == "tenancy_punjab")
+    first = await approvals.record_approval(reviewer=lawyer, pack_id=pack.id, content_hash=pack.content_hash,
+                                            authorities_hash=pack.authorities_hash, reviewer_role="r")
+    monkeypatch.setattr(authorities, "LIBRARY_PATH", edited_library(
+        tmp_path, "Registration Act 1908", "17(1)",
+        authorities.load_library().resolve("Registration Act 1908", "17(1)").text + " (amended)"))
+    newer = next(p for p in engine.load_packs() if p.id == "tenancy_punjab")
+    assert newer.content_hash == pack.content_hash and newer.authorities_hash != pack.authorities_hash
+    second = await approvals.record_approval(reviewer=lawyer, pack_id=pack.id, content_hash=newer.content_hash,
+                                             authorities_hash=newer.authorities_hash, reviewer_role="r")
+    rows = {a["_id"]: a async for a in db["analysis_playbook_approvals"].find({"pack_id": pack.id})}
+    assert rows[first["_id"]]["active"] is False
+    assert rows[first["_id"]]["revoke_reason"] == "superseded: cited text changed"
+    assert rows[second["_id"]]["active"] is True
+    [entry] = [a async for a in db["analysis_approval_audit"].find({"approval_id": second["_id"]})]
+    assert entry["superseded"] == [first["_id"]]
