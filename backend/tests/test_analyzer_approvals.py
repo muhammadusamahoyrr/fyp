@@ -104,11 +104,11 @@ async def test_approval_needs_the_packs_exact_qualification(env):
     for who in (unqualified, nda_only):
         with pytest.raises(UploadRejected, match="needs the qualification pk.punjab.tenancy"):
             await approvals.record_approval(reviewer=who, pack_id=pack.id,
-                                            content_hash=pack.content_hash, reviewer_role="r")
+                                            content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
     assert (await statuses())["test_legal"] == "awaiting_approval"
 
     record = await approvals.record_approval(reviewer=tenancy, pack_id=pack.id,
-                                             content_hash=pack.content_hash,
+                                             content_hash=pack.content_hash, authorities_hash=pack.authorities_hash,
                                              reviewer_role="Advocate, Punjab")
     assert record["qualification"] == "pk.punjab.tenancy" and record["active"] is True
     assert (await statuses())["test_legal"] == "applied"
@@ -124,18 +124,18 @@ async def test_refusals_hash_general_and_duplicates(env):
     pack = legal_pack()
     with pytest.raises(AnalyzerConflict, match="changed since it was reviewed"):
         await approvals.record_approval(reviewer=lawyer, pack_id=pack.id,
-                                        content_hash="0" * 64, reviewer_role="r")
+                                        content_hash="0" * 64, authorities_hash=pack.authorities_hash, reviewer_role="r")
     with pytest.raises(UploadRejected, match="no legal claim"):
         await approvals.record_approval(reviewer=lawyer, pack_id="general",
-                                        content_hash=pack.content_hash, reviewer_role="r")
+                                        content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
     with pytest.raises(AnalyzerNotFound):
         await approvals.record_approval(reviewer=lawyer, pack_id="nope",
-                                        content_hash=pack.content_hash, reviewer_role="r")
+                                        content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
     await approvals.record_approval(reviewer=lawyer, pack_id=pack.id,
-                                    content_hash=pack.content_hash, reviewer_role="r")
+                                    content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
     with pytest.raises(AnalyzerConflict, match="already approved"):
         await approvals.record_approval(reviewer=lawyer, pack_id=pack.id,
-                                        content_hash=pack.content_hash, reviewer_role="r")
+                                        content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
 
 
 async def test_an_audit_failure_rolls_the_approval_back(env, monkeypatch):
@@ -151,7 +151,7 @@ async def test_an_audit_failure_rolls_the_approval_back(env, monkeypatch):
     monkeypatch.setattr(approvals, "_audit", boom)
     with pytest.raises(RuntimeError):
         await approvals.record_approval(reviewer=lawyer, pack_id=pack.id,
-                                        content_hash=pack.content_hash, reviewer_role="r")
+                                        content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
     monkeypatch.undo()
     assert await db["analysis_playbook_approvals"].count_documents({}) == 0, \
         "an approval committed without its audit row"
@@ -165,14 +165,14 @@ async def test_revoking_an_approval_and_approving_again(env):
                                             qualification="pk.punjab.tenancy", basis="b")
     pack = legal_pack()
     record = await approvals.record_approval(reviewer=lawyer, pack_id=pack.id,
-                                             content_hash=pack.content_hash, reviewer_role="r")
+                                             content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
     with pytest.raises(AnalyzerNotFound):            # someone else's approval
         await approvals.revoke_approval(actor=other, approval_id=record["_id"], reason="no")
     await approvals.revoke_approval(actor=lawyer, approval_id=record["_id"], reason="re-reviewing")
     assert (await statuses())["test_legal"] == "awaiting_approval"
     # The same text can be approved again; the revoked record stays as history.
     again = await approvals.record_approval(reviewer=other, pack_id=pack.id,
-                                            content_hash=pack.content_hash, reviewer_role="r")
+                                            content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
     await approvals.revoke_approval(actor=admin, approval_id=again["_id"], reason="admin")
     assert await db["analysis_playbook_approvals"].count_documents({"active": False}) == 2
 
@@ -184,7 +184,7 @@ async def test_revoking_a_qualification_withdraws_its_approvals(env):
                                                 qualification="pk.punjab.tenancy", basis="b")
     pack = legal_pack()
     record = await approvals.record_approval(reviewer=lawyer, pack_id=pack.id,
-                                             content_hash=pack.content_hash, reviewer_role="r")
+                                             content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
     assert (await statuses())["test_legal"] == "applied"
     outcome = await approvals.revoke_qualification(admin=admin, grant_id=grant["_id"],
                                                    reason="enrolment lapsed")
@@ -195,7 +195,7 @@ async def test_revoking_a_qualification_withdraws_its_approvals(env):
     assert audit[0]["approvals_deactivated"] == [record["_id"]]
     with pytest.raises(UploadRejected, match="needs the qualification"):
         await approvals.record_approval(reviewer=lawyer, pack_id=pack.id,
-                                        content_hash=pack.content_hash, reviewer_role="r")
+                                        content_hash=pack.content_hash, authorities_hash=pack.authorities_hash, reviewer_role="r")
 
 
 # ── the HTTP surface and its roles ───────────────────────────────────────────
@@ -248,7 +248,8 @@ async def test_the_review_endpoints_enforce_roles_end_to_end(api):
     text = (await client.get("/playbooks/test_legal")).json()
     assert text["content_hash"] == legal["content_hash"] and "Rent Registrar" in text["text"]
     approved = await client.post("/playbooks/test_legal/approvals", json={
-        "content_hash": text["content_hash"], "reviewer_role": "Advocate, Punjab"})
+        "content_hash": text["content_hash"], "authorities_hash": text["authorities_hash"],
+        "reviewer_role": "Advocate, Punjab"})
     assert approved.status_code == 201, approved.text
     listing = (await client.get("/playbooks")).json()
     assert len(next(p for p in listing if p["id"] == "test_legal")["approvals"]) == 1

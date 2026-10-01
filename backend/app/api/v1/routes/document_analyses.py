@@ -210,6 +210,8 @@ require_reviewer = role_required(UserRole.LAWYER, UserRole.ADMIN)
 class ApprovalBody(BaseModel):
     #: The hash of the text the reviewer READ (from GET /playbooks/{id}).
     content_hash: str = Field(min_length=64, max_length=64)
+    #: The hash of the official text it cites, from the same response.
+    authorities_hash: str = Field(min_length=64, max_length=64)
     #: The capacity in which they approve, e.g. "Advocate High Court, Punjab".
     reviewer_role: str = Field(min_length=1, max_length=200)
 
@@ -249,9 +251,10 @@ async def approve_playbook(pack_id: str, body: ApprovalBody = Body(...),
     _require_available()
     record = await _run(approvals.record_approval(
         reviewer=current_user, pack_id=pack_id, content_hash=body.content_hash,
-        reviewer_role=body.reviewer_role))
+        authorities_hash=body.authorities_hash, reviewer_role=body.reviewer_role))
     return {"approval_id": record["_id"], "pack_id": record["pack_id"],
-            "content_hash": record["content_hash"], "approved_at": record["approved_at"]}
+            "content_hash": record["content_hash"], "authorities_hash": record["authorities_hash"],
+            "approved_at": record["approved_at"]}
 
 
 @router.post("/playbook-approvals/{approval_id}/revoke")

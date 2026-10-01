@@ -1,9 +1,10 @@
 # Punjab tenancy checklist -- DRAFT FOR LAWYER REVIEW. NOT APPROVED.
 #
 # Runs only after a reviewer holding pk.punjab.tenancy approves this exact
-# text (DOC_ANALYZER_PLAN.md §4.5a). Every authority is quoted verbatim in
-# SOURCES.md with where it was read; the reviewer must check each against the
-# current official text, including amendments, before approving.
+# text AND the official text it cites (DOC_ANALYZER_PLAN.md §4.5a). Every
+# authority resolves to the authority library (authority_library.yaml), cut
+# from the official Punjab Code / Pakistan Code publications; the reviewer
+# must still confirm each is current, including amendments, before approving.
 #
 # Wording rules: a check reports whether the document APPEARS to contain an
 # item ("Found" / "Not located automatically"). It never says the item is
@@ -167,6 +168,7 @@ checks:
     authority:
       - {statute: Registration Act 1908, section: "17(1)(d)"}
       - {statute: Transfer of Property Act 1882, section: "107"}
+      - {statute: Transfer of Property Act 1882, section: "1"}
 
   - id: registration_year_to_year
     kind: reminder

@@ -204,6 +204,18 @@ function ReportView({ t, runId }) {
                                     Cites: {f.authority.map(x => `${x.statute}, s.${x.section}`).join("; ")}
                                 </div>
                             )}
+                            {f.authority?.some(x => x.located && x.source?.url) && (
+                                <div style={{ fontSize: 12, color: t.textMuted }}>
+                                    {f.authority.filter(x => x.located && x.source?.url).map(x => (
+                                        <div key={`${x.statute}.${x.section}`} data-source>
+                                            Official text of s.{x.section}:{" "}
+                                            <a href={x.source.url} target="_blank" rel="noopener noreferrer">
+                                                {x.source.publisher}, p.{x.pages.join(", ")}
+                                            </a>{" "}(read {x.source.retrieved})
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                             {f.evidence.length > 0 && <Evidence t={t} items={f.evidence} />}
                         </Card>
                     ))}

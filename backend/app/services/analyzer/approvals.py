@@ -9,8 +9,10 @@ accepted only from a user who is
     basis (enrolment, practice area, ...).
 
 WHAT IS APPROVED IS ONE EXACT TEXT. The approval binds the pack id to the
-SHA-256 of the pack's text as it is in the repository NOW. Any edit changes
-the hash and the pack stops running until it is approved again.
+SHA-256 of the pack's text as it is in the repository NOW, and to the hash
+of the official provisions it cites (authorities.py). An edit to either
+changes a hash and the pack stops running until it is approved again; the
+re-approval supersedes the stale one, audited, in the same transaction.
 
 EVERY CHANGE IS AUDITED. Granting or revoking a qualification, approving a
 pack and revoking an approval each write an append-only audit row in the
@@ -130,12 +132,13 @@ def _legal_pack(pack_id: str):
 
 
 async def record_approval(*, reviewer: dict, pack_id: str, content_hash: str,
-                          reviewer_role: str) -> dict:
+                          authorities_hash: str, reviewer_role: str) -> dict:
     """The CALLER approves, as themselves. Never on someone else's behalf."""
     pack = _legal_pack(pack_id)
-    if pack.content_hash != content_hash:
+    if pack.content_hash != content_hash or pack.authorities_hash != authorities_hash:
         # The reviewer read a different text from the one that would run.
-        raise AnalyzerConflict("hash_mismatch", "The playbook has changed since it was reviewed.")
+        raise AnalyzerConflict("hash_mismatch", "The playbook, or the official text it cites, "
+                                                "has changed since it was reviewed.")
     reviewer_role = _clean_text(reviewer_role, "reviewer_role", 200)
     user = await get_users_col().find_one({"_id": reviewer["_id"]})
     if (user is None or user.get("role") != "lawyer"
@@ -147,14 +150,29 @@ async def record_approval(*, reviewer: dict, pack_id: str, content_hash: str,
         raise UploadRejected("reviewer_not_qualified",
                              f"Approving this playbook needs the qualification {pack.required_qualification}.")
     record = {"_id": uuid.uuid4().hex, "pack_id": pack.id, "version": pack.version,
-              "content_hash": pack.content_hash, "qualification": pack.required_qualification,
+              "content_hash": pack.content_hash, "authorities_hash": pack.authorities_hash,
+              "authority_library_hash": pack.authority_library_hash,
+              "qualification": pack.required_qualification,
               "qualification_grant_id": grant["_id"], "reviewer_user_id": user["_id"],
               "reviewer_role": reviewer_role, "approved_at": _now(), "active": True}
 
     async def op(session):
+        # The same pack text approved against OLDER official text: that
+        # approval no longer counts (its authorities hash is stale), and is
+        # superseded here rather than left to block this one.
+        stale = [a["_id"] async for a in get_analysis_playbook_approvals_col().find(
+            {"pack_id": pack.id, "content_hash": pack.content_hash, "active": True,
+             "authorities_hash": {"$ne": pack.authorities_hash}}, {"_id": 1}, session=session)]
+        if stale:
+            await get_analysis_playbook_approvals_col().update_many(
+                {"_id": {"$in": stale}, "active": True},
+                {"$set": {"active": False, "revoked_at": record["approved_at"],
+                          "revoked_by": user["_id"], "revoke_reason": "superseded: cited text changed"}},
+                session=session)
         await get_analysis_playbook_approvals_col().insert_one(record, session=session)
         await _audit(session, actor=user, action="approve_playbook", pack_id=pack.id,
                      version=pack.version, content_hash=pack.content_hash,
+                     authorities_hash=pack.authorities_hash, superseded=stale,
                      approval_id=record["_id"], qualification=pack.required_qualification)
 
     try:
@@ -195,18 +213,19 @@ async def list_playbooks() -> list[dict]:
     packs = load_packs()
     active = {}
     async for a in get_analysis_playbook_approvals_col().find({"active": True}):
-        active.setdefault((a["pack_id"], a["content_hash"]), []).append(
+        active.setdefault((a["pack_id"], a["content_hash"], a.get("authorities_hash")), []).append(
             {"approval_id": a["_id"], "reviewer_user_id": a["reviewer_user_id"],
              "reviewer_role": a["reviewer_role"], "approved_at": a["approved_at"]})
     return [{"id": p.id, "version": p.version, "title": p.title, "scope": p.scope,
              "requires_approval": p.requires_approval,
              "required_qualification": p.required_qualification,
-             "content_hash": p.content_hash,
-             "approvals": active.get((p.id, p.content_hash), [])} for p in packs]
+             "content_hash": p.content_hash, "authorities_hash": p.authorities_hash,
+             "approvals": active.get((p.id, p.content_hash, p.authorities_hash), [])} for p in packs]
 
 
 def playbook_text(pack_id: str) -> dict:
-    """The exact text a reviewer reads, and the hash an approval must quote."""
+    """The exact text a reviewer reads -- the pack AND the official text of
+    every provision it cites -- and the two hashes an approval must quote."""
     pack = next((p for p in load_packs() if p.id == pack_id), None)
     if pack is None:
         raise AnalyzerNotFound("No such playbook.")
@@ -216,8 +235,29 @@ def playbook_text(pack_id: str) -> dict:
         raw = path.read_text(encoding="utf-8")
         if engine.content_hash(raw) == pack.content_hash:
             return {"id": pack.id, "version": pack.version, "content_hash": pack.content_hash,
-                    "required_qualification": pack.required_qualification, "text": raw}
+                    "authorities_hash": pack.authorities_hash,
+                    "required_qualification": pack.required_qualification, "text": raw,
+                    "cited_provisions": _cited_provisions(pack)}
     raise AnalyzerNotFound("No such playbook.")
+
+
+def _cited_provisions(pack) -> list[dict]:
+    from app.services.analyzer import authorities
+
+    library, seen, out = authorities.load_library(), set(), []
+    for check in pack.checks:
+        for a in check.authority:
+            provision = library.resolve(a["statute"], a["section"])
+            key = (provision.statute, provision.section)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"statute": provision.statute, "section": provision.section,
+                        "heading": provision.heading, "pages": list(provision.pages),
+                        "text": provision.text, "text_sha256": provision.text_sha256,
+                        "source": {k: provision.source[k] for k in (
+                            "publisher", "url", "listing_url", "sha256", "retrieved")}})
+    return out
 
 
 async def audit_trail(*, limit: int = 100) -> list[dict]:

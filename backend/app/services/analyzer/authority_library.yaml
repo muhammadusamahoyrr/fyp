@@ -1,0 +1,250 @@
+# Authority library for the Document Analyzer -- GENERATED, DO NOT EDIT BY HAND.
+# Built by scripts/build_analyzer_authorities.py from the pinned official
+# sources below; loading verifies every text_sha256. To change a provision,
+# change the pinned source and rebuild: approvals bound to the old text stop
+# counting (see app/services/analyzer/authorities.py).
+version: 1
+sources:
+  punjab_rented_premises_act_2009:
+    statute: Punjab Rented Premises Act 2009
+    jurisdiction: punjab
+    publisher: Punjab Code, Government of the Punjab
+    url: https://punjabcode.punjab.gov.pk/uploads/articles/THE_PUNJAB_RENTED_PREMISES_ACT_2009.doc.pdf
+    listing_url: https://punjabcode.punjab.gov.pk/en/show_article/VGEFMQQzVm8-
+    sha256: dc8e42971dfd2bd770c08f80b2b079ccaa6db54079a7b45adc40ee64cfc26962
+    retrieved: '2026-10-01'
+    official: true
+  registration_act_1908:
+    statute: Registration Act 1908
+    jurisdiction: federal
+    publisher: Pakistan Code, Ministry of Law and Justice
+    url: https://pakistancode.gov.pk/pdffiles/administrator0f29bc9f1e3dfed37c0034eed1e29d53.pdf
+    listing_url: null
+    sha256: b9f6a700e43ad5824252330b41abd675690035b2347da61978f08d486fa40674
+    retrieved: '2026-10-01'
+    official: true
+  transfer_of_property_act_1882:
+    statute: Transfer of Property Act 1882
+    jurisdiction: federal
+    publisher: Pakistan Code, Ministry of Law and Justice
+    url: https://pakistancode.gov.pk/pdffiles/administrator77923ce792b475e339e1f46ba0442da3.pdf
+    listing_url: null
+    sha256: d75669bc902f55b55b0bde6f5ddc1002bb891a834d89a2d56b840462a8449185
+    retrieved: '2026-10-01'
+    official: true
+  contract_act_1872:
+    statute: Contract Act 1872
+    jurisdiction: federal
+    publisher: Pakistan Code, Ministry of Law and Justice
+    url: https://pakistancode.gov.pk/pdffiles/administrator8332a6df32386960ac7d81a5cf7aade2.pdf
+    listing_url: null
+    sha256: 930c60f67216530fab28f37d439ad3c3ae941dc918c914f2e7c18ddbabb7bfbd
+    retrieved: '2026-10-01'
+    official: true
+provisions:
+- statute: Punjab Rented Premises Act 2009
+  section: '5'
+  heading: Agreement between landlord and tenant
+  source: punjab_rented_premises_act_2009
+  pages:
+  - 4
+  - 5
+  text: |-
+    5. Agreement between landlord and tenant.– (1) A landlord shall not let out a
+    premises to a tenant except by a tenancy agreement.
+    (2) A landlord shall present the tenancy agreement before the Rent
+    Registrar.
+    (3) The Rent Registrar shall enter the particulars of the tenancy in a
+    register, affix his official seal on the tenancy agreement, retain a copy thereof and
+    return the original tenancy agreement to the landlord.
+    (4) The entry of particulars of the tenancy shall not absolve the landlord or
+    the tenant of their liability to register the tenancy agreement under the law relating to
+    registration of documents.
+    (5) A tenancy agreement entered in the office of a Rent Registrar or a
+    certified copy thereof shall be a proof of the relationship of landlord and tenant.
+    (6) Any agreement which may be executed between the landlord and the
+    tenant in respect of the premises shall be presented before the Rent Registrar in the
+    same manner as provided in sub-section (2).
+  text_sha256: de6771742e3b134b3c3768b2e792f830b8999c03d5d929b5bf7c21f2975db903
+- statute: Punjab Rented Premises Act 2009
+  section: '6'
+  heading: Contents of tenancy agreement
+  source: punjab_rented_premises_act_2009
+  pages:
+  - 5
+  text: |-
+    6. Contents of tenancy agreement.– (1) A tenancy agreement shall contain, as
+    far as possible, the following:
+    (a) particulars of the landlord and the tenant;
+    (b) description of the premises;
+    (c) period of the tenancy;
+    (d) rate of rent, rate of enhancement, due date and mode of payment of
+    rent;
+    (e) particulars of the bank account of the landlord, if the rent is to be paid
+    through a bank;
+    (f) the purpose for which the premises is let out; and
+    (g) amount of advance rent, security or pagri, if any.
+    (2) If the tenure of the tenancy is fixed but a rent is fixed only for a part of
+    the tenure, in the absence of any stipulation to the contrary in the tenancy
+    agreement, the rent shall be deemed to remain the same for the whole of the tenure.
+  text_sha256: 65bf6b5ffe03ebb0fd03566763b98a31ecf7187de27ef35807c3dd68c6211bea
+- statute: Punjab Rented Premises Act 2009
+  section: '7'
+  heading: Payment of rent
+  source: punjab_rented_premises_act_2009
+  pages:
+  - 5
+  text: |-
+    7. Payment of rent.– (1) A tenant shall pay or tender the rent to the landlord in the
+    mode and by the date mentioned in the tenancy agreement.
+    (2) If the date of payment is not mentioned in the tenancy agreement, a
+    tenant shall pay or tender the rent not later than tenth day of the following month.
+    (3) If the mode of payment is not mentioned in the tenancy agreement, a
+    tenant shall pay or tender the rent to the landlord through money order or deposit in
+    the bank account of the landlord.
+  text_sha256: 10b2032a7af11467f817bbbea301bf9b518f69a2fd81af190646aa1803accac4
+- statute: Registration Act 1908
+  section: 17(1)
+  heading: Documents of which registration is compulsory
+  source: registration_act_1908
+  pages:
+  - 10
+  text: |-
+    17. Documents of which registration is compulsory.— (1) The following documents shall
+    be registered, if the property to which they relate is situate in a district in which, and if they have been
+    executed on or after the date on which, Act No. XVI of 1864, or the Indian Registration Act, 1866
+    (XX of 1866), or the Indian Registration Act, 1871 (VIII of 1871), or the Indian Registration Act, 1877
+    (III of 1877), or this Act came or comes into force, namely:—
+    (a) instruments of gift of immoveable property;
+    (b) other non-testamentary instruments which purport or operate to create, declare,
+    assign, limit or extinguish, whether in present or in future, any right, title or
+    interest, whether vested or contingent, of the value of one hundred rupees and
+    upwards, to or in immoveable property;
+    1[Explanation.___ In the case of an assignment of a mortgage the consideration for the deed
+    of assignment shall be deemed to be the value for registration;]
+    1[(ba) an instrument which grants power to an attorney or which constitutes an
+    agreement to create, declare, assign, limit or extinguish, by way of sale, any
+    right, title or interest of the value of one hundred rupees and upward, to or in
+    immovable property;]
+    (c) non-testamentary instruments 3[(other than the acknowledgment of a receipt or
+    payment made in respect of any transaction to which an instrument registered
+    under clause (o) relates)] which acknowledge the receipt or payment of any
+    consideration on account of the creation, declaration, assignment, limitation or
+    extinction of any such right, title or interest; and
+    (d) leases of immoveable property from year to year, or for any term exceeding one
+    year, or reserving a yearly rent;
+    4[(e) non-testamentary instruments transferring or assigning any decree or order of a
+    Court or any award when such decree or order or award purports or operates to
+    create, declare, assign, limit or extinguish, whether in present or in future, any
+    right, title or interest, whether vested or contingent, of the value of one hundred
+    rupees and upwards, to or in immoveable property:]
+    Provided that the 5[Provincial Government] may, by order published in the 6[official Gazette],
+    exempt from the operation of this sub-section any leases executed in any district, or part of a district,
+    the terms granted by which do not exceed five years and the annual rents reserved by which do not
+    exceed fifty rupees.
+  text_sha256: bc85bc93c4d5bace310535de0012c6d51280f966544ac4fd33bdaa8ab38fec1d
+- statute: Transfer of Property Act 1882
+  section: '1'
+  heading: Short title, commencement and extent
+  source: transfer_of_property_act_1882
+  pages:
+  - 8
+  - 9
+  text: |-
+    1. Short title.—This Act may be called the Transfer of Property Act, 1882.
+    Commencement. It shall come into force on the first day of July, 1882.
+    2[* * * * * * *]
+    Extent. 3[ 2[This] Act or any Part thereof may by notification in the official Gazette be
+    extended to the whole or any part of 2[a Province] 4[by the Provincial Government]].
+    5[And any 6[Provincial Government] may, 7[* * *] from time to time, by notification in the
+    6[official Gazette], exempt either retrospectively or prospectively, any part of the territories
+    administered by such 5[Provincial Government] from all or any of the following provisions, namely:__
+    Sections 54, paragraphs 2 and 3, 59, 107 and 123.]
+    1This Act has been extended with effect from 1st January, 1915, to the Province of Sindh, see Bom. R. & O.
+    Ss. 54, 107 and 123 have been extended from 6th May, 1935, to all Municipalities in the Punjab and all notified areas declared and notified under s. 241
+    of the Punjab Municipal Act, 1911, see Punjab Gazette Extraordinary, 1925, p. 27.
+    S. 54, paras, 2 and 3, and ss. 59, 107 and 123 extend to every cantonment in the Provinces, etc., see s. 287 of the Cantonments Act. 1924 (Act No. II of
+    1924). It has been rep. as to Crown Grants by the Crown Grants Act, 1895 (Act No. XV of 1895), and amended in Sind by Sind Act No. XIV of 1939,
+    s.2.
+    This Act shall be deemed to have been amended in its application to the Province of Sind, see Sind Act No. XIV of 1939.
+    The Act has been extended, in respect of non agricultural lands, to Baluchistan States Union and the Khairpur State by G.G.Os. 4 and 5 of 1953, as
+    amended respectively.
+    The Act has been and shall be deemed to have been brought into force in Gwadur with effect from the 8th Septemter, 1958, by the Gwadur (Application
+    of Central Laws) Ordinance, 1960 (Ordinance No. XXXVII of 1960), s. 2.
+    The Act, as in force in the North West Frontier Province immediately before the commencement of N.W.F.P. Regulation No. 2 of 1974, has been
+    applied to the Provincially Administered Tribal Areas of Chitral, Dir, Kalam, Swat and Malakand protected Area, by N.W.F.P. Regulation, No. 2 of
+    1974, s. 3.
+    2Omitted and subs. by the Federal Adaptation of Laws Order, 1975 (President’s Order No. 4 of 1975), Art. 2 and Sch.
+    3Subs. by the Central Laws (Statute Reform) Ordinance, 1960 (Ordinance No. XXI of 1960), s. 3 and 2nd Sch.
+    4Subs. by A. O., 1964, Art. 2 and Sch.
+    5Subs. by Act No. III of 1885, s. 1.
+    6Subs. by A. O., 1937.
+    7Rep. by the Devolution Act, 1920 (Act No. XXXVIII of 1920), s. 2 and Sch. 1.
+    1[Notwithstanding anything in the foregoing part of this section, sections 54, paragraphs 2 and
+    3, 59, 107 and 123 shall not extend or be extended to any district or tract of country for the time being
+    excluded from the operation of the Registration Act, 2[1908(XVI of 1908)], under the power conferred
+    by the first section of that Act or otherwise.]
+  text_sha256: c0f593887894145677c135ca261a89d3a68fcf958e30157ee086422ac7c245af
+- statute: Transfer of Property Act 1882
+  section: '107'
+  heading: Leases how made
+  source: transfer_of_property_act_1882
+  pages:
+  - 46
+  text: |-
+    107. Leases how made.—A lease of immoveable property from year to year, or for any term
+    exceeding one year, or reserving a yearly rent, can be made only by a registered instrument.
+    3[All other leases of immoveable property may be made either by a registered instrument or by
+    oral agreement accompanied by delivery of possession.]
+    1[Where a lease of immoveable property is made by a registered instrument, such instrument
+    or, where there are more instruments than one, each such instrument shall be executed by both the
+    lessor and the lessee:]
+    3[Provided that the 4[Provincial Government] may, 4[* * *] from time to time, by notification
+    in the 4[official Gazette], direct that leases of immoveable property, other than leases from year to year,
+    or for any term exceeding one year, or reserving a yearly rent, or any class of such leases, may be made
+    by unregistered instrument or by oral agreement without delivery of possession.]
+  text_sha256: e4372557478775abd50a8e37eea9e37e1ab209e73c648f63629208ff54bd9f14
+- statute: Contract Act 1872
+  section: '27'
+  heading: Agreement in restraint of trade void
+  source: contract_act_1872
+  pages:
+  - 22
+  text: |-
+    27. Agreement in restraint of trade void. Every agreement by which any one is restrained
+    from exercising a lawful profession, trade or business of any kind, is to that extent void.
+    Exception 1.___Saving of agreement not to carry on business of which good-will is sold.
+    one who sells the good-will of a business may agree with the buyer to refrain from carrying on a
+    similar business, within specified local limits, so long as the buyer, or any person deriving title to the
+    good-will from him, carries on a like business therein : Provided that such limits appear to the Court
+    reasonable, regard being had to the nature of the business.
+    1[* * * * * *]
+  text_sha256: 92b25cc70955902a0e20cd131355205b075591ba539347d23358a7781f077459
+- statute: Contract Act 1872
+  section: '28'
+  heading: Agreements in restraint of legal proceedings void
+  source: contract_act_1872
+  pages:
+  - 22
+  - 23
+  text: |-
+    28. Agreements in restraint of legal proceedings void. Every agreement, by which any
+    party thereto is restricted absolutely from enforcing his rights under or in respect of any contract, by
+    the usual legal proceedings in the ordinary tribunals, or which limits the time within which he may
+    thus enforce his rights, is void to that extent.
+    Exception 1.___Saving of contract to refer to arbitration dispute that may arise.__This
+    section shall not render illegal a contract by which two or more persons agree that any dispute which
+    may arise between them in respect of any subject or class of subjects shall be referred to arbitration,
+    and that only the amount awarded in such arbitration shall be recoverable in respect of the dispute so
+    referred.
+    1Rep. by the Partnership Act, 1932 (IX of 1932), s. 73 and Sch. ll.
+    Suits barred by such Contracts. 1When such a contract has been made, a suit may be brought
+    for its specific performance, and if a suit, other than for such specific performance, or for the
+    recovery of the amount so awarded, is brought by one party to such contract against any other such
+    party in respect of any subject which they have so agreed to refer, the existence of such contract shall
+    be bar to the suit.
+    Exception 2.___Saving of contract to refer questions that have already arisen.___Nor shall
+    this section render illegal any contract in writing, by which two or more persons agree to refer to
+    arbitration any question between them which has already arisen, or affect any provision of any law in
+    force for the time being as to references to arbitration.
+  text_sha256: 512112d02b0f2d1370ba892f1e0179afcb9f6a59434aef1b2f2093797b64fedf

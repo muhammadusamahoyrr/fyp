@@ -22,6 +22,13 @@ WHAT A CHECK YIELDS (never "missing")
 Every finding carries its scope labels:
   general_review  -> "General document review"
   legal_playbook  -> "Legal playbook applied", "Applicability requires lawyer review"
+
+CITATIONS RESOLVE TO OFFICIAL TEXT (authorities.py)
+  `load_packs` resolves every citation of a legal pack against the authority
+  library; one that does not resolve makes the pack invalid. A finding stores
+  the citation together with where its text was read (publisher, URL, file
+  hash, pages, text hash), frozen at analysis time. An approval binds the
+  pack's hash AND the hash of the provisions it cites.
 """
 from __future__ import annotations
 
@@ -57,6 +64,7 @@ class Check:
     any_of: list[re.Pattern] = field(default_factory=list)
     all_of: list[re.Pattern] = field(default_factory=list)
     authority: list[dict] = field(default_factory=list)
+    sources: list[dict] = field(default_factory=list)      # resolved, set by load_packs
 
 
 @dataclass
@@ -70,6 +78,8 @@ class Pack:
     applies_if: dict | None
     checks: list[Check]
     content_hash: str
+    authorities_hash: str = ""
+    authority_library_hash: str = ""
 
 
 def content_hash(raw: str) -> str:
@@ -183,9 +193,35 @@ def parse_pack(raw_text: str, source: str = "pack") -> Pack:
                 checks=parsed, content_hash=content_hash(raw_text))
 
 
-def load_packs(directory: Path | None = None) -> list[Pack]:
+def bind_authorities(pack: Pack, library, source: str = "pack") -> Pack:
+    """Resolve every citation to the library's official text, or refuse the pack."""
+    from app.services.analyzer import authorities
+
+    cited = []
+    for check in pack.checks:
+        check.sources = []
+        for a in check.authority:
+            provision = library.resolve(a["statute"], a["section"])
+            if provision is None:
+                raise PlaybookError(f"{source}: check {check.id} cites {a['statute']} "
+                                    f"s.{a['section']}, which is not in the authority library")
+            cited.append(provision)
+            check.sources.append(authorities.snapshot(a, provision))
+    pack.authorities_hash = authorities.authorities_hash(cited)
+    pack.authority_library_hash = library.content_hash
+    return pack
+
+
+def load_packs(directory: Path | None = None, library=None) -> list[Pack]:
+    from app.services.analyzer import authorities
+
     directory = directory or PLAYBOOK_DIR          # read at call time (tests repoint it)
-    packs = [parse_pack(p.read_text(encoding="utf-8"), p.name)
+    if library is None:
+        try:
+            library = authorities.load_library()
+        except (OSError, authorities.AuthorityError) as exc:
+            raise PlaybookError(f"authority library unusable: {exc}") from None
+    packs = [bind_authorities(parse_pack(p.read_text(encoding="utf-8"), p.name), library, p.name)
              for p in sorted(directory.glob("*.yaml"))]
     ids = [p.id for p in packs]
     if len(ids) != len(set(ids)):
@@ -198,11 +234,13 @@ def load_packs(directory: Path | None = None) -> list[Pack]:
 async def approved_hashes(packs: list[Pack]) -> set[tuple[str, str]]:
     from app.db.collections import get_analysis_playbook_approvals_col
 
-    wanted = [{"pack_id": p.id, "content_hash": p.content_hash}
+    # Both hashes must match: the pack's text AND the official text it cites.
+    wanted = [{"pack_id": p.id, "content_hash": p.content_hash,
+               "authorities_hash": p.authorities_hash}
               for p in packs if p.requires_approval]
     if not wanted:
         return set()
-    return {(a["pack_id"], a["content_hash"]) async for a in
+    return {(a["pack_id"], a["content_hash"], a["authorities_hash"]) async for a in
             get_analysis_playbook_approvals_col().find({"$or": wanted, "active": True})}
 
 
@@ -226,7 +264,7 @@ def _finding(pack: Pack, check: Check, result: str | None, *, sentence_ids=(), r
         "check_id": check.id, "kind": check.kind, "title": check.title, "why": check.why,
         "severity": check.severity, "check_result": result,
         "sentence_ids": list(sentence_ids), "reason": reason,
-        "authority": check.authority,
+        "authority": check.sources or check.authority,
     }
 
 
@@ -258,6 +296,8 @@ async def analyse(context: dict, text: str, sentences: list[dict], *,
     findings, summary = [], []
     for pack in packs:
         entry = {"pack_id": pack.id, "version": pack.version, "content_hash": pack.content_hash,
+                 "authorities_hash": pack.authorities_hash,
+                 "authority_library_hash": pack.authority_library_hash,
                  "scope": pack.scope, "title": pack.title}
         if pack.applies_if is not None:
             applies = evaluate(pack.applies_if, context)
@@ -267,7 +307,7 @@ async def analyse(context: dict, text: str, sentences: list[dict], *,
             if applies is UNKNOWN:
                 summary.append({**entry, "status": "unable_to_determine"})
                 continue
-        if pack.requires_approval and (pack.id, pack.content_hash) not in approved:
+        if pack.requires_approval and (pack.id, pack.content_hash, pack.authorities_hash) not in approved:
             summary.append({**entry, "status": "awaiting_approval"})
             continue
         pack_findings = run_pack(pack, context, text, sentences)

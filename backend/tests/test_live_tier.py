@@ -7,15 +7,22 @@ Skipped unless AAI_LIVE_TESTS=1 (tests/conftest.py). Run on demand, or by the ma
 
 Each test proves something the deterministic suite cannot: that the real
 provider still honours the structured-output contract the stub reproduces
-(tests/test_structured_output_attribution.py).
+(tests/test_structured_output_attribution.py), and that the official text
+the authority library was cut from has not changed.
 """
 from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
 
 from app.ai import llm as llm_mod
 from app.ai import provider_health as ph
+
+BACKEND = Path(__file__).resolve().parents[1]
 
 
 class Grounding(BaseModel):
@@ -44,3 +51,11 @@ def test_groq_honours_structured_output_and_is_attributed():
     assert len(events) == 1 and events[0]["outcome"] == "success"
     assert events[0]["provider"] == "groq" and events[0]["purpose"] == ph.PURPOSE_GROUNDING_JUDGE
 
+
+@pytest.mark.network
+def test_the_authority_library_still_matches_the_official_sources():
+    """Re-download every pinned official file and rebuild: any drift fails."""
+    run = subprocess.run([sys.executable, "scripts/build_analyzer_authorities.py", "--check"],
+                         cwd=BACKEND, capture_output=True, text=True, timeout=900)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "matches the official sources" in run.stdout

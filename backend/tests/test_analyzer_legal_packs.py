@@ -3,23 +3,23 @@
 They are not approved, so in normal operation they never run. These tests
 check two things:
   * the drafts stay honest: every citation is backed by a verbatim quote in
-    SOURCES.md, nothing says "missing", and unapproved packs never run;
+    the authority library (official text), nothing says "missing", and
+    unapproved packs never run;
   * WHEN approved (simulated with a test approval record), each check does
     what its text says on realistic documents -- including the three
     registration limbs and the three-valued "not stated" case.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
 
+from app.services.analyzer import authorities
 from app.services.analyzer import playbook_engine as engine
 from app.services.analyzer import segmentation as seg
 
 PLAYBOOKS = Path(engine.PLAYBOOK_DIR)
-SOURCES = (PLAYBOOKS / "SOURCES.md").read_text(encoding="utf-8")
 LEGAL = ("tenancy_punjab", "nda", "employment")
 
 LEASE = """TENANCY AGREEMENT
@@ -71,23 +71,19 @@ def test_each_legal_pack_needs_its_own_qualification(pack_id, qualification):
 
 
 @pytest.mark.parametrize("pack_id", LEGAL)
-def test_every_citation_is_backed_by_a_verbatim_source(pack_id):
-    """A cited section must appear in SOURCES.md under its statute's heading."""
-    statute_titles = {
-        "Punjab Rented Premises Act 2009": "Punjab Rented Premises Act, 2009",
-        "Registration Act 1908": "Registration Act, 1908",
-        "Transfer of Property Act 1882": "Transfer of Property Act, 1882",
-        "Contract Act 1872": "Contract Act, 1872",
-    }
+def test_every_citation_resolves_to_official_text(pack_id):
+    """Each cited provision is in the authority library, from an OFFICIAL
+    source, and the cited sub-division is really in that text."""
+    library = authorities.load_library()
     for check in packs()[pack_id].checks:
         for a in check.authority:
-            assert a["statute"] in statute_titles, f"{pack_id}.{check.id} cites an unsourced statute"
-            heading = SOURCES.index(f"## {statute_titles[a['statute']]}")
-            next_heading = SOURCES.find("\n## ", heading + 1)
-            section_block = SOURCES[heading:next_heading if next_heading != -1 else None]
-            top = a["section"].split("(")[0]
-            assert re.search(rf"\*\*s\.{re.escape(top)}\b", section_block), \
-                f"{pack_id}.{check.id}: s.{a['section']} is not quoted in SOURCES.md"
+            provision = library.resolve(a["statute"], a["section"])
+            assert provision is not None, f"{pack_id}.{check.id}: s.{a['section']} not in the library"
+            assert provision.source["url"].startswith(("https://punjabcode.punjab.gov.pk/",
+                                                       "https://pakistancode.gov.pk/"))
+        # What a finding stores is the resolved snapshot, not the bare citation.
+        assert [s["section"] for s in check.sources] == [str(a["section"]) for a in check.authority]
+        assert all(s["located"] and s["text_sha256"] for s in check.sources)
 
 
 @pytest.mark.parametrize("pack_id", LEGAL)
@@ -146,7 +142,7 @@ def test_the_three_registration_limbs(terms, expected):
     assert {k: r[k]["check_result"] for k in expected} == expected
     for k, v in expected.items():
         if v is None:
-            assert {a["section"] for a in r[k]["authority"]} == {"17(1)(d)", "107"}
+            assert {"17(1)(d)", "107"} <= {a["section"] for a in r[k]["authority"]}
 
 
 # ── NDA and employment ──────────────────────────────────────────────────────

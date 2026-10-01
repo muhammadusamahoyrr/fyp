@@ -277,7 +277,9 @@ test("an approved legal finding shows its labels and citations", async () => {
             labels: ["Legal playbook applied", "Applicability requires lawyer review"],
             check_id: "registration_term_over_one_year", kind: "reminder", title: "Registration -- term exceeding one year",
             why: "The confirmed term exceeds one year.", check_result: null, evidence: [],
-            authority: [{ statute: "Registration Act 1908", section: "17(1)(d)" },
+            authority: [{ statute: "Registration Act 1908", section: "17(1)(d)", located: true, pages: [10],
+                          source: { publisher: "Pakistan Code, Ministry of Law and Justice",
+                                    url: "https://pakistancode.gov.pk/pdffiles/reg.pdf", retrieved: "2026-10-01" } },
                         { statute: "Transfer of Property Act 1882", section: "107" }] }] } });
     api.__respond("getAnalysisText", { data: { text: "x", clauses: [], sentences: [],
         text_version: { page_map_available: false, corrected: false } } });
@@ -287,6 +289,14 @@ test("an approved legal finding shows its labels and citations", async () => {
     assert.equal(card.querySelector("[data-result]").textContent, "Reminder");
     assert.equal(card.querySelector("[data-authority]").textContent,
                  "Cites: Registration Act 1908, s.17(1)(d); Transfer of Property Act 1882, s.107");
+    // Only a citation located in the authority library gets a source link.
+    const sources = [...card.querySelectorAll("[data-source]")];
+    assert.equal(sources.length, 1);
+    assert.equal(sources[0].textContent,
+                 "Official text of s.17(1)(d): Pakistan Code, Ministry of Law and Justice, p.10 (read 2026-10-01)");
+    const link = sources[0].querySelector("a");
+    assert.equal(link.getAttribute("href"), "https://pakistancode.gov.pk/pdffiles/reg.pdf");
+    assert.equal(link.getAttribute("rel"), "noopener noreferrer");
     assert.match(p.container.textContent, /Applicability requires lawyer review\./);
     await p.unmount();
 });

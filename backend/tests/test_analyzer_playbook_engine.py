@@ -36,21 +36,21 @@ LEGAL = textwrap.dedent("""\
         kind: reminder
         title: Presentation to the Rent Registrar
         why: A reminder; it cannot be seen from the text.
-        authority: {statute: Test Act, section: "5"}
+        authority: {statute: Punjab Rented Premises Act 2009, section: "5(2)"}
       - id: long_lease
         kind: legal_check
         title: Long-lease limb
         why: Applies only to long leases.
         applies_if: {gt: [{field: terms.term_months}, {value: 12}]}
         locate: {any_of: ['registered']}
-        authority: {statute: Test Act, section: "17"}
+        authority: {statute: Registration Act 1908, section: "17(1)(d)"}
       - id: year_to_year
         kind: legal_check
         title: Year-to-year limb
         why: Depends on a term the person may not have stated.
         applies_if: {eq: [{field: terms.tenancy_year_to_year}, {value: true}]}
         locate: {any_of: ['registered']}
-        authority: {statute: Test Act, section: "17"}
+        authority: {statute: Registration Act 1908, section: "17(1)(d)"}
 """)
 
 TENANCY = {"document_type": "tenancy", "jurisdiction": "punjab",
@@ -79,11 +79,11 @@ def test_the_hash_ignores_line_endings_and_nothing_else():
 
 @pytest.mark.parametrize("edit,message", [
     (("requires_approval: true", "requires_approval: false"), "always requires lawyer approval"),
-    (('    authority: {statute: Test Act, section: "17"}\n  - id: year_to_year',
+    (('    authority: {statute: Registration Act 1908, section: "17(1)(d)"}\n  - id: year_to_year',
       '  - id: year_to_year'), "must cite its authority"),
     (("kind: reminder", "kind: general_check"), "not allowed in a legal_playbook pack"),
-    (("locate: {any_of: ['registered']}\n    authority: {statute: Test Act, section: \"17\"}\n  - id: year_to_year",
-      "locate: {any_of: ['(unclosed']}\n    authority: {statute: Test Act, section: \"17\"}\n  - id: year_to_year"), "invalid pattern"),
+    (("locate: {any_of: ['registered']}\n    authority: {statute: Registration Act 1908, section: \"17(1)(d)\"}\n  - id: year_to_year",
+      "locate: {any_of: ['(unclosed']}\n    authority: {statute: Registration Act 1908, section: \"17(1)(d)\"}\n  - id: year_to_year"), "invalid pattern"),
     (("id: year_to_year", "id: long_lease"), "unique"),
     (("applies_if: {all:", "applies_if_typo: {all:"), "unknown keys"),
     (("{value: 12}", "{value: '12'}"), "compares int with str"),
@@ -148,6 +148,7 @@ async def test_an_approved_pack_runs_with_three_valued_checks(legal_dir, mongo):
     pack = next(p for p in engine.load_packs() if p.id == "test_legal")
     await mongo["analysis_playbook_approvals"].insert_one(
         {"pack_id": pack.id, "content_hash": pack.content_hash, "version": 1,
+         "authorities_hash": pack.authorities_hash,
          "reviewer_user_id": "lawyer-x", "reviewer_role": "test", "active": True})
     try:
         findings, summary = await engine.analyse(TENANCY, LEASE, sentences_of(LEASE))
