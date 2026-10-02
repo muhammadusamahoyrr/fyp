@@ -466,3 +466,27 @@ test("the AI stages are polled and named", () => {
     assert.equal(live.shouldPoll("ai_reporting"), true);
     assert.equal(live.STAGE_LABEL.ai_reporting, "Preparing AI drafting notes");
 });
+
+test("every AI tab says how the layer was evaluated for this document type", async () => {
+    const evaluation = { document_type: "nda", status: "not_yet_evaluated", label_review: "developer_only",
+        model: null, evaluated_at: null };
+    const p = await openReport({ ...WITH_AI, ai: { ...AI_OK, evaluation } });
+    for (const key of ["summary_points", "model_risks", "obligations"]) {
+        await click(tab(p.container, key));
+        const note = p.container.querySelector("[data-ai-evaluation]");
+        assert.equal(note.dataset.aiEvaluation, "not_yet_evaluated");
+        assert.match(note.textContent, /Not yet evaluated: AI drafting notes for non-disclosure documents/);
+        assert.match(note.textContent, /written by the developer and have not been reviewed by a lawyer/);
+    }
+    await p.unmount();
+});
+
+test("the evaluation disclosure never claims more than the record", () => {
+    assert.match(live.evaluationText(undefined), /could not be read/);
+    assert.match(live.evaluationText({ status: "not_in_evaluation_dataset", document_type: "other" }),
+                 /not in the evaluation set/);
+    assert.equal(live.evaluationText({ status: "evaluated", evaluated_at: "2026-11-01", model: "m",
+        label_review: "lawyer_reviewed" }), "Evaluated on 2026-11-01 with m. Evaluation labels were reviewed by a qualified lawyer.");
+    assert.doesNotMatch(live.evaluationText({ status: "not_yet_evaluated", document_type: "tenancy",
+        label_review: "developer_only" }), /reviewed by a qualified lawyer/);
+});

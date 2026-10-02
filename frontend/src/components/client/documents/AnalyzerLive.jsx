@@ -260,12 +260,36 @@ function AiItem({ t, kind, item }) {
     );
 }
 
+const TYPE_NAME = { tenancy: "tenancy", nda: "non-disclosure", employment: "employment" };
+
+/* How the AI layer was evaluated for this document's type -- from the
+ * server's frozen record, never assumed. */
+export function evaluationText(evaluation) {
+    const e = evaluation || { status: "record_unavailable" };
+    const kind = TYPE_NAME[e.document_type] || "this kind of";
+    const status = {
+        not_yet_evaluated: `Not yet evaluated: AI drafting notes for ${kind} documents have not been measured on the evaluation set.`,
+        evaluated: `Evaluated on ${e.evaluated_at} with ${e.model}.`,
+        not_in_evaluation_dataset: "Not evaluated: this kind of document is not in the evaluation set.",
+        record_unavailable: "The evaluation record could not be read, so how well these notes work is unknown.",
+    }[e.status] || "How well these notes work is unknown.";
+    const labels = {
+        developer_only: "Evaluation labels were written by the developer and have not been reviewed by a lawyer.",
+        lawyer_reviewed: "Evaluation labels were reviewed by a qualified lawyer.",
+    }[e.label_review];
+    return labels ? `${status} ${labels}` : status;
+}
+
 function AiTab({ t, report, kind }) {
     const ai = report.ai || { status: "unavailable", reason: "not_recorded" };
     const items = report[kind] || [];
     const usable = ai.status === "complete" || ai.status === "partial";
     return (
         <div data-ai-tab={kind} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div role="note" data-ai-evaluation={ai.evaluation?.status || "record_unavailable"}
+                style={{ fontSize: 12.5, color: t.textMuted }}>
+                {evaluationText(ai.evaluation)}
+            </div>
             <AiNotice t={t} ai={ai} />
             {usable && items.map(item => <AiItem key={item.fingerprint} t={t} kind={kind} item={item} />)}
             {usable && items.length === 0 && <div data-ai-empty style={{ fontSize: 13, color: t.textMuted }}>{TAB_EMPTY[kind]}</div>}
