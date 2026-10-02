@@ -183,6 +183,32 @@ provisions:
     the terms granted by which do not exceed five years and the annual rents reserved by which do not
     exceed fifty rupees.
   text_sha256: bc85bc93c4d5bace310535de0012c6d51280f966544ac4fd33bdaa8ab38fec1d
+  notes:
+  - page: 10
+    marker: '1'
+    marker_in_text: true
+    text: Explanation added by the Registration (Amdt.) Ordinance, 1962 (45 of 1962), s. 3.
+  - page: 10
+    marker: '2'
+    marker_in_text: false
+    text: Ins. by the Registration (Amdt) Act, 2022 ( XXXVIII of 2022), s.2.
+  - page: 10
+    marker: '3'
+    marker_in_text: true
+    text: Ins.by the Registration (Amdt.) Ordinance, 1962 (45 of 1962) s.3.
+  - page: 10
+    marker: '4'
+    marker_in_text: true
+    text: Clause (e) ins. by the Transfer of Property (Amdt.) Supplementary Act, 1929 (21of 1929), s.10.
+  - page: 10
+    marker: '5'
+    marker_in_text: true
+    text: Subs. by A. O., 1937, for “L. G.”.
+  - page: 10
+    marker: '6'
+    marker_in_text: true
+    text: Subs. ibid., for “loca1 official Gazette”.
+  notes_sha256: 4f9fa4bc8f4467193ea8c4f8bb8b4621d96b0bd5d60e7cdbb79d32faa00988aa
 - statute: Transfer of Property Act 1882
   section: '1'
   heading: Short title, commencement and extent
@@ -200,31 +226,63 @@ provisions:
     6[official Gazette], exempt either retrospectively or prospectively, any part of the territories
     administered by such 5[Provincial Government] from all or any of the following provisions, namely:__
     Sections 54, paragraphs 2 and 3, 59, 107 and 123.]
-    1This Act has been extended with effect from 1st January, 1915, to the Province of Sindh, see Bom. R. & O.
-    Ss. 54, 107 and 123 have been extended from 6th May, 1935, to all Municipalities in the Punjab and all notified areas declared and notified under s. 241
-    of the Punjab Municipal Act, 1911, see Punjab Gazette Extraordinary, 1925, p. 27.
-    S. 54, paras, 2 and 3, and ss. 59, 107 and 123 extend to every cantonment in the Provinces, etc., see s. 287 of the Cantonments Act. 1924 (Act No. II of
-    1924). It has been rep. as to Crown Grants by the Crown Grants Act, 1895 (Act No. XV of 1895), and amended in Sind by Sind Act No. XIV of 1939,
-    s.2.
-    This Act shall be deemed to have been amended in its application to the Province of Sind, see Sind Act No. XIV of 1939.
-    The Act has been extended, in respect of non agricultural lands, to Baluchistan States Union and the Khairpur State by G.G.Os. 4 and 5 of 1953, as
-    amended respectively.
-    The Act has been and shall be deemed to have been brought into force in Gwadur with effect from the 8th Septemter, 1958, by the Gwadur (Application
-    of Central Laws) Ordinance, 1960 (Ordinance No. XXXVII of 1960), s. 2.
-    The Act, as in force in the North West Frontier Province immediately before the commencement of N.W.F.P. Regulation No. 2 of 1974, has been
-    applied to the Provincially Administered Tribal Areas of Chitral, Dir, Kalam, Swat and Malakand protected Area, by N.W.F.P. Regulation, No. 2 of
-    1974, s. 3.
-    2Omitted and subs. by the Federal Adaptation of Laws Order, 1975 (President’s Order No. 4 of 1975), Art. 2 and Sch.
-    3Subs. by the Central Laws (Statute Reform) Ordinance, 1960 (Ordinance No. XXI of 1960), s. 3 and 2nd Sch.
-    4Subs. by A. O., 1964, Art. 2 and Sch.
-    5Subs. by Act No. III of 1885, s. 1.
-    6Subs. by A. O., 1937.
-    7Rep. by the Devolution Act, 1920 (Act No. XXXVIII of 1920), s. 2 and Sch. 1.
     1[Notwithstanding anything in the foregoing part of this section, sections 54, paragraphs 2 and
     3, 59, 107 and 123 shall not extend or be extended to any district or tract of country for the time being
     excluded from the operation of the Registration Act, 2[1908(XVI of 1908)], under the power conferred
     by the first section of that Act or otherwise.]
-  text_sha256: c0f593887894145677c135ca261a89d3a68fcf958e30157ee086422ac7c245af
+  text_sha256: 184eab3974d0991e8bf6c291325e719bfd71cc582c0b8f57bc692418fe03260f
+  notes:
+  - page: 8
+    marker: '1'
+    marker_in_text: false
+    text: |-
+      This Act has been extended with effect from 1st January, 1915, to the Province of Sindh, see Bom. R. & O.
+      Ss. 54, 107 and 123 have been extended from 6th May, 1935, to all Municipalities in the Punjab and all notified areas declared and notified under s. 241
+      of the Punjab Municipal Act, 1911, see Punjab Gazette Extraordinary, 1925, p. 27.
+      S. 54, paras, 2 and 3, and ss. 59, 107 and 123 extend to every cantonment in the Provinces, etc., see s. 287 of the Cantonments Act. 1924 (Act No. II of
+      1924). It has been rep. as to Crown Grants by the Crown Grants Act, 1895 (Act No. XV of 1895), and amended in Sind by Sind Act No. XIV of 1939,
+      s.2.
+      This Act shall be deemed to have been amended in its application to the Province of Sind, see Sind Act No. XIV of 1939.
+      The Act has been extended, in respect of non agricultural lands, to Baluchistan States Union and the Khairpur State by G.G.Os. 4 and 5 of 1953, as
+      amended respectively.
+      The Act has been and shall be deemed to have been brought into force in Gwadur with effect from the 8th Septemter, 1958, by the Gwadur (Application
+      of Central Laws) Ordinance, 1960 (Ordinance No. XXXVII of 1960), s. 2.
+      The Act, as in force in the North West Frontier Province immediately before the commencement of N.W.F.P. Regulation No. 2 of 1974, has been
+      applied to the Provincially Administered Tribal Areas of Chitral, Dir, Kalam, Swat and Malakand protected Area, by N.W.F.P. Regulation, No. 2 of
+      1974, s. 3.
+  - page: 8
+    marker: '2'
+    marker_in_text: true
+    text: Omitted and subs. by the Federal Adaptation of Laws Order, 1975 (President’s Order No. 4 of 1975), Art. 2 and Sch.
+  - page: 8
+    marker: '3'
+    marker_in_text: true
+    text: Subs. by the Central Laws (Statute Reform) Ordinance, 1960 (Ordinance No. XXI of 1960), s. 3 and 2nd Sch.
+  - page: 8
+    marker: '4'
+    marker_in_text: true
+    text: Subs. by A. O., 1964, Art. 2 and Sch.
+  - page: 8
+    marker: '5'
+    marker_in_text: true
+    text: Subs. by Act No. III of 1885, s. 1.
+  - page: 8
+    marker: '6'
+    marker_in_text: true
+    text: Subs. by A. O., 1937.
+  - page: 8
+    marker: '7'
+    marker_in_text: true
+    text: Rep. by the Devolution Act, 1920 (Act No. XXXVIII of 1920), s. 2 and Sch. 1.
+  - page: 9
+    marker: '1'
+    marker_in_text: true
+    text: Ins. by Act No. III of 1885; it is to be deemed to have been added from the date on which Act 4 of 1882 came into force.
+  - page: 9
+    marker: '2'
+    marker_in_text: true
+    text: Subs. by Act No. XX of 1929, for 1877.
+  notes_sha256: ced72882a5699196b536809d0529735ccd92d69677019a9603325e4ae56cd989
 - statute: Transfer of Property Act 1882
   section: '107'
   heading: Leases how made
@@ -244,6 +302,26 @@ provisions:
     or for any term exceeding one year, or reserving a yearly rent, or any class of such leases, may be made
     by unregistered instrument or by oral agreement without delivery of possession.]
   text_sha256: e4372557478775abd50a8e37eea9e37e1ab209e73c648f63629208ff54bd9f14
+  notes:
+  - page: 46
+    marker: '1'
+    marker_in_text: true
+    text: Subs. and ins. by Act No. XX of 1929, ss. 54-55.
+  - page: 46
+    marker: '2'
+    marker_in_text: true
+    text: |-
+      As to limitation to the territorial operation of s. 107, see s. 1, supra. S. 107 extends to every cantonment in the Provinces, etc., see s. 287 of the
+      Cantonments Act, 1924 (Act No. II of 1924).
+  - page: 46
+    marker: '3'
+    marker_in_text: true
+    text: Subs. and ins. by Act No. VI of 1904, ss. 5.
+  - page: 46
+    marker: '4'
+    marker_in_text: true
+    text: Subs. and rep. by A. O., 1937.
+  notes_sha256: de6566cfb44ae47dcf08b671dc017942c66e71434c945a275fdca05a21eb673d
 - statute: Contract Act 1872
   section: '27'
   heading: Agreement in restraint of trade void
@@ -260,6 +338,12 @@ provisions:
     reasonable, regard being had to the nature of the business.
     1[* * * * * *]
   text_sha256: 92b25cc70955902a0e20cd131355205b075591ba539347d23358a7781f077459
+  notes:
+  - page: 22
+    marker: '1'
+    marker_in_text: true
+    text: Rep. by the Partnership Act, 1932 (IX of 1932), s. 73 and Sch. ll.
+  notes_sha256: fa06e7647cc75208fd3c8d68747a63bb4ae4a74b554c60ebf284c3682b7bac12
 - statute: Contract Act 1872
   section: '28'
   heading: Agreements in restraint of legal proceedings void
@@ -277,7 +361,6 @@ provisions:
     may arise between them in respect of any subject or class of subjects shall be referred to arbitration,
     and that only the amount awarded in such arbitration shall be recoverable in respect of the dispute so
     referred.
-    1Rep. by the Partnership Act, 1932 (IX of 1932), s. 73 and Sch. ll.
     Suits barred by such Contracts. 1When such a contract has been made, a suit may be brought
     for its specific performance, and if a suit, other than for such specific performance, or for the
     recovery of the amount so awarded, is brought by one party to such contract against any other such
@@ -287,4 +370,10 @@ provisions:
     this section render illegal any contract in writing, by which two or more persons agree to refer to
     arbitration any question between them which has already arisen, or affect any provision of any law in
     force for the time being as to references to arbitration.
-  text_sha256: 512112d02b0f2d1370ba892f1e0179afcb9f6a59434aef1b2f2093797b64fedf
+  text_sha256: 546c1260fd5c86618c713c7b6d8a42af5ffb9e06501c8225ca5bcbee26ea4fd7
+  notes:
+  - page: 23
+    marker: '1'
+    marker_in_text: true
+    text: Repealed by the Specific Relief Act, 1877 (I of 1877).
+  notes_sha256: 24621a54a165cc62430411a5105470d6560cdfa049a9a21e2bd9b08a939d356b

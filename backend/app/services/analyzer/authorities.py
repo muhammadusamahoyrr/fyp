@@ -28,15 +28,23 @@ AUTHORITY METADATA (what a reader must be told about the source itself)
   COVERAGE lists, per document type, the statutes held and the known gaps;
   a gap may be a release blocker.
 
+EDITORIAL NOTES ARE NOT THE PROVISION
+  A provision's `text` is the section as enacted and amended -- body text
+  only. The publisher's footnotes (amendment history, extension, repeal of
+  words) are kept apart in `notes`, each with the page and the footnote
+  marker that refers to it, so a reader never mistakes them for the section
+  and a footnote never lands in the wrong section. `notes_sha256` binds them.
+
 WHAT AN APPROVAL BINDS
   `authorities_hash(pack)` is the SHA-256 over the cited provisions'
-  (statute, section, text hash). An approval records it next to the pack's
-  own hash, so changing the official text a pack relies on stops the pack
-  exactly as editing the pack does.
+  (statute, section, text hash, notes hash). An approval records it next to
+  the pack's own hash, so changing the official text a pack relies on -- or
+  the notes shown beside it -- stops the pack exactly as editing the pack does.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -82,6 +90,16 @@ class Provision:
     pages: tuple[int, ...]
     text: str
     text_sha256: str
+    notes: tuple[dict, ...] = ()
+    notes_sha256: str = ""
+
+
+def notes_hash(notes: list[dict]) -> str:
+    """SHA-256 of a provision's editorial notes; "" when it has none."""
+    if not notes:
+        return ""
+    canonical = json.dumps(notes, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -159,6 +177,16 @@ def parse_library(raw: str) -> Library:
         pages = p.get("pages")
         if not isinstance(pages, list) or not pages or not all(isinstance(n, int) and n > 0 for n in pages):
             raise AuthorityError(f"{where}: pages must be page numbers")
+        notes = p.get("notes") or []
+        if not isinstance(notes, list) or not all(
+                isinstance(n, dict) and set(n) == {"page", "marker", "marker_in_text", "text"}
+                and isinstance(n["page"], int) and n["page"] in pages
+                and isinstance(n["marker"], str) and n["marker"].isdigit()
+                and isinstance(n["marker_in_text"], bool)
+                and isinstance(n["text"], str) and n["text"].strip() for n in notes):
+            raise AuthorityError(f"{where}: a note needs a page of the provision, a marker and text")
+        if notes_hash(notes) != (p.get("notes_sha256") or ""):
+            raise AuthorityError(f"{where}: notes do not match notes_sha256")
         key = (p["statute"], p["section"])
         if key in seen:
             raise AuthorityError(f"{where}: duplicate {key}")
@@ -168,7 +196,8 @@ def parse_library(raw: str) -> Library:
             source={"id": p["source"], **{k: meta.get(k) for k in (
                 "publisher", "url", "listing_url", "sha256", "retrieved", "jurisdiction",
                 "authority_status", "amended_up_to")}},
-            pages=tuple(pages), text=text, text_sha256=p["text_sha256"]))
+            pages=tuple(pages), text=text, text_sha256=p["text_sha256"],
+            notes=tuple(notes), notes_sha256=notes_hash(notes)))
     if not provisions:
         raise AuthorityError("authority library: no provisions")
     coverage = _parse_coverage(data.get("coverage"), {m["statute"] for m in sources.values()})
@@ -205,7 +234,7 @@ def load_library(path: Path | None = None) -> Library:
 
 
 def authorities_hash(cited: list[Provision]) -> str:
-    keys = sorted({(p.statute, p.section, p.text_sha256) for p in cited})
+    keys = sorted({(p.statute, p.section, p.text_sha256, p.notes_sha256) for p in cited})
     return hashlib.sha256(repr(keys).encode("utf-8")).hexdigest()
 
 

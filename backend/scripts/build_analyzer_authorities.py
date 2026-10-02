@@ -18,12 +18,24 @@ PINNED SOURCES
   counting (approvals bind the cited provisions' hashes).
 
 TEXT
-  Extracted with pdfplumber from the PDF text layer. Two characters the
-  publishers' text layer uses as look-alikes are normalised (U+037E GREEK
-  QUESTION MARK -> ';', U+2011 NON-BREAKING HYPHEN -> '-'); "Page N of M"
-  footer lines are dropped. Footnote numbers stay where the text layer puts
-  them, e.g. "2107. Leases how made" is footnote 2 followed by "107.".
-  Nothing else is changed.
+  Extracted with pdfplumber from the PDF text layer, line by line. Two
+  characters the publishers' text layer uses as look-alikes are normalised
+  (U+037E GREEK QUESTION MARK -> ';', U+2011 NON-BREAKING HYPHEN -> '-');
+  "Page N of M" footer lines are dropped. Footnote numbers stay where the
+  text layer puts them, e.g. "2107. Leases how made" is footnote 2 followed
+  by "107.". Nothing else is changed.
+
+FOOTNOTES ARE NOTES, NOT TEXT
+  The publishers set footnotes in a smaller type than the body. A line whose
+  type is smaller than 0.8 x the page's body size is a footnote line; every
+  other line is body. A provision is cut from BODY lines only, so a page's
+  footnotes never land inside a section that runs across that page
+  (Contract Act s.28 once carried s.27's footnote that way). Each footnote
+  whose marker -- a small-type number in the provision's own lines -- appears
+  in the provision is attached to it as a note {page, marker, text,
+  marker_in_text: true}. A footnote that another provision's marker points
+  to is not attached; one that NO marker on its page points to is attached
+  to every provision on that page with marker_in_text: false, never dropped.
 
 AUTHORITY METADATA
   Every source here is `official` (only the publishers in
@@ -174,6 +186,16 @@ PROVISIONS = [
      "28. Agreements in restraint of legal proceedings void", "29. Agreements void for uncertainty", 3),
 ]
 
+# Footnotes attached to a provision although their marker is outside it,
+# each with the reason: {(source, section): [(page, marker), ...]}.
+EXTRA_NOTES = {
+    # Footnote 1 hangs on the Act's title ("1ACT No. IV OF 1882"), but it is
+    # the record of the Act's EXTENT -- e.g. ss.54, 107 and 123 extended to
+    # Punjab municipalities and every cantonment -- which s.1 governs and the
+    # tenancy pack's registration reminders rely on.
+    ("transfer_of_property_act_1882", "1"): [(8, "1")],
+}
+
 _FOOTER = re.compile(r"^Page \d+ of \d+$")
 _LOOKALIKES = {";": ";", "‑": "-"}
 
@@ -200,27 +222,91 @@ def fetch(source_id: str, directory: Path) -> Path:
     return path
 
 
+SMALL = 0.8        # below this fraction of the body size: footnote type / a footnote marker
+
+
+def _size(char: dict) -> float:
+    return round(char["size"], 1)
+
+
+def _dominant(sizes: list[float]) -> float:
+    return max(set(sizes), key=sizes.count)
+
+
+def _small_digits(chars: list[dict], limit: float) -> list[str]:
+    """Runs of small-type digits in a line: its footnote markers."""
+    runs, run = [], ""
+    for c in chars:
+        if c["text"].isdigit() and _size(c) < limit:
+            run += c["text"]
+        elif run:
+            runs.append(run)
+            run = ""
+    return runs + ([run] if run else [])
+
+
 @functools.lru_cache(maxsize=None)
-def page_texts(pdf: Path) -> tuple[tuple[int, str], ...]:
+def page_lines(pdf: Path) -> tuple[tuple[int, tuple, tuple], ...]:
+    """Per page: (page, body lines as (text, markers), footnotes as (marker, text))."""
     with pdfplumber.open(pdf) as doc:
-        return tuple((n, doc.pages[n - 1].extract_text() or "") for n in range(1, len(doc.pages) + 1))
+        pages = [[(line["text"], [c for c in line["chars"] if not c["text"].isspace()])
+                  for line in page.extract_text_lines(return_chars=True)] for page in doc.pages]
+    pages = [[(text, chars) for text, chars in lines if chars] for lines in pages]
+    # The whole Act's body size: on a footnote-heavy page the footnote type can
+    # outnumber the body type (Transfer of Property Act, page 8).
+    body_size = _dominant([_size(c) for lines in pages for _, chars in lines for c in chars])
+    out = []
+    for n, lines in enumerate(pages, start=1):
+        body, notes = [], []
+        for text, chars in lines:
+            size = _dominant([_size(c) for c in chars])
+            if size >= SMALL * body_size:
+                body.append((text, tuple(_small_digits(chars, SMALL * body_size))))
+                continue
+            lead = _small_digits(chars[:4], SMALL * size)
+            if lead and text.startswith(lead[0]):
+                notes.append([lead[0], text[len(lead[0]):]])      # a new footnote
+            elif notes:
+                notes[-1][1] += "\n" + text                          # its next line
+        out.append((n, tuple(body), tuple((m, normalise(t)) for m, t in notes)))
+    return tuple(out)
 
 
-def cut(pdf: Path, start: str, end: str, first_page: int) -> tuple[str, list[int]]:
-    pages = page_texts(pdf)
-    joined, offsets = "", []
-    for n, text in pages[first_page - 1:]:
-        offsets.append((len(joined), n))
-        joined += text + "\n"
+def cut(pdf: Path, start: str, end: str, first_page: int) -> tuple[str, list[int], list[dict]]:
+    pages = page_lines(pdf)
+    joined, lines = "", []
+    for n, body, _ in pages[first_page - 1:]:
+        for text, markers in body:
+            lines.append((len(joined), len(joined) + len(text), n, markers))
+            joined += text + "\n"
     i = joined.find(start)
     if i < 0:
         raise SystemExit(f"start marker not found: {start!r}")
     j = joined.find(end, i + len(start))
     if j < 0:
         raise SystemExit(f"end marker not found: {end!r}")
-    spanned = [n for k, (off, n) in enumerate(offsets)
-               if off < j and (k + 1 == len(offsets) or offsets[k + 1][0] > i)]
-    return normalise(joined[i:j]), spanned
+    within = [(n, markers) for a, b, n, markers in lines if a < j and b > i]
+    spanned = sorted({n for n, _ in within})
+    wanted = {(n, m) for n, markers in within for m in markers}
+    # A footnote no marker anywhere on its page refers to (the publisher's
+    # marker is wrong or missing) cannot be placed; it is shown with every
+    # provision on that page, flagged, rather than dropped.
+    on_page = {(n, m) for n, body, _ in pages for _, markers in body for m in markers}
+    notes = [{"page": n, "marker": m, "marker_in_text": (n, m) in wanted, "text": text}
+             for n, _, footnotes in pages if n in spanned
+             for m, text in footnotes if (n, m) in wanted or (n, m) not in on_page]
+    return normalise(joined[i:j]), spanned, notes
+
+
+def extra_notes(pdf: Path, wanted: list[tuple[int, str]], pages: list[int]) -> list[dict]:
+    footnotes = {(n, m): text for n, _, notes in page_lines(pdf) for m, text in notes}
+    out = []
+    for page, marker in wanted:
+        if page not in pages or (page, marker) not in footnotes:
+            raise SystemExit(f"extra note p{page} [{marker}] not found on the provision's pages")
+        out.append({"page": page, "marker": marker, "marker_in_text": False,
+                    "text": footnotes[(page, marker)]})
+    return out
 
 
 def build(directory: Path) -> dict:
@@ -228,13 +314,19 @@ def build(directory: Path) -> dict:
                      "amended_up_to": None} for sid, meta in SOURCES.items()}
     provisions = []
     for sid, section, heading, start, end, first_page in PROVISIONS:
-        text, pages = cut(fetch(sid, directory), start, end, first_page)
-        if "�" in text:
+        text, pages, notes = cut(fetch(sid, directory), start, end, first_page)
+        notes = sorted(extra_notes(fetch(sid, directory), EXTRA_NOTES.get((sid, section), []), pages) + notes,
+                       key=lambda n: (n["page"], int(n["marker"])))
+        if "�" in text + "".join(n["text"] for n in notes):
             raise SystemExit(f"{sid} s.{section}: unreadable characters in the text layer")
-        provisions.append({
+        provision = {
             "statute": SOURCES[sid]["statute"], "section": section, "heading": heading,
             "source": sid, "pages": pages, "text": text,
-            "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()})
+            "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+        if notes:
+            provision["notes"] = notes
+            provision["notes_sha256"] = authorities.notes_hash(notes)
+        provisions.append(provision)
     return {"version": 1, "sources": sources, "coverage": COVERAGE, "provisions": provisions}
 
 

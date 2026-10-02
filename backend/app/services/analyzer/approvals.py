@@ -263,6 +263,7 @@ def _cited_provisions(pack) -> list[dict]:
             out.append({"statute": provision.statute, "section": provision.section,
                         "heading": provision.heading, "pages": list(provision.pages),
                         "text": provision.text, "text_sha256": provision.text_sha256,
+                        "notes": list(provision.notes), "notes_sha256": provision.notes_sha256,
                         "source": {**{k: provision.source[k] for k in (
                             "publisher", "url", "listing_url", "sha256", "retrieved",
                             "authority_status", "amended_up_to")},
