@@ -258,7 +258,7 @@ def test_an_empty_field_is_never_evidence_that_a_term_is_stated():
     rows = [{"sentence_id": s.sentence_id, "start": s.start, "end": s.end,
              "empty_value": s.empty_value} for s in sentences]
     assert [r["empty_value"] for r in rows] == [False, True, False]
-    check = SimpleNamespace(any_of=[re.compile("security deposit", re.I)], all_of=[])
+    check = SimpleNamespace(any_of=[re.compile("security deposit", re.I)], all_of=[], none_of=[])
     assert _locate(check, text, rows) == []
     filled = "Landlord:\nSecurity Deposit Date: 1 May 2026\nThe tenant pays rent monthly."
     _, sentences = seg.segment(filled, [])

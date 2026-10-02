@@ -226,3 +226,60 @@ def test_non_solicitation_and_restrain_wording_is_not_an_automatic_s27_match():
                    "The Recipient is restrained from using the information."):
         r = results("nda", NDA_CTX, clause)
         assert r["non_compete_restraint"]["check_result"] == "not_located", clause
+
+
+# ── the cases both independent AI reviews (Codex, Claude) raised, 2026-10-02 ──
+
+REVIEWED_CASES = [
+    # (pack, check, sentence, expected)
+    ("tenancy_punjab", "s6_rate_of_enhancement", "The rent shall be enhanced by 10% every year.", "present"),
+    ("tenancy_punjab", "s6_rate_of_enhancement", "The rent shall be increased by 12.5 per cent annually.", "present"),
+    ("tenancy_punjab", "s6_rate_of_enhancement",
+     "If rent is not paid by the 5th, a surcharge of 5% shall be added, increasing the amount due.", "not_located"),
+    ("tenancy_punjab", "s6_due_date", "Either party may end the tenancy by giving one month notice in advance.", "not_located"),
+    ("tenancy_punjab", "s6_due_date", "The Tenant has paid two months rent in advance.", "not_located"),
+    ("tenancy_punjab", "s6_due_date", "The Tenant shall vacate the premises on or before the expiry of the tenancy.", "not_located"),
+    ("tenancy_punjab", "s6_due_date", "The rent shall be paid by the fifth of every month.", "present"),
+    ("tenancy_punjab", "s6_due_date", "Rent is payable by 5th of every English calendar month.", "present"),
+    ("tenancy_punjab", "s6_mode_of_payment", "The Landlord may check the electricity meter.", "not_located"),
+    ("tenancy_punjab", "s6_mode_of_payment", "The rent shall be paid through JazzCash.", "present"),
+    ("tenancy_punjab", "s6_mode_of_payment", "The Tenant shall deposit the rent in the bank account of the Landlord.", "present"),
+    ("tenancy_punjab", "s6_purpose", "For the purpose of this Agreement, Premises means the house.", "not_located"),
+    ("tenancy_punjab", "s6_purpose", "House 3, Commercial Area, DHA Phase 5, Lahore.", "not_located"),
+    ("tenancy_punjab", "s6_purpose", "The house is let for family residence only.", "present"),
+    ("tenancy_punjab", "s6_purpose", "The Landlord lets the shop to the Tenant for eleven months.", "not_located"),
+    ("tenancy_punjab", "s6_advance_security_pagri",
+     "The Tenant shall deposit the rent in the bank account of the Landlord.", "not_located"),
+    ("tenancy_punjab", "s6_advance_security_pagri",
+     "The Tenant shall be responsible for the security of the premises.", "not_located"),
+    ("tenancy_punjab", "s6_period_of_tenancy",
+     "The Tenant has paid a security deposit equal to two months rent, refundable at the end of the tenancy.", "not_located"),
+    ("tenancy_punjab", "s6_period_of_tenancy",
+     "This Lease Deed is made between Ahmed Raza, aged about 52 years, and Bilal Khan.", "not_located"),
+    ("tenancy_punjab", "s6_period_of_tenancy", "Either party may end the tenancy by giving one month's notice.", "not_located"),
+    ("tenancy_punjab", "s6_period_of_tenancy", "The tenancy is for 11 months, renewable with one month notice.", "present"),
+    ("tenancy_punjab", "s6_period_of_tenancy",
+     "The tenancy commences on 1 March 2026 and ends on 31 January 2027.", "present"),
+    ("tenancy_punjab", "s6_period_of_tenancy", "This is an 11-month tenancy.", "present"),
+    ("tenancy_punjab", "s6_period_of_tenancy", "The tenancy shall be for ten months.", "present"),
+    ("tenancy_punjab", "s6_rate_of_rent", "The monthly rent is 85,000 rupees.", "present"),
+    ("tenancy_punjab", "s6_rate_of_rent",
+     "The Tenant shall pay a deposit of Rs. 170,000 equal to two months' rent.", "not_located"),
+    ("tenancy_punjab", "s6_description_of_premises", "The Landlord lets House # 12, Street 4, Model Town.", "present"),
+    ("tenancy_punjab", "s6_description_of_premises", "The upper portion of Property No. 45-B, Johar Town.", "present"),
+    ("nda", "non_compete_restraint",
+     "The Recipient shall not disclose Confidential Information to any competitor.", "not_located"),
+    ("nda", "non_compete_restraint", "The Recipient shall not carry on any similar business for two years.", "present"),
+    ("nda", "non_compete_restraint", "The Recipient shall not engage in any rival business.", "present"),
+    ("nda", "limits_on_legal_proceedings",
+     "The Recipient shall not bring any third party into the discussions.", "not_located"),
+    ("nda", "limits_on_legal_proceedings", "The Recipient waives all rights to sue the Company.", "present"),
+    ("nda", "limits_on_legal_proceedings", "No suit or other legal proceedings shall lie against the Company.", "present"),
+    ("nda", "limits_on_legal_proceedings", "Any claim shall be time-barred unless notified within 30 days.", "present"),
+]
+
+
+@pytest.mark.parametrize("pack_id,check,sentence,expected", REVIEWED_CASES)
+def test_the_cases_the_independent_reviews_raised(pack_id, check, sentence, expected):
+    ctx = TENANCY if pack_id == "tenancy_punjab" else NDA_CTX
+    assert results(pack_id, ctx, sentence)[check]["check_result"] == expected

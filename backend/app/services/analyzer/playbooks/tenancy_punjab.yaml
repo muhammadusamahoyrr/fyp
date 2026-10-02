@@ -3,13 +3,14 @@
 # Runs only after a reviewer holding pk.punjab.tenancy approves this exact
 # text AND the official text it cites (DOC_ANALYZER_PLAN.md §4.5a). Every
 # authority resolves to the authority library (authority_library.yaml), cut
-# from the official Punjab Code / Pakistan Code publications; the reviewer
-# must still confirm each is current, including amendments, before approving.
+# from the official Punjab Code publications; the reviewer must still confirm
+# each is current, including amendments, before approving.
 #
 # Wording rules: a check reports whether the document APPEARS to contain an
 # item ("Found" / "Not located automatically"). It never says the item is
 # missing, never says the document is unlawful, and every result carries
-# "Applicability requires lawyer review".
+# "Applicability requires lawyer review". "Found" says only that wording of
+# that kind appears -- never that it is legally sufficient.
 id: tenancy_punjab
 version: 1
 scope: legal_playbook
@@ -27,9 +28,11 @@ checks:
     title: Presenting the agreement to the Rent Registrar
     why: >-
       Section 5(2) requires the landlord to present the tenancy agreement
-      before the Rent Registrar. Whether that was done cannot be seen from the
-      document itself. Section 5(4) adds that entry with the Rent Registrar does
-      not replace registration under the law on registration of documents.
+      before the Rent Registrar. The document itself cannot show whether that
+      was done. Section 5(4): the entry of the particulars of the tenancy
+      "shall not absolve the landlord or the tenant of their liability to
+      register the tenancy agreement under the law relating to registration
+      of documents".
     authority:
       - {statute: Punjab Rented Premises Act 2009, section: "5(2)"}
       - {statute: Punjab Rented Premises Act 2009, section: "5(4)"}
@@ -41,8 +44,9 @@ checks:
     title: Particulars of the landlord and the tenant
     why: >-
       Section 6(1)(a): the agreement should contain, as far as possible,
-      particulars of the landlord and the tenant (for example identity card
-      numbers, parentage and addresses).
+      particulars of the landlord and the tenant. The Act does not list the
+      particulars. This check locates only identity-card, parentage or
+      residence wording; whether what is stated is sufficient is for a lawyer.
     locate:
       any_of: ['cnic', 'c\.n\.i\.c\.?', 'national identity card', 's/o', 'd/o', 'w/o',
                'son of', 'daughter of', 'wife of', 'resident of']
@@ -55,8 +59,11 @@ checks:
     why: Section 6(1)(b) -- the agreement should describe the premises, as far as possible.
     locate:
       any_of: ['situated (?:at|in)', 'located at', 'bearing (?:no\.?|number)', 'measuring',
-               '(?:house|shop|flat|plot|office|apartment|unit) (?:(?:no\.?|number) ?)?\d+[a-z]?',
-               'marlas?', 'kanals?', 'sq(?:uare)?\.? ?(?:ft|feet|yards?|metres?|meters?)']
+               '(?:house|shop|flat|plot|office|apartment|unit|property)\s*(?:(?:no\.?|number|#)\s*)?\d+[-a-z0-9]*',
+               '(?:upper|lower|ground|first|second|basement) (?:floor|portion)',
+               'portion of (?:the )?(?:house|property|plot|building)',
+               'khasra', 'khewat', 'marlas?', 'kanals?',
+               'sq(?:uare)?\.? ?(?:ft|feet|yards?|metres?|meters?)', 'sft']
     authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(b)"}
 
   - id: s6_period_of_tenancy
@@ -65,12 +72,14 @@ checks:
     title: Period of the tenancy
     why: Section 6(1)(c) -- the agreement should state the period of the tenancy, as far as possible.
     locate:
-      any_of: ['\d+\s*(?:\(\d+\)\s*)?(?:months?|years?)',
-               '(?:one|two|three|four|five|six|eleven|twelve)\s*(?:\(\d+\)\s*)?(?:months?|years?)']
+      # A duration directly followed by "notice" ("one month's notice") is a
+      # notice period, not the term; a term and a notice clause in the same
+      # sentence still count.
+      any_of: ['(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen|twenty-four)\s*(?:\(\d+\)\s*)?-?\s*(?:months?|years?)(?!(?:''s|’s|'')?\s+(?:prior\s+|written\s+|advance\s+)?notice)',
+               '(?:from|commenc\w* on)\s+\d{1,2}(?:st|nd|rd|th)?\s+[a-z]+,?\s+\d{4}.{0,60}?(?:to|till|until|ends? on|expir\w* on)\s+\d{1,2}(?:st|nd|rd|th)?\s+[a-z]+']
       all_of: ['term|period|tenancy|lease[sd]?|lets?|letting|let out']
-      # A notice period ("one month's notice", "no notice of less than three
-      # months shall end this tenancy") is not the period of the tenancy.
-      none_of: ['notices?']
+      none_of: ['deposit', 'security', 'advance (?:rent|payment)', 'aged', 'years? (?:of age|old)',
+                'notice (?:of|period of) (?:not )?(?:less|more) than']
     authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(c)"}
 
   - id: s6_rate_of_rent
@@ -79,9 +88,11 @@ checks:
     title: Rate of rent
     why: Section 6(1)(d) -- the agreement should state the rate of rent, as far as possible.
     locate:
-      any_of: ['(?:rs\.?|pkr|rupees)\s*\d[\d,]*']
+      any_of: ['(?:rs\.?|pkr|rupees)\s*\d[\d,]*', '\d[\d,]*(?:/-)?\s*(?:rupees|rs\.?|pkr)']
       # "rent", or a periodic amount ("shall pay Rs. 60,000 per month").
       all_of: ['rent|per (?:month|mensem|annum|year)|monthly|yearly|annually|(?:each|every) month']
+      # A deposit or security amount "equal to two months' rent" is not the rent.
+      none_of: ['deposit', 'security', 'pagri', 'advance (?:rent|payment)']
     authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
 
   - id: s6_rate_of_enhancement
@@ -90,15 +101,18 @@ checks:
     title: Rate of enhancement of rent
     why: >-
       Section 6(1)(d) -- the agreement should state the rate of enhancement,
-      as far as possible. Section 6(2) provides a default where rent is fixed
-      for only part of a fixed tenure. Only wording that states a rate,
-      percentage or amount is located; a bare power to increase the rent
-      states no rate.
+      as far as possible. Section 6(2): if the tenure is fixed but a rent is
+      fixed only for a part of it, then, absent a stipulation to the contrary,
+      the rent is deemed to remain the same for the whole tenure. Only wording
+      that states a rate, percentage or amount is located; a bare power to
+      increase the rent states no rate.
     locate:
       any_of: ['\d+(?:\.\d+)?\s*(?:%|percent|per\s*cent)',
-               '(?:five|ten|fifteen|twenty|twenty-five)\s*(?:%|percent|per\s*cent)',
+               '(?:five|seven|eight|ten|twelve|fifteen|twenty|twenty-five)\s*(?:%|percent|per\s*cent)',
                '(?:by|to) (?:rs\.?|pkr|rupees)\s*\d[\d,]*']
       all_of: ['rent', 'enhanc\w*|increas\w*|escalat\w*|revis\w*|rais\w*']
+      # A late-payment surcharge "increases the amount due"; it is not a rate of enhancement.
+      none_of: ['surcharge', 'late', 'penalt\w*', 'fine']
     authority:
       - {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
       - {statute: Punjab Rented Premises Act 2009, section: "6(2)"}
@@ -112,8 +126,12 @@ checks:
       not, s.7(2) sets a default: not later than the tenth day of the
       following month.
     locate:
-      any_of: ['payable (?:by|on|before|in advance)', '\d+(?:st|nd|rd|th)? (?:day )?of (?:each|every|the) month',
-               'in advance', 'on or before']
+      any_of: ['payable (?:by|on|before|in advance)',
+               '(?:\d+(?:st|nd|rd|th)?|first|second|third|fifth|seventh|tenth|fifteenth)\s+(?:day\s+)?of\s+(?:each|every|the)\s+(?:english\s+|calendar\s+|following\s+)*month',
+               'on or before']
+      # Only rent timing: "vacate on or before" and "notice in advance" are not due dates.
+      all_of: ['rent|pay\w*']
+      none_of: ['vacat\w*', 'notice']
     authority:
       - {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
       - {statute: Punjab Rented Premises Act 2009, section: "7(2)"}
@@ -127,8 +145,10 @@ checks:
       does not, s.7(3) sets a default: money order or deposit in the
       landlord's bank account.
     locate:
-      any_of: ['cash', 'cheque', 'check', 'bank (?:transfer|deposit|account)', 'online',
-               'money order', 'pay order', 'demand draft']
+      any_of: ['cash', 'cheques?', 'bank (?:transfer|deposit|account)', 'online (?:transfer|payment|banking)',
+               'money order', 'pay order', 'demand draft', 'jazzcash', 'easypaisa', 'ibft',
+               'into (?:the|his|her|their) (?:\w+ )?account']
+      all_of: ['rent|pay\w*|deposit\w*|transfer\w*']
     authority:
       - {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
       - {statute: Punjab Rented Premises Act 2009, section: "7(3)"}
@@ -147,8 +167,13 @@ checks:
     title: Purpose of the letting
     why: Section 6(1)(f) -- the agreement should state the purpose for which the premises is let out, as far as possible.
     locate:
-      any_of: ['purpose', 'for (?:residential|commercial|business|office|shop|godown|warehouse) (?:use|purposes?)',
-               'used (?:only )?(?:as|for)', 'residential', 'commercial']
+      # Letting or use wording only: "For the purpose of this Agreement" and an
+      # address such as "Commercial Area" are not a purpose of letting.
+      any_of: ['for (?:residential|commercial|business|office|shop|godown|warehouse|industrial) (?:use|purposes?)',
+               '(?:residential|commercial) (?:use|purposes?)',
+               'used? (?:only |solely |exclusively )?(?:as|for)',
+               'for (?:the )?purposes? of (?:residence|business|running|carrying on)',
+               'for (?:family |private )?residence']
     authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(f)"}
 
   - id: s6_advance_security_pagri
@@ -159,10 +184,15 @@ checks:
       Section 6(1)(g) -- the agreement should state the amount of advance rent,
       security or pagri, if any. If none was taken, there may be nothing to find.
     locate:
-      any_of: ['advance (?:rent|payment)', 'security(?: deposit| amount)?', 'pagri', 'deposit']
+      # "deposit the rent in the bank" and "security of the premises" are not this.
+      any_of: ['advance (?:rent|payment)', 'security (?:deposit|amount|money)', 'pagri',
+               '(?:refundable|rent) deposit', 'deposit of (?:rs\.?|pkr|rupees)',
+               'as (?:security|advance)']
     authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(g)"}
 
   # ── registration (three limbs, each its own reminder) ───────────────────
+  # The cited Registration Act and Transfer of Property Act text is the
+  # Punjab Code's (as amended in the Punjab), not Pakistan Code's.
   - id: registration_term_over_one_year
     kind: reminder
     title: Registration -- term exceeding one year
@@ -170,8 +200,8 @@ checks:
       The confirmed term exceeds one year. Section 17(1)(d) of the Registration
       Act and s.107 of the Transfer of Property Act require such a lease to be
       registered (s.107: "can be made only by a registered instrument"),
-      subject to any exemption under the proviso to s.17(1) and to s.107's
-      territorial operation (s.1 TPA). A lawyer should confirm.
+      subject to the proviso to s.17(1) and to where s.107 operates in the
+      Punjab (s.1 of that Act). A lawyer should confirm.
     applies_if: {gt: [{field: terms.term_months}, {value: 12}]}
     authority:
       - {statute: Registration Act 1908, section: "17(1)(d)"}
@@ -184,11 +214,13 @@ checks:
     why: >-
       The lease was confirmed as one from year to year. Section 17(1)(d) of the
       Registration Act and s.107 of the Transfer of Property Act require such a
-      lease to be registered, subject to the same exemptions. A lawyer should confirm.
+      lease to be registered, subject to the proviso to s.17(1) and to where
+      s.107 operates in the Punjab (s.1 of that Act). A lawyer should confirm.
     applies_if: {eq: [{field: terms.tenancy_year_to_year}, {value: true}]}
     authority:
       - {statute: Registration Act 1908, section: "17(1)(d)"}
       - {statute: Transfer of Property Act 1882, section: "107"}
+      - {statute: Transfer of Property Act 1882, section: "1"}
 
   - id: registration_yearly_rent
     kind: reminder
@@ -196,8 +228,10 @@ checks:
     why: >-
       The rent was confirmed as yearly. Section 17(1)(d) of the Registration Act
       and s.107 of the Transfer of Property Act require a lease reserving a
-      yearly rent to be registered, subject to the same exemptions. A lawyer should confirm.
+      yearly rent to be registered, subject to the proviso to s.17(1) and to
+      where s.107 operates in the Punjab (s.1 of that Act). A lawyer should confirm.
     applies_if: {eq: [{field: terms.rent_period}, {value: yearly}]}
     authority:
       - {statute: Registration Act 1908, section: "17(1)(d)"}
       - {statute: Transfer of Property Act 1882, section: "107"}
+      - {statute: Transfer of Property Act 1882, section: "1"}
