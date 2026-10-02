@@ -57,7 +57,9 @@ async def test_a_real_document_is_segmented_and_proposed(extracted):
     sentences = await published_rows(get_analysis_sentences_col(), run)
     clauses = await published_rows(get_analysis_clauses_col(), run)
     assert run["segmentation"] == {"clauses": len(clauses), "sentences": len(sentences),
-                                   "text_version_id": version["_id"]}
+                                   "text_version_id": version["_id"],
+                                   "clause_sources": {"preamble": 1, "numbering": 1},
+                                   "headings": 0, "form_fields": 0, "limitations": []}
     texts = [text[s["start"]:s["end"]] for s in sentences]
     assert "1. The Landlord lets the shop." in texts
     assert "2. Rent is Rs. 85,000 per month." in texts

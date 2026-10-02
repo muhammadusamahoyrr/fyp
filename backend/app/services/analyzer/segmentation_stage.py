@@ -3,7 +3,9 @@
   1. Refuse unless the run's text version is CONFIRMED (unconfirmed OCR text
      never reaches here) and its decrypted bytes match the recorded hash.
   2. Segment deterministically (segmentation.py) against the published page
-     map, so every sentence carries its page spans.
+     map, so every sentence carries its page spans. For a DOCX the published
+     structure blocks are passed too: Word headings and numbering labels
+     start clauses; form-field lines become units of their own.
   3. Write clause and sentence rows keyed (run_id, stage, fence, ordinal).
   4. Publish through the fenced, source-guarded commit and pause the run in
      `needs_document_confirmation`, carrying the document-type and province
@@ -17,6 +19,7 @@ from datetime import datetime, timezone
 from app.db.collections import (
     get_analysis_clauses_col,
     get_analysis_sentences_col,
+    get_analysis_text_blocks_col,
     get_analysis_text_pages_col,
     get_analysis_text_versions_col,
 )
@@ -34,6 +37,16 @@ async def _published_pages(version: dict) -> list[dict]:
         {"text_version_id": version["_id"], "stage": stage, "fence": fence}).sort("ordinal", 1)]
 
 
+async def _published_blocks(version: dict) -> list[dict]:
+    """The DOCX structure published with this text version; [] for any other."""
+    stage, fence = next(iter(version.get("published", {}).items()), (None, None))
+    if stage is None or not (version.get("structure") or {}).get("available"):
+        return []
+    return [b async for b in get_analysis_text_blocks_col().find(
+        {"text_version_id": version["_id"], "stage": stage, "fence": fence},
+        {"_id": 0}).sort("ordinal", 1)]
+
+
 async def run_segment(lease: Lease) -> str:
     version = await get_analysis_text_versions_col().find_one(
         {"_id": lease.run.get("text_version_id"), "source_id": lease.source_id})
@@ -49,7 +62,8 @@ async def run_segment(lease: Lease) -> str:
     text = raw.decode("utf-8")
 
     try:
-        clauses, sentences = segmentation.segment(text, await _published_pages(version))
+        clauses, sentences = segmentation.segment(
+            text, await _published_pages(version), await _published_blocks(version))
     except ValueError as exc:                     # too_many_clauses / too_many_sentences
         await worker.finish_without_result(lease, status="failed", error_code=str(exc))
         return f"failed:{exc}"
@@ -64,20 +78,23 @@ async def run_segment(lease: Lease) -> str:
         await get_analysis_clauses_col().update_one(
             {**key, "ordinal": c.ordinal},
             {"$setOnInsert": {**common, "clause_id": c.clause_id, "number": c.number,
-                              "heading": c.heading, "start": c.start, "end": c.end}},
+                              "heading": c.heading, "start": c.start, "end": c.end,
+                              "source": c.source, "block_id": c.block_id}},
             upsert=True)
     for s in sentences:
         await get_analysis_sentences_col().update_one(
             {**key, "ordinal": s.ordinal},
             {"$setOnInsert": {**common, "sentence_id": s.sentence_id, "clause_id": s.clause_id,
-                              "start": s.start, "end": s.end, "page_spans": s.page_spans}},
+                              "start": s.start, "end": s.end, "page_spans": s.page_spans,
+                              "kind": s.kind, "label_end": s.label_end}},
             upsert=True)
 
     try:
         await worker.commit_stage(
             lease, stage=STAGE, next_status="needs_document_confirmation",
             set_fields={"segmentation": {"clauses": len(clauses), "sentences": len(sentences),
-                                         "text_version_id": version["_id"]},
+                                         "text_version_id": version["_id"],
+                                         **segmentation.summary(clauses, sentences)},
                         "document_proposal": segmentation.propose_document(text, sentences)})
     except (LostLease, deletion.StaleSource) as exc:
         if isinstance(exc, LostLease) and await worker.finish_without_result(
