@@ -87,6 +87,7 @@ class Sentence:
     page_spans: list[dict] = field(default_factory=list)
     kind: str = KIND_SENTENCE
     label_end: int | None = None        # form field: offset just past the label's ":"
+    empty_value: bool = False           # form field with nothing after the label ("CNIC:")
 
 
 def _trim(text: str, start: int, end: int) -> tuple[int, int]:
@@ -156,6 +157,31 @@ def form_field(text: str, start: int, end: int) -> int | None:
     return text.index(":", m.end("label")) + 1
 
 
+#: An EMPTY FORM FIELD is a whole line "Label:" with no value, whose label
+#: names a personal or form detail ("CNIC No.:", "Email:", "Signature:").
+#: It is a form_field unit with empty_value=True -- kept, so a readiness
+#: check can see the blank; never a heading, never a clause of its own, and
+#: never evidence that a term is stated. "Term:" / "Landlord:" stay headings.
+_FIELD_WORDS = {"name", "cnic", "nic", "nicop", "passport", "email", "e-mail", "phone",
+                "mobile", "cell", "tel", "telephone", "contact", "fax", "address", "date",
+                "dated", "signature", "signed", "sign", "thumb", "id", "no", "number",
+                "occupation", "age", "city", "district", "tehsil", "ntn", "iban",
+                "designation", "s/o", "d/o", "w/o"}
+
+
+def empty_form_field(text: str, start: int, end: int) -> bool:
+    """Is text[start:end] a whole-line field label with no value ("CNIC:")?"""
+    line = text[start:end]
+    if not line.endswith(":") or "\n" in line:
+        return False
+    label = line[:-1].strip()
+    if not label or not _title_like(label, 5):
+        return False
+    words = {w.lower().strip(".’'") for w in re.findall(r"[A-Za-z][A-Za-z/’'.-]*", label)}
+    words |= {w[:-2] for w in words if w.endswith("’s") or w.endswith("'s")}
+    return bool(words & _FIELD_WORDS)
+
+
 def _caps_title(text: str, start: int, end: int) -> bool:
     """A short ALL-CAPS line with no sentence punctuation ("TENANCY AGREEMENT")."""
     line = text[start:end].strip()
@@ -213,7 +239,7 @@ def _clause_starts(text: str, blocks: list[dict] | None = None) -> list[_Start]:
     for line_start, line_end in _lines(text, 0, len(text)):
         s, e = _trim(text, line_start, line_end)
         title = colon_heading(text, s, e) if s < e else None
-        if title:
+        if title and not empty_form_field(text, s, e):
             offer(_Start(s, None, SOURCE_COLON_HEADING, heading=title))
     return [found[k] for k in sorted(found)]
 
@@ -293,8 +319,9 @@ def units(text: str, clause: Clause) -> list[tuple[int, int, str, int | None]]:
 
     The clause's first line is a HEADING unit when it is a Word heading, a
     colon heading or a short ALL-CAPS title. A form-field line is a unit of
-    its own. Everything else is running prose, split into sentences -- line
-    breaks inside a sentence are only whitespace.
+    its own; an EMPTY form field ("CNIC:") is one whose label_end == end.
+    Everything else is running prose, split into sentences -- line breaks
+    inside a sentence are only whitespace.
     """
     out: list[tuple[int, int, str, int | None]] = []
     prose_from: int | None = None
@@ -303,10 +330,12 @@ def units(text: str, clause: Clause) -> list[tuple[int, int, str, int | None]]:
         s, e = _trim(text, line_start, line_end)
         if s >= e:
             continue
-        heading = first and (clause.source in (SOURCE_HEADING_BLOCK, SOURCE_COLON_HEADING)
-                             or colon_heading(text, s, e) is not None or _caps_title(text, s, e))
+        forced = first and clause.source in (SOURCE_HEADING_BLOCK, SOURCE_COLON_HEADING)
+        empty = not forced and empty_form_field(text, s, e)
+        heading = not empty and first and (forced or colon_heading(text, s, e) is not None
+                                           or _caps_title(text, s, e))
         first = False
-        label_end = None if heading else form_field(text, s, e)
+        label_end = e if empty else None if heading else form_field(text, s, e)
         if heading or label_end is not None:
             if prose_from is not None:
                 out.extend((a, b, KIND_SENTENCE, None) for a, b in _prose(text, prose_from, line_start))
@@ -345,7 +374,8 @@ def segment(text: str, pages: list[dict],
             sentences.append(Sentence(ordinal=ordinal, sentence_id=f"s{ordinal}",
                                       clause_id=clause.clause_id, start=s, end=e,
                                       page_spans=page_spans_for(s, e, pages),
-                                      kind=kind, label_end=label_end))
+                                      kind=kind, label_end=label_end,
+                                      empty_value=kind == KIND_FORM_FIELD and label_end == e))
             if len(sentences) > MAX_SENTENCES:
                 raise ValueError("too_many_sentences")
     return clauses, sentences
@@ -364,6 +394,7 @@ def summary(clauses: list[Clause], sentences: list[Sentence]) -> dict:
     return {"clause_sources": sources,
             "headings": sum(1 for s in sentences if s.kind == KIND_HEADING),
             "form_fields": sum(1 for s in sentences if s.kind == KIND_FORM_FIELD),
+            "empty_form_fields": sum(1 for s in sentences if s.empty_value),
             "limitations": limitations}
 
 

@@ -249,6 +249,8 @@ async def approved_hashes(packs: list[Pack]) -> set[tuple[str, str]]:
 def _locate(check: Check, text: str, sentences: list[dict]) -> list[str]:
     hits = []
     for s in sentences:
+        if s.get("empty_value"):        # a blank form field ("Security Deposit:") states nothing
+            continue
         if (any(p.search(text, s["start"], s["end"]) for p in check.any_of)
                 and all(p.search(text, s["start"], s["end"]) for p in check.all_of)):
             hits.append(s["sentence_id"])

@@ -351,7 +351,7 @@ async def get_text(*, owner_id: str, run_id: str) -> dict:
               "source": 1, "block_id": 1, "text_version_id": 1}).sort("ordinal", 1)]
     sentences = [s async for s in get_analysis_sentences_col().find(
         key, {"_id": 0, "sentence_id": 1, "clause_id": 1, "start": 1, "end": 1,
-              "page_spans": 1, "kind": 1, "label_end": 1}).sort("ordinal", 1)]
+              "page_spans": 1, "kind": 1, "label_end": 1, "empty_value": 1}).sort("ordinal", 1)]
     version = await get_analysis_text_versions_col().find_one({"_id": clauses[0]["text_version_id"]})
     text = (await blob_store.read(version["blob_id"], source_id=run["source_id"],
                                   purpose="canonical_text")).decode("utf-8")

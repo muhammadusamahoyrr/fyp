@@ -86,7 +86,8 @@ async def run_segment(lease: Lease) -> str:
             {**key, "ordinal": s.ordinal},
             {"$setOnInsert": {**common, "sentence_id": s.sentence_id, "clause_id": s.clause_id,
                               "start": s.start, "end": s.end, "page_spans": s.page_spans,
-                              "kind": s.kind, "label_end": s.label_end}},
+                              "kind": s.kind, "label_end": s.label_end,
+                              "empty_value": s.empty_value}},
             upsert=True)
 
     try:

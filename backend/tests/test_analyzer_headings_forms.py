@@ -3,9 +3,14 @@
 Clauses start at numbering, at Word headings and numbering labels (DOCX
 blocks) and at colon headings ("Term:"); form-field lines ("Monthly Rent:
 Rs. 85,000") are evidence units of their own. Prose that merely contains a
-colon is neither. Synthetic text and packages only.
+colon is neither. A blank field ("CNIC:") is a form field with
+empty_value=True: kept, never a clause, never evidence. Synthetic text and
+packages only.
 """
 from __future__ import annotations
+
+import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -225,4 +230,38 @@ def test_a_structured_document_reports_its_sources_and_counts():
     clauses, sentences = seg.segment(FORM, [])
     report = seg.summary(clauses, sentences)
     assert report == {"clause_sources": {seg.SOURCE_PREAMBLE: 1, seg.SOURCE_COLON_HEADING: 3},
-                      "headings": 4, "form_fields": 5, "limitations": []}
+                      "headings": 4, "form_fields": 5, "empty_form_fields": 0,
+                      "limitations": []}
+
+
+# ── empty form fields ────────────────────────────────────────────────────────
+
+def test_empty_field_labels_are_form_fields_with_no_value_not_headings():
+    text = "Landlord:\nName: Ahmed Raza\nCNIC:\nEmail:\nTerm:\nThe tenancy lasts a year."
+    clauses, sentences = seg.segment(text, [])
+    assert [c.heading for c in clauses] == ["Landlord", "Term"]
+    units = [(text[s.start:s.end], s.kind, s.empty_value) for s in sentences]
+    assert units == [("Landlord:", seg.KIND_HEADING, False),
+                     ("Name: Ahmed Raza", seg.KIND_FORM_FIELD, False),
+                     ("CNIC:", seg.KIND_FORM_FIELD, True), ("Email:", seg.KIND_FORM_FIELD, True),
+                     ("Term:", seg.KIND_HEADING, False),
+                     ("The tenancy lasts a year.", seg.KIND_SENTENCE, False)]
+    empties = [s for s in sentences if s.empty_value]
+    assert all(s.label_end == s.end for s in empties)
+    assert seg.summary(clauses, sentences)["empty_form_fields"] == 2
+
+
+def test_an_empty_field_is_never_evidence_that_a_term_is_stated():
+    from app.services.analyzer.playbook_engine import _locate
+    text = "Landlord:\nSecurity Deposit Date:\nThe tenant pays rent monthly."
+    _, sentences = seg.segment(text, [])
+    rows = [{"sentence_id": s.sentence_id, "start": s.start, "end": s.end,
+             "empty_value": s.empty_value} for s in sentences]
+    assert [r["empty_value"] for r in rows] == [False, True, False]
+    check = SimpleNamespace(any_of=[re.compile("security deposit", re.I)], all_of=[])
+    assert _locate(check, text, rows) == []
+    filled = "Landlord:\nSecurity Deposit Date: 1 May 2026\nThe tenant pays rent monthly."
+    _, sentences = seg.segment(filled, [])
+    rows = [{"sentence_id": s.sentence_id, "start": s.start, "end": s.end,
+             "empty_value": s.empty_value} for s in sentences]
+    assert _locate(check, filled, rows) == ["s1"]
