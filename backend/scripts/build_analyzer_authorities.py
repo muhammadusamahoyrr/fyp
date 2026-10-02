@@ -88,21 +88,27 @@ SOURCES = {
         "listing_url": "https://punjabcode.punjab.gov.pk/en/show_article/VGEFMQQzVm8-",
         "sha256": "dc8e42971dfd2bd770c08f80b2b079ccaa6db54079a7b45adc40ee64cfc26962",
     },
-    "registration_act_1908": {
+    # The Registration Act and the Transfer of Property Act are cut from the
+    # PUNJAB Code, not Pakistan Code: the subject devolved to the provinces
+    # (18th Amendment) and the Punjab has amended both -- TPA s.1 wholly
+    # substituted by Punjab Act VIII of 2011; Registration Act amended by
+    # Punjab Acts XIX of 2011 and XL of 2026, among others. The tenancy pack
+    # is a Punjab pack, so it cites the text in force in the Punjab.
+    "punjab_registration_act_1908": {
         "statute": "Registration Act 1908",
-        "jurisdiction": "federal",
-        "publisher": "Pakistan Code, Ministry of Law and Justice",
-        "url": "https://pakistancode.gov.pk/pdffiles/administrator0f29bc9f1e3dfed37c0034eed1e29d53.pdf",
+        "jurisdiction": "punjab",
+        "publisher": "Punjab Code, Government of the Punjab",
+        "url": "https://punjabcode.punjab.gov.pk/uploads/articles/registration-act-1908-doc-pdf.pdf",
         "listing_url": None,
-        "sha256": "b9f6a700e43ad5824252330b41abd675690035b2347da61978f08d486fa40674",
+        "sha256": "2d20ce6cffeedeb53446410043dab72c26cfe5108de250fab83c9f5e612cfcd8",
     },
-    "transfer_of_property_act_1882": {
+    "punjab_transfer_of_property_act_1882": {
         "statute": "Transfer of Property Act 1882",
-        "jurisdiction": "federal",
-        "publisher": "Pakistan Code, Ministry of Law and Justice",
-        "url": "https://pakistancode.gov.pk/pdffiles/administrator77923ce792b475e339e1f46ba0442da3.pdf",
+        "jurisdiction": "punjab",
+        "publisher": "Punjab Code, Government of the Punjab",
+        "url": "https://punjabcode.punjab.gov.pk/uploads/articles/THE_TRANSFER_OF_PROPERTY_ACT_1882.doc.pdf",
         "listing_url": None,
-        "sha256": "d75669bc902f55b55b0bde6f5ddc1002bb891a834d89a2d56b840462a8449185",
+        "sha256": "c9250ac578d088e7779aaf1dea7b3b29ec3a6aa50a6c25c5ae83d3bc4f121097",
     },
     "contract_act_1872": {
         "statute": "Contract Act 1872",
@@ -128,7 +134,8 @@ COVERAGE = {
             {"id": "tenancy.partial_sections",
              "text": "Only sections 5-7 of the Punjab Rented Premises Act 2009, section 17(1) of "
                      "the Registration Act 1908 and sections 1 and 107 of the Transfer of Property "
-                     "Act 1882 are held.",
+                     "Act 1882 (both as published in the Punjab Code) are held. Notifications under "
+                     "TPA s.1(3) and (4) and under the proviso to Registration Act s.17(1) are not.",
              "release_blocker": False},
             {"id": "tenancy.stamp_duty",
              "text": "Stamp duty (Stamp Act 1899 and the Punjab finance laws) is not held.",
@@ -158,8 +165,9 @@ COVERAGE = {
         "statutes": [],
         "gaps": [
             {"id": "all.amendment_date_unknown",
-             "text": "No source states the date it is amended up to; whether later amendments "
-                     "exist is decided only by the lawyer who approves each pack.",
+             "text": "No source states a consolidated date it is amended up to (the Punjab Code "
+                     "footnotes date individual amendments); whether later amendments exist is "
+                     "decided only by the lawyer who approves each pack.",
              "release_blocker": False},
         ],
     },
@@ -174,12 +182,12 @@ PROVISIONS = [
      "6. Contents of tenancy agreement", "7. Payment of rent", 2),
     ("punjab_rented_premises_act_2009", "7", "Payment of rent",
      "7. Payment of rent", "8. Existing tenancy", 2),
-    ("registration_act_1908", "17(1)", "Documents of which registration is compulsory",
-     "17. Documents of which registration is compulsory", "(2) Nothing in clauses (b) and (c)", 3),
-    ("transfer_of_property_act_1882", "1", "Short title, commencement and extent",
-     "1. Short title.", "2. Repeal of Acts.", 3),
-    ("transfer_of_property_act_1882", "107", "Leases how made",
-     "107. Leases how made", "108. Rights and liabilities of lessor and lessee", 10),
+    ("punjab_registration_act_1908", "17(1)", "Documents of which registration is compulsory",
+     "17. Documents of which registration is compulsory", "(2) Nothing in clauses (b) and (c)", 13),
+    ("punjab_transfer_of_property_act_1882", "1", "Short title, commencement, extent and exemption",
+     "1. Short title, commencement, extent and exemption", "2. Repeal of Acts.", 9),
+    ("punjab_transfer_of_property_act_1882", "107", "Leases how made",
+     "107. Leases how made", "108. Rights and liabilities of lessor and lessee", 9),
     ("contract_act_1872", "27", "Agreement in restraint of trade void",
      "27. Agreement in restraint of trade void", "28. Agreements in restraint of legal proceedings", 3),
     ("contract_act_1872", "28", "Agreements in restraint of legal proceedings void",
@@ -189,11 +197,12 @@ PROVISIONS = [
 # Footnotes attached to a provision although their marker is outside it,
 # each with the reason: {(source, section): [(page, marker), ...]}.
 EXTRA_NOTES = {
-    # Footnote 1 hangs on the Act's title ("1ACT No. IV OF 1882"), but it is
-    # the record of the Act's EXTENT -- e.g. ss.54, 107 and 123 extended to
-    # Punjab municipalities and every cantonment -- which s.1 governs and the
-    # tenancy pack's registration reminders rely on.
-    ("transfer_of_property_act_1882", "1"): [(8, "1")],
+    # Footnote 1 hangs on the Act's title ("1THE TRANSFER OF PROPERTY ACT,
+    # 1882"), but it is the record of the Act's EXTENT -- ss.54, 107 and 123
+    # extended to Punjab municipalities and every cantonment, and the Act's
+    # adoption by the Punjab after the 18th Amendment -- which s.1 governs and
+    # the tenancy pack's registration reminders rely on.
+    ("punjab_transfer_of_property_act_1882", "1"): [(9, "1")],
 }
 
 _FOOTER = re.compile(r"^Page \d+ of \d+$")
@@ -264,7 +273,9 @@ def page_lines(pdf: Path) -> tuple[tuple[int, tuple, tuple], ...]:
                 body.append((text, tuple(_small_digits(chars, SMALL * body_size))))
                 continue
             lead = _small_digits(chars[:4], SMALL * size)
-            if lead and text.startswith(lead[0]):
+            if text.strip().isdigit():
+                notes.append([text.strip(), ""])                     # marker on its own line
+            elif lead and text.startswith(lead[0]):
                 notes.append([lead[0], text[len(lead[0]):]])      # a new footnote
             elif notes:
                 notes[-1][1] += "\n" + text                          # its next line

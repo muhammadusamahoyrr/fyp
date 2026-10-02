@@ -144,20 +144,42 @@ def test_a_footnote_never_lands_in_another_section():
     assert "Specific Relief Act" in s28.notes[0]["text"]
 
 
+def test_the_tenancy_pack_cites_the_punjab_text_not_the_federal_one():
+    """Both AI reviews: the Registration Act and the TPA are cut from the Punjab
+    Code, as amended in the Punjab (the subject devolved after the 18th Amendment)."""
+    s1 = provision("Transfer of Property Act 1882", "1")
+    s17 = provision("Registration Act 1908", "17(1)")
+    for p in (s1, s17, provision("Transfer of Property Act 1882", "107")):
+        assert p.source["url"].startswith("https://punjabcode.punjab.gov.pk/")
+        assert p.source["jurisdiction"] == "punjab"
+    assert "any part of the Punjab from all or any of" in flat(s1.text)          # Punjab s.1(4)
+    assert "(5) Notwithstanding anything in this section" in s1.text            # continues on p.10
+    assert "(bb) an instrument which grants power to an attorney" in s17.text
+    assert "registered under 4[clause (b)] relates" in flat(s17.text)
+    assert "(d) leases of immoveable property from year to year" in s17.text
+
+
 def test_the_extent_footnotes_are_notes_beside_tpa_s1_and_s107():
     s1, s107 = provision("Transfer of Property Act 1882", "1"), provision("Transfer of Property Act 1882", "107")
-    assert "Ss. 54, 107 and 123 have been extended" not in s1.text
-    assert "Sections 54, paragraphs 2 and 3, 59, 107 and 123" in flat(s1.text)
-    extent = next(n for n in s1.notes if (n["page"], n["marker"]) == (8, "1"))
+    assert "Ss. 54, 107 and 123 were extended" not in s1.text
+    extent = next(n for n in s1.notes if (n["page"], n["marker"]) == (9, "1"))
     assert "Municipalities in the Punjab" in extent["text"] and extent["marker_in_text"] is False
+    assert "VIII of 2011" in flat(extent["text"])
     assert any("territorial operation of s. 107" in flat(n["text"]) for n in s107.notes)
 
 
-def test_a_footnote_with_no_marker_on_its_page_is_shown_flagged_not_dropped():
-    notes = provision("Registration Act 1908", "17(1)").notes
-    orphan = next(n for n in notes if n["marker"] == "2")
-    assert "Registration (Amdt) Act, 2022" in orphan["text"] and orphan["marker_in_text"] is False
-    assert all(n["marker_in_text"] for n in notes if n["marker"] != "2")
+def test_a_footnote_with_no_marker_on_its_page_is_shown_flagged_not_dropped(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "build_analyzer_authorities", BACKEND / "scripts" / "build_analyzer_authorities.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    pages = ((1, (("5. First section text 1[inserted]", ("1",)), ("6. Next section", ()),),
+              (("1", "Inserted by Act I."), ("2", "Inserted by Act II."), ("3", "Note for s.6."))),)
+    pages = ((1, pages[0][1] + (("6. Next 3[words]", ("3",)),), pages[0][2]),)
+    monkeypatch.setattr(script, "page_lines", lambda pdf: pages)
+    text, spanned, notes = script.cut(Path("x.pdf"), "5. First section", "6. Next section", 1)
+    assert text == "5. First section text 1[inserted]" and spanned == [1]
+    assert [(n["marker"], n["marker_in_text"]) for n in notes] == [("1", True), ("2", False)]
 
 
 def test_notes_are_hash_bound_and_part_of_the_authorities_hash(tmp_path):
@@ -441,15 +463,15 @@ def test_currency_goes_stale_and_is_said_when_never_checked(tmp_path):
 def test_a_changed_or_unreachable_source_is_a_blocker_and_an_old_pin_says_nothing(tmp_path):
     library = authorities.load_library()
     data = yaml.safe_load(authorities.CURRENCY_PATH.read_text(encoding="utf-8"))
-    data["sources"]["registration_act_1908"].update(status=authorities.SOURCE_CHANGED,
+    data["sources"]["punjab_registration_act_1908"].update(status=authorities.SOURCE_CHANGED,
                                                     observed_sha256="1" * 64)
     data["sources"]["contract_act_1872"]["status"] = authorities.CHECK_FAILED
-    data["sources"]["transfer_of_property_act_1882"]["pinned_sha256"] = "2" * 64   # an older pin
+    data["sources"]["punjab_transfer_of_property_act_1882"]["pinned_sha256"] = "2" * 64   # an older pin
     currency = authorities.parse_currency(yaml.safe_dump(data), library)
     blockers = {b["id"]: b["reason"] for b in authorities.release_blockers(library, currency, CHECKED)}
-    assert blockers["currency:registration_act_1908"].endswith("currency source_changed (last checked 2026-10-02)")
+    assert blockers["currency:punjab_registration_act_1908"].endswith("currency source_changed (last checked 2026-10-02)")
     assert "check_failed" in blockers["currency:contract_act_1872"]
-    assert "not_checked" in blockers["currency:transfer_of_property_act_1882"]
+    assert "not_checked" in blockers["currency:punjab_transfer_of_property_act_1882"]
     assert "currency:punjab_rented_premises_act_2009" not in blockers
     with pytest.raises(AuthorityError, match="unknown source"):
         authorities.parse_currency(yaml.safe_dump({"version": 1, "sources": {"nope": {}}}), library)

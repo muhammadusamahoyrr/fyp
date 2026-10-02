@@ -15,23 +15,23 @@ sources:
     retrieved: '2026-10-01'
     authority_status: official
     amended_up_to: null
-  registration_act_1908:
+  punjab_registration_act_1908:
     statute: Registration Act 1908
-    jurisdiction: federal
-    publisher: Pakistan Code, Ministry of Law and Justice
-    url: https://pakistancode.gov.pk/pdffiles/administrator0f29bc9f1e3dfed37c0034eed1e29d53.pdf
+    jurisdiction: punjab
+    publisher: Punjab Code, Government of the Punjab
+    url: https://punjabcode.punjab.gov.pk/uploads/articles/registration-act-1908-doc-pdf.pdf
     listing_url: null
-    sha256: b9f6a700e43ad5824252330b41abd675690035b2347da61978f08d486fa40674
+    sha256: 2d20ce6cffeedeb53446410043dab72c26cfe5108de250fab83c9f5e612cfcd8
     retrieved: '2026-10-01'
     authority_status: official
     amended_up_to: null
-  transfer_of_property_act_1882:
+  punjab_transfer_of_property_act_1882:
     statute: Transfer of Property Act 1882
-    jurisdiction: federal
-    publisher: Pakistan Code, Ministry of Law and Justice
-    url: https://pakistancode.gov.pk/pdffiles/administrator77923ce792b475e339e1f46ba0442da3.pdf
+    jurisdiction: punjab
+    publisher: Punjab Code, Government of the Punjab
+    url: https://punjabcode.punjab.gov.pk/uploads/articles/THE_TRANSFER_OF_PROPERTY_ACT_1882.doc.pdf
     listing_url: null
-    sha256: d75669bc902f55b55b0bde6f5ddc1002bb891a834d89a2d56b840462a8449185
+    sha256: c9250ac578d088e7779aaf1dea7b3b29ec3a6aa50a6c25c5ae83d3bc4f121097
     retrieved: '2026-10-01'
     authority_status: official
     amended_up_to: null
@@ -56,7 +56,7 @@ coverage:
       text: Only Punjab's rent law is held; tenancies in other provinces or Islamabad are not covered.
       release_blocker: false
     - id: tenancy.partial_sections
-      text: Only sections 5-7 of the Punjab Rented Premises Act 2009, section 17(1) of the Registration Act 1908 and sections 1 and 107 of the Transfer of Property Act 1882 are held.
+      text: Only sections 5-7 of the Punjab Rented Premises Act 2009, section 17(1) of the Registration Act 1908 and sections 1 and 107 of the Transfer of Property Act 1882 (both as published in the Punjab Code) are held. Notifications under TPA s.1(3) and (4) and under the proviso to Registration Act s.17(1) are not.
       release_blocker: false
     - id: tenancy.stamp_duty
       text: Stamp duty (Stamp Act 1899 and the Punjab finance laws) is not held.
@@ -79,7 +79,7 @@ coverage:
     statutes: []
     gaps:
     - id: all.amendment_date_unknown
-      text: No source states the date it is amended up to; whether later amendments exist is decided only by the lawyer who approves each pack.
+      text: No source states a consolidated date it is amended up to (the Punjab Code footnotes date individual amendments); whether later amendments exist is decided only by the lawyer who approves each pack.
       release_blocker: false
 provisions:
 - statute: Punjab Rented Premises Act 2009
@@ -146,182 +146,227 @@ provisions:
 - statute: Registration Act 1908
   section: 17(1)
   heading: Documents of which registration is compulsory
-  source: registration_act_1908
+  source: punjab_registration_act_1908
   pages:
-  - 10
+  - 13
+  - 14
   text: |-
-    17. Documents of which registration is compulsory.— (1) The following documents shall
-    be registered, if the property to which they relate is situate in a district in which, and if they have been
-    executed on or after the date on which, Act No. XVI of 1864, or the Indian Registration Act, 1866
-    (XX of 1866), or the Indian Registration Act, 1871 (VIII of 1871), or the Indian Registration Act, 1877
-    (III of 1877), or this Act came or comes into force, namely:—
+    17. Documents of which registration is compulsory.– (1) The following
+    documents shall be registered, if the property to which they relate is situate in a
+    district in which, and if they have been executed on or after the date on which, Act
+    No. XVI of 1864, or the Indian Registration Act, 18667, or the Indian Registration Act,
+    18718 or the Indian Registration Act, 18779, or this Act came or comes into force,
+    namely:–
     (a) instruments of gift of immoveable property;
-    (b) other non-testamentary instruments which purport or operate to create, declare,
-    assign, limit or extinguish, whether in present or in future, any right, title or
-    interest, whether vested or contingent, of the value of one hundred rupees and
-    upwards, to or in immoveable property;
-    1[Explanation.___ In the case of an assignment of a mortgage the consideration for the deed
-    of assignment shall be deemed to be the value for registration;]
-    1[(ba) an instrument which grants power to an attorney or which constitutes an
-    agreement to create, declare, assign, limit or extinguish, by way of sale, any
-    right, title or interest of the value of one hundred rupees and upward, to or in
-    immovable property;]
-    (c) non-testamentary instruments 3[(other than the acknowledgment of a receipt or
-    payment made in respect of any transaction to which an instrument registered
-    under clause (o) relates)] which acknowledge the receipt or payment of any
-    consideration on account of the creation, declaration, assignment, limitation or
-    extinction of any such right, title or interest; and
-    (d) leases of immoveable property from year to year, or for any term exceeding one
-    year, or reserving a yearly rent;
-    4[(e) non-testamentary instruments transferring or assigning any decree or order of a
-    Court or any award when such decree or order or award purports or operates to
-    create, declare, assign, limit or extinguish, whether in present or in future, any
-    right, title or interest, whether vested or contingent, of the value of one hundred
-    rupees and upwards, to or in immoveable property:]
-    Provided that the 5[Provincial Government] may, by order published in the 6[official Gazette],
-    exempt from the operation of this sub-section any leases executed in any district, or part of a district,
-    the terms granted by which do not exceed five years and the annual rents reserved by which do not
-    exceed fifty rupees.
-  text_sha256: bc85bc93c4d5bace310535de0012c6d51280f966544ac4fd33bdaa8ab38fec1d
+    (b) other non-testamentary instruments which purport or operate to create,
+    declare, assign, limit or extinguish, whether in present or in future, any
+    right, title or interest, whether vested or contingent, of the value of one
+    hundred rupees and upwards, to or in immoveable property;
+    1[Explanation.– In the case of an assignment of a mortgage the consideration for the
+    deed of assignment shall be deemed to be the value for registration;]
+    2[(bb) an instrument which grants power to an attorney or which constitutes an
+    agreement to create, declare, assign, limit or extinguish, by way of sale,
+    any right, title or interest of the value of one hundred rupees and upwards,
+    to or in immovable property;]
+    (c) non-testamentary instruments 3[other than the acknowledgement of a
+    receipt or payment made in respect of any transaction to which an
+    instrument registered under 4[clause (b)] relates] which acknowledge the
+    receipt or payment of any consideration on account of the creation,
+    declaration, assignment, limitation or extinction of any such right, title or
+    interest; and
+    (d) leases of immoveable property from year to year, or for any term
+    exceeding one year, or reserving a yearly rent;
+    5[(e) non-testamentary instruments transferring or assigning any decree or
+    order of a Court or any award when such decree or order or award
+    purports or operates to create, declare, assign, limit or extinguish, whether
+    in present or in future, any right, title or interest, whether vested or
+    contingent, of the value of one hundred rupees and upwards to or in
+    immoveable property:]
+    Provided that the 6[Government] may, by order published in the 7[Official
+    Gazette], exempt from the operation of this sub-section any leases executed in any
+    district, or part of a district, the terms granted by which do not exceed five years and
+    the annual rents reserved by which do not exceed fifty rupees.
+  text_sha256: b2188474e91034661d7fb2ad8c0ffd7fabc59a9b0175f856584b37e9cba2ab4e
   notes:
-  - page: 10
+  - page: 13
+    marker: '7'
+    marker_in_text: true
+    text: XX of 1866.
+  - page: 13
+    marker: '8'
+    marker_in_text: true
+    text: VII of 1871.
+  - page: 13
+    marker: '9'
+    marker_in_text: true
+    text: III of 1877.
+  - page: 14
     marker: '1'
     marker_in_text: true
-    text: Explanation added by the Registration (Amdt.) Ordinance, 1962 (45 of 1962), s. 3.
-  - page: 10
+    text: |-
+      Added by the Registration (Amendment) Ordinance, 1962 (XLV of 1962), published in the Gazette of Pakistan (Extraordinary),
+      dated: 7 June 1962, pp. 953-960, s. 3.
+  - page: 14
     marker: '2'
-    marker_in_text: false
-    text: Ins. by the Registration (Amdt) Act, 2022 ( XXXVIII of 2022), s.2.
-  - page: 10
+    marker_in_text: true
+    text: |-
+      Inserted by the Registration (Amendment) Act 2018 (XXVI of 2018), published in the Punjab Gazette (Extraordinary), dated: 24
+      May 2018, pp. 8167-8168, s. 2.
+  - page: 14
     marker: '3'
     marker_in_text: true
-    text: Ins.by the Registration (Amdt.) Ordinance, 1962 (45 of 1962) s.3.
-  - page: 10
+    text: |-
+      Inserted by the Registration (Amendment) Ordinance, 1962 (XLV of 1962), published in the Gazette of Pakistan
+      (Extraordinary), dated: 7 June 1962, pp. 953-960, s. 3.
+  - page: 14
     marker: '4'
     marker_in_text: true
-    text: Clause (e) ins. by the Transfer of Property (Amdt.) Supplementary Act, 1929 (21of 1929), s.10.
-  - page: 10
+    text: |-
+      Substituted for the expression “clause (a)” by the Registration (Amendment) Act 2011 (XIX of 2011), published in the Punjab
+      Gazette (Extraordinary), dated: 3 October 2011, pp. 37373-37374, s. 6.
+  - page: 14
     marker: '5'
     marker_in_text: true
-    text: Subs. by A. O., 1937, for “L. G.”.
-  - page: 10
+    text: |-
+      Inserted by the Transfer of Property (Amendment) Supplementary Act, 1929 (XXI of 1929); assented to by the Governor
+      General on 4 October 1929; and, was published in the Gazette of India (Extraordinary), dated: 25 October 1929, pp. 133-153,
+      s. 10: it came into force on 1 April 1930.
+  - page: 14
     marker: '6'
     marker_in_text: true
-    text: Subs. ibid., for “loca1 official Gazette”.
-  notes_sha256: 4f9fa4bc8f4467193ea8c4f8bb8b4621d96b0bd5d60e7cdbb79d32faa00988aa
+    text: |-
+      Substituted for the words “Provincial Government” by the Registration (Amendment) Act 2011 (XIX of 2011), published in the
+      Punjab Gazette (Extraordinary), dated: 3 October 2011, pp. 37373-37374, s. 6. They were earlier substituted for the words
+      “Local Government” by the Government of India (Adaptation of Indian Laws) Order, 1937, published in the Gazette of India
+      (Extraordinary), dated: 1 April 1937, pp. 75-344, Article 4 read with the Table of General Adaptations.
+  - page: 14
+    marker: '7'
+    marker_in_text: true
+    text: |-
+      Substituted for the words “local official Gazette” by the Government of India (Adaptation of Indian Laws) Order, 1937,
+      published in the Gazette of India (Extraordinary), dated: 1 April 1937, pp. 75-344, Article 4 read with the Table of General
+      Adaptations.
+  notes_sha256: e6ddc5d3db5e24368417dcac0275a963a3103b2a8796e0e6c105722c703326a1
 - statute: Transfer of Property Act 1882
   section: '1'
-  heading: Short title, commencement and extent
-  source: transfer_of_property_act_1882
+  heading: Short title, commencement, extent and exemption
+  source: punjab_transfer_of_property_act_1882
   pages:
-  - 8
   - 9
+  - 10
   text: |-
-    1. Short title.—This Act may be called the Transfer of Property Act, 1882.
-    Commencement. It shall come into force on the first day of July, 1882.
-    2[* * * * * * *]
-    Extent. 3[ 2[This] Act or any Part thereof may by notification in the official Gazette be
-    extended to the whole or any part of 2[a Province] 4[by the Provincial Government]].
-    5[And any 6[Provincial Government] may, 7[* * *] from time to time, by notification in the
-    6[official Gazette], exempt either retrospectively or prospectively, any part of the territories
-    administered by such 5[Provincial Government] from all or any of the following provisions, namely:__
-    Sections 54, paragraphs 2 and 3, 59, 107 and 123.]
-    1[Notwithstanding anything in the foregoing part of this section, sections 54, paragraphs 2 and
-    3, 59, 107 and 123 shall not extend or be extended to any district or tract of country for the time being
-    excluded from the operation of the Registration Act, 2[1908(XVI of 1908)], under the power conferred
-    by the first section of that Act or otherwise.]
-  text_sha256: 184eab3974d0991e8bf6c291325e719bfd71cc582c0b8f57bc692418fe03260f
+    1. Short title, commencement, extent and exemption.– (1) This Act may be
+    cited as the Transfer of Property Act, 1882.
+    (2) It shall come into force on the first day of July, 1882.
+    (3) The Government may, by notification in the official Gazette, extend the
+    Act to the whole or any part of the Punjab.
+    (4) The Government may, by notification in the official Gazette, exempt
+    either retrospectively or prospectively, any part of the Punjab from all or any of
+    paragraphs 2 and 3 of section 54, section 59, section 107 and section 123.
+    (5) Notwithstanding anything in this section, paragraphs 2 and 3 of section
+    54, section 59, section 107 and section 123 shall not extend or be extended to any
+    district for the time being excluded from the operation of the Registration Act, 1908
+    (XVI of 1908).]
+  text_sha256: 68b2b4fda9e8a911e396da4f937deb69e9db960cffc689e84dc184d666ac4706
   notes:
-  - page: 8
+  - page: 9
     marker: '1'
     marker_in_text: false
     text: |-
-      This Act has been extended with effect from 1st January, 1915, to the Province of Sindh, see Bom. R. & O.
-      Ss. 54, 107 and 123 have been extended from 6th May, 1935, to all Municipalities in the Punjab and all notified areas declared and notified under s. 241
-      of the Punjab Municipal Act, 1911, see Punjab Gazette Extraordinary, 1925, p. 27.
-      S. 54, paras, 2 and 3, and ss. 59, 107 and 123 extend to every cantonment in the Provinces, etc., see s. 287 of the Cantonments Act. 1924 (Act No. II of
-      1924). It has been rep. as to Crown Grants by the Crown Grants Act, 1895 (Act No. XV of 1895), and amended in Sind by Sind Act No. XIV of 1939,
-      s.2.
-      This Act shall be deemed to have been amended in its application to the Province of Sind, see Sind Act No. XIV of 1939.
-      The Act has been extended, in respect of non agricultural lands, to Baluchistan States Union and the Khairpur State by G.G.Os. 4 and 5 of 1953, as
-      amended respectively.
-      The Act has been and shall be deemed to have been brought into force in Gwadur with effect from the 8th Septemter, 1958, by the Gwadur (Application
-      of Central Laws) Ordinance, 1960 (Ordinance No. XXXVII of 1960), s. 2.
-      The Act, as in force in the North West Frontier Province immediately before the commencement of N.W.F.P. Regulation No. 2 of 1974, has been
-      applied to the Provincially Administered Tribal Areas of Chitral, Dir, Kalam, Swat and Malakand protected Area, by N.W.F.P. Regulation, No. 2 of
-      1974, s. 3.
-  - page: 8
-    marker: '2'
-    marker_in_text: true
-    text: Omitted and subs. by the Federal Adaptation of Laws Order, 1975 (President’s Order No. 4 of 1975), Art. 2 and Sch.
-  - page: 8
-    marker: '3'
-    marker_in_text: true
-    text: Subs. by the Central Laws (Statute Reform) Ordinance, 1960 (Ordinance No. XXI of 1960), s. 3 and 2nd Sch.
-  - page: 8
-    marker: '4'
-    marker_in_text: true
-    text: Subs. by A. O., 1964, Art. 2 and Sch.
-  - page: 8
-    marker: '5'
-    marker_in_text: true
-    text: Subs. by Act No. III of 1885, s. 1.
-  - page: 8
-    marker: '6'
-    marker_in_text: true
-    text: Subs. by A. O., 1937.
-  - page: 8
-    marker: '7'
-    marker_in_text: true
-    text: Rep. by the Devolution Act, 1920 (Act No. XXXVIII of 1920), s. 2 and Sch. 1.
-  - page: 9
-    marker: '1'
-    marker_in_text: true
-    text: Ins. by Act No. III of 1885; it is to be deemed to have been added from the date on which Act 4 of 1882 came into force.
+      For Statement of Objects and Reasons, see Gazette of India, 1877, Pt. V, p.171; for the Preliminary Report of the Select
+      Committee, see ibid., 1878, Pt. V, p.48; for the further Report of the Select Committee, see ibid., 1879, Pt. V, p. 106; for the
+      third Report of the Select Committee, see ibid., 1881, Pt. V. p.395; for Proceedings in Council, see ibid., 1877, Supplement,
+      p.1568; ibid., 1877, Supplement, p.1690; ibid, 1882, Supplement, pp.96 and 169.
+      This Act was extended with effect from 1st January 1915, to the Province of Sind, see Bom. R & O.
+      Ss. 54, 107 and 123 were extended from 6th May, 1935, to all Municipalities in the Punjab and all notified areas declared
+      and notified under s. 241 of the Punjab Municipal Act, 1911, see Punjab Gazette Extraordinary, 1925, p.27.
+      S. 54, paras, 2 and 3, and ss. 59, 107 and 123 extend to every cantonment in the Province, see s.287 of the Cantonments
+      Act, 1924 (II of 1924); and published in the Gazette of India, Part IV, dated 23.2.1924, pages 3-58.
+      It was repealed as to Crown Grants by the Crown Grants Act, 1895 (XV of 1895), and amended in Sind by Sind Act 14 of
+      1939, s.2.
+      This Act shall be deemed to have been amended in its application to the Province of Sind, see Sind Act XIV of 1939.
+      The Act has been extended, in respect of non-agricultural lands, to Baluchistan States Union and the Khairpur State by
+      G.G.Os. 4 and 5 of 1953, as amended respectively.
+      The Act was and shall be deemed to have been brought into force in Gwadur with effect from the 8th September, 1958, by
+      the Gwadur (Application of Central Laws) Ordinance, 1960 (XXXVII of 1960), s.2.
+      The Act, as in force in the North-West Frontier Province immediately before the commencement of N.W.F.P. Regulation
+      No.2 of 1974, has been applied to the Provincially Administered Tribal Areas of Chitral, Dir, Kalam, Swat and Malakand
+      Protected Area by N.W.F.P. Regulation No.2 of 1974, s.3.
+      This Act was originally in the Federal ambit, however, the subject on which this law was enacted, has devolved to the
+      provinces by virtue of 18th Amendment in the Constitution, hence it was adopted, with amendments, for the province of the
+      Punjab by the Transfer of Property (Amendment) Act 2011 (VIII of 2011); and published in the Gazette of Punjab
+      (Extraordinary), dated 2.5.2011, pages 38631– 38632.
   - page: 9
     marker: '2'
     marker_in_text: true
-    text: Subs. by Act No. XX of 1929, for 1877.
-  notes_sha256: ced72882a5699196b536809d0529735ccd92d69677019a9603325e4ae56cd989
+    text: |-
+      Substituted by the Transfer of Property (Amendment) Act 2011 (VIII of 2011); and published in the Gazette of Punjab
+      (Extraordinary), dated 2.5.2011, pages 38631– 38632, s.2.
+  notes_sha256: 752c457e6ee900c30d134dcec6787c6d4ef37de2cb279ae2effc5f00d0bf02f5
 - statute: Transfer of Property Act 1882
   section: '107'
   heading: Leases how made
-  source: transfer_of_property_act_1882
+  source: punjab_transfer_of_property_act_1882
   pages:
-  - 46
+  - 53
   text: |-
-    107. Leases how made.—A lease of immoveable property from year to year, or for any term
-    exceeding one year, or reserving a yearly rent, can be made only by a registered instrument.
-    3[All other leases of immoveable property may be made either by a registered instrument or by
-    oral agreement accompanied by delivery of possession.]
-    1[Where a lease of immoveable property is made by a registered instrument, such instrument
-    or, where there are more instruments than one, each such instrument shall be executed by both the
-    lessor and the lessee:]
-    3[Provided that the 4[Provincial Government] may, 4[* * *] from time to time, by notification
-    in the 4[official Gazette], direct that leases of immoveable property, other than leases from year to year,
-    or for any term exceeding one year, or reserving a yearly rent, or any class of such leases, may be made
-    by unregistered instrument or by oral agreement without delivery of possession.]
-  text_sha256: e4372557478775abd50a8e37eea9e37e1ab209e73c648f63629208ff54bd9f14
+    107. Leases how made.– A lease of immovable property from year to year, or for
+    any term exceeding one year, or reserving a yearly rent, can be made only by a
+    registered instrument.
+    181[All other leases of immovable property may be made either by a registered
+    instrument or by oral agreement accompanied by delivery of possession].
+    182[Where a lease of immovable property is made by a registered instrument,
+    such instrument or, where there are more instruments than one, each such
+    instrument shall be executed by both the lessor and the lessee:]
+    183[Provided that the 184[Government] may, 185[* * *] from time to time, by
+    notification in the 186[official Gazette], direct that leases of immovable property, other
+    than leases from year to year, or for any term exceeding one year, or reserving a
+    yearly rent, or any class of such leases, may be made by unregistered instrument or
+    by oral agreement without delivery of possession.
+  text_sha256: 7757af1d6a66f20be793fba277dd0be85c4ecc1b8929a403a7bac10e7a9f8af8
   notes:
-  - page: 46
-    marker: '1'
-    marker_in_text: true
-    text: Subs. and ins. by Act No. XX of 1929, ss. 54-55.
-  - page: 46
-    marker: '2'
+  - page: 53
+    marker: '180'
     marker_in_text: true
     text: |-
-      As to limitation to the territorial operation of s. 107, see s. 1, supra. S. 107 extends to every cantonment in the Provinces, etc., see s. 287 of the
-      Cantonments Act, 1924 (Act No. II of 1924).
-  - page: 46
-    marker: '3'
+      As to limitation to the territorial operation of s. 107, see s. 1, supra. S. 107 extends to every cantonment in the Province, see
+      s. 287 of the Cantonments Act, 1924 (II of 1924); and published in the Gazette of India, Part IV, dated 23.2.1924, pages 3-58.
+  - page: 53
+    marker: '181'
     marker_in_text: true
-    text: Subs. and ins. by Act No. VI of 1904, ss. 5.
-  - page: 46
-    marker: '4'
+    text: |-
+      Substituted for the original paragraph.by the Transfer of Property (Amendment) Act, 1904 (VI of 1904); and published in the
+      Government Gazette Punjab and its Dependencies, dated 24.3.1904, page 9, s. 5,
+  - page: 53
+    marker: '182'
     marker_in_text: true
-    text: Subs. and rep. by A. O., 1937.
-  notes_sha256: de6566cfb44ae47dcf08b671dc017942c66e71434c945a275fdca05a21eb673d
+    text: |-
+      Inserted by the Transfer of Property (Amendment) Act 1929 (XX of 1929); and published in the Government Gazette, Punjab
+      and its Dependencies, dated 25.10.1929, pages 121-153, s. 55.
+  - page: 53
+    marker: '183'
+    marker_in_text: true
+    text: |-
+      Proviso inserted by the Transfer of Property (Amendment) Act, 1904 (VI of 1904); and published in the Government Gazette
+      Punjab and its Dependencies, dated 24.3.1904, page 9, s. 5.
+  - page: 53
+    marker: '184'
+    marker_in_text: true
+    text: |-
+      Substituted for the words “Provincial Government” by the Transfer of Property (Amendment) Act 2011 (VIII of 2011); and
+      published in the Gazette of Punjab (Extraordinary), dated 2.5.2011, pages 38631– 38632, s.14.
+  - page: 53
+    marker: '185'
+    marker_in_text: true
+    text: |-
+      The words “with the previous sanction of the Governor General in Council” repealed by the Government of India (Adaptation
+      of Indian Laws) Order, 1937; and published in the Gazette of India (Extraordinary), dated 1.4.1937, pages 75-344, see Article 3
+      and Schedule I.
+  - page: 53
+    marker: '186'
+    marker_in_text: true
+    text: Substituted ibid, for “local official Gazette”.
+  notes_sha256: 778d1b191356ff78b05adeddd4b3e27558cf2e2a3198e03fdf3552850faac1b4
 - statute: Contract Act 1872
   section: '27'
   heading: Agreement in restraint of trade void
