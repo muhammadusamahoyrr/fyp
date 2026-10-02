@@ -170,6 +170,22 @@ def _empty_corpus_index():
 
 
 @pytest.fixture(autouse=True)
+def _test_ai_policy_records(monkeypatch):
+    """Analyzer AI checklist records come from tests/fixtures/ai_policies.
+
+    Readiness needs a VERIFIED checklist record for the policy id; the real
+    one (app/services/analyzer/ai_policies/AAI-AI-DP-001.yaml) is pending
+    until a person verifies the deployment, so tests use a fixture id
+    (AAI-AI-TEST-001) that can never be mistaken for a real verification.
+    A test that reads the production records passes `directory=`.
+    """
+    from app.services.analyzer import ai_records
+
+    monkeypatch.setattr(ai_records, "POLICY_DIR",
+                        Path(__file__).resolve().parent / "fixtures" / "ai_policies")
+
+
+@pytest.fixture(autouse=True)
 def _no_background_embeds(monkeypatch):
     """Stop KYC approvals and profile edits from embedding for real.
 

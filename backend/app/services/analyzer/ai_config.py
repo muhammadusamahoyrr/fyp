@@ -15,6 +15,10 @@ contract that every AI output records.
              the analyzer closed.
   synthetic  ALWAYS on (demo policy). Real documents are not permitted at
              all, whatever the ZDR record says.
+  checklist  the policy id must name a VERIFIED checklist record
+             (ai_records.py): verifier, date, scope, evidence reference,
+             approved endpoints, and ZDR confirmed on the provider account
+             on the same date as ANALYZER_AI_ZDR_VERIFIED_ON.
 
 Problems are fixed vocabulary: no key, model id or evidence text is echoed.
 """
@@ -24,6 +28,8 @@ import re
 from datetime import date
 
 PROVIDER_GROQ = "groq"
+#: The one endpoint the client calls; the policy record must approve it.
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 ZDR_UNVERIFIED = "unverified"
 ZDR_VERIFIED = "verified"
 
@@ -85,6 +91,16 @@ def problems(settings=None, today: date | None = None) -> list[str]:
         out.append(AI_KEY_MISSING)
     if not _POLICY_ID.match(settings.analyzer_ai_policy_id or ""):
         out.append(AI_POLICY_ID_MISSING)
+    else:
+        from app.services.analyzer import ai_records
+
+        try:
+            record = ai_records.load_policy(settings.analyzer_ai_policy_id)
+        except (ai_records.RecordError, OSError, ValueError):
+            record = {"status": "malformed"}
+        out.extend(ai_records.policy_problems(record, endpoint=GROQ_CHAT_URL,
+                                              zdr_verified_on=settings.analyzer_ai_zdr_verified_on,
+                                              today=today))
     status = settings.analyzer_ai_zdr_status
     if status not in (ZDR_UNVERIFIED, ZDR_VERIFIED):
         out.append(AI_ZDR_STATUS_INVALID)

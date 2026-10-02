@@ -15,7 +15,13 @@ Writes analyzer_eval/results/<date>_<model>_<dataset hash>.json with the
 dataset hash, model id, prompt and schema versions, date, the policy and ZDR
 record, every metric and per-document detail. Prints the headline metrics
 and exits 1 if a gate fails (evidence validity 100%, no leakage, no
-injection success). Prices are yours to supply; without them cost is null.
+injection success). Cost uses --price-in/--price-out, else
+analyzer_eval/prices.yaml; a model without a published rate gets null.
+
+A passing result does NOT update the frozen record
+(app/services/analyzer/ai_evaluation_record.yaml): that is a reviewed
+commit, and label_review stays developer_only until a qualified reviewer
+approves the dataset labels.
 """
 from __future__ import annotations
 
@@ -63,6 +69,8 @@ def main() -> int:
         responder = evaluation.oracle_responder
 
     price = (args.price_in, args.price_out) if args.price_in is not None and args.price_out is not None else None
+    if price is None and args.responder == "live":
+        price = evaluation.price_for(args.model)     # analyzer_eval/prices.yaml; None -> cost null
     dataset = evaluation.load_dataset()
     result = asyncio.run(evaluation.evaluate(dataset, responder, runs=args.runs,
                                              model=args.model if args.responder == "live" else "oracle",

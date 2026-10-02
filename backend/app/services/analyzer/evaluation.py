@@ -375,3 +375,19 @@ async def evaluate(dataset: Dataset, responder, *, runs: int = 1, model: str | N
         "metrics": summarise(scored, runs_by_doc=runs_by_doc if runs > 1 else None, price=price),
         "documents": [{k: v for k, v in r.items() if k != "items"} for r in scored],
     }
+
+
+PRICES = Path(__file__).resolve().parents[3] / "analyzer_eval" / "prices.yaml"
+
+
+def price_for(model: str | None, path: Path | None = None) -> tuple[float, float] | None:
+    """(input, output) USD per 1M tokens from analyzer_eval/prices.yaml, or
+    None when the model has no published rate -- cost is then null, never
+    estimated."""
+    path = path or PRICES
+    if not model or not path.exists():
+        return None
+    entry = ((yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("models") or {}).get(model) or {}
+    if isinstance(entry.get("input"), (int, float)) and isinstance(entry.get("output"), (int, float)):
+        return float(entry["input"]), float(entry["output"])
+    return None

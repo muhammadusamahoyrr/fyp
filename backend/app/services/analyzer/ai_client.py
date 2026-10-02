@@ -29,7 +29,7 @@ from app.services.analyzer import ai_config
 
 logger = logging.getLogger(__name__)
 
-GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_CHAT_URL = ai_config.GROQ_CHAT_URL
 TIMEOUT_SECONDS = 60.0
 MAX_PROMPT_CHARS = 200_000
 

@@ -134,3 +134,12 @@ async def test_rows_a_stale_fence_left_behind_are_never_shown(flow):
     await get_analysis_ai_items_col().insert_one(stale)
     body = await report(client, created)
     assert [r["title"] for r in body["model_risks"]] == [live["title"]]
+
+
+async def test_the_report_discloses_that_the_type_is_not_yet_evaluated(flow):
+    client = flow[0]
+    created = await to_ai(flow, model(answer))
+    assert await runner.process_one("w1") == "done"
+    disclosed = (await report(client, created))["ai"]["evaluation"]
+    assert disclosed["document_type"] == "tenancy" and disclosed["status"] == "not_yet_evaluated"
+    assert disclosed["label_review"] == "developer_only" and disclosed["model"] is None

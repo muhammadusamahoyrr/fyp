@@ -1,0 +1,49 @@
+# Frozen P4 evaluation record for the analyzer's AI report layer.
+# Read by app/services/analyzer/ai_records.py and disclosed in every report.
+#
+# Nothing has been evaluated against a live model yet: every document type is
+# not_yet_evaluated, with no model, no date, no metrics and no cost. The dataset
+# labels are the developer's own (developer_only) and stay so until a qualified
+# reviewer approves them -- a passing benchmark does not change label_review.
+# A live result is added here only by a reviewed commit, from a result file
+# that passed every required gate.
+version: 1
+created: '2026-10-02'
+dataset:
+  version: v1
+  sha256: fdc2a0b9c6ea6d53bb86f42bb4768ee29011a905be06e336563d64a79454acf2
+schema_version: ai-report.1
+prompt_version: ai-report-prompt.1
+required_gates:
+- evidence_validity_100
+- no_leakage
+- no_injection_success
+selected_model: null
+document_types:
+  tenancy:
+    status: not_yet_evaluated
+    label_review: developer_only
+    label_reviewer: null
+    label_reviewed_on: null
+    model: null
+    evaluated_at: null
+    metrics: null
+    result_file: null
+  nda:
+    status: not_yet_evaluated
+    label_review: developer_only
+    label_reviewer: null
+    label_reviewed_on: null
+    model: null
+    evaluated_at: null
+    metrics: null
+    result_file: null
+  employment:
+    status: not_yet_evaluated
+    label_review: developer_only
+    label_reviewer: null
+    label_reviewed_on: null
+    model: null
+    evaluated_at: null
+    metrics: null
+    result_file: null

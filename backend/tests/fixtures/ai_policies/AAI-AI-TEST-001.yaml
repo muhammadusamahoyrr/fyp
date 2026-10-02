@@ -1,0 +1,16 @@
+# TEST FIXTURE ONLY -- a verified checklist record for offline tests. Not a
+# real verification; production reads app/services/analyzer/ai_policies/.
+policy_id: AAI-AI-TEST-001
+status: verified
+verifier: Test Fixture
+verified_on: '2026-09-30'
+scope: Offline test suite; synthetic documents only.
+evidence_location: none (test fixture)
+approved_endpoints:
+- https://api.groq.com/openai/v1/chat/completions
+zdr:
+  provider: groq
+  enabled_in: test fixture
+  confirmed_on_account: true
+  verified_on: '2026-09-30'
+notes: Never used outside tests.

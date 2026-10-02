@@ -441,7 +441,7 @@ async def _ai_layer(run: dict) -> tuple[dict, dict]:
     import hashlib
 
     from app.db.collections import get_analysis_ai_items_col
-    from app.services.analyzer import ai_report, ai_stage
+    from app.services.analyzer import ai_records, ai_report, ai_stage
 
     summary = run.get("ai_report") or {"status": ai_stage.UNAVAILABLE, "reason": "not_recorded"}
     by_kind: dict[str, list] = {"risk": [], "obligation": [], "summary_point": []}
@@ -474,5 +474,16 @@ async def _ai_layer(run: dict) -> tuple[dict, dict]:
           "zdr": provenance.get("zdr"), "latency_ms": provenance.get("latency_ms"),
           "usage": provenance.get("usage"),
           "counts": summary.get("counts"), "dropped": summary.get("dropped"),
-          "merged": summary.get("merged")}
+          "merged": summary.get("merged"),
+          # How the AI layer was evaluated for THIS document's confirmed type,
+          # from the frozen record: not_yet_evaluated until a live benchmark
+          # passed every gate; label review stays developer_only until a
+          # qualified reviewer approved the dataset labels.
+          "evaluation": ai_records.evaluation_for(await _document_type(run))}
     return ai, by_kind
+
+
+async def _document_type(run: dict) -> str | None:
+    context = await get_analysis_context_versions_col().find_one(
+        {"_id": run.get("context_version_id"), "source_id": run["source_id"]}, {"document_type": 1})
+    return (context or {}).get("document_type")

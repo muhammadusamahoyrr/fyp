@@ -19,7 +19,7 @@ TODAY = date(2026, 10, 2)
 GOOD = {"analyzer_ai": True, "analyzer_ai_provider": "groq",
         "analyzer_ai_model": "openai/gpt-oss-120b",
         "analyzer_ai_model_allowlist": "openai/gpt-oss-120b,openai/gpt-oss-20b",
-        "analyzer_ai_policy_id": "AAI-AI-DP-001", "analyzer_ai_zdr_status": "verified",
+        "analyzer_ai_policy_id": "AAI-AI-TEST-001", "analyzer_ai_zdr_status": "verified",
         "analyzer_ai_zdr_verified_on": "2026-09-30",
         "analyzer_ai_zdr_evidence": "Groq data controls export, kept in ops/zdr/2026-09-30",
         "analyzer_ai_synthetic_only": True, "groq_api_key": "test-key-not-real"}
@@ -43,7 +43,7 @@ def test_a_consistent_configuration_has_no_problems_and_states_its_contract():
     assert ai_config.problems(good, TODAY) == []
     assert ai_config.contract(good, TODAY) == {
         "provider": "groq", "model": "openai/gpt-oss-120b", "fallback": None,
-        "policy_id": "AAI-AI-DP-001", "zdr": {"status": "verified", "verified_on": "2026-09-30"},
+        "policy_id": "AAI-AI-TEST-001", "zdr": {"status": "verified", "verified_on": "2026-09-30"},
         "synthetic_only": True}
 
 
@@ -81,7 +81,7 @@ def test_unverified_zdr_alone_closes_the_ai_layer():
         ai_config.AI_ZDR_NOT_VERIFIED]
     # A bare claim is not a verification, and the contract never repeats it.
     claimed = config(analyzer_ai_zdr_verified_on="", analyzer_ai_zdr_evidence="")
-    assert ai_config.problems(claimed, TODAY) == [ai_config.AI_ZDR_CLAIM_UNSUPPORTED]
+    assert ai_config.AI_ZDR_CLAIM_UNSUPPORTED in ai_config.problems(claimed, TODAY)
     assert ai_config.contract(claimed, TODAY)["zdr"] == {"status": "unverified", "verified_on": None}
 
 
@@ -131,3 +131,44 @@ async def test_a_consistent_ai_contract_is_ready(app_indexes, ready_otherwise):
         ready_otherwise.setattr(settings, name, value)
     assert await readiness.refresh() == []
     assert readiness.is_ready() is True
+
+
+# ── the checklist record behind the policy id ────────────────────────────────
+
+def test_the_real_checklist_is_pending_and_keeps_the_ai_layer_closed():
+    from app.services.analyzer import ai_records
+    real = ai_records.load_policy("AAI-AI-DP-001", ai_records.HERE / "ai_policies")
+    assert real["status"] == ai_records.PENDING and real["zdr"]["confirmed_on_account"] is False
+    assert ai_config.GROQ_CHAT_URL in real["approved_endpoints"]
+    assert ai_records.policy_problems(real, endpoint=ai_config.GROQ_CHAT_URL,
+                                      zdr_verified_on="2026-09-30") == [
+        "ai_policy_not_verified: the checklist record is not verified"]
+
+
+@pytest.mark.parametrize("change, fragment", [
+    ({"status": "pending_verification"}, "ai_policy_not_verified"),
+    ({"verifier": ""}, "ai_policy_incomplete"),
+    ({"verified_on": "2027-01-01"}, "ai_policy_incomplete"),
+    ({"evidence_location": None}, "ai_policy_incomplete"),
+    ({"approved_endpoints": ["https://api.openrouter.ai/v1/chat/completions"]}, "ai_policy_endpoint_not_approved"),
+    ({"zdr": {"confirmed_on_account": False, "verified_on": "2026-09-30"}}, "ai_policy_zdr_unconfirmed"),
+    ({"zdr": {"confirmed_on_account": True, "verified_on": "2026-09-01"}}, "ai_policy_zdr_date_mismatch"),
+])
+def test_an_incomplete_or_unconfirmed_checklist_is_named(change, fragment):
+    from app.services.analyzer import ai_records
+    record = {**ai_records.load_policy("AAI-AI-TEST-001"), **change}
+    problems = ai_records.policy_problems(record, endpoint=ai_config.GROQ_CHAT_URL,
+                                          zdr_verified_on="2026-09-30", today=TODAY)
+    assert any(p.startswith(fragment) for p in problems), problems
+
+
+def test_a_policy_id_without_a_record_closes_the_ai_layer():
+    problems = ai_config.problems(config(analyzer_ai_policy_id="AAI-AI-DP-999"), TODAY)
+    assert problems == ["ai_policy_record_missing: no checklist record for ANALYZER_AI_POLICY_ID"]
+
+
+def test_the_production_policy_id_is_not_ready_until_a_person_verifies_it(monkeypatch):
+    from app.services.analyzer import ai_records
+    monkeypatch.setattr(ai_records, "POLICY_DIR", ai_records.HERE / "ai_policies")
+    assert "ai_policy_not_verified: the checklist record is not verified" in ai_config.problems(
+        config(analyzer_ai_policy_id="AAI-AI-DP-001"), TODAY)
