@@ -9,10 +9,12 @@ contract that every AI output records.
   model      pinned, and in the allowlist. Never chosen at runtime.
   policy id  the data-protection checklist the deployment was reviewed
              against, e.g. AAI-AI-DP-001.
-  ZDR        "unverified" unless a person verified zero data retention, and
-             then the date (not in the future) and where the evidence is
-             kept. Unverified -> synthetic documents only, and the contract
-             never says ZDR applies.
+  ZDR        REQUIRED. The AI layer runs only after a person verified zero
+             data retention: status "verified", the date (not in the
+             future) and where the evidence is kept. Anything less keeps
+             the analyzer closed.
+  synthetic  ALWAYS on (demo policy). Real documents are not permitted at
+             all, whatever the ZDR record says.
 
 Problems are fixed vocabulary: no key, model id or evidence text is echoed.
 """
@@ -34,8 +36,10 @@ AI_POLICY_ID_MISSING = "ai_policy_id_missing: ANALYZER_AI_POLICY_ID is empty or 
 AI_ZDR_STATUS_INVALID = "ai_zdr_status_invalid: ANALYZER_AI_ZDR_STATUS must be unverified or verified"
 AI_ZDR_CLAIM_UNSUPPORTED = ("ai_zdr_claim_unsupported: a verified ZDR status needs "
                             "ANALYZER_AI_ZDR_VERIFIED_ON (a past date) and ANALYZER_AI_ZDR_EVIDENCE")
-AI_REAL_DOCUMENTS_NEED_ZDR = ("ai_real_documents_need_verified_zdr: ANALYZER_AI_SYNTHETIC_ONLY "
-                              "may be false only with a verified ZDR record")
+AI_ZDR_NOT_VERIFIED = ("ai_zdr_not_verified: ANALYZER_AI needs ANALYZER_AI_ZDR_STATUS=verified "
+                       "with its date and evidence")
+AI_SYNTHETIC_ONLY_REQUIRED = ("ai_synthetic_only_required: ANALYZER_AI_SYNTHETIC_ONLY must be "
+                              "true; real documents are not permitted")
 
 _POLICY_ID = re.compile(r"^[A-Z0-9][A-Z0-9._-]{2,63}$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -84,10 +88,12 @@ def problems(settings=None, today: date | None = None) -> list[str]:
     status = settings.analyzer_ai_zdr_status
     if status not in (ZDR_UNVERIFIED, ZDR_VERIFIED):
         out.append(AI_ZDR_STATUS_INVALID)
-    elif status == ZDR_VERIFIED and not zdr_verified(settings, today):
-        out.append(AI_ZDR_CLAIM_UNSUPPORTED)
-    if not settings.analyzer_ai_synthetic_only and not zdr_verified(settings, today):
-        out.append(AI_REAL_DOCUMENTS_NEED_ZDR)
+    elif status == ZDR_UNVERIFIED:
+        out.append(AI_ZDR_NOT_VERIFIED)
+    elif not zdr_verified(settings, today):
+        out.append(AI_ZDR_CLAIM_UNSUPPORTED)     # "verified" without a past date and evidence
+    if settings.analyzer_ai_synthetic_only is not True:
+        out.append(AI_SYNTHETIC_ONLY_REQUIRED)
     return out
 
 

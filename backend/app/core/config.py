@@ -209,9 +209,10 @@ class Settings(BaseSettings):
     # e.g. "AAI-AI-DP-001"; recorded with every AI output.
     analyzer_ai_policy_id: str = ""
     # Zero data retention at the provider: "unverified" unless a person
-    # verified it, and then the date and where the evidence is kept. Without
-    # a verified record the AI layer takes synthetic documents only, and
-    # nothing may say ZDR applies.
+    # verified it, and then the date and where the evidence is kept.
+    # ANALYZER_AI requires a verified record; anything less keeps the
+    # analyzer closed. SYNTHETIC_ONLY must stay true (demo policy): real
+    # documents are not permitted, whatever the ZDR record says.
     analyzer_ai_zdr_status: str = "unverified"   # unverified | verified
     analyzer_ai_zdr_verified_on: str = ""        # YYYY-MM-DD
     analyzer_ai_zdr_evidence: str = ""           # where the proof is kept

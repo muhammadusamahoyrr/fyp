@@ -1,8 +1,9 @@
 """Document Analyzer: the AI layer's provider contract and readiness.
 
 The settings live in app/core/config.py; ai_config only validates them. One
-provider, one pinned allowlisted model, a policy id and an honest ZDR record
--- or the analyzer stays closed. Offline: no provider is called here.
+provider, one pinned allowlisted model, a policy id, ZDR verified by a person
+and synthetic documents only -- or the analyzer stays closed. Offline: no
+provider is called here.
 """
 from __future__ import annotations
 
@@ -18,8 +19,9 @@ TODAY = date(2026, 10, 2)
 GOOD = {"analyzer_ai": True, "analyzer_ai_provider": "groq",
         "analyzer_ai_model": "openai/gpt-oss-120b",
         "analyzer_ai_model_allowlist": "openai/gpt-oss-120b,openai/gpt-oss-20b",
-        "analyzer_ai_policy_id": "AAI-AI-DP-001", "analyzer_ai_zdr_status": "unverified",
-        "analyzer_ai_zdr_verified_on": "", "analyzer_ai_zdr_evidence": "",
+        "analyzer_ai_policy_id": "AAI-AI-DP-001", "analyzer_ai_zdr_status": "verified",
+        "analyzer_ai_zdr_verified_on": "2026-09-30",
+        "analyzer_ai_zdr_evidence": "Groq data controls export, kept in ops/zdr/2026-09-30",
         "analyzer_ai_synthetic_only": True, "groq_api_key": "test-key-not-real"}
 
 
@@ -41,7 +43,7 @@ def test_a_consistent_configuration_has_no_problems_and_states_its_contract():
     assert ai_config.problems(good, TODAY) == []
     assert ai_config.contract(good, TODAY) == {
         "provider": "groq", "model": "openai/gpt-oss-120b", "fallback": None,
-        "policy_id": "AAI-AI-DP-001", "zdr": {"status": "unverified", "verified_on": None},
+        "policy_id": "AAI-AI-DP-001", "zdr": {"status": "verified", "verified_on": "2026-09-30"},
         "synthetic_only": True}
 
 
@@ -54,13 +56,14 @@ def test_a_consistent_configuration_has_no_problems_and_states_its_contract():
     ({"analyzer_ai_policy_id": ""}, ai_config.AI_POLICY_ID_MISSING),
     ({"analyzer_ai_policy_id": "checklist one"}, ai_config.AI_POLICY_ID_MISSING),
     ({"analyzer_ai_zdr_status": "yes"}, ai_config.AI_ZDR_STATUS_INVALID),
-    ({"analyzer_ai_zdr_status": "verified"}, ai_config.AI_ZDR_CLAIM_UNSUPPORTED),
-    ({"analyzer_ai_zdr_status": "verified", "analyzer_ai_zdr_verified_on": "2026-09-01"},
-     ai_config.AI_ZDR_CLAIM_UNSUPPORTED),                                  # no evidence
-    ({"analyzer_ai_zdr_status": "verified", "analyzer_ai_zdr_verified_on": "2027-01-01",
-      "analyzer_ai_zdr_evidence": "Groq data controls screenshot, ticket 12"},
-     ai_config.AI_ZDR_CLAIM_UNSUPPORTED),                                  # a future date
-    ({"analyzer_ai_synthetic_only": False}, ai_config.AI_REAL_DOCUMENTS_NEED_ZDR),
+    ({"analyzer_ai_zdr_status": "unverified"}, ai_config.AI_ZDR_NOT_VERIFIED),
+    ({"analyzer_ai_zdr_status": "unverified", "analyzer_ai_zdr_verified_on": "",
+      "analyzer_ai_zdr_evidence": ""}, ai_config.AI_ZDR_NOT_VERIFIED),
+    ({"analyzer_ai_zdr_verified_on": ""}, ai_config.AI_ZDR_CLAIM_UNSUPPORTED),       # no date
+    ({"analyzer_ai_zdr_evidence": "  "}, ai_config.AI_ZDR_CLAIM_UNSUPPORTED),        # no evidence
+    ({"analyzer_ai_zdr_verified_on": "2027-01-01"}, ai_config.AI_ZDR_CLAIM_UNSUPPORTED),  # future
+    ({"analyzer_ai_zdr_verified_on": "2026-02-30"}, ai_config.AI_ZDR_CLAIM_UNSUPPORTED),  # no such day
+    ({"analyzer_ai_synthetic_only": False}, ai_config.AI_SYNTHETIC_ONLY_REQUIRED),
 ])
 def test_each_inconsistency_is_named(changes, problem):
     assert problem in ai_config.problems(config(**changes), TODAY)
@@ -73,15 +76,19 @@ def test_problems_never_echo_keys_models_or_evidence():
     assert "secret-model-x" not in text and "private note" not in text
 
 
-def test_zdr_is_said_only_when_a_person_verified_it():
-    claimed = config(analyzer_ai_zdr_status="verified")
+def test_unverified_zdr_alone_closes_the_ai_layer():
+    assert ai_config.problems(config(analyzer_ai_zdr_status="unverified"), TODAY) == [
+        ai_config.AI_ZDR_NOT_VERIFIED]
+    # A bare claim is not a verification, and the contract never repeats it.
+    claimed = config(analyzer_ai_zdr_verified_on="", analyzer_ai_zdr_evidence="")
+    assert ai_config.problems(claimed, TODAY) == [ai_config.AI_ZDR_CLAIM_UNSUPPORTED]
     assert ai_config.contract(claimed, TODAY)["zdr"] == {"status": "unverified", "verified_on": None}
-    verified = config(analyzer_ai_zdr_status="verified", analyzer_ai_zdr_verified_on="2026-09-30",
-                      analyzer_ai_zdr_evidence="Groq data controls export, kept in ops/zdr/2026-09-30",
-                      analyzer_ai_synthetic_only=False)
-    assert ai_config.problems(verified, TODAY) == []
-    assert ai_config.contract(verified, TODAY)["zdr"] == {"status": "verified",
-                                                          "verified_on": "2026-09-30"}
+
+
+def test_real_documents_are_refused_even_with_verified_zdr():
+    real = config(analyzer_ai_synthetic_only=False)
+    assert ai_config.zdr_verified(real, TODAY) is True
+    assert ai_config.problems(real, TODAY) == [ai_config.AI_SYNTHETIC_ONLY_REQUIRED]
 
 
 # ── readiness reads the central configuration ────────────────────────────────
@@ -106,10 +113,16 @@ async def test_ai_off_is_not_checked(app_indexes, ready_otherwise):
     assert readiness.is_ready() is True
 
 
-async def test_an_inconsistent_ai_contract_closes_the_analyzer(app_indexes, ready_otherwise):
-    for name, value in {**GOOD, "analyzer_ai_model": "llama-3.1-8b-instant"}.items():
+@pytest.mark.parametrize("changes, problem", [
+    ({"analyzer_ai_model": "llama-3.1-8b-instant"}, ai_config.AI_MODEL_NOT_ALLOWLISTED),
+    ({"analyzer_ai_zdr_status": "unverified"}, ai_config.AI_ZDR_NOT_VERIFIED),
+    ({"analyzer_ai_synthetic_only": False}, ai_config.AI_SYNTHETIC_ONLY_REQUIRED),
+])
+async def test_an_inconsistent_ai_contract_closes_the_analyzer(app_indexes, ready_otherwise,
+                                                               changes, problem):
+    for name, value in {**GOOD, **changes}.items():
         ready_otherwise.setattr(settings, name, value)
-    assert await readiness.refresh() == [ai_config.AI_MODEL_NOT_ALLOWLISTED]
+    assert await readiness.refresh() == [problem]
     assert readiness.is_ready() is False
 
 
