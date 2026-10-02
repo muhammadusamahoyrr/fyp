@@ -9,10 +9,12 @@ approval names precisely what was read:
                                   evidence units, its expected labels, a
                                   decision column per label and a sign-off
                                   for the dataset SHA-256
-  02_playbooks_review.html        each legal playbook's exact text with its
-                                  content_hash and authorities_hash, and the
-                                  official text it cites (source, snapshot
-                                  date, authority status, currency)
+  02_playbooks_review.html        the tenancy and NDA playbooks' exact text
+                                  with their content_hash and authorities_hash,
+                                  and the official text they cite (source,
+                                  snapshot date, authority status, currency).
+                                  The employment pack is NOT offered for
+                                  approval until its coverage is decided.
   03_employment_coverage_request.html
                                   the open employment-law release blocker
                                   and what the reviewer is asked to decide
@@ -39,7 +41,13 @@ sys.path.insert(0, str(BACKEND))
 
 from app.services.analyzer import approvals, authorities, evaluation, playbook_engine  # noqa: E402
 
-LEGAL_PACKS = ("tenancy_punjab", "nda", "employment")
+#: Packs offered for APPROVAL. The employment pack is deliberately not one:
+#: its statutes, province and checks are decided first (the coverage
+#: request), which changes its content and authorities hashes and needs a
+#: new package. It appears only in the coverage request, marked not for
+#: approval.
+REVIEW_PACKS = ("tenancy_punjab", "nda")
+NOT_FOR_APPROVAL = ("employment",)
 
 #: Statute NAMES offered to the reviewer as a starting point for the
 #: employment coverage decision. Not verified by the developer against any
@@ -181,9 +189,13 @@ def employment_request(employment: dict, authority: dict, generated: str) -> str
     body = (
         f"<div class=\"note\"><p><b>Open release blocker</b> <code>{esc(blocker['id'])}</code>: "
         f"{esc(blocker['text'])}</p></div>"
-        f"<p>The employment playbook (content_hash <code>{esc(employment['content_hash'])}</code>) currently "
+        f"<p>The current employment playbook (content_hash <code>{esc(employment['content_hash'])}</code>) "
         f"cites only: {esc(cited)}. No employment statute's text is in the authority library, so the "
         f"employment legal checklist cannot be released, whatever the AI layer does.</p>"
+        "<div class=\"note\"><p><b>Please do not approve the current employment playbook.</b> It is "
+        "shown for context only. Once you decide the statutes, province and checks below, the playbook "
+        "and its cited text change, its hashes change, and a new review package is sent for approval."
+        "</p></div>"
         "<h2>What we ask you to decide</h2><ol>"
         "<li>Which statutes and exact provisions should the library hold for employment agreements and "
         "offer letters, and for which province(s) or federal territory?</li>"
@@ -200,7 +212,8 @@ def employment_request(employment: dict, authority: dict, generated: str) -> str
         "<table><tr><th>Statute (as named by the developer)</th><th>Include? (yes / no)</th>"
         f"<th>Provisions</th><th>Official source</th></tr>{candidates}"
         "<tr><td>Other: ______________________</td><td></td><td></td><td></td></tr></table>"
-        + sign_off("employment coverage decision", f"employment playbook content_hash {employment['content_hash']}"))
+        + sign_off("employment coverage decision (not a playbook approval)",
+                   f"coverage request for employment playbook content_hash {employment['content_hash']}"))
     return page("Employment law coverage: request for a decision", body, generated)
 
 
@@ -218,12 +231,13 @@ def build(out: Path, generated: str | None = None) -> dict:
     generated = generated or date.today().isoformat()
     out.mkdir(parents=True, exist_ok=True)
     dataset = evaluation.load_dataset()
-    packs = [approvals.playbook_text(pid) for pid in LEGAL_PACKS]
+    packs = [approvals.playbook_text(pid) for pid in REVIEW_PACKS]
+    employment = approvals.playbook_text("employment")
     authority = authorities.current_metadata()
     files = {
         "01_dataset_labels_review.html": dataset_review(dataset, generated),
         "02_playbooks_review.html": playbook_review(packs, authority, generated),
-        "03_employment_coverage_request.html": employment_request(packs[-1], authority, generated),
+        "03_employment_coverage_request.html": employment_request(employment, authority, generated),
     }
     for name, content in files.items():
         (out / name).write_text(content, encoding="utf-8", newline="\n")
@@ -233,6 +247,9 @@ def build(out: Path, generated: str | None = None) -> dict:
         "playbooks": {p["id"]: {"version": p["version"], "content_hash": p["content_hash"],
                                 "authorities_hash": p["authorities_hash"],
                                 "required_qualification": p["required_qualification"]} for p in packs},
+        "not_for_approval": {"employment": {"content_hash": employment["content_hash"],
+                                            "authorities_hash": employment["authorities_hash"],
+                                            "reason": "coverage decision pending"}},
         "release_blockers": [b["id"] for b in authority["release_blockers"]],
         "files": {name: hashlib.sha256(content.encode("utf-8")).hexdigest() for name, content in files.items()},
     }

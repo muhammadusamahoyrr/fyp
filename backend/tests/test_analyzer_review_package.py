@@ -41,7 +41,8 @@ def test_the_manifest_hashes_every_file_and_names_the_dataset_and_packs(built):
     for pid, entry in manifest["playbooks"].items():
         assert (entry["content_hash"], entry["authorities_hash"]) == (packs[pid].content_hash,
                                                                       packs[pid].authorities_hash)
-    assert set(manifest["playbooks"]) == {"tenancy_punjab", "nda", "employment"}
+    assert set(manifest["playbooks"]) == {"tenancy_punjab", "nda"}
+    assert manifest["not_for_approval"]["employment"]["content_hash"] == packs["employment"].content_hash
     assert "employment.no_employment_statute" in manifest["release_blockers"]
     assert json.loads(files["manifest.json"]) == manifest
 
@@ -67,10 +68,12 @@ def test_document_text_is_escaped_never_injected_into_the_page(built):
 
 def test_each_playbook_is_shown_whole_with_its_official_text(built):
     review = built[2]["02_playbooks_review.html"]
-    for pid in ("tenancy_punjab", "nda", "employment"):
+    for pid in ("tenancy_punjab", "nda"):
         raw = (playbook_engine.PLAYBOOK_DIR / f"{pid}.yaml").read_text(encoding="utf-8")
         first_check = re.search(r"^\s*- id: (\S+)", raw, re.M).group(1)
         assert first_check in review
+    employment = next(p for p in playbook_engine.load_packs() if p.id == "employment")
+    assert employment.content_hash not in review and "Sign-off: playbook employment" not in review
     assert "Punjab Code, Government of the Punjab" in review and "authority_status" not in review
     assert "does not confirm that no later amendment exists" in review
 
@@ -78,6 +81,8 @@ def test_each_playbook_is_shown_whole_with_its_official_text(built):
 def test_the_employment_request_marks_its_list_as_unverified(built):
     request = built[2]["03_employment_coverage_request.html"]
     assert "employment.no_employment_statute" in request and "NOT verified" in request
+    assert "Please do not approve the current employment playbook" in request
+    assert "not a playbook approval" in request
     for name in package.EMPLOYMENT_CANDIDATES:
         assert package.esc(name) in request
 
