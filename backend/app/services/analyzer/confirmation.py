@@ -365,6 +365,25 @@ async def get_text(*, owner_id: str, run_id: str) -> dict:
     }
 
 
+_GRAPH_HIDDEN = {"_id": 0, "run_id": 0, "stage": 0, "fence": 0, "source_id": 0,
+                 "text_version_id": 0, "created_at": 0}
+
+
+async def get_graph(*, owner_id: str, run_id: str) -> dict:
+    """Definitions, term uses, references and possible undefined terms of the
+    published segmentation. Offsets index the text /text returns; nothing
+    here is a quote, a legal conclusion or a model's output."""
+    from app.db.collections import get_analysis_doc_graph_col
+
+    run = await _owned_live_run(owner_id, run_id)
+    fence = run.get("published", {}).get("segment")
+    if fence is None:
+        raise AnalyzerConflict("not_segmented", "This analysis has not been read yet.")
+    rows = [r async for r in get_analysis_doc_graph_col().find(
+        {"run_id": run_id, "stage": "segment", "fence": fence}, _GRAPH_HIDDEN).sort("ordinal", 1)]
+    return {"summary": run.get("doc_graph") or {}, "rows": rows}
+
+
 SCOPE_NOTICE = {
     "general_review": ("General document review: drafting-completeness checks. "
                        "None is a legal requirement."),

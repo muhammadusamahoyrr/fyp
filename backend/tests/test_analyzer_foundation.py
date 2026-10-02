@@ -104,7 +104,8 @@ def test_names_are_unique_and_every_collection_is_covered():
     assert len(names) == len(set(names))
     assert analyzer_collections() == (
         "analysis_approval_audit", "analysis_blobs", "analysis_clauses",
-        "analysis_context_versions", "analysis_deletion_outbox", "analysis_findings",
+        "analysis_context_versions", "analysis_deletion_outbox", "analysis_doc_graph",
+        "analysis_findings",
         "analysis_playbook_approvals", "analysis_reviewer_qualifications", "analysis_runs",
         "analysis_sentences", "analysis_sources", "analysis_text_blocks", "analysis_text_pages",
         "analysis_text_versions")

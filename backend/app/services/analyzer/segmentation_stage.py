@@ -6,7 +6,10 @@
      map, so every sentence carries its page spans. For a DOCX the published
      structure blocks are passed too: Word headings and numbering labels
      start clauses; form-field lines become units of their own.
-  3. Write clause and sentence rows keyed (run_id, stage, fence, ordinal).
+  3. Write clause and sentence rows keyed (run_id, stage, fence, ordinal),
+     and the definitions / cross-reference graph built from them
+     (doc_graph.py) under the same key, so it publishes -- or is swept --
+     with them.
   4. Publish through the fenced, source-guarded commit and pause the run in
      `needs_document_confirmation`, carrying the document-type and province
      PROPOSALS with the sentence ids behind them. The person decides.
@@ -18,12 +21,13 @@ from datetime import datetime, timezone
 
 from app.db.collections import (
     get_analysis_clauses_col,
+    get_analysis_doc_graph_col,
     get_analysis_sentences_col,
     get_analysis_text_blocks_col,
     get_analysis_text_pages_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import blob_store, deletion, segmentation, worker
+from app.services.analyzer import blob_store, deletion, doc_graph, segmentation, worker
 from app.services.analyzer.worker import Lease, LostLease
 
 STAGE = "segment"
@@ -61,15 +65,16 @@ async def run_segment(lease: Lease) -> str:
         return "failed:text_integrity"
     text = raw.decode("utf-8")
 
+    pages, blocks = await _published_pages(version), await _published_blocks(version)
     try:
-        clauses, sentences = segmentation.segment(
-            text, await _published_pages(version), await _published_blocks(version))
+        clauses, sentences = segmentation.segment(text, pages, blocks)
     except ValueError as exc:                     # too_many_clauses / too_many_sentences
         await worker.finish_without_result(lease, status="failed", error_code=str(exc))
         return f"failed:{exc}"
     if not sentences:
         await worker.finish_without_result(lease, status="failed", error_code="no_sentences")
         return "failed:no_sentences"
+    graph_rows, graph_summary = doc_graph.build(text, clauses, sentences, blocks, pages)
 
     now = datetime.now(timezone.utc)
     key = {"run_id": lease.run_id, "stage": STAGE, "fence": lease.fence}
@@ -89,6 +94,11 @@ async def run_segment(lease: Lease) -> str:
                               "kind": s.kind, "label_end": s.label_end,
                               "empty_value": s.empty_value}},
             upsert=True)
+    for row in graph_rows:
+        await get_analysis_doc_graph_col().update_one(
+            {**key, "ordinal": row["ordinal"]},
+            {"$setOnInsert": {**common, **{k: v for k, v in row.items() if k != "ordinal"}}},
+            upsert=True)
 
     try:
         await worker.commit_stage(
@@ -96,6 +106,7 @@ async def run_segment(lease: Lease) -> str:
             set_fields={"segmentation": {"clauses": len(clauses), "sentences": len(sentences),
                                          "text_version_id": version["_id"],
                                          **segmentation.summary(clauses, sentences)},
+                        "doc_graph": graph_summary,
                         "document_proposal": segmentation.propose_document(text, sentences)})
     except (LostLease, deletion.StaleSource) as exc:
         if isinstance(exc, LostLease) and await worker.finish_without_result(

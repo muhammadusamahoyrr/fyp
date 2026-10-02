@@ -209,6 +209,31 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="The unpublished-output sweep reads only rows older than its cutoff.",
     ),
+    # ── analysis_doc_graph (definitions and cross-references) ────────────────
+    IndexSpec(
+        collection="analysis_doc_graph",
+        name="uniq_analysis_doc_graph_row",
+        keys=(("run_id", ASCENDING), ("stage", ASCENDING), ("fence", ASCENDING),
+              ("ordinal", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("Run-output identity (plan §5), published with the segmentation "
+             "under the same fence. A retried write under the same fence is "
+             "idempotent; another fence cannot overwrite it."),
+    ),
+    IndexSpec(
+        collection="analysis_doc_graph",
+        name="analysis_doc_graph_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every graph row of a source.",
+    ),
+    IndexSpec(
+        collection="analysis_doc_graph",
+        name="analysis_doc_graph_created",
+        keys=(("created_at", ASCENDING),),
+        kind=QUERY,
+        why="The unpublished-output sweep reads only rows older than its cutoff.",
+    ),
     # ── analysis_findings / analysis_playbook_approvals ──────────────────────
     IndexSpec(
         collection="analysis_findings",

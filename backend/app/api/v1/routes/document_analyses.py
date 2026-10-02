@@ -192,6 +192,13 @@ async def get_analysis_text(run_id: str, current_user: dict = Depends(require_cl
     return await _run(confirmation.get_text(owner_id=str(current_user["_id"]), run_id=run_id))
 
 
+@router.get("/runs/{run_id}/graph")
+async def get_analysis_graph(run_id: str, current_user: dict = Depends(require_client)):
+    """Definitions and cross-references, anchored by offsets and stable ids."""
+    _require_available()
+    return await _run(confirmation.get_graph(owner_id=str(current_user["_id"]), run_id=run_id))
+
+
 @router.get("/runs/{run_id}/report")
 async def get_analysis_report(run_id: str, current_user: dict = Depends(require_client)):
     """Findings with scope labels and server-cut evidence. 409 until done."""

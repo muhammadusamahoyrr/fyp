@@ -73,8 +73,8 @@ def SOURCE_SCOPED():
     return (C.get_analysis_deletion_outbox_col(), C.get_analysis_blobs_col(),
             C.get_analysis_text_pages_col(), C.get_analysis_text_blocks_col(),
             C.get_analysis_text_versions_col(), C.get_analysis_clauses_col(),
-            C.get_analysis_sentences_col(), C.get_analysis_context_versions_col(),
-            C.get_analysis_findings_col())
+            C.get_analysis_sentences_col(), C.get_analysis_doc_graph_col(),
+            C.get_analysis_context_versions_col(), C.get_analysis_findings_col())
 
 
 def files_on_disk() -> list:

@@ -323,6 +323,15 @@ def get_analysis_sentences_col() -> AsyncIOMotorCollection:
     return get_database()["analysis_sentences"]
 
 
+def get_analysis_doc_graph_col() -> AsyncIOMotorCollection:
+    """Definitions and cross-reference graph of a run's text version
+    (analyzer/doc_graph.py): definition, term_use, reference and
+    possible_undefined_term rows -- offsets and stable sentence / clause /
+    block ids, never text. Keyed (run_id, stage, fence, ordinal) with the
+    segmentation it was built from."""
+    return get_database()["analysis_doc_graph"]
+
+
 def get_analysis_context_versions_col() -> AsyncIOMotorCollection:
     """What a person confirmed about a text version: document type, province
     and decisive key terms with their evidence. Immutable; a change is a new
