@@ -12,6 +12,8 @@ provide on its own:
   * ITS UNIQUE INDEXES. One source per idempotency key, one open run per
     source, one purge per source. Without them the code races and nothing
     resolves the race.
+  * ITS AI CONTRACT, when ANALYZER_AI is on: one provider, one pinned and
+    allowlisted model, a policy id and an honest ZDR record (ai_config.py).
 
 FAIL CLOSED, BUT ONLY THE ANALYZER. When DOC_ANALYZER is on and a check fails,
 the analyzer answers 503 and writes nothing; the rest of the application starts
@@ -66,6 +68,13 @@ async def check() -> list[str]:
         problems.append(TRANSACTIONS_UNAVAILABLE)
     problems.extend(str(p) for p in await validate_analyzer_indexes())
     problems.extend(blob_store.keyring_problems())
+    from app.core.config import settings
+    from app.services.analyzer import ai_config
+
+    if settings.analyzer_ai:
+        # The AI layer's provider contract, from the central configuration:
+        # an inconsistent one keeps the whole analyzer closed, never "AI off".
+        problems.extend(ai_config.problems(settings))
     return problems
 
 

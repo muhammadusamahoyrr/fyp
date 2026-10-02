@@ -192,6 +192,30 @@ class Settings(BaseSettings):
     # otherwise. Never logged. Old ids stay listed until nothing uses them.
     analyzer_keks: str = ""
     analyzer_kek_active: str = ""
+    # The analyzer's AI report layer (summary, risks, obligations). OFF by
+    # default and separate from DOC_ANALYZER: the deterministic analyzer runs
+    # without it. When ON, analyzer readiness (analyzer/ai_config.py) refuses
+    # the analyzer unless all of this is consistent: ONE provider, ONE pinned
+    # model from the allowlist, the data-protection checklist it was reviewed
+    # against, and an honest zero-data-retention record. No fallback model,
+    # key or provider is ever tried.
+    analyzer_ai: bool = False
+    analyzer_ai_provider: str = "groq"           # the only supported provider
+    analyzer_ai_model: str = ""                  # the exact Groq model id, pinned
+    # Models that may be pinned (comma-separated). Changing the pin is a
+    # reviewed configuration change, never a runtime fallback.
+    analyzer_ai_model_allowlist: str = "openai/gpt-oss-120b,openai/gpt-oss-20b,llama-3.3-70b-versatile"
+    # The data-protection checklist this deployment was reviewed against,
+    # e.g. "AAI-AI-DP-001"; recorded with every AI output.
+    analyzer_ai_policy_id: str = ""
+    # Zero data retention at the provider: "unverified" unless a person
+    # verified it, and then the date and where the evidence is kept. Without
+    # a verified record the AI layer takes synthetic documents only, and
+    # nothing may say ZDR applies.
+    analyzer_ai_zdr_status: str = "unverified"   # unverified | verified
+    analyzer_ai_zdr_verified_on: str = ""        # YYYY-MM-DD
+    analyzer_ai_zdr_evidence: str = ""           # where the proof is kept
+    analyzer_ai_synthetic_only: bool = True
 
     # Retention DELETION for intakes and their uploaded evidence — its own
     # switch, deliberately not shared with the V2 one above. The two stores hold
