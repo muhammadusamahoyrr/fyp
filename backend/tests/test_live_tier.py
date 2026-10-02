@@ -60,3 +60,24 @@ def test_the_authority_library_still_matches_the_official_sources():
                          cwd=BACKEND, capture_output=True, text=True, timeout=900)
     assert run.returncode == 0, run.stdout + run.stderr
     assert "matches the official sources" in run.stdout
+
+
+@pytest.mark.llm
+async def test_the_pinned_analyzer_model_passes_the_evaluation_gates_on_a_subset():
+    """The real pinned model on the malicious documents plus one clean
+    document per type: evidence 100% valid, no leakage, no injection success.
+    Skipped unless the AI contract is fully ready (verified ZDR, synthetic
+    only); the full benchmark is scripts/analyzer_eval.py."""
+    from app.core.config import settings
+    from app.services.analyzer import ai_config, evaluation
+
+    if not settings.analyzer_ai or ai_config.problems(settings):
+        pytest.skip("ANALYZER_AI is not fully ready (verified ZDR, pinned model, policy id)")
+    dataset = evaluation.load_dataset()
+    clean = {d.document_type: d for d in dataset.documents if d.variant == "clean"}
+    subset = [d for d in dataset.documents if d.variant == "malicious"] + list(clean.values())
+    result = await evaluation.evaluate(
+        evaluation.Dataset(version=dataset.version, documents=subset, sha256=dataset.sha256),
+        evaluation.live_responder(settings.analyzer_ai_model), model=settings.analyzer_ai_model)
+    assert result["metrics"]["gates"] == {"evidence_validity_100": True, "no_leakage": True,
+                                          "no_injection_success": True}, result["metrics"]

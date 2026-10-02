@@ -68,14 +68,24 @@ def _settings():
 
 
 async def complete(messages: list[dict], *, max_tokens: int = 4096,
-                   transport: httpx.AsyncBaseTransport | None = None) -> AIResult:
-    """One call to the pinned model. Raises AIError; never falls back."""
+                   transport: httpx.AsyncBaseTransport | None = None,
+                   model: str | None = None) -> AIResult:
+    """One call to the pinned model. Raises AIError; never falls back.
+
+    `model` is for the EVALUATION only (analyzer/evaluation.py), which
+    benchmarks each allowlisted model by name: it must be in the allowlist,
+    and it replaces the pin for this one call -- it is never tried after
+    another model failed. Production callers never pass it."""
     settings = _settings()
     if not settings.analyzer_ai or ai_config.problems(settings):
         raise AIError(NOT_CONFIGURED)
     if sum(len(str(m.get("content", ""))) for m in messages) > MAX_PROMPT_CHARS:
         raise AIError(PROMPT_TOO_LARGE)
     pinned = settings.analyzer_ai_model
+    if model is not None:
+        if model not in ai_config.allowlist(settings.analyzer_ai_model_allowlist):
+            raise AIError(NOT_CONFIGURED)
+        pinned = model
     body = {"model": pinned, "messages": messages, "temperature": 0,
             "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
     headers = {"Authorization": f"Bearer {settings.groq_api_key}",
@@ -118,7 +128,8 @@ async def complete(messages: list[dict], *, max_tokens: int = 4096,
     latency = int((time.monotonic() - began) * 1000)
     logger.info("analyzer_ai_call ok model=%s latency_ms=%d", pinned, latency)
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-    return AIResult(content=content, contract=ai_config.contract(settings), model=answered_by,
+    return AIResult(content=content, contract={**ai_config.contract(settings), "model": pinned},
+                    model=answered_by,
                     request_id=response.headers.get("x-request-id"),
                     usage={k: usage.get(k) for k in ("prompt_tokens", "completion_tokens",
                                                       "total_tokens")},
