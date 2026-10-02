@@ -49,6 +49,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Local backend launcher runtime state
+backend/.serve.pid
+backend/.serve.stop
+
 # Testing
 coverage/
 .nyc_output/

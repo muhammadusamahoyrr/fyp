@@ -72,8 +72,11 @@ cd backend
 python -m venv venv
 venv/Scripts/pip install -r requirements.txt      # Linux/mac: venv/bin/pip
 
-# ALWAYS use the venv's uvicorn — the system Python does not have the deps.
-venv/Scripts/uvicorn app.main:app --reload --port 8000
+# ALWAYS use the venv's single-instance launcher — system Python may not have
+# the dependencies, and direct reload servers can be started twice.
+venv/Scripts/python scripts/serve.py start
+venv/Scripts/python scripts/serve.py status
+venv/Scripts/python scripts/serve.py stop
 ```
 
 Startup (`app/main.py` lifespan) connects Mongo, connects Chroma, and creates

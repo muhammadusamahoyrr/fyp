@@ -1,2 +1,2 @@
 @echo off
-"%~dp0venv\Scripts\python.exe" -m uvicorn app.main:app --reload --port 8000
+"%~dp0venv\Scripts\python.exe" "%~dp0scripts\serve.py" start

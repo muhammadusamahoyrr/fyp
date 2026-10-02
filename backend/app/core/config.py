@@ -157,7 +157,7 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
-    frontend_url: str = "http://localhost:3000"
+    frontend_url: str = "http://localhost:3001"
     cors_origins: str = ""            # extra allowed origins, comma-separated
     run_schedulers: bool = True       # in-process schedulers; disable on all but one worker
     # How often each worker checks the provenance outbox. Cheap when idle:

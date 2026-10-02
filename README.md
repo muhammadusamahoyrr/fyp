@@ -174,8 +174,9 @@ cp .env.example .env        # then fill in the values below
 # Ingest the legal corpus (statutes → collections)
 venv/Scripts/python scripts/ingest_pakistan_laws.py
 
-# Run the API
-venv/Scripts/uvicorn app.main:app --reload
+# Run exactly one API process on 127.0.0.1:8000. The launcher refuses a
+# duplicate port owner and supports graceful stop/status commands.
+venv/Scripts/python scripts/serve.py start
 ```
 
 API docs are then served at `http://localhost:8000/docs`.
@@ -185,8 +186,12 @@ API docs are then served at `http://localhost:8000/docs`.
 ```bash
 cd frontend
 npm install
-npm run dev        # http://localhost:3000
+npm run dev        # http://localhost:3001
 ```
+
+Stop the backend with `venv/Scripts/python scripts/serve.py stop`. Do not start
+a second direct `uvicorn --reload` process alongside it: reloads reset active
+browser requests and duplicate workers can serve different application state.
 
 ### Configuration
 

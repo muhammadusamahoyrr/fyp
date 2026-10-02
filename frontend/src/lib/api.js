@@ -1,4 +1,7 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+// Keep the browser on one origin. Next proxies this relative path to the fixed
+// backend target, so changing the local frontend port cannot silently point the
+// browser at a different API process.
+const BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 // ─── Token store (in-memory, audit #5) ────────────────────────────────────────
 // The access token lives ONLY in memory — never localStorage — so an XSS payload
