@@ -25,10 +25,25 @@ TEXT
   them, e.g. "2107. Leases how made" is footnote 2 followed by "107.".
   Nothing else is changed.
 
+AUTHORITY METADATA
+  Every source here is `official` (only the publishers in
+  authorities.OFFICIAL_HOSTS may claim it); `amended_up_to` is null because
+  none of these files states the amendment date it reflects. COVERAGE lists,
+  per document type, the statutes held and the known gaps, some of which
+  are release blockers (see authorities.release_blockers).
+
+CURRENCY
+  --currency re-fetches each official file, compares it with its pin and
+  writes app/services/analyzer/authority_currency.yaml (status, date, the
+  pin checked). It never changes the library: a changed file is reported
+  as source_changed and the build itself keeps refusing until a person
+  reads the new text and moves the pin.
+
 Usage:
   python scripts/build_analyzer_authorities.py              # download, verify, write
   python scripts/build_analyzer_authorities.py --dir DIR    # use files already in DIR
   python scripts/build_analyzer_authorities.py --check      # verify only; exit 1 on drift
+  python scripts/build_analyzer_authorities.py --currency   # re-fetch, record currency
 """
 from __future__ import annotations
 
@@ -47,6 +62,7 @@ import yaml
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
+from app.services.analyzer import authorities  # noqa: E402
 from app.services.analyzer.authorities import LIBRARY_PATH, dump_library  # noqa: E402
 
 RETRIEVED = "2026-10-01"
@@ -83,6 +99,57 @@ SOURCES = {
         "url": "https://pakistancode.gov.pk/pdffiles/administrator8332a6df32386960ac7d81a5cf7aade2.pdf",
         "listing_url": None,
         "sha256": "930c60f67216530fab28f37d439ad3c3ae941dc918c914f2e7c18ddbabb7bfbd",
+    },
+}
+
+# What the library holds per document type, and what it does not. A gap that
+# is a release blocker keeps the legal layer for that type unreleased.
+COVERAGE = {
+    "tenancy": {
+        "statutes": ["Punjab Rented Premises Act 2009", "Registration Act 1908",
+                     "Transfer of Property Act 1882"],
+        "gaps": [
+            {"id": "tenancy.punjab_only",
+             "text": "Only Punjab's rent law is held; tenancies in other provinces or "
+                     "Islamabad are not covered.",
+             "release_blocker": False},
+            {"id": "tenancy.partial_sections",
+             "text": "Only sections 5-7 of the Punjab Rented Premises Act 2009, section 17(1) of "
+                     "the Registration Act 1908 and sections 1 and 107 of the Transfer of Property "
+                     "Act 1882 are held.",
+             "release_blocker": False},
+            {"id": "tenancy.stamp_duty",
+             "text": "Stamp duty (Stamp Act 1899 and the Punjab finance laws) is not held.",
+             "release_blocker": False},
+        ],
+    },
+    "nda": {
+        "statutes": ["Contract Act 1872"],
+        "gaps": [
+            {"id": "nda.general_contract_law_only",
+             "text": "Only sections 27 and 28 of the Contract Act 1872 are held; no statute "
+                     "specific to confidential information is.",
+             "release_blocker": False},
+        ],
+    },
+    "employment": {
+        "statutes": ["Contract Act 1872"],
+        "gaps": [
+            {"id": "employment.no_employment_statute",
+             "text": "No employment statute's text is held (federal or provincial labour and "
+                     "standing-orders law); only Contract Act 1872 sections 27 and 28. "
+                     "Employment legal provisions must be added by a lawyer.",
+             "release_blocker": True},
+        ],
+    },
+    "all": {
+        "statutes": [],
+        "gaps": [
+            {"id": "all.amendment_date_unknown",
+             "text": "No source states the date it is amended up to; whether later amendments "
+                     "exist is decided only by the lawyer who approves each pack.",
+             "release_blocker": False},
+        ],
     },
 }
 
@@ -157,7 +224,8 @@ def cut(pdf: Path, start: str, end: str, first_page: int) -> tuple[str, list[int
 
 
 def build(directory: Path) -> dict:
-    sources = {sid: {**meta, "retrieved": RETRIEVED, "official": True} for sid, meta in SOURCES.items()}
+    sources = {sid: {**meta, "retrieved": RETRIEVED, "authority_status": authorities.OFFICIAL,
+                     "amended_up_to": None} for sid, meta in SOURCES.items()}
     provisions = []
     for sid, section, heading, start, end, first_page in PROVISIONS:
         text, pages = cut(fetch(sid, directory), start, end, first_page)
@@ -167,14 +235,49 @@ def build(directory: Path) -> dict:
             "statute": SOURCES[sid]["statute"], "section": section, "heading": heading,
             "source": sid, "pages": pages, "text": text,
             "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()})
-    return {"version": 1, "sources": sources, "provisions": provisions}
+    return {"version": 1, "sources": sources, "coverage": COVERAGE, "provisions": provisions}
+
+
+def currency(today: str) -> dict:
+    """Re-fetch every official file and compare it with its pin. Writes nothing
+    into the library; a changed or unreachable file is recorded as such."""
+    out = {}
+    for sid, meta in SOURCES.items():
+        entry = {"pinned_sha256": meta["sha256"], "last_checked": today}
+        try:
+            response = httpx.get(meta["url"], timeout=120, follow_redirects=True,
+                                 headers={"User-Agent": "Mozilla/5.0 (attorney-ai authority builder)"})
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            out[sid] = {**entry, "status": authorities.CHECK_FAILED, "observed_sha256": None,
+                        "error": type(exc).__name__}
+            continue
+        observed = hashlib.sha256(response.content).hexdigest()
+        out[sid] = {**entry, "observed_sha256": observed,
+                    "status": authorities.SOURCE_UNCHANGED if observed == meta["sha256"]
+                    else authorities.SOURCE_CHANGED}
+    return {"version": 1, "sources": out}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dir", type=Path, help="directory holding (or receiving) the source PDFs")
     parser.add_argument("--check", action="store_true", help="verify the committed library; write nothing")
+    parser.add_argument("--currency", action="store_true",
+                        help="re-fetch the official files and record their currency")
     args = parser.parse_args()
+    if args.currency:
+        import datetime
+
+        result = currency(datetime.date.today().isoformat())
+        rendered = ("# Currency of the authority library's official sources -- GENERATED by\n"
+                    "# scripts/build_analyzer_authorities.py --currency. See authorities.py.\n"
+                    + yaml.safe_dump(result, sort_keys=True))
+        authorities.parse_currency(rendered, authorities.load_library())   # never write the unreadable
+        authorities.CURRENCY_PATH.write_text(rendered, encoding="utf-8", newline="\n")
+        for sid, entry in result["sources"].items():
+            print(f"{sid}: {entry['status']}")
+        return
     directory = args.dir or Path(tempfile.mkdtemp(prefix="analyzer-authorities-"))
     directory.mkdir(parents=True, exist_ok=True)
     rendered = dump_library(build(directory))

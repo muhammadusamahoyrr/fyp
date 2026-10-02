@@ -411,5 +411,11 @@ async def get_report(*, owner_id: str, run_id: str) -> dict:
         "evidence": [{"sentence_id": i, "text": quotes.get(i)} for i in f.get("sentence_ids", [])],
     } for f in rows]
     report = run.get("report", {})
+    from app.services.analyzer import authorities
+
+    # The authority/source layer, as of now: each source's official/mirror
+    # status, snapshot date and currency, coverage gaps and release blockers.
+    # Each finding keeps the snapshot it was made against.
     return {"id": run_id, "packs": report.get("packs", []), "counts": report.get("counts", {}),
-            "scope_notice": SCOPE_NOTICE, "findings": findings}
+            "scope_notice": SCOPE_NOTICE, "findings": findings,
+            "authority": authorities.current_metadata()}

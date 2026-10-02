@@ -187,6 +187,10 @@ async def test_the_real_tenancy_pack_from_approval_to_withdrawal(lifecycle, tmp_
     cited = {(c["statute"], c["section"]) for c in review["cited_provisions"]}
     assert ("Registration Act 1908", "17(1)") in cited and ("Transfer of Property Act 1882", "1") in cited
     assert all(c["source"]["url"].startswith("https://") for c in review["cited_provisions"])
+    # ...and is told what each source is, how current, and what is not covered.
+    assert {c["source"]["authority_status"] for c in review["cited_provisions"]} == {"official"}
+    assert all(c["source"]["currency"]["caveat"] for c in review["cited_provisions"])
+    assert "tenancy.stamp_duty" in {g["id"] for g in review["authority"]["coverage"]["tenancy"]["gaps"]}
     body = {"content_hash": review["content_hash"], "authorities_hash": review["authorities_hash"],
             "reviewer_role": "Advocate High Court (test)"}
 
@@ -216,6 +220,11 @@ async def test_the_real_tenancy_pack_from_approval_to_withdrawal(lifecycle, tmp_
     [source] = rate["authority"]
     assert source["located"] and source["section"] == "6(1)(d)" and source["pages"] == [5]
     assert source["source"]["publisher"] == "Punjab Code, Government of the Punjab"
+    assert (source["source"]["authority_status"], source["source"]["snapshot_date"]) == \
+           ("official", "2026-10-01")
+    layer = report["authority"]
+    assert layer["available"] and len(layer["sources"]) == 4
+    assert "employment.no_employment_statute" in {b["id"] for b in layer["release_blockers"]}
     frozen_run = report["id"]
     frozen = (await client.get(f"{base}/runs/{frozen_run}/report")).json()
 
@@ -273,3 +282,145 @@ async def test_reapproval_against_new_cited_text_supersedes_the_stale_one(lifecy
     assert rows[second["_id"]]["active"] is True
     [entry] = [a async for a in db["analysis_approval_audit"].find({"approval_id": second["_id"]})]
     assert entry["superseded"] == [first["_id"]]
+
+
+# ── authority metadata: status, snapshot, currency, coverage, blockers ───────
+
+from datetime import date  # noqa: E402
+
+CHECKED = date(2026, 10, 2)
+
+
+def library_with(tmp_path: Path, change) -> Path:
+    """A copy of the library with `change(data)` applied, written WITHOUT the
+    dump-time validation, so invalid shapes can reach the parser."""
+    data = yaml.safe_load(RAW)
+    change(data)
+    path = tmp_path / "authority_library.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return path
+
+
+def test_every_committed_source_states_its_status_and_snapshot():
+    library = authorities.load_library()
+    for sid, meta in library.sources.items():
+        assert meta["authority_status"] == authorities.OFFICIAL
+        assert meta["retrieved"] == "2026-10-01" and meta["amended_up_to"] is None
+    for p in library.provisions:
+        assert p.source["authority_status"] == authorities.OFFICIAL
+
+
+def test_only_an_official_publisher_may_claim_official(tmp_path):
+    def move(data):
+        data["sources"]["contract_act_1872"]["url"] = "https://www.pakistani.org/contract-act.pdf"
+    with pytest.raises(AuthorityError, match="not an official publisher"):
+        authorities.load_library(library_with(tmp_path, move))
+
+
+@pytest.mark.parametrize("status", [None, "unofficial", True])
+def test_a_source_must_say_official_or_mirror(tmp_path, status):
+    def change(data):
+        data["sources"]["contract_act_1872"]["authority_status"] = status
+    with pytest.raises(AuthorityError, match="official or mirror"):
+        authorities.load_library(library_with(tmp_path, change))
+
+
+def test_a_mirror_copy_is_readable_but_no_legal_pack_may_cite_it(tmp_path):
+    def mirror(data):
+        meta = data["sources"]["contract_act_1872"]
+        meta["authority_status"] = authorities.MIRROR
+        meta["url"] = "https://www.pakistani.org/contract-act.pdf"
+    library = authorities.load_library(library_with(tmp_path, mirror))
+    assert library.resolve("Contract Act 1872", "27").source["authority_status"] == authorities.MIRROR
+    with pytest.raises(PlaybookError, match="from a mirror copy"):
+        engine.load_packs(library=library)              # nda and employment cite s.27
+    assert {"mirror:contract_act_1872"} <= {b["id"] for b in authorities.release_blockers(
+        library, {}, CHECKED)}
+
+
+@pytest.mark.parametrize("change, message", [
+    (lambda d: d.pop("coverage"), "coverage must list"),
+    (lambda d: d["coverage"]["nda"]["statutes"].append("Specific Relief Act 1877"), "not in the library"),
+    (lambda d: d["coverage"]["nda"]["gaps"].append({"id": "x", "text": "y"}), "release_blocker"),
+    (lambda d: d["coverage"]["nda"]["gaps"].append(dict(d["coverage"]["tenancy"]["gaps"][0])),
+     "duplicate gap id"),
+    (lambda d: d["sources"]["contract_act_1872"].update(amended_up_to="soon"), "amended_up_to"),
+])
+def test_malformed_metadata_fails_closed(tmp_path, change, message):
+    with pytest.raises(AuthorityError, match=message):
+        authorities.load_library(library_with(tmp_path, change))
+
+
+def test_coverage_and_currency_are_what_the_build_script_writes():
+    spec = importlib.util.spec_from_file_location(
+        "build_analyzer_authorities", BACKEND / "scripts" / "build_analyzer_authorities.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    library = authorities.load_library()
+    assert library.coverage == script.COVERAGE
+    raw = yaml.safe_load(authorities.CURRENCY_PATH.read_text(encoding="utf-8"))
+    assert {sid: e["pinned_sha256"] for sid, e in raw["sources"].items()} == \
+           {sid: m["sha256"] for sid, m in library.sources.items()}
+
+
+def test_the_committed_currency_check_and_the_blockers_it_leaves():
+    library = authorities.load_library()
+    currency = authorities.load_currency(library)
+    meta = authorities.metadata(library, currency, CHECKED)
+    for source in meta["sources"]:
+        assert source["authority_status"] == authorities.OFFICIAL
+        assert source["snapshot_date"] == "2026-10-01" and source["amended_up_to"] is None
+        assert source["currency"]["status"] == authorities.SOURCE_UNCHANGED
+        assert source["currency"]["last_checked"] == "2026-10-02"
+        assert "does not confirm that no later amendment exists" in source["currency"]["caveat"]
+    # Only the missing employment law is left: the sources were re-checked.
+    assert [b["id"] for b in meta["release_blockers"]] == ["employment.no_employment_statute"]
+
+
+def test_currency_goes_stale_and_is_said_when_never_checked(tmp_path):
+    library = authorities.load_library()
+    currency = authorities.load_currency(library)
+    late = date(2027, 6, 1)
+    assert {s["currency"]["status"] for s in authorities.metadata(library, currency, late)["sources"]} \
+        == {authorities.STALE}
+    assert len([b for b in authorities.release_blockers(library, currency, late)
+                if b["kind"] == "currency"]) == 4
+    missing = authorities.load_currency(library, tmp_path / "absent.yaml")
+    assert missing == {}
+    states = authorities.metadata(library, missing, CHECKED)["sources"]
+    assert {(s["currency"]["status"], s["currency"]["last_checked"]) for s in states} == \
+           {(authorities.NOT_CHECKED, None)}
+
+
+def test_a_changed_or_unreachable_source_is_a_blocker_and_an_old_pin_says_nothing(tmp_path):
+    library = authorities.load_library()
+    data = yaml.safe_load(authorities.CURRENCY_PATH.read_text(encoding="utf-8"))
+    data["sources"]["registration_act_1908"].update(status=authorities.SOURCE_CHANGED,
+                                                    observed_sha256="1" * 64)
+    data["sources"]["contract_act_1872"]["status"] = authorities.CHECK_FAILED
+    data["sources"]["transfer_of_property_act_1882"]["pinned_sha256"] = "2" * 64   # an older pin
+    currency = authorities.parse_currency(yaml.safe_dump(data), library)
+    blockers = {b["id"]: b["reason"] for b in authorities.release_blockers(library, currency, CHECKED)}
+    assert blockers["currency:registration_act_1908"].endswith("currency source_changed (last checked 2026-10-02)")
+    assert "check_failed" in blockers["currency:contract_act_1872"]
+    assert "not_checked" in blockers["currency:transfer_of_property_act_1882"]
+    assert "currency:punjab_rented_premises_act_2009" not in blockers
+    with pytest.raises(AuthorityError, match="unknown source"):
+        authorities.parse_currency(yaml.safe_dump({"version": 1, "sources": {"nope": {}}}), library)
+
+
+def test_a_finding_freezes_the_source_status_and_snapshot_date():
+    pack = next(p for p in engine.load_packs() if p.id == "tenancy_punjab")
+    for check in pack.checks:
+        for source in check.sources:
+            assert source["source"]["authority_status"] == authorities.OFFICIAL
+            assert source["source"]["snapshot_date"] == "2026-10-01"
+            assert source["source"]["amended_up_to"] is None
+
+
+def test_an_unusable_library_is_reported_as_a_blocker(tmp_path, monkeypatch):
+    bad = tmp_path / "authority_library.yaml"
+    bad.write_text("version: 2\n", encoding="utf-8")
+    monkeypatch.setattr(authorities, "LIBRARY_PATH", bad)
+    meta = authorities.current_metadata()
+    assert meta["available"] is False and meta["release_blockers"][0]["id"] == "library_unusable"

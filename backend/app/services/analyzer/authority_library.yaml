@@ -13,7 +13,8 @@ sources:
     listing_url: https://punjabcode.punjab.gov.pk/en/show_article/VGEFMQQzVm8-
     sha256: dc8e42971dfd2bd770c08f80b2b079ccaa6db54079a7b45adc40ee64cfc26962
     retrieved: '2026-10-01'
-    official: true
+    authority_status: official
+    amended_up_to: null
   registration_act_1908:
     statute: Registration Act 1908
     jurisdiction: federal
@@ -22,7 +23,8 @@ sources:
     listing_url: null
     sha256: b9f6a700e43ad5824252330b41abd675690035b2347da61978f08d486fa40674
     retrieved: '2026-10-01'
-    official: true
+    authority_status: official
+    amended_up_to: null
   transfer_of_property_act_1882:
     statute: Transfer of Property Act 1882
     jurisdiction: federal
@@ -31,7 +33,8 @@ sources:
     listing_url: null
     sha256: d75669bc902f55b55b0bde6f5ddc1002bb891a834d89a2d56b840462a8449185
     retrieved: '2026-10-01'
-    official: true
+    authority_status: official
+    amended_up_to: null
   contract_act_1872:
     statute: Contract Act 1872
     jurisdiction: federal
@@ -40,7 +43,44 @@ sources:
     listing_url: null
     sha256: 930c60f67216530fab28f37d439ad3c3ae941dc918c914f2e7c18ddbabb7bfbd
     retrieved: '2026-10-01'
-    official: true
+    authority_status: official
+    amended_up_to: null
+coverage:
+  tenancy:
+    statutes:
+    - Punjab Rented Premises Act 2009
+    - Registration Act 1908
+    - Transfer of Property Act 1882
+    gaps:
+    - id: tenancy.punjab_only
+      text: Only Punjab's rent law is held; tenancies in other provinces or Islamabad are not covered.
+      release_blocker: false
+    - id: tenancy.partial_sections
+      text: Only sections 5-7 of the Punjab Rented Premises Act 2009, section 17(1) of the Registration Act 1908 and sections 1 and 107 of the Transfer of Property Act 1882 are held.
+      release_blocker: false
+    - id: tenancy.stamp_duty
+      text: Stamp duty (Stamp Act 1899 and the Punjab finance laws) is not held.
+      release_blocker: false
+  nda:
+    statutes:
+    - Contract Act 1872
+    gaps:
+    - id: nda.general_contract_law_only
+      text: Only sections 27 and 28 of the Contract Act 1872 are held; no statute specific to confidential information is.
+      release_blocker: false
+  employment:
+    statutes:
+    - Contract Act 1872
+    gaps:
+    - id: employment.no_employment_statute
+      text: No employment statute's text is held (federal or provincial labour and standing-orders law); only Contract Act 1872 sections 27 and 28. Employment legal provisions must be added by a lawyer.
+      release_blocker: true
+  all:
+    statutes: []
+    gaps:
+    - id: all.amendment_date_unknown
+      text: No source states the date it is amended up to; whether later amendments exist is decided only by the lawyer who approves each pack.
+      release_blocker: false
 provisions:
 - statute: Punjab Rented Premises Act 2009
   section: '5'

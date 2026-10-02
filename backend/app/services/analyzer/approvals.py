@@ -27,7 +27,7 @@ the `basis` records what it rested on.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -237,14 +237,22 @@ def playbook_text(pack_id: str) -> dict:
             return {"id": pack.id, "version": pack.version, "content_hash": pack.content_hash,
                     "authorities_hash": pack.authorities_hash,
                     "required_qualification": pack.required_qualification, "text": raw,
-                    "cited_provisions": _cited_provisions(pack)}
+                    "cited_provisions": _cited_provisions(pack),
+                    "authority": _authority_metadata()}
     raise AnalyzerNotFound("No such playbook.")
+
+
+def _authority_metadata() -> dict:
+    from app.services.analyzer import authorities
+
+    return authorities.current_metadata()
 
 
 def _cited_provisions(pack) -> list[dict]:
     from app.services.analyzer import authorities
 
     library, seen, out = authorities.load_library(), set(), []
+    currency, today = authorities.load_currency(library), date.today()
     for check in pack.checks:
         for a in check.authority:
             provision = library.resolve(a["statute"], a["section"])
@@ -255,8 +263,12 @@ def _cited_provisions(pack) -> list[dict]:
             out.append({"statute": provision.statute, "section": provision.section,
                         "heading": provision.heading, "pages": list(provision.pages),
                         "text": provision.text, "text_sha256": provision.text_sha256,
-                        "source": {k: provision.source[k] for k in (
-                            "publisher", "url", "listing_url", "sha256", "retrieved")}})
+                        "source": {**{k: provision.source[k] for k in (
+                            "publisher", "url", "listing_url", "sha256", "retrieved",
+                            "authority_status", "amended_up_to")},
+                            "snapshot_date": provision.source["retrieved"],
+                            "currency": authorities.currency_of(provision.source["id"],
+                                                                currency, today)}})
     return out
 
 

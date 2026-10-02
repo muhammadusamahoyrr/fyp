@@ -205,6 +205,10 @@ def bind_authorities(pack: Pack, library, source: str = "pack") -> Pack:
             if provision is None:
                 raise PlaybookError(f"{source}: check {check.id} cites {a['statute']} "
                                     f"s.{a['section']}, which is not in the authority library")
+            if provision.source.get("authority_status") != authorities.OFFICIAL:
+                raise PlaybookError(f"{source}: check {check.id} cites {a['statute']} "
+                                    f"s.{a['section']} from a mirror copy; a legal check may "
+                                    "cite only the official text")
             cited.append(provision)
             check.sources.append(authorities.snapshot(a, provision))
     pack.authorities_hash = authorities.authorities_hash(cited)
