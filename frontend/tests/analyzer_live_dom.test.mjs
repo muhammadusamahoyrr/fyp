@@ -363,3 +363,106 @@ test("an NDA's terms follow the server's decisive list and yes/no answers", asyn
     });
     await p.unmount();
 });
+
+// ── the AI drafting notes: their own tabs, their own states ─────────────────
+
+const AI_OK = { status: "complete", reason: null, error_code: null,
+    label: "General drafting attention item",
+    notice: "AI-generated drafting attention items. Not legal advice and not a legal check; no law was applied.",
+    no_law_applied: true, not_legal_advice: true, schema_version: "ai-report.1",
+    prompt_version: "ai-report-prompt.1", provider: "groq", model: "openai/gpt-oss-120b", fallback: null,
+    counts: { summary_points: 1, risks: 1, obligations: 2 }, dropped: { count: 0, by_reason: {} } };
+const EV = (id, text) => ({ sentence_id: id, clause_id: "c1", start: 0, end: text.length, page_spans: [],
+    text, integrity: "ok" });
+const WITH_AI = { ...REPORT, legal_checks: REPORT.findings, ai: AI_OK,
+    summary_points: [{ kind: "summary_point", fingerprint: "f1", clause_id: "c1",
+        point: "An eleven-month tenancy.", evidence: [EV("s2", "The term is eleven (11) months.")] }],
+    model_risks: [{ kind: "risk", fingerprint: "f2", clause_id: "c1", category: "missing_detail",
+        title: "No payment date", explanation: "The rent has no due date.", severity: "medium",
+        severity_reason: "Likely to cause disagreement.", evidence: [EV("s3", "Rent is Rs. 85,000 per month.")] }],
+    obligations: [
+        { kind: "obligation", fingerprint: "f3", clause_id: "c1", party: "Tenant", action: "Pay the rent.",
+          deadline_status: "stated", deadline: "by the 5th day of each month", condition: null,
+          evidence: [EV("s3", "Rent is Rs. 85,000 per month.")] },
+        { kind: "obligation", fingerprint: "f4", clause_id: "c1", party: "Landlord", action: "Hand over keys.",
+          deadline_status: "not_stated", deadline: null, condition: "If the rent is paid.",
+          evidence: [{ ...EV("s4", "x"), text: null, integrity: "mismatch" }] }] };
+
+async function openReport(data) {
+    api.__respond("getAnalysisReport", { data });
+    api.__respond("getAnalysisText", { data: { text: "x", clauses: [], sentences: [],
+        text_version: { page_map_available: false, corrected: false } } });
+    return openRun({ id: "r1", status: "done", state_version: 9 });
+}
+const tab = (container, key) => container.querySelector(`[data-tab="${key}"]`);
+
+test("the report has Checks, Summary, Risks and Obligations tabs; checks stay first", async () => {
+    const p = await openReport(WITH_AI);
+    const tabs = [...p.container.querySelectorAll('[role="tab"]')].map(b => b.textContent);
+    assert.deepEqual(tabs, ["Checks", "Summary", "Risks", "Obligations"]);
+    assert.ok(p.container.querySelector('[data-finding="parties_named"]'), "checks are not shown first");
+    assert.equal(p.container.querySelector("[data-ai-item]"), null, "AI items leaked into the checks");
+    await p.unmount();
+});
+
+test("AI items show their labels, the server's evidence, and how they were made", async () => {
+    const p = await openReport(WITH_AI);
+    await click(tab(p.container, "model_risks"));
+    const risks = p.container.querySelector('[data-ai-tab="model_risks"]');
+    assert.equal(risks.querySelector("[data-ai-status]").dataset.aiStatus, "complete");
+    assert.match(risks.textContent, /General drafting attention item · No law applied · Not legal advice/);
+    assert.match(risks.querySelector("[data-ai-provenance]").textContent,
+                 /groq · openai\/gpt-oss-120b · prompt ai-report-prompt.1 · schema ai-report.1/);
+    const card = risks.querySelector('[data-ai-item="model_risks"]');
+    assert.equal(card.querySelector("[data-severity]").textContent, "Medium");
+    assert.equal(card.querySelector("[data-evidence]").textContent, "Rent is Rs. 85,000 per month.");
+    assert.doesNotMatch(p.container.textContent, /\bcritical\b/i);
+
+    await click(tab(p.container, "obligations"));
+    const deadlines = [...p.container.querySelectorAll("[data-deadline]")].map(d => d.textContent);
+    assert.deepEqual(deadlines, ["Deadline: by the 5th day of each month", "No deadline stated in the document"]);
+    assert.match(p.container.querySelector("[data-evidence-withheld]").textContent, /Evidence withheld/);
+
+    await click(tab(p.container, "summary_points"));
+    assert.match(p.container.querySelector('[data-ai-item="summary_points"]').textContent, /An eleven-month tenancy\./);
+    await p.unmount();
+});
+
+test("a failed AI layer is an alert, never an empty list", async () => {
+    const p = await openReport({ ...WITH_AI, ai: { ...AI_OK, status: "failed", error_code: "ai_timeout",
+        counts: null }, model_risks: [], obligations: [], summary_points: [] });
+    await click(tab(p.container, "model_risks"));
+    const alert = p.container.querySelector('[data-ai-status="failed"]');
+    assert.equal(alert.getAttribute("role"), "alert");
+    assert.match(alert.textContent, /could not be produced.*ai_timeout.*not the same as\s+finding no issues/s);
+    assert.equal(p.container.querySelector("[data-ai-empty]"), null, "a failure was shown as 'nothing found'");
+    await p.unmount();
+});
+
+test("complete-but-empty, partial and unavailable read differently", async () => {
+    let p = await openReport({ ...WITH_AI, ai: { ...AI_OK, counts: { summary_points: 0, risks: 0, obligations: 0 } },
+        model_risks: [], obligations: [], summary_points: [] });
+    await click(tab(p.container, "model_risks"));
+    assert.match(p.container.querySelector("[data-ai-empty]").textContent, /returned no drafting attention items/);
+    assert.equal(p.container.querySelector('[data-ai-status="failed"]'), null);
+    await p.unmount();
+
+    p = await openReport({ ...WITH_AI, ai: { ...AI_OK, status: "partial", dropped: { count: 2, by_reason: {} } } });
+    await click(tab(p.container, "model_risks"));
+    assert.match(p.container.querySelector("[data-ai-partial]").textContent, /2 AI item\(s\) were removed/);
+    assert.ok(p.container.querySelector('[data-ai-item="model_risks"]'), "partial items were hidden");
+    await p.unmount();
+
+    p = await openReport({ ...REPORT, ai: { status: "unavailable", reason: "ai_disabled" } });
+    await click(tab(p.container, "summary_points"));
+    assert.equal(p.container.querySelector("[data-ai-status]").dataset.aiStatus, "unavailable");
+    assert.match(p.container.textContent, /switched off on this server/);
+    assert.equal(p.container.querySelector("[data-ai-item]"), null);
+    await p.unmount();
+});
+
+test("the AI stages are polled and named", () => {
+    assert.equal(live.shouldPoll("queued_ai_report"), true);
+    assert.equal(live.shouldPoll("ai_reporting"), true);
+    assert.equal(live.STAGE_LABEL.ai_reporting, "Preparing AI drafting notes");
+});

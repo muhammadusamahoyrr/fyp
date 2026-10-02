@@ -9,7 +9,10 @@
  * runs GENERAL drafting checks (labelled "General document review" -- none
  * is a legal requirement). A legal checklist runs only once a qualified
  * lawyer has approved its exact text; until then the report says it exists
- * and was not run.
+ * and was not run. AI drafting notes, when the server produced them, sit in
+ * their own Summary / Risks / Obligations tabs, labelled as general drafting
+ * attention items (no law applied, not legal advice), with their state --
+ * complete, partial, failed or unavailable -- always said.
  *
  * Demo data only: the server's own warning is shown, the file picker stays
  * disabled until the user ticks the confirmation, and the confirmation is
@@ -41,6 +44,8 @@ export const STAGE_LABEL = {
     needs_terms_confirmation: "Confirm the key terms",
     queued_analysis: "Waiting to check the document",
     analyzing: "Checking the document",
+    queued_ai_report: "Waiting to prepare AI drafting notes",
+    ai_reporting: "Preparing AI drafting notes",
     done: "Checked",
     failed: "Could not be read",
     cancelled: "Cancelled",
@@ -49,7 +54,7 @@ export const STAGE_LABEL = {
 
 /* Statuses where the server is working and the screen should keep asking. */
 const WORKING = new Set(["queued_extract", "extracting", "queued_segmentation", "segmenting",
-    "queued_terms", "extracting_terms", "queued_analysis", "analyzing"]);
+    "queued_terms", "extracting_terms", "queued_analysis", "analyzing", "queued_ai_report", "ai_reporting"]);
 const OPEN = new Set([...WORKING, "needs_ocr_confirmation", "needs_document_confirmation",
     "needs_terms_confirmation"]);
 export const shouldPoll = status => WORKING.has(status);
@@ -159,11 +164,124 @@ function TextViewer({ t, runId }) {
     );
 }
 
+/* ── the AI drafting notes ───────────────────────────────────────────────── */
+/* The model's items are a separate layer from the checks: labelled as such,
+ * never law, and their state is always said -- a failure must never look
+ * like "no risks found". Evidence is the server's cut of the frozen text. */
+
+export const AI_LABELS = ["General drafting attention item", "No law applied", "Not legal advice"];
+export const AI_UNAVAILABLE_TEXT = {
+    ai_disabled: "AI drafting notes are switched off on this server.",
+    ai_not_ready: "AI drafting notes are not configured safely on this server, so they were not run.",
+    not_synthetic: "AI drafting notes run only on documents confirmed as synthetic.",
+    not_recorded: "This analysis was made before AI drafting notes existed.",
+    no_confirmed_text: "AI drafting notes need the confirmed text, which was not available.",
+    text_integrity: "The stored text did not match its fingerprint, so it was not sent to the AI.",
+};
+const SEVERITY_TEXT = { low: "Low", medium: "Medium", high: "High" };
+const TAB_EMPTY = {
+    summary_points: "The AI returned no summary points for this document.",
+    model_risks: "The AI returned no drafting attention items for this document.",
+    obligations: "The AI returned no obligations for this document.",
+};
+
+function AiEvidence({ t, items }) {
+    return (
+        <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 13, color: t.textMuted }}>
+            {items.map(e => (
+                <li key={e.sentence_id}>
+                    {e.integrity === "ok"
+                        ? <q data-evidence>{e.text}</q>
+                        : <span data-evidence-withheld>Evidence withheld: the document text no longer matches what was analysed.</span>}
+                </li>
+            ))}
+        </ul>
+    );
+}
+
+function AiNotice({ t, ai }) {
+    if (ai.status === "failed") {
+        return (
+            <Card role="alert" data-ai-status="failed" style={{ padding: 12, fontSize: 13.5 }}>
+                <b>AI drafting notes could not be produced</b> ({ai.error_code}). This is not the same as
+                finding no issues: nothing was checked by the AI.
+            </Card>
+        );
+    }
+    if (ai.status === "unavailable") {
+        return (
+            <Card role="note" data-ai-status="unavailable" style={{ padding: 12, fontSize: 13.5 }}>
+                {AI_UNAVAILABLE_TEXT[ai.reason] || "AI drafting notes are not available for this document."}
+            </Card>
+        );
+    }
+    return (
+        <Card role="note" data-ai-status={ai.status} style={{ padding: 12, fontSize: 13 }}>
+            <div data-ai-labels style={{ fontSize: 12, color: t.textMuted }}>{AI_LABELS.join(" · ")}</div>
+            <div style={{ marginTop: 4 }}>{ai.notice}</div>
+            {ai.status === "partial" && (
+                <div data-ai-partial style={{ marginTop: 4 }}>
+                    {ai.dropped?.count} AI item(s) were removed because they could not be checked against the document.
+                </div>
+            )}
+            <div data-ai-provenance style={{ fontSize: 12, color: t.textMuted, marginTop: 4 }}>
+                {ai.provider} · {ai.model} · prompt {ai.prompt_version} · schema {ai.schema_version}
+            </div>
+        </Card>
+    );
+}
+
+function AiItem({ t, kind, item }) {
+    return (
+        <Card data-ai-item={kind} style={{ padding: 12, marginBottom: 8 }}>
+            {kind === "model_risks" && (
+                <>
+                    <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                        <b style={{ flex: 1 }}>{item.title}</b>
+                        <span data-severity={item.severity}>{SEVERITY_TEXT[item.severity]}</span>
+                    </div>
+                    <div style={{ fontSize: 13 }}>{item.explanation}</div>
+                    <div style={{ fontSize: 12.5, color: t.textMuted }}>Why {SEVERITY_TEXT[item.severity]?.toLowerCase()}: {item.severity_reason}</div>
+                </>
+            )}
+            {kind === "obligations" && (
+                <>
+                    <div><b data-party>{item.party}</b>: {item.action}</div>
+                    <div data-deadline style={{ fontSize: 12.5, color: t.textMuted }}>
+                        {item.deadline_status === "stated" ? `Deadline: ${item.deadline}` : "No deadline stated in the document"}
+                    </div>
+                    {item.condition && <div style={{ fontSize: 12.5, color: t.textMuted }}>Condition: {item.condition}</div>}
+                </>
+            )}
+            {kind === "summary_points" && <div style={{ fontSize: 13.5 }}>{item.point}</div>}
+            <div style={{ fontSize: 12, color: t.textMuted, margin: "4px 0" }}>{AI_LABELS.join(" · ")}</div>
+            <AiEvidence t={t} items={item.evidence} />
+        </Card>
+    );
+}
+
+function AiTab({ t, report, kind }) {
+    const ai = report.ai || { status: "unavailable", reason: "not_recorded" };
+    const items = report[kind] || [];
+    const usable = ai.status === "complete" || ai.status === "partial";
+    return (
+        <div data-ai-tab={kind} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <AiNotice t={t} ai={ai} />
+            {usable && items.map(item => <AiItem key={item.fingerprint} t={t} kind={kind} item={item} />)}
+            {usable && items.length === 0 && <div data-ai-empty style={{ fontSize: 13, color: t.textMuted }}>{TAB_EMPTY[kind]}</div>}
+        </div>
+    );
+}
+
+const REPORT_TABS = [["checks", "Checks"], ["summary_points", "Summary"], ["model_risks", "Risks"],
+    ["obligations", "Obligations"]];
+
 /* ── the report ──────────────────────────────────────────────────────────── */
 
 function ReportView({ t, runId }) {
     const [report, setReport] = useState(null);
     const [issue, setIssue] = useState(null);
+    const [tab, setTab] = useState("checks");
     useEffect(() => {
         let live = true;
         getAnalysisReport(runId).then(r => {
@@ -175,19 +293,30 @@ function ReportView({ t, runId }) {
     }, [runId]);
     if (issue) return <div role="alert">{issue}</div>;
     if (!report) return <div style={{ color: t.textMuted }}>Loading the report…</div>;
-    const shown = report.findings.filter(f => f.check_result !== "not_applicable");
+    const shown = (report.legal_checks || report.findings).filter(f => f.check_result !== "not_applicable");
     const groups = ["general_review", "legal_playbook"]
         .map(scope => [scope, shown.filter(f => f.scope === scope)])
         .filter(([, items]) => items.length);
     const notices = report.packs.filter(p => PACK_STATUS_TEXT[p.status]);
     return (
         <section data-report aria-label="Report" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {notices.map(p => (
+            <div role="tablist" aria-label="Report sections" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {REPORT_TABS.map(([key, label]) => (
+                    <button key={key} type="button" role="tab" data-tab={key} aria-selected={tab === key}
+                        onClick={() => setTab(key)} style={{ padding: "6px 12px", borderRadius: 8, cursor: "pointer",
+                            border: `1px solid ${t.border}`, background: tab === key ? t.inputBg : "transparent",
+                            color: "inherit", fontWeight: tab === key ? 700 : 400 }}>
+                        {label}
+                    </button>
+                ))}
+            </div>
+            {tab !== "checks" && <AiTab t={t} report={report} kind={tab} />}
+            {tab === "checks" && notices.map(p => (
                 <Card key={p.pack_id} role="note" data-pack-status={p.status} style={{ padding: 12, fontSize: 13.5 }}>
                     <b>{p.title}:</b> {PACK_STATUS_TEXT[p.status]}
                 </Card>
             ))}
-            {groups.map(([scope, items]) => (
+            {tab === "checks" && groups.map(([scope, items]) => (
                 <div key={scope} data-scope={scope}>
                     <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 6 }}>{report.scope_notice[scope]}</div>
                     {items.map(f => (
