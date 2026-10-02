@@ -55,7 +55,7 @@ checks:
     why: Section 6(1)(b) -- the agreement should describe the premises, as far as possible.
     locate:
       any_of: ['situated (?:at|in)', 'located at', 'bearing (?:no\.?|number)', 'measuring',
-               '(?:house|shop|flat|plot|office|apartment|unit) (?:no\.?|number)',
+               '(?:house|shop|flat|plot|office|apartment|unit) (?:(?:no\.?|number) ?)?\d+[a-z]?',
                'marlas?', 'kanals?', 'sq(?:uare)?\.? ?(?:ft|feet|yards?|metres?|meters?)']
     authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(b)"}
 
@@ -68,6 +68,9 @@ checks:
       any_of: ['\d+\s*(?:\(\d+\)\s*)?(?:months?|years?)',
                '(?:one|two|three|four|five|six|eleven|twelve)\s*(?:\(\d+\)\s*)?(?:months?|years?)']
       all_of: ['term|period|tenancy|lease[sd]?|lets?|letting|let out']
+      # A notice period ("one month's notice", "no notice of less than three
+      # months shall end this tenancy") is not the period of the tenancy.
+      none_of: ['notices?']
     authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(c)"}
 
   - id: s6_rate_of_rent
@@ -77,7 +80,8 @@ checks:
     why: Section 6(1)(d) -- the agreement should state the rate of rent, as far as possible.
     locate:
       any_of: ['(?:rs\.?|pkr|rupees)\s*\d[\d,]*']
-      all_of: ['rent']
+      # "rent", or a periodic amount ("shall pay Rs. 60,000 per month").
+      all_of: ['rent|per (?:month|mensem|annum|year)|monthly|yearly|annually|(?:each|every) month']
     authority: {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
 
   - id: s6_rate_of_enhancement
@@ -87,10 +91,14 @@ checks:
     why: >-
       Section 6(1)(d) -- the agreement should state the rate of enhancement,
       as far as possible. Section 6(2) provides a default where rent is fixed
-      for only part of a fixed tenure.
+      for only part of a fixed tenure. Only wording that states a rate,
+      percentage or amount is located; a bare power to increase the rent
+      states no rate.
     locate:
-      any_of: ['enhanc\w*', 'increase\w*', 'escalat\w*', 'revis\w*']
-      all_of: ['rent']
+      any_of: ['\d+(?:\.\d+)?\s*(?:%|percent|per\s*cent)',
+               '(?:five|ten|fifteen|twenty|twenty-five)\s*(?:%|percent|per\s*cent)',
+               '(?:by|to) (?:rs\.?|pkr|rupees)\s*\d[\d,]*']
+      all_of: ['rent', 'enhanc\w*|increas\w*|escalat\w*|revis\w*|rais\w*']
     authority:
       - {statute: Punjab Rented Premises Act 2009, section: "6(1)(d)"}
       - {statute: Punjab Rented Premises Act 2009, section: "6(2)"}

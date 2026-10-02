@@ -1,8 +1,10 @@
 # Non-disclosure agreement checklist -- DRAFT FOR LAWYER REVIEW. NOT APPROVED.
 #
-# Runs only after a reviewer holding pk.contract.nda approves this exact text.
-# Authorities are quoted verbatim in SOURCES.md. Kept deliberately small: only
-# points that rest on a provision whose text was read.
+# Runs only after a reviewer holding pk.contract.nda approves this exact text
+# AND the official text it cites (DOC_ANALYZER_PLAN.md §4.5a). Every authority
+# resolves to the authority library (authority_library.yaml), cut from the
+# official Pakistan Code publication. Kept deliberately small: only points
+# that rest on a provision whose text was read.
 id: nda
 version: 1
 scope: legal_playbook
@@ -23,7 +25,10 @@ checks:
       on its terms and requires lawyer review.
     applies_if: {eq: [{field: terms.non_compete}, {value: true}]}
     locate:
-      any_of: ['non[\s-]?compet\w*', 'not (?:to )?compete', 'compet(?:e|es|ing|ition|itions|itor|itors)', 'solicit\w*', 'restrain\w*']
+      # Non-solicitation and generic "restrain" wording are not located here:
+      # whether they restrain a profession, trade or business is for the
+      # reviewer, not a keyword.
+      any_of: ['non[\s-]?compet\w*', 'not (?:to )?compete', 'compet(?:e|es|ing|ition|itions|itor|itors)']
     authority: {statute: Contract Act 1872, section: "27"}
 
   - id: limits_on_legal_proceedings

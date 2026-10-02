@@ -63,6 +63,7 @@ class Check:
     applies_if: dict | None
     any_of: list[re.Pattern] = field(default_factory=list)
     all_of: list[re.Pattern] = field(default_factory=list)
+    none_of: list[re.Pattern] = field(default_factory=list)
     authority: list[dict] = field(default_factory=list)
     sources: list[dict] = field(default_factory=list)      # resolved, set by load_packs
 
@@ -116,19 +117,21 @@ def _check(raw: dict, scope: str, where: str) -> Check:
     if raw.get("applies_if") is not None:
         validate(raw["applies_if"], f"{where}.applies_if")
     locate = raw.get("locate")
-    any_of, all_of = [], []
+    any_of, all_of, none_of = [], [], []
     if kind == "reminder":
         if locate:
             raise PlaybookError(f"{where}: a reminder states something; it does not locate")
     else:
         if not isinstance(locate, dict) or not locate.get("any_of"):
             raise PlaybookError(f"{where}: a check needs locate.any_of")
-        if set(locate) - {"any_of", "all_of"}:
-            raise PlaybookError(f"{where}: locate takes any_of / all_of only")
-        if len(locate["any_of"]) > 30 or len(locate.get("all_of") or []) > 10:
+        if set(locate) - {"any_of", "all_of", "none_of"}:
+            raise PlaybookError(f"{where}: locate takes any_of / all_of / none_of only")
+        if (len(locate["any_of"]) > 30 or len(locate.get("all_of") or []) > 10
+                or len(locate.get("none_of") or []) > 10):
             raise PlaybookError(f"{where}: too many patterns")
         any_of = [_pattern(p, f"{where}.any_of") for p in locate["any_of"]]
         all_of = [_pattern(p, f"{where}.all_of") for p in locate.get("all_of") or []]
+        none_of = [_pattern(p, f"{where}.none_of") for p in locate.get("none_of") or []]
     authority = raw.get("authority") or []
     if isinstance(authority, dict):
         authority = [authority]
@@ -141,7 +144,7 @@ def _check(raw: dict, scope: str, where: str) -> Check:
             raise PlaybookError(f"{where}: authority needs statute and section")
     return Check(id=cid, kind=kind, title=raw["title"].strip(), why=raw["why"].strip(),
                  severity=raw.get("severity"), applies_if=raw.get("applies_if"),
-                 any_of=any_of, all_of=all_of, authority=list(authority))
+                 any_of=any_of, all_of=all_of, none_of=none_of, authority=list(authority))
 
 
 def parse_pack(raw_text: str, source: str = "pack") -> Pack:
@@ -256,7 +259,10 @@ def _locate(check: Check, text: str, sentences: list[dict]) -> list[str]:
         if s.get("empty_value"):        # a blank form field ("Security Deposit:") states nothing
             continue
         if (any(p.search(text, s["start"], s["end"]) for p in check.any_of)
-                and all(p.search(text, s["start"], s["end"]) for p in check.all_of)):
+                and all(p.search(text, s["start"], s["end"]) for p in check.all_of)
+                # A sentence that matches an exclusion says something else
+                # ("one month's notice" is not the tenancy's period).
+                and not any(p.search(text, s["start"], s["end"]) for p in check.none_of)):
             hits.append(s["sentence_id"])
             if len(hits) >= MAX_EVIDENCE:
                 break

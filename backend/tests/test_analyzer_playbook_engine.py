@@ -183,3 +183,36 @@ def test_an_amount_alone_is_located_despite_the_word_guards():
     general = next(p for p in engine.load_packs() if p.id == "general")
     by_id = {f["check_id"]: f for f in engine.run_pack(general, TENANCY, text, sentences_of(text))}
     assert by_id["payment_terms"]["check_result"] == "present"
+
+
+GENERAL_WITH_EXCLUSION = textwrap.dedent("""\
+    id: excl
+    version: 1
+    scope: general_review
+    requires_approval: false
+    title: Exclusion test
+    checks:
+      - id: period
+        kind: general_check
+        title: A period is stated
+        why: A test.
+        locate:
+          any_of: ['[0-9]+ months?']
+          none_of: ['notices?']
+    """)
+
+
+def test_a_none_of_pattern_excludes_a_sentence_that_says_something_else():
+    pack = engine.parse_pack(GENERAL_WITH_EXCLUSION)
+    text = "The term is 11 months.\nNo notice of less than 3 months shall end it."
+    found = engine.run_pack(pack, TENANCY, text, sentences_of(text))[0]
+    assert found["check_result"] == "present" and len(found["sentence_ids"]) == 1
+    only_notice = "Either party may give 3 months notice."
+    assert engine.run_pack(pack, TENANCY, only_notice, sentences_of(only_notice))[0]["check_result"] \
+        == "not_located"
+
+
+def test_a_locator_takes_only_any_of_all_of_and_none_of():
+    bad = GENERAL_WITH_EXCLUSION.replace("none_of:", "unless_of:")
+    with pytest.raises(PlaybookError, match="any_of / all_of / none_of only"):
+        engine.parse_pack(bad)

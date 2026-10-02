@@ -177,3 +177,52 @@ def test_employment_pack_runs_its_checks_and_reminder():
     assert r["non_compete_restraint"]["check_result"] == "present"
     assert r["limits_on_legal_proceedings"]["check_result"] == "not_located"
     assert r["statutory_protections"]["check_result"] is None and r["statutory_protections"]["authority"] == []
+
+
+# ── locator precision on the evaluation dataset (AI preliminary review F1-F3, F7) ──
+
+def dataset_results(doc_id):
+    from app.services.analyzer import evaluation
+
+    doc = evaluation.prepare(next(d for d in evaluation.load_dataset().documents if d.id == doc_id))
+    pack_id = {"tenancy": "tenancy_punjab", "nda": "nda"}[doc.document_type]
+    ctx = TENANCY if pack_id == "tenancy_punjab" else NDA_CTX
+    return {f["check_id"]: f for f in engine.run_pack(packs()[pack_id], ctx, doc.text, doc.rows)}
+
+
+def test_a_notice_period_is_not_the_period_of_the_tenancy():
+    # tenancy-06 s4: "No notice of less than three months shall end this tenancy."
+    assert dataset_results("tenancy-06")["s6_period_of_tenancy"]["check_result"] == "not_located"
+    assert dataset_results("tenancy-01")["s6_period_of_tenancy"]["sentence_ids"] == ["s3"]
+
+
+def test_a_bare_power_to_increase_the_rent_states_no_rate_of_enhancement():
+    # tenancy-08 s3: "The Landlord may increase the rent from time to time."
+    assert dataset_results("tenancy-08")["s6_rate_of_enhancement"]["check_result"] == "not_located"
+    assert results("tenancy_punjab", TENANCY, LEASE)["s6_rate_of_enhancement"]["check_result"] == "present"
+    for stated in ("The rent shall be enhanced by Rs. 5,000 every year.",
+                   "The rent shall increase at ten percent annually."):
+        assert results("tenancy_punjab", TENANCY, stated)["s6_rate_of_enhancement"]["check_result"] \
+            == "present", stated
+
+
+def test_a_periodic_amount_is_a_rate_of_rent_and_a_numbered_unit_describes_premises():
+    r = dataset_results("tenancy-02")    # "shall pay Rs. 60,000 per month"; "Flat 7, Block C"
+    assert r["s6_rate_of_rent"]["sentence_ids"] == ["s4"]
+    assert r["s6_description_of_premises"]["sentence_ids"] == ["s2"]
+    assert dataset_results("tenancy-03")["s6_description_of_premises"]["sentence_ids"] == ["s2"]
+    deposit = "The Tenant has paid a security deposit of Rs. 170,000."
+    assert results("tenancy_punjab", TENANCY, deposit)["s6_rate_of_rent"]["check_result"] == "not_located"
+
+
+def test_party_particulars_are_unchanged_until_a_lawyer_says_what_suffices():
+    # A name alone is not located; the sufficiency question is put to the reviewer.
+    assert dataset_results("tenancy-01")["s6_particulars_of_parties"]["check_result"] == "not_located"
+    assert results("tenancy_punjab", TENANCY, LEASE)["s6_particulars_of_parties"]["check_result"] == "present"
+
+
+def test_non_solicitation_and_restrain_wording_is_not_an_automatic_s27_match():
+    for clause in ("The Recipient shall not solicit the Company's customers for one year.",
+                   "The Recipient is restrained from using the information."):
+        r = results("nda", NDA_CTX, clause)
+        assert r["non_compete_restraint"]["check_result"] == "not_located", clause
