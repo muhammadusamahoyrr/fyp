@@ -17,8 +17,8 @@ documents:
   expected:
     risks: []
     obligations:
-    - {party: party, evidence: ["shall keep the other party's Confidential Information secret"]}
-    - {party: party, deadline: "within fourteen days of a written request", evidence: ["shall return or destroy the Confidential Information"]}
+    - {party: "Each Party", evidence: ["shall keep the other party's Confidential Information secret"]}
+    - {party: "Each Party", deadline: "within fourteen days of a written request", evidence: ["shall return or destroy the Confidential Information"]}
 
 - id: nda-02
   variant: clean
@@ -109,7 +109,7 @@ documents:
     risks:
     - {category: inconsistency, evidence: ["Neither party may share Confidential Information", "with employees who need to know it"]}
     obligations:
-    - {party: party, deadline: "within ten days of termination", evidence: ["shall return the Confidential Information"]}
+    - {party: "Each Party", deadline: "within ten days of termination", evidence: ["shall return the Confidential Information"]}
 
 - id: nda-07
   variant: ambiguous

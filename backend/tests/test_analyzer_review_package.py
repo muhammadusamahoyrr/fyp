@@ -92,3 +92,45 @@ def test_the_script_refuses_to_write_inside_the_repository(monkeypatch, capsys):
     assert package.main() == 2
     assert "outside the repository" in capsys.readouterr().out
     assert not (BACKEND / "review_out").exists()
+
+
+def test_the_employment_request_offers_decisions_never_an_approval(built):
+    request = built[2]["03_employment_coverage_request.html"]
+    decision = re.search(r"<th>Decision \(([^)]*)\)</th>", request).group(1)
+    assert decision.split(" / ") == ["coverage_decision_complete", "changes_requested",
+                                     "unable_to_determine", "specialist_review_required"]
+    assert "approve" not in decision
+
+
+def test_footnotes_are_shown_apart_from_the_section_text(built):
+    review = built[2]["02_playbooks_review.html"]
+    s28 = review.split("Contract Act 1872, s.28")[1].split("<h3>")[0]
+    text = s28.split("<pre>")[1].split("</pre>")[0]
+    assert "Partnership Act" not in text
+    assert "Publisher's footnotes" in s28 and "Specific Relief Act" in s28
+    assert "marker not in the section text" in review          # Registration Act footnote 2
+    assert "Notes SHA-256" in review
+
+
+def test_open_questions_are_put_to_the_reviewer_not_applied(built):
+    review, sheet = built[2]["02_playbooks_review.html"], built[2]["01_dataset_labels_review.html"]
+    assert "Has the Punjab amended either Act" in review
+    assert "particulars to be sufficient" in review
+    assert "Non-solicitation" in review
+    for doc_id, asked in package.DATASET_QUESTIONS.items():
+        section = sheet.split(f"<h2>{doc_id} ")[1].split("<h2>")[0]
+        assert "not applied" in section
+        for q in asked:
+            assert package.esc(q) in section
+    assert "party: Each Party" in sheet and "party: party;" not in sheet
+
+
+def test_a_rebuilt_package_names_the_one_it_supersedes(tmp_path):
+    old = "bcfe238d85079440eb0089f36d62c16db5d625a05a3cc355a1b5a983f209aa3f"
+    manifest = package.build(tmp_path, generated="2026-10-02", supersedes=old)
+    assert manifest["supersedes"] == {"zip_sha256": old}
+    assert manifest["review_status"] == {"lawyer_reviewed": False, "legal_pack_approved": False}
+    for name in manifest["files"]:
+        assert old in (tmp_path / name).read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="64 hex"):
+        package.build(tmp_path, supersedes="BCFE238D")
