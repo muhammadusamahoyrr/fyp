@@ -413,9 +413,66 @@ async def get_report(*, owner_id: str, run_id: str) -> dict:
     report = run.get("report", {})
     from app.services.analyzer import authorities
 
-    # The authority/source layer, as of now: each source's official/mirror
-    # status, snapshot date and currency, coverage gaps and release blockers.
-    # Each finding keeps the snapshot it was made against.
+    ai, by_kind = await _ai_layer(run)
+    # Four layers, kept apart: the playbook checks (legal_checks; `findings`
+    # is the same list under its older name), the model's drafting items
+    # (model_risks / obligations / summary_points, with `ai` saying how they
+    # were produced -- or that they were not), and the authority/source
+    # layer as of now. Each finding keeps the authority snapshot it was
+    # made against.
     return {"id": run_id, "packs": report.get("packs", []), "counts": report.get("counts", {}),
-            "scope_notice": SCOPE_NOTICE, "findings": findings,
+            "scope_notice": SCOPE_NOTICE, "legal_checks": findings, "findings": findings,
+            "ai": ai, "model_risks": by_kind["risk"], "obligations": by_kind["obligation"],
+            "summary_points": by_kind["summary_point"],
             "authority": authorities.current_metadata()}
+
+
+_AI_ITEM_FIELDS = {
+    "risk": ("category", "title", "explanation", "severity", "severity_reason"),
+    "obligation": ("party", "action", "deadline_status", "deadline", "condition"),
+    "summary_point": ("point",),
+}
+
+
+async def _ai_layer(run: dict) -> tuple[dict, dict]:
+    """The AI layer of a report: its status and provenance, and its items with
+    evidence cut from the frozen text HERE. A stored hash that no longer
+    matches the cut text is reported, and that evidence text withheld."""
+    import hashlib
+
+    from app.db.collections import get_analysis_ai_items_col
+    from app.services.analyzer import ai_report, ai_stage
+
+    summary = run.get("ai_report") or {"status": ai_stage.UNAVAILABLE, "reason": "not_recorded"}
+    by_kind: dict[str, list] = {"risk": [], "obligation": [], "summary_point": []}
+    fence = run.get("published", {}).get(ai_stage.STAGE)
+    rows = [] if fence is None else [r async for r in get_analysis_ai_items_col().find(
+        {"run_id": run["_id"], "stage": ai_stage.STAGE, "fence": fence}, {"_id": 0}).sort("ordinal", 1)]
+    quotes = await _quotes(run, {e["sentence_id"] for r in rows for e in r["evidence"]})
+    for r in rows:
+        evidence = []
+        for e in r["evidence"]:
+            cut = quotes.get(e["sentence_id"])
+            intact = cut is not None and hashlib.sha256(cut.encode("utf-8")).hexdigest() == e["text_sha256"]
+            evidence.append({"sentence_id": e["sentence_id"], "clause_id": e["clause_id"],
+                             "start": e["start"], "end": e["end"], "page_spans": e["page_spans"],
+                             "text": cut if intact else None,
+                             "integrity": "ok" if intact else "mismatch"})
+        by_kind[r["kind"]].append({"kind": r["kind"], "label": r["label"],
+                                   "fingerprint": r["fingerprint"], "clause_id": r["clause_id"],
+                                   **{k: r.get(k) for k in _AI_ITEM_FIELDS[r["kind"]]},
+                                   "evidence": evidence})
+    provenance = summary.get("provenance") or {}
+    ai = {"status": summary["status"], "reason": summary.get("reason"),
+          "error_code": summary.get("error_code"),
+          "label": ai_report.LABEL, "notice": ai_report.LAYER_NOTICE,
+          "no_law_applied": True, "not_legal_advice": True,
+          "schema_version": summary.get("schema_version"),
+          "prompt_version": summary.get("prompt_version"),
+          "provider": provenance.get("provider"), "model": provenance.get("model"),
+          "fallback": provenance.get("fallback"), "policy_id": provenance.get("policy_id"),
+          "zdr": provenance.get("zdr"), "latency_ms": provenance.get("latency_ms"),
+          "usage": provenance.get("usage"),
+          "counts": summary.get("counts"), "dropped": summary.get("dropped"),
+          "merged": summary.get("merged")}
+    return ai, by_kind
