@@ -80,7 +80,7 @@ export const RESULT_TEXT = {
     not_applicable: "Does not apply",
 };
 const PACK_STATUS_TEXT = {
-    awaiting_approval: "A legal checklist for this kind of document exists but has not been approved by a qualified lawyer yet, so it was not run.",
+    awaiting_approval: "Pending qualified lawyer validation. A legal checklist for this kind of document exists but has not been approved by a qualified lawyer yet, so it was not run.",
     unable_to_determine: "Whether a legal checklist applies could not be decided from what you confirmed.",
 };
 export const errorText = code => ERROR_TEXT[code] || "The document could not be read.";

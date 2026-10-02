@@ -263,7 +263,7 @@ test("a checked document shows its report, worded honestly, and its text", async
     assert.match(report.querySelector('[data-finding="parties_named"]').textContent, /General document review/);
     assert.doesNotMatch(report.textContent, /missing/i);
     const notice = report.querySelector('[data-pack-status="awaiting_approval"]');
-    assert.match(notice.textContent, /not been approved by a qualified lawyer yet, so it was not run/);
+    assert.match(notice.textContent, /^Punjab tenancy checklist: Pending qualified lawyer validation. .*not been approved by a qualified lawyer yet, so it was not run/);
     assert.equal(report.querySelector('[data-scope="legal_playbook"]'), null, "an unapproved legal pack's results were shown");
     const clauses = [...p.container.querySelectorAll("[data-clause]")].map(c => c.textContent);
     assert.deepEqual(clauses, ["1. One.", "2. Two."]);
