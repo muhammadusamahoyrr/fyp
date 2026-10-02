@@ -25,6 +25,7 @@ document_types:
     label_review: developer_only
     label_reviewer: null
     label_reviewed_on: null
+    label_reviewed_dataset_sha256: null
     model: null
     evaluated_at: null
     metrics: null
@@ -34,6 +35,7 @@ document_types:
     label_review: developer_only
     label_reviewer: null
     label_reviewed_on: null
+    label_reviewed_dataset_sha256: null
     model: null
     evaluated_at: null
     metrics: null
@@ -43,6 +45,7 @@ document_types:
     label_review: developer_only
     label_reviewer: null
     label_reviewed_on: null
+    label_reviewed_dataset_sha256: null
     model: null
     evaluated_at: null
     metrics: null

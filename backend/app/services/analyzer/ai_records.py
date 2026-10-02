@@ -102,8 +102,8 @@ def policy_problems(record: dict | None, *, endpoint: str, zdr_verified_on: str,
 
 _RECORD_KEYS = {"version", "created", "dataset", "schema_version", "prompt_version",
                 "required_gates", "selected_model", "document_types"}
-_TYPE_KEYS = {"status", "label_review", "label_reviewer", "label_reviewed_on", "model",
-              "evaluated_at", "metrics", "result_file"}
+_TYPE_KEYS = {"status", "label_review", "label_reviewer", "label_reviewed_on",
+              "label_reviewed_dataset_sha256", "model", "evaluated_at", "metrics", "result_file"}
 
 
 def parse_evaluation_record(raw: str, *, allowlist: tuple[str, ...] = ()) -> dict:
@@ -122,7 +122,12 @@ def parse_evaluation_record(raw: str, *, allowlist: tuple[str, ...] = ()) -> dic
         if entry["label_review"] == LAWYER_REVIEWED:
             if not (entry["label_reviewer"] or "").strip() or not _date_ok(entry["label_reviewed_on"]):
                 raise RecordError(f"{where}: lawyer review needs the reviewer and the date")
-        elif entry["label_review"] != DEVELOPER_ONLY or entry["label_reviewer"] or entry["label_reviewed_on"]:
+            if entry["label_reviewed_dataset_sha256"] != data["dataset"]["sha256"]:
+                # A sign-off covers the exact labels read; a corrected dataset
+                # has a new hash and needs a new review.
+                raise RecordError(f"{where}: the lawyer review was of a different dataset version")
+        elif (entry["label_review"] != DEVELOPER_ONLY or entry["label_reviewer"]
+              or entry["label_reviewed_on"] or entry["label_reviewed_dataset_sha256"]):
             raise RecordError(f"{where}: label_review is developer_only or lawyer_reviewed")
         if entry["status"] == NOT_YET_EVALUATED:
             if any(entry[k] is not None for k in ("model", "evaluated_at", "metrics", "result_file")):

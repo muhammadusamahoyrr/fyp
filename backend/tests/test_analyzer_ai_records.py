@@ -25,7 +25,8 @@ def test_the_committed_record_is_honest_about_what_was_evaluated():
     assert set(record["document_types"]) == set(evaluation.DOCUMENT_TYPES)
     for entry in record["document_types"].values():
         assert entry == {"status": "not_yet_evaluated", "label_review": "developer_only",
-                         "label_reviewer": None, "label_reviewed_on": None, "model": None,
+                         "label_reviewer": None, "label_reviewed_on": None,
+                         "label_reviewed_dataset_sha256": None, "model": None,
                          "evaluated_at": None, "metrics": None, "result_file": None}
 
 
@@ -63,6 +64,23 @@ def test_an_evaluated_type_must_name_an_allowlisted_model():
     with pytest.raises(ai_records.RecordError, match="allowlisted model"):
         ai_records.parse_evaluation_record(raw, allowlist=ai_config.allowlist(
             settings.analyzer_ai_model_allowlist))
+
+
+def test_a_lawyer_review_binds_the_exact_dataset_version_it_read():
+    current = yaml.safe_load(RAW)["dataset"]["sha256"]
+    signed = {"label_review": "lawyer_reviewed", "label_reviewer": "Advocate X (test)",
+              "label_reviewed_on": "2026-10-01"}
+    ok = change(lambda d: d["document_types"]["nda"].update(
+        {**signed, "label_reviewed_dataset_sha256": current}))
+    assert ai_records.parse_evaluation_record(ok)["document_types"]["nda"]["label_review"] == "lawyer_reviewed"
+    stale = change(lambda d: d["document_types"]["nda"].update(
+        {**signed, "label_reviewed_dataset_sha256": "0" * 64}))
+    with pytest.raises(ai_records.RecordError, match="different dataset version"):
+        ai_records.parse_evaluation_record(stale)
+    corrected = change(lambda d: (d["document_types"]["nda"].update(
+        {**signed, "label_reviewed_dataset_sha256": current}), d["dataset"].update(sha256="1" * 64)))
+    with pytest.raises(ai_records.RecordError, match="different dataset version"):
+        ai_records.parse_evaluation_record(corrected)
 
 
 def test_a_passing_benchmark_does_not_make_the_labels_lawyer_reviewed():
