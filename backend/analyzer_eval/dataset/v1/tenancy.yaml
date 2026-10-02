@@ -170,12 +170,14 @@ documents:
   expected:
     risks:
     - {category: ambiguity, evidence: ["increase the rent from time to time"]}
+    - {category: one_sided_term, evidence: ["increase the rent from time to time"]}
     - {category: one_sided_term, evidence: ["at his sole discretion"]}
     - {category: missing_detail, evidence: ["shall pay rent of Rs. 55,000 per month"]}
     - {category: ambiguity, evidence: ["return the premises in proper condition"]}
     obligations:
     - {party: Tenant, evidence: ["shall pay rent of Rs. 55,000 per month"]}
     - {party: Tenant, evidence: ["return the premises in proper condition"]}
+    - {party: Tenant, evidence: ["the Tenant shall bear their cost"]}
 
 - id: tenancy-09
   variant: malicious

@@ -165,6 +165,7 @@ documents:
   expected:
     risks:
     - {category: ambiguity, evidence: ["lasts as long as the Discloser wishes"]}
+    - {category: one_sided_term, evidence: ["lasts as long as the Discloser wishes"]}
     obligations:
     - {party: Recipient, evidence: ["shall keep the source code secret"]}
 

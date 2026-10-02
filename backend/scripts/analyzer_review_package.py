@@ -51,69 +51,158 @@ REVIEW_PACKS = ("tenancy_punjab", "nda")
 NOT_FOR_APPROVAL = ("employment",)
 
 #: Statute NAMES offered to the reviewer as a starting point for the
-#: employment coverage decision. Not verified by the developer against any
-#: official source; the reviewer confirms, rejects or replaces each.
+#: employment coverage decision, each with what two independent AI reviews
+#: found on the official Punjab Code / Pakistan Code. The developer has NOT
+#: verified any of it; the reviewer confirms, rejects or replaces each.
 EMPLOYMENT_CANDIDATES = (
-    "Punjab Terms of Employment (Standing Orders) Act, 2012",
-    "Industrial and Commercial Employment (Standing Orders) Ordinance, 1968",
-    "Punjab Shops and Establishments Ordinance, 1969",
-    "Payment of Wages Act, 1936",
-    "Punjab Minimum Wages Act, 2019",
-    "Punjab Industrial Relations Act, 2010",
-    "Employees' Old-Age Benefits Act, 1976",
-    "Punjab Employees Social Security Ordinance, 1965",
-    "Factories Act, 1934",
+    ("Punjab Terms of Employment (Standing Orders) Act, 2012",
+     "unable_to_verify: no Act of this title was found on the Punjab Code; the title matches "
+     "Sindh's Terms of Employment (Standing Orders) Act. Do not rely on it."),
+    ("Industrial and Commercial Employment (Standing Orders) Ordinance, 1968",
+     "found on the Punjab Code; listed for repeal by the Punjab Labour Code 2026, s.435"),
+    ("Punjab Shops and Establishments Ordinance, 1969",
+     "title differs: the Punjab Code lists \"West Pakistan Shops and Establishments Ordinance, 1969\"; "
+     "listed for repeal by the Punjab Labour Code 2026, s.435"),
+    ("Payment of Wages Act, 1936",
+     "found on the Punjab Code; listed for repeal by the Punjab Labour Code 2026, s.435"),
+    ("Punjab Minimum Wages Act, 2019",
+     "found on the Punjab Code; listed for repeal by the Punjab Labour Code 2026, s.435"),
+    ("Punjab Industrial Relations Act, 2010",
+     "found on the Punjab Code; listed for repeal by the Punjab Labour Code 2026, s.435"),
+    ("Employees' Old-Age Benefits Act, 1976",
+     "federal Act (Pakistan Code); its application in the Punjab after devolution is for you"),
+    ("Punjab Employees Social Security Ordinance, 1965",
+     "title differs: the Punjab Code lists \"Provincial Employees' Social Security Ordinance, 1965\""),
+    ("Factories Act, 1934",
+     "found on the Punjab Code; listed for repeal by the Punjab Labour Code 2026, s.435"),
+    ("Punjab Labour Code 2026 (IX of 2026)",
+     "NOT on the original list; found on the Punjab Code. It comes into force on a date notified "
+     "in the Gazette (s.1(3)); no commencement notification was found. Its s.435 repeals six of "
+     "the laws above once in force."),
 )
 
-#: Points raised by an AI preliminary review of the labels. They are NOT
-#: applied to the dataset: each is put to the reviewer as a question.
+#: Changes made to the dataset because two independent AI reviews (Codex and
+#: Claude) agreed on them. Shown to the reviewer, who may still reverse them.
+DATASET_CHANGES = (
+    "employment-06 Obligation 2: deadline \"thirty days' notice\" became \"thirty days' notice "
+    "before resigning\" (the full timing words of s4).",
+    "tenancy-08: added one_sided_term on s3 (the Landlord alone may increase the rent), alongside "
+    "the existing ambiguity label.",
+    "tenancy-08: added an obligation on s4 (party Tenant, deadline not stated: \"the Tenant shall "
+    "bear their cost\").",
+    "nda-09: added one_sided_term on s5 (the duty lasts as long as the Discloser wishes), alongside "
+    "the existing ambiguity label.",
+)
+
+#: Labelling-policy questions: the two AI reviews disagreed on 13 labels mostly
+#: because no written rule settles these. Your answer becomes the guideline.
+DATASET_POLICY_QUESTIONS = [
+    "When a document states a duration or deadline only vaguely (\"promptly\", \"a reasonable "
+    "period\", \"a suitable period\"), should the obligation's deadline read \"not stated\" (with "
+    "the vagueness labelled as an ambiguity risk), or record the vague words as a stated but "
+    "ambiguous deadline?",
+    "When a duty and its duration are in different sentences (nda-01 s3 and s4), should the "
+    "obligation cite both evidence units?",
+    "How should something ABSENT from a document (no term, no date of execution) be labelled: "
+    "on which evidence unit, and should it be labelled at all in documents not of the "
+    "\"incomplete\" variant (tenancy-06 to -10 also state no term)?",
+    "Should a missing-detail label say exactly what is missing (e.g. \"rent amount stated; due "
+    "date and mode not stated\"), or is the category with its evidence unit enough?",
+]
+
+#: Points raised by one AI review only, or on which the two disagreed. NOT
+#: applied: each is put to the reviewer as a question.
 DATASET_QUESTIONS = {
-    "tenancy-03": ["The agreement states no date, no place of execution and no term at all. "
-                   "Should any of these be labelled, and on which evidence unit?"],
-    "tenancy-04": ["The lease states no term and no date. Should either be labelled, and on which "
-                   "evidence unit?"],
-    "tenancy-08": ["s4 (\"the Tenant shall bear their cost\") puts a duty on the Tenant but is not "
-                   "labelled as an obligation. Should it be?",
-                   "s3 (the Landlord may increase the rent from time to time) is labelled ambiguity. "
-                   "Is it also a one_sided_term?"],
-    "nda-09": ["s5 (\"The duty lasts as long as the Discloser wishes\") is labelled ambiguity. "
-               "Is it better labelled one_sided_term, or both?"],
-    "employment-06": ["Obligation 2 gives \"thirty days' notice\" as its deadline. Is a notice period "
-                      "a deadline for this label, or should the deadline read \"not stated\"?"],
-    "employment-08": ["s4 is a post-employment restriction on working for a competitor, labelled "
-                      "ambiguity only. The labels are drafting points by design; should anything "
-                      "more be noted here?"],
+    "tenancy-03": ["No date, place of execution or term is stated. Should these be labelled, and on "
+                   "which unit (one review: s1 and s0-s1; the other: s2)?",
+                   "Should Risks 1-3 say precisely what is missing (Risk 1: due date and mode; Risk 2: "
+                   "notice length, form, effective date; Risk 3: deposit return and deductions)?"],
+    "tenancy-04": ["No date and no term are stated. Should either be labelled, and on which unit?",
+                   "Risk 1: should it say the premises lacks an identifying number or fuller address?"],
+    "tenancy-08": ["Risk 3: should it say the amount and period are stated but no due date or mode is?"],
+    "tenancy-10": ["Risk 2: should it say the amount and period are stated but no due date or mode is?"],
+    "nda-01": ["Obligation 1: should it cite s3 and s4 and record the duration \"three years from the "
+               "date of this Agreement\"?"],
+    "nda-02": ["Obligation 1: should it cite s3 and s4 (two years after the tasting project ends)?",
+               "Is the undefined end of \"the tasting project\" an ambiguity to label (s2, s4)?"],
+    "nda-03": ["No duration of confidentiality is stated. Should that be labelled (s2, s3)?"],
+    "nda-04": ["No duration of confidentiality is stated. Should that be labelled (s2, s4)?"],
+    "nda-05": ["The only duty stated is not to copy marked documents (s4); there is no general duty of "
+               "non-disclosure. Should that be labelled missing_detail?"],
+    "nda-07": ["Obligation 1: is \"a reasonable period\" (s4) a stated but ambiguous duration, or "
+               "\"not stated\"? (See policy question 1.)"],
+    "nda-08": ["Obligation 1: is \"promptly\" a stated but ambiguous deadline, or \"not stated\"? "
+               "(See policy question 1.)",
+               "The agreement states no basic duty of confidentiality, only a permission to disclose "
+               "(s2). Should that be labelled missing_detail?"],
+    "nda-09": ["Obligation 1: should it cite s5 too, recording a duration controlled by the Discloser?"],
+    "nda-10": ["s4 (liability to pay any amount the Company decides): should it also be an obligation "
+               "on the Recipient?"],
+    "employment-04": ["s4: only the Company may terminate. Is that also a one_sided_term, as in "
+                      "employment-09 s5 and tenancy-10 s5?"],
+    "employment-08": ["Risk 3 / s4: the post-employment restriction is labelled ambiguity. Should it "
+                      "also be one_sided_term, and should the possible restraint-of-trade question be "
+                      "noted (as a drafting point only)?",
+                      "Obligation 2: is \"a suitable period\" a stated but ambiguous duration, or "
+                      "\"not stated\"? (See policy question 1.)",
+                      "s2 states no pay date (labelled missing_detail elsewhere, e.g. employment-04 s3). "
+                      "Should it be labelled here?"],
     "employment-10": ["Obligation 1 rests on s4 (\"a salary to be decided later\"). Is that an "
-                      "obligation, or only a missing detail?"],
+                      "obligation, or only a missing detail?",
+                      "s2 offers the role with no start date. Should that be labelled missing_detail, as "
+                      "in employment-03?"],
 }
 
 #: Questions put to the reviewer of each legal playbook. Answers can change
 #: the playbook or the cited text, and so its hashes: put them before approving.
 PLAYBOOK_QUESTIONS = {
     "tenancy_punjab": [
+        "Scope: the pack runs on any tenancy confirmed as in the Punjab. Which premises and "
+        "relationships do sections 2-3 of the Punjab Rented Premises Act include or exclude, and "
+        "should the pack ask about them before it runs? Are premises in a cantonment governed by "
+        "this Act or another rent law?",
         "Section 6(1)(a) asks for \"particulars of the landlord and the tenant\". The check "
-        "s6_particulars_of_parties locates only CNIC, parentage (s/o, d/o, w/o, son of ...) or "
-        "\"resident of\" wording; a name alone is not located. What must an agreement state for its "
-        "particulars to be sufficient (name, CNIC, parentage, address)? The check is deliberately "
-        "left unchanged until you answer.",
-        "The Registration Act 1908 (s.17(1)) and Transfer of Property Act 1882 (ss.1, 107) text is cut "
-        "from Pakistan Code, the FEDERAL publication. Has the Punjab amended either Act in a way that "
-        "affects s.17(1)(d) or s.107 for leases in the Punjab? If so, which instrument, and from which "
-        "official source should its text be cut?",
-        "Footnotes are now shown apart from each section's text. A footnote marked \"marker not in the "
-        "section text\" is shown because it bears on the section although its marker is elsewhere "
-        "(or missing from the published text). Please confirm each such note, in particular "
-        "Registration Act footnote 2 on page 10 (Registration (Amdt) Act, 2022), whose marker does "
-        "not appear anywhere on that page.",
-        "s6_period_of_tenancy no longer counts a sentence that mentions notice, and "
-        "s6_rate_of_enhancement now needs a stated percentage or amount -- a bare power to increase "
-        "the rent is not located. Are these the right limits?",
+        "locates only identity-card, parentage or residence wording; a name alone is not located. "
+        "What must an agreement state for its particulars to be sufficient? The check is "
+        "deliberately left unchanged until you answer.",
+        "The Registration Act s.17(1) and Transfer of Property Act ss.1 and 107 are now cut from "
+        "the PUNJAB Code (as amended in the Punjab: TPA s.1 substituted by Punjab Act VIII of "
+        "2011; Registration Act amended by Punjab Acts XIX of 2011, XXVI of 2018 and XL of 2026), "
+        "not from Pakistan Code. Is this the text in force? Which notifications under TPA s.1(3) "
+        "and (4), and orders under the proviso to s.17(1), are in force, and where does s.107 "
+        "operate in the Punjab (the publisher's footnote: municipalities, notified areas and "
+        "cantonments; s.1(5))?",
+        "Registration reminders: is a lease from year to year, or one \"reserving a yearly rent\", "
+        "correctly told apart from a monthly rent quoted as an annual total? Is a term of exactly "
+        "12 months correctly treated as not exceeding one year?",
+        "Should the Rent Registrar reminder also mention s.5(6) (later agreements must also be "
+        "presented) and the s.9 consequence of a tenancy that does not conform (not held in the "
+        "library)?",
+        "Stamp duty (Stamp Act 1899 and the Punjab finance laws) is not held. Should it be, and "
+        "from which official text?",
+        "s6_bank_particulars is a reminder shown on every Punjab tenancy. Should it instead show "
+        "only when the agreement provides for payment through a bank?",
+        "A footnote marked \"marker not in the section text\" is shown because it bears on the "
+        "section although its marker is elsewhere -- here the Transfer of Property Act's title "
+        "footnote, which records the Act's extent. Please confirm it.",
+        "The locators were tightened after two AI reviews: a duration counts as the term unless "
+        "it is a notice period; deposits and ages no longer count as the term; due date, mode, "
+        "purpose and deposit checks need rent or letting context. Are these the right limits?",
     ],
     "nda": [
-        "Non-solicitation and generic \"restrain\" wording are no longer located by "
-        "non_compete_restraint (Contract Act s.27): only non-compete wording is. Should a "
-        "non-solicitation or other restraint clause be raised to the user, and if so as what -- a "
-        "reminder, a question, or a located check -- and in what words?",
+        "Non-solicitation and wording such as \"not disclose to any competitor\" are no longer "
+        "located by non_compete_restraint: only wording restraining the carrying on of a trade or "
+        "business is. Should a non-solicitation clause be raised to the user, and if so how?",
+        "How does s.27 apply to a restraint that runs during the relationship compared with one "
+        "after it ends, and to an NDA governed by a foreign law? Should this pack run only when "
+        "Pakistani law governs the agreement?",
+        "Under s.28, how should absolute bars, exclusive-jurisdiction (forum) clauses, arbitration "
+        "clauses, claim-notification periods and contractual limitation periods be told apart?",
+        "The s.28 text includes the paragraph \"Suits barred by such Contracts\", which the "
+        "publisher's footnote says was repealed by the Specific Relief Act 1877. Should it be "
+        "shown at all?",
+        "duration_of_confidentiality is a drafting point, not a statutory one. Should it move out "
+        "of this legal pack into the general drafting checks?",
     ],
 }
 
@@ -175,7 +264,13 @@ def dataset_review(dataset, generated: str, supersedes: str | None = None) -> st
         "<p>Labels are currently <b>developer_only</b>. They become <b>lawyer_reviewed</b> only through "
         "your signed decision, recorded with your name and the date.</p></div>",
         f"<p>Dataset <b>{esc(dataset.version)}</b>, SHA-256 <code>{esc(dataset.sha256)}</code>, "
-        f"{len(dataset.documents)} documents.</p>"]
+        f"{len(dataset.documents)} documents.</p>",
+        "<h2>Changed after two independent AI reviews</h2><p>Both reviews (Codex and Claude) agreed on "
+        "these, so they were applied. You may reverse any of them.</p><ul>"
+        + "".join(f"<li>{esc(c)}</li>" for c in DATASET_CHANGES) + "</ul>",
+        "<h2>Labelling policy: please decide first</h2><p>The two AI reviews disagreed on 13 labels, "
+        "mostly because no written rule settles these points. Your answers become the labelling "
+        "guideline.</p>" + questions(DATASET_POLICY_QUESTIONS)]
     for doc in dataset.documents:
         evaluation.prepare(doc)
         units = "".join(
@@ -191,7 +286,7 @@ def dataset_review(dataset, generated: str, supersedes: str | None = None) -> st
                           f"<td>{esc(', '.join(o['sentence_ids']))}</td><td></td><td></td></tr>")
         if not labels:
             labels.append("<tr><td colspan=\"5\">No drafting points or obligations labelled.</td></tr>")
-        asked = (f"<h3>Questions for you (raised by an AI preliminary review; not applied)</h3>"
+        asked = (f"<h3>Questions for you (raised by one AI review, or disputed between the two; not applied)</h3>"
                  f"{questions(DATASET_QUESTIONS[doc.id])}" if doc.id in DATASET_QUESTIONS else "")
         injection = (f"<p><b>Malicious variant:</b> the document embeds an instruction aimed at the AI, "
                      f"marked by the canary <code>{esc(doc.canary)}</code>. It is a test of the AI, "
@@ -273,8 +368,8 @@ def employment_request(employment: dict, authority: dict, generated: str,
                        supersedes: str | None = None) -> str:
     blocker = next(g for g in authority["coverage"]["employment"]["gaps"] if g["release_blocker"])
     cited = ", ".join(f"{c['statute']} s.{c['section']}" for c in employment["cited_provisions"])
-    candidates = "".join(f"<tr><td>{esc(name)}</td><td></td><td></td><td></td></tr>"
-                         for name in EMPLOYMENT_CANDIDATES)
+    candidates = "".join(f"<tr><td>{esc(name)}</td><td><i>{esc(found)}</i></td><td></td><td></td><td></td></tr>"
+                         for name, found in EMPLOYMENT_CANDIDATES)
     body = (
         f"<div class=\"note\"><p><b>Open release blocker</b> <code>{esc(blocker['id'])}</code>: "
         f"{esc(blocker['text'])}</p></div>"
@@ -297,10 +392,18 @@ def employment_request(employment: dict, authority: dict, generated: str,
         "authorities_hash for approval. Nothing is added on the developer's own reading of the law.</p>"
         "<h2>Starting list (names only, NOT verified)</h2>"
         "<p>The developer has not checked these names, their current status or their applicability against "
-        "any official source. Please confirm, reject or replace each, and add what is missing.</p>"
-        "<table><tr><th>Statute (as named by the developer)</th><th>Include? (yes / no)</th>"
-        f"<th>Provisions</th><th>Official source</th></tr>{candidates}"
-        "<tr><td>Other: ______________________</td><td></td><td></td><td></td></tr></table>"
+        "any official source. Two independent AI reviews checked them against the Punjab Code and Pakistan "
+        "Code; what they found is shown, NOT verified. Please confirm, reject or replace each, and add what "
+        "is missing.</p>"
+        "<table><tr><th>Statute (as named by the developer)</th><th>What the AI reviews found (unverified)</th>"
+        f"<th>Include? (yes / no)</th><th>Provisions</th><th>Official source</th></tr>{candidates}"
+        "<tr><td>Other: ______________________</td><td></td><td></td><td></td><td></td></tr></table>"
+        "<h2>Further questions</h2>"
+        + questions(["Which jurisdictions (Punjab, other provinces, Islamabad Capital Territory) and which "
+                     "private-sector categories belong in the first employment checklist?",
+                     "Which categories must be excluded from a generic private-employment checklist "
+                     "(e.g. public servants and other statutory service regimes)?",
+                     "Is the Punjab Labour Code 2026 in force, and from what date?"])
         + sign_off("employment coverage decision (not a playbook approval)",
                    f"coverage request for employment playbook content_hash {employment['content_hash']}",
                    COVERAGE_DECISIONS))

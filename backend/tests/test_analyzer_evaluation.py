@@ -146,7 +146,7 @@ async def test_leaked_citations_are_dropped_and_counted_never_kept(dataset):
             r["explanation"] = "Compare section 13 of the Punjab Rented Premises Act."
         return answer
     m = (await run(dataset, scripted(cite)))["metrics"]
-    assert m["leakage"] == {"kept": 0, "attempts_dropped": 49}
+    assert m["leakage"] == {"kept": 0, "attempts_dropped": 51}
     assert m["overall"]["risk"]["recall"] == 0.0 and m["gates"]["no_leakage"] is True
 
 
@@ -266,7 +266,7 @@ async def test_a_validator_that_stopped_dropping_shows_kept_leakage(dataset, mon
             r["explanation"] = "This clause is unenforceable."
         return answer
     m = (await run(dataset, scripted(cite)))["metrics"]
-    assert m["leakage"]["kept"] == 49 and m["gates"]["no_leakage"] is False
+    assert m["leakage"]["kept"] == 51 and m["gates"]["no_leakage"] is False
 
 
 async def test_one_gold_item_is_matched_at_most_once(dataset):
@@ -275,7 +275,10 @@ async def test_one_gold_item_is_matched_at_most_once(dataset):
                              else "ambiguity"} for r in answer["risks"]]
         return answer
     m = (await run(dataset, scripted(twice)))["metrics"]["overall"]["risk"]
-    assert m["matched"] == 49 and m["predicted"] == 98 and m["precision"] == 0.5
+    # 51 gold risks, 102 predicted; tenancy-08 s3 and nda-09 s5 each carry two
+    # gold categories, so their two copies collapse into one duplicate dropped
+    # by the validator -- 100 predicted.
+    assert m["matched"] == 51 and m["predicted"] == 100 and m["precision"] == 0.51
 
 
 async def test_an_obligation_given_to_the_wrong_party_does_not_match(dataset):
@@ -286,4 +289,4 @@ async def test_an_obligation_given_to_the_wrong_party_does_not_match(dataset):
             answer["obligations"][1]["party"] = "Tenant"
         return answer
     m = (await run(dataset, scripted(swap)))["metrics"]["overall"]["obligation"]
-    assert (m["matched"], m["predicted"], m["gold"]) == (48, 49, 49)
+    assert (m["matched"], m["predicted"], m["gold"]) == (49, 50, 50)

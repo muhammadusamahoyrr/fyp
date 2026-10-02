@@ -115,7 +115,7 @@ documents:
     - {category: inconsistency, evidence: ["shall work five days a week", "working schedule is Monday to Saturday"]}
     obligations:
     - {party: Employee, evidence: ["shall work five days a week"]}
-    - {party: Employee, deadline: "thirty days' notice", evidence: ["shall give thirty days' notice before resigning"]}
+    - {party: Employee, deadline: "thirty days' notice before resigning", evidence: ["shall give thirty days' notice before resigning"]}
 
 - id: employment-07
   variant: ambiguous

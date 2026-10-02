@@ -83,8 +83,12 @@ def test_the_employment_request_marks_its_list_as_unverified(built):
     assert "employment.no_employment_statute" in request and "NOT verified" in request
     assert "Please do not approve the current employment playbook" in request
     assert "not a playbook approval" in request
-    for name in package.EMPLOYMENT_CANDIDATES:
-        assert package.esc(name) in request
+    for name, found in package.EMPLOYMENT_CANDIDATES:
+        assert package.esc(name) in request and package.esc(found) in request
+    # Both AI reviews: this title could not be verified; it is flagged, never relied on.
+    flagged = dict(package.EMPLOYMENT_CANDIDATES)["Punjab Terms of Employment (Standing Orders) Act, 2012"]
+    assert flagged.startswith("unable_to_verify")
+    assert "public servants" in request
 
 
 def test_the_script_refuses_to_write_inside_the_repository(monkeypatch, capsys):
@@ -114,7 +118,12 @@ def test_footnotes_are_shown_apart_from_the_section_text(built):
 
 def test_open_questions_are_put_to_the_reviewer_not_applied(built):
     review, sheet = built[2]["02_playbooks_review.html"], built[2]["01_dataset_labels_review.html"]
-    assert "Has the Punjab amended either Act" in review
+    assert "now cut from the PUNJAB Code" in review and "s.1(3)" in review
+    assert "sections 2-3 of the Punjab Rented Premises Act" in review
+    for asked in package.DATASET_POLICY_QUESTIONS:
+        assert package.esc(asked) in sheet
+    for change in package.DATASET_CHANGES:
+        assert package.esc(change) in sheet
     assert "particulars to be sufficient" in review
     assert "Non-solicitation" in review
     for doc_id, asked in package.DATASET_QUESTIONS.items():
