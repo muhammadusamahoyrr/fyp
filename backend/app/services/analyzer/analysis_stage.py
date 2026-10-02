@@ -1,6 +1,8 @@
 """The analysis stage: confirmed context + mapped text -> playbook findings.
 
-Takes a run from `queued_analysis` (via `analyzing`) to `done`:
+Takes a run from `queued_analysis` (via `analyzing`) to `queued_ai_report`
+when the AI layer is ready (ai_stage), otherwise to `done` -- recording why
+the AI layer did not run:
 
   1. Load the CONFIRMED context version (type, province, terms) and the
      text it was confirmed against; refuse a text whose hash does not match.
@@ -72,13 +74,19 @@ async def run_analysis(lease: Lease) -> str:
     for f in findings:
         label = f["check_result"] or "reminder"
         counts[label] = counts.get(label, 0) + 1
+    from app.services.analyzer import ai_stage
+
+    go, why = ai_stage.wanted()
+    extra = {} if go else {"ai_report": ai_stage.unavailable(why)}
     try:
-        await worker.commit_stage(lease, stage=STAGE, next_status="done", set_fields={
-            "report": {"packs": summary, "counts": counts,
-                       "context_version_id": context["_id"], "generated_at": now}})
+        await worker.commit_stage(
+            lease, stage=STAGE, next_status="queued_ai_report" if go else "done", set_fields={
+                "report": {"packs": summary, "counts": counts,
+                           "context_version_id": context["_id"], "generated_at": now},
+                **extra})
     except (LostLease, deletion.StaleSource) as exc:
         if isinstance(exc, LostLease) and await worker.finish_without_result(
                 lease, status="cancelled"):
             return "cancelled"
         return "lost"
-    return "done"
+    return "queued_ai_report" if go else "done"

@@ -74,7 +74,8 @@ def SOURCE_SCOPED():
             C.get_analysis_text_pages_col(), C.get_analysis_text_blocks_col(),
             C.get_analysis_text_versions_col(), C.get_analysis_clauses_col(),
             C.get_analysis_sentences_col(), C.get_analysis_doc_graph_col(),
-            C.get_analysis_context_versions_col(), C.get_analysis_findings_col())
+            C.get_analysis_context_versions_col(), C.get_analysis_findings_col(),
+            C.get_analysis_ai_items_col())
 
 
 def files_on_disk() -> list:

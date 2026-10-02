@@ -332,6 +332,15 @@ def get_analysis_doc_graph_col() -> AsyncIOMotorCollection:
     return get_database()["analysis_doc_graph"]
 
 
+def get_analysis_ai_items_col() -> AsyncIOMotorCollection:
+    """The AI report layer's VALIDATED items (analyzer/ai_report.py): risks,
+    obligations and summary points with sentence ids and evidence offsets +
+    hashes -- never the provider's raw response, never document text. Keyed
+    (run_id, stage, fence, ordinal); visible only once the run publishes
+    that fence."""
+    return get_database()["analysis_ai_items"]
+
+
 def get_analysis_context_versions_col() -> AsyncIOMotorCollection:
     """What a person confirmed about a text version: document type, province
     and decisive key terms with their evidence. Immutable; a change is a new

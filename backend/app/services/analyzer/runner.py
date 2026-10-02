@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from app.services.analyzer import (
+    ai_stage,
     analysis_stage,
     extraction_stage,
     segmentation_stage,
@@ -25,6 +26,7 @@ HANDLERS = {
     "segmenting": segmentation_stage.run_segment,
     "extracting_terms": terms_stage.run_terms,
     "analyzing": analysis_stage.run_analysis,
+    "ai_reporting": ai_stage.run_ai_report,
 }
 
 _QUEUED_FOR = {active: queued for queued, active in states.ACTIVE_FOR_QUEUED.items()}

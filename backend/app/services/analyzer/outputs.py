@@ -26,6 +26,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from app.db.collections import (
+    get_analysis_ai_items_col,
     get_analysis_clauses_col,
     get_analysis_doc_graph_col,
     get_analysis_findings_col,
@@ -84,9 +85,10 @@ async def _sweep_by_run(col, cutoff, limit) -> int:
 
 async def sweep_unpublished_run_outputs(*, older_than: timedelta = DEFAULT_AGE,
                                         limit: int = 5000) -> int:
-    """Clause, sentence, graph and finding rows no run publishes (see module docstring)."""
+    """Clause, sentence, graph, finding and AI rows no run publishes (see module docstring)."""
     cutoff = datetime.now(timezone.utc) - older_than
     return (await _sweep_by_run(get_analysis_clauses_col(), cutoff, limit)
             + await _sweep_by_run(get_analysis_sentences_col(), cutoff, limit)
             + await _sweep_by_run(get_analysis_doc_graph_col(), cutoff, limit)
-            + await _sweep_by_run(get_analysis_findings_col(), cutoff, limit))
+            + await _sweep_by_run(get_analysis_findings_col(), cutoff, limit)
+            + await _sweep_by_run(get_analysis_ai_items_col(), cutoff, limit))

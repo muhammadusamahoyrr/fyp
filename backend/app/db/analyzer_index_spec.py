@@ -209,6 +209,31 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="The unpublished-output sweep reads only rows older than its cutoff.",
     ),
+    # ── analysis_ai_items (validated AI report items) ────────────────────────
+    IndexSpec(
+        collection="analysis_ai_items",
+        name="uniq_analysis_ai_items_row",
+        keys=(("run_id", ASCENDING), ("stage", ASCENDING), ("fence", ASCENDING),
+              ("ordinal", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("Run-output identity (plan §5). A stale AI worker's rows carry an "
+             "old fence: they can be written but never published or overwrite "
+             "the live fence's rows."),
+    ),
+    IndexSpec(
+        collection="analysis_ai_items",
+        name="analysis_ai_items_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every AI item of a source.",
+    ),
+    IndexSpec(
+        collection="analysis_ai_items",
+        name="analysis_ai_items_created",
+        keys=(("created_at", ASCENDING),),
+        kind=QUERY,
+        why="The unpublished-output sweep reads only rows older than its cutoff.",
+    ),
     # ── analysis_doc_graph (definitions and cross-references) ────────────────
     IndexSpec(
         collection="analysis_doc_graph",

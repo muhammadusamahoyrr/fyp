@@ -21,12 +21,14 @@ QUEUED_STATES: tuple[str, ...] = (
     "queued_segmentation",
     "queued_terms",
     "queued_analysis",
+    "queued_ai_report",
 )
 ACTIVE_STATES: tuple[str, ...] = (
     "extracting",
     "segmenting",
     "extracting_terms",
     "analyzing",
+    "ai_reporting",
 )
 PAUSED_STATES: tuple[str, ...] = (
     "needs_ocr_confirmation",
@@ -44,6 +46,7 @@ ACTIVE_FOR_QUEUED: dict[str, str] = {
     "queued_segmentation": "segmenting",
     "queued_terms": "extracting_terms",
     "queued_analysis": "analyzing",
+    "queued_ai_report": "ai_reporting",
 }
 
 INITIAL_STATE = "queued_extract"

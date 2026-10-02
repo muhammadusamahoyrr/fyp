@@ -41,6 +41,7 @@ from datetime import datetime, timedelta, timezone
 from pymongo import ReturnDocument
 
 from app.db.collections import (
+    get_analysis_ai_items_col,
     get_analysis_blobs_col,
     get_analysis_clauses_col,
     get_analysis_context_versions_col,
@@ -203,6 +204,7 @@ async def purge_source(source_id: str) -> str:
     await get_analysis_doc_graph_col().delete_many({"source_id": source_id})
     await get_analysis_context_versions_col().delete_many({"source_id": source_id})
     await get_analysis_findings_col().delete_many({"source_id": source_id})
+    await get_analysis_ai_items_col().delete_many({"source_id": source_id})
 
     # 5. A bare tombstone: nothing derived from the document survives.
     await sources.update_one(
