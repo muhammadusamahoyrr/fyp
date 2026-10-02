@@ -66,7 +66,7 @@ def ok_response(text, rows):
              "sentence_ids": [notice["sentence_id"]], "clause_id": notice["clause_id"]}],
         "obligations": [
             {"party": "Tenant", "action": "Pay the monthly rent.", "deadline_status": "stated",
-             "deadline": "By the 5th of each month", "condition": None,
+             "deadline": "By the 5th day of each month", "condition": None,
              "sentence_ids": [rent["sentence_id"]], "clause_id": rent["clause_id"]},
             {"party": "Tenant", "action": "Bear the cost of repairs.", "deadline_status": "not_stated",
              "deadline": None, "condition": "If the Landlord decides a repair is needed.",
@@ -169,7 +169,7 @@ def test_schema_errors_never_carry_model_text():
                     "shall bear their cost."),
      "verbatim_copy"),
     (lambda d, t, rows: d["obligations"][0].update(party="Guarantor"), "party_not_in_evidence"),
-    (lambda d, t, rows: d["obligations"][0].update(deadline="By the 10th of each month"),
+    (lambda d, t, rows: d["obligations"][0].update(deadline="By the 10th day of each month"),
      "deadline_not_in_evidence"),
 ])
 def test_a_bad_item_is_dropped_with_its_reason(change, reason):
@@ -306,3 +306,86 @@ async def test_generate_fails_whole_on_an_invalid_schema(configured):
     with pytest.raises(ai_client.AIError) as err:
         await r.generate(text, rows, clause_ids, transport=groq_returns({"summary": "free text"}))
     assert err.value.code == r.SCHEMA_INVALID
+
+
+# ── party, deadline and citation checks (whole words, aliases, shared parser) ─
+
+PARTIES = """LEASE
+This Lease is made between Ahmed Raza (the "Landlord") and Bilal Khan (the "Tenant").
+1. Payment
+Ahmed Raza shall issue a receipt within seven days of each payment.
+2. Guests
+The Tenants' guests shall leave by next week.
+3. Keys
+The Tenant shall return the keys on 30 June 2027."""
+
+
+def obligation(text, rows, fragment, party, *, deadline=None):
+    unit = sid(text, rows, fragment)
+    return {"party": party, "action": "Do the stated thing.",
+            "deadline_status": "stated" if deadline else "not_stated", "deadline": deadline,
+            "condition": None, "sentence_ids": [unit["sentence_id"]], "clause_id": unit["clause_id"]}
+
+
+def judge(*obligations, text=PARTIES, graph=True):
+    from app.services.analyzer import doc_graph
+    _, rows, clause_ids = doc(text)
+    clauses, sentences = seg.segment(text, [])
+    graph_rows = doc_graph.build(text, clauses, sentences)[0] if graph else None
+    data = {"schema_version": r.SCHEMA_VERSION, "prompt_version": r.PROMPT_VERSION,
+            "risks": [], "obligations": list(obligations), "summary_points": []}
+    return r.validate(data, text, rows, clause_ids, graph_rows)
+
+
+def rows_of(text=PARTIES):
+    return doc(text)[1]
+
+
+def test_a_party_is_a_whole_word_never_part_of_another():
+    rows = rows_of()
+    out = judge(obligation(PARTIES, rows, "guests shall leave", "Tenant"))
+    assert out["dropped"]["by_reason"] == {"party_not_in_evidence": 1}      # only "Tenants'"
+    out = judge(obligation(PARTIES, rows, "return the keys", "the Tenant"))
+    assert out["dropped"]["count"] == 0
+
+
+def test_a_designated_alias_names_the_same_party():
+    rows = rows_of()
+    via_alias = obligation(PARTIES, rows, "issue a receipt", "Landlord")      # text says Ahmed Raza
+    assert judge(via_alias)["dropped"]["count"] == 0
+    assert judge(via_alias, graph=False)["dropped"]["by_reason"] == {"party_not_in_evidence": 1}
+    stranger = obligation(PARTIES, rows, "issue a receipt", "Tenant")         # the other party
+    assert judge(stranger)["dropped"]["by_reason"] == {"party_not_in_evidence": 1}
+
+
+@pytest.mark.parametrize("fragment, party, deadline, kept", [
+    ("issue a receipt", "Ahmed Raza", "within seven days of each payment", True),
+    ("issue a receipt", "Ahmed Raza", "Within  Seven Days.", True),             # normalised
+    ("issue a receipt", "Ahmed Raza", "within 7 days", False),                  # not as written
+    ("issue a receipt", "Ahmed Raza", "within seven days of each invoice", False),
+    ("guests shall leave", "Tenants", "by next week", True),
+    ("guests shall leave", "Tenants", "by next month", False),
+    ("return the keys", "Tenant", "on 30 June 2027", True),
+    ("return the keys", "Tenant", "on 30 June 2028", False),
+    ("return the keys", "Tenant", "June 20", False),                           # not a whole phrase
+])
+def test_a_stated_deadline_must_be_written_in_its_sentences(fragment, party, deadline, kept):
+    rows = rows_of()
+    out = judge(obligation(PARTIES, rows, fragment, party, deadline=deadline))
+    assert (out["dropped"]["count"] == 0) is kept, out["dropped"]
+
+
+@pytest.mark.parametrize("explanation", [
+    "Compare s. 27 of the Contract Act, 1872.",                  # the shared statute parser
+    "Under Section 489-F PPC this would differ.",
+    "As held in 2019 SCMR 445, such terms fail.",                # the shared case parser
+    "compare section 302 of the pakistan penal code",            # only the shared parser
+    "relief lies under article 25 of the constitution",          # only the shared parser
+    "see order 7 rule 11 cpc",                                   # only the shared parser
+    "see section 17 of the registration act",                    # the lower-case guard
+])
+def test_citations_found_by_the_shared_parsers_drop_the_item(explanation):
+    text, rows, clause_ids = doc()
+    data = ok_response(text, rows)
+    data["risks"][2]["explanation"] = explanation
+    assert r.validate(data, text, rows, clause_ids)["dropped"]["by_reason"] == {"legal_citation": 1}

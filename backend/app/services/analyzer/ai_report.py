@@ -26,9 +26,18 @@ PER ITEM (the item is dropped, the reason counted; the rest survive)
                         names drafting attention items, never legal outcomes
   verbatim_copy         >= 12 consecutive words copied from the document
                         (quotation marks alone are fine: "Tenant" is a term)
-  party_not_in_evidence an obligation's party not named in its sentences
-  deadline_not_in_evidence  a stated deadline whose numbers are not in its
-                        sentences; no stated deadline -> "not_stated"
+  party_not_in_evidence an obligation's party not named in its sentences --
+                        as a whole word or phrase ("Tenant" never matches
+                        inside "Tenants"), or through an alias the definitions
+                        graph records: Ahmed Raza (the "Landlord")
+  deadline_not_in_evidence  a stated deadline whose normalised phrase is not
+                        word for word in its sentences ("seven days", "next
+                        week", a date); no stated deadline -> "not_stated"
+
+CITATIONS are found by the shared parsers -- citation_verification's statute
+parser (with a fixed, empty corpus index: this is detection, not
+verification) and the citator's case-reporter parser -- with the fixed
+patterns below only as a supplementary guard.
 
 SEVERITY is low | medium | high, each with a required reason, by the rubric
 in the prompt. There is no "critical". Duplicates (same kind, same sentences,
@@ -210,7 +219,9 @@ _CITATION = re.compile(
     r"|\b(?:Constitution|Code of Civil Procedure|Penal Code)\b"
     r"|\b(?:PPC|CPC|CrPC|Cr\.P\.C|QSO|PLD|SCMR|CLC|YLR|MLD|PLJ|KLR|PCrLJ|CLD|PTD)\b"
     r"|\b(?:sections?|ss?\.|articles?|art\.)\s*\d+[A-Z-]*\s*(?:\([^)]*\)\s*)*(?:of|under)\s+(?!this\b)(?:the\s+)?[A-Z]"
-    r"|\b\w+\s+v(?:s)?\.?\s+[A-Z]\w+",
+    r"|\b\w+\s+v(?:s)?\.?\s+[A-Z]\w+"
+    r"|(?i:\b(?:sections?|s\.?|articles?|art\.)\s*\d+[a-z-]*(?:\([^)]*\))*\s+(?:of|under)\s+"
+    r"(?:the\s+)?(?:[a-z]+\s+){0,6}(?:act|ordinance|code|rules)\b)",
     re.UNICODE)
 _CONCLUSION = re.compile(r"\b(?:void|voidable|illegal|unlawful|unenforceable|invalid|"
                          r"null and void|against the law|violat\w*|breach(?:es)? of (?:the )?law|"
@@ -223,12 +234,75 @@ def _shingles(text: str, n: int) -> set[tuple[str, ...]]:
     return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
 
 
-def _numbers(text: str) -> set[str]:
-    return set(re.findall(r"\d+", text or ""))
+def _phrase(text: str) -> str:
+    """Lower case, straight quotes, single spaces, no edge punctuation."""
+    t = (text or "").replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    return re.sub(r"\s+", " ", t).strip(" .,;:!?\"'").lower()
+
+
+def _says(evidence: str, phrase: str) -> bool:
+    """`phrase` occurs in `evidence` as whole words (a possessive is allowed)."""
+    p = _phrase(phrase)
+    if not p:
+        return False
+    body = r"\s+".join(re.escape(w) for w in p.split(" "))
+    return re.search(r"(?<![a-z0-9])" + body + r"(?:'s)?(?![a-z0-9])", _phrase(evidence)) is not None
+
+
+def _without_article(name: str) -> str:
+    return re.sub(r"^(?:the|a|an)\s+", "", _phrase(name))
+
+
+_EMPTY_INDEX = None
+
+
+def _cites_law(text: str) -> bool:
+    """The shared parsers first; the fixed patterns only as a backstop."""
+    global _EMPTY_INDEX
+    from app.ai.citation_verification import parse_statute_citations
+    from app.ai.corpus_index import CorpusIndex
+    from app.services.citator_service import extract_citations
+
+    if _EMPTY_INDEX is None:
+        _EMPTY_INDEX = CorpusIndex({})
+    return bool(parse_statute_citations(text, _EMPTY_INDEX) or extract_citations(text)
+                or _CITATION.search(text))
+
+
+_NAME_BEFORE = re.compile(r"((?:(?:Mr|Mrs|Ms|Dr|M/s)\.?\s+)?(?:[A-Z][\w&.'-]*\s+){0,5}[A-Z][\w&.'-]*)"
+                          r"[\s,]*\($")
+
+
+def aliases(text: str, graph_rows: list[dict] | None) -> list[set[str]]:
+    """Groups of names for one party, from the graph's designations: the
+    designated term and the name written just before its parenthetical --
+    Ahmed Raza (the "Landlord") -> {"ahmed raza", "landlord"}."""
+    groups = []
+    for row in graph_rows or []:
+        if row.get("type") != "definition" or row.get("kind") != "designation":
+            continue
+        opening = text.rfind("(", max(0, row["start"] - 200), row["start"])
+        if opening < 0:
+            continue
+        m = _NAME_BEFORE.search(text, max(0, opening - 120), opening + 1)
+        group = {_without_article(row["term"])}
+        if m:
+            group.add(_without_article(m.group(1)))
+        groups.append(group)
+    return groups
+
+
+def _party_named(party: str, evidence: str, groups: list[set[str]]) -> bool:
+    name = _without_article(party)
+    names = {name}
+    for group in groups:
+        if name in group:
+            names |= group
+    return any(_says(evidence, n) for n in names if n)
 
 
 def _drop_reason(kind: str, item: dict, units: dict, clause_ids: set, text: str,
-                 doc_shingles: set) -> str | None:
+                 doc_shingles: set, groups: list[set[str]]) -> str | None:
     ids = item["sentence_ids"]
     if any(i not in units for i in ids):
         return "unknown_sentence_id"
@@ -240,7 +314,7 @@ def _drop_reason(kind: str, item: dict, units: dict, clause_ids: set, text: str,
     joined = " ".join(fields)
     if _URL.search(joined):
         return "url"
-    if _CITATION.search(joined):
+    if _cites_law(joined):
         return "legal_citation"
     if _CONCLUSION.search(joined):
         return "legal_conclusion"
@@ -248,9 +322,9 @@ def _drop_reason(kind: str, item: dict, units: dict, clause_ids: set, text: str,
         return "verbatim_copy"
     evidence = " ".join(text[units[i]["start"]:units[i]["end"]] for i in ids)
     if kind == "obligations":
-        if item["party"].strip().lower() not in evidence.lower():
+        if not _party_named(item["party"], evidence, groups):
             return "party_not_in_evidence"
-        if item["deadline_status"] == "stated" and not _numbers(item["deadline"]) <= _numbers(evidence):
+        if item["deadline_status"] == "stated" and not _says(evidence, item["deadline"]):
             return "deadline_not_in_evidence"
     return None
 
@@ -274,11 +348,14 @@ def evidence(text: str, units: dict, ids: list[str]) -> list[dict]:
     return out
 
 
-def validate(data, text: str, sentences: list[dict], clause_ids: set[str]) -> dict:
+def validate(data, text: str, sentences: list[dict], clause_ids: set[str],
+             graph_rows: list[dict] | None = None) -> dict:
     """Whole-response schema (raises SchemaInvalid), then per-item checks
-    (drops, counted), dedupe by fingerprint, and server-cut evidence."""
+    (drops, counted), dedupe by fingerprint, and server-cut evidence.
+    `graph_rows`: the published definitions graph, for party aliases."""
     _check_schema(data)
     units = {s["sentence_id"]: s for s in sentences}
+    groups = aliases(text, graph_rows)
     doc_shingles = _shingles(text, VERBATIM_WORDS)
     out = {"schema_version": SCHEMA_VERSION, "prompt_version": PROMPT_VERSION,
            "label": LABEL, "notice": LAYER_NOTICE,
@@ -287,7 +364,7 @@ def validate(data, text: str, sentences: list[dict], clause_ids: set[str]) -> di
     for kind in FIELDS:
         kept: dict[str, dict] = {}
         for item in data[kind]:
-            reason = _drop_reason(kind, item, units, clause_ids, text, doc_shingles)
+            reason = _drop_reason(kind, item, units, clause_ids, text, doc_shingles, groups)
             if reason:
                 out["dropped"]["count"] += 1
                 out["dropped"]["by_reason"][reason] = out["dropped"]["by_reason"].get(reason, 0) + 1
@@ -308,11 +385,11 @@ def validate(data, text: str, sentences: list[dict], clause_ids: set[str]) -> di
 
 
 async def generate(text: str, sentences: list[dict], clause_ids: set[str], *,
-                   transport=None) -> dict:
+                   graph_rows: list[dict] | None = None, transport=None) -> dict:
     """One pinned call (ai_client), then validate. Raises AIError on any failure."""
     result = await ai_client.complete(build_messages(text, sentences), max_tokens=MAX_TOKENS,
                                       transport=transport)
-    report = validate(result.content, text, sentences, clause_ids)
+    report = validate(result.content, text, sentences, clause_ids, graph_rows)
     report["provenance"] = {**result.contract, "request_id": result.request_id,
                             "usage": result.usage, "latency_ms": result.latency_ms}
     return report
