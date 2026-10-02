@@ -212,7 +212,7 @@ async def test_the_real_tenancy_pack_from_approval_to_withdrawal(lifecycle, tmp_
     assert applied["status"] == "applied"
     assert (applied["content_hash"], applied["authorities_hash"]) == \
            (review["content_hash"], review["authorities_hash"])
-    legal = [f for f in report["findings"] if f["pack_id"] == "tenancy_punjab"]
+    legal = [f for f in report["legal_checks"] if f["pack_id"] == "tenancy_punjab"]
     assert legal and all(f["labels"] == ["Legal playbook applied", "Applicability requires lawyer review"]
                          for f in legal)
     rate = next(f for f in legal if f["check_id"] == "s6_rate_of_rent")

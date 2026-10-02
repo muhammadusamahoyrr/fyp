@@ -234,7 +234,7 @@ const REPORT = {
             { pack_id: "tenancy_punjab", title: "Punjab tenancy checklist", status: "awaiting_approval" }],
     scope_notice: { general_review: "General document review: drafting-completeness checks. None is a legal requirement.",
                     legal_playbook: "Legal playbook applied to the terms you confirmed. Applicability requires lawyer review." },
-    findings: [
+    legal_checks: [
         { pack_id: "general", scope: "general_review", labels: ["General document review"], check_id: "parties_named",
           kind: "general_check", title: "The parties are named", why: "Most agreements say who is bound.",
           check_result: "present", evidence: [{ sentence_id: "s0", text: "Between the Landlord and the Tenant." }] },
@@ -273,7 +273,7 @@ test("a checked document shows its report, worded honestly, and its text", async
 test("an approved legal finding shows its labels and citations", async () => {
     api.__respond("getAnalysisReport", { data: { ...REPORT,
         packs: [{ pack_id: "tenancy_punjab", title: "Punjab tenancy checklist", status: "applied" }],
-        findings: [{ pack_id: "tenancy_punjab", scope: "legal_playbook",
+        legal_checks: [{ pack_id: "tenancy_punjab", scope: "legal_playbook",
             labels: ["Legal playbook applied", "Applicability requires lawyer review"],
             check_id: "registration_term_over_one_year", kind: "reminder", title: "Registration -- term exceeding one year",
             why: "The confirmed term exceeds one year.", check_result: null, evidence: [],
@@ -374,7 +374,7 @@ const AI_OK = { status: "complete", reason: null, error_code: null,
     counts: { summary_points: 1, risks: 1, obligations: 2 }, dropped: { count: 0, by_reason: {} } };
 const EV = (id, text) => ({ sentence_id: id, clause_id: "c1", start: 0, end: text.length, page_spans: [],
     text, integrity: "ok" });
-const WITH_AI = { ...REPORT, legal_checks: REPORT.findings, ai: AI_OK,
+const WITH_AI = { ...REPORT, ai: AI_OK,
     summary_points: [{ kind: "summary_point", fingerprint: "f1", clause_id: "c1",
         point: "An eleven-month tenancy.", evidence: [EV("s2", "The term is eleven (11) months.")] }],
     model_risks: [{ kind: "risk", fingerprint: "f2", clause_id: "c1", category: "missing_detail",

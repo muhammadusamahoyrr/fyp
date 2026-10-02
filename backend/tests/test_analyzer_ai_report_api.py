@@ -33,7 +33,7 @@ async def test_the_four_layers_arrive_separately_with_server_cut_evidence(flow):
     body = await report(client, created)
     text = (await client.get(f"{BASE}/{created['run_id']}/text")).json()["text"]
 
-    assert body["legal_checks"] == body["findings"] and body["legal_checks"]
+    assert "findings" not in body and body["legal_checks"]
     assert all(f["scope"] in ("general_review", "legal_playbook") for f in body["legal_checks"])
     assert [len(body[k]) for k in ("model_risks", "obligations", "summary_points")] == [1, 1, 1]
     assert "authority" in body

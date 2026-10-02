@@ -317,7 +317,7 @@ function ReportView({ t, runId }) {
     }, [runId]);
     if (issue) return <div role="alert">{issue}</div>;
     if (!report) return <div style={{ color: t.textMuted }}>Loading the report…</div>;
-    const shown = (report.legal_checks || report.findings).filter(f => f.check_result !== "not_applicable");
+    const shown = report.legal_checks.filter(f => f.check_result !== "not_applicable");
     const groups = ["general_review", "legal_playbook"]
         .map(scope => [scope, shown.filter(f => f.scope === scope)])
         .filter(([, items]) => items.length);

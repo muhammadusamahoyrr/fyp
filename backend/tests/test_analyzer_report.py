@@ -59,10 +59,10 @@ async def test_a_finished_run_reports_general_findings_with_exact_evidence(ready
     assert {p["pack_id"]: p["status"] for p in report["packs"]} == {
         "general": "applied", "tenancy_punjab": "awaiting_approval",
         "nda": "not_applicable", "employment": "not_applicable"}
-    assert {f["pack_id"] for f in report["findings"]} == {"general"}
+    assert {f["pack_id"] for f in report["legal_checks"]} == {"general"}
     assert "None is a legal requirement" in report["scope_notice"]["general_review"]
 
-    by_id = {f["check_id"]: f for f in report["findings"]}
+    by_id = {f["check_id"]: f for f in report["legal_checks"]}
     assert by_id["parties_named"]["check_result"] == "present"
     assert by_id["parties_named"]["labels"] == ["General document review"]
     assert any("Landlord and the Tenant" in e["text"] for e in by_id["parties_named"]["evidence"])
@@ -73,7 +73,7 @@ async def test_a_finished_run_reports_general_findings_with_exact_evidence(ready
     assert {k for k, f in by_id.items() if f["check_result"] == "not_located"} == {
         "date_stated", "termination", "disputes", "governing_law"}
     assert all(f["evidence"] == [] for f in by_id.values() if f["check_result"] == "not_located")
-    assert not any("missing" in str(f).lower() for f in report["findings"])
+    assert not any("missing" in str(f).lower() for f in report["legal_checks"])
     run = await get_analysis_runs_col().find_one({"_id": rid})
     assert run["status"] == "done" and run["is_open"] is False
     assert run["report"]["counts"] == {"present": 4, "not_located": 4}
@@ -90,7 +90,7 @@ async def test_an_applicable_unapproved_legal_pack_is_named_not_run(ready, tmp_p
     report = (await client.get(f"/documents/analyses/runs/{created['run_id']}/report")).json()
     status = {p["pack_id"]: p["status"] for p in report["packs"]}
     assert status == {"general": "applied", "test_legal": "awaiting_approval"}
-    assert not any(f["scope"] == "legal_playbook" for f in report["findings"])
+    assert not any(f["scope"] == "legal_playbook" for f in report["legal_checks"])
 
 
 async def test_a_broken_pack_fails_the_run_rather_than_half_running(ready, tmp_path, monkeypatch):

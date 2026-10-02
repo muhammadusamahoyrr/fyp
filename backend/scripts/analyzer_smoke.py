@@ -186,8 +186,8 @@ def main() -> None:
         check("general review applied", status.get("general") == "applied", str(status))
         check("unapproved tenancy pack reported, not run",
               status.get("tenancy_punjab") == "awaiting_approval"
-              and not any(f["scope"] == "legal_playbook" for f in report["findings"]), str(status))
-        evidence = [e["text"] for f in report["findings"] for e in f["evidence"]]
+              and not any(f["scope"] == "legal_playbook" for f in report["legal_checks"]), str(status))
+        evidence = [e["text"] for f in report["legal_checks"] for e in f["evidence"]]
         check("evidence is exact text from the document",
               "Signed in the presence of two witnesses." in evidence)
 

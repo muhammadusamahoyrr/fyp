@@ -414,14 +414,13 @@ async def get_report(*, owner_id: str, run_id: str) -> dict:
     from app.services.analyzer import authorities
 
     ai, by_kind = await _ai_layer(run)
-    # Four layers, kept apart: the playbook checks (legal_checks; `findings`
-    # is the same list under its older name), the model's drafting items
+    # Four layers, kept apart: the playbook checks (legal_checks), the model's drafting items
     # (model_risks / obligations / summary_points, with `ai` saying how they
     # were produced -- or that they were not), and the authority/source
     # layer as of now. Each finding keeps the authority snapshot it was
     # made against.
     return {"id": run_id, "packs": report.get("packs", []), "counts": report.get("counts", {}),
-            "scope_notice": SCOPE_NOTICE, "legal_checks": findings, "findings": findings,
+            "scope_notice": SCOPE_NOTICE, "legal_checks": findings,
             "ai": ai, "model_risks": by_kind["risk"], "obligations": by_kind["obligation"],
             "summary_points": by_kind["summary_point"],
             "authority": authorities.current_metadata()}
