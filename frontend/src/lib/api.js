@@ -3,6 +3,11 @@
 // browser at a different API process.
 const BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
+export const AUTH_BOOTSTRAP_UNAVAILABLE = 'backend_unavailable';
+const REFRESHED = 'refreshed';
+const REFRESH_INVALID = 'invalid';
+const REFRESH_UNAVAILABLE = 'unavailable';
+
 // ─── Token store (in-memory, audit #5) ────────────────────────────────────────
 // The access token lives ONLY in memory — never localStorage — so an XSS payload
 // can't read it out of persistent storage. The durable credential is the HttpOnly
@@ -72,10 +77,12 @@ export async function bootstrapAuth() {
   if (accessToken) return true;                       // already have one this tab
   const sibling = await _requestSiblingToken();       // election: another tab holds one?
   if (sibling) { accessToken = sibling; return true; }
-  if (await _tryRefresh()) return true;               // single-flight /auth/refresh
+  const refreshStatus = await _tryRefresh();          // single-flight /auth/refresh
+  if (refreshStatus === REFRESHED) return true;
   // Simultaneous cold-load rotation race: give a sibling's broadcast a beat, retry once.
   const late = await _requestSiblingToken(250);
   if (late) { accessToken = late; return true; }
+  if (refreshStatus === REFRESH_UNAVAILABLE) return AUTH_BOOTSTRAP_UNAVAILABLE;
   return !!accessToken;
 }
 
@@ -168,14 +175,20 @@ async function apiFetch(path, options = {}) {
 
   // Auto-refresh on 401
   if (res.status === 401 && token) {
-    const refreshed = await _tryRefresh();
-    if (refreshed) {
+    const refreshStatus = await _tryRefresh();
+    if (refreshStatus === REFRESHED) {
       headers['Authorization'] = `Bearer ${getToken()}`;
       try {
         res = await fetch(`${BASE}${path}`, { ...fetchOptions, headers, credentials: 'include' });
       } catch {
         return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
       }
+    } else if (refreshStatus === REFRESH_UNAVAILABLE) {
+      return {
+        data: null,
+        error: formatResponseError({ detail: 'The server is restarting or unavailable. Please retry in a moment.' }),
+        status: 0,
+      };
     } else {
       clearToken();
       return { data: null, error: formatResponseError({ detail: 'Session expired. Please sign in again.' }), status: 401 };
@@ -244,7 +257,7 @@ async function _tryRefresh() {
       if (res.ok) {
         const body = await res.json();
         setToken(body.access_token);   // sets in-memory + broadcasts to siblings
-        return true;
+        return REFRESHED;
       }
       // Another tab may have won the server's atomic refresh claim. Accept only
       // a different token; the stale token would only trigger another 401.
@@ -252,12 +265,16 @@ async function _tryRefresh() {
         const sibling = await _requestSiblingToken(250);
         if (sibling && sibling !== tokenBeingReplaced) {
           accessToken = sibling;
-          return true;
+          return REFRESHED;
         }
       }
-      return false;
+      // Only an authentication response proves that the refresh credential is
+      // invalid. A proxy/backend 5xx is an outage and must not log the user out.
+      return (res.status === 401 || res.status === 403)
+        ? REFRESH_INVALID
+        : REFRESH_UNAVAILABLE;
     } catch {
-      return false;
+      return REFRESH_UNAVAILABLE;
     } finally {
       _refreshPromise = null;
     }
@@ -384,14 +401,20 @@ async function apiFetchMultipart(path, formData, extraHeaders = {}) {
   }
 
   if (res.status === 401 && token) {
-    const refreshed = await _tryRefresh();
-    if (refreshed) {
+    const refreshStatus = await _tryRefresh();
+    if (refreshStatus === REFRESHED) {
       headers['Authorization'] = `Bearer ${getToken()}`;
       try {
         res = await fetch(`${BASE}${path}`, { method: 'POST', headers, credentials: 'include', body: formData });
       } catch {
         return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
       }
+    } else if (refreshStatus === REFRESH_UNAVAILABLE) {
+      return {
+        data: null,
+        error: formatResponseError({ detail: 'The server is restarting or unavailable. Please retry in a moment.' }),
+        status: 0,
+      };
     } else {
       clearToken();
       return { data: null, error: formatResponseError({ detail: 'Session expired. Please sign in again.' }), status: 401 };
