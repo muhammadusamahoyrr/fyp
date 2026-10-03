@@ -51,8 +51,8 @@ test("workspace rows never wrap — a wrapping row cannot scroll", async () => {
         assert.ok(mobile ? L.root.overflowY === "auto" : L.row.minHeight === 0,
             mobile ? "a phone must scroll the whole page" : "desktop columns must be height-bounded");
     }
-    for (const file of ["DocsDrafts.jsx", "DocsAnalyzer.jsx"]) {
-        const src = readFileSync(new URL(`../src/components/client/documents/${file}`, import.meta.url), "utf8");
+    for (const file of ["client/documents/DocsDrafts.jsx", "analyzer/AnalyzerWorkspace.jsx"]) {
+        const src = readFileSync(new URL(`../src/components/${file}`, import.meta.url), "utf8");
         assert.doesNotMatch(src, /flex: 1, minHeight: 0, display: "flex", flexWrap: "wrap"/, `${file} has a wrapping workspace row`);
     }
 });

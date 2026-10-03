@@ -56,7 +56,6 @@ const SUB_ITEMS = {
     documents: [
         { view: "drafts", label: "AI drafting", ur: "اے آئی ڈرافٹنگ" },
         { view: "new", label: "Templates", ur: "ٹیمپلیٹس" },
-        { view: "analyzer", label: "Document analyzer", ur: "دستاویز تجزیہ" },
         { view: "vault", label: "Vault", ur: "والٹ" },
     ],
 };
@@ -291,7 +290,7 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
     };
 
     // Documents draws its own header and manages its own scrolling: its
-    // screens (drafting, analyzer) are full-height workspaces.
+    // screens (drafting) are full-height workspaces.
     const noTopbar = tab === "agreements" || tab === "chatbot" || tab === "tracking" || tab === "documents";
     const noPadding = tab === "agreements" || tab === "chatbot" || tab === "documents";
 

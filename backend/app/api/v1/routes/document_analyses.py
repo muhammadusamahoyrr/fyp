@@ -1,4 +1,11 @@
-"""Document Analyzer HTTP surface (DOC_ANALYZER_PLAN.md §8). Client-only.
+"""Document Analyzer HTTP surface (DOC_ANALYZER_PLAN.md §8). REGISTERED-LAWYER-ONLY.
+
+The analyzer is a lawyer's tool (decision of 2026-10-03): its reports carry
+legal-playbook results that need a lawyer's judgement and AI drafting items
+that are not approved for anyone else to rely on. A client account is
+refused by every endpoint here (403), so raw AI output never reaches a
+client response. A client's document reaches a lawyer only by an explicit
+review request (not part of this module).
 
 Gates, in order. Gates 1-5 read only HEADERS: a request refused by any of
 them is answered before `request.form()` is called, so its multipart body is
@@ -23,7 +30,7 @@ from starlette.datastructures import UploadFile
 
 from app.core.config import settings
 from app.core.constants import UserRole
-from app.dependencies import require_admin, require_client, require_lawyer, role_required
+from app.dependencies import require_admin, require_lawyer, role_required
 from app.services.analyzer import (
     approvals,
     confirmation,
@@ -35,6 +42,17 @@ from app.services.analyzer import (
 from app.services.analyzer.errors import AnalyzerError
 
 router = APIRouter(prefix="/documents/analyses", tags=["document-analyses"])
+
+#: ACCESS POLICY "registered-lawyer-only" (2026-10-03). Any registered account
+#: whose role is lawyer may use the analyzer; a client or an admin may not.
+#: This is NOT a KYC or verification check -- no KYC process exists yet, and
+#: nothing here may say a lawyer is "KYC approved". When a real verification
+#: module exists the rule becomes: role == lawyer AND verification_status ==
+#: approved. Separate, stricter rules stay where they are: approving a legal
+#: playbook needs the exact verified legal qualification (approvals.py), and a
+#: client's document reaches a lawyer only through an explicit review request.
+ACCESS_POLICY = "registered-lawyer-only"
+require_registered_lawyer = require_lawyer
 
 #: Multipart framing and the few small form fields ride on top of the file.
 FORM_OVERHEAD = 64 * 1024
@@ -85,7 +103,7 @@ async def create_document_analysis(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     attested: str | None = Header(default=None, alias="X-Synthetic-Data-Attested"),
     attestation_version: str | None = Header(default=None, alias="X-Synthetic-Attestation-Version"),
-    current_user: dict = Depends(require_client),
+    current_user: dict = Depends(require_registered_lawyer),
 ):
     _require_available()
     try:
@@ -123,7 +141,7 @@ class OcrTextBody(BaseModel):
 
 
 @router.get("/runs/{run_id}")
-async def get_analysis_run(run_id: str, current_user: dict = Depends(require_client)):
+async def get_analysis_run(run_id: str, current_user: dict = Depends(require_registered_lawyer)):
     """Poll a run. While it waits for OCR confirmation, includes the text to check."""
     _require_available()
     return await _run(confirmation.get_run(owner_id=str(current_user["_id"]), run_id=run_id))
@@ -131,7 +149,7 @@ async def get_analysis_run(run_id: str, current_user: dict = Depends(require_cli
 
 @router.post("/runs/{run_id}/ocr-text")
 async def confirm_ocr_text(run_id: str, body: OcrTextBody = Body(...),
-                           current_user: dict = Depends(require_client)):
+                           current_user: dict = Depends(require_registered_lawyer)):
     _require_available()
     return await _run(confirmation.confirm_ocr_text(
         owner_id=str(current_user["_id"]), run_id=run_id,
@@ -152,7 +170,7 @@ class TermsBody(BaseModel):
 
 @router.post("/runs/{run_id}/document")
 async def confirm_document(run_id: str, body: DocumentBody = Body(...),
-                           current_user: dict = Depends(require_client)):
+                           current_user: dict = Depends(require_registered_lawyer)):
     _require_available()
     return await _run(confirmation.confirm_document(
         owner_id=str(current_user["_id"]), run_id=run_id,
@@ -162,7 +180,7 @@ async def confirm_document(run_id: str, body: DocumentBody = Body(...),
 
 @router.post("/runs/{run_id}/terms")
 async def confirm_terms(run_id: str, body: TermsBody = Body(...),
-                        current_user: dict = Depends(require_client)):
+                        current_user: dict = Depends(require_registered_lawyer)):
     _require_available()
     return await _run(confirmation.confirm_terms(
         owner_id=str(current_user["_id"]), run_id=run_id,
@@ -170,7 +188,7 @@ async def confirm_terms(run_id: str, body: TermsBody = Body(...),
 
 
 @router.post("/runs/{run_id}/cancel")
-async def cancel_analysis_run(run_id: str, current_user: dict = Depends(require_client)):
+async def cancel_analysis_run(run_id: str, current_user: dict = Depends(require_registered_lawyer)):
     _require_available()
     return await _run(confirmation.cancel_run(owner_id=str(current_user["_id"]), run_id=run_id))
 
@@ -178,7 +196,7 @@ async def cancel_analysis_run(run_id: str, current_user: dict = Depends(require_
 @router.get("")
 @router.get("/", include_in_schema=False)
 async def list_document_analyses(limit: int = 20, before: str | None = None,
-                                 current_user: dict = Depends(require_client)):
+                                 current_user: dict = Depends(require_registered_lawyer)):
     """History: the caller's live analyses, newest first."""
     _require_available()
     return await _run(lifecycle.list_analyses(owner_id=str(current_user["_id"]),
@@ -186,21 +204,21 @@ async def list_document_analyses(limit: int = 20, before: str | None = None,
 
 
 @router.get("/runs/{run_id}/text")
-async def get_analysis_text(run_id: str, current_user: dict = Depends(require_client)):
+async def get_analysis_text(run_id: str, current_user: dict = Depends(require_registered_lawyer)):
     """Text, clauses and sentences with offsets, for the text viewer."""
     _require_available()
     return await _run(confirmation.get_text(owner_id=str(current_user["_id"]), run_id=run_id))
 
 
 @router.get("/runs/{run_id}/graph")
-async def get_analysis_graph(run_id: str, current_user: dict = Depends(require_client)):
+async def get_analysis_graph(run_id: str, current_user: dict = Depends(require_registered_lawyer)):
     """Definitions and cross-references, anchored by offsets and stable ids."""
     _require_available()
     return await _run(confirmation.get_graph(owner_id=str(current_user["_id"]), run_id=run_id))
 
 
 @router.get("/runs/{run_id}/report")
-async def get_analysis_report(run_id: str, current_user: dict = Depends(require_client)):
+async def get_analysis_report(run_id: str, current_user: dict = Depends(require_registered_lawyer)):
     """Findings with scope labels and server-cut evidence. 409 until done."""
     _require_available()
     return await _run(confirmation.get_report(owner_id=str(current_user["_id"]), run_id=run_id))
@@ -298,7 +316,7 @@ async def approval_audit(limit: int = 100, current_user: dict = Depends(require_
 
 
 @router.get("/attestation")
-async def attestation_text(current_user: dict = Depends(require_client)):
+async def attestation_text(current_user: dict = Depends(require_registered_lawyer)):
     """The wording the UI must show, and the version to send back."""
     _require_available()
     version = max(upload_rules.ATTESTATION_VERSIONS)
@@ -306,14 +324,14 @@ async def attestation_text(current_user: dict = Depends(require_client)):
 
 
 @router.get("/{source_id}")
-async def get_document_analysis(source_id: str, current_user: dict = Depends(require_client)):
+async def get_document_analysis(source_id: str, current_user: dict = Depends(require_registered_lawyer)):
     _require_available()
     return await _run(lifecycle.get_analysis(owner_id=str(current_user["_id"]),
                                              source_id=source_id))
 
 
 @router.delete("/{source_id}", status_code=204)
-async def delete_document_analysis(source_id: str, current_user: dict = Depends(require_client)):
+async def delete_document_analysis(source_id: str, current_user: dict = Depends(require_registered_lawyer)):
     """Tombstone + purge job in one transaction; every NEW read 404s from the commit on.
 
     Not found, not the owner and already deleted all answer 404, so the route

@@ -10,7 +10,9 @@
  * to the home screen, which would break resuming a draft after a refresh.
  */
 export const DOCUMENTS_VIEW_EVENT = "attorney:documents-view";
-export const DOCUMENTS_VIEWS = ["new", "mine", "drafts", "analyzer", "vault"];
+// No "analyzer": the Document Analyzer is a lawyer's tool (2026-10-03), on the
+// lawyer dashboard only. A request for it is ignored here.
+export const DOCUMENTS_VIEWS = ["new", "mine", "drafts", "vault"];
 
 let pending = null;
 

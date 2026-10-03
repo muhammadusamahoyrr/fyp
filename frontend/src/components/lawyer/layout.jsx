@@ -113,6 +113,8 @@ const NAV_SECTIONS = [
         label: "",
         items: [
             { id: "documents", label: "Documents", icon: "documents" },
+            // The Document Analyzer: a lawyer's tool only (2026-10-03).
+            { id: "doc-analyzer", label: "Document Analyzer", icon: "documents" },
             { id: "agreements", label: "Agreements", icon: "documents" },
             // OUT OF SCOPE, 2026-09-23. "Overseas Disputes" is the lawyer side
             // of the client's "Property Dispute" module; both are hidden
@@ -452,7 +454,7 @@ function Topbar({ page, collapsed, setCollapsed, toggleTheme, children }) {
     const labels = {
         dashboard: "Dashboard", cases: "Cases", documents: "Documents",
         agreements: "Agreements", causelist: "Cause List", caselaw: "Case Law Research", payments: "Payments", appointments: "Appointments", clients: "Clients", "ai-legal": "AI Assistant",
-        "doc-automation": "Document Automation",
+        "doc-automation": "Document Automation", "doc-analyzer": "Document Analyzer",
         profile: "Lawyer Profile", settings: "Settings",
     };
 

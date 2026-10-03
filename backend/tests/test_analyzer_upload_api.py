@@ -62,9 +62,10 @@ async def test_not_ready_means_503_and_nothing_stored(http):
     await assert_nothing_stored(actor["_id"])
 
 
-async def test_lawyers_cannot_upload(http):
+async def test_clients_cannot_upload(http):
+    """The analyzer is a lawyer's tool (2026-10-03); see test_analyzer_lawyer_only."""
     client, actor = http
-    actor["role"] = "lawyer"
+    actor["role"] = "client"
     assert (await upload(client)).status_code == 403
 
 

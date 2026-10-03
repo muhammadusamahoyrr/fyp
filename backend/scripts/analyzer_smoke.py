@@ -79,12 +79,13 @@ def env() -> dict:
     return e
 
 
-def seed_client(mongo: MongoClient) -> tuple[str, str]:
+def seed_lawyer(mongo: MongoClient) -> tuple[str, str]:
+    """The analyzer is a lawyer's tool (2026-10-03): the smoke signs in as one."""
     from app.core.security import hash_password
     email, password = f"smoke-{uuid.uuid4().hex[:8]}@example.com", secrets.token_urlsafe(16)
     mongo[DB]["users"].insert_one({
-        "_id": uuid.uuid4().hex, "role": "client", "email": email,
-        "password_hash": hash_password(password), "full_name": "Smoke Client",
+        "_id": uuid.uuid4().hex, "role": "lawyer", "email": email,
+        "password_hash": hash_password(password), "full_name": "Smoke Lawyer",
         "phone": None, "province": None, "avatar_url": None, "is_active": True})
     return email, password
 
@@ -131,7 +132,7 @@ def main() -> None:
             raise SystemExit("FAIL  the smoke server did not start")
         check("server started with DOC_ANALYZER on (isolated)", True)
 
-        email, password = seed_client(mongo)
+        email, password = seed_lawyer(mongo)
         login = httpx.post(f"{BASE}/auth/login", json={"email": email, "password": password}, timeout=30)
         check("real login", login.status_code == 200, login.text[:200])
         client = httpx.Client(base_url=BASE, timeout=60,

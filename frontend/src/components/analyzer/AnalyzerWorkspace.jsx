@@ -1,5 +1,11 @@
 'use client';
-/* Document analyzer — a FICTIONAL DEMONSTRATION until the backend exists.
+/* AnalyzerWorkspace — the Document Analyzer, a LAWYER's tool (2026-10-03).
+ *
+ * Mounted only on the lawyer dashboard (components/lawyer/DocAnalyzerPage.jsx);
+ * the client dashboard has no analyzer and its old URL redirects. The
+ * server refuses every analyzer endpoint to a client account.
+ *
+ * Document analyzer — a FICTIONAL DEMONSTRATION until the backend exists.
  *
  * There is no analysis endpoint (see DOC_ANALYZER_PLAN.md). So:
  *   - nothing offers to take the user's own file: upload says it is not
@@ -18,7 +24,7 @@
  * review risks yet. Off (404), unavailable (503) or no answer: this
  * fictional demonstration, unchanged. */
 import React, { useEffect, useRef, useState } from "react";
-import { useT } from "../theme.js";
+import { useT } from "@/components/client/theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useIsMobile } from "@/lib/i18n.jsx";
 import { analyzerAttestation } from "@/lib/api.js";
@@ -26,7 +32,7 @@ import AnalyzerLive from "./AnalyzerLive.jsx";
 import {
     Btn, Chip, Pill, Label, Card, Paper, PreviewBadge, ScreenHeader, Icon,
     SERIF, SEVERITY, onPrimary, splitLayout,
-} from "./ui.jsx";
+} from "@/components/client/documents/ui.jsx";
 
 /* Shown wherever the sample names a legal source. The sample's law is not
  * checked against anything: our library holds none of these statutes yet. */
@@ -761,7 +767,7 @@ function FictionalAnalyzer({ onBack, userName }) {
 
 
 /* Live when the server says so; the fictional demonstration otherwise. */
-export default function DocsAnalyzer(props) {
+export default function AnalyzerWorkspace(props) {
     const [live, setLive] = useState(undefined);      // undefined = still asking
     const [showDemo, setShowDemo] = useState(false);
     useEffect(() => {

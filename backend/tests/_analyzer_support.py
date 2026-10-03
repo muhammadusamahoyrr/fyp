@@ -35,8 +35,8 @@ async def http(mongo, app_indexes, monkeypatch, tmp_path):
     from app.dependencies import get_current_user
     from app.main import app
 
-    owner = f"client-{uuid.uuid4().hex[:10]}"
-    actor = {"_id": owner, "role": "client", "is_active": True}
+    owner = f"lawyer-{uuid.uuid4().hex[:10]}"
+    actor = {"_id": owner, "role": "lawyer", "is_active": True}     # the analyzer is lawyer-only
     monkeypatch.setattr(settings, "doc_analyzer", True)
     monkeypatch.setattr(settings, "upload_root", str(tmp_path))
     monkeypatch.setattr(settings, "analyzer_keks", KEY)

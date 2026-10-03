@@ -19,8 +19,8 @@
  * sent as headers the server checks before it accepts the file.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useT } from "../theme.js";
-import { Btn, Card, Label } from "./ui.jsx";
+import { useT } from "@/components/client/theme.js";
+import { Btn, Card, Label } from "@/components/client/documents/ui.jsx";
 import {
     cancelAnalysisRun, confirmAnalysisDocument, confirmAnalysisOcr, confirmAnalysisTerms,
     createAnalysis, deleteAnalysis, getAnalysisReport, getAnalysisRun, getAnalysisText,

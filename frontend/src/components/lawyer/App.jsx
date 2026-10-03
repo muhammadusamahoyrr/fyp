@@ -17,6 +17,7 @@ import { PaymentsPage } from "./PaymentsPage.jsx";
 import { ClientsPage } from "./ClientsPage.jsx";
 import { AILegalPage } from "./AILegalPage.jsx";
 import { DocAutomationPage } from "./DocAutomationPage.jsx";
+import { DocAnalyzerPage } from "./DocAnalyzerPage.jsx";
 import { ProfilePage } from "./ProfilePage.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { DisputesInboxPage } from "./DisputesInboxPage.jsx";
@@ -26,7 +27,7 @@ import { getMe, getNotifications, markNotificationRead, markAllNotificationsRead
 // LoginPage not yet implemented
 const LoginPage = () => null;
 const DocumentsPage = DocWorkflowApp;
-const pageMap = { dashboard: DashboardPage, cases: CasesPage, documents: DocumentsPage, appointments: AppointmentsPage, agreements: AgreementsPage, causelist: CauselistPage, caselaw: CaseLawPage, payments: PaymentsPage, clients: ClientsPage, "ai-legal": AILegalPage, "doc-automation": DocAutomationPage, "overseas-disputes": DisputesInboxPage, profile: ProfilePage, settings: SettingsPage, onboarding: OnboardingPage };
+const pageMap = { dashboard: DashboardPage, cases: CasesPage, documents: DocumentsPage, appointments: AppointmentsPage, agreements: AgreementsPage, causelist: CauselistPage, caselaw: CaseLawPage, payments: PaymentsPage, clients: ClientsPage, "ai-legal": AILegalPage, "doc-automation": DocAutomationPage, "doc-analyzer": DocAnalyzerPage, "overseas-disputes": DisputesInboxPage, profile: ProfilePage, settings: SettingsPage, onboarding: OnboardingPage };
 
 const _fmtAgo = (iso) => {
     if (!iso) return "";
@@ -199,7 +200,7 @@ export default function App({ initialPage = "dashboard" }) {
                                 <ActiveCaseBanner caseId={activeCase} onClear={() => { setActiveCaseState(null); setOpenCaseId(null); }} />
                             )}
                             {/* FIX: removed key={page} — was destroying all page state on every navigation */}
-                            <main ref={mainRef} data-lenis-prevent className="page-enter lw-main" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: ["ai-legal", "cases", "doc-automation", "documents", "onboarding"].includes(page) ? "hidden" : "auto", scrollBehavior: "smooth", padding: ["ai-legal", "cases", "doc-automation", "documents", "onboarding"].includes(page) ? 0 : 24 }}>
+                            <main ref={mainRef} data-lenis-prevent className="page-enter lw-main" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: ["ai-legal", "cases", "doc-automation", "doc-analyzer", "documents", "onboarding"].includes(page) ? "hidden" : "auto", scrollBehavior: "smooth", padding: ["ai-legal", "cases", "doc-automation", "doc-analyzer", "documents", "onboarding"].includes(page) ? 0 : 24 }}>
                                 {page === "onboarding"
                                     ? <OnboardingPage t={t} role="lawyer" onComplete={() => {
                                         try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch {}

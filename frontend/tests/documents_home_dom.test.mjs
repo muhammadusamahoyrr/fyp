@@ -33,7 +33,7 @@ const { default: DocsVault, accessOf, formatWhen } =
 const { default: DocsDrafts, placeholderCounts } =
     await import("../src/components/client/documents/DocsDrafts.jsx");
 const { default: DocsAnalyzer } =
-    await import("../src/components/client/documents/DocsAnalyzer.jsx");
+    await import("../src/components/analyzer/AnalyzerWorkspace.jsx");
 const { ToastCtx } = await import("../src/components/shared/Toast.jsx");
 const toasts = [];
 
@@ -499,7 +499,7 @@ test("the sample is labelled as fictional once loaded", async () => {
 });
 
 test("the start screen greets the user and explains what exists", async () => {
-    const { greetingFor } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
+    const { greetingFor } = await import("../src/components/analyzer/AnalyzerWorkspace.jsx");
     const p = await mount(DocsAnalyzer, { onBack: () => {}, userName: "Test User" });
     assert.match(p.container.textContent, /Good (Morning|Afternoon|Evening), Test!/);
     assert.match(p.container.textContent, /Document review/);
@@ -533,7 +533,7 @@ const DASHBOARD_PROPS = { sample: "Shop rent agreement", side: "Tenant", depth: 
     onDepth: () => {}, onBack: () => {}, onReanalyze: () => {} };
 
 test("the analysis dashboard has a tab per finding, with counts", async () => {
-    const { AnalysisDashboard } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
+    const { AnalysisDashboard } = await import("../src/components/analyzer/AnalyzerWorkspace.jsx");
     const depth = [];
     const p = await mount(AnalysisDashboard, { ...DASHBOARD_PROPS, onDepth: k => depth.push(k) });
     const tabs = [...p.container.querySelectorAll('[role="tab"]')].map(b => b.textContent.trim());
@@ -548,7 +548,7 @@ test("the analysis dashboard has a tab per finding, with counts", async () => {
 });
 
 test("a finding opens its clause on the Document tab", async () => {
-    const { AnalysisDashboard } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
+    const { AnalysisDashboard } = await import("../src/components/analyzer/AnalyzerWorkspace.jsx");
     const p = await mount(AnalysisDashboard, DASHBOARD_PROPS);
     await click([...p.container.querySelectorAll('[role="tab"]')].find(b => b.textContent.trim().startsWith("Risks")));
     await click(buttons(p.container, "View in document")[0]);
@@ -638,7 +638,7 @@ test("P-1: the reading view carries the banner and no dead actions, on every tab
 });
 
 test("P-1: the dashboard carries the banner and no invented claims, on every tab", async () => {
-    const { AnalysisDashboard } = await import("../src/components/client/documents/DocsAnalyzer.jsx");
+    const { AnalysisDashboard } = await import("../src/components/analyzer/AnalyzerWorkspace.jsx");
     const p = await mount(AnalysisDashboard, DASHBOARD_PROPS);
     await visitTabs(p, "dashboard");
     // Sources are marked as not checked (they show on Summary, Risks and Checks).
@@ -649,7 +649,7 @@ test("P-1: the dashboard carries the banner and no invented claims, on every tab
 
 test("P-1: the sample's legal source lines are all illustrative", async () => {
     const { readFileSync } = await import("node:fs");
-    const src = readFileSync(new URL("../src/components/client/documents/DocsAnalyzer.jsx", import.meta.url), "utf8");
+    const src = readFileSync(new URL("../src/components/analyzer/AnalyzerWorkspace.jsx", import.meta.url), "utf8");
     // Every `cite:` and every `law:` is the illustrative marker (or null).
     const cites = [...src.matchAll(/\b(cite|law):\s*([^,}]+)/g)].map(m => m[2].trim());
     assert.ok(cites.length >= 6, "the sample's sources were not found");

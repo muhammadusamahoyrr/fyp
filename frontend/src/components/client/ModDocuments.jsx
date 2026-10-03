@@ -11,7 +11,6 @@ import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
 import MyDocumentsPanel from "./MyDocumentsPanel.jsx";
 import DocumentsHome from "./DocumentsHome.jsx";
 import DocsDrafts from "./documents/DocsDrafts.jsx";
-import DocsAnalyzer from "./documents/DocsAnalyzer.jsx";
 import DocsVault from "./documents/DocsVault.jsx";
 import { Btn, Pill, Label, Paper, TOKEN_STYLE, VALUE_STYLE, docsTheme } from "./documents/ui.jsx";
 import { useIsMobile } from "@/lib/i18n.jsx";
@@ -550,7 +549,7 @@ const ModDocuments = () => {
     // drafting form so nothing typed there is lost.
     const prefillRef = useRef(null);
     const showView = view => {
-        if (view === "drafts" || view === "analyzer" || view === "vault") {
+        if (view === "drafts" || view === "vault") {
             setView(view);
             return;
         }
@@ -1175,9 +1174,6 @@ const ModDocuments = () => {
         return frame(<DocsDrafts seed={draftsSeed} templates={templates} cases={cases} onBack={backHome}
             onOpenView={v => setView(v)}
             onOpenDocument={restored => { setView("flow"); setViewRev(null); applyRestored(restored); }} />);
-    }
-    if (view === "analyzer") {
-        return frame(<DocsAnalyzer onBack={backHome} onOpenView={v => setView(v)} userName={user?.full_name} />);
     }
     if (view === "vault") {
         return frame(<DocsVault onBack={backHome}
