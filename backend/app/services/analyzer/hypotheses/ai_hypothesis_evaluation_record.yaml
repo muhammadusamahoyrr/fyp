@@ -12,7 +12,7 @@ versions:
   catalogue: drafting-hypotheses.v1
   catalogue_sha256: 8594d27a6a8ca6183d85168fa0003bef54031d108726cd896afd4194a68690b4
   scanner: hypothesis-scanner.1
-  scanner_code_sha256: 7da62da1504b60741a12315f433634af16f27c306720e019c1ed28dd7ff0d2c1
+  scanner_code_sha256: 1b035a26a3ee795b1f100174bbe0c3da01f77c1d0950dbda618259e38c8879c2
   prompt: ai-hypothesis-prompt.1
   schema: ai-hypothesis.1
   prompt_sha256: ee920bc3c64a6a7031bb8356b81a6c25501345d9664ea38f263c1b0d63733374
@@ -42,14 +42,14 @@ gate:
   status: not_passed
 scanner_only:
   tp: 251
-  fp: 29
+  fp: 27
   fn: 10
-  tn: 445
+  tn: 447
   items: 735
-  attention_precision: 0.8964
+  attention_precision: 0.9029
   attention_recall: 0.9617
   unable_rate: 0.0
-  status_agreement: 0.9333
+  status_agreement: 0.9361
   evidence_validity: 1.0
 by_document_type:
   employment:
@@ -74,14 +74,14 @@ by_document_type:
     status_agreement: 0.92
   tenancy:
     tp: 87
-    fp: 12
+    fp: 10
     fn: 2
-    tn: 154
+    tn: 156
     items: 255
-    attention_precision: 0.8788
+    attention_precision: 0.8969
     attention_recall: 0.9775
     unable_rate: 0.0
-    status_agreement: 0.9333
+    status_agreement: 0.9412
 by_question:
   blank_placeholders:
     tp: 7
@@ -125,14 +125,14 @@ by_question:
     status_agreement: 0.7333
   conflicting_values:
     tp: 5
-    fp: 2
+    fp: 1
     fn: 0
-    tn: 38
+    tn: 39
     items: 45
-    attention_precision: 0.7143
+    attention_precision: 0.8333
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.9556
+    status_agreement: 0.9778
   dispute_resolution:
     tp: 39
     fp: 0
@@ -245,14 +245,14 @@ by_question:
     status_agreement: 0.9333
   rent_amount:
     tp: 4
-    fp: 2
+    fp: 1
     fn: 0
-    tn: 9
+    tn: 10
     items: 15
-    attention_precision: 0.6667
+    attention_precision: 0.8
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.8
+    status_agreement: 0.8667
   rent_due:
     tp: 5
     fp: 1
@@ -409,13 +409,6 @@ weak_questions:
   recall: 1.0
   flagged: 7
   gold_attention: 5
-- question_id: conflicting_values
-  fails:
-  - precision
-  precision: 0.7143
-  recall: 1.0
-  flagged: 7
-  gold_attention: 5
 - question_id: mutual_or_one_way
   fails:
   - precision
@@ -445,13 +438,6 @@ weak_questions:
   recall: 0.6667
   flagged: 4
   gold_attention: 3
-- question_id: rent_amount
-  fails:
-  - precision
-  precision: 0.6667
-  recall: 1.0
-  flagged: 6
-  gold_attention: 4
 - question_id: start_date
   fails:
   - precision

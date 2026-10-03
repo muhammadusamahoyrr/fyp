@@ -54,6 +54,16 @@ def test_years_become_months_and_yearly_rent_is_seen():
     assert values(c, "tenancy_year_to_year") == []
 
 
+def test_rent_paid_in_advance_is_rent_not_a_deposit():
+    text = ("1. The monthly rent is Rs. 40,000, payable in advance by the 5th of each month. "
+            "2. The Tenant has paid an advance of Rs. 120,000, adjustable against the last three months.")
+    _, sentences = seg.segment(text, [])
+    rows = [{"sentence_id": s.sentence_id, "start": s.start, "end": s.end} for s in sentences]
+    c = terms.candidates(text, rows)
+    assert values(c, "rent_amount") == [40000]
+    assert values(c, "security_deposit") == [120000]          # an advance sum is still a deposit
+
+
 # ── validation of what is confirmed ──────────────────────────────────────────
 
 KNOWN = {"s1", "s2"}

@@ -75,6 +75,8 @@ _NOTICE = re.compile(rf"\b(?P<n>{_NUM})(?:\s*\((?P<paren>\d{{1,4}})\))?\s*days?'
 _NOTICE_ANY = re.compile(rf"\b(?P<n>{_NUM})(?:\s*\((?P<paren>\d{{1,4}})\))?\s*(?P<unit>days?|weeks?|months?)'?s?'?\s*(?:prior\s+)?(?:written\s+)?notice\b", re.I)
 _MONTHLY = re.compile(r"\b(?:per\s+month|monthly|per\s+mensem|each\s+month|every\s+month)\b", re.I)
 _YEARLY = re.compile(r"\b(?:per\s+annum|per\s+year|yearly|annual(?:ly)?)\b", re.I)
+#: "payable in advance" says when rent is paid; it is not a deposit.
+_IN_ADVANCE = re.compile(r"\bin\s+advance\b", re.I)
 _YEAR_TO_YEAR = re.compile(r"\b(?:from\s+)?year[\s-]+to[\s-]+year\b", re.I)
 _MUTUAL = re.compile(r"\bmutual(?:ly)?\b|\beach\s+party\s+(?:may|shall|will)\s+disclose\b", re.I)
 _ONE_WAY = re.compile(r"\bone[\s-]way\b|\bunilateral\b", re.I)
@@ -87,6 +89,10 @@ def _int(word_or_digits: str) -> int:
 
 def _mentions(sentence: str, *words: str) -> bool:
     return any(re.search(rf"\b{w}\b", sentence, re.I) for w in words)
+
+
+def _about_deposit(sentence: str) -> bool:
+    return _mentions(_IN_ADVANCE.sub(" ", sentence), "deposit", "security", "advance")
 
 
 def _months(m) -> int:
@@ -136,10 +142,10 @@ def _tenancy(body, sid, add):
             add("rent_period", "monthly", sid, _MONTHLY.search(body).group(0))
         if _YEARLY.search(body):
             add("rent_period", "yearly", sid, _YEARLY.search(body).group(0))
-        if not _mentions(body, "deposit", "security", "advance"):
+        if not _about_deposit(body):
             for m in _AMOUNT.finditer(body):
                 add("rent_amount", int(m.group("amt").replace(",", "")), sid, m.group(0))
-    if _mentions(body, "deposit", "security", "advance"):
+    if _about_deposit(body):
         for m in _AMOUNT.finditer(body):
             add("security_deposit", int(m.group("amt").replace(",", "")), sid, m.group(0))
     if _YEAR_TO_YEAR.search(body):
