@@ -19,6 +19,7 @@ import asyncio
 import uuid
 
 import pytest
+from tests._engagement_support import disengage, engage  # D1: sharing needs an accepted engagement
 
 from app.core.config import settings
 from app.core.exceptions import (
@@ -82,7 +83,9 @@ async def _clean(mongo):
                   "email": f"{LAWYER}@test.invalid",
                   "lawyer_profile": {"kyc_verified": True}}},
         upsert=True)
+    await engage(CLIENT, LAWYER)
     yield
+    await disengage(CLIENT, LAWYER)
     await get_users_col().delete_one({"_id": LAWYER})
 
 

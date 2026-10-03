@@ -33,6 +33,7 @@ from __future__ import annotations
 import secrets
 
 import pytest
+from tests._engagement_support import disengage, engage  # D1: sharing needs an accepted engagement
 
 from app.core.config import settings
 from app.core.exceptions import ConflictError
@@ -80,7 +81,9 @@ async def kyc_lawyer(mongo):
         {"$set": {"_id": LAWYER_ID, "role": "lawyer",
                   "lawyer_profile": {"kyc_verified": True}}},
         upsert=True)
+    await engage(CLIENT["_id"], LAWYER_ID)
     yield LAWYER_ID
+    await disengage(CLIENT["_id"], LAWYER_ID)
     await get_users_col().delete_one({"_id": LAWYER_ID})
 
 

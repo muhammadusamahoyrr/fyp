@@ -702,6 +702,14 @@ async def submit_for_review(
     if not (lawyer.get("lawyer_profile") or {}).get("kyc_verified"):
         raise AppValidationError("Lawyer is not yet KYC-verified")
 
+    # D1 (2026-10-03): the same rule as DOCUMENTS_V2 -- only through an ACCEPTED
+    # engagement with this lawyer, on the document's case when it has one. A
+    # case with a dangling or other lawyer is caught here too: no accepted
+    # engagement on that case with that lawyer exists.
+    from app.services.document_sharing import require_accepted_engagement
+    await require_accepted_engagement(client_id=client_id, lawyer_id=target_lawyer_id,
+                                      case_id=doc.get("case_id"))
+
     now = datetime.now(timezone.utc)
     fields = {
         "review_status": "submitted",

@@ -32,7 +32,7 @@ import {
 import {
     extractDocumentFields, generateDocument, downloadDocumentFile,
     fetchRevisionPreview, submitDocumentForReview,
-    searchLawyers, getCaseTimeline,
+    listEngagements, getCaseTimeline,
     createDocumentV2, generateRevisionV2, submitDocumentV2, getDocumentV2,
     withdrawDocumentV2, listTemplates, getDocumentLegacy,
     idempotencyKey, errorCode, isRetryable,
@@ -237,7 +237,8 @@ const ModDocuments = () => {
     const [userApproved, setUserApproved] = useState(false);
     // Step 4 — lawyer submission (real pipeline: submit → lawyer reviews → notified)
     const [selLawyer, setSelLawyer] = useState(null);         // _id of the chosen lawyer
-    const [revLawyers, setRevLawyers] = useState([]);         // verified lawyers from the API
+    const [revLawyers, setRevLawyers] = useState([]);         // lawyers of the client's ACCEPTED engagements
+    const [revLawyersLoaded, setRevLawyersLoaded] = useState(false);
     const [caseLawyerId, setCaseLawyerId] = useState(null);   // assigned lawyer of the linked case, if any
     const [genCaseId, setGenCaseId] = useState(null);         // case the document was generated for
     // THE EXTRACTION, BEFORE IT BECOMES A DOCUMENT.
@@ -336,18 +337,27 @@ const ModDocuments = () => {
     }, [docId, docRevisionId, docPdfSha256, viewRev]);
 
     useEffect(() => {
-        if (step !== 3 || revLawyers.length) return;
-        searchLawyers({ page_size: 50 }).then(({ data }) => {
+        if (step !== 3 || revLawyersLoaded) return;
+        // D1 (2026-10-03): a document goes to a lawyer only through an ACCEPTED
+        // engagement -- the server refuses anyone else. So the choice is the
+        // lawyers the client has engaged, never the whole directory.
+        listEngagements({ status: "accepted" }).then(({ data }) => {
             const items = Array.isArray(data) ? data : (data?.items || []);
-            setRevLawyers(items.map(l => ({
-                _id: l._id,
-                name: l.full_name || "Lawyer",
-                spec: ((l.lawyer_profile?.specializations || [])[0] || "General Practice").replace(/_/g, " "),
-                rating: l.lawyer_profile?.rating || 0,
-                avail: !!l.lawyer_profile?.availability,
-                avatar: (l.full_name || "L").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
-            })));
-        }).catch(() => { });
+            const byLawyer = new Map();
+            for (const e of items) {
+                if (!e?.lawyer_id || byLawyer.has(e.lawyer_id)) continue;
+                const name = e.lawyer_name || "Your lawyer";
+                byLawyer.set(e.lawyer_id, {
+                    _id: e.lawyer_id,
+                    name,
+                    spec: e.case_title ? `Engaged on: ${e.case_title}` : "Engaged lawyer",
+                    rating: 0,
+                    avail: null,
+                    avatar: name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
+                });
+            }
+            setRevLawyers([...byLawyer.values()]);
+        }).catch(() => { }).finally(() => setRevLawyersLoaded(true));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [step]);
 
@@ -1666,18 +1676,22 @@ const ModDocuments = () => {
                                                     <span style={{ width: 40, height: 40, borderRadius: "50%", background: on ? t.primary : t.primaryGlow2, color: on ? (t.mode === "dark" ? "#1A2E35" : "#fff") : t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>{l.avatar}</span>
                                                     <span style={{ flex: 1, minWidth: 0 }}>
                                                         <span style={{ display: "block", fontSize: 14, fontWeight: 700 }}>{l.name}</span>
-                                                        <span style={{ display: "block", fontSize: 12, color: t.textMuted, textTransform: "capitalize" }}>{l.spec}</span>
+                                                        <span style={{ display: "block", fontSize: 12, color: t.textMuted }}>{l.spec}</span>
                                                     </span>
-                                                    {l.rating > 0 && <span style={{ fontSize: 12, color: t.warn }}>⭐ {l.rating}</span>}
-                                                    <span style={{ fontSize: 12, color: l.avail ? t.success : t.textMuted, whiteSpace: "nowrap" }}>{l.avail ? "● Available" : "○ Busy"}</span>
+
                                                 </button>
                                             );
                                         })}
                                         {caseLawyerId && !revLawyers.some(l => l._id === caseLawyerId) && (
                                             <div style={{ padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${t.primary}`, background: t.primaryGlow2, fontSize: 14, fontWeight: 700, color: t.text }}>⚖️ Your engaged case lawyer</div>
                                         )}
-                                        {!caseLawyerId && !revLawyers.length && (
-                                            <div style={{ fontSize: 12.5, color: t.textMuted, textAlign: "center", padding: "18px 0" }}>Loading verified lawyers…</div>
+                                        {!caseLawyerId && !revLawyers.length && !revLawyersLoaded && (
+                                            <div style={{ fontSize: 12.5, color: t.textMuted, textAlign: "center", padding: "18px 0" }}>Loading your lawyers…</div>
+                                        )}
+                                        {!caseLawyerId && !revLawyers.length && revLawyersLoaded && (
+                                            <div data-no-engaged-lawyer role="note" style={{ fontSize: 13, color: t.textMuted, textAlign: "center", padding: "18px 8px", lineHeight: 1.55 }}>
+                                                You have no lawyer engaged yet. A document can be sent only to a lawyer you have hired — hire a lawyer first, then send it for review.
+                                            </div>
                                         )}
                                     </div>
                                 </div>

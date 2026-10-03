@@ -29,6 +29,7 @@ import asyncio
 import secrets
 
 import pytest
+from tests._engagement_support import disengage, engage  # D1: sharing needs an accepted engagement
 from fastapi import HTTPException
 
 import app.api.v1.routes.documents_v2 as v2api
@@ -243,7 +244,9 @@ async def kyc_lawyer(monkeypatch):
 
     monkeypatch.setattr(UserRepository, "find_by_id",
                         lambda self, uid: find_by_id(uid))
-    return LAWYER_ID
+    await engage(CLIENT["_id"], LAWYER_ID)
+    yield LAWYER_ID
+    await disengage(CLIENT["_id"], LAWYER_ID)
 
 
 async def _generated_doc(monkeypatch):

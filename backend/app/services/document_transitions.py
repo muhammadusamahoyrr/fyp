@@ -293,9 +293,11 @@ async def submit(
     # a client submitted to a lawyer they never named is a false record of
     # intent in an audit trail. A caller who names the wrong lawyer is told so.
     #
-    # No case, or a case with no lawyer engaged yet, means there is no
-    # engagement to contradict — the client picks, which is the point of
-    # picking.
+    # No case no longer means a free choice (decision D1, 2026-10-03): it let a
+    # client send a document to ANY KYC-flagged lawyer with no relationship at
+    # all. Every submission now needs an ACCEPTED engagement with the named
+    # lawyer -- on the document's case when it has one (document_sharing.py,
+    # checked below, after the case's own consistency checks).
     if doc.get("case_id"):
         case = await case_repo.find_by_id(doc["case_id"])
         # A DANGLING REFERENCE IS NOT AN ABSENCE OF CONSTRAINT.
@@ -320,6 +322,11 @@ async def submit(
             raise ForbiddenError(
                 "This case is engaged with another lawyer. Documents on a case "
                 "go to the lawyer engaged on it.")
+
+    # D1: the relationship authorises the submission, case or no case.
+    from app.services.document_sharing import require_accepted_engagement
+    await require_accepted_engagement(client_id=actor_id, lawyer_id=lawyer_id,
+                                      case_id=doc.get("case_id"))
 
     now = _now()
     # If resubmitting after an approval, preserve the old approval in history.

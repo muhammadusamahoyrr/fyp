@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from tests._engagement_support import disengage, engage  # D1: sharing needs an accepted engagement
 
 from app.core.config import settings
 from app.dependencies import get_current_user
@@ -73,8 +74,10 @@ async def _clean(mongo):
         {"_id": LAWYER}, {"$set": {"_id": LAWYER, "role": "lawyer", "is_active": True,
                                    "email": f"{LAWYER}@test.invalid",
                                    "lawyer_profile": {"kyc_verified": True}}}, upsert=True)
+    await engage(CLIENT, LAWYER)
     yield
     app.dependency_overrides.clear()
+    await disengage(CLIENT, LAWYER)
     await get_users_col().delete_one({"_id": LAWYER})
 
 
