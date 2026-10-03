@@ -172,6 +172,30 @@ export function lawyerReviewRequestDeepLink(id) {
     return `${REVIEW_QUEUE_PATH}?${params.toString()}`;
 }
 
+/* The deep link, remembered for this page load until a MOUNTED queue has
+ * shown its result. Read straight from the address it was lost on a remount:
+ * a lawyer arriving from a notification without the onboarding cache sees the
+ * dashboard mount the queue, swap to the onboarding check, and mount it again
+ * -- the first mount stripped the query and the second found nothing.
+ *
+ * So the address is read (and cleaned) here, the result kept, and only
+ * `settleLawyerReviewLink()` -- called once the request is on screen, or
+ * "not found" is -- forgets it. A NEW link in the address always replaces it. */
+const NO_LINK = Object.freeze({ requestId: null, invalid: false });
+let lawyerLinkMemo = null;
+export function peekLawyerReviewLink() {
+    if (typeof window === "undefined") return NO_LINK;
+    const fresh = readLawyerReviewLink(window.location.search);
+    if (fresh.requestId || fresh.invalid) {
+        lawyerLinkMemo = fresh;
+        try { window.history.replaceState(window.history.state, "", REVIEW_QUEUE_PATH); } catch { /* not fatal */ }
+    }
+    return lawyerLinkMemo || NO_LINK;
+}
+export function settleLawyerReviewLink() {
+    lawyerLinkMemo = null;
+}
+
 export function readLawyerReviewLink(search) {
     const params = new URLSearchParams(typeof search === "string" ? search : "");
     const raw = params.get("request");

@@ -28,8 +28,8 @@ import {
     idempotencyKey, listEngagements, listReviewInbox, markReviewRequestViewed,
 } from "@/lib/api.js";
 import {
-    DECLINE_REASON_MAX, LAWYER_REQUEST_NOT_FOUND, REVIEW_QUEUE_PATH, counterText, lawyerActions,
-    lawyerErrorMessage, lawyerStatusView, readLawyerReviewLink,
+    DECLINE_REASON_MAX, LAWYER_REQUEST_NOT_FOUND, counterText, lawyerActions,
+    lawyerErrorMessage, lawyerStatusView, peekLawyerReviewLink, settleLawyerReviewLink,
 } from "@/lib/reviewRequests.js";
 import { Btn, Card, Label, Pill, fieldStyle } from "@/components/client/documents/ui.jsx";
 import { formatWhen } from "@/components/client/documents/DocsVault.jsx";
@@ -61,8 +61,7 @@ export function ReviewQueuePage() {
 function ReviewQueue({ t }) {
     const toast = useToast();
     const { setPage } = useCase();
-    const [link] = useState(() => (typeof window === "undefined"
-        ? { requestId: null, invalid: false } : readLawyerReviewLink(window.location.search)));
+    const [link] = useState(peekLawyerReviewLink);
     const [filter, setFilter] = useState(null);
     const [items, setItems] = useState([]);
     const [cursor, setCursor] = useState(null);
@@ -95,12 +94,6 @@ function ReviewQueue({ t }) {
             setCases(map);
         })();
     }, []);
-    // The deep link is consumed once: the address goes back to the plain queue
-    // (a fixed path), so a refresh does not replay it.
-    useEffect(() => {
-        if (!link.requestId && !link.invalid) return;
-        try { window.history.replaceState(window.history.state, "", REVIEW_QUEUE_PATH); } catch { /* not fatal */ }
-    }, [link]);
 
     const replace = updated => setItems(list => list.map(r => (r.id === updated.id ? { ...r, ...updated } : r)));
 
@@ -120,7 +113,7 @@ function ReviewQueue({ t }) {
             <div role="tablist" aria-label="Filter by state" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {FILTERS.map(([value, name]) => (
                     <button key={name} type="button" role="tab" aria-selected={filter === value}
-                        onClick={() => { setFilter(value); setCursor(null); }}
+                        onClick={() => { settleLawyerReviewLink(); setFilter(value); setCursor(null); }}
                         style={{ minHeight: 34, padding: "0 14px", borderRadius: 999, cursor: "pointer", fontSize: 13,
                                  border: `1px solid ${filter === value ? t.primary : t.border}`,
                                  background: filter === value ? t.primaryGlow2 || t.card : "transparent",
@@ -150,7 +143,7 @@ function ReviewQueue({ t }) {
                                 return (
                                     <li key={r.id}>
                                         <button type="button" data-rq-row={r.id} aria-current={selected ? "true" : undefined}
-                                            onClick={() => { setNotFound(false); setSelectedId(r.id); }}
+                                            onClick={() => { settleLawyerReviewLink(); setNotFound(false); setSelectedId(r.id); }}
                                             style={{ width: "100%", textAlign: "left", display: "flex", gap: 12, alignItems: "center",
                                                      padding: "14px 18px", border: "none", borderBottom: `1px solid ${t.border}`,
                                                      background: selected ? (t.primaryGlow2 || t.card) : "transparent",
@@ -177,7 +170,8 @@ function ReviewQueue({ t }) {
 
                 {selectedId && (
                     <RequestDetail key={selectedId} t={t} requestId={selectedId} cases={cases}
-                        onMissing={() => { setSelectedId(null); setNotFound(true); }}
+                        onMissing={() => { settleLawyerReviewLink(); setSelectedId(null); setNotFound(true); }}
+                        onLoaded={() => settleLawyerReviewLink()}
                         onChanged={updated => { replace(updated); }}
                         onStale={() => load()}
                         toast={toast} />
@@ -187,7 +181,7 @@ function ReviewQueue({ t }) {
     );
 }
 
-function RequestDetail({ t, requestId, cases, onMissing, onChanged, onStale, toast }) {
+function RequestDetail({ t, requestId, cases, onMissing, onLoaded, onChanged, onStale, toast }) {
     const keyFor = useKeyFor();
     const [request, setRequest] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -200,10 +194,18 @@ function RequestDetail({ t, requestId, cases, onMissing, onChanged, onStale, toa
     // a ref so the load effect depends on the request id alone and runs once.
     const onMissingRef = useRef(onMissing);
     onMissingRef.current = onMissing;
+    const onLoadedRef = useRef(onLoaded);
+    onLoadedRef.current = onLoaded;
+    // Only a component still on screen reports back: an answer that arrives
+    // after an unmount (the onboarding swap) must not settle the deep link.
+    const alive = useRef(true);
+    useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
     const reload = useCallback(async () => {
         const res = await getReviewRequest(requestId);
+        if (!alive.current) return null;
         if (res?.error || !res?.data?.id) { onMissingRef.current?.(); return null; }
         setRequest(res.data);
+        onLoadedRef.current?.();
         return res.data;
     }, [requestId]);
     useEffect(() => { reload(); }, [reload]);

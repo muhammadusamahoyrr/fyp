@@ -273,6 +273,25 @@ test("a request not sent to this lawyer, or a malformed id, is a calm 'not found
     assert.equal(p.container.querySelector("[data-rq-not-found]").textContent, rr.LAWYER_REQUEST_NOT_FOUND);
 });
 
+test("the deep link survives the dashboard remounting the queue (onboarding check)", async () => {
+    // Found in the 2026-10-03 browser smoke: a lawyer arriving from a
+    // notification without the onboarding cache saw the queue mount, unmount
+    // for the onboarding check, and mount again -- and the request never
+    // opened, because the first mount had already stripped the address.
+    dom.reconfigure({ url: `http://localhost/lawyer/documents/review-queue?request=${ID}` });
+    api.__respond("getReviewRequest", () => new Promise(r => setTimeout(() => r({ data: ROW }), 80)));
+    const first = await queue();                                    // the first answer is still in flight
+    await first.unmount();                                          // ...the onboarding swap
+    assert.equal(dom.window.location.search, "", "the address was cleaned on the first read");
+    const second = await queue();
+    await settle(150);
+    assert.ok(second.container.querySelector(`[data-rq-detail="${ID}"]`), "the request opens after the remount");
+    await second.unmount();
+    // Settled now: a later visit to the queue does not reopen it.
+    const third = await queue();
+    assert.equal(third.container.querySelector("[data-rq-detail]"), null);
+});
+
 // ── the sidebar ─────────────────────────────────────────────────────────────
 
 test("the sidebar lists Review Queue only while the feature is on", async () => {
