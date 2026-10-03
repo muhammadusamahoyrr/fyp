@@ -77,6 +77,14 @@ REVIEW_REQUEST_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         why=("When the client deletes a document: its open requests are "
              "cancelled and its accepted ones start their retention (§7.4)."),
     ),
+    IndexSpec(
+        collection="document_review_requests",
+        name="review_requests_sweep",
+        keys=(("status", ASCENDING), ("_id", ASCENDING)),
+        kind=QUERY,
+        why=("The lifecycle sweep (§7.3 backstop) pages open requests and "
+             "accepted ones without retention by `_id`, in bounded batches."),
+    ),
     # ── document_review_request_events ───────────────────────────────────────
     IndexSpec(
         collection="document_review_request_events",

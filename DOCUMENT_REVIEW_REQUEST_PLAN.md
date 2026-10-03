@@ -1,9 +1,10 @@
 # Document Review Requests — Phase 1 plan
 
 Status: **Phase 1 in progress.** D1 shipped first as its own fix. Slice 1 (model, indexes,
-settings), slice 2 (client service and API) and slice 3 (lawyer API) are implemented, behind
-`DOCUMENT_REVIEW_REQUESTS` (off). Slices 4 (engagement-end hook, retention, deletion hold),
-5 (notifications) and 6 (client UI) are not. Written 2026-10-03; decisions D1–D4 **decided**
+settings), slice 2 (client service and API), slice 3 (lawyer API) and slice 4 (engagement-end
+hook, retention, sweep, deletion hold) are implemented, behind `DOCUMENT_REVIEW_REQUESTS` (off).
+Slices 5 (notifications) and 6 (client UI) are not. The client-side DOCUMENTS_V2 document
+DELETE itself does not exist yet (§7.4). Written 2026-10-03; decisions D1–D4 **decided**
 2026-10-03 (§14).
 Scope owner: Muhammad Usama. Related: `DOC_ANALYZER_PLAN.md` (the analyzer engine),
 `ENGAGEMENT_REDESIGN.md` (engagements).
@@ -226,12 +227,10 @@ document text.
 "No" means the document endpoint answers 404 and the inbox item shows its status but not the
 document.
 
-**Implementation status.** Slice 3 enforces this table as far as the stored fields allow: an
-open request whose engagement is no longer `accepted` is 404, and an accepted request with a
-`retention_until` in the past is 404. Nothing sets `retention_until` yet -- the engagement-end
-hook and the document-deletion trigger that write it are **slice 4**. Until slice 4 lands, an
-accepted request stays downloadable after its engagement ends; accepted-document retention
-enforcement activates with slice 4.
+**Implementation status.** Enforced since slice 4: an open request whose engagement is no
+longer `accepted` is 404 (and is cancelled by the hook or the sweep), and an accepted request is
+404 from the instant `now >= retention_until`. The engagement-end hook writes `retention_until`
+(§7.3); the document-deletion trigger is ready but has no caller yet (§7.4).
 
 ### 7.2 Client cancel
 
@@ -242,8 +241,34 @@ lawyer is notified if they could already see it. From `accepted`: refused in Pha
 
 A hook on every engagement transition out of `accepted` (completed, terminated) — and a
 periodic sweep as a backstop — moves that engagement's `draft | submitted | viewed` requests to
-`cancelled` (`cancel_reason: engagement_ended`, system actor). `accepted` requests keep
-read-only access per §7.1.
+`cancelled` (`cancel_reason: engagement_ended`, system actor). `accepted` requests keep their
+status and start read-only retention (§7.4).
+
+As built (slice 4, `services/review_request_lifecycle.py`):
+
+- **Same transaction.** `terminate_engagement` (already transactional) and
+  `complete_engagement` (made transactional for this: its final `accepted → completed` write is
+  now conditional and shares a transaction with the hook) call
+  `end_for_engagement(session, …)`. If the hook fails, the engagement transition rolls back.
+- **Only while `DOCUMENT_REVIEW_REQUESTS` is on.** Off, the hooks and the sweep are no-ops and
+  `complete_engagement` takes its original non-transactional path, so a standalone Mongo
+  (local development) completes engagements exactly as before. On, transactions are mandatory
+  and startup refuses a standalone server (`review_request_lifecycle.assert_ready`, after the
+  index check) instead of failing a completion at runtime. Rows left open while the flag was off
+  are caught up by the sweep once it is on again. (`terminate_engagement` was already
+  transactional before this plan and still needs a replica set either way.)
+- **Races.** Submit and accept write the request row, which the hook also writes, so the pair
+  serialises (one retries and sees the other). Create, and a draft moved to another engagement,
+  only READ the engagement, so they `$inc` a `review_request_guard` counter on the engagement
+  row inside their transaction to force the same conflict (otherwise a draft could commit on an
+  engagement whose termination committed a moment earlier). The counter is stripped from
+  engagement API responses.
+- **Sweep.** `sweep()` runs every `REVIEW_REQUEST_SWEEP_MINUTES` (default 15) while the flag is
+  on. It pages open requests, then accepted ones without retention, by `_id` in bounded batches
+  (index `review_requests_sweep`), and runs the same hooks — one transaction per ended
+  engagement or missing document. Re-running writes nothing: processed rows no longer match.
+- **Audit.** `cancelled` and `retention_started` events, `actor_role: system`, detail = ids and
+  reason codes (and `retention_until`) only.
 
 ### 7.4 Retention and deletion (D3, decided)
 
@@ -260,20 +285,34 @@ artifact deleted once no other hold exists
 ```
 
 - **Configurable:** `REVIEW_REQUEST_RETENTION_DAYS` (setting, default 30).
-- **Frozen:** `retention_until` is written ONCE, on the request, when the triggering event
-  happens (engagement leaves `accepted`, or the client deletes the document) — never
-  recomputed per request. Changing the setting later affects only future events.
-- New fields on the request: `read_only_since`, `retention_until`, `retention_trigger`
+- **Frozen, first trigger wins:** `retention_started_at`, `retention_until` and
+  `retention_reason` are written ONCE, by the first triggering event (engagement leaves
+  `accepted`, or the client deletes the document). A later event finds `retention_until` set
+  and changes nothing — the 30 days are never reset or extended. Changing the setting later
+  affects only future triggers.
+- New fields on the request: `retention_started_at`, `retention_until`, `retention_reason`
   (`engagement_ended | document_deleted`).
 - **Legal hold vs UI access:** a legal hold may keep the FILE beyond `retention_until`
   (`document_deletion` already lets holds win), but it never extends the lawyer's access in the
   UI or API: after `retention_until` the request's document endpoint is 404 regardless of holds.
 - The PDF is never copied: the request references the revision's existing artifact.
 - `document_deletion` gains a hold: a revision referenced by a request in `submitted`,
-  `viewed`, or `accepted` with `retention_until` unset or in the future is **not deleted**.
+  `viewed`, or `accepted` with `retention_until` unset or in the future is **not deleted** —
+  `delete_revision` returns `held` before writing anything, and `purge` counts it as held.
+  Once `retention_until` passes, the same call deletes it. A draft, a declined or a cancelled
+  request holds nothing.
 - A client deleting a Vault document: its `draft | submitted | viewed` requests are cancelled
   (`document_deleted`); for an `accepted` request the client is told, before deleting, that the
   lawyer keeps read-only access to the version they were sent for 30 days.
+- **Deferred to its own slice** (`feat(documents): add recoverable Vault document deletion`):
+  DOCUMENTS_V2 has no client-facing document DELETE today — no route, no service.
+  `end_for_document(session, …)` is implemented and tested, and the sweep applies it to any
+  request whose document row is gone, so the review-request side is ready. Recommended design
+  for that slice: a `deleted_at` tombstone (recoverable, not a hard delete) written in the same
+  transaction as `end_for_document`, with an asynchronous purge afterwards that honours the
+  revision hold above; and, when an accepted request exists, the 30-day lawyer-access warning
+  shown before the client confirms. Tombstone semantics, recovery and the warning wording are
+  that slice's design, not this one's.
 
 ## 8. Authorization, enumeration safety, audit
 

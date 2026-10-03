@@ -75,7 +75,7 @@ class CancelReason(str, Enum):
     DOCUMENT_DELETED = "document_deleted"
 
 
-class RetentionTrigger(str, Enum):
+class RetentionReason(str, Enum):
     """What started an ACCEPTED request's read-only retention (D3)."""
     ENGAGEMENT_ENDED = "engagement_ended"
     DOCUMENT_DELETED = "document_deleted"
@@ -159,9 +159,9 @@ class DocumentReviewRequest(BaseModel):
 
     # D3: an ACCEPTED request becomes read-only when its engagement ends or its
     # document is deleted; `retention_until` is computed then and frozen.
-    read_only_since: datetime | None = None
+    retention_started_at: datetime | None = None
     retention_until: datetime | None = None
-    retention_trigger: RetentionTrigger | None = None
+    retention_reason: RetentionReason | None = None
 
     # SHA-256 of the client's create Idempotency-Key (never the raw key).
     create_idempotency_key_hash: str
@@ -194,21 +194,21 @@ class DocumentReviewRequest(BaseModel):
                 raise ValueError("a cancelled request carries cancelled_at and cancel_reason")
         elif self.cancel_reason is not None or self.cancelled_at is not None:
             raise ValueError("cancel fields belong to a cancelled request")
-        retention = (self.read_only_since, self.retention_until, self.retention_trigger)
+        retention = (self.retention_started_at, self.retention_until, self.retention_reason)
         if any(v is not None for v in retention):
             if status != S.ACCEPTED.value:
                 raise ValueError("retention applies only to an accepted request")
             if any(v is None for v in retention):
-                raise ValueError("read_only_since, retention_until and retention_trigger go together")
-            if self.retention_until <= self.read_only_since:
-                raise ValueError("retention_until is after read_only_since")
+                raise ValueError("retention_started_at, retention_until and retention_reason go together")
+            if self.retention_until <= self.retention_started_at:
+                raise ValueError("retention_until is after retention_started_at")
         return self
 
 
 #: Keys an audit event's `detail` may hold: ids, hashes and reason codes --
 #: never a note, a reason typed by a person, or any document text.
 EVENT_DETAIL_KEYS = frozenset({"revision_id", "version", "pdf_sha256", "engagement_id", "document_id",
-                               "cancel_reason", "retention_trigger", "retention_until",
+                               "cancel_reason", "retention_reason", "retention_until",
                                # SHA-256 of the Idempotency-Key (never the key) and of
                                # the request body: a retried delete is recognised, and
                                # a reused key with another body refused, after the row

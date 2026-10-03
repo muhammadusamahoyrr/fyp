@@ -191,6 +191,9 @@ class Settings(BaseSettings):
     # deadline is computed once, at that event, and frozen on the request
     # (`retention_until`); changing this later affects only future events.
     review_request_retention_days: int = 30
+    # How often the review-request lifecycle sweep runs (backstop for the
+    # engagement-end and document-deletion hooks). Only while the flag is on.
+    review_request_sweep_minutes: int = 15
 
     # ── DOC_ANALYZER — real document analysis (DOC_ANALYZER_PLAN.md) ──────────
     # OFF by default. When off, the analyzer routes answer 404 and nothing is

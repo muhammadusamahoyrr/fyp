@@ -372,7 +372,7 @@ async def test_document_access_follows_the_plan_row_by_row(db):
     await svc.accept(lawyer_id=LAWYER, request_id=accepted["id"], idempotency_key=key(), expected_state_version=2)
     assert (await svc.download_document(lawyer_id=LAWYER, request_id=accepted["id"]))[0] == PDF
     # D3 read-only retention: until `retention_until`, then 404.
-    retained = {"read_only_since": now - timedelta(days=1), "retention_trigger": "engagement_ended"}
+    retained = {"retention_started_at": now - timedelta(days=1), "retention_reason": "engagement_ended"}
     await get_document_review_requests_col().update_one(
         {"_id": accepted["id"]}, {"$set": {**retained, "retention_until": now + timedelta(days=29)}})
     assert (await svc.download_document(lawyer_id=LAWYER, request_id=accepted["id"]))[0] == PDF

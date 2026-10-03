@@ -180,7 +180,7 @@ def client_view(row: dict) -> dict:
         "cancelled_at": _iso(row.get("cancelled_at")),
         "decline_reason": row.get("decline_reason"),
         "cancel_reason": row.get("cancel_reason"),
-        "read_only_since": _iso(row.get("read_only_since")),
+        "retention_started_at": _iso(row.get("retention_started_at")),
         "retention_until": _iso(row.get("retention_until")),
     }
 
@@ -249,6 +249,24 @@ async def _owned_engagement(client_id: str, engagement_id: str, session=None) ->
     if engagement is None:
         raise _not_found()
     return engagement
+
+
+async def _guard_engagement(session, engagement_id: str) -> None:
+    """Make this transaction CONFLICT with any engagement transition.
+
+    Creating a request (or moving a draft to another engagement) only READS the
+    engagement; the engagement-end hook only touches requests that already
+    point at it. Without a shared write, a create could commit a new open
+    request on an engagement whose termination committed a moment earlier --
+    each transaction valid alone, the pair wrong (write skew). Incrementing a
+    counter on the engagement row turns that into a write conflict: one of
+    the two retries and sees the other's outcome. Submit and accept need no
+    guard: they write the request row, which the hook writes too."""
+    moved = await get_engagements_col().update_one(
+        {"_id": engagement_id, "status": EngagementStatus.ACCEPTED.value},
+        {"$inc": {"review_request_guard": 1}}, session=session)
+    if moved.matched_count != 1:
+        raise _engagement_not_active()
 
 
 def _check_engagement(doc: dict, engagement: dict) -> None:
@@ -351,6 +369,7 @@ async def create_draft(*, client_id: str, idempotency_key: str, document_id: str
         doc = await _owned_document(client_id, document_id, session)
         engagement = await _owned_engagement(client_id, engagement_id, session)
         _check_engagement(doc, engagement)
+        await _guard_engagement(session, engagement_id)
         rev = await _usable_revision(document_id, revision_id, expected_pdf_sha256, session)
         now = _now()
         row = {
@@ -505,6 +524,7 @@ async def edit_draft(*, client_id: str, request_id: str, idempotency_key: str,
             doc = await _owned_document(client_id, row["document_id"], session)
             engagement = await _owned_engagement(client_id, changes["engagement_id"], session)
             _check_engagement(doc, engagement)
+            await _guard_engagement(session, engagement["_id"])
             updates.update(engagement_id=engagement["_id"], lawyer_id=engagement["lawyer_id"],
                            case_id=engagement.get("case_id"))
             detail["engagement_id"] = engagement["_id"]
@@ -733,7 +753,7 @@ def lawyer_view(row: dict, client_name: str, now: datetime) -> dict:
         "cancelled_at": _iso(row.get("cancelled_at")),
         "decline_reason": row.get("decline_reason"),
         "cancel_reason": row.get("cancel_reason"),
-        "read_only_since": _iso(row.get("read_only_since")),
+        "retention_started_at": _iso(row.get("retention_started_at")),
         "retention_until": _iso(row.get("retention_until")),
         "document_available": grants_document_access(row, now),
         "analysis": None,

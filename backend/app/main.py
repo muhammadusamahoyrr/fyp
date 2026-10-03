@@ -124,6 +124,32 @@ async def _lawyer_index_reconciler():
                 "Lawyer index reconciliation sweep failed")
 
 
+async def _review_request_sweep():
+    """Backstop for the review-request lifecycle hooks (DOCUMENT_REVIEW_REQUEST_PLAN.md §7.3).
+
+    The hooks run inside the engagement transition's own transaction; this
+    catches anything they did not reach (a crash, an older transition path,
+    rows from before the hook existed). Ungated like the relays: every step is
+    a conditional write in its own transaction and a re-run writes nothing, so
+    every worker may run it. A no-op while DOCUMENT_REVIEW_REQUESTS is off.
+    Sleeps first.
+    """
+    import asyncio
+    import logging
+
+    interval = max(1, settings.review_request_sweep_minutes) * 60
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            from app.services.review_request_lifecycle import enabled, sweep
+            if enabled():
+                await sweep()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("Review request lifecycle sweep failed")
+
+
 async def _provenance_relay():
     """Deliver provenance records whose direct write failed.
 
@@ -297,6 +323,10 @@ async def lifespan(app: FastAPI):
     # Same rule for document review requests: warn while the flag is off,
     # refuse to start once it is on and an index is missing.
     await enforce_review_request_indexes()
+    # DOCUMENT_REVIEW_REQUESTS on: refuse a standalone Mongo now, rather than
+    # fail a client's first submit or an engagement completion later.
+    from app.services.review_request_lifecycle import assert_ready as _review_requests_ready
+    await _review_requests_ready()
 
     # The Document Analyzer checks its own prerequisites (transactions, its
     # indexes) and FAILS CLOSED ON ITS OWN: a failure closes the analyzer's
@@ -394,6 +424,7 @@ async def lifespan(app: FastAPI):
     scheduler_tasks.append(_asyncio.create_task(_documents_v2_relay()))
     scheduler_tasks.append(_asyncio.create_task(_analyzer_housekeeping()))
     scheduler_tasks.append(_asyncio.create_task(_analyzer_worker()))
+    scheduler_tasks.append(_asyncio.create_task(_review_request_sweep()))
 
     # EVENT OUTBOX relay: ungated, and NOT covered by the v2 relay above, which
     # returns immediately while DOCUMENTS_V2 is off. Agreement transitions park

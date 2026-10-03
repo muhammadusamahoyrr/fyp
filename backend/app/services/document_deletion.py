@@ -5,7 +5,11 @@ pdf_sha256) BEFORE anything is destroyed, then removes the artifact bytes, then
 the extracted content, then the row — recording each completed step. A crash at
 any point resumes from the first step not yet done. An artifact still referenced
 by another revision is never deleted, and the tombstone survives as the audit
-residue of an erased document.
+residue of an erased document. A revision a document review request still
+needs (submitted, viewed, or accepted and not past `retention_until`) is never
+deleted either: `delete_revision` refuses it as `held` and changes nothing
+(DOCUMENT_REVIEW_REQUEST_PLAN.md §7.4). Once that retention expires, the same
+call deletes it.
 
 Gated behind `settings.documents_v2_deletion_enabled` — a separate, independently
 approved switch. While it is off, `purge()` is report-only: it counts eligible
@@ -38,7 +42,16 @@ async def delete_revision(revision_id: str, *, reason: str = "retention") -> dic
 
     Safe to call again after a crash: completed steps (recorded on the tombstone)
     are skipped. Returns the final step set.
+
+    Refused, before anything is written, while a review request holds the
+    revision. A legal hold may keep a file longer; a review request's hold
+    never outlives its `retention_until`.
     """
+    from app.services.review_request_lifecycle import revision_is_held
+
+    if await revision_is_held(revision_id):
+        return {"status": "held", "revision_id": revision_id, "hold": "review_request"}
+
     rev = await get_document_revisions_col().find_one({"_id": revision_id})
     ts = await get_deletion_tombstones_col().find_one({"_id": revision_id})
     if not rev and not ts:
@@ -115,7 +128,10 @@ async def purge(limit: int = 200) -> dict:
             held_skipped += 1
             continue
         if settings.documents_v2_deletion_enabled:
-            await delete_revision(rev["_id"], reason="retention")
+            outcome = await delete_revision(rev["_id"], reason="retention")
+            if outcome.get("status") == "held":
+                held_skipped += 1
+                continue
             deleted += 1
 
     return {

@@ -123,17 +123,17 @@ def test_a_row_that_breaks_an_invariant_is_refused(changes, message):
 
 def test_d3_retention_fields_go_together_and_only_on_an_accepted_request():
     accepted = dict(status="accepted", is_open=False, submitted_at=NOW, decided_at=NOW)
-    ok = make(**accepted, read_only_since=NOW, retention_until=NOW + timedelta(days=30),
-              retention_trigger="engagement_ended")
-    assert ok.retention_trigger == rr.RetentionTrigger.ENGAGEMENT_ENDED
+    ok = make(**accepted, retention_started_at=NOW, retention_until=NOW + timedelta(days=30),
+              retention_reason="engagement_ended")
+    assert ok.retention_reason == rr.RetentionReason.ENGAGEMENT_ENDED
     with pytest.raises(ValidationError, match="go together"):
-        make(**accepted, read_only_since=NOW)
-    with pytest.raises(ValidationError, match="after read_only_since"):
-        make(**accepted, read_only_since=NOW, retention_until=NOW, retention_trigger="document_deleted")
+        make(**accepted, retention_started_at=NOW)
+    with pytest.raises(ValidationError, match="after retention_started_at"):
+        make(**accepted, retention_started_at=NOW, retention_until=NOW, retention_reason="document_deleted")
     with pytest.raises(ValidationError, match="only to an accepted"):
         make(status="declined", is_open=False, submitted_at=NOW, decided_at=NOW,
-             read_only_since=NOW, retention_until=NOW + timedelta(days=30),
-             retention_trigger="engagement_ended")
+             retention_started_at=NOW, retention_until=NOW + timedelta(days=30),
+             retention_reason="engagement_ended")
 
 
 def test_a_draft_the_system_cancelled_needs_no_submission_time():
