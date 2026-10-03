@@ -21,6 +21,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/components/client/theme.js";
 import { Btn, Card, Label } from "@/components/client/documents/ui.jsx";
+import DraftingReview from "@/components/analyzer/DraftingReview.jsx";
 import {
     cancelAnalysisRun, confirmAnalysisDocument, confirmAnalysisOcr, confirmAnalysisTerms,
     createAnalysis, deleteAnalysis, getAnalysisReport, getAnalysisRun, getAnalysisText,
@@ -31,6 +32,8 @@ export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const ACCEPT = ".pdf,.docx,.jpg,.jpeg,.png";
 const ACCEPTED_EXT = /\.(pdf|docx|jpe?g|png)$/i;
 export const POLL_MS = 2000;
+/* A run made by the drafting-question engine opens the INTERNAL review. */
+export const HYPOTHESIS_ENGINE = "ai-hypothesis.1";
 
 export const STAGE_LABEL = {
     queued_extract: "Waiting to read the document",
@@ -46,6 +49,10 @@ export const STAGE_LABEL = {
     analyzing: "Checking the document",
     queued_ai_report: "Waiting to prepare AI drafting notes",
     ai_reporting: "Preparing AI drafting notes",
+    queued_hypothesis_scan: "Waiting to run the drafting questions",
+    hypothesis_scanning: "Running the drafting questions",
+    queued_hypothesis_review: "Waiting for the AI review signal",
+    hypothesis_reviewing: "Preparing the AI review signal",
     done: "Checked",
     failed: "Could not be read",
     cancelled: "Cancelled",
@@ -54,7 +61,8 @@ export const STAGE_LABEL = {
 
 /* Statuses where the server is working and the screen should keep asking. */
 const WORKING = new Set(["queued_extract", "extracting", "queued_segmentation", "segmenting",
-    "queued_terms", "extracting_terms", "queued_analysis", "analyzing", "queued_ai_report", "ai_reporting"]);
+    "queued_terms", "extracting_terms", "queued_analysis", "analyzing", "queued_ai_report", "ai_reporting",
+    "queued_hypothesis_scan", "hypothesis_scanning", "queued_hypothesis_review", "hypothesis_reviewing"]);
 const OPEN = new Set([...WORKING, "needs_ocr_confirmation", "needs_document_confirmation",
     "needs_terms_confirmation"]);
 export const shouldPoll = status => WORKING.has(status);
@@ -594,7 +602,8 @@ function RunView({ t, runId, onBack }) {
             {status === "needs_ocr_confirmation" && <OcrStep t={t} run={run} onDone={reload} />}
             {status === "needs_document_confirmation" && <DocumentStep t={t} run={run} onDone={reload} />}
             {status === "needs_terms_confirmation" && <TermsStep t={t} run={run} onDone={reload} />}
-            {status === "done" && (
+            {status === "done" && run.engine === HYPOTHESIS_ENGINE && <DraftingReview t={t} runId={runId} />}
+            {status === "done" && run.engine !== HYPOTHESIS_ENGINE && (
                 <>
                     <ReportView t={t} runId={runId} />
                     <TextViewer t={t} runId={runId} />

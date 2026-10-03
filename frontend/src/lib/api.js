@@ -2077,6 +2077,24 @@ export async function deleteAnalysis(sourceId) {
   return apiFetch(`/documents/analyses/${encodeURIComponent(sourceId)}`, { method: 'DELETE' });
 }
 
+/* The INTERNAL drafting-question review (synthetic documents only). Every
+ * response carries the server's evaluation status; a decision must echo it
+ * back (`evaluationAck`), so the screen cannot act without showing it.
+ * Decisions are append-only: there is no edit or delete call. */
+export async function getDraftingReview(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/drafting-review`);
+}
+
+export async function recordDraftingDecision(runId, { questionId, decision, reasonCode = null,
+                                                      sentenceIds = [], evaluationAck }, key) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/drafting-review/decisions`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+    body: JSON.stringify({ question_id: questionId, decision, reason_code: reasonCode,
+                           sentence_ids: sentenceIds, evaluation_ack: evaluationAck }),
+  });
+}
+
 /* A key for one intent. Mint it where the user acts, not where the request is
    sent, and pass the SAME one to every retry of that action. */
 export function idempotencyKey() {
