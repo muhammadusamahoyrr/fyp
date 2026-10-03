@@ -98,8 +98,10 @@ async def _doc_rev():
 
 # ═══════════════ A · HTTP round-trip ═══════════════
 
-async def test_http_route_404_when_flag_off(mongo, _store):
-    # flag off (default) → the route is indistinguishable from missing
+async def test_http_route_404_when_flag_off(mongo, _store, monkeypatch):
+    # flag off -- set explicitly, not read from this machine's .env -- the
+    # route is indistinguishable from missing
+    monkeypatch.setattr(settings, "documents_v2", False)
     async with _client(CLIENT_USER) as c:
         r = await c.post(f"{API}/documents/v2/whatever/submit",
                          json={"expected_version": 1, "expected_pdf_sha256": "x",

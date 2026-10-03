@@ -243,7 +243,7 @@ async def test_rollback_restores_and_preserves_revisions(mongo, _store, tmp_path
 
 # ── compat reader keeps a V2-native doc readable while flag off ────────────────
 
-async def test_compat_reader_projects_v2_native(mongo, _store, tmp_path):
+async def test_compat_reader_projects_v2_native(mongo, _store, tmp_path, monkeypatch):
     # a truly V2-native doc: schema_version 2, NO legacy file_path/fields
     doc_id = "native-" + uuid.uuid4().hex[:8]
     rev_id = "nrev-" + uuid.uuid4().hex[:8]
@@ -255,7 +255,7 @@ async def test_compat_reader_projects_v2_native(mongo, _store, tmp_path):
         "_id": doc_id, "client_id": CLIENT, "schema_version": 2,
         "current_revision_id": rev_id, "current_version": 1, "review_status": "none"})
 
-    assert settings.documents_v2 is False
+    monkeypatch.setattr(settings, "documents_v2", False)     # flag off, whatever this machine's .env says
     view = await document_service.get_document(doc_id, CLIENT, "client")
     # Projected from the revision AND resolved into the store. The bare key
     # ("docs/x.0.pdf") was asserted here once — and it is exactly what made the

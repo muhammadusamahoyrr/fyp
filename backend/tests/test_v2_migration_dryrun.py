@@ -384,4 +384,6 @@ async def test_every_blocking_code_has_a_branch_that_can_emit_it():
 
 
 async def test_the_flag_stays_off():
-    assert settings.documents_v2 is False
+    # The SHIPPED default, not this machine's .env.
+    from app.core.config import Settings
+    assert Settings.model_fields["documents_v2"].default is False

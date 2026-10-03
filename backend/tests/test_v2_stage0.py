@@ -30,7 +30,9 @@ from app.services import document_service as ds
 # ── the flag is off; nothing changed live ────────────────────────────────────
 
 def test_documents_v2_flag_defaults_off():
-    assert settings.documents_v2 is False
+    # The SHIPPED default, not this machine's .env.
+    from app.core.config import Settings
+    assert Settings.model_fields["documents_v2"].default is False
 
 
 # ── extract_pdf_text: total, and never a false "ok" (plan A1) ─────────────────
