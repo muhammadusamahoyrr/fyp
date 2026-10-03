@@ -489,6 +489,13 @@ test("the evaluation disclosure never claims more than the record", () => {
         label_review: "lawyer_reviewed" }), "Evaluated on 2026-11-01 with m. Evaluation labels were reviewed by a qualified lawyer.");
     assert.doesNotMatch(live.evaluationText({ status: "not_yet_evaluated", document_type: "tenancy",
         label_review: "developer_only" }), /reviewed by a qualified lawyer/);
+    // Evaluated is not approved: the record's quality decision is said, not implied.
+    assert.equal(live.evaluationText({ status: "evaluated", evaluated_at: "2026-10-03", model: "openai/gpt-oss-120b",
+        label_review: "developer_only", quality_decision: "not_approved",
+        decision_reason: "risk_precision_below_threshold" }),
+        "Evaluated on 2026-10-03 with openai/gpt-oss-120b. Evaluation labels were written by the developer and "
+        + "have not been reviewed by a lawyer. This model is not approved for use: too many of the drafting risks "
+        + "it proposes are not real issues.");
 });
 
 

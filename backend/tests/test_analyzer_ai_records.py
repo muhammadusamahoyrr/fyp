@@ -1,37 +1,77 @@
 """Document Analyzer: the frozen evaluation record says only what is true.
 
-Nothing has been evaluated live: every document type is not_yet_evaluated,
-with developer-only labels, no model, no date, no metrics and no cost. The
-loader refuses any record that claims more than it can show.
+gpt-oss-120b was evaluated live (prompt 2, 90/90 calls) and passed every
+safety gate, but its risk precision is below the quality threshold: it is
+EVALUATED, NOT SELECTED -- quality not approved, release not approved. The
+labels stay developer-only and the documents synthetic-only. The loader
+refuses any record that claims more than it can show.
 """
 from __future__ import annotations
 
 import pytest
 import yaml
 
+import hashlib
+import json
+from pathlib import Path
+
 from app.core.config import settings
-from app.services.analyzer import ai_config, ai_records, ai_report, evaluation
+from app.services.analyzer import ai_config, ai_records, ai_report, evaluation, injection
 
 RAW = ai_records.EVALUATION_RECORD.read_text(encoding="utf-8")
+BACKEND = Path(__file__).resolve().parents[1]
 
 
 def test_the_committed_record_is_honest_about_what_was_evaluated():
     record = ai_records.load_evaluation_record()
     assert record["selected_model"] is None and record["created"] == "2026-10-02"
     assert record["dataset"] == {"version": "v1", "sha256": evaluation.load_dataset().sha256}
-    assert (record["schema_version"], record["prompt_version"]) == (ai_report.SCHEMA_VERSION,
-                                                                    ai_report.PROMPT_VERSION)
+    assert (record["schema_version"], record["prompt_version"], record["detector_version"]) == (
+        ai_report.SCHEMA_VERSION, ai_report.PROMPT_VERSION, injection.DETECTOR_VERSION)
     assert tuple(record["required_gates"]) == ai_records.REQUIRED_GATES
     assert set(record["document_types"]) == set(evaluation.DOCUMENT_TYPES)
+    decision = record["decision"]
+    assert decision["evaluated_model"] == "openai/gpt-oss-120b"
+    assert decision["safety_gates_passed"] is True
+    assert (decision["quality_decision"], decision["release_approved"], decision["reason"]) == (
+        "not_approved", False, "risk_precision_below_threshold")
+    assert decision["overall"]["risk_precision"] < decision["quality_threshold"]["risk_precision"]
+    assert (decision["labels"], decision["documents"]) == ("developer_only", "synthetic_only")
     for entry in record["document_types"].values():
-        assert entry == {"status": "not_yet_evaluated", "label_review": "developer_only",
-                         "label_reviewer": None, "label_reviewed_on": None,
-                         "label_reviewed_dataset_sha256": None, "model": None,
-                         "evaluated_at": None, "metrics": None, "result_file": None}
+        assert entry["status"] == "evaluated" and entry["model"] == "openai/gpt-oss-120b"
+        assert entry["label_review"] == "developer_only" and entry["label_reviewer"] is None
 
 
-def change(edit) -> str:
+def test_the_record_is_bound_to_its_valid_result_file():
+    """The numbers are the result file's, and the file is the one hashed."""
+    record = ai_records.load_evaluation_record()
+    decision = record["decision"]
+    raw = (BACKEND / decision["result_file"]).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == decision["result_sha256"]
+    result = json.loads(raw)
+    assert result["valid_benchmark"] is True and result["completion"]["complete"] is True
+    assert (result["model"], result["prompt_version"], result["dataset"]["sha256"]) == (
+        decision["evaluated_model"], record["prompt_version"], record["dataset"]["sha256"])
+    m = result["metrics"]
+    assert decision["overall"]["risk_precision"] == m["overall"]["risk"]["precision"]
+    assert decision["overall"]["risk_recall"] == m["overall"]["risk"]["recall"]
+    assert decision["overall"]["obligation_precision"] == m["overall"]["obligation"]["precision"]
+    assert decision["overall"]["injection_success"] == m["injection"]["success"] == 0
+    assert all(m["gates"].values())
+    for doc_type, entry in record["document_types"].items():
+        assert entry["metrics"]["risk_precision"] == m["by_type"][doc_type]["risk"]["precision"]
+
+
+NOT_YET = {"status": "not_yet_evaluated", "model": None, "evaluated_at": None, "metrics": None,
+           "result_file": None}
+
+
+def change(edit, *, base=None) -> str:
     data = yaml.safe_load(RAW)
+    if base == "not_yet":                         # a record before any evaluation
+        for entry in data["document_types"].values():
+            entry.update(NOT_YET)
+        data["decision"] = None
     edit(data)
     return yaml.safe_dump(data, sort_keys=False)
 
@@ -56,7 +96,32 @@ EVALUATED = {"status": "evaluated", "model": "openai/gpt-oss-120b", "evaluated_a
 ])
 def test_a_record_that_claims_more_than_it_shows_is_refused(edit, message):
     with pytest.raises(ai_records.RecordError, match=message):
+        ai_records.parse_evaluation_record(change(edit, base="not_yet"))
+
+
+@pytest.mark.parametrize("edit, message", [
+    # Evaluated is not selected: selecting needs a release, a release needs quality.
+    (lambda d: d.update(selected_model="openai/gpt-oss-120b"), "selected only when its release is approved"),
+    (lambda d: d["decision"].update(release_approved=True), "release needs a quality approval"),
+    (lambda d: d["decision"].update(release_approved=True, quality_decision="approved",
+                                    safety_gates_passed=False), "every safety gate"),
+    (lambda d: d["decision"].update(quality_decision="good"), "quality_decision is one of"),
+    (lambda d: d["decision"].update(reason=""), "needs the reason"),
+    (lambda d: d["decision"].update(labels="lawyer_reviewed"), "how the dataset labels were reviewed"),
+    (lambda d: d["decision"].update(documents="real"), "synthetic_only"),
+    (lambda d: d["decision"].update(result_sha256=None), "result file and its SHA-256"),
+    (lambda d: d["decision"].update(evaluated_model="openai/gpt-oss-20b"), "a model that was evaluated"),
+    (lambda d: d.update(decision=None), "needs a decision"),
+])
+def test_an_evaluated_model_is_not_a_selected_one(edit, message):
+    with pytest.raises(ai_records.RecordError, match=message):
         ai_records.parse_evaluation_record(change(edit))
+
+
+def test_a_selected_model_needs_quality_and_release_approval():
+    raw = change(lambda d: (d["decision"].update(quality_decision="approved", release_approved=True),
+                            d.update(selected_model="openai/gpt-oss-120b")))
+    assert ai_records.parse_evaluation_record(raw)["selected_model"] == "openai/gpt-oss-120b"
 
 
 def test_an_evaluated_type_must_name_an_allowlisted_model():
@@ -90,15 +155,19 @@ def test_a_passing_benchmark_does_not_make_the_labels_lawyer_reviewed():
 
 
 @pytest.mark.parametrize("doc_type, status", [
-    ("tenancy", "not_yet_evaluated"), ("nda", "not_yet_evaluated"),
-    ("employment", "not_yet_evaluated"), ("other", "not_in_evaluation_dataset"),
-    (None, "not_in_evaluation_dataset"),
+    ("tenancy", "evaluated"), ("nda", "evaluated"), ("employment", "evaluated"),
+    ("other", "not_in_evaluation_dataset"), (None, "not_in_evaluation_dataset"),
 ])
 def test_the_report_disclosure_for_each_type(doc_type, status):
+    """An evaluated type discloses the model AND that it is not approved."""
     disclosed = ai_records.evaluation_for(doc_type)
-    assert disclosed["status"] == status and disclosed["model"] is None
-    if status == "not_yet_evaluated":
-        assert disclosed["label_review"] == "developer_only"
+    assert disclosed["status"] == status
+    if status == "evaluated":
+        assert disclosed["model"] == "openai/gpt-oss-120b" and disclosed["label_review"] == "developer_only"
+        assert (disclosed["quality_decision"], disclosed["release_approved"], disclosed["decision_reason"]) == (
+            "not_approved", False, "risk_precision_below_threshold")
+    else:
+        assert disclosed["model"] is None
 
 
 def test_an_unreadable_record_is_disclosed_not_hidden(monkeypatch, tmp_path):

@@ -310,8 +310,17 @@ export function evaluationText(evaluation) {
         developer_only: "Evaluation labels were written by the developer and have not been reviewed by a lawyer.",
         lawyer_reviewed: "Evaluation labels were reviewed by a qualified lawyer.",
     }[e.label_review];
-    return labels ? `${status} ${labels}` : status;
+    // Evaluated is not approved: say which, so a measurement never reads as an endorsement.
+    const decision = e.status === "evaluated" && e.quality_decision && e.quality_decision !== "approved"
+        ? `This model is not approved for use${DECISION_REASON_TEXT[e.decision_reason]
+            ? `: ${DECISION_REASON_TEXT[e.decision_reason]}` : ""}.`
+        : "";
+    return [status, labels, decision].filter(Boolean).join(" ");
 }
+
+export const DECISION_REASON_TEXT = {
+    risk_precision_below_threshold: "too many of the drafting risks it proposes are not real issues",
+};
 
 function AiTab({ t, report, kind }) {
     const ai = report.ai || { status: "unavailable", reason: "not_recorded" };

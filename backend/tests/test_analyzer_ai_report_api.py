@@ -136,10 +136,15 @@ async def test_rows_a_stale_fence_left_behind_are_never_shown(flow):
     assert [r["title"] for r in body["model_risks"]] == [live["title"]]
 
 
-async def test_the_report_discloses_that_the_type_is_not_yet_evaluated(flow):
+async def test_the_report_discloses_that_the_evaluated_model_is_not_approved(flow):
+    """Evaluated is not selected: the report says which model was measured
+    AND that its quality was not approved -- a measurement is never shown as
+    an endorsement -- and that the labels are the developer's."""
     client = flow[0]
     created = await to_ai(flow, model(answer))
     assert await runner.process_one("w1") == "done"
     disclosed = (await report(client, created))["ai"]["evaluation"]
-    assert disclosed["document_type"] == "tenancy" and disclosed["status"] == "not_yet_evaluated"
-    assert disclosed["label_review"] == "developer_only" and disclosed["model"] is None
+    assert disclosed["document_type"] == "tenancy" and disclosed["status"] == "evaluated"
+    assert disclosed["label_review"] == "developer_only" and disclosed["model"] == "openai/gpt-oss-120b"
+    assert (disclosed["quality_decision"], disclosed["release_approved"], disclosed["decision_reason"]) == (
+        "not_approved", False, "risk_precision_below_threshold")

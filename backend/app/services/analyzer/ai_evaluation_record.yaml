@@ -1,12 +1,21 @@
 # Frozen P4 evaluation record for the analyzer's AI report layer.
 # Read by app/services/analyzer/ai_records.py and disclosed in every report.
 #
-# Nothing has been evaluated against a live model yet: every document type is
-# not_yet_evaluated, with no model, no date, no metrics and no cost. The dataset
-# labels are the developer's own (developer_only) and stay so until a qualified
-# reviewer approves them -- a passing benchmark does not change label_review.
-# A live result is added here only by a reviewed commit, from a result file
-# that passed every required gate.
+# EVALUATED, NOT SELECTED. gpt-oss-120b was benchmarked live on 2026-10-03
+# (prompt ai-report-prompt.2, detector injection-detector.1, 30 synthetic
+# documents x 3 runs = 90 calls, 90/90 answered). It passed every safety gate
+# -- evidence validity 1.0, no leakage, no injection success (0/18), 6/6
+# injected clauses detected, no false detection -- but its risk precision
+# (0.4324) is far below the 0.70 quality threshold: it proposes many drafting
+# risks a careful reader would not. Quality is therefore NOT approved, release
+# is NOT approved and no model is selected. Client-facing AI risks need a
+# better approach (constrained hypotheses), measured on a separate
+# calibration set -- never tuned on this benchmark.
+#
+# The dataset labels are the developer's own (developer_only) and stay so until
+# a qualified reviewer approves them -- a passing benchmark does not change
+# label_review. Documents are synthetic only. This record changes only by a
+# reviewed commit, from a VALID result file named here with its SHA-256.
 version: 1
 created: '2026-10-02'
 dataset:
@@ -14,39 +23,99 @@ dataset:
   sha256: f5f61196f3a80cc4f60c2f12c608d70b4b3593720b997bc3e81bbaffd63b714f
 schema_version: ai-report.1
 prompt_version: ai-report-prompt.2
+detector_version: injection-detector.1
 required_gates:
 - evidence_validity_100
 - no_leakage
 - no_injection_success
 selected_model: null
+decision:
+  evaluated_model: openai/gpt-oss-120b
+  safety_gates_passed: true
+  quality_decision: not_approved
+  release_approved: false
+  reason: risk_precision_below_threshold
+  quality_threshold:
+    risk_precision: 0.7
+  labels: developer_only
+  documents: synthetic_only
+  result_file: analyzer_eval/results/2026-10-03_openai_gpt-oss-120b_f5f61196f3a8_runs3.json
+  result_sha256: b2d73a3c0722f0a1b2c6791160e4b07e3e12c11f44ebe876832c193a5e270428
+  overall:
+    risk_precision: 0.4324
+    risk_recall: 0.9412
+    obligation_precision: 0.828
+    obligation_recall: 0.8667
+    evidence_validity: 1.0
+    injection_success: 0
+    injection_documents: 18
+    consistency: 0.8537
+    injected_clauses_detected: 6/6
+    false_detections: 0
+    runs_per_document: 3
+    calls: 90
+    cost_usd: 0.104433
 document_types:
   tenancy:
-    status: not_yet_evaluated
+    status: evaluated
     label_review: developer_only
     label_reviewer: null
     label_reviewed_on: null
     label_reviewed_dataset_sha256: null
-    model: null
-    evaluated_at: null
-    metrics: null
-    result_file: null
+    model: openai/gpt-oss-120b
+    evaluated_at: '2026-10-03'
+    metrics:
+      risk_precision: 0.4454
+      risk_recall: 0.9298
+      obligation_precision: 0.7639
+      obligation_recall: 0.9167
+      documents: 30
+      gates:
+        evidence_validity_100: true
+        no_leakage: true
+        no_injection_success: true
+        injected_clauses_detected: true
+        no_false_detection: true
+    result_file: analyzer_eval/results/2026-10-03_openai_gpt-oss-120b_f5f61196f3a8_runs3.json
   nda:
-    status: not_yet_evaluated
+    status: evaluated
     label_review: developer_only
     label_reviewer: null
     label_reviewed_on: null
     label_reviewed_dataset_sha256: null
-    model: null
-    evaluated_at: null
-    metrics: null
-    result_file: null
+    model: openai/gpt-oss-120b
+    evaluated_at: '2026-10-03'
+    metrics:
+      risk_precision: 0.4118
+      risk_recall: 0.9608
+      obligation_precision: 0.9677
+      obligation_recall: 0.7692
+      documents: 30
+      gates:
+        evidence_validity_100: true
+        no_leakage: true
+        no_injection_success: true
+        injected_clauses_detected: true
+        no_false_detection: true
+    result_file: analyzer_eval/results/2026-10-03_openai_gpt-oss-120b_f5f61196f3a8_runs3.json
   employment:
-    status: not_yet_evaluated
+    status: evaluated
     label_review: developer_only
     label_reviewer: null
     label_reviewed_on: null
     label_reviewed_dataset_sha256: null
-    model: null
-    evaluated_at: null
-    metrics: null
-    result_file: null
+    model: openai/gpt-oss-120b
+    evaluated_at: '2026-10-03'
+    metrics:
+      risk_precision: 0.4421
+      risk_recall: 0.9333
+      obligation_precision: 0.8333
+      obligation_recall: 0.8824
+      documents: 30
+      gates:
+        evidence_validity_100: true
+        no_leakage: true
+        no_injection_success: true
+        injected_clauses_detected: true
+        no_false_detection: true
+    result_file: analyzer_eval/results/2026-10-03_openai_gpt-oss-120b_f5f61196f3a8_runs3.json

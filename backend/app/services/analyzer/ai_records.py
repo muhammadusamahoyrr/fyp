@@ -38,6 +38,10 @@ EVALUATED = "evaluated"
 DEVELOPER_ONLY = "developer_only"
 LAWYER_REVIEWED = "lawyer_reviewed"
 REQUIRED_GATES = ("evidence_validity_100", "no_leakage", "no_injection_success")
+# The quality decision on an evaluated model, apart from its safety gates: a
+# model can pass every safety gate and still not be good enough to show.
+QUALITY_DECISIONS = ("approved", "not_approved", "not_decided")
+SYNTHETIC_ONLY = "synthetic_only"
 
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -100,8 +104,11 @@ def policy_problems(record: dict | None, *, endpoint: str, zdr_verified_on: str,
 
 # ── the evaluation record ────────────────────────────────────────────────────
 
-_RECORD_KEYS = {"version", "created", "dataset", "schema_version", "prompt_version",
-                "required_gates", "selected_model", "document_types"}
+_RECORD_KEYS = {"version", "created", "dataset", "schema_version", "prompt_version", "detector_version",
+                "required_gates", "selected_model", "decision", "document_types"}
+_DECISION_KEYS = {"evaluated_model", "safety_gates_passed", "quality_decision", "release_approved",
+                  "reason", "quality_threshold", "labels", "documents", "result_file", "result_sha256",
+                  "overall"}
 _TYPE_KEYS = {"status", "label_review", "label_reviewer", "label_reviewed_on",
               "label_reviewed_dataset_sha256", "model", "evaluated_at", "metrics", "result_file"}
 
@@ -145,7 +152,45 @@ def parse_evaluation_record(raw: str, *, allowlist: tuple[str, ...] = ()) -> dic
     selected = data["selected_model"]
     if selected is not None and selected not in evaluated_models:
         raise RecordError("evaluation record: a selected model must be one that was evaluated")
+    _check_decision(data, evaluated_models)
     return data
+
+
+def _check_decision(data: dict, evaluated_models: set[str]) -> None:
+    """An evaluated model is not a selected one. Selecting needs a release
+    approval, which needs a quality approval; passing the safety gates is
+    neither. The record also may not claim more of its labels or documents
+    than they are."""
+    decision = data["decision"]
+    selected = data["selected_model"]
+    if decision is None:
+        if evaluated_models or selected is not None:
+            raise RecordError("evaluation record: an evaluated model needs a decision")
+        return
+    where = "evaluation record: decision"
+    if not isinstance(decision, dict) or set(decision) != _DECISION_KEYS:
+        raise RecordError(f"{where}: keys must be {sorted(_DECISION_KEYS)}")
+    if decision["evaluated_model"] not in evaluated_models:
+        raise RecordError(f"{where}: the decision is about a model that was evaluated")
+    if decision["quality_decision"] not in QUALITY_DECISIONS:
+        raise RecordError(f"{where}: quality_decision is one of {', '.join(QUALITY_DECISIONS)}")
+    if not isinstance(decision["release_approved"], bool) or not isinstance(decision["safety_gates_passed"], bool):
+        raise RecordError(f"{where}: release_approved and safety_gates_passed are true or false")
+    if decision["release_approved"] and decision["quality_decision"] != "approved":
+        raise RecordError(f"{where}: a release needs a quality approval")
+    if decision["release_approved"] and not decision["safety_gates_passed"]:
+        raise RecordError(f"{where}: a release needs every safety gate passed")
+    if (selected is not None) != (decision["release_approved"] and selected == decision["evaluated_model"]):
+        raise RecordError(f"{where}: a model is selected only when its release is approved")
+    if decision["quality_decision"] != "approved" and not (decision["reason"] or "").strip():
+        raise RecordError(f"{where}: a model that is not approved needs the reason")
+    reviewed = all(e["label_review"] == LAWYER_REVIEWED for e in (data["document_types"] or {}).values())
+    if decision["labels"] != (LAWYER_REVIEWED if reviewed else DEVELOPER_ONLY):
+        raise RecordError(f"{where}: labels must say how the dataset labels were reviewed")
+    if decision["documents"] != SYNTHETIC_ONLY:
+        raise RecordError(f"{where}: the evaluation documents are synthetic_only")
+    if not decision["result_file"] or not _SHA.match(str(decision["result_sha256"] or "")):
+        raise RecordError(f"{where}: the result file and its SHA-256 are required")
 
 
 def load_evaluation_record(path: Path | None = None) -> dict:
@@ -166,7 +211,11 @@ def evaluation_for(document_type: str | None) -> dict:
         return {"document_type": document_type, "status": "not_in_evaluation_dataset",
                 "label_review": None, "model": None, "evaluated_at": None,
                 "dataset_sha256": record["dataset"]["sha256"]}
+    decision = record["decision"] if entry["status"] == EVALUATED else None
     return {"document_type": document_type, "status": entry["status"],
             "label_review": entry["label_review"], "model": entry["model"],
             "evaluated_at": entry["evaluated_at"], "dataset_sha256": record["dataset"]["sha256"],
-            "record_created": record["created"]}
+            "record_created": record["created"],
+            "quality_decision": decision["quality_decision"] if decision else None,
+            "release_approved": decision["release_approved"] if decision else False,
+            "decision_reason": decision["reason"] if decision else None}
