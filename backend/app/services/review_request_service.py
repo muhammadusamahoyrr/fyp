@@ -66,6 +66,7 @@ from app.db.collections import (
     get_users_col,
 )
 from app.models import review_request as rr
+from app.services import review_request_notifications as notifications
 
 #: Receipts a single request may hold. A draft is edited a handful of times;
 #: the cap keeps a scripted loop from growing one row without bound.
@@ -459,12 +460,17 @@ async def _change(*, request_id: str, idempotency_key: str, op_name: str, body: 
         _validate(new_row)
         response = (lawyer_view(new_row, await _client_name(row["client_id"], session), now)
                     if lawyer_id is not None else client_view(new_row))
+        change: dict = {"$set": {**updates, "state_version": new_row["state_version"],
+                                 "event_seq": new_row["event_seq"], "updated_at": now,
+                                 f"receipts.{kh}": {"op": op_name, "fingerprint": fp, "response": response}}}
+        # Notification intents ride in THIS write: committed with the change
+        # or not at all (review_request_notifications).
+        intents = notifications.intents_for(row, new_row["status"], new_row["event_seq"], now)
+        if intents:
+            change["$push"] = {"pending_events": {"$each": intents}}
         result = await requests.update_one(
             {"_id": request_id, "state_version": expected_state_version, "status": row["status"]},
-            {"$set": {**updates, "state_version": new_row["state_version"],
-                      "event_seq": new_row["event_seq"], "updated_at": now,
-                      f"receipts.{kh}": {"op": op_name, "fingerprint": fp, "response": response}}},
-            session=session)
+            change, session=session)
         if result.matched_count != 1:
             raise _stale()
         await get_document_review_request_events_col().insert_one(
@@ -475,7 +481,7 @@ async def _change(*, request_id: str, idempotency_key: str, op_name: str, body: 
         return response
 
     try:
-        return await _in_transaction(op)
+        response = await _in_transaction(op)
     except DuplicateKeyError as exc:
         if "uniq_open_review_request" in str(exc):
             # Only an edit that moves the draft to another engagement can hit it.
@@ -483,6 +489,10 @@ async def _change(*, request_id: str, idempotency_key: str, op_name: str, body: 
             raise await _open_request_exists((row or {}).get("document_id", ""),
                                              body.get("engagement_id", "")) from None
         raise
+    # Committed. Prompt delivery is best effort and never raises; the
+    # reconciler is what guarantees it.
+    await notifications.deliver_now(request_id)
+    return response
 
 
 def _require_status(row: dict, *allowed: str, message: str, code: str = "invalid_transition") -> None:

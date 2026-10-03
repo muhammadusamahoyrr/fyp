@@ -1,9 +1,9 @@
 # Document Review Requests — Phase 1 plan
 
 Status: **Phase 1 in progress.** D1 shipped first as its own fix. Slice 1 (model, indexes,
-settings), slice 2 (client service and API), slice 3 (lawyer API) and slice 4 (engagement-end
-hook, retention, sweep, deletion hold) are implemented, behind `DOCUMENT_REVIEW_REQUESTS` (off).
-Slices 5 (notifications) and 6 (client UI) are not. The client-side DOCUMENTS_V2 document
+settings), slice 2 (client service and API), slice 3 (lawyer API), slice 4 (engagement-end
+hook, retention, sweep, deletion hold) and slice 5 (notifications) are implemented, behind
+`DOCUMENT_REVIEW_REQUESTS` (off). Slice 6 (client UI) is not. The client-side DOCUMENTS_V2 document
 DELETE itself does not exist yet (§7.4). Written 2026-10-03; decisions D1–D4 **decided**
 2026-10-03 (§14).
 Scope owner: Muhammad Usama. Related: `DOC_ANALYZER_PLAN.md` (the analyzer engine),
@@ -203,15 +203,41 @@ automatically; a lawyer starts it themselves (and today cannot, for a real docum
 
 | Event | To | Type (new `NotificationType`) |
 |---|---|---|
-| submitted | lawyer | `document_review_requested` — deep link to the inbox item |
-| accepted / declined | client | `document_review_accepted` / `document_review_declined` |
-| cancelled (client or system) after the lawyer could see it | lawyer | `document_review_cancelled` |
+| submitted | lawyer | `review_request_submitted` |
+| accepted / declined | client | `review_request_accepted` / `review_request_declined` |
+| cancelled (client or system) after the lawyer could see it (`submitted`/`viewed`) | lawyer | `review_request_cancelled` |
+
+Creating, editing or deleting a draft, `POST /view`, a download and retention starting notify
+no one; nor does the system cancelling a draft (it was never shared).
 
 The notification is a durable **intent** written in the same atomic update as the status
 change (the `pending_events` + reconciler pattern of `document_transitions`). Sending it is the
 reconciler's job: a failed or slow notification never rolls back or fails the request, and is
 retried. The notification text names the document title and client — never the note or any
 document text.
+
+As built (slice 5, `services/review_request_notifications.py`):
+
+- **Intent in the same write.** `_change` (submit, accept, decline, cancel) and the lifecycle
+  hook (system cancel) `$push` the intent onto `pending_events` in the very update that changes
+  the status, inside its transaction. A rolled-back change leaves no intent.
+- **Exactly one.** Dedupe key `review_request:{request_id}:{event_seq}:{recipient_id}:{kind}`
+  is the notification's `logical_event_id` (unique index). A retry, a crash between notifying
+  and removing the intent, or concurrent reconcilers all end with one notification. Intents
+  are removed by id (`$pull`), never by rewriting the array.
+- **Delivery.** Best effort right after the commit (`deliver_now`, never raises — a committed
+  submit is never turned into an error), and `reconcile()` every 30 s: bounded `_id`-ordered
+  batches over the rows that hold intents (partial index `review_requests_pending_events`,
+  hinted). A failure records the error class, backs off (2^n s, ≤ 10 min) and retries. No-op
+  while the flag is off; intents written earlier are delivered once it is on again.
+- **Recipient check.** At delivery the intent's recipient must still be the request's party in
+  that role; anything else is dropped and logged, never delivered.
+- **Content.** Title, the other party's name, and `payload = {review_request_id, link}` with
+  `link = /{lawyer|client}/review-requests/{id}` (the UI routes arrive in slice 6). Never the
+  note, the decline reason, document text, a storage path or a hash.
+- **WebSocket.** `notification_service.create_notification` now treats the WebSocket push as a
+  courtesy: a socket or Redis failure is logged and the stored notification stands.
+- Email and payment integrations are out of scope.
 
 ## 7. Access, revocation and retention
 

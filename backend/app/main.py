@@ -150,6 +150,28 @@ async def _review_request_sweep():
             logging.getLogger(__name__).exception("Review request lifecycle sweep failed")
 
 
+async def _review_request_notifier():
+    """Deliver document review request notification intents (plan §6).
+
+    Ungated like the relays: delivery is deduplicated by a unique key and an
+    intent is removed by id, so every worker may run it at once. A no-op
+    while DOCUMENT_REVIEW_REQUESTS is off.
+    """
+    import asyncio
+    import logging
+
+    interval = getattr(settings, "provenance_relay_seconds", 30)
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            from app.services.review_request_notifications import reconcile
+            await reconcile()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("Review request notification reconcile failed")
+
+
 async def _provenance_relay():
     """Deliver provenance records whose direct write failed.
 
@@ -425,6 +447,7 @@ async def lifespan(app: FastAPI):
     scheduler_tasks.append(_asyncio.create_task(_analyzer_housekeeping()))
     scheduler_tasks.append(_asyncio.create_task(_analyzer_worker()))
     scheduler_tasks.append(_asyncio.create_task(_review_request_sweep()))
+    scheduler_tasks.append(_asyncio.create_task(_review_request_notifier()))
 
     # EVENT OUTBOX relay: ungated, and NOT covered by the v2 relay above, which
     # returns immediately while DOCUMENTS_V2 is off. Agreement transitions park

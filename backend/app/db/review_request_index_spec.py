@@ -85,6 +85,18 @@ REVIEW_REQUEST_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         why=("The lifecycle sweep (§7.3 backstop) pages open requests and "
              "accepted ones without retention by `_id`, in bounded batches."),
     ),
+    IndexSpec(
+        collection="document_review_requests",
+        name="review_requests_pending_events",
+        keys=(("pending_events.id", ASCENDING),),
+        kind=QUERY, partial_filter={"pending_events.id": {"$exists": True}},
+        why=("The notification reconciler selects only the requests that still "
+             "hold undelivered intents (`pending_events.id` exists -- the "
+             "query's own predicate, so the planner can use this partial "
+             "index), then pages them by `_id` in bounded batches. Partial: "
+             "almost every request holds none. (Not on `_id`: an _id index "
+             "cannot be partial.)"),
+    ),
     # ── document_review_request_events ───────────────────────────────────────
     IndexSpec(
         collection="document_review_request_events",

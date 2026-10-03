@@ -54,6 +54,7 @@ from app.db.collections import (
     get_engagements_col,
 )
 from app.models import review_request as rr
+from app.services import review_request_notifications as notifications
 from app.services import review_request_service as svc
 
 SWEEP_BATCH = 200
@@ -152,11 +153,16 @@ async def _write(session, row: dict, updates: dict, now: datetime, event_type: s
     new_row = {**row, **updates, "state_version": row["state_version"] + 1,
                "event_seq": row["event_seq"] + 1, "updated_at": now}
     svc._validate(new_row)
+    change: dict = {"$set": {**updates, "state_version": new_row["state_version"],
+                             "event_seq": new_row["event_seq"], "updated_at": now}}
+    # A request the lawyer could already see: they are told it was cancelled.
+    # The intent commits with the cancellation; delivery is the reconciler's.
+    intents = notifications.intents_for(row, new_row["status"], new_row["event_seq"], now)
+    if intents:
+        change["$push"] = {"pending_events": {"$each": intents}}
     result = await get_document_review_requests_col().update_one(
         {"_id": row["_id"], "state_version": row["state_version"], **guard},
-        {"$set": {**updates, "state_version": new_row["state_version"],
-                  "event_seq": new_row["event_seq"], "updated_at": now}},
-        session=session)
+        change, session=session)
     if result.matched_count != 1:
         raise _Lost(row["_id"])
     await get_document_review_request_events_col().insert_one(
