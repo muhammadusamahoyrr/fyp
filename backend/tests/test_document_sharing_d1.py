@@ -1,4 +1,4 @@
-"""Decision D1 (2026-10-03) on the LEGACY submit path.
+"""Decisions D1 and D2 (2026-10-03) on the LEGACY submit path.
 
 The legacy `submit_for_review` used the case's lawyer if there was one, and
 otherwise ANY lawyer the client named who was flagged KYC-verified -- no
@@ -74,3 +74,12 @@ async def test_a_legacy_case_document_needs_the_engagement_on_its_case():
     case_doc = await legacy_doc(case_id="this-matter")
     with pytest.raises(ForbiddenError, match="on that case"):
         await document_service.submit_for_review(case_doc, CLIENT, LAWYER, None, "normal")
+
+
+async def test_d2_an_engaged_lawyer_without_a_kyc_flag_may_receive_it():
+    """D2 (2026-10-03): no KYC gate on the legacy path either."""
+    await get_users_col().update_one({"_id": LAWYER}, {"$set": {"lawyer_profile": {"kyc_verified": False}}})
+    await engage(CLIENT, LAWYER)
+    doc_id = await legacy_doc()
+    assert (await document_service.submit_for_review(doc_id, CLIENT, LAWYER, None, "normal"))["review_status"] \
+        == "submitted"

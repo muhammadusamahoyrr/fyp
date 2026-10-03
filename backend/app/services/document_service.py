@@ -699,8 +699,7 @@ async def submit_for_review(
     lawyer = await user_repo.find_by_id(target_lawyer_id)
     if not lawyer or lawyer.get("role") != "lawyer":
         raise NotFoundError("Lawyer")
-    if not (lawyer.get("lawyer_profile") or {}).get("kyc_verified"):
-        raise AppValidationError("Lawyer is not yet KYC-verified")
+    # No KYC gate (decision D2): the accepted engagement below authorises it.
 
     # D1 (2026-10-03): the same rule as DOCUMENTS_V2 -- only through an ACCEPTED
     # engagement with this lawyer, on the document's case when it has one. A

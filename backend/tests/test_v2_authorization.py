@@ -313,20 +313,24 @@ async def test_a_case_with_no_engaged_lawyer_refuses_every_choice(
     assert d["review_status"] != "submitted"
 
 
-async def test_the_kyc_gate_is_still_in_force(enabled, monkeypatch):
-    """The new rule is added to the old one, not substituted for it."""
+async def test_an_engaged_lawyer_without_a_kyc_flag_may_receive_it(enabled, monkeypatch):
+    """D2 (2026-10-03): no KYC gate. No KYC process exists, so the flag proves
+    nothing; the accepted engagement is the authorisation."""
     await get_users_col().update_one(
         {"_id": ENGAGED_LAWYER},
         {"$set": {"lawyer_profile": {"kyc_verified": False}}})
 
     doc_id, rev = await _submitted_document(monkeypatch)
-    with pytest.raises(Exception) as exc:
-        await tx.submit(
-            document_id=doc_id, actor_id=OWNER["_id"],
-            expected_version=rev["version"],
-            expected_pdf_sha256=rev["pdf_sha256"],
-            lawyer_id=ENGAGED_LAWYER, idempotency_key=key())
-    assert "kyc" in str(exc.value).lower()
+    out = await _submit(doc_id, rev, ENGAGED_LAWYER)
+    assert out["review_status"] == "submitted"
+
+
+async def test_the_recipient_must_still_be_a_registered_lawyer(enabled, monkeypatch):
+    """Removing the KYC gate does not open the recipient up to other roles."""
+    await get_users_col().update_one({"_id": ENGAGED_LAWYER}, {"$set": {"role": "client"}})
+    doc_id, rev = await _submitted_document(monkeypatch)
+    with pytest.raises(NotFoundError):
+        await _submit(doc_id, rev, ENGAGED_LAWYER)
 
 
 async def test_a_dangling_case_reference_fails_closed(enabled, monkeypatch):

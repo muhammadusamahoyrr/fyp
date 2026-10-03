@@ -284,18 +284,28 @@ async def test_submit_after_approval_preserves_history(mongo, _store):
 
 # ── authorization + KYC + safe errors ─────────────────────────────────────────
 
-async def test_submit_requires_kyc(mongo, _store):
+async def test_submit_needs_the_engagement_not_a_kyc_flag(mongo, _store):
+    """D2 (2026-10-03): no KYC gate. A registered lawyer without the flag is
+    refused only for want of an accepted engagement, and accepted with one."""
     doc, rev = await _doc_with_revision()
     await get_users_col().update_one(
         {"_id": "unverified-lawyer"},
         {"$set": {"_id": "unverified-lawyer", "role": "lawyer",
                   "email": "unverified-lawyer@test.invalid",
                   "lawyer_profile": {"kyc_verified": False}}}, upsert=True)
-    with pytest.raises(AppValidationError):
-        await tx.submit(document_id=doc["_id"], actor_id=CLIENT,
-                        expected_version=rev["version"], expected_pdf_sha256=rev["pdf_sha256"],
-                        lawyer_id="unverified-lawyer", idempotency_key="kyc")
-    await get_users_col().delete_one({"_id": "unverified-lawyer"})
+    try:
+        with pytest.raises(ForbiddenError, match="accepted engagement"):
+            await tx.submit(document_id=doc["_id"], actor_id=CLIENT,
+                            expected_version=rev["version"], expected_pdf_sha256=rev["pdf_sha256"],
+                            lawyer_id="unverified-lawyer", idempotency_key="kyc")
+        await engage(CLIENT, "unverified-lawyer")
+        out = await tx.submit(document_id=doc["_id"], actor_id=CLIENT,
+                              expected_version=rev["version"], expected_pdf_sha256=rev["pdf_sha256"],
+                              lawyer_id="unverified-lawyer", idempotency_key="kyc-engaged")
+        assert out["review_status"] == "submitted"
+    finally:
+        await disengage("unverified-lawyer")
+        await get_users_col().delete_one({"_id": "unverified-lawyer"})
 
 
 async def test_review_by_wrong_lawyer_forbidden(mongo, _store):
