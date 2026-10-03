@@ -1,0 +1,59 @@
+# Tenancy drafting questions (ANALYZER_HYPOTHESES_PLAN.md §3.2).
+# Drafting completeness only -- separate from the Punjab tenancy legal playbook
+# (playbooks/tenancy_punjab.yaml), which cites law and needs a lawyer's approval.
+catalogue: drafting-hypotheses.v1
+scope: tenancy
+questions:
+  - id: rent_amount
+    question: Is the rent amount stated?
+    detector: tenancy_rent_amount
+    polarity: attention_if_absent
+    ambiguous_when: Rent is mentioned but no figure is given.
+    explain: true
+
+  - id: rent_due
+    question: Is it stated when the rent is due?
+    detector: tenancy_rent_due
+    polarity: attention_if_absent
+    ambiguous_when: A rent period is given but no due day.
+    explain: true
+
+  - id: security_deposit
+    question: Is a security deposit and its refund addressed?
+    detector: tenancy_security_deposit
+    polarity: attention_if_absent
+    ambiguous_when: A deposit is mentioned without an amount or without how it is returned.
+    explain: true
+
+  - id: term_duration
+    question: Is the term of the tenancy stated?
+    detector: tenancy_term
+    polarity: attention_if_absent
+    ambiguous_when: A term or period is mentioned without a length.
+    explain: true
+
+  - id: premises_description
+    question: Are the premises described?
+    detector: tenancy_premises
+    polarity: attention_if_absent
+    ambiguous_when: The premises are referred to but not identified by number, location or address.
+    explain: true
+
+  - id: termination_notice
+    question: Is a notice period for ending the tenancy stated?
+    detector: tenancy_termination_notice
+    polarity: attention_if_absent
+    ambiguous_when: Ending the tenancy is mentioned without a notice period.
+    explain: true
+
+  - id: utilities_maintenance
+    question: Is it stated who pays utilities or handles maintenance?
+    detector: tenancy_utilities_maintenance
+    polarity: attention_if_absent
+    explain: false
+
+  - id: rent_increase
+    question: Is a rent increase addressed?
+    detector: tenancy_rent_increase
+    polarity: attention_if_absent
+    explain: false
