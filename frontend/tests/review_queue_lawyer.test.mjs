@@ -279,12 +279,19 @@ test("the deep link survives the dashboard remounting the queue (onboarding chec
     // for the onboarding check, and mount again -- and the request never
     // opened, because the first mount had already stripped the address.
     dom.reconfigure({ url: `http://localhost/lawyer/documents/review-queue?request=${ID}` });
-    api.__respond("getReviewRequest", () => new Promise(r => setTimeout(() => r({ data: ROW }), 80)));
+    // Every lookup waits until the test releases it: no timing, no race.
+    const pending = [];
+    api.__respond("getReviewRequest", () => new Promise(r => pending.push(() => r({ data: ROW }))));
     const first = await queue();                                    // the first answer is still in flight
+    assert.equal(pending.length, 1);
     await first.unmount();                                          // ...the onboarding swap
     assert.equal(dom.window.location.search, "", "the address was cleaned on the first read");
+    await act(async () => { pending[0](); });                       // the late answer reaches an unmounted detail
+    await settle();
     const second = await queue();
-    await settle(150);
+    assert.equal(pending.length, 2, "the remounted queue looks the request up again");
+    await act(async () => { pending[1](); });
+    await settle();
     assert.ok(second.container.querySelector(`[data-rq-detail="${ID}"]`), "the request opens after the remount");
     await second.unmount();
     // Settled now: a later visit to the queue does not reopen it.
