@@ -31,7 +31,7 @@ from app.db.collections import (
     get_analysis_findings_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import blob_store, deletion, injection, playbook_engine, worker
+from app.services.analyzer import blob_store, deletion, injection, playbook_engine, states, worker
 from app.services.analyzer.playbook_dsl import PlaybookError
 from app.services.analyzer.terms_stage import published_sentences
 from app.services.analyzer.worker import Lease, LostLease
@@ -88,11 +88,17 @@ async def run_analysis(lease: Lease) -> str:
         counts[label] = counts.get(label, 0) + 1
     from app.services.analyzer import ai_stage
 
-    go, why = ai_stage.wanted()
-    extra = {} if go else {"ai_report": ai_stage.unavailable(why)}
+    if run.get("engine") == states.ENGINE_HYPOTHESIS:
+        # The drafting-question engine replaces the open AI report: the scan
+        # runs next whatever the AI layer's state (it needs no model).
+        next_status, extra = "queued_hypothesis_scan", {}
+    else:
+        go, why = ai_stage.wanted()
+        next_status = "queued_ai_report" if go else "done"
+        extra = {} if go else {"ai_report": ai_stage.unavailable(why)}
     try:
         await worker.commit_stage(
-            lease, stage=STAGE, next_status="queued_ai_report" if go else "done", set_fields={
+            lease, stage=STAGE, next_status=next_status, set_fields={
                 "report": {"packs": summary, "counts": counts,
                            "context_version_id": context["_id"], "generated_at": now,
                            "security_scan": {
@@ -105,4 +111,4 @@ async def run_analysis(lease: Lease) -> str:
                 lease, status="cancelled"):
             return "cancelled"
         return "lost"
-    return "queued_ai_report" if go else "done"
+    return next_status

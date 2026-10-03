@@ -233,6 +233,10 @@ class Settings(BaseSettings):
     analyzer_ai_zdr_verified_on: str = ""        # YYYY-MM-DD
     analyzer_ai_zdr_evidence: str = ""           # where the proof is kept
     analyzer_ai_synthetic_only: bool = True
+    # ANALYZER_HYPOTHESES_PLAN.md: new runs use the fixed drafting-question
+    # engine (`ai-hypothesis.1`) instead of the open AI report (`ai-report.1`).
+    # Read when a run is CREATED; existing runs keep their engine. Off by default.
+    analyzer_engine_hypotheses: bool = False
 
     # Retention DELETION for intakes and their uploaded evidence — its own
     # switch, deliberately not shared with the V2 one above. The two stores hold

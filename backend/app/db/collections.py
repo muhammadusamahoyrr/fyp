@@ -348,6 +348,13 @@ def get_analysis_context_versions_col() -> AsyncIOMotorCollection:
     return get_database()["analysis_context_versions"]
 
 
+def get_analysis_hypothesis_results_col() -> AsyncIOMotorCollection:
+    """Drafting-question scanner results (ANALYZER_HYPOTHESES_PLAN.md §5):
+    one row per (run, stage, fence, question), written once and never
+    updated; visible only under the run's published fence."""
+    return get_database()["analysis_hypothesis_results"]
+
+
 def get_analysis_findings_col() -> AsyncIOMotorCollection:
     """Playbook results of a run (general and approved legal packs), keyed
     (run_id, stage, fence, ordinal). Sentence ids only -- quotes are cut from

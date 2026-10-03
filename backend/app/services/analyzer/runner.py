@@ -12,6 +12,7 @@ from app.services.analyzer import (
     ai_stage,
     analysis_stage,
     extraction_stage,
+    hypothesis_stage,
     segmentation_stage,
     states,
     terms_stage,
@@ -27,6 +28,7 @@ HANDLERS = {
     "extracting_terms": terms_stage.run_terms,
     "analyzing": analysis_stage.run_analysis,
     "ai_reporting": ai_stage.run_ai_report,
+    "hypothesis_scanning": hypothesis_stage.run_hypothesis_scan,
 }
 
 _QUEUED_FOR = {active: queued for queued, active in states.ACTIVE_FOR_QUEUED.items()}

@@ -234,6 +234,32 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="The unpublished-output sweep reads only rows older than its cutoff.",
     ),
+    # ── analysis_hypothesis_results (drafting-question scanner) ─────────────
+    IndexSpec(
+        collection="analysis_hypothesis_results",
+        name="uniq_analysis_hypothesis_results_row",
+        keys=(("run_id", ASCENDING), ("stage", ASCENDING), ("fence", ASCENDING),
+              ("question_id", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("One scanner answer per question per fence (ANALYZER_HYPOTHESES_PLAN.md "
+             "§5). Rows are inserted once and never updated; a stale worker's rows "
+             "carry an old fence and are never published or able to overwrite the "
+             "live fence's rows."),
+    ),
+    IndexSpec(
+        collection="analysis_hypothesis_results",
+        name="analysis_hypothesis_results_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every scanner result of a source.",
+    ),
+    IndexSpec(
+        collection="analysis_hypothesis_results",
+        name="analysis_hypothesis_results_created",
+        keys=(("created_at", ASCENDING),),
+        kind=QUERY,
+        why="The unpublished-output sweep reads only rows older than its cutoff.",
+    ),
     # ── analysis_doc_graph (definitions and cross-references) ────────────────
     IndexSpec(
         collection="analysis_doc_graph",

@@ -201,6 +201,10 @@ receipt" builds on this).
     prompt and schema version, model id.
 
   Evidence is offsets + hashes, never text. Raw provider output is never stored.
+- Which engine a run uses is set by `ANALYZER_ENGINE_HYPOTHESES` (default off) **when the run is created** and
+  stored as `run.engine` (`ai-report.1` | `ai-hypothesis.1`); flipping the setting never moves an existing run.
+  An `ai-hypothesis.1` run goes analysis → `queued_hypothesis_scan` → `hypothesis_scanning` → done, whatever the
+  AI layer's state. *(Step 3, built.)*
 - Two stages: `hypothesis_scan` (publishes scanner results) and `hypothesis_ai_review` (attaches signals). The
   second can fail, time out or be skipped without touching the first. A run using this engine does not run the
   `ai-report.1` stage. The engine is recorded on the run at creation; old runs keep theirs.

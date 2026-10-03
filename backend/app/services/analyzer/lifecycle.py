@@ -36,6 +36,7 @@ from app.db.collections import (
     get_analysis_runs_col,
     get_analysis_sources_col,
 )
+from app.core.config import settings
 from app.services.analyzer import blob_store, states
 from app.services.analyzer.errors import AnalyzerConflict, AnalyzerNotFound, UploadRejected
 from app.services.analyzer.txn import run_in_transaction
@@ -127,6 +128,9 @@ async def create_analysis(*, owner_id: str, idempotency_key: str, content: bytes
         "lease_expires_at": None,
         "cancel_requested": False,
         "options": options,
+        # Fixed for the life of the run (ANALYZER_HYPOTHESES_PLAN.md §5).
+        "engine": (states.ENGINE_HYPOTHESIS if settings.analyzer_engine_hypotheses
+                   else states.ENGINE_AI_REPORT),
         "created_at": now,
         "updated_at": now,
     }

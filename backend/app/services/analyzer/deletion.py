@@ -48,6 +48,7 @@ from app.db.collections import (
     get_analysis_deletion_outbox_col,
     get_analysis_doc_graph_col,
     get_analysis_findings_col,
+    get_analysis_hypothesis_results_col,
     get_analysis_runs_col,
     get_analysis_sentences_col,
     get_analysis_sources_col,
@@ -205,6 +206,7 @@ async def purge_source(source_id: str) -> str:
     await get_analysis_context_versions_col().delete_many({"source_id": source_id})
     await get_analysis_findings_col().delete_many({"source_id": source_id})
     await get_analysis_ai_items_col().delete_many({"source_id": source_id})
+    await get_analysis_hypothesis_results_col().delete_many({"source_id": source_id})
 
     # 5. A bare tombstone: nothing derived from the document survives.
     await sources.update_one(

@@ -22,6 +22,7 @@ QUEUED_STATES: tuple[str, ...] = (
     "queued_terms",
     "queued_analysis",
     "queued_ai_report",
+    "queued_hypothesis_scan",
 )
 ACTIVE_STATES: tuple[str, ...] = (
     "extracting",
@@ -29,6 +30,7 @@ ACTIVE_STATES: tuple[str, ...] = (
     "extracting_terms",
     "analyzing",
     "ai_reporting",
+    "hypothesis_scanning",
 )
 PAUSED_STATES: tuple[str, ...] = (
     "needs_ocr_confirmation",
@@ -47,7 +49,13 @@ ACTIVE_FOR_QUEUED: dict[str, str] = {
     "queued_terms": "extracting_terms",
     "queued_analysis": "analyzing",
     "queued_ai_report": "ai_reporting",
+    "queued_hypothesis_scan": "hypothesis_scanning",
 }
+
+#: The two analysis engines (ANALYZER_HYPOTHESES_PLAN.md §5). A run's engine is
+#: fixed when it is created; a run without the field is an `ai-report.1` run.
+ENGINE_AI_REPORT = "ai-report.1"
+ENGINE_HYPOTHESIS = "ai-hypothesis.1"
 
 INITIAL_STATE = "queued_extract"
 
