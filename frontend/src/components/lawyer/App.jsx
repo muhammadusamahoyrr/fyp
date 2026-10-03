@@ -18,16 +18,17 @@ import { ClientsPage } from "./ClientsPage.jsx";
 import { AILegalPage } from "./AILegalPage.jsx";
 import { DocAutomationPage } from "./DocAutomationPage.jsx";
 import { DocAnalyzerPage } from "./DocAnalyzerPage.jsx";
+import { ReviewQueuePage } from "./ReviewQueuePage.jsx";
 import { ProfilePage } from "./ProfilePage.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { DisputesInboxPage } from "./DisputesInboxPage.jsx";
 import { OnboardingPage, ONBOARDED_KEY, isLawyerOnboarded } from "./OnboardingPage.jsx";
-import { getMe, getNotifications, markNotificationRead, markAllNotificationsRead, openNotificationSocket } from "@/lib/api.js";
+import { getMe, getNotifications, listReviewInbox, markNotificationRead, markAllNotificationsRead, openNotificationSocket } from "@/lib/api.js";
 
 // LoginPage not yet implemented
 const LoginPage = () => null;
 const DocumentsPage = DocWorkflowApp;
-const pageMap = { dashboard: DashboardPage, cases: CasesPage, documents: DocumentsPage, appointments: AppointmentsPage, agreements: AgreementsPage, causelist: CauselistPage, caselaw: CaseLawPage, payments: PaymentsPage, clients: ClientsPage, "ai-legal": AILegalPage, "doc-automation": DocAutomationPage, "doc-analyzer": DocAnalyzerPage, "overseas-disputes": DisputesInboxPage, profile: ProfilePage, settings: SettingsPage, onboarding: OnboardingPage };
+const pageMap = { dashboard: DashboardPage, cases: CasesPage, documents: DocumentsPage, appointments: AppointmentsPage, agreements: AgreementsPage, causelist: CauselistPage, caselaw: CaseLawPage, payments: PaymentsPage, clients: ClientsPage, "ai-legal": AILegalPage, "doc-automation": DocAutomationPage, "doc-analyzer": DocAnalyzerPage, "review-queue": ReviewQueuePage, "overseas-disputes": DisputesInboxPage, profile: ProfilePage, settings: SettingsPage, onboarding: OnboardingPage };
 
 const _fmtAgo = (iso) => {
     if (!iso) return "";
@@ -72,6 +73,16 @@ export default function App({ initialPage = "dashboard" }) {
 
         return () => { cancelled = true; };
     }, [initialPage]);
+    // Document review requests: the Review Queue is listed only once the
+    // server confirms the feature is on (a 404 feature_disabled hides it).
+    const [reviewQueueOn, setReviewQueueOn] = useState(false);
+    useEffect(() => {
+        let alive = true;
+        listReviewInbox({ limit: 1 }).then(res => {
+            if (alive) setReviewQueueOn(Boolean(res && !res.error && res.data));
+        }).catch(() => {});
+        return () => { alive = false; };
+    }, []);
     const [collapsed, setCollapsed] = useState(false);
     const [navOpen, setNavOpen] = useState(false);   // mobile sidebar drawer
     const [activeCase, setActiveCaseState] = useState(null);
@@ -190,7 +201,8 @@ export default function App({ initialPage = "dashboard" }) {
                                 {navOpen && <div className="lw-scrim" onClick={() => setNavOpen(false)} aria-hidden />}
                                 <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed}
                                     unreadMsgs={unreadMsgs} toggleTheme={toggle} isDark={isDark}
-                                    mobileOpen={navOpen} onNavigate={() => setNavOpen(false)} />
+                                    mobileOpen={navOpen} onNavigate={() => setNavOpen(false)}
+                                    reviewQueueOn={reviewQueueOn} />
                             </>
                         )}
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0, position: "relative", zIndex: 1 }}>

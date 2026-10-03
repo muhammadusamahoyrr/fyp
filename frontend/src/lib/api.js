@@ -2516,3 +2516,42 @@ export async function cancelReviewRequest(requestId, { expectedStateVersion }, k
     body: JSON.stringify({ expected_state_version: expectedStateVersion }),
   });
 }
+
+/* ── Document review requests: the lawyer's side (plan §5, Phase 2 queue) ──
+ * The request's frozen lawyer only; anyone else gets the same 404 as a
+ * missing id. Every GET here is read-only: opening a request is an explicit
+ * `markReviewRequestViewed`. Nothing here starts an analysis. */
+export async function listReviewInbox({ status = null, cursor = null, limit = 20 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (status) params.set('status', status);
+  if (cursor) params.set('cursor', cursor);
+  return apiFetch(`/review-requests/inbox?${params}`);
+}
+
+export async function markReviewRequestViewed(requestId) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/view`, { method: 'POST' });
+}
+
+export async function acceptReviewRequest(requestId, { expectedStateVersion }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/accept`, {
+    method: 'POST', headers: v2Headers(key),
+    body: JSON.stringify({ expected_state_version: expectedStateVersion }),
+  });
+}
+
+export async function declineReviewRequest(requestId, { expectedStateVersion, reason = null }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/decline`, {
+    method: 'POST', headers: v2Headers(key),
+    body: JSON.stringify({ expected_state_version: expectedStateVersion, reason }),
+  });
+}
+
+/* The FROZEN PDF the client sent. The server re-hashes the bytes before
+ * sending; a mismatch is a 409 and no file. Returns { data: true } or
+ * { error, code, status }. */
+export async function downloadReviewRequestDocument(requestId, filename = 'document.pdf') {
+  const { data: res, error, status } = await apiFetch(
+    `/review-requests/${encodeURIComponent(requestId)}/document`, { returnResponse: true });
+  if (res) return _saveBlob(res, filename);
+  return { error: error?.message || 'Download failed', code: errorCode(error), status };
+}

@@ -157,3 +157,81 @@ export function readReviewRequestLink(search) {
 export const REQUEST_NOT_FOUND = "Review request not found. It may have been deleted, or the link is not for your account.";
 export const DRAFT_LOCKED_NOTICE =
     "The version and the lawyer of a draft cannot be changed. To change them, delete this draft and start a new request.";
+
+/* ── The lawyer's side (Phase 2 Review Queue) ─────────────────────────────── */
+
+export const DECLINE_REASON_MAX = 500;
+export const REVIEW_QUEUE_PATH = "/lawyer/documents/review-queue";
+
+/* Lawyer notification deep link: /lawyer/review-requests/{id} redirects here.
+ * Same rules as the client's: a fixed path, a validated id as a query value. */
+export function lawyerReviewRequestDeepLink(id) {
+    const params = new URLSearchParams();
+    if (isRequestId(id)) params.set("request", id);
+    else params.set("missing", "1");
+    return `${REVIEW_QUEUE_PATH}?${params.toString()}`;
+}
+
+export function readLawyerReviewLink(search) {
+    const params = new URLSearchParams(typeof search === "string" ? search : "");
+    const raw = params.get("request");
+    const requestId = isRequestId(raw) ? raw : null;
+    return { requestId, invalid: params.get("missing") === "1" || (raw !== null && !requestId) };
+}
+
+/* A request as its lawyer sees it. */
+export function lawyerStatusView(request) {
+    switch (request?.status) {
+        case "submitted": return { label: "New", tone: "info", detail: "Not opened yet." };
+        case "viewed": return { label: "Opened", tone: "info", detail: "You have opened this request." };
+        case "accepted": return { label: "Accepted", tone: "low", detail: "You agreed to review this version." };
+        case "declined": return { label: "Declined", tone: "high", detail: "You declined this request." };
+        case "cancelled": return {
+            label: "Cancelled", tone: "muted",
+            detail: request?.cancel_reason === "engagement_ended"
+                ? "Cancelled because the engagement ended."
+                : request?.cancel_reason === "document_deleted"
+                    ? "Cancelled because the client deleted the document."
+                    : "The client cancelled this request.",
+        };
+        default: return { label: "Unknown", tone: "muted", detail: "" };
+    }
+}
+
+/* What the lawyer may do now. Download follows the server's own answer. */
+export function lawyerActions(request) {
+    const open = request?.status === "submitted" || request?.status === "viewed";
+    return {
+        markViewed: request?.status === "submitted",
+        accept: open,
+        decline: open,
+        download: Boolean(request?.document_available),
+    };
+}
+
+export function lawyerErrorMessage(code, fallback) {
+    switch (code) {
+        case "stale_state":
+            return "This request changed while you were looking at it (the client may have cancelled). It has been reloaded.";
+        case "invalid_transition":
+            return "This request is no longer open, so it cannot be accepted or declined.";
+        case "engagement_not_active":
+            return "The engagement with this client is no longer active.";
+        case "integrity":
+            return "The stored file does not match the version the client sent, so it was not downloaded. Please report this.";
+        case "artifact_unavailable":
+            return "The file for this version could not be read. Try again later.";
+        case "not_found":
+            return "This request is not available.";
+        default:
+            return requestErrorMessage(code, fallback);
+    }
+}
+
+export const LAWYER_REQUEST_NOT_FOUND =
+    "Review request not found. It may have been withdrawn, or it was not sent to you.";
+
+/* The Analyzer is synthetic-only: a client's real document is never sent to it
+ * from here, and no "Open in Analyzer" control exists until a real-document AI
+ * policy, consent and retention are approved. Exported so a test can pin it. */
+export const ANALYZER_HANDOFF_ENABLED = false;

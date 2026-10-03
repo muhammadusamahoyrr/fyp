@@ -115,6 +115,9 @@ const NAV_SECTIONS = [
             { id: "documents", label: "Documents", icon: "documents" },
             // The Document Analyzer: a lawyer's tool only (2026-10-03).
             { id: "doc-analyzer", label: "Document Analyzer", icon: "documents" },
+            // Document review requests (Phase 2). Listed only while the server
+            // has DOCUMENT_REVIEW_REQUESTS on -- see `reviewQueueOn`.
+            { id: "review-queue", label: "Review Queue", icon: "documents", requires: "reviewQueue" },
             { id: "agreements", label: "Agreements", icon: "documents" },
             // OUT OF SCOPE, 2026-09-23. "Overseas Disputes" is the lawyer side
             // of the client's "Property Dispute" module; both are hidden
@@ -234,7 +237,7 @@ function SectionLabel({ label, collapsed, t }) {
         : null;
 }
 
-function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs, mobileOpen = false, onNavigate }) {
+function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs, mobileOpen = false, onNavigate, reviewQueueOn = false }) {
     const { t, toggle } = useTheme();
     const { user } = useAuth();
     const { notifs, clearNotif, clearAll } = useNotif();
@@ -356,7 +359,7 @@ function Sidebar({ page, setPage, collapsed, setCollapsed, unreadMsgs, mobileOpe
                 {NAV_SECTIONS.map(section => (
                     <div key={section.id}>
                         <SectionLabel label={section.label} collapsed={collapsed} t={t} />
-                        {section.items.map(item => (
+                        {section.items.filter(item => item.requires !== "reviewQueue" || reviewQueueOn).map(item => (
                             <NavItem key={item.id} item={item} page={page} setPage={navigate} collapsed={collapsed} t={t} unreadMsgs={unreadMsgs} />
                         ))}
                     </div>
