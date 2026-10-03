@@ -278,7 +278,8 @@ async def test_only_a_validation_set_can_earn_engineering_passed(tmp_path, monke
 
 def test_dataset_roles_are_fixed():
     assert ev.role_of("calib-1") == "development"
-    assert ev.role_of("validation-1") == "validation"
+    assert ev.role_of("validation-1") == "development"      # tuned on after its baseline was kept
+    assert ev.role_of("validation-2") == "validation"
     assert ev.role_of("holdout-1") == "holdout"
 
 

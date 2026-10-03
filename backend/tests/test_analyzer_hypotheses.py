@@ -320,3 +320,89 @@ Issued on 6 June 2026 by Indus Mills (the "Mill") to Farah Naz (the "Engineer").
 
 def test_the_scan_is_deterministic():
     assert run(TENANCY, "tenancy")["results"] == run(TENANCY, "tenancy")["results"]
+
+
+# ── from the validation-1 findings (validation-1 is a development set now) ──
+
+def test_a_signature_line_is_a_signature_block_not_a_placeholder_but_body_blanks_are():
+    signed = """TENANCY AGREEMENT
+This Agreement is made on 3 May 2026 between Kashif Raza (the "Landlord") and Hira Batool (the "Tenant").
+1. The Landlord lets House No. 12, Street 4, Johar Town, Lahore to the Tenant.
+
+Landlord: ________________      Tenant: ________________
+Witness 1: ______________       Witness 2: ______________
+"""
+    out = run(signed, "tenancy")["by_id"]
+    assert out["signature_block"]["status"] == "present"
+    assert out["blank_placeholders"]["status"] == "not_located"
+    assert out["parties_identified"]["status"] == "present"       # a signature line is not a party's name
+    body_blank = signed.replace("Lahore to the Tenant.", "Lahore to the Tenant. CNIC of the Tenant: ____________")
+    assert run(body_blank, "tenancy")["by_id"]["blank_placeholders"]["status"] == "present"
+    # A value field in the signing area ("Date: ____") is still a blank to fill.
+    dated = signed + "Date: ____________\n"
+    assert run(dated, "tenancy")["by_id"]["blank_placeholders"]["status"] == "present"
+
+
+def test_parties_are_combined_across_lines_and_sentences():
+    letter = """OFFER LETTER
+Date: 2 June 2026
+Ms. Amna Rafiq, Multan
+
+Dear Ms. Amna,
+We offer you the post of Lab Assistant from 1 July 2026.
+
+For Bahauddin Diagnostics
+"""
+    assert run(letter, "employment")["by_id"]["parties_identified"]["status"] == "present"
+    sheet = """KEY TERMS
+- Lessor: Mr. Nadeem Akhtar, Sahiwal
+- Lessee: a firm to be named later
+"""
+    out = run(sheet, "tenancy")["by_id"]["parties_identified"]
+    assert (out["status"], out["reason_code"]) == ("ambiguous", "one_party_only")
+    generic = "This agreement is made between the First Party and the Second Party.\n"
+    assert run(generic, "tenancy")["by_id"]["parties_identified"]["status"] == "not_located"
+
+
+def test_an_undefined_term_is_a_capitalised_term_used_as_one():
+    text = """APPOINTMENT LETTER
+Issued on 4 June 2026 by Ravi Glass (the "Company") to Mr. Asim Noor (the "Employee").
+1. The Employee is appointed as Store Keeper and shall follow the Store Procedures.
+2. Disputes go to the courts at Lahore under the Arbitration Act, 1940.
+"""
+    out = run(text, "employment")["by_id"]["undefined_terms"]
+    assert out["status"] == "present"
+    clean = text.replace(" and shall follow the Store Procedures", "")
+    # A job title, a statute, a place and a party name are not drafting terms.
+    assert run(clean, "employment")["by_id"]["undefined_terms"]["status"] == "not_located"
+
+
+def test_two_values_in_one_sentence_are_told_apart_but_across_sentences_conflict():
+    one = """EMPLOYMENT AGREEMENT
+Made on 5 May 2026 between Kohinoor Mills (the "Employer") and Saad Iqbal (the "Employee").
+1. After confirmation, 60 days' notice by either side; during probation, 15 days' notice.
+"""
+    assert run(one, "employment")["by_id"]["conflicting_values"]["status"] == "not_located"
+    two = one + "2. The Employee shall start work on 1 June 2026.\n3. The Employee shall start work on 15 June 2026.\n"
+    assert run(two, "employment")["by_id"]["conflicting_values"]["status"] == "present"
+    heading = """NON-DISCLOSURE AGREEMENT
+Made on 6 May 2026 between Tariq Foods (the "Discloser") and Nida Shah (the "Recipient").
+2. Mutual or One-Way Obligations
+Only the Recipient is bound by this Agreement.
+"""
+    out = run(heading, "nda")["by_id"]
+    assert out["conflicting_values"]["status"] == "not_located"   # a heading states no value
+    assert out["mutual_or_one_way"]["status"] == "present"
+
+
+def test_inline_captions_label_lines_and_roman_urdu_are_read():
+    text = """TENANCY
+Made on 7 May 2026 between Jamil Khan (the "Landlord") and Rubab Ali (the "Tenant").
+IV.  RENT. Rs. 90,000 per month.
+Due: 5th of every month
+Security: two months' rent, refundable on vacating.
+Har saal kiraya Rs. 2,000 barhe ga.
+"""
+    out = run(text, "tenancy")["by_id"]
+    for q in ("rent_amount", "rent_due", "security_deposit", "rent_increase"):
+        assert out[q]["status"] == "present", q

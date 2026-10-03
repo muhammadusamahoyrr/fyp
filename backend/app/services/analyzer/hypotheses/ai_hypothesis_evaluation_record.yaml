@@ -12,13 +12,13 @@ versions:
   catalogue: drafting-hypotheses.v1
   catalogue_sha256: 8594d27a6a8ca6183d85168fa0003bef54031d108726cd896afd4194a68690b4
   scanner: hypothesis-scanner.1
-  scanner_code_sha256: 4c42e678827432018ff4c2bf2999157d7803065e83cfcb969e31c108968bbcc8
+  scanner_code_sha256: 299cf4139990bce90d8cc355f3c1a1acb602f42a82e4aaa7acf0e20e9fa98957
   prompt: ai-hypothesis-prompt.1
   schema: ai-hypothesis.1
   prompt_sha256: ee920bc3c64a6a7031bb8356b81a6c25501345d9664ea38f263c1b0d63733374
 dataset:
   name: validation-1
-  role: validation
+  role: development
   sha256: f0246a6a37a43e8735fa40581e48dbdc27a959ca059faad7487be37384fd7b49
   documents: 69
   labelling_rubric: LABELLING_RUBRIC.md
@@ -36,88 +36,77 @@ gate:
     leakage: 0
   per_question_min_support: 3
   validation_min_examples: 8
-  dataset_role: validation
+  dataset_role: development
   checks:
-    attention_precision: false
+    attention_precision: true
     attention_recall: true
     evidence_validity: true
     no_weak_questions: false
-    coverage: true
   status: not_passed
 scanner_only:
-  tp: 348
-  fp: 171
-  fn: 34
-  tn: 574
+  tp: 362
+  fp: 27
+  fn: 20
+  tn: 718
   items: 1127
-  attention_precision: 0.6705
-  attention_recall: 0.911
+  attention_precision: 0.9306
+  attention_recall: 0.9476
   unable_rate: 0.0
-  status_agreement: 0.7853
+  status_agreement: 0.9326
   evidence_validity: 1.0
 by_document_type:
   employment:
-    tp: 134
-    fp: 53
-    fn: 10
-    tn: 194
+    tp: 136
+    fp: 7
+    fn: 8
+    tn: 240
     items: 391
-    attention_precision: 0.7166
-    attention_recall: 0.9306
+    attention_precision: 0.951
+    attention_recall: 0.9444
     unable_rate: 0.0
-    status_agreement: 0.8005
+    status_agreement: 0.9335
   nda:
-    tp: 99
-    fp: 58
-    fn: 10
-    tn: 178
+    tp: 105
+    fp: 13
+    fn: 4
+    tn: 223
     items: 345
-    attention_precision: 0.6306
-    attention_recall: 0.9083
+    attention_precision: 0.8898
+    attention_recall: 0.9633
     unable_rate: 0.0
-    status_agreement: 0.771
+    status_agreement: 0.9275
   tenancy:
-    tp: 115
-    fp: 60
-    fn: 14
-    tn: 202
+    tp: 121
+    fp: 7
+    fn: 8
+    tn: 255
     items: 391
-    attention_precision: 0.6571
-    attention_recall: 0.8915
+    attention_precision: 0.9453
+    attention_recall: 0.938
     unable_rate: 0.0
-    status_agreement: 0.7826
+    status_agreement: 0.9361
 by_question:
   blank_placeholders:
     tp: 9
-    fp: 48
+    fp: 1
     fn: 0
-    tn: 12
+    tn: 59
     items: 69
-    attention_precision: 0.1579
+    attention_precision: 0.9
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.3043
+    status_agreement: 0.9855
   compelled_disclosure:
     tp: 12
-    fp: 4
+    fp: 0
     fn: 0
-    tn: 7
+    tn: 11
     items: 23
-    attention_precision: 0.75
+    attention_precision: 1.0
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.7826
+    status_agreement: 0.9565
   confidential_definition:
-    tp: 8
-    fp: 6
-    fn: 1
-    tn: 8
-    items: 23
-    attention_precision: 0.5714
-    attention_recall: 0.8889
-    unable_rate: 0.0
-    status_agreement: 0.6522
-  confidentiality_duration:
     tp: 9
     fp: 3
     fn: 0
@@ -126,25 +115,35 @@ by_question:
     attention_precision: 0.75
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.7826
-  conflicting_values:
-    tp: 6
-    fp: 5
-    fn: 3
-    tn: 55
-    items: 69
-    attention_precision: 0.5455
-    attention_recall: 0.6667
+    status_agreement: 0.8261
+  confidentiality_duration:
+    tp: 9
+    fp: 0
+    fn: 0
+    tn: 14
+    items: 23
+    attention_precision: 1.0
+    attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.8841
-  dispute_resolution:
-    tp: 39
-    fp: 1
+    status_agreement: 0.9565
+  conflicting_values:
+    tp: 7
+    fp: 0
     fn: 2
+    tn: 60
+    items: 69
+    attention_precision: 1.0
+    attention_recall: 0.7778
+    unable_rate: 0.0
+    status_agreement: 0.971
+  dispute_resolution:
+    tp: 38
+    fp: 1
+    fn: 3
     tn: 27
     items: 69
-    attention_precision: 0.975
-    attention_recall: 0.9512
+    attention_precision: 0.9744
+    attention_recall: 0.9268
     unable_rate: 0.0
     status_agreement: 0.9275
   execution_date:
@@ -158,13 +157,13 @@ by_question:
     unable_rate: 0.0
     status_agreement: 0.9565
   governing_law_stated:
-    tp: 43
+    tp: 42
     fp: 1
-    fn: 1
+    fn: 2
     tn: 24
     items: 69
-    attention_precision: 0.9773
-    attention_recall: 0.9773
+    attention_precision: 0.9767
+    attention_recall: 0.9545
     unable_rate: 0.0
     status_agreement: 0.913
   leave:
@@ -178,15 +177,15 @@ by_question:
     unable_rate: 0.0
     status_agreement: 0.9565
   mutual_or_one_way:
-    tp: 8
-    fp: 6
-    fn: 2
-    tn: 7
+    tp: 10
+    fp: 2
+    fn: 0
+    tn: 11
     items: 23
-    attention_precision: 0.5714
-    attention_recall: 0.8
+    attention_precision: 0.8333
+    attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.5652
+    status_agreement: 0.8261
   notice_period:
     tp: 9
     fp: 0
@@ -198,45 +197,45 @@ by_question:
     unable_rate: 0.0
     status_agreement: 0.913
   parties_identified:
-    tp: 9
-    fp: 25
-    fn: 3
-    tn: 32
-    items: 69
-    attention_precision: 0.2647
-    attention_recall: 0.75
-    unable_rate: 0.0
-    status_agreement: 0.5507
-  pay_date:
-    tp: 9
-    fp: 4
+    tp: 12
+    fp: 0
     fn: 0
-    tn: 10
-    items: 23
-    attention_precision: 0.6923
+    tn: 57
+    items: 69
+    attention_precision: 1.0
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.7391
-  position_role:
+    status_agreement: 0.971
+  pay_date:
     tp: 9
-    fp: 6
-    fn: 1
-    tn: 7
-    items: 23
-    attention_precision: 0.6
-    attention_recall: 0.9
-    unable_rate: 0.0
-    status_agreement: 0.5217
-  premises_description:
-    tp: 5
     fp: 1
-    fn: 4
+    fn: 0
     tn: 13
     items: 23
-    attention_precision: 0.8333
-    attention_recall: 0.5556
+    attention_precision: 0.9
+    attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.7826
+    status_agreement: 0.8696
+  position_role:
+    tp: 9
+    fp: 1
+    fn: 1
+    tn: 12
+    items: 23
+    attention_precision: 0.9
+    attention_recall: 0.9
+    unable_rate: 0.0
+    status_agreement: 0.8696
+  premises_description:
+    tp: 6
+    fp: 0
+    fn: 3
+    tn: 14
+    items: 23
+    attention_precision: 1.0
+    attention_recall: 0.6667
+    unable_rate: 0.0
+    status_agreement: 0.8696
   probation:
     tp: 11
     fp: 0
@@ -248,35 +247,35 @@ by_question:
     unable_rate: 0.0
     status_agreement: 1.0
   rent_amount:
-    tp: 8
+    tp: 10
     fp: 3
-    fn: 2
+    fn: 0
     tn: 10
     items: 23
-    attention_precision: 0.7273
-    attention_recall: 0.8
+    attention_precision: 0.7692
+    attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.7826
+    status_agreement: 0.8696
   rent_due:
     tp: 9
-    fp: 4
+    fp: 0
     fn: 1
-    tn: 9
+    tn: 13
     items: 23
-    attention_precision: 0.6923
+    attention_precision: 1.0
     attention_recall: 0.9
     unable_rate: 0.0
-    status_agreement: 0.7391
+    status_agreement: 0.913
   rent_increase:
     tp: 12
-    fp: 4
+    fp: 0
     fn: 1
-    tn: 6
+    tn: 10
     items: 23
-    attention_precision: 0.75
+    attention_precision: 1.0
     attention_recall: 0.9231
     unable_rate: 0.0
-    status_agreement: 0.6957
+    status_agreement: 0.8696
   return_or_destruction:
     tp: 9
     fp: 2
@@ -299,24 +298,24 @@ by_question:
     status_agreement: 1.0
   security_deposit:
     tp: 10
-    fp: 5
+    fp: 1
     fn: 0
-    tn: 8
+    tn: 12
     items: 23
-    attention_precision: 0.6667
+    attention_precision: 0.9091
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.7826
+    status_agreement: 0.9565
   signature_block:
     tp: 9
-    fp: 34
+    fp: 2
     fn: 1
-    tn: 25
+    tn: 57
     items: 69
-    attention_precision: 0.2093
+    attention_precision: 0.8182
     attention_recall: 0.9
     unable_rate: 0.0
-    status_agreement: 0.4928
+    status_agreement: 0.9565
   standard_exclusions:
     tp: 11
     fp: 2
@@ -329,14 +328,14 @@ by_question:
     status_agreement: 0.913
   start_date:
     tp: 9
-    fp: 2
+    fp: 1
     fn: 0
-    tn: 12
+    tn: 13
     items: 23
-    attention_precision: 0.8182
+    attention_precision: 0.9
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.913
+    status_agreement: 0.9565
   term_duration:
     tp: 10
     fp: 1
@@ -349,24 +348,24 @@ by_question:
     status_agreement: 0.8261
   termination_notice:
     tp: 12
-    fp: 3
+    fp: 0
     fn: 0
-    tn: 8
+    tn: 11
     items: 23
-    attention_precision: 0.8
+    attention_precision: 1.0
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.7391
+    status_agreement: 0.913
   undefined_terms:
-    tp: 0
-    fp: 0
-    fn: 9
-    tn: 60
+    tp: 6
+    fp: 4
+    fn: 3
+    tn: 56
     items: 69
-    attention_precision: null
-    attention_recall: 0.0
+    attention_precision: 0.6
+    attention_recall: 0.6667
     unable_rate: 0.0
-    status_agreement: 0.8696
+    status_agreement: 0.8986
   unresolved_references:
     tp: 8
     fp: 0
@@ -398,28 +397,7 @@ by_question:
     unable_rate: 0.0
     status_agreement: 0.913
 weak_questions:
-- question_id: blank_placeholders
-  fails:
-  - precision
-  precision: 0.1579
-  recall: 1.0
-  flagged: 57
-  gold_attention: 9
-- question_id: compelled_disclosure
-  fails:
-  - precision
-  precision: 0.75
-  recall: 1.0
-  flagged: 16
-  gold_attention: 12
 - question_id: confidential_definition
-  fails:
-  - precision
-  precision: 0.5714
-  recall: 0.8889
-  flagged: 14
-  gold_attention: 9
-- question_id: confidentiality_duration
   fails:
   - precision
   precision: 0.75
@@ -428,91 +406,32 @@ weak_questions:
   gold_attention: 9
 - question_id: conflicting_values
   fails:
-  - precision
   - recall
-  precision: 0.5455
-  recall: 0.6667
-  flagged: 11
+  precision: 1.0
+  recall: 0.7778
+  flagged: 7
   gold_attention: 9
-- question_id: mutual_or_one_way
-  fails:
-  - precision
-  - recall
-  precision: 0.5714
-  recall: 0.8
-  flagged: 14
-  gold_attention: 10
-- question_id: parties_identified
-  fails:
-  - precision
-  - recall
-  precision: 0.2647
-  recall: 0.75
-  flagged: 34
-  gold_attention: 12
-- question_id: pay_date
-  fails:
-  - precision
-  precision: 0.6923
-  recall: 1.0
-  flagged: 13
-  gold_attention: 9
-- question_id: position_role
-  fails:
-  - precision
-  precision: 0.6
-  recall: 0.9
-  flagged: 15
-  gold_attention: 10
 - question_id: premises_description
   fails:
   - recall
-  precision: 0.8333
-  recall: 0.5556
+  precision: 1.0
+  recall: 0.6667
   flagged: 6
   gold_attention: 9
 - question_id: rent_amount
   fails:
   - precision
-  - recall
-  precision: 0.7273
-  recall: 0.8
-  flagged: 11
-  gold_attention: 10
-- question_id: rent_due
-  fails:
-  - precision
-  precision: 0.6923
-  recall: 0.9
-  flagged: 13
-  gold_attention: 10
-- question_id: rent_increase
-  fails:
-  - precision
-  precision: 0.75
-  recall: 0.9231
-  flagged: 16
-  gold_attention: 13
-- question_id: security_deposit
-  fails:
-  - precision
-  precision: 0.6667
+  precision: 0.7692
   recall: 1.0
-  flagged: 15
-  gold_attention: 10
-- question_id: signature_block
-  fails:
-  - precision
-  precision: 0.2093
-  recall: 0.9
-  flagged: 43
+  flagged: 13
   gold_attention: 10
 - question_id: undefined_terms
   fails:
+  - precision
   - recall
-  precision: null
-  recall: 0.0
-  flagged: 0
+  precision: 0.6
+  recall: 0.6667
+  flagged: 10
   gold_attention: 9
 coverage:
   min_examples: 8
@@ -621,7 +540,7 @@ v1_regression:
   role: regression_only
   gold_risks: 51
   gold_risks_touched_by_a_scanner_flag: 23
-  scanner_flags: 270
+  scanner_flags: 276
   ai_report_1_reference:
     risk_precision: 0.4324
     risk_recall: 0.9412

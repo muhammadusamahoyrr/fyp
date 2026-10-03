@@ -20,11 +20,17 @@ DATASETS (analyzer_eval/hypotheses/<name>/) and their ROLES:
   calib-1       DEVELOPMENT set. Its failures were used to improve the
                 detectors, so it can never earn `engineering_passed` again:
                 the most it reports is `development_passed`.
-  validation-1  VALIDATION set, written independently (fresh author, given
-                only the frozen catalogue and the labelling rubric), hashed
-                before any run. Developer-labelled: at most
-                `engineering_passed`, and only with enough examples per
-                question (VALIDATION_MIN_EXAMPLES attention and non-attention).
+  validation-1  written independently and frozen as the first VALIDATION set.
+                It failed (0.6705 / 0.911, kept for good in baselines/); its
+                findings were then used to improve the detectors, so it is a
+                DEVELOPMENT set now (at most `development_passed`).
+  validation-2  VALIDATION set, written independently (a fresh author given
+                only the frozen catalogue and LABELLING_RUBRIC.v2.md), hashed
+                before any run. Scored ONCE: no detector tuning after it is
+                seen; a failure stays `not_passed` (no endless rotation of
+                test sets). Developer-labelled: at most `engineering_passed`,
+                and only with enough examples per question
+                (VALIDATION_MIN_EXAMPLES attention and non-attention).
   holdout-1     sealed: refused unless explicitly unsealed with lawyer labels
   v1         (the ai-report.1 set) regression comparison only -- see
              `v1_regression`; never used to build or tune anything
@@ -56,7 +62,7 @@ RECORD_PATH = Path(__file__).resolve().parent / "ai_hypothesis_evaluation_record
 BASELINES = Path(__file__).resolve().parent / "baselines"
 #: The labelling rubric each independently written set was authored from.
 #: A rubric is never edited in place: a new version is a new file.
-RUBRICS = {"validation-1": "LABELLING_RUBRIC.md"}
+RUBRICS = {"validation-1": "LABELLING_RUBRIC.md", "validation-2": "LABELLING_RUBRIC.v2.md"}
 FREEZE_MANIFEST = "FROZEN.txt"
 
 
@@ -87,7 +93,8 @@ VALIDATION_MIN_EXAMPLES = 8
 
 DEVELOPMENT, VALIDATION, HOLDOUT, ADHOC = "development", "validation", "holdout", "adhoc"
 #: The only sets that may earn `engineering_passed` are validation sets.
-DATASET_ROLES = {"calib-1": DEVELOPMENT, "validation-1": VALIDATION, "holdout-1": HOLDOUT}
+DATASET_ROLES = {"calib-1": DEVELOPMENT, "validation-1": DEVELOPMENT, "validation-2": VALIDATION,
+                 "holdout-1": HOLDOUT}
 STATUSES = ("not_passed", "development_passed", "engineering_passed")
 
 
