@@ -10,7 +10,10 @@
      and the definitions / cross-reference graph built from them
      (doc_graph.py) under the same key, so it publishes -- or is swept --
      with them.
-  4. Publish through the fenced, source-guarded commit and pause the run in
+  4. Scan the frozen text, once, for embedded instructions addressed to an
+     AI (injection.py) and record ids and reason codes only -- the analysis
+     and AI stages consume this record and never rescan.
+  5. Publish through the fenced, source-guarded commit and pause the run in
      `needs_document_confirmation`, carrying the document-type and province
      PROPOSALS with the sentence ids behind them. The person decides.
 """
@@ -27,7 +30,7 @@ from app.db.collections import (
     get_analysis_text_pages_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import blob_store, deletion, doc_graph, segmentation, worker
+from app.services.analyzer import blob_store, deletion, doc_graph, injection, segmentation, worker
 from app.services.analyzer.worker import Lease, LostLease
 
 STAGE = "segment"
@@ -75,6 +78,10 @@ async def run_segment(lease: Lease) -> str:
         await worker.finish_without_result(lease, status="failed", error_code="no_sentences")
         return "failed:no_sentences"
     graph_rows, graph_summary = doc_graph.build(text, clauses, sentences, blocks, pages)
+    security_scan = injection.record(
+        injection.scan(text, [{"sentence_id": s.sentence_id, "clause_id": s.clause_id,
+                               "start": s.start, "end": s.end} for s in sentences]),
+        document_hash=version["text_hash"], text_version_id=version["_id"])
 
     now = datetime.now(timezone.utc)
     key = {"run_id": lease.run_id, "stage": STAGE, "fence": lease.fence}
@@ -107,6 +114,8 @@ async def run_segment(lease: Lease) -> str:
                                          "text_version_id": version["_id"],
                                          **segmentation.summary(clauses, sentences)},
                         "doc_graph": graph_summary,
+                        # Published with the sentences it names, by the same fenced commit.
+                        "security_scan": security_scan,
                         "document_proposal": segmentation.propose_document(text, sentences)})
     except (LostLease, deletion.StaleSource) as exc:
         if isinstance(exc, LostLease) and await worker.finish_without_result(

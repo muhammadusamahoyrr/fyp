@@ -6,7 +6,12 @@ and ai_config reports no problem); otherwise the analysis stage goes straight
 to `done` and the run records why the AI layer did not run.
 
   1. Refuse a source not attested synthetic, and a text whose hash does not
-     match: the run finishes `done` with the AI layer `unavailable`.
+     match: the run finishes `done` with the AI layer `unavailable`. Refuse,
+     the same way, a run without the frozen embedded-instruction scan
+     (`security_scan_not_recorded` -- a new run is needed) or with one made
+     on other text (`security_scan_mismatch`): the model is never called
+     on a document nobody scanned. Flagged sentences are withheld from the
+     prompt and forbidden as evidence (ai_report, prompt 2).
   2. Call the model OUTSIDE any transaction, under a heartbeat. A worker
      that lost its lease or was asked to cancel while waiting writes nothing.
   3. On success, write the VALIDATED items only (ai_report.validate:
@@ -35,7 +40,7 @@ from app.db.collections import (
     get_analysis_sources_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import ai_client, ai_config, ai_report, blob_store, deletion, worker
+from app.services.analyzer import ai_client, ai_config, ai_report, blob_store, deletion, injection, worker
 from app.services.analyzer.terms_stage import published_sentences
 from app.services.analyzer.worker import Lease, LostLease
 
@@ -122,6 +127,12 @@ async def run_ai_report(lease: Lease) -> str:
                                 purpose="canonical_text")
     if hashlib.sha256(raw).hexdigest() != version["text_hash"]:
         return await _finish(lease, unavailable("text_integrity"))
+    try:
+        scan = injection.from_record(run.get("security_scan"), document_hash=version["text_hash"])
+    except injection.ScanMismatch:
+        return await _finish(lease, unavailable("security_scan_mismatch"))
+    if scan is None:
+        return await _finish(lease, unavailable("security_scan_not_recorded"))
     text = raw.decode("utf-8")
     sentences = await published_sentences(run)
     clause_ids = {c["clause_id"] for c in await _published(get_analysis_clauses_col(), run)}
@@ -130,8 +141,8 @@ async def run_ai_report(lease: Lease) -> str:
     began = datetime.now(timezone.utc)
     async with worker.keep_alive(lease) as alive:
         try:
-            report = await ai_report.generate(text, sentences, clause_ids,
-                                              graph_rows=graph_rows, transport=TRANSPORT)
+            report = await ai_report.generate(text, sentences, clause_ids, graph_rows=graph_rows,
+                                              transport=TRANSPORT, suspect=scan.sentence_ids)
             error = None
         except ai_client.AIError as exc:
             report, error = None, exc.code
@@ -143,7 +154,8 @@ async def run_ai_report(lease: Lease) -> str:
 
     base = {"schema_version": ai_report.SCHEMA_VERSION, "prompt_version": ai_report.PROMPT_VERSION,
             "started_at": began, "finished_at": datetime.now(timezone.utc),
-            "text_sha256": hashlib.sha256(raw).hexdigest()}
+            "text_sha256": hashlib.sha256(raw).hexdigest(),
+            "detector_version": scan.detector_version, "withheld_sentences": len(scan.flagged)}
     if error is not None:
         logger.warning("analyzer_ai_report_failed run_id=%s code=%s", lease.run_id, error)
         return await _finish(lease, {**base, "status": FAILED, "error_code": error,

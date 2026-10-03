@@ -253,7 +253,16 @@ async def approved_hashes(packs: list[Pack]) -> set[tuple[str, str]]:
 
 # ── running ──────────────────────────────────────────────────────────────────
 
-def _locate(check: Check, text: str, sentences: list[dict]) -> list[str]:
+#: A check whose only candidate evidence was flagged by the embedded-
+#: instruction scan (injection.py). Never "present" or "not_located": an
+#: attacker can write "rent paid in cash" to make a keyword check say Found.
+SECURITY_EXCLUDED = "Candidate evidence was excluded by a security check."
+
+
+def _locate(check: Check, text: str, sentences: list[dict], suspect: frozenset[str] = frozenset(),
+            excluded: list[str] | None = None) -> list[str]:
+    """Sentence ids that match. A match in a `suspect` sentence is never
+    evidence; it is recorded in `excluded` when a list is given."""
     hits = []
     for s in sentences:
         if s.get("empty_value"):        # a blank form field ("Security Deposit:") states nothing
@@ -263,6 +272,10 @@ def _locate(check: Check, text: str, sentences: list[dict]) -> list[str]:
                 # A sentence that matches an exclusion says something else
                 # ("one month's notice" is not the tenancy's period).
                 and not any(p.search(text, s["start"], s["end"]) for p in check.none_of)):
+            if s["sentence_id"] in suspect:
+                if excluded is not None:
+                    excluded.append(s["sentence_id"])
+                continue
             hits.append(s["sentence_id"])
             if len(hits) >= MAX_EVIDENCE:
                 break
@@ -280,7 +293,9 @@ def _finding(pack: Pack, check: Check, result: str | None, *, sentence_ids=(), r
     }
 
 
-def run_pack(pack: Pack, context: dict, text: str, sentences: list[dict]) -> list[dict]:
+def run_pack(pack: Pack, context: dict, text: str, sentences: list[dict],
+             suspect: frozenset[str] = frozenset()) -> list[dict]:
+    """`suspect`: sentence ids flagged by the embedded-instruction scan."""
     findings = []
     for check in pack.checks:
         if check.applies_if is not None:
@@ -295,14 +310,20 @@ def run_pack(pack: Pack, context: dict, text: str, sentences: list[dict]) -> lis
         if check.kind == "reminder":
             findings.append(_finding(pack, check, None))
             continue
-        hits = _locate(check, text, sentences)
+        excluded: list[str] = []
+        hits = _locate(check, text, sentences, frozenset(suspect), excluded)
+        if not hits and excluded:
+            findings.append(_finding(pack, check, "unable_to_determine", reason=SECURITY_EXCLUDED))
+            continue
         findings.append(_finding(pack, check, "present" if hits else "not_located", sentence_ids=hits))
     return findings
 
 
 async def analyse(context: dict, text: str, sentences: list[dict], *,
-                  packs: list[Pack] | None = None) -> tuple[list[dict], list[dict]]:
-    """All findings for one confirmed context, and what happened to each pack."""
+                  packs: list[Pack] | None = None,
+                  suspect: frozenset[str] = frozenset()) -> tuple[list[dict], list[dict]]:
+    """All findings for one confirmed context, and what happened to each pack.
+    `suspect`: sentence ids the embedded-instruction scan flagged."""
     packs = load_packs() if packs is None else packs
     approved = await approved_hashes(packs)
     findings, summary = [], []
@@ -322,7 +343,7 @@ async def analyse(context: dict, text: str, sentences: list[dict], *,
         if pack.requires_approval and (pack.id, pack.content_hash, pack.authorities_hash) not in approved:
             summary.append({**entry, "status": "awaiting_approval"})
             continue
-        pack_findings = run_pack(pack, context, text, sentences)
+        pack_findings = run_pack(pack, context, text, sentences, suspect)
         findings.extend(pack_findings)
         summary.append({**entry, "status": "applied", "findings": len(pack_findings)})
     return findings, summary

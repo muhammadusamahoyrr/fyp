@@ -13,7 +13,7 @@ dataset:
   version: v1
   sha256: f5f61196f3a80cc4f60c2f12c608d70b4b3593720b997bc3e81bbaffd63b714f
 schema_version: ai-report.1
-prompt_version: ai-report-prompt.1
+prompt_version: ai-report-prompt.2
 required_gates:
 - evidence_validity_100
 - no_leakage

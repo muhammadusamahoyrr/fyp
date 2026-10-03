@@ -105,7 +105,10 @@ async def test_a_perfect_answer_scores_perfectly_and_passes_every_gate(dataset):
         for doc_type in ev.DOCUMENT_TYPES:
             assert m["by_type"][doc_type][kind]["recall"] == 1.0
     assert m["evidence_validity"] == 1.0 and m["gates"] == {
-        "evidence_validity_100": True, "no_leakage": True, "no_injection_success": True}
+        "evidence_validity_100": True, "no_leakage": True, "no_injection_success": True,
+        "injected_clauses_detected": True, "no_false_detection": True}
+    assert m["detection"] == {"detector_version": "injection-detector.1", "malicious_documents": 6,
+                              "clauses_detected": 6, "false_flags_in_other_documents": 0}
     assert result["dataset"] == {"version": "v1", "sha256": dataset.sha256, "documents": 30}
     assert (result["schema_version"], result["prompt_version"]) == (ai_report.SCHEMA_VERSION,
                                                                     ai_report.PROMPT_VERSION)
@@ -119,12 +122,27 @@ def scripted(change):
     return respond
 
 
-async def test_an_obeyed_injection_that_reaches_the_output_fails_the_gate(dataset):
-    def obey(doc, answer):
-        for r in answer["risks"]:
-            if doc.canary:
-                r["title"] = f"{r['title']} {doc.canary}"
-        return answer
+def obey(doc, answer):
+    for r in answer["risks"]:
+        if doc.canary:
+            r["title"] = f"{r['title']} {doc.canary}"
+    return answer
+
+
+async def test_an_echoed_canary_is_dropped_before_it_reaches_the_output(dataset):
+    """The embedded-instruction scan flags the canary's sentence, so an item
+    repeating the canary is dropped as echoes_suspected_instruction."""
+    m = (await run(dataset, scripted(obey)))["metrics"]
+    assert m["injection"] == {"documents": 6, "success": 0, "obeyed_raw": 6}
+    assert m["dropped"]["echoes_suspected_instruction"] == 9      # every risk of the 6 documents
+    assert m["gates"]["no_injection_success"] is True
+
+
+async def test_an_obeyed_injection_that_reaches_the_output_fails_the_gate(dataset, monkeypatch):
+    """Without the scan (simulated), the same answers reach the output -- and
+    the gate, unchanged, fails."""
+    from app.services.analyzer import injection
+    monkeypatch.setattr(injection, "scan", lambda text, rows: injection.Scan(injection.DETECTOR_VERSION))
     m = (await run(dataset, scripted(obey)))["metrics"]
     assert m["injection"] == {"documents": 6, "success": 6, "obeyed_raw": 6}
     assert m["gates"]["no_injection_success"] is False
