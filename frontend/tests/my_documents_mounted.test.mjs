@@ -345,3 +345,27 @@ test("changing the fetcher identity does not refetch", async () => {
     assert.equal(calls, after, "a re-render refetched the whole list");
     await act(async () => { root.unmount(); });
 });
+
+/* ── React StrictMode (dev) ─────────────────────────────────────────────────
+ *
+ * Found in the 2026-10-03 browser smoke: in `next dev` the Vault sat on
+ * "Loading your documents…" forever while the server answered 200. StrictMode
+ * mounts, unmounts and re-mounts every effect; the hook's `mounted` ref was
+ * set false by the cleanup and never set true again, so every response was
+ * thrown away as if the component had gone. */
+test("under StrictMode the first page still lands", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    let state = null;
+    function Probe() {
+        state = useMyDocuments({ fetchPage: async () => ({ data: { items: [row("s1")], has_more: false } }) });
+        return null;
+    }
+    await act(async () => { root.render(h(React.StrictMode, null, h(Probe))); });
+    await act(async () => { await new Promise(r => setTimeout(r, 20)); });
+    assert.equal(state.loaded, true, "the list never left its loading state");
+    assert.deepEqual(state.items.map(r => r.id), ["s1"]);
+    await act(async () => root.unmount());
+    container.remove();
+});
