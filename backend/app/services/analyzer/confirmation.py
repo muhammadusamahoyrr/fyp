@@ -74,6 +74,8 @@ async def get_run(*, owner_id: str, run_id: str) -> dict:
         "state_version": run["state_version"], "options": run.get("options", {}),
         "error_code": run.get("error_code"), "extraction": run.get("extraction"),
         "cancel_requested": bool(run.get("cancel_requested")),
+        # Which report the run makes: ai-report.1, or the drafting questions.
+        "engine": run.get("engine") or states.ENGINE_AI_REPORT,
     }
     if run["status"] == "needs_ocr_confirmation":
         version = await get_analysis_text_versions_col().find_one(

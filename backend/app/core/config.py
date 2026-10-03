@@ -240,6 +240,11 @@ class Settings(BaseSettings):
     # engine (`ai-hypothesis.1`) instead of the open AI report (`ai-report.1`).
     # Read when a run is CREATED; existing runs keep their engine. Off by default.
     analyzer_engine_hypotheses: bool = False
+    # The INTERNAL drafting-question review screen (services/analyzer/
+    # drafting_review.py): synthetic documents only, always carrying the
+    # evaluation status. Off by default; it never makes the scanner a
+    # production, client or real-document feature.
+    analyzer_hypothesis_review_ui: bool = False
 
     # Retention DELETION for intakes and their uploaded evidence — its own
     # switch, deliberately not shared with the V2 one above. The two stores hold

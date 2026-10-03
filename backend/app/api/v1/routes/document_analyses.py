@@ -224,6 +224,50 @@ async def get_analysis_report(run_id: str, current_user: dict = Depends(require_
     return await _run(confirmation.get_report(owner_id=str(current_user["_id"]), run_id=run_id))
 
 
+# ── drafting-question review (INTERNAL, synthetic only) ──────────────────────
+#
+# ANALYZER_HYPOTHESES_PLAN.md §6, services/analyzer/drafting_review.py. The
+# scanner has NOT passed its engineering gate: this is an internal review of
+# synthetic documents, off unless ANALYZER_HYPOTHESIS_REVIEW_UI is on, and
+# every response carries the evaluation status the server read.
+
+def _require_drafting_review() -> None:
+    _require_available()
+    if not settings.analyzer_hypothesis_review_ui:
+        _fail(404, "feature_disabled", "Not found.")
+
+
+class DraftingDecisionBody(BaseModel):
+    question_id: str = Field(min_length=1, max_length=64)
+    decision: str = Field(min_length=1, max_length=32)
+    reason_code: str | None = Field(default=None, max_length=64)
+    sentence_ids: list[str] = Field(default_factory=list, max_length=50)
+    #: The evaluation status the screen showed; it must match the server's.
+    evaluation_ack: str | None = Field(default=None, max_length=32)
+
+
+@router.get("/runs/{run_id}/drafting-review")
+async def get_drafting_review(run_id: str, current_user: dict = Depends(require_registered_lawyer)):
+    from app.services.analyzer import drafting_review
+
+    _require_drafting_review()
+    return await _run(drafting_review.get_review(owner_id=str(current_user["_id"]), run_id=run_id))
+
+
+@router.post("/runs/{run_id}/drafting-review/decisions", status_code=201)
+async def record_drafting_decision(run_id: str, body: DraftingDecisionBody = Body(...),
+                                   idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+                                   current_user: dict = Depends(require_registered_lawyer)):
+    from app.services.analyzer import drafting_review
+
+    _require_drafting_review()
+    return await _run(drafting_review.record_decision(
+        owner_id=str(current_user["_id"]), actor=current_user, run_id=run_id,
+        question_id=body.question_id, decision=body.decision, reason_code=body.reason_code,
+        sentence_ids=body.sentence_ids, evaluation_ack=body.evaluation_ack,
+        idempotency_key=idempotency_key))
+
+
 # ── legal playbook review (P2B) ──────────────────────────────────────────────
 #
 # Literal paths, registered BEFORE the generic /{source_id} routes below, which

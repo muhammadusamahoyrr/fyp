@@ -369,6 +369,16 @@ def get_analysis_hypothesis_reviews_col() -> AsyncIOMotorCollection:
     return get_database()["analysis_hypothesis_reviews"]
 
 
+def get_analysis_hypothesis_decisions_col() -> AsyncIOMotorCollection:
+    """A reviewer's decisions (a registered lawyer account -- qualification
+    not verified) on drafting-question results in the INTERNAL review
+    (services/analyzer/drafting_review.py): confirm, dismiss with a reason,
+    or point to evidence. They grant no approval or label status.
+    APPEND-ONLY -- one insert per decision, never updated or deleted, except
+    by the source's purge."""
+    return get_database()["analysis_hypothesis_decisions"]
+
+
 def get_analysis_findings_col() -> AsyncIOMotorCollection:
     """Playbook results of a run (general and approved legal packs), keyed
     (run_id, stage, fence, ordinal). Sentence ids only -- quotes are cut from

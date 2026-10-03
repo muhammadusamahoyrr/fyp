@@ -285,6 +285,29 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="The unpublished-output sweep reads only rows older than its cutoff.",
     ),
+    # ── analysis_hypothesis_decisions (internal review, append-only) ─────────
+    IndexSpec(
+        collection="analysis_hypothesis_decisions",
+        name="uniq_analysis_hypothesis_decisions_key",
+        keys=(("run_id", ASCENDING), ("actor_user_id", ASCENDING), ("idempotency_key", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("A retried decision (same Idempotency-Key) is recorded once. Decisions are "
+             "insert-only: a change of mind is a new decision, never an edit."),
+    ),
+    IndexSpec(
+        collection="analysis_hypothesis_decisions",
+        name="analysis_hypothesis_decisions_run",
+        keys=(("run_id", ASCENDING), ("at", ASCENDING)),
+        kind=QUERY,
+        why="The review reads a run's decision history in order.",
+    ),
+    IndexSpec(
+        collection="analysis_hypothesis_decisions",
+        name="analysis_hypothesis_decisions_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every decision on a source.",
+    ),
     # ── analysis_doc_graph (definitions and cross-references) ────────────────
     IndexSpec(
         collection="analysis_doc_graph",
