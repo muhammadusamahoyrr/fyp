@@ -77,6 +77,8 @@ _MONTHLY = re.compile(r"\b(?:per\s+month|monthly|per\s+mensem|each\s+month|every
 _YEARLY = re.compile(r"\b(?:per\s+annum|per\s+year|yearly|annual(?:ly)?)\b", re.I)
 #: "payable in advance" says when rent is paid; it is not a deposit.
 _IN_ADVANCE = re.compile(r"\bin\s+advance\b", re.I)
+#: A "notice period" is not the term of the tenancy.
+_NOTICE_PERIOD = re.compile(r"\bnotice\s+period\b|\bperiod\s+of\s+notice\b", re.I)
 _YEAR_TO_YEAR = re.compile(r"\b(?:from\s+)?year[\s-]+to[\s-]+year\b", re.I)
 _MUTUAL = re.compile(r"\bmutual(?:ly)?\b|\beach\s+party\s+(?:may|shall|will)\s+disclose\b", re.I)
 _ONE_WAY = re.compile(r"\bone[\s-]way\b|\bunilateral\b", re.I)
@@ -132,7 +134,8 @@ def candidates(text: str, sentences: list[dict], document_type: str = "tenancy")
 def _tenancy(body, sid, add):
     if _mentions(body, "term", "period", "tenancy", "lease", "let", "months?", "years?"):
         for m in _DURATION.finditer(body):
-            if _mentions(body, "notice", "deposit") and not _mentions(body, "term", "period", "let"):
+            if ((_mentions(body, "notice") or _about_deposit(body))
+                    and not _mentions(_NOTICE_PERIOD.sub(" ", body), "term", "period", "let")):
                 continue
             months = _months(m)
             if 0 < months <= 1200:

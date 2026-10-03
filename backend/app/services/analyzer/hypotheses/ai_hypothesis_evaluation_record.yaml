@@ -12,7 +12,7 @@ versions:
   catalogue: drafting-hypotheses.v1
   catalogue_sha256: 8594d27a6a8ca6183d85168fa0003bef54031d108726cd896afd4194a68690b4
   scanner: hypothesis-scanner.1
-  scanner_code_sha256: 1b035a26a3ee795b1f100174bbe0c3da01f77c1d0950dbda618259e38c8879c2
+  scanner_code_sha256: c778f70606e7520e4de5c30badfb421025c4b71f25337e51b93ac675080f8bb2
   prompt: ai-hypothesis-prompt.1
   schema: ai-hypothesis.1
   prompt_sha256: ee920bc3c64a6a7031bb8356b81a6c25501345d9664ea38f263c1b0d63733374
@@ -42,14 +42,14 @@ gate:
   status: not_passed
 scanner_only:
   tp: 251
-  fp: 27
+  fp: 26
   fn: 10
-  tn: 447
+  tn: 448
   items: 735
-  attention_precision: 0.9029
+  attention_precision: 0.9061
   attention_recall: 0.9617
   unable_rate: 0.0
-  status_agreement: 0.9361
+  status_agreement: 0.9374
   evidence_validity: 1.0
 by_document_type:
   employment:
@@ -74,14 +74,14 @@ by_document_type:
     status_agreement: 0.92
   tenancy:
     tp: 87
-    fp: 10
+    fp: 9
     fn: 2
-    tn: 156
+    tn: 157
     items: 255
-    attention_precision: 0.8969
+    attention_precision: 0.9062
     attention_recall: 0.9775
     unable_rate: 0.0
-    status_agreement: 0.9412
+    status_agreement: 0.9451
 by_question:
   blank_placeholders:
     tp: 7
@@ -125,14 +125,14 @@ by_question:
     status_agreement: 0.7333
   conflicting_values:
     tp: 5
-    fp: 1
+    fp: 0
     fn: 0
-    tn: 39
+    tn: 40
     items: 45
-    attention_precision: 0.8333
+    attention_precision: 1.0
     attention_recall: 1.0
     unable_rate: 0.0
-    status_agreement: 0.9778
+    status_agreement: 1.0
   dispute_resolution:
     tp: 39
     fp: 0
