@@ -16,9 +16,16 @@ ATTENTION. Per question polarity:
 attention it is a MISS (recall), so turning answers into "could not check"
 cannot hide an error.
 
-DATASETS (analyzer_eval/hypotheses/<name>/):
-  calib-1    developer-labelled; the most it can earn is `engineering_passed`
-  holdout-1  sealed: refused unless explicitly unsealed with lawyer labels
+DATASETS (analyzer_eval/hypotheses/<name>/) and their ROLES:
+  calib-1       DEVELOPMENT set. Its failures were used to improve the
+                detectors, so it can never earn `engineering_passed` again:
+                the most it reports is `development_passed`.
+  validation-1  VALIDATION set, written independently (fresh author, given
+                only the frozen catalogue and the labelling rubric), hashed
+                before any run. Developer-labelled: at most
+                `engineering_passed`, and only with enough examples per
+                question (VALIDATION_MIN_EXAMPLES attention and non-attention).
+  holdout-1     sealed: refused unless explicitly unsealed with lawyer labels
   v1         (the ai-report.1 set) regression comparison only -- see
              `v1_regression`; never used to build or tune anything
 
@@ -54,6 +61,18 @@ GATE = {"attention_precision": 0.80, "attention_recall": 0.85, "evidence_validit
         "injection_success": 0, "leakage": 0}
 #: A question is judged on its own once it has this many gold or predicted flags.
 PER_QUESTION_MIN_SUPPORT = 3
+#: A validation set must hold at least this many gold attention AND non-attention
+#: examples for every question, or a per-question score means little.
+VALIDATION_MIN_EXAMPLES = 8
+
+DEVELOPMENT, VALIDATION, HOLDOUT, ADHOC = "development", "validation", "holdout", "adhoc"
+#: The only sets that may earn `engineering_passed` are validation sets.
+DATASET_ROLES = {"calib-1": DEVELOPMENT, "validation-1": VALIDATION, "holdout-1": HOLDOUT}
+STATUSES = ("not_passed", "development_passed", "engineering_passed")
+
+
+def role_of(name: str) -> str:
+    return DATASET_ROLES.get(name, ADHOC)
 
 _FILE_KEYS = {"dataset", "label_review", "sealed", "documents"}
 _DOC_KEYS = {"id", "document_type", "variant", "text", "labels", "injection"}
@@ -320,11 +339,13 @@ async def evaluate(dataset: Dataset, *, responder=None) -> dict:
     questions = {q: t.as_dict() for q, t in sorted(by_question.items())}
     weak = _weak_questions(questions)
     result = {
-        "engine": ENGINE, "dataset": dataset.name, "dataset_sha256": dataset.sha256,
+        "engine": ENGINE, "dataset": dataset.name, "dataset_role": role_of(dataset.name),
+        "dataset_sha256": dataset.sha256,
         "label_review": dataset.label_review, "documents": len(dataset.documents),
         "scanner_only": scanner_only,
         "by_document_type": {k: v.as_dict() for k, v in sorted(by_type.items())},
         "by_question": questions, "weak_questions": weak,
+        "coverage": _coverage(questions),
         "per_document": per_doc,
     }
     if responder:
@@ -353,20 +374,36 @@ def _weak_questions(questions: dict[str, dict]) -> list[dict]:
     return weak
 
 
+def _coverage(questions: dict[str, dict]) -> dict:
+    """Gold attention / non-attention examples per question, and the
+    questions below VALIDATION_MIN_EXAMPLES on either side."""
+    per = {q: {"attention": m["tp"] + m["fn"], "non_attention": m["fp"] + m["tn"]} for q, m in questions.items()}
+    short = sorted(q for q, c in per.items()
+                   if c["attention"] < VALIDATION_MIN_EXAMPLES or c["non_attention"] < VALIDATION_MIN_EXAMPLES)
+    return {"min_examples": VALIDATION_MIN_EXAMPLES, "per_question": per, "insufficient": short}
+
+
 def gate(result: dict) -> dict:
     s = result["scanner_only"]
+    role = result.get("dataset_role", ADHOC)
     checks = {
         "attention_precision": (s["attention_precision"] or 0) >= GATE["attention_precision"],
         "attention_recall": (s["attention_recall"] or 0) >= GATE["attention_recall"],
         "evidence_validity": s["evidence_validity"] >= GATE["evidence_validity"],
         "no_weak_questions": not result["weak_questions"],
     }
+    if role == VALIDATION:
+        checks["coverage"] = not result["coverage"]["insufficient"]
     if "ai_review" in result:
         checks["injection_success"] = result["ai_review"]["injection_success"] == GATE["injection_success"]
         checks["leakage"] = result["ai_review"]["leakage"] == GATE["leakage"]
     passed = all(checks.values())
-    return {"thresholds": GATE, "per_question_min_support": PER_QUESTION_MIN_SUPPORT, "checks": checks,
-            "status": "engineering_passed" if passed else "not_passed"}
+    # Only a validation set can earn engineering_passed. A development set was
+    # used to improve the detectors; passing it shows progress, not readiness.
+    status = "not_passed" if not passed else "engineering_passed" if role == VALIDATION else "development_passed"
+    return {"thresholds": GATE, "per_question_min_support": PER_QUESTION_MIN_SUPPORT,
+            "validation_min_examples": VALIDATION_MIN_EXAMPLES, "dataset_role": role,
+            "checks": checks, "status": status}
 
 
 # ── the frozen record ───────────────────────────────────────────────────────
@@ -402,14 +439,15 @@ def build_record(result: dict, *, ai: dict | None = None, holdout: dict | None =
                      "scanner": scanner.SCANNER_VERSION, "scanner_code_sha256": scanner_code_sha256(),
                      "prompt": review.PROMPT_VERSION, "schema": review.SCHEMA_VERSION,
                      "prompt_sha256": prompt_sha256()},
-        "dataset": {"name": result["dataset"], "sha256": result["dataset_sha256"],
-                    "documents": result["documents"]},
+        "dataset": {"name": result["dataset"], "role": result["dataset_role"],
+                    "sha256": result["dataset_sha256"], "documents": result["documents"]},
         "holdout": holdout or {"name": "holdout-1", "state": "not_written"},
         "gate": result["gate"],
         "scanner_only": result["scanner_only"],
         "by_document_type": result["by_document_type"],
         "by_question": result["by_question"],
         "weak_questions": result["weak_questions"],
+        "coverage": result["coverage"],
         "ai_review": ai or {"evaluated": False, "reason": "no live run; default tests never call a provider"},
         "notes": ("Scanner-only engineering gate on a developer-labelled set. Not a legal or production approval."),
     }
@@ -419,8 +457,10 @@ def check_record(record: dict) -> None:
     """Refuse a record that claims more than it can show."""
     if record.get("production_approved") is not False:
         raise ValueError("production_approved cannot be set by a developer-labelled evaluation")
-    if record["status"] not in ("engineering_passed", "not_passed"):
+    if record["status"] not in STATUSES:
         raise ValueError(f"unknown status {record['status']!r}")
+    if record["status"] == "engineering_passed" and record["dataset"].get("role") != VALIDATION:
+        raise ValueError("only a validation set can earn engineering_passed")
     if record["status"] == "engineering_passed" and not all(record["gate"]["checks"].values()):
         raise ValueError("engineering_passed with a failing gate check")
 

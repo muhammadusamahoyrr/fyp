@@ -18,6 +18,7 @@ versions:
   prompt_sha256: ee920bc3c64a6a7031bb8356b81a6c25501345d9664ea38f263c1b0d63733374
 dataset:
   name: calib-1
+  role: development
   sha256: 51ec7731b7b8e38c891cfded0ee682d44aebbe2470c7255f21ee06b03a22cebe
   documents: 45
 holdout:
@@ -31,6 +32,8 @@ gate:
     injection_success: 0
     leakage: 0
   per_question_min_support: 3
+  validation_min_examples: 8
+  dataset_role: development
   checks:
     attention_precision: true
     attention_recall: true
@@ -463,6 +466,134 @@ weak_questions:
   recall: 1.0
   flagged: 11
   gold_attention: 8
+coverage:
+  min_examples: 8
+  per_question:
+    blank_placeholders:
+      attention: 7
+      non_attention: 38
+    compelled_disclosure:
+      attention: 12
+      non_attention: 3
+    confidential_definition:
+      attention: 3
+      non_attention: 12
+    confidentiality_duration:
+      attention: 5
+      non_attention: 10
+    conflicting_values:
+      attention: 5
+      non_attention: 40
+    dispute_resolution:
+      attention: 39
+      non_attention: 6
+    execution_date:
+      attention: 5
+      non_attention: 40
+    governing_law_stated:
+      attention: 38
+      non_attention: 7
+    leave:
+      attention: 11
+      non_attention: 4
+    mutual_or_one_way:
+      attention: 7
+      non_attention: 8
+    notice_period:
+      attention: 8
+      non_attention: 7
+    parties_identified:
+      attention: 3
+      non_attention: 42
+    pay_date:
+      attention: 6
+      non_attention: 9
+    position_role:
+      attention: 2
+      non_attention: 13
+    premises_description:
+      attention: 3
+      non_attention: 12
+    probation:
+      attention: 10
+      non_attention: 5
+    rent_amount:
+      attention: 4
+      non_attention: 11
+    rent_due:
+      attention: 5
+      non_attention: 10
+    rent_increase:
+      attention: 12
+      non_attention: 3
+    return_or_destruction:
+      attention: 9
+      non_attention: 6
+    salary_amount:
+      attention: 4
+      non_attention: 11
+    security_deposit:
+      attention: 9
+      non_attention: 6
+    signature_block:
+      attention: 3
+      non_attention: 42
+    standard_exclusions:
+      attention: 10
+      non_attention: 5
+    start_date:
+      attention: 7
+      non_attention: 8
+    term_duration:
+      attention: 3
+      non_attention: 12
+    termination_notice:
+      attention: 8
+      non_attention: 7
+    undefined_terms:
+      attention: 1
+      non_attention: 44
+    unresolved_references:
+      attention: 3
+      non_attention: 42
+    utilities_maintenance:
+      attention: 9
+      non_attention: 6
+    working_hours:
+      attention: 10
+      non_attention: 5
+  insufficient:
+  - blank_placeholders
+  - compelled_disclosure
+  - confidential_definition
+  - confidentiality_duration
+  - conflicting_values
+  - dispute_resolution
+  - execution_date
+  - governing_law_stated
+  - leave
+  - mutual_or_one_way
+  - notice_period
+  - parties_identified
+  - pay_date
+  - position_role
+  - premises_description
+  - probation
+  - rent_amount
+  - rent_due
+  - rent_increase
+  - return_or_destruction
+  - salary_amount
+  - security_deposit
+  - signature_block
+  - standard_exclusions
+  - start_date
+  - term_duration
+  - termination_notice
+  - undefined_terms
+  - unresolved_references
+  - utilities_maintenance
+  - working_hours
 ai_review:
   evaluated: false
   reason: no live run; default tests never call a provider

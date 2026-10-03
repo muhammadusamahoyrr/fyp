@@ -69,8 +69,9 @@ def main() -> int:
     print(f"results: {out}")
 
     if args.write_record:
-        if args.dataset != "calib-1":
-            print("refused: the record is written from calib-1 only (the holdout stays sealed)", file=sys.stderr)
+        if ev.role_of(args.dataset) not in (ev.DEVELOPMENT, ev.VALIDATION):
+            print("refused: the record is written from a development or validation set (the holdout stays sealed)",
+                  file=sys.stderr)
             return 2
         if ai_meta:
             ai_meta = {**ai_meta, **result["ai_review"],

@@ -4,8 +4,11 @@
 # developer_only): what a careful reader answers to each drafting question,
 # following the catalogue's own ambiguous_when wording -- never what the scanner
 # happens to output, and never a statement about what the law requires. Written
-# after the catalogue was frozen (0548313). The most this set can earn is
-# engineering_passed. Any edit is a new dataset name, never an in-place change.
+# after the catalogue was frozen (0548313).
+# ROLE: DEVELOPMENT SET (2026-10-03). Its first run's failures are used to
+# improve the detectors, so it can never earn engineering_passed again (the most
+# it reports is development_passed). The gate is validation-1. Any edit to a
+# document or label is a new dataset name, never an in-place change.
 dataset: calib-1
 label_review: developer_only
 sealed: false

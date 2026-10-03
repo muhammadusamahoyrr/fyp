@@ -235,7 +235,8 @@ lawyer-labelled calibration set.
 | Set | Use | Labels |
 |---|---|---|
 | **v1** (existing 30 docs) | **Regression comparison only.** Never used to write or tune anything. | developer |
-| **calib-1** (new, ≥ 45 synthetic docs: 15 per type, all variants) | Engineering gate. Written only AFTER the catalogue is frozen. | developer (lawyer not yet available) |
+| **calib-1** (45 synthetic docs: 15 per type, all variants) | **Development set** (owner, 2026-10-03): its first-run failures improve the detectors, so it can earn at most `development_passed`. | developer |
+| **validation-1** (new) | **Engineering gate.** Written by an independent author in a fresh session, given only the frozen catalogue and the labelling rubric -- never detector code, calib-1 or its failures; hashed and committed before any run. ≥ 8 attention and ≥ 8 non-attention gold examples per question, or the gate fails (`coverage`). Developer-labelled: at most `engineering_passed`. | developer (independent) |
 | **holdout-1** (new, ≥ 15 docs) | **Sealed.** Written and hashed, then not opened or run until a qualified lawyer labels it. | lawyer (pending) |
 
 Metrics on calib-1, per question and overall:

@@ -228,6 +228,7 @@ async def test_the_record_freezes_every_hash_and_cannot_claim_production(tmp_pat
         ev.check_record({**record, "production_approved": True})
     with pytest.raises(ValueError, match="failing gate"):
         ev.check_record({**record, "status": "engineering_passed",
+                         "dataset": {**record["dataset"], "role": "validation"},
                          "gate": {**record["gate"], "checks": {**record["gate"]["checks"], "attention_recall": False}}})
 
 
@@ -249,6 +250,29 @@ def test_the_committed_record_is_honest():
     assert record["engine"] == "ai-hypothesis.1" and record["dataset"]["name"] == "calib-1"
     assert record["label_review"] == "developer_only" and record["production_approved"] is False
     assert record["holdout"]["state"] in ("not_written", "sealed")
+    # calib-1 was used to improve the detectors: a development set never earns engineering_passed.
+    assert record["dataset"]["role"] == "development" and record["status"] in ("not_passed", "development_passed")
     for key in ("catalogue_sha256", "scanner_code_sha256", "prompt_sha256"):
         assert len(record["versions"][key]) == 64
     assert record["dataset"]["sha256"] == ev.load_dataset("calib-1").sha256   # the committed set is the one scored
+
+
+async def test_only_a_validation_set_can_earn_engineering_passed(tmp_path, monkeypatch):
+    labels = scanned_labels(TENANCY, "tenancy")
+    docs = [doc(f"d{i}", labels) for i in range(2)]
+    monkeypatch.setitem(ev.DATASET_ROLES, "dev-x", ev.DEVELOPMENT)
+    monkeypatch.setitem(ev.DATASET_ROLES, "val-x", ev.VALIDATION)
+    dev = await ev.evaluate(ev.load_dataset("dev-x", root=write(tmp_path, "dev-x", docs)))
+    assert dev["gate"]["status"] == "development_passed"           # perfect, and still not engineering_passed
+    val = await ev.evaluate(ev.load_dataset("val-x", root=write(tmp_path, "val-x", docs)))
+    assert val["gate"]["checks"]["coverage"] is False               # 2 documents cannot give 8 + 8 per question
+    assert val["gate"]["status"] == "not_passed"
+    record = ev.build_record(dev)
+    with pytest.raises(ValueError, match="only a validation set"):
+        ev.check_record({**record, "status": "engineering_passed"})
+
+
+def test_dataset_roles_are_fixed():
+    assert ev.role_of("calib-1") == "development"
+    assert ev.role_of("validation-1") == "validation"
+    assert ev.role_of("holdout-1") == "holdout"
