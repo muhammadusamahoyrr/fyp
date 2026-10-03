@@ -34,6 +34,8 @@ def main() -> int:
     parser.add_argument("--ai", choices=("none", "live"), default="none")
     parser.add_argument("--model", default=None)
     parser.add_argument("--write-record", action="store_true")
+    parser.add_argument("--baseline", action="store_true",
+                        help="also keep this record for good in baselines/ (never overwritten)")
     args = parser.parse_args()
 
     responder, ai_meta = None, None
@@ -84,9 +86,18 @@ def main() -> int:
                   "# commit. Developer-labelled: the most it can say is engineering_passed. It is NOT a legal or\n"
                   "# production approval. The ai-report.1 record (ai_evaluation_record.yaml) is separate and\n"
                   "# unchanged.\n")
-        ev.RECORD_PATH.write_text(header + yaml.safe_dump(record, sort_keys=False, allow_unicode=True, width=1000),
-                                  encoding="utf-8", newline="\n")
+        body = yaml.safe_dump(record, sort_keys=False, allow_unicode=True, width=1000)
+        ev.RECORD_PATH.write_text(header + body, encoding="utf-8", newline="\n")
         print(f"record: {ev.RECORD_PATH}")
+        if args.baseline:
+            ev.BASELINES.mkdir(exist_ok=True)
+            kept = ev.BASELINES / f"{record['created']}_{args.dataset}.yaml"
+            if kept.exists():
+                print(f"refused: {kept.name} already exists; a baseline is never overwritten", file=sys.stderr)
+                return 2
+            kept.write_text("# A kept gate result: never regenerated or edited. The current record moves on.\n"
+                            + header + body, encoding="utf-8", newline="\n")
+            print(f"baseline: {kept}")
     return 0
 
 

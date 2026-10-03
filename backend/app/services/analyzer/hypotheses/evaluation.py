@@ -51,6 +51,26 @@ from app.services.analyzer.hypotheses import catalog, review, scanner
 
 ROOT = Path(__file__).resolve().parents[4] / "analyzer_eval" / "hypotheses"
 RECORD_PATH = Path(__file__).resolve().parent / "ai_hypothesis_evaluation_record.yaml"
+#: Gate results kept for good, one file each, never regenerated. The current
+#: record (RECORD_PATH) moves on; a baseline does not.
+BASELINES = Path(__file__).resolve().parent / "baselines"
+#: The labelling rubric each independently written set was authored from.
+#: A rubric is never edited in place: a new version is a new file.
+RUBRICS = {"validation-1": "LABELLING_RUBRIC.md"}
+FREEZE_MANIFEST = "FROZEN.txt"
+
+
+def rubric_sha256(dataset: str) -> str | None:
+    name = RUBRICS.get(dataset)
+    return hashlib.sha256((ROOT / name).read_bytes()).hexdigest() if name else None
+
+
+def freeze_manifest(dataset: str) -> dict | None:
+    """The hashes written before a set's first scored run, or None."""
+    path = ROOT / dataset / FREEZE_MANIFEST
+    if not path.exists():
+        return None
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 ENGINE = "ai-hypothesis.1"
 LABELS = ("present", "not_located", "ambiguous")
 FOUND = ("present", "ambiguous")
@@ -440,7 +460,10 @@ def build_record(result: dict, *, ai: dict | None = None, holdout: dict | None =
                      "prompt": review.PROMPT_VERSION, "schema": review.SCHEMA_VERSION,
                      "prompt_sha256": prompt_sha256()},
         "dataset": {"name": result["dataset"], "role": result["dataset_role"],
-                    "sha256": result["dataset_sha256"], "documents": result["documents"]},
+                    "sha256": result["dataset_sha256"], "documents": result["documents"],
+                    "labelling_rubric": RUBRICS.get(result["dataset"]),
+                    "labelling_rubric_sha256": rubric_sha256(result["dataset"]),
+                    "frozen_before_run": _frozen_before_run(result["dataset"], result["dataset_sha256"])},
         "holdout": holdout or {"name": "holdout-1", "state": "not_written"},
         "gate": result["gate"],
         "scanner_only": result["scanner_only"],
@@ -453,6 +476,16 @@ def build_record(result: dict, *, ai: dict | None = None, holdout: dict | None =
     }
 
 
+def _frozen_before_run(dataset: str, sha256: str) -> bool:
+    """True when the set's freeze manifest names this exact dataset hash and,
+    where a rubric is recorded, this exact rubric."""
+    manifest = freeze_manifest(dataset)
+    if not manifest or manifest.get("dataset_sha256") != sha256:
+        return False
+    rubric = rubric_sha256(dataset)
+    return rubric is None or manifest.get("rubric_sha256") == rubric
+
+
 def check_record(record: dict) -> None:
     """Refuse a record that claims more than it can show."""
     if record.get("production_approved") is not False:
@@ -463,6 +496,8 @@ def check_record(record: dict) -> None:
         raise ValueError("only a validation set can earn engineering_passed")
     if record["status"] == "engineering_passed" and not all(record["gate"]["checks"].values()):
         raise ValueError("engineering_passed with a failing gate check")
+    if record["status"] == "engineering_passed" and not record["dataset"].get("frozen_before_run"):
+        raise ValueError("engineering_passed needs a validation set frozen before its first run")
 
 
 # ── v1: regression comparison only ──────────────────────────────────────────

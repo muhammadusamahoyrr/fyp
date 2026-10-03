@@ -193,3 +193,6 @@ backend/.mongo-rs/
 # Analyzer benchmark checkpoints (resumable partial runs; never committed)
 backend/analyzer_eval/results/*.checkpoint.json
 backend/analyzer_eval/results/*.checkpoint.json.tmp
+# Local hypothesis-evaluation results: regenerated deterministically by
+# scripts/analyzer_hypothesis_eval.py; no committed record depends on them.
+backend/analyzer_eval/hypotheses/results/

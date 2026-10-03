@@ -247,14 +247,18 @@ def test_the_committed_record_is_honest():
     import yaml as _yaml
     record = _yaml.safe_load(ev.RECORD_PATH.read_text(encoding="utf-8"))
     ev.check_record(record)
-    assert record["engine"] == "ai-hypothesis.1" and record["dataset"]["name"] == "calib-1"
+    assert record["engine"] == "ai-hypothesis.1"
+    assert record["dataset"]["role"] == ev.role_of(record["dataset"]["name"])
     assert record["label_review"] == "developer_only" and record["production_approved"] is False
     assert record["holdout"]["state"] in ("not_written", "sealed")
-    # calib-1 was used to improve the detectors: a development set never earns engineering_passed.
-    assert record["dataset"]["role"] == "development" and record["status"] in ("not_passed", "development_passed")
+    # A development set was used to improve the detectors: it never earns engineering_passed.
+    # Only a validation set may, and a developer-labelled one goes no further.
+    allowed = {"development": ("not_passed", "development_passed"),
+               "validation": ("not_passed", "engineering_passed")}[record["dataset"]["role"]]
+    assert record["status"] in allowed
     for key in ("catalogue_sha256", "scanner_code_sha256", "prompt_sha256"):
         assert len(record["versions"][key]) == 64
-    assert record["dataset"]["sha256"] == ev.load_dataset("calib-1").sha256   # the committed set is the one scored
+    assert record["dataset"]["sha256"] == ev.load_dataset(record["dataset"]["name"]).sha256   # the committed set is the one scored
 
 
 async def test_only_a_validation_set_can_earn_engineering_passed(tmp_path, monkeypatch):
@@ -276,3 +280,24 @@ def test_dataset_roles_are_fixed():
     assert ev.role_of("calib-1") == "development"
     assert ev.role_of("validation-1") == "validation"
     assert ev.role_of("holdout-1") == "holdout"
+
+
+def test_the_independent_validation_1_baseline_is_kept_as_it_failed():
+    """validation-1 was written independently and frozen before its first run.
+    It scored 0.6705 / 0.911 (not_passed) after calib-1 tuning: the evidence of
+    overfitting. It is kept for good, whatever the current record says."""
+    import yaml as _yaml
+    [path] = sorted(ev.BASELINES.glob("*_validation-1.yaml"))
+    kept = _yaml.safe_load(path.read_text(encoding="utf-8"))
+    ev.check_record(kept)
+    assert kept["status"] == "not_passed" and kept["dataset"]["role"] == "validation"
+    assert (kept["scanner_only"]["attention_precision"], kept["scanner_only"]["attention_recall"]) == (0.6705, 0.911)
+    manifest = ev.freeze_manifest("validation-1")
+    assert kept["dataset"]["frozen_before_run"] is True
+    assert kept["dataset"]["sha256"] == manifest["dataset_sha256"] == ev.load_dataset("validation-1").sha256
+    assert kept["dataset"]["labelling_rubric_sha256"] == manifest["rubric_sha256"] == ev.rubric_sha256("validation-1")
+    assert kept["versions"]["scanner_code_sha256"] == manifest["scanner_code_sha256_at_freeze"]
+    # Byte-exact: the per-file hashes written at freeze time still match.
+    import hashlib
+    for name, digest in manifest["files"].items():
+        assert hashlib.sha256((ev.ROOT / "validation-1" / name).read_bytes()).hexdigest() == digest, name

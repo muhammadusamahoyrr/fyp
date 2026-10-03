@@ -1,0 +1,3 @@
+# Frozen evaluation inputs are hashed byte-for-byte (FROZEN.txt, rubric hash):
+# never convert their line endings on checkout.
+backend/analyzer_eval/hypotheses/** -text
