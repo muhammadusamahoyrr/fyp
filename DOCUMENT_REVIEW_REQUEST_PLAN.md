@@ -330,15 +330,19 @@ artifact deleted once no other hold exists
 - A client deleting a Vault document: its `draft | submitted | viewed` requests are cancelled
   (`document_deleted`); for an `accepted` request the client is told, before deleting, that the
   lawyer keeps read-only access to the version they were sent for 30 days.
-- **Deferred to its own slice** (`feat(documents): add recoverable Vault document deletion`):
-  DOCUMENTS_V2 has no client-facing document DELETE today — no route, no service.
-  `end_for_document(session, …)` is implemented and tested, and the sweep applies it to any
-  request whose document row is gone, so the review-request side is ready. Recommended design
-  for that slice: a `deleted_at` tombstone (recoverable, not a hard delete) written in the same
-  transaction as `end_for_document`, with an asynchronous purge afterwards that honours the
-  revision hold above; and, when an accepted request exists, the 30-day lawyer-access warning
-  shown before the client confirms. Tombstone semantics, recovery and the warning wording are
-  that slice's design, not this one's.
+- **Client deletion, as built** (`services/vault_deletion.py`, own slice): delete MOVES the
+  document row to `deleted_documents` (`deleted_at`, `deleted_by`, `purge_after` = now +
+  `VAULT_RECOVERY_DAYS`, default 30), so every read of `documents` stops finding it with no
+  per-read filter. With DOCUMENT_REVIEW_REQUESTS on, the move and `end_for_document` share one
+  transaction (a hook failure rolls the delete back); off, it is trash-first-then-remove and the
+  sweep catches up later. Before deleting, `GET /documents/v2/{id}/deletion-preview` returns the
+  recovery date, the open requests that will be cancelled and each accepted review's lawyer and
+  read-only-until date, which the UI shows before "Delete". A document still in the legacy v2
+  review (`review_status: submitted`) is refused (409 `document_under_review`). Restore
+  (`POST …/restore`) moves it back before `purge_after`; it does not reopen cancelled requests
+  or undo a started retention. The hourly purge destroys only past `purge_after`, through
+  `delete_revision` (review holds win; report-only unless DOCUMENTS_V2_DELETION_ENABLED;
+  legal holds skip the document); once it starts, restore is closed.
 
 ## 8. Authorization, enumeration safety, audit
 

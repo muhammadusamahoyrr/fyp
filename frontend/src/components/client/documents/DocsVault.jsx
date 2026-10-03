@@ -18,6 +18,7 @@ import { useIsMobile } from "@/lib/i18n.jsx";
 import { Btn, IconBtn, Pill, Card, Icon, fieldStyle } from "./ui.jsx";
 import ReviewRequestDialog from "./ReviewRequestDialog.jsx";
 import ReviewRequestsPanel from "./ReviewRequestsPanel.jsx";
+import { DeleteDocumentDialog, RecentlyDeleted } from "./VaultTrash.jsx";
 
 const TONE = { info: "info", ok: "low", warn: "medium", danger: "high", muted: "muted" };
 // Same face as the analyzer: Nunito Sans, a free near-match for Avenir.
@@ -67,7 +68,7 @@ export function sortRows(rows, how) {
     return copy.sort((a, b) => when(b) - when(a));
 }
 
-const GRID = "minmax(220px, 2.6fr) minmax(110px, 1fr) 70px minmax(110px, .9fr) 110px 120px 140px";
+const GRID = "minmax(220px, 2.6fr) minmax(110px, 1fr) 70px minmax(110px, .9fr) 110px 120px 180px";
 
 const svg = (d, s = 20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>;
 const I = {
@@ -77,6 +78,7 @@ const I = {
     search: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
     filter: <path d="M4 7h16M7 12h10M10 17h4" />,
     send: <><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4z" /></>,
+    trash: <><path d="M4 7h16M10 11v6M14 11v6" /><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></>,
 };
 
 export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
@@ -95,6 +97,9 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
     const [rrEnabled, setRrEnabled] = useState(null);         // null = not asked yet
     const [requesting, setRequesting] = useState(null);      // the row being shared
     const [rrReload, setRrReload] = useState(0);
+    // Recoverable deletion: the row being deleted, and the trash list's reload.
+    const [deleting, setDeleting] = useState(null);
+    const [trashReload, setTrashReload] = useState(0);
     // The deep link is honoured ONCE the server has said whether the feature is
     // on. Off: the ordinary Vault, nothing of review requests. Either way the
     // query is then dropped from the address (a fixed path, never user input),
@@ -231,7 +236,7 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
                 <section style={{ display: "flex", flexDirection: "column", borderRadius: 18, background: t.mode === "dark" ? "#141d2c" : t.surface, border: `1px solid ${panelBorder}`, overflow: "visible", minHeight: 300 }}>
                     <div style={{ display: "flex", alignItems: "center", padding: "6px 24px 0", borderBottom: `1px solid ${panelBorder}` }}>
                         <div role="tablist" style={{ display: "flex", gap: 30 }}>
-                            {[["all", "All Documents"], ["folders", "Folder"], ...(rrEnabled ? [["requests", "Review requests"]] : [])].map(([id, name]) => (
+                            {[["all", "All Documents"], ["folders", "Folder"], ...(rrEnabled ? [["requests", "Review requests"]] : []), ["trash", "Recently deleted"]].map(([id, name]) => (
                                 <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
                                     style={{ minHeight: 48, padding: 0, background: "transparent", border: "none", borderBottom: `3px solid ${tab === id ? "#1f8a5b" : "transparent"}`, color: tab === id ? "#1f8a5b" : t.text, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: VAULT_FONT }}>
                                     {name}
@@ -260,7 +265,10 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
                         </div>
                     </div>
 
-                    {tab === "requests" && rrEnabled ? (
+                    {tab === "trash" ? (
+                        <RecentlyDeleted reloadSignal={trashReload}
+                            onRestored={item => { toast.show(`“${item.title || "Document"}” is back in your Vault.`, "success", 3000); docs.reload(); }} />
+                    ) : tab === "requests" && rrEnabled ? (
                         <ReviewRequestsPanel reloadSignal={rrReload}
                             focusId={linkFocus?.id || null} focusInvalid={Boolean(linkFocus?.invalid)} />
                     ) : tab === "folders" ? (
@@ -305,6 +313,8 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
                                             <span style={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
                                                 <IconBtn label={`Open ${row.title || "document"}`} onClick={() => open(row)} disabled={busyId === row.id} style={{ border: "none" }}>{Icon.eye}</IconBtn>
                                                 <IconBtn label={a.canDownload ? `Download ${row.title || "document"}` : a.reason} onClick={() => a.canDownload && download(row)} disabled={!a.canDownload} style={{ border: "none", opacity: a.canDownload ? 1 : 0.4 }}>{Icon.download}</IconBtn>
+                                                <IconBtn label={`Delete ${row.title || "document"}`} data-delete-document={row.id}
+                                                    onClick={() => setDeleting(row)} style={{ border: "none" }}>{svg(I.trash, 17)}</IconBtn>
                                                 {rrEnabled && (
                                                     <IconBtn label={a.canDownload ? `Request lawyer review of ${row.title || "document"}` : a.reason}
                                                         data-request-review={row.id}
@@ -326,6 +336,17 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
                     )}
                 </section>
             </div>
+            {deleting && (
+                <DeleteDocumentDialog row={deleting}
+                    onClose={() => setDeleting(null)}
+                    onDeleted={() => {
+                        setDeleting(null);
+                        toast.show("Moved to Recently deleted. You can restore it from there.", "success", 3500);
+                        docs.reload();
+                        setTrashReload(n => n + 1);
+                        setRrReload(n => n + 1);
+                    }} />
+            )}
             {requesting && (
                 <ReviewRequestDialog row={requesting}
                     onClose={() => setRequesting(null)}

@@ -513,6 +513,19 @@ async def create_all_indexes() -> None:
     await _analyzer_indexes()
     await _ocr_revision_indexes()
     await _review_request_indexes()
+    await _vault_trash_indexes()
+
+
+async def _vault_trash_indexes() -> None:
+    """The Vault trash (services/vault_deletion.py): a client's "Recently
+    deleted" newest first, and the purge's due-date scan."""
+    from app.db.collections import get_deleted_documents_col
+
+    col = get_deleted_documents_col()
+    await col.create_indexes([
+        IndexModel([("client_id", ASCENDING), ("deleted_at", DESCENDING)], name="vault_trash_client_recent"),
+        IndexModel([("purge_after", ASCENDING)], name="vault_trash_purge_due"),
+    ])
 
 
 async def _provenance_indexes() -> None:

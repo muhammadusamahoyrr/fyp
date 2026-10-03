@@ -178,6 +178,9 @@ class Settings(BaseSettings):
     # nothing is destroyed until this is explicitly turned on. Deletion is
     # tombstone-first and crash-safe (services/document_deletion.py).
     documents_v2_deletion_enabled: bool = False
+    # Days a client can restore a deleted Vault document before it is purged
+    # (services/vault_deletion.py). Purging itself still needs the switch above.
+    vault_recovery_days: int = 30
 
     # ── DOCUMENT REVIEW REQUESTS — client→lawyer sharing ─────────────────────
     # DOCUMENT_REVIEW_REQUEST_PLAN.md. A client sends one exact, frozen Vault
@@ -418,6 +421,13 @@ class Settings(BaseSettings):
                 "instant the first run would decide for itself how much of "
                 "the backlog to notify")
         return self
+
+    @field_validator("vault_recovery_days")
+    @classmethod
+    def _recovery_is_sane(cls, value: int) -> int:
+        if not 1 <= value <= 365:
+            raise ValueError("vault_recovery_days must be between 1 and 365")
+        return value
 
     @field_validator("review_request_retention_days")
     @classmethod

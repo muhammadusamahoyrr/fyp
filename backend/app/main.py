@@ -28,6 +28,7 @@ from app.api.v1.routes import (
     disputes,
     documents,
     documents_v2,
+    documents_v2_trash,
     document_analyses,
     document_draft_plans,
     engagements,
@@ -170,6 +171,27 @@ async def _review_request_notifier():
             raise
         except Exception:
             logging.getLogger(__name__).exception("Review request notification reconcile failed")
+
+
+async def _vault_purge():
+    """Purge Vault documents whose recovery period has ended
+    (services/vault_deletion.py). Hourly; inert while DOCUMENTS_V2 is off, and
+    report-only unless DOCUMENTS_V2_DELETION_ENABLED is on. Every step is a
+    conditional write or the tombstone-first `delete_revision`, so it is safe
+    on every worker."""
+    import asyncio
+    import logging
+
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            if settings.documents_v2:
+                from app.services.vault_deletion import purge_due
+                await purge_due()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("Vault purge failed")
 
 
 async def _provenance_relay():
@@ -448,6 +470,7 @@ async def lifespan(app: FastAPI):
     scheduler_tasks.append(_asyncio.create_task(_analyzer_worker()))
     scheduler_tasks.append(_asyncio.create_task(_review_request_sweep()))
     scheduler_tasks.append(_asyncio.create_task(_review_request_notifier()))
+    scheduler_tasks.append(_asyncio.create_task(_vault_purge()))
 
     # EVENT OUTBOX relay: ungated, and NOT covered by the v2 relay above, which
     # returns immediately while DOCUMENTS_V2 is off. Agreement transitions park
@@ -571,6 +594,8 @@ app.include_router(lawyers.router, prefix=API_PREFIX)
 app.include_router(document_analyses.router, prefix=API_PREFIX)  # 404 while DOC_ANALYZER is off
 app.include_router(documents.router, prefix=API_PREFIX)
 app.include_router(document_draft_plans.router, prefix=API_PREFIX)
+# BEFORE documents_v2: `/documents/v2/trash` must not be read as a document id.
+app.include_router(documents_v2_trash.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(documents_v2.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(inheritance.router, prefix=API_PREFIX)
 app.include_router(agreements.router, prefix=API_PREFIX)

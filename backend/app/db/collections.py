@@ -201,6 +201,13 @@ def get_retrieval_labels_col() -> AsyncIOMotorCollection:
 # outbox, the crash-consistent transition receipts and the deletion tombstones.
 # See the drafting remediation plan (v5 §2, v5.1) for the schemas.
 
+def get_deleted_documents_col() -> AsyncIOMotorCollection:
+    """The Vault trash: a deleted DOCUMENTS_V2 document's row, moved here with
+    `deleted_at` / `purge_after` so every read of `documents` stops finding it,
+    and restorable until `purge_after` (services/vault_deletion.py)."""
+    return get_database()["deleted_documents"]
+
+
 def get_document_revisions_col() -> AsyncIOMotorCollection:
     """Append-only, immutable-once-terminal revisions of a document."""
     return get_database()["document_revisions"]

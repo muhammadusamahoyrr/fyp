@@ -2555,3 +2555,23 @@ export async function downloadReviewRequestDocument(requestId, filename = 'docum
   if (res) return _saveBlob(res, filename);
   return { error: error?.message || 'Download failed', code: errorCode(error), status };
 }
+
+/* ── Vault: recoverable deletion (services/vault_deletion.py) ──────────────
+ * Delete MOVES a document to "Recently deleted"; it can be restored until
+ * `purge_after`. Ask for the preview first: it carries the warnings the client
+ * must see (open review requests, a lawyer's read-only access). */
+export async function getDocumentDeletionPreview(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/deletion-preview`);
+}
+
+export async function deleteDocumentV2(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}`, { method: 'DELETE' });
+}
+
+export async function listDeletedDocumentsV2() {
+  return apiFetch('/documents/v2/trash');
+}
+
+export async function restoreDocumentV2(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/restore`, { method: 'POST' });
+}
