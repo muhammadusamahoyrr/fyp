@@ -1,8 +1,8 @@
-"""Document review requests, the client side (DOCUMENT_REVIEW_REQUEST_PLAN.md §2, §3, §5, §8).
+"""Document review requests: client and lawyer sides (DOCUMENT_REVIEW_REQUEST_PLAN.md §2, §3, §5, §7.1, §8).
 
 A client chooses one exact revision of a Vault document and one of their
 ACCEPTED engagements, drafts a request, and submits it. This module owns every
-client write to a request; the lawyer side, the engagement hooks and the
+client and lawyer write to a request; the engagement hooks, retention and
 notifications are later slices.
 
 ONE TRANSACTION PER CHANGE
@@ -43,6 +43,7 @@ engagement's, their revision changed).
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -51,6 +52,7 @@ import uuid
 from datetime import datetime, timezone
 
 from pydantic import ValidationError
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from app.core.constants import EngagementStatus
@@ -195,9 +197,10 @@ def _validate(row: dict) -> None:
 
 
 def _event(row: dict, *, seq: int, type_: str, actor_id: str, at: datetime,
-           from_status: str | None, to_status: str | None, detail: dict) -> dict:
+           from_status: str | None, to_status: str | None, detail: dict,
+           actor_role: str = rr.ActorRole.CLIENT.value) -> dict:
     event = {"_id": uuid.uuid4().hex, "request_id": row["_id"], "seq": seq, "type": type_,
-             "actor_id": actor_id, "actor_role": rr.ActorRole.CLIENT.value, "at": at,
+             "actor_id": actor_id, "actor_role": actor_role, "at": at,
              "from_status": from_status, "to_status": to_status, "detail": detail}
     rr.ReviewRequestEvent.model_validate(event)
     return event
@@ -392,20 +395,34 @@ async def create_draft(*, client_id: str, idempotency_key: str, document_id: str
 
 # ── changes to an existing request ──────────────────────────────────────────
 
-async def _change(*, client_id: str, request_id: str, idempotency_key: str, op_name: str,
-                  body: dict, expected_state_version: int, decide) -> dict:
-    """The shared skeleton of edit, submit and cancel.
+async def _change(*, request_id: str, idempotency_key: str, op_name: str, body: dict,
+                  expected_state_version: int, decide, client_id: str | None = None,
+                  lawyer_id: str | None = None) -> dict:
+    """The shared skeleton of every change to an existing request: the
+    client's edit, submit and cancel, the lawyer's accept and decline.
 
-    `decide(row, session, now)` checks the transition and returns
-    `(updates, event_type, detail)`; it raises to refuse. Order of checks:
-    owner (404) → replay (original response / 409 mismatch) → version (409
-    stale) → the transition's own rules.
+    Exactly one of `client_id` / `lawyer_id` names the actor; it decides the
+    scope (a lawyer sees only submitted requests sent to them), the audit
+    role and the response shape. `decide(row, session, now)` checks the
+    transition and returns `(updates, event_type, detail)`; it raises to
+    refuse. Order of checks: scope (404) → replay (original response / 409
+    mismatch) → version (409 stale) → the transition's own rules.
     """
-    kh, fp = key_hash(idempotency_key), fingerprint(op_name, request_id, body)
+    if (client_id is None) == (lawyer_id is None):
+        raise ValueError("exactly one actor")
+    if lawyer_id is not None:
+        actor_id, actor_role, scope = lawyer_id, rr.ActorRole.LAWYER.value, _lawyer_scope(lawyer_id)
+        # The lawyer's receipts live in their own slots: a key only ever
+        # replays a response made for the same actor.
+        kh = key_hash(f"lawyer|{lawyer_id}|{idempotency_key}")
+    else:
+        actor_id, actor_role, scope = client_id, rr.ActorRole.CLIENT.value, {"client_id": client_id}
+        kh = key_hash(idempotency_key)
+    fp = fingerprint(op_name, request_id, body)
     requests = get_document_review_requests_col()
 
     async def op(session):
-        row = await requests.find_one({"_id": request_id, "client_id": client_id}, session=session)
+        row = await requests.find_one({"_id": request_id, **scope}, session=session)
         if row is None:
             raise _not_found()
         replayed = _replay(row, kh, fp)
@@ -421,7 +438,8 @@ async def _change(*, client_id: str, request_id: str, idempotency_key: str, op_n
         new_row = {**row, **updates, "state_version": row["state_version"] + 1,
                    "event_seq": row["event_seq"] + 1, "updated_at": now}
         _validate(new_row)
-        response = client_view(new_row)
+        response = (lawyer_view(new_row, await _client_name(row["client_id"], session), now)
+                    if lawyer_id is not None else client_view(new_row))
         result = await requests.update_one(
             {"_id": request_id, "state_version": expected_state_version, "status": row["status"]},
             {"$set": {**updates, "state_version": new_row["state_version"],
@@ -431,8 +449,9 @@ async def _change(*, client_id: str, request_id: str, idempotency_key: str, op_n
         if result.matched_count != 1:
             raise _stale()
         await get_document_review_request_events_col().insert_one(
-            _event(row, seq=new_row["event_seq"], type_=event_type, actor_id=client_id, at=now,
-                   from_status=row["status"], to_status=new_row["status"], detail=detail),
+            _event(row, seq=new_row["event_seq"], type_=event_type, actor_id=actor_id, at=now,
+                   from_status=row["status"], to_status=new_row["status"], detail=detail,
+                   actor_role=actor_role),
             session=session)
         return response
 
@@ -650,3 +669,262 @@ async def list_for_client(*, client_id: str, status: str | None = None, cursor: 
     rows = rows[:limit]
     return {"items": [client_view(r) for r in rows],
             "next_cursor": _encode_cursor(rows[-1]) if more and rows else None}
+
+
+# ── the lawyer side (plan §5 lawyer, §7.1) ──────────────────────────────────
+#
+# A lawyer sees a request only when it is addressed to them (`lawyer_id`,
+# frozen at create) AND it was submitted: a draft -- including one the system
+# cancelled before submission -- was never shared and does not exist for them.
+# Reads never change state: a GET can be fired by a prefetch or a cache, so
+# "viewed" is an explicit POST, and a download writes an audit event only.
+
+def _lawyer_scope(lawyer_id: str) -> dict:
+    return {"lawyer_id": lawyer_id, "submitted_at": {"$ne": None}}
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def grants_document_access(row: dict, now: datetime) -> bool:
+    """§7.1: submitted/viewed yes; accepted yes until its frozen
+    `retention_until` (D3; a legal hold never extends it); declined and
+    cancelled no."""
+    status = row["status"]
+    if status in (rr.ReviewRequestStatus.SUBMITTED.value, rr.ReviewRequestStatus.VIEWED.value):
+        return True
+    if status == rr.ReviewRequestStatus.ACCEPTED.value:
+        until = _aware(row.get("retention_until"))
+        return until is None or until > now
+    return False
+
+
+async def _client_name(client_id: str, session=None) -> str:
+    user = await get_users_col().find_one({"_id": client_id}, {"full_name": 1}, session=session)
+    return (user or {}).get("full_name", "")
+
+
+def lawyer_view(row: dict, client_name: str, now: datetime) -> dict:
+    """A request as its lawyer sees it: the frozen version, the client's
+    note and focus, and nothing else. No storage path, no key material, and
+    no analyzer output -- `analysis` is always null; nothing here starts a
+    run."""
+    return {
+        "id": row["_id"],
+        "state_version": row["state_version"],
+        "status": row["status"],
+        "client_id": row["client_id"],
+        "client_name": client_name,
+        "engagement_id": row["engagement_id"],
+        "case_id": row.get("case_id"),
+        "revision_id": row["revision_id"],
+        "version": row["version"],
+        "pdf_sha256": row["pdf_sha256"],
+        "document_title": row.get("document_title"),
+        "template": row.get("template"),
+        "note": row.get("note"),
+        "focus": list(row.get("focus") or []),
+        "submitted_at": _iso(row.get("submitted_at")),
+        "viewed_at": _iso(row.get("viewed_at")),
+        "decided_at": _iso(row.get("decided_at")),
+        "cancelled_at": _iso(row.get("cancelled_at")),
+        "decline_reason": row.get("decline_reason"),
+        "cancel_reason": row.get("cancel_reason"),
+        "read_only_since": _iso(row.get("read_only_since")),
+        "retention_until": _iso(row.get("retention_until")),
+        "document_available": grants_document_access(row, now),
+        "analysis": None,
+    }
+
+
+async def get_for_lawyer(*, lawyer_id: str, request_id: str) -> dict:
+    """One request, READ-ONLY. Opening it changes nothing (see `mark_viewed`)."""
+    row = await get_document_review_requests_col().find_one({"_id": request_id, **_lawyer_scope(lawyer_id)})
+    if row is None:
+        raise _not_found()
+    return lawyer_view(row, await _client_name(row["client_id"]), _now())
+
+
+def _encode_inbox_cursor(row: dict) -> str:
+    raw = f"{_iso(row['submitted_at'])}|{row['_id']}"
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii")
+
+
+async def list_inbox(*, lawyer_id: str, status: str | None = None, cursor: str | None = None,
+                     limit: int = 20) -> dict:
+    """The lawyer's requests, newest submission first; keyset-paginated on
+    (submitted_at DESC, _id ASC) -- `review_requests_lawyer_inbox`.
+    `submitted_at` never changes after submit, so the order is stable."""
+    if status is not None and status not in rr.LAWYER_VISIBLE_STATUSES:
+        raise ReviewRequestError(422, "validation_error", "Unknown status.")
+    limit = max(1, min(limit, LIST_LIMIT_MAX))
+    query: dict = {"lawyer_id": lawyer_id,
+                   "status": status or {"$in": list(rr.LAWYER_VISIBLE_STATUSES)},
+                   "submitted_at": {"$ne": None}}
+    if cursor:
+        submitted, last_id = _decode_cursor(cursor)
+        query["$or"] = [{"submitted_at": {"$lt": submitted}},
+                        {"submitted_at": submitted, "_id": {"$gt": last_id}}]
+    rows = await get_document_review_requests_col().find(
+        query, {"receipts": 0, "pending_events": 0, "create_idempotency_key_hash": 0}).sort(
+        [("submitted_at", -1), ("_id", 1)]).limit(limit + 1).to_list(limit + 1)
+    more = len(rows) > limit
+    rows = rows[:limit]
+    client_ids = list({r["client_id"] for r in rows})
+    names = {u["_id"]: u.get("full_name", "") for u in await get_users_col().find(
+        {"_id": {"$in": client_ids}}, {"full_name": 1}).to_list(len(client_ids))} if client_ids else {}
+    now = _now()
+    return {"items": [lawyer_view(r, names.get(r["client_id"], ""), now) for r in rows],
+            "next_cursor": _encode_inbox_cursor(rows[-1]) if more and rows else None}
+
+
+async def mark_viewed(*, lawyer_id: str, request_id: str) -> dict:
+    """submitted → viewed, once. Naturally idempotent: any later call (or a
+    concurrent one, which loses the transaction and re-reads) finds the
+    request no longer `submitted` and changes nothing -- one `viewed` event
+    ever."""
+    requests = get_document_review_requests_col()
+
+    async def op(session):
+        row = await requests.find_one({"_id": request_id, **_lawyer_scope(lawyer_id)}, session=session)
+        if row is None:
+            raise _not_found()
+        now = _now()
+        name = await _client_name(row["client_id"], session)
+        if row["status"] != rr.ReviewRequestStatus.SUBMITTED.value:
+            return lawyer_view(row, name, now)
+        updates = {"status": rr.ReviewRequestStatus.VIEWED.value, "viewed_at": now}
+        new_row = {**row, **updates, "state_version": row["state_version"] + 1,
+                   "event_seq": row["event_seq"] + 1, "updated_at": now}
+        _validate(new_row)
+        result = await requests.update_one(
+            {"_id": request_id, "status": rr.ReviewRequestStatus.SUBMITTED.value,
+             "state_version": row["state_version"]},
+            {"$set": {**updates, "state_version": new_row["state_version"],
+                      "event_seq": new_row["event_seq"], "updated_at": now}}, session=session)
+        if result.matched_count != 1:
+            raise _stale()
+        await get_document_review_request_events_col().insert_one(
+            _event(row, seq=new_row["event_seq"], type_=rr.ReviewRequestEventType.VIEWED.value,
+                   actor_id=lawyer_id, actor_role=rr.ActorRole.LAWYER.value, at=now,
+                   from_status=row["status"], to_status=new_row["status"], detail={}),
+            session=session)
+        return lawyer_view(new_row, name, now)
+
+    return await _in_transaction(op)
+
+
+_DECIDABLE = (rr.ReviewRequestStatus.SUBMITTED.value, rr.ReviewRequestStatus.VIEWED.value)
+
+
+async def accept(*, lawyer_id: str, request_id: str, idempotency_key: str,
+                 expected_state_version: int) -> dict:
+    """submitted | viewed → accepted ("I will review this"). The engagement
+    must still be accepted. Races with the client's cancel or the lawyer's
+    own decline on the same version: exactly one commits, the rest are 409."""
+    body = {"expected_state_version": expected_state_version}
+
+    async def decide(row, session, now):
+        _require_status(row, *_DECIDABLE, message="Only a submitted request can be accepted.")
+        engagement = await get_engagements_col().find_one(
+            {"_id": row["engagement_id"], "lawyer_id": lawyer_id}, session=session)
+        if engagement is None or engagement.get("status") != EngagementStatus.ACCEPTED.value:
+            raise _engagement_not_active()
+        updates = {"status": rr.ReviewRequestStatus.ACCEPTED.value, "is_open": False, "decided_at": now}
+        return updates, rr.ReviewRequestEventType.ACCEPTED.value, {"revision_id": row["revision_id"],
+                                                                    "pdf_sha256": row["pdf_sha256"]}
+
+    return await _change(lawyer_id=lawyer_id, request_id=request_id, idempotency_key=idempotency_key,
+                         op_name="accept", body=body, expected_state_version=expected_state_version,
+                         decide=decide)
+
+
+async def decline(*, lawyer_id: str, request_id: str, idempotency_key: str,
+                  expected_state_version: int, reason: str | None = None) -> dict:
+    """submitted | viewed → declined, with an optional reason (≤ 500). The
+    reason is the lawyer's words: on the request for the client, never in
+    the audit event."""
+    reason = _clean_note(reason)
+    body = {"expected_state_version": expected_state_version, "reason": reason}
+
+    async def decide(row, session, now):
+        _require_status(row, *_DECIDABLE, message="Only a submitted request can be declined.")
+        updates = {"status": rr.ReviewRequestStatus.DECLINED.value, "is_open": False,
+                   "decided_at": now, "decline_reason": reason}
+        return updates, rr.ReviewRequestEventType.DECLINED.value, {}
+
+    return await _change(lawyer_id=lawyer_id, request_id=request_id, idempotency_key=idempotency_key,
+                         op_name="decline", body=body, expected_state_version=expected_state_version,
+                         decide=decide)
+
+
+def _integrity() -> ReviewRequestError:
+    return ReviewRequestError(409, "integrity",
+                              "The stored file does not match the version that was sent. It was not served.")
+
+
+def _artifact_unavailable() -> ReviewRequestError:
+    return ReviewRequestError(409, "artifact_unavailable",
+                              "The file for the version that was sent could not be read.")
+
+
+async def download_document(*, lawyer_id: str, request_id: str) -> tuple[bytes, dict]:
+    """The FROZEN PDF, or no bytes at all.
+
+    Served only while the request grants access (§7.1) and, for an open
+    request, while its engagement is still accepted. Checked in order: the
+    frozen revision still exists, is generated, has an artifact and the hash
+    the request froze; then the BYTES are hashed and compared. Any mismatch is
+    409 and nothing is sent. The audit event (ids and hashes only) commits
+    before the bytes are returned; it advances `event_seq` only, so downloads
+    never conflict with -- or stale -- the request's state version.
+    """
+    from app.services import artifact_store
+    from app.services.artifact_store import ArtifactStoreError
+
+    requests = get_document_review_requests_col()
+    row = await requests.find_one({"_id": request_id, **_lawyer_scope(lawyer_id)})
+    if row is None or not grants_document_access(row, _now()):
+        raise _not_found()
+    if row["status"] in _DECIDABLE:
+        engagement = await get_engagements_col().find_one(
+            {"_id": row["engagement_id"], "lawyer_id": lawyer_id}, {"status": 1})
+        if engagement is None or engagement.get("status") != EngagementStatus.ACCEPTED.value:
+            raise _not_found()
+
+    rev = await get_document_revisions_col().find_one(
+        {"_id": row["revision_id"], "document_id": row["document_id"]})
+    if rev is None or rev.get("status") != "generated" or not rev.get("artifact_key"):
+        raise _artifact_unavailable()
+    if rev.get("pdf_sha256") != row["pdf_sha256"]:
+        raise _integrity()
+    try:
+        data = await asyncio.to_thread(artifact_store.open_final, rev["artifact_key"])
+    except (OSError, ArtifactStoreError):
+        raise _artifact_unavailable() from None
+    if hashlib.sha256(data).hexdigest() != row["pdf_sha256"]:
+        raise _integrity()
+
+    async def op(session):
+        current = await requests.find_one_and_update(
+            {"_id": request_id, **_lawyer_scope(lawyer_id)}, {"$inc": {"event_seq": 1}},
+            projection={"event_seq": 1, "status": 1, "retention_until": 1},
+            return_document=ReturnDocument.AFTER, session=session)
+        # Re-checked inside the transaction: a cancel that committed while the
+        # bytes were being read ends access before they are handed over.
+        if current is None or not grants_document_access(current, _now()):
+            raise _not_found()
+        await get_document_review_request_events_col().insert_one(
+            _event(row, seq=current["event_seq"], type_=rr.ReviewRequestEventType.DOCUMENT_DOWNLOAD_AUTHORIZED.value,
+                   actor_id=lawyer_id, actor_role=rr.ActorRole.LAWYER.value, at=_now(),
+                   from_status=current["status"], to_status=current["status"],
+                   detail={"revision_id": row["revision_id"], "version": row["version"],
+                           "pdf_sha256": row["pdf_sha256"]}),
+            session=session)
+
+    await _in_transaction(op)
+    return data, {"revision_id": row["revision_id"], "version": row["version"],
+                  "pdf_sha256": row["pdf_sha256"]}

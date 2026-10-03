@@ -87,7 +87,7 @@ class ReviewRequestEventType(str, Enum):
     DRAFT_DELETED = "draft_deleted"
     SUBMITTED = "submitted"
     VIEWED = "viewed"
-    DOCUMENT_DOWNLOADED = "document_downloaded"
+    DOCUMENT_DOWNLOAD_AUTHORIZED = "document_download_authorized"
     ACCEPTED = "accepted"
     DECLINED = "declined"
     CANCELLED = "cancelled"

@@ -611,6 +611,8 @@ async def test_a_lawyer_is_refused_403_on_every_client_route(http):
     client, actor = http
     actor["role"] = "lawyer"
     for method, path in ROUTES:
+        if (method, path) == ("GET", "/review-requests/x"):
+            continue        # shared read-only detail: the lawyer gets their own view (slice 3)
         res = await client.request(method, path, json={}, headers={"Idempotency-Key": key()})
         assert res.status_code == 403, (method, path, res.text)
 

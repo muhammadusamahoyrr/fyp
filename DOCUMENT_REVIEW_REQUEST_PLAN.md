@@ -1,7 +1,10 @@
 # Document Review Requests — Phase 1 plan
 
-Status: **PLAN, not implemented** (except D1, shipped first as its own fix). Written 2026-10-03;
-decisions D1–D4 **decided** 2026-10-03 (§14).
+Status: **Phase 1 in progress.** D1 shipped first as its own fix. Slice 1 (model, indexes,
+settings), slice 2 (client service and API) and slice 3 (lawyer API) are implemented, behind
+`DOCUMENT_REVIEW_REQUESTS` (off). Slices 4 (engagement-end hook, retention, deletion hold),
+5 (notifications) and 6 (client UI) are not. Written 2026-10-03; decisions D1–D4 **decided**
+2026-10-03 (§14).
 Scope owner: Muhammad Usama. Related: `DOC_ANALYZER_PLAN.md` (the analyzer engine),
 `ENGAGEMENT_REDESIGN.md` (engagements).
 
@@ -76,7 +79,7 @@ The check runs at **create** and again at **submit** (the engagement can end in 
 ## 3. Lifecycle
 
 ```text
-draft ──submit──► submitted ──lawyer opens──► viewed ──┬─accept──► accepted
+draft ──submit──► submitted ──POST /view───► viewed ──┬─accept──► accepted
   │                   │                        │      └─decline─► declined
   │                   └──────client cancel─────┴────────────────► cancelled
   └──client deletes── (row removed; audit event kept)
@@ -88,7 +91,7 @@ draft ──submit──► submitted ──lawyer opens──► viewed ──�
 | `draft` | edit note/focus, change version/engagement | `draft` | client | |
 | `draft` | delete | (removed) | client | Audit event `draft_deleted` remains. |
 | `draft` | submit | `submitted` | client | Engagement and revision re-checked; notification intent written. |
-| `submitted` | lawyer's first open of the request or its document | `viewed` | lawyer | Atomic `submitted→viewed`; later opens change nothing. |
+| `submitted` | lawyer calls `POST /{id}/view` | `viewed` | lawyer | Atomic `submitted→viewed`; later calls change nothing. Reading the request or downloading its document never does this (§5). |
 | `submitted`, `viewed` | accept | `accepted` | lawyer | "I will review this." The review OUTCOME is Phase 2/3. |
 | `submitted`, `viewed` | decline (optional reason ≤ 500 chars) | `declined` | lawyer | |
 | `submitted`, `viewed` | cancel | `cancelled` | client | Lawyer access ends at once (§7). |
@@ -138,8 +141,11 @@ No file bytes, no copy of the PDF, no analyzer output.
 ### 4.2 `document_review_request_events` (append-only audit)
 
 `{request_id, seq, type, actor_id, actor_role, at, from_status, to_status, detail}`.
-Types: `created`, `edited`, `draft_deleted`, `submitted`, `viewed`, `document_downloaded`,
-`accepted`, `declined`, `cancelled`. `detail` holds ids and hashes only (revision id,
+Types: `created`, `edited`, `draft_deleted`, `submitted`, `viewed`,
+`document_download_authorized`, `accepted`, `declined`, `cancelled`, `retention_started`.
+`document_download_authorized` is written (and committed) after the bytes are verified and
+BEFORE they are returned, so it records that a download was authorised and started, not that
+the client received the file -- a disconnect mid-transfer leaves the same event. `detail` holds ids and hashes only (revision id,
 pdf_sha256, reason code) — never the note text or document text. Rows are never updated or
 deleted by this module.
 
@@ -171,17 +177,22 @@ as `document_transitions`) and, where it changes an existing request, `expected_
 | `POST /review-requests/{id}/submit` | `{expected_state_version}` | `submitted`; engagement and revision re-checked. |
 | `POST /review-requests/{id}/cancel` | `{expected_state_version}` | From `submitted`/`viewed` only. |
 | `GET /review-requests?status=&cursor=` | — | The caller's requests. |
-| `GET /review-requests/{id}` | — | One request (client view). |
+| `GET /review-requests/{id}` | — | One request (client view). Read-only. |
 
-### Lawyer (`require_lawyer`, and `lawyer_id == caller`)
+### Lawyer (`require_lawyer`, and the request's frozen `lawyer_id == caller`)
+
+**Every GET is read-only.** A browser prefetch or a cache can issue a GET, so no GET changes a
+request's status: opening a request is an explicit `POST /view`. (Changed during slice 3 from
+an earlier draft in which the first GET of the request or its document marked it viewed.)
 
 | Method & path | Result |
 |---|---|
-| `GET /review-requests/inbox?status=&cursor=` | The caller's submitted/viewed/accepted/declined requests (never drafts). |
-| `GET /review-requests/inbox/{id}` | One request; first open moves `submitted → viewed`. |
-| `GET /review-requests/inbox/{id}/document` | The FROZEN PDF, streamed from the existing artifact by `revision_id`, verified against `pdf_sha256` before sending (mismatch → 409 `integrity`, never the wrong bytes). Also marks viewed; writes `document_downloaded`. Allowed only while the request grants access (§7). |
-| `POST /review-requests/inbox/{id}/accept` | `{expected_state_version}` |
-| `POST /review-requests/inbox/{id}/decline` | `{expected_state_version, reason?}` |
+| `GET /review-requests/inbox?status=&cursor=` | The caller's submitted/viewed/accepted/declined/cancelled requests (never drafts, nor a draft the system cancelled before submission), keyset-paginated on `(submitted_at DESC, _id ASC)`. |
+| `GET /review-requests/{id}` | One request, lawyer view (same path as the client's; each role gets its own view). **Read-only.** |
+| `POST /review-requests/{id}/view` | The ONLY way `submitted → viewed` happens. Idempotent: later calls return the request unchanged; one `viewed` event ever. |
+| `GET /review-requests/{id}/document` | The FROZEN PDF from the existing artifact by `revision_id`. The revision, its artifact and its `pdf_sha256` are checked, then the bytes themselves are hashed; any mismatch → 409 `integrity` (missing file or revision → 409 `artifact_unavailable`), never the wrong bytes. Writes a `document_download_authorized` audit event (ids and hashes only); **does not change the status** or the state version. Allowed only while the request grants access (§7.1). |
+| `POST /review-requests/{id}/accept` | `{expected_state_version}` + Idempotency-Key. From `submitted`/`viewed` only; the engagement must still be accepted. |
+| `POST /review-requests/{id}/decline` | `{expected_state_version, reason?}` (≤ 500 chars) + Idempotency-Key. From `submitted`/`viewed` only. The reason is shown to the client, never written to the audit. |
 
 The lawyer's responses carry the original document and the client's note/focus **only** —
 no analyzer output exists for these requests, and none is attached. Analysis never starts
@@ -214,6 +225,13 @@ document text.
 
 "No" means the document endpoint answers 404 and the inbox item shows its status but not the
 document.
+
+**Implementation status.** Slice 3 enforces this table as far as the stored fields allow: an
+open request whose engagement is no longer `accepted` is 404, and an accepted request with a
+`retention_until` in the past is 404. Nothing sets `retention_until` yet -- the engagement-end
+hook and the document-deletion trigger that write it are **slice 4**. Until slice 4 lands, an
+accepted request stays downloadable after its engagement ends; accepted-document retention
+enforcement activates with slice 4.
 
 ### 7.2 Client cancel
 

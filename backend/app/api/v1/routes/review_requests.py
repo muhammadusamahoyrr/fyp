@@ -1,11 +1,18 @@
-"""Document review requests, client routes (DOCUMENT_REVIEW_REQUEST_PLAN.md §5).
+"""Document review requests, client and lawyer routes (DOCUMENT_REVIEW_REQUEST_PLAN.md §5).
 
 Inert unless BOTH `DOCUMENTS_V2` and `DOCUMENT_REVIEW_REQUESTS` are on: every
 route answers 404 `feature_disabled` otherwise -- checked before
 authentication, so a disabled feature looks like a route that does not exist.
-Client role only (a lawyer gets 403). Every mutation takes an Idempotency-Key
-header; every change of an existing request names `expected_state_version`
+
+Roles: drafting, submitting and cancelling are the client's; the inbox,
+`/view`, `/document`, `/accept` and `/decline` are the registered lawyer's;
+`GET /{id}` answers either, each with their own view. Any other role is 403.
+Every mutation that is not naturally idempotent takes an Idempotency-Key
+header, and every change of an existing request names `expected_state_version`
 (in the body; for DELETE, in the `Expected-State-Version` header).
+
+Every GET is read-only. A prefetch or a cache can fire a GET, so a lawyer
+opening a request marks it viewed with an explicit `POST /{id}/view`.
 
 Errors use the service's codes: `{ "error": {"code","message"}, "status_code" }`.
 """
@@ -16,8 +23,8 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.exceptions import AppValidationError
-from app.dependencies import require_client
-from app.models.review_request import FOCUS_ITEM_MAX, FOCUS_MAX_ITEMS, NOTE_MAX
+from app.dependencies import require_client, require_client_or_lawyer, require_lawyer
+from app.models.review_request import DECLINE_REASON_MAX, FOCUS_MAX_ITEMS, NOTE_MAX
 from app.services import document_transitions as tx
 from app.services import review_request_service as svc
 from app.services.review_request_service import ReviewRequestError
@@ -91,6 +98,19 @@ class CancelBody(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class AcceptBody(BaseModel):
+    expected_state_version: int = Field(ge=1)
+
+    model_config = {"extra": "forbid"}
+
+
+class DeclineBody(BaseModel):
+    expected_state_version: int = Field(ge=1)
+    reason: str | None = Field(default=None, max_length=DECLINE_REASON_MAX)
+
+    model_config = {"extra": "forbid"}
+
+
 # Literal paths BEFORE `/{request_id}`: FastAPI matches in declaration order.
 
 @router.get("/eligible-engagements")
@@ -98,6 +118,14 @@ async def eligible_engagements(document_id: str = Query(min_length=1, max_length
                                current_user: dict = Depends(require_client)):
     return {"items": await _run(svc.eligible_engagements(
         client_id=current_user["_id"], document_id=document_id))}
+
+
+@router.get("/inbox")
+async def lawyer_inbox(status: str | None = None, cursor: str | None = Query(default=None, max_length=512),
+                       limit: int = Query(default=20, ge=1, le=svc.LIST_LIMIT_MAX),
+                       current_user: dict = Depends(require_lawyer)):
+    return await _run(svc.list_inbox(lawyer_id=current_user["_id"], status=status,
+                                     cursor=cursor, limit=limit))
 
 
 @router.post("", status_code=201)
@@ -118,7 +146,11 @@ async def list_requests(status: str | None = None, cursor: str | None = Query(de
 
 
 @router.get("/{request_id}")
-async def get_request(request_id: str, current_user: dict = Depends(require_client)):
+async def get_request(request_id: str, current_user: dict = Depends(require_client_or_lawyer)):
+    """Read-only for both roles: the client's view of their own request, or
+    the addressed lawyer's view of a submitted one. Never marks it viewed."""
+    if current_user.get("role") == "lawyer":
+        return await _run(svc.get_for_lawyer(lawyer_id=current_user["_id"], request_id=request_id))
     return await _run(svc.get_for_client(client_id=current_user["_id"], request_id=request_id))
 
 
@@ -170,3 +202,46 @@ async def cancel_request(request_id: str, body: CancelBody,
     key = _require_key(idempotency_key)
     return await _run(svc.cancel(client_id=current_user["_id"], request_id=request_id,
                                  idempotency_key=key, expected_state_version=body.expected_state_version))
+
+
+# ── lawyer ──────────────────────────────────────────────────────────────────
+
+@router.post("/{request_id}/view")
+async def view_request(request_id: str, current_user: dict = Depends(require_lawyer)):
+    """submitted → viewed, once; any repeat returns the request unchanged."""
+    return await _run(svc.mark_viewed(lawyer_id=current_user["_id"], request_id=request_id))
+
+
+@router.get("/{request_id}/document")
+async def download_document(request_id: str, current_user: dict = Depends(require_lawyer)):
+    data, meta = await _run(svc.download_document(lawyer_id=current_user["_id"], request_id=request_id))
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="review-request-{request_id[:12]}.pdf"',
+            # STRONG etag: the bytes were hashed and matched just now.
+            "ETag": f'"{meta["pdf_sha256"]}"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Revision-Version": str(meta["version"]),
+        },
+    )
+
+
+@router.post("/{request_id}/accept")
+async def accept_request(request_id: str, body: AcceptBody,
+                         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+                         current_user: dict = Depends(require_lawyer)):
+    key = _require_key(idempotency_key)
+    return await _run(svc.accept(lawyer_id=current_user["_id"], request_id=request_id, idempotency_key=key,
+                                 expected_state_version=body.expected_state_version))
+
+
+@router.post("/{request_id}/decline")
+async def decline_request(request_id: str, body: DeclineBody,
+                          idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+                          current_user: dict = Depends(require_lawyer)):
+    key = _require_key(idempotency_key)
+    return await _run(svc.decline(lawyer_id=current_user["_id"], request_id=request_id, idempotency_key=key,
+                                  expected_state_version=body.expected_state_version, reason=body.reason))
