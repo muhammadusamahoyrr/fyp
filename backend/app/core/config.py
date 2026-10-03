@@ -179,6 +179,19 @@ class Settings(BaseSettings):
     # tombstone-first and crash-safe (services/document_deletion.py).
     documents_v2_deletion_enabled: bool = False
 
+    # ── DOCUMENT REVIEW REQUESTS — client→lawyer sharing ─────────────────────
+    # DOCUMENT_REVIEW_REQUEST_PLAN.md. A client sends one exact, frozen Vault
+    # version to the lawyer of an ACCEPTED engagement. OFF by default, and it
+    # stays off until BOTH the client flow and the lawyer Review Queue (Phase 2)
+    # are ready -- no client may send what no lawyer can open. Requires
+    # DOCUMENTS_V2 (the Vault is V2). Off: the routes answer 404.
+    document_review_requests: bool = False
+    # D3: after an ACCEPTED request's engagement ends or its document is
+    # deleted, the lawyer keeps READ-ONLY access for this many days. The
+    # deadline is computed once, at that event, and frozen on the request
+    # (`retention_until`); changing this later affects only future events.
+    review_request_retention_days: int = 30
+
     # ── DOC_ANALYZER — real document analysis (DOC_ANALYZER_PLAN.md) ──────────
     # OFF by default. When off, the analyzer routes answer 404 and nothing is
     # written. When ON it additionally requires a transactional database
@@ -398,6 +411,13 @@ class Settings(BaseSettings):
                 "instant the first run would decide for itself how much of "
                 "the backlog to notify")
         return self
+
+    @field_validator("review_request_retention_days")
+    @classmethod
+    def _retention_is_sane(cls, value: int) -> int:
+        if not 1 <= value <= 3650:
+            raise ValueError("review_request_retention_days must be between 1 and 3650")
+        return value
 
     @field_validator("appointment_scheduler_interval_minutes")
     @classmethod

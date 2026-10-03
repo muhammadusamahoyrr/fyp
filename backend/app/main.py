@@ -58,6 +58,7 @@ from app.db.appointment_slot_preflight import assert_appointment_booking_ready
 from app.db.chroma import close_chroma, connect_chroma
 from app.db.indexes import (
     create_all_indexes,
+    enforce_review_request_indexes,
     enforce_v2_correctness_indexes,
 )
 from app.db.mongodb import close_db, connect_db
@@ -292,6 +293,9 @@ async def lifespan(app: FastAPI):
     # because from that point the missing index is not a slow query, it is a
     # guarantee that silently is not held.
     await enforce_v2_correctness_indexes()
+    # Same rule for document review requests: warn while the flag is off,
+    # refuse to start once it is on and an index is missing.
+    await enforce_review_request_indexes()
 
     # The Document Analyzer checks its own prerequisites (transactions, its
     # indexes) and FAILS CLOSED ON ITS OWN: a failure closes the analyzer's

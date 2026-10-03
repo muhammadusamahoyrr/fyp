@@ -371,3 +371,19 @@ def get_analysis_approval_audit_col() -> AsyncIOMotorCollection:
     """Append-only: every grant, revocation and approval, written in the same
     transaction as the change it records."""
     return get_database()["analysis_approval_audit"]
+
+
+# ── Document review requests (DOCUMENT_REVIEW_REQUEST_PLAN.md) ───────────────
+# Dormant unless DOCUMENT_REVIEW_REQUESTS is on. Model: app/models/review_request.py.
+# Indexes: app/db/review_request_index_spec.py.
+
+def get_document_review_requests_col() -> AsyncIOMotorCollection:
+    """One client-to-lawyer request for ONE frozen Vault version. No file
+    bytes and no copy of the PDF: it references the revision's artifact."""
+    return get_database()["document_review_requests"]
+
+
+def get_document_review_request_events_col() -> AsyncIOMotorCollection:
+    """Append-only audit: every change to a request and every download of its
+    document, ids and hashes only. Never updated or deleted."""
+    return get_database()["document_review_request_events"]

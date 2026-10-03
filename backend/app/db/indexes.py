@@ -47,6 +47,7 @@ from app.db.collections import (
 )
 
 from app.db.analyzer_index_spec import ANALYZER_INDEX_REQUIREMENTS, OBSOLETE_ANALYZER_INDEXES
+from app.db.review_request_index_spec import REVIEW_REQUEST_INDEX_REQUIREMENTS
 from app.db.v2_index_spec import (
     CODE_UNREADABLE,
     CORRECTNESS,
@@ -261,6 +262,63 @@ async def validate_analyzer_indexes() -> list[IndexProblem]:
     return await _validate_specs(ANALYZER_INDEX_REQUIREMENTS)
 
 
+# ── DOCUMENT REVIEW REQUEST INDEXES ──────────────────────────────────────────
+
+
+class MissingReviewRequestIndexes(RuntimeError):
+    """DOCUMENT_REVIEW_REQUESTS is on and an index it depends on is not valid."""
+
+
+async def _review_request_indexes() -> None:
+    """Review-request indexes, from their manifest. Created whether or not the
+    flag is on -- the collections are empty until it is -- so turning it on
+    meets indexes that already exist. Failures log (class only) and continue;
+    `enforce_review_request_indexes` is what refuses."""
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    for spec in REVIEW_REQUEST_INDEX_REQUIREMENTS:
+        try:
+            await db[spec.collection].create_indexes([spec.model()])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "index_create_failed collection=%s index=%s error_class=%s. "
+                "It must be valid before DOCUMENT_REVIEW_REQUESTS is enabled.",
+                spec.collection, spec.name, type(exc).__name__)
+
+
+async def validate_review_request_indexes() -> list[IndexProblem]:
+    """Every requirement in `REVIEW_REQUEST_INDEX_REQUIREMENTS` not satisfied.
+    Reads only; an empty list means every guarantee is enforced."""
+    return await _validate_specs(REVIEW_REQUEST_INDEX_REQUIREMENTS)
+
+
+async def enforce_review_request_indexes() -> list[IndexProblem]:
+    """At startup. OFF: report and return -- nothing writes these collections,
+    so a missing index cannot corrupt anything. ON: refuse to start, for a
+    query index as well as a correctness one: the one-open-request and
+    create-key indexes ARE the race guards, and the inbox index keeps a
+    lawyer's queue from becoming a collection scan."""
+    from app.core.config import settings
+
+    problems = await validate_review_request_indexes()
+    if not problems:
+        return []
+    correctness = [p for p in problems if p.kind == CORRECTNESS]
+    detail = "; ".join(str(p) for p in problems)
+    if not settings.document_review_requests:
+        logger.warning(
+            "review_request_indexes_invalid count=%d correctness=%d detail=%s. "
+            "DOCUMENT_REVIEW_REQUESTS is off, so nothing depends on them yet -- "
+            "they must be correct before it is enabled.",
+            len(problems), len(correctness), detail)
+        return problems
+    raise MissingReviewRequestIndexes(
+        "DOCUMENT_REVIEW_REQUESTS is enabled but its indexes are not in place: " + detail
+        + f". ({len(correctness)} of {len(problems)} are correctness guarantees.) "
+        "Fix them or disable DOCUMENT_REVIEW_REQUESTS.")
+
+
 async def check_v2_correctness_indexes() -> list[str]:
     """Backwards-compatible string view of `validate_v2_indexes`."""
     return [str(p) for p in await validate_v2_indexes()]
@@ -454,6 +512,7 @@ async def create_all_indexes() -> None:
     await _documents_v2_indexes()
     await _analyzer_indexes()
     await _ocr_revision_indexes()
+    await _review_request_indexes()
 
 
 async def _provenance_indexes() -> None:
