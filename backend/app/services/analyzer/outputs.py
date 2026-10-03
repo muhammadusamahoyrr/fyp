@@ -31,6 +31,7 @@ from app.db.collections import (
     get_analysis_doc_graph_col,
     get_analysis_findings_col,
     get_analysis_hypothesis_results_col,
+    get_analysis_hypothesis_reviews_col,
     get_analysis_runs_col,
     get_analysis_sentences_col,
     get_analysis_text_blocks_col,
@@ -93,4 +94,5 @@ async def sweep_unpublished_run_outputs(*, older_than: timedelta = DEFAULT_AGE,
             + await _sweep_by_run(get_analysis_doc_graph_col(), cutoff, limit)
             + await _sweep_by_run(get_analysis_findings_col(), cutoff, limit)
             + await _sweep_by_run(get_analysis_ai_items_col(), cutoff, limit)
-            + await _sweep_by_run(get_analysis_hypothesis_results_col(), cutoff, limit))
+            + await _sweep_by_run(get_analysis_hypothesis_results_col(), cutoff, limit)
+            + await _sweep_by_run(get_analysis_hypothesis_reviews_col(), cutoff, limit))

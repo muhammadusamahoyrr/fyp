@@ -57,7 +57,8 @@ async def test_with_the_ai_layer_off_the_scan_runs_and_publishes_under_its_fence
     summary = run["hypotheses"]
     assert summary["engine"] == "ai-hypothesis.1" and summary["document_type"] == "tenancy"
     assert summary["catalogue"] == "drafting-hypotheses.v1" and len(summary["catalogue_sha256"]) == 64
-    assert summary["ai_review"] == hypothesis_stage.AI_REVIEW_NOT_BUILT
+    # The AI layer is off in this fixture: no review is queued, and the reason is recorded.
+    assert summary["ai_review"]["status"] == "unavailable" and summary["ai_review"]["reason"] == "ai_layer_off"
     assert summary["skipped"] == [] and sum(summary["counts"].values()) == 17
 
     rows = await hypothesis_stage.published_results(run)

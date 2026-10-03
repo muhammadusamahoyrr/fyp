@@ -170,7 +170,9 @@ evaluation (§7), and it never enters the gate's attention set.
 ### 4.2 `unable_to_determine` reason codes
 
 `ocr_unconfirmed`, `page_map_unavailable`, `text_limit_reached`, `detector_error`, `language_unsupported`,
-`structure_unavailable` (where the question needs DOCX structure). `not_located` is used **only** when the
+`structure_unavailable` (where the question needs DOCX structure), `evidence_flagged` (every sentence the
+detector located was flagged by the embedded-instruction scan; a flagged sentence is never evidence -- the same
+policy as the playbook engine). `not_located` is used **only** when the
 scanner read the whole document and every input the question relies on is available. An unknown document type is
 not a document-level code: it skips the type-specific checks (§3.2). The one universal question that needs a type
 to compare values (`conflicting_values`) answers `unable_to_determine` / `needs_document_type` instead; every other
@@ -182,7 +184,8 @@ keeps it as a sentence, but it states nothing.
 ### 4.3 AI review `unavailable` reason codes
 
 `ai_layer_off`, `ai_not_ready`, `synthetic_only_refused`, `provider_timeout`, `rate_limited`, `provider_error`,
-`schema_invalid`, `answer_mismatch` (ids not the ones sent), `injection_scan_missing`. Each item's signal records
+`schema_invalid`, `injection_scan_missing`, `no_confirmed_text`, `text_integrity`, `nothing_to_review`, and per
+item `item_dropped_or_unanswered` (the validator dropped it, or the model gave no answer for it). Each item's signal records
 one; the run summary counts them. None of them changes a scanner result or the run's scanner outcome.
 
 ### 4.4 Data sent to the provider
@@ -208,6 +211,14 @@ receipt" builds on this).
 - Two stages: `hypothesis_scan` (publishes scanner results) and `hypothesis_ai_review` (attaches signals). The
   second can fail, time out or be skipped without touching the first. A run using this engine does not run the
   `ai-report.1` stage. The engine is recorded on the run at creation; old runs keep theirs.
+- *(Step 4, built.)* After the scan publishes, the run goes to `queued_hypothesis_review` only when the AI layer
+  is on and ready and at least one item is reviewable; otherwise it ends `done` with the reason. The review stage
+  (`hypothesis_review_stage.py`) re-checks synthetic attestation, readiness, the text hash and the
+  embedded-instruction scan, calls the pinned model once outside any transaction under a heartbeat, validates
+  (`hypotheses/review.py`), writes one insert-only row per sent item to `analysis_hypothesis_reviews`
+  (signal + explanation, or `unavailable` + reason; sentence ids and SHA-256s, never text, never the raw
+  response), and publishes through `commit_stage`. `report(run)` returns the published scanner rows unchanged
+  with the published signal beside each (`not_requested` where none was asked).
 - Old `ai-report.1` items and runs are never migrated, rewritten or re-labelled.
 - Deletion follows the run's existing lifecycle.
 

@@ -32,7 +32,7 @@ from app.db.collections import (
     get_analysis_hypothesis_results_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import blob_store, deletion, worker
+from app.services.analyzer import ai_stage, blob_store, deletion, injection, worker
 from app.services.analyzer.hypotheses import catalog, scanner
 from app.services.analyzer.terms_stage import published_sentences
 from app.services.analyzer.worker import Lease, LostLease
@@ -40,8 +40,6 @@ from app.services.analyzer.worker import Lease, LostLease
 logger = logging.getLogger(__name__)
 
 STAGE = "hypothesis_scan"
-#: Stored on the run until the AI review stage exists (step 4 of the plan).
-AI_REVIEW_NOT_BUILT = {"status": "unavailable", "reason": "ai_review_not_built"}
 
 
 async def _published_graph(run: dict) -> list[dict]:
@@ -81,12 +79,19 @@ async def run_hypothesis_scan(lease: Lease) -> str:
         await worker.finish_without_result(lease, status="failed", error_code="hypothesis_catalogue_invalid")
         return "failed:hypothesis_catalogue_invalid"
 
+    try:
+        security = injection.from_record(run.get("security_scan"), document_hash=version["text_hash"])
+    except injection.ScanMismatch:
+        await worker.finish_without_result(lease, status="failed", error_code="security_scan_mismatch")
+        return "failed:security_scan_mismatch"
+    suspect = security.sentence_ids if security else frozenset()
+
     sentences = await published_sentences(run)
     scan = scanner.scan(
         text=raw.decode("utf-8"), sentences=sentences, graph_rows=await _published_graph(run),
         document_type=context.get("document_type"),
         document_unable_reason=None if version.get("confirmed", True) else "ocr_unconfirmed",
-        catalogue=catalogue)
+        catalogue=catalogue, suspect=suspect)
 
     now = datetime.now(timezone.utc)
     key = {"run_id": lease.run_id, "stage": STAGE, "fence": lease.fence}
@@ -101,16 +106,28 @@ async def run_hypothesis_scan(lease: Lease) -> str:
     counts: dict[str, int] = {}
     for result in scan["results"]:
         counts[result["status"]] = counts.get(result["status"], 0) + 1
+    # The AI review is a separate, later stage that cannot touch these rows.
+    # Whether it runs never decides whether the scan publishes.
+    from app.services.analyzer.hypotheses import review
+    go, why = ai_stage.wanted()
+    wanted_items, _ = review.select(scan["results"], suspect)
+    if go and wanted_items:
+        next_status, ai_review = "queued_hypothesis_review", {"status": "queued"}
+    else:
+        from app.services.analyzer.hypothesis_review_stage import unavailable
+        reason = ("nothing_to_review" if go else "ai_layer_off" if why == "ai_disabled" else "ai_not_ready")
+        next_status, ai_review = "done", unavailable(reason)
     try:
-        await worker.commit_stage(lease, stage=STAGE, next_status="done", set_fields={
+        await worker.commit_stage(lease, stage=STAGE, next_status=next_status, set_fields={
             "hypotheses": {
                 "engine": "ai-hypothesis.1", "catalogue": scan["catalogue"],
                 "catalogue_sha256": scan["catalogue_sha256"], "scanner": scan["scanner"],
                 "document_type": scan["document_type"], "counts": counts,
                 "skipped": scan["skipped"], "text_sha256": version["text_hash"],
-                "generated_at": now, "ai_review": AI_REVIEW_NOT_BUILT}})
+                "excluded_flagged_sentences": len(suspect),
+                "generated_at": now, "ai_review": ai_review}})
     except (LostLease, deletion.StaleSource) as exc:
         if isinstance(exc, LostLease) and await worker.finish_without_result(lease, status="cancelled"):
             return "cancelled"
         return "lost"
-    return "done"
+    return next_status

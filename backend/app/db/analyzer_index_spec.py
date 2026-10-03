@@ -260,6 +260,31 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="The unpublished-output sweep reads only rows older than its cutoff.",
     ),
+    # ── analysis_hypothesis_reviews (AI review signals) ──────────────────────
+    IndexSpec(
+        collection="analysis_hypothesis_reviews",
+        name="uniq_analysis_hypothesis_reviews_row",
+        keys=(("run_id", ASCENDING), ("stage", ASCENDING), ("fence", ASCENDING),
+              ("question_id", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("One AI review signal per question per fence, insert-only, in its own "
+             "collection so it can never alter a scanner row. A stale worker's rows "
+             "carry an old fence and are never published."),
+    ),
+    IndexSpec(
+        collection="analysis_hypothesis_reviews",
+        name="analysis_hypothesis_reviews_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every AI review signal of a source.",
+    ),
+    IndexSpec(
+        collection="analysis_hypothesis_reviews",
+        name="analysis_hypothesis_reviews_created",
+        keys=(("created_at", ASCENDING),),
+        kind=QUERY,
+        why="The unpublished-output sweep reads only rows older than its cutoff.",
+    ),
     # ── analysis_doc_graph (definitions and cross-references) ────────────────
     IndexSpec(
         collection="analysis_doc_graph",

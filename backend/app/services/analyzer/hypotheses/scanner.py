@@ -62,7 +62,8 @@ def _groups(sentence_ids: list[str], sentences: list[dict]) -> list[dict]:
 
 def scan(*, text: str, sentences: list[dict], graph_rows: list[dict], document_type: str | None,
          document_unable_reason: str | None = None,
-         catalogue: catalog.Catalogue | None = None) -> dict:
+         catalogue: catalog.Catalogue | None = None,
+         suspect: frozenset[str] = frozenset()) -> dict:
     """{catalogue, catalogue_sha256, scanner, document_type, results[], skipped[]}."""
     catalogue = catalogue or catalog.load()
     confirmed = document_type if document_type in catalog.DOCUMENT_TYPES else None
@@ -80,6 +81,13 @@ def scan(*, text: str, sentences: list[dict], graph_rows: list[dict], document_t
             logger.exception("hypothesis detector %s failed", q.detector_name)
             finding = detectors.Finding(UNABLE, reason_code="detector_error")
         status, reason = finding.status, finding.reason_code
+        if finding.sentence_ids and suspect:
+            # A sentence the embedded-instruction scan flagged is never
+            # evidence: dropped, and a result left with none is not "Found".
+            kept = [sid for sid in finding.sentence_ids if sid not in suspect]
+            if not kept and status not in (NOT_LOCATED, UNABLE):
+                status, reason = UNABLE, "evidence_flagged"
+            finding.sentence_ids = kept
         if status == NOT_LOCATED and document_unable_reason:
             status, reason = UNABLE, document_unable_reason
         groups = [] if status in (NOT_LOCATED, UNABLE) else _groups(finding.sentence_ids, sentences)

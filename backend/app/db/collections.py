@@ -355,6 +355,13 @@ def get_analysis_hypothesis_results_col() -> AsyncIOMotorCollection:
     return get_database()["analysis_hypothesis_results"]
 
 
+def get_analysis_hypothesis_reviews_col() -> AsyncIOMotorCollection:
+    """AI review signals beside the scanner results (ANALYZER_HYPOTHESES_PLAN.md
+    §4.1): one row per (run, stage, fence, question), insert-only; ids, hashes
+    and versions -- never evidence text or the raw provider response."""
+    return get_database()["analysis_hypothesis_reviews"]
+
+
 def get_analysis_findings_col() -> AsyncIOMotorCollection:
     """Playbook results of a run (general and approved legal packs), keyed
     (run_id, stage, fence, ordinal). Sentence ids only -- quotes are cut from

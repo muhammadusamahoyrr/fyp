@@ -23,6 +23,7 @@ QUEUED_STATES: tuple[str, ...] = (
     "queued_analysis",
     "queued_ai_report",
     "queued_hypothesis_scan",
+    "queued_hypothesis_review",
 )
 ACTIVE_STATES: tuple[str, ...] = (
     "extracting",
@@ -31,6 +32,7 @@ ACTIVE_STATES: tuple[str, ...] = (
     "analyzing",
     "ai_reporting",
     "hypothesis_scanning",
+    "hypothesis_reviewing",
 )
 PAUSED_STATES: tuple[str, ...] = (
     "needs_ocr_confirmation",
@@ -50,6 +52,7 @@ ACTIVE_FOR_QUEUED: dict[str, str] = {
     "queued_analysis": "analyzing",
     "queued_ai_report": "ai_reporting",
     "queued_hypothesis_scan": "hypothesis_scanning",
+    "queued_hypothesis_review": "hypothesis_reviewing",
 }
 
 #: The two analysis engines (ANALYZER_HYPOTHESES_PLAN.md §5). A run's engine is
