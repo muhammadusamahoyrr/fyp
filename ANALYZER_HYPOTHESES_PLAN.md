@@ -256,6 +256,16 @@ not_passed`, plus `label_review: developer_only | lawyer_reviewed`. `production_
 value while `label_review` is `developer_only`, and requires the holdout result. The `ai-report.1` record is not
 edited.
 
+**Per-question gate (built).** An overall average cannot hide a weak detector: a question with at least 3 scanner
+flags must reach precision ≥ 0.80 on its own, and one with at least 3 gold attention items must reach recall ≥ 0.85.
+Any failing question makes the status `not_passed`.
+
+*(Step 5, built.)* Harness `hypotheses/evaluation.py`, runner `scripts/analyzer_hypothesis_eval.py` (offline by default;
+a live AI run needs `AAI_LIVE_TESTS=1` and a ready AI layer), dataset `backend/analyzer_eval/hypotheses/calib-1/`
+(45 documents), record `hypotheses/ai_hypothesis_evaluation_record.yaml` (catalogue, scanner-code, prompt and
+dataset SHA-256s; `production_approved` is unreachable). First run, 2026-10-03, scanner-only: attention precision
+0.896, recall 0.962, evidence validity 1.0 -- **not_passed** on 10 weak questions.
+
 **v1 regression:** map attention items to the v1 scorer's risk shape (`missing_detail`, `contradiction`,
 `ambiguity`, with sentence ids) and report old vs new side by side. Not a gate; a check that nothing the old layer
 caught is silently lost.
