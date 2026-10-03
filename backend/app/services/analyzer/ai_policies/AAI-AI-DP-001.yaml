@@ -12,16 +12,16 @@
 #      commits the change for review. zdr.verified_on must equal
 #      ANALYZER_AI_ZDR_VERIFIED_ON.
 policy_id: AAI-AI-DP-001
-status: pending_verification
-verifier: null
-verified_on: null
-scope: null
-evidence_location: null
+status: verified
+verifier: Muhammad Usama (account owner)
+verified_on: '2026-10-03'
+scope: Analyzer AI report layer, synthetic evaluation documents only; the project owner's paid (Developer tier) Groq organization, project "Default Project"; Global ZDR and Inference APIs ZDR both enabled.
+evidence_location: Console screenshot kept outside the repository (Documents/Attorney.AI evidence/groq-zdr-2026-10-03-paid-org.png, SHA-256 53f64a9b3ff7fe2a44d66de8809bc642e46c4be89fef73826ab876cfba841d24)
 approved_endpoints:
 - https://api.groq.com/openai/v1/chat/completions
 zdr:
   provider: groq
   enabled_in: Groq Console -> Data Controls (organization level)
-  confirmed_on_account: false
-  verified_on: null
-notes: Synthetic documents only (ANALYZER_AI_SYNTHETIC_ONLY=true). Real documents are not permitted.
+  confirmed_on_account: true
+  verified_on: '2026-10-03'
+notes: Synthetic documents only (ANALYZER_AI_SYNTHETIC_ONLY=true). Real documents are not permitted. History - 2026-10-02 the free "Personal" organization was verified the same way (groq-zdr-2026-10-02.png, SHA-256 6200cf8418e24102eb07b477e886fa4f2b1949dfae54595beb5049bfa70040cc); 2026-10-03 the paid organization above replaced it for evaluation runs.

@@ -135,14 +135,22 @@ async def test_a_consistent_ai_contract_is_ready(app_indexes, ready_otherwise):
 
 # ── the checklist record behind the policy id ────────────────────────────────
 
-def test_the_real_checklist_is_pending_and_keeps_the_ai_layer_closed():
+def test_the_real_checklist_was_verified_by_a_person_and_binds_its_zdr_date():
+    """The account owner confirmed organization-level ZDR in Groq Console --
+    the free organization on 2026-10-02, the paid one now used for evaluation
+    on 2026-10-03 (evidence kept outside the repository). The record is
+    complete, and it supports the AI layer only with that exact ZDR date."""
     from app.services.analyzer import ai_records
     real = ai_records.load_policy("AAI-AI-DP-001", ai_records.HERE / "ai_policies")
-    assert real["status"] == ai_records.PENDING and real["zdr"]["confirmed_on_account"] is False
+    assert real["status"] == ai_records.VERIFIED and real["zdr"]["confirmed_on_account"] is True
+    assert real["verifier"] and real["scope"] and real["evidence_location"]
+    assert "outside the repository" in real["evidence_location"]
     assert ai_config.GROQ_CHAT_URL in real["approved_endpoints"]
     assert ai_records.policy_problems(real, endpoint=ai_config.GROQ_CHAT_URL,
-                                      zdr_verified_on="2026-09-30") == [
-        "ai_policy_not_verified: the checklist record is not verified"]
+                                      zdr_verified_on="2026-10-03", today=date(2026, 10, 3)) == []
+    assert ai_records.policy_problems(real, endpoint=ai_config.GROQ_CHAT_URL,
+                                      zdr_verified_on="2026-09-30", today=date(2026, 10, 3)) == [
+        "ai_policy_zdr_date_mismatch: the ZDR date differs from ANALYZER_AI_ZDR_VERIFIED_ON"]
 
 
 @pytest.mark.parametrize("change, fragment", [
@@ -167,8 +175,7 @@ def test_a_policy_id_without_a_record_closes_the_ai_layer():
     assert problems == ["ai_policy_record_missing: no checklist record for ANALYZER_AI_POLICY_ID"]
 
 
-def test_the_production_policy_id_is_not_ready_until_a_person_verifies_it(monkeypatch):
+def test_the_production_policy_id_is_ready_only_with_its_own_zdr_date(monkeypatch):
     from app.services.analyzer import ai_records
     monkeypatch.setattr(ai_records, "POLICY_DIR", ai_records.HERE / "ai_policies")
-    assert "ai_policy_not_verified: the checklist record is not verified" in ai_config.problems(
-        config(analyzer_ai_policy_id="AAI-AI-DP-001"), TODAY)
+    assert "ai_policy_zdr_date_mismatch: the ZDR date differs from ANALYZER_AI_ZDR_VERIFIED_ON" in         ai_config.problems(config(analyzer_ai_policy_id="AAI-AI-DP-001"), date(2026, 10, 3))
