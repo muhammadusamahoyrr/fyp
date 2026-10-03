@@ -255,5 +255,68 @@ The Employee shall work from 9 am to 6 pm.
     assert out["leave"]["status"] == "not_located"
 
 
+def test_a_blank_value_is_unclear_but_a_blank_party_name_does_not_blank_the_date():
+    text = """TENANCY AGREEMENT
+This Agreement is made on 2 May 2026 between ____________ (the "Landlord") and Nadia Karim (the "Tenant").
+1. The Landlord lets Flat No. ____, Gulshan Block 7, Karachi.
+2. The rent is Rs. 70,000 per month, payable by the 10th of each month.
+Signature of the Landlord: ____________
+"""
+    out = run(text, "tenancy")["by_id"]
+    assert (out["parties_identified"]["status"], out["parties_identified"]["reason_code"]) == \
+        ("ambiguous", "party_is_placeholder")
+    assert (out["premises_description"]["status"], out["premises_description"]["reason_code"]) == \
+        ("ambiguous", "value_is_placeholder")
+    assert out["execution_date"]["status"] == "present"       # the blank is the party's name, not the date
+    assert out["signature_block"]["status"] == "present"      # a signature line is blank by design
+
+
+def test_tenancy_wording_without_the_usual_words_is_found():
+    text = """LEASE OF WAREHOUSE
+This Lease is dated the 4th day of March 2026 between Usman Gill (the "Lessor") and Kiran Foods (the "Lessee").
+1. The Lessor leases the warehouse at Sundar Industrial Estate, Lahore.
+2. The Lessee shall pay hire of Rs. 300,000 per month in advance.
+3. Caution money of Rs. 600,000 shall be paid back when the warehouse is handed over.
+4. Either party may bring this lease to an end on ninety days' notice.
+"""
+    out = run(text, "tenancy")["by_id"]
+    for q in ("execution_date", "premises_description", "rent_amount", "rent_due", "security_deposit",
+              "termination_notice"):
+        assert out[q]["status"] == "present", q
+
+
+def test_nda_direction_duration_and_definition_in_other_words():
+    one_way = """CONFIDENTIALITY UNDERTAKING
+Given on 5 May 2026 by Bilal Haider (the "Consultant") to Lahore Robotics (the "Company").
+1. "Secret Data" refers to every circuit design of the Company.
+2. Only the Consultant is bound by this undertaking.
+3. The duty of secrecy continues for a span of six years.
+"""
+    out = run(one_way, "nda")["by_id"]
+    assert out["confidential_definition"]["status"] == "present"
+    assert out["mutual_or_one_way"]["status"] == "present"
+    assert out["confidentiality_duration"]["status"] == "present"
+    both = one_way + "4. The obligations of this undertaking are reciprocal.\n"
+    assert run(both, "nda")["by_id"]["mutual_or_one_way"]["reason_code"] == "reads_as_both"
+    vague = one_way.replace("for a span of six years", "for a reasonable time")
+    assert run(vague, "nda")["by_id"]["confidentiality_duration"]["status"] == "ambiguous"
+
+
+def test_employment_pay_frequency_is_not_a_pay_date_and_synonyms_are_found():
+    text = """LETTER OF ENGAGEMENT
+Issued on 6 June 2026 by Indus Mills (the "Mill") to Farah Naz (the "Engineer").
+1. The Engineer is engaged as Process Engineer from 1 July 2026.
+2. Her salary is Rs. 150,000 per month.
+3. The first sixty days are a trial period.
+4. Either side may sever the engagement on fifteen days' intimation.
+"""
+    out = run(text, "employment")["by_id"]
+    assert out["position_role"]["status"] == "present"
+    assert out["start_date"]["status"] == "present"
+    assert out["probation"]["status"] == "present"
+    assert out["notice_period"]["status"] == "present"
+    assert (out["pay_date"]["status"], out["pay_date"]["reason_code"]) == ("ambiguous", "salary_without_pay_date")
+
+
 def test_the_scan_is_deterministic():
     assert run(TENANCY, "tenancy")["results"] == run(TENANCY, "tenancy")["results"]

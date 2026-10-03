@@ -109,22 +109,36 @@ def _term_ids(inp: ScanInput, term: str) -> list[str]:
     return ids
 
 
-def _located(found: list[str], vague: list[str], reason: str) -> Finding:
+def _located(inp: ScanInput, found: list[str], vague: list[str], reason: str) -> Finding:
     """present when specific wording was found; ambiguous when only vague
-    wording was; not_located when neither."""
+    wording was, or when every specific sentence leaves its value blank
+    ("House No. ____", "means [insert description]"); not_located when
+    neither."""
+    by_id = {s["sentence_id"]: s for s in inp.sentences}
+    # A blank party name ("between ____ and ...") belongs to parties_identified,
+    # not to the date or the clause in the same sentence.
+    filled = [i for i in found if not _BLANK.search(_BLANK_PARTY.sub(" ", inp.body(by_id[i])))]
+    if filled:
+        return Finding(PRESENT, filled)
     if found:
-        return Finding(PRESENT, found)
+        return Finding(AMBIGUOUS, found, "value_is_placeholder")
     if vague:
         return Finding(AMBIGUOUS, vague, reason)
     return Finding(NOT_LOCATED)
 
 
-_DATE = _rx(r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*,?\s+\d{4}",
+_DATE = _rx(r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:day\s+)?(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*,?\s+\d{4}",
             r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}",
             r"\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\b")
 _AMOUNT = term_rules._AMOUNT
 _DURATION = term_rules._DURATION
 _NOTICE_ANY = term_rules._NOTICE_ANY
+#: A length of time in any unit ("ninety days", "one month", "three (3) years").
+_LENGTH = _rx(rf"\b{term_rules._NUM}(?:\s*\(\d{{1,4}}\))?\s*(?:days?|weeks?|months?|years?)\b")
+#: A value left to be filled in. A party slot is a blank where a name goes.
+_BLANK_TOKEN = r"(?:_{3,}|\.{4,}|\[\s*[●•]\s*\]|\bTBD\b|\[\s*insert[^\]]*\]|<\s*insert[^>]*>)"
+_BLANK = _rx(_BLANK_TOKEN)
+_BLANK_PARTY = _rx(rf"{_BLANK_TOKEN}\s*\(\s*(?:the\s+)?[\"“]", rf"\b(?:between|and|to|by)\s+{_BLANK_TOKEN}")
 
 
 # ── universal ───────────────────────────────────────────────────────────────
@@ -144,7 +158,10 @@ def parties_identified(inp: ScanInput) -> Finding:
             ids.append(r["sentence_id"])
     between = _hits(inp, _BETWEEN)
     if len(names) >= 2 or between:
-        return Finding(PRESENT, list(dict.fromkeys(between + ids)))
+        found = list(dict.fromkeys(between + ids))
+        if _with(inp, found, _BLANK_PARTY):
+            return Finding(AMBIGUOUS, found, "party_is_placeholder")
+        return Finding(PRESENT, found)
     if ids or _hits(inp, _PARTY_WORD):
         return Finding(AMBIGUOUS, ids or _hits(inp, _PARTY_WORD)[:3], "one_party_only")
     return Finding(NOT_LOCATED)
@@ -154,17 +171,16 @@ _DATED = _rx(r"\bdated\b", r"\bmade on\b", r"\bentered into on\b", r"\bexecuted 
 
 
 def execution_date(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _DATE), _hits(inp, _DATED), "date_word_without_date")
+    return _located(inp, _hits(inp, _DATE), _hits(inp, _DATED), "date_word_without_date")
 
 
 _SIGN = _rx(r"\bsigned\b", r"\bsignature", r"\bwitness(?:es)?\b", r"\bin witness whereof\b", r"\bexecuted\b")
 
 
 def signature_block(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _SIGN), [], "")
-
-
-_BLANK = _rx(r"_{3,}", r"\.{4,}", r"\[\s*[●•]\s*\]", r"\bTBD\b", r"\[\s*insert[^\]]*\]", r"<\s*insert[^>]*>")
+    # A signature line is blank by design: no placeholder rule here.
+    ids = _hits(inp, _SIGN)
+    return Finding(PRESENT, ids) if ids else Finding(NOT_LOCATED)
 
 
 def blank_placeholders(inp: ScanInput) -> Finding:
@@ -211,7 +227,7 @@ _DISPUTE = _rx(r"\barbitrat\w*", r"\bdisputes?\b", r"\bcourts?\s+(?:at|of|in)\b"
 
 
 def dispute_resolution(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _DISPUTE), [], "")
+    return _located(inp, _hits(inp, _DISPUTE), [], "")
 
 
 _GOVERNING = _rx(r"\bgoverning law\b", r"\bgoverned by\b", r"\blaws? of (?:the islamic republic of )?pakistan\b",
@@ -219,34 +235,43 @@ _GOVERNING = _rx(r"\bgoverning law\b", r"\bgoverned by\b", r"\blaws? of (?:the i
 
 
 def governing_law_stated(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _GOVERNING), [], "")
+    return _located(inp, _hits(inp, _GOVERNING), [], "")
 
 
 # ── tenancy ─────────────────────────────────────────────────────────────────
 
-_RENT = _rx(r"\brent\b")
+_RENT = _rx(r"\brent(?:al)?\b", r"\bhire\b")
 _DUE_DAY = _rx(r"\b(?:on or before|by|before)\s+the\s+\w+(?:st|nd|rd|th)?\s+(?:day|of)",
                r"\bin advance\b", r"\b\d{1,2}(?:st|nd|rd|th)\s+(?:day\s+)?of\s+(?:each|every)\b",
                r"\bfirst week of\b", r"\bwithin \w+ days of (?:the )?(?:start|beginning)\b")
 
 
+_REFUND = _rx(r"\brefund\w*", r"\breturn\w*", r"\brepa(?:y|id)\w*", r"\badjust\w*", r"\b(?:paid|given|handed) back\b")
+_DEPOSIT = _rx(r"\bdeposit\b", r"\bsecurity\b", r"\badvance\b", r"\bcaution money\b")
+
+
+def _deposit_ids(inp: ScanInput) -> list[str]:
+    """Sentences about a deposit. "payable in advance" is when rent is paid."""
+    by_id = {s["sentence_id"]: s for s in inp.sentences}
+    return [i for i in _hits(inp, _DEPOSIT)
+            if _DEPOSIT.search(term_rules._IN_ADVANCE.sub(" ", inp.body(by_id[i])))]
+
+
 def tenancy_rent_amount(inp: ScanInput) -> Finding:
-    return _located(_term_ids(inp, "rent_amount"), _hits(inp, _RENT, also=_rx(r"\bpa(?:y|id|yable)\b")),
-                    "rent_without_amount")
+    deposits = set(_deposit_ids(inp))
+    stated = [i for i in _hits(inp, _RENT, also=_AMOUNT) if i not in deposits]
+    found = list(dict.fromkeys(_term_ids(inp, "rent_amount") + stated))
+    return _located(inp, found, _hits(inp, _RENT), "rent_without_amount")
 
 
 def tenancy_rent_due(inp: ScanInput) -> Finding:
     rent = _hits(inp, _RENT)
-    return _located(_with(inp, rent, _DUE_DAY), _term_ids(inp, "rent_period"), "period_without_due_day")
-
-
-_REFUND = _rx(r"\brefund\w*", r"\breturn\w*", r"\brepa(?:y|id)\w*", r"\badjust\w*")
-_DEPOSIT = _rx(r"\bdeposit\b", r"\bsecurity\b", r"\badvance\b")
+    return _located(inp, _with(inp, rent, _DUE_DAY), _term_ids(inp, "rent_period"), "period_without_due_day")
 
 
 def tenancy_security_deposit(inp: ScanInput) -> Finding:
-    amounts = _term_ids(inp, "security_deposit")
-    mentions = _hits(inp, _DEPOSIT)
+    mentions = _deposit_ids(inp)
+    amounts = list(dict.fromkeys(_term_ids(inp, "security_deposit") + _with(inp, mentions, _AMOUNT)))
     refunds = _with(inp, mentions, _REFUND)
     if amounts and refunds:
         return Finding(PRESENT, list(dict.fromkeys(amounts + refunds)))
@@ -258,36 +283,47 @@ def tenancy_security_deposit(inp: ScanInput) -> Finding:
 
 
 def tenancy_term(inp: ScanInput) -> Finding:
-    vague = _hits(inp, _rx(r"\b(?:term|period) of (?:the )?(?:tenancy|lease)\b", r"\bfor a period\b"))
-    return _located(_term_ids(inp, "term_months"), vague, "term_without_length")
+    vague = _hits(inp, _rx(r"\b(?:term|period) of (?:the )?(?:tenancy|lease)\b", r"\bfor a period\b",
+                           r"\breasonable (?:period|time)\b"))
+    return _located(inp, _term_ids(inp, "term_months"), vague, "term_without_length")
 
 
-_PREMISES = _rx(r"\bpremises\b", r"\bproperty\b", r"\bhouse\b", r"\bshop\b", r"\bflat\b", r"\bapartment\b")
+_PREMISES = _rx(r"\bpremises\b", r"\bproperty\b", r"\bhouse\b", r"\bshop\b", r"\bflat\b", r"\bapartment\b",
+                r"\bgodown\b", r"\bwarehouse\b", r"\boffice\b", r"\bbuilding\b", r"\bportion\b", r"\bbungalow\b",
+                r"\broom\b", r"\bplot\b", r"\bland\b")
 _ADDRESS = _rx(r"\b(?:no\.?|number)\s*[\w-]+", r"\bsituated\b", r"\blocated\b", r"\bblock\b", r"\bstreet\b",
-               r"\broad\b", r"\bsector\b", r"\bplot\b", r"\bmarla\b", r"\bkanal\b", r"\bsq(?:uare)?\.?\s*f")
+               r"\broad\b", r"\bsector\b", r"\bplot\s+(?:no\.?\s*)?\d", r"\bmarla\b", r"\bkanal\b",
+               r"\bsq(?:uare)?\.?\s*f")
+#: "at Saddar Bazaar, Peshawar": a named place followed by a town (case-sensitive).
+_LOCALITY = re.compile(r"\b(?:at|in)\s+[A-Z][\w-]*(?:\s+[A-Z][\w-]*)*,\s*[A-Z]")
 
 
 def tenancy_premises(inp: ScanInput) -> Finding:
     mentions = _hits(inp, _PREMISES)
-    return _located(_with(inp, mentions, _ADDRESS), mentions[:3], "premises_not_identified")
+    found = list(dict.fromkeys(_with(inp, mentions, _ADDRESS) + _with(inp, mentions, _LOCALITY)))
+    return _located(inp, found, mentions[:3], "premises_not_identified")
 
 
-_ENDING = _rx(r"\bterminat\w*", r"\bvacat\w*", r"\bend (?:this|the) (?:agreement|tenancy)\b")
+_ENDING = _rx(r"\bterminat\w*", r"\bend\b[^.;]{0,40}\b(?:agreement|tenancy|lease|letting|deed|contract)\b",
+              r"\bto an end\b")
+_NOTICE_PERIOD = _rx(r"\bnotice period\b", r"\bperiod of notice\b")
 
 
 def tenancy_termination_notice(inp: ScanInput) -> Finding:
     endings = _hits(inp, _ENDING)
-    found = list(dict.fromkeys(_term_ids(inp, "landlord_notice_days") + _with(inp, endings, _NOTICE_ANY)))
-    return _located(found, endings[:3], "ending_without_notice_period")
+    vacating = _hits(inp, _rx(r"\bvacat\w*"))     # vacating with a notice is an ending; alone it is not
+    found = list(dict.fromkeys(_term_ids(inp, "landlord_notice_days") + _with(inp, endings + vacating, _NOTICE_ANY)
+                               + _hits(inp, _NOTICE_PERIOD, also=_LENGTH)))
+    return _located(inp, found, endings[:3], "ending_without_notice_period")
 
 
 def tenancy_utilities_maintenance(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _rx(r"\butilit\w*", r"\belectricity\b", r"\bgas\b", r"\bwater\b",
-                                   r"\bmaintenance\b", r"\brepairs?\b")), [], "")
+    return _located(inp, _hits(inp, _rx(r"\butilit\w*", r"\belectricity\b", r"\bgas\b", r"\bwater\b",
+                                        r"\bmaintenance\b", r"\brepairs?\b")), [], "")
 
 
 def tenancy_rent_increase(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _rx(r"\bincreas\w*", r"\benhance\w*", r"\bescalat\w*"), also=_RENT), [], "")
+    return _located(inp, _hits(inp, _rx(r"\bincreas\w*", r"\benhance\w*", r"\bescalat\w*"), also=_RENT), [], "")
 
 
 # ── NDA ─────────────────────────────────────────────────────────────────────
@@ -299,87 +335,139 @@ def nda_confidential_definition(inp: ScanInput) -> Finding:
     defined = [r["sentence_id"] for r in inp.graph_rows
                if r.get("type") == doc_graph.ROW_DEFINITION and r.get("sentence_id")
                and "confidential information" in (r.get("normalized") or "")]
-    defined += [i for i in _hits(inp, _rx(r"\bconfidential information\b\W{0,3}\s*(?:means|includes|shall mean)\b"))
-                if i not in defined]
-    return _located(defined, _hits(inp, _CONFIDENTIAL_INFO)[:3], "mentioned_not_defined")
+    defined += [i for i in _hits(inp, _rx(r"\bconfidential information\b\W{0,3}\s*(?:means|includes|shall mean)\b",
+                                          _DEFINED_SECRET)) if i not in defined]
+    return _located(inp, defined, _hits(inp, _CONFIDENTIAL_INFO)[:3], "mentioned_not_defined")
+
+
+#: A quoted defined term naming secret material, then a defining verb:
+#: '"Proprietary Material" denotes ...'.
+_DEFINED_SECRET = (r"[\"“][^\"”]{0,40}\b(?:confidential|proprietary|secret)\w*[^\"”]{0,40}[\"”]\s*"
+                   r"(?:means|includes|shall mean|denotes|refers to|comprises|covers)\b")
+_MUTUAL_WORDING = _rx(r"\btwo[\s-]way\b", r"\breciprocal\b", r"\bbinds? both parties\b",
+                      r"\bboth parties (?:are|shall be) bound\b")
+_ONE_WAY_WORDING = _rx(r"\bonly\b[^.;]{0,40}\b(?:is|are|shall be)\s+bound\b", r"\bonly\b[^.;]{0,40}\bowes?\b",
+                       r"\b(?:alone|solely)\b[^.;]{0,20}\b(?:assumes?|owes?|bears?|undertakes?)\b",
+                       r"\bno (?:corresponding |reciprocal )?obligations? of confiden", r"\bundertakes nothing\b",
+                       r"\bnothing in return\b")
 
 
 def nda_mutual_or_one_way(inp: ScanInput) -> Finding:
-    candidates = inp.terms.get("nda_mutual", [])
-    ids = _term_ids(inp, "nda_mutual")
-    if len({c["value"] for c in candidates}) > 1:
+    one_way = _hits(inp, _ONE_WAY_WORDING)
+    mutual = [i for i in _hits(inp, _MUTUAL_WORDING) if i not in one_way]
+    values = {c["value"] for c in inp.terms.get("nda_mutual", [])}
+    values |= ({True} if mutual else set()) | ({False} if one_way else set())
+    ids = list(dict.fromkeys(_term_ids(inp, "nda_mutual") + mutual + one_way))
+    if len(values) > 1:
         return Finding(AMBIGUOUS, ids, "reads_as_both")
     return Finding(PRESENT, ids) if ids else Finding(NOT_LOCATED)
 
 
+_DUTY = _rx(r"\bconfidential\w*", r"\bobligations?\b", r"\bdut(?:y|ies)\b", r"\bundertaking\b", r"^\W*(?:\d+[.)]\s*)?"
+            r"(?:term|duration)\s*:")
+
+
 def nda_confidentiality_duration(inp: ScanInput) -> Finding:
-    vague = _hits(inp, _rx(r"\bsurviv\w*", r"\bindefinite\w*", r"\bperpetu\w*"), also=_rx(r"\bconfidential\w*|\bobligation"))
-    return _located(_term_ids(inp, "confidentiality_years"), vague, "survival_without_length")
+    restraints = set(_hits(inp, term_rules._NON_COMPETE))
+    stated = [i for i in _hits(inp, _DUTY, also=_LENGTH) if i not in restraints]
+    found = list(dict.fromkeys(_term_ids(inp, "confidentiality_years") + stated))
+    vague = _hits(inp, _rx(r"\bsurviv\w*", r"\bindefinite\w*", r"\bperpetu\w*", r"\breasonable (?:time|period)\b",
+                           rf"{_BLANK_TOKEN}\s*(?:days?|months?|years?)\b"), also=_DUTY)
+    return _located(inp, found, vague, "survival_without_length")
 
 
 def nda_exclusions(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _rx(r"\bpublic domain\b", r"\bpublicly (?:available|known)\b", r"\balready (?:known|in)\b",
-                                   r"\bindependently developed\b", r"\blawfully (?:received|obtained)\b")), [], "")
+    found = _hits(inp, _rx(r"\bpublic domain\b", r"\bpublicly (?:available|known)\b", r"\balready (?:known|in)\b",
+                           r"\bindependently developed\b", r"\blawfully (?:received|obtained)\b",
+                           r"\bgenerally (?:known|available)\b"))
+    vague = _hits(inp, _rx(r"\bexclusions?\b", r"\bexceptions?\b", r"\bcarve[\s-]outs?\b"))
+    return _located(inp, found, vague, "exclusions_not_stated")
+
+
+_MATERIAL = _rx(r"\binformation\b", r"\bmaterials?\b", r"\bdocuments?\b", r"\bcop(?:y|ies)\b", r"\bdata\b",
+                r"\brecords?\b")
 
 
 def nda_return_destruction(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _rx(r"\breturn\w*", r"\bdestr(?:oy|uction)\w*", r"\bdelet\w*"),
-                          also=_rx(r"\binformation\b", r"\bmaterials?\b", r"\bdocuments?\b", r"\bcopies\b")), [], "")
+    found = _hits(inp, _rx(r"\breturn\w*", r"\bdestr(?:oy|uction)\w*", r"\bdelet\w*", r"\bhand (?:back|over)\b",
+                           r"\bshred\w*", r"\bsurrender\w*", r"\bdeliver up\b"), also=_MATERIAL)
+    vague = _hits(inp, _rx(r"\b(?:on|upon|after)\s+(?:the\s+)?(?:termination|expiry|completion|end)\b"),
+                  also=_MATERIAL)
+    return _located(inp, found, vague, "end_handling_not_stated")
 
 
 def nda_compelled_disclosure(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _rx(r"\brequired by law\b", r"\bcourt order\b", r"\border of (?:a|any) court\b",
-                                   r"\bcompelled\b", r"\blegal process\b", r"\bregulatory authority\b")), [], "")
+    return _located(inp, _hits(inp, _rx(r"\brequired by law\b", r"\bcourt order\b", r"\border of (?:a|any) court\b",
+                                        r"\bcompelled\b", r"\blegal process\b", r"\bregulatory authority\b",
+                                        r"\b(?:court|regulator|authority|tribunal)\b[^.;]{0,60}"
+                                        r"\b(?:demands?|requires?|orders?|compels?)\b[^.;]{0,30}\bdisclos\w*")),
+                    [], "")
 
 
 # ── employment ──────────────────────────────────────────────────────────────
 
 def employment_position(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _rx(r"\bappointed as\b", r"\bposition of\b", r"\brole of\b", r"\bdesignation\b",
-                                   r"\bjob title\b", r"\bemployed as\b")), [], "")
+    return _located(inp, _hits(inp, _rx(r"\bappointed as\b", r"\bposition of\b", r"\brole of\b", r"\bdesignation\b",
+                                        r"\bjob title\b", r"\bemployed as\b", r"\bengaged as\b", r"\bdesignated as\b",
+                                        r"\bin the capacity of\b", r"\bpost of\b", r"\bposition\s*:")), [], "")
 
 
-_START = _rx(r"\bcommenc\w*", r"\bstart\w*", r"\bjoin\w*", r"\beffective from\b", r"\bwith effect from\b")
+_START = _rx(r"\bcommenc\w*", r"\bstart\w*", r"\bjoin\w*", r"\beffective from\b", r"\bwith effect from\b",
+             r"\b(?:appointed|employed|engaged)\b[^.;]{0,60}\bfrom\b")
 
 
 def employment_start_date(inp: ScanInput) -> Finding:
     starts = _hits(inp, _START)
-    return _located(_with(inp, starts, _DATE), starts[:3], "start_without_date")
+    return _located(inp, _with(inp, starts, _DATE), starts[:3], "start_without_date")
 
 
 _SALARY = _rx(r"\bsalary\b", r"\bremuneration\b", r"\bwages?\b", r"\bpay\b")
 
 
 def employment_salary_amount(inp: ScanInput) -> Finding:
-    return _located(_term_ids(inp, "salary_amount"), _hits(inp, _SALARY)[:3], "salary_without_amount")
+    return _located(inp, _term_ids(inp, "salary_amount"), _hits(inp, _SALARY)[:3], "salary_without_amount")
 
 
-_PAY_WHEN = _rx(r"\blast working day\b", r"\bon the \w+(?:st|nd|rd|th)?\b", r"\beach month\b", r"\bevery month\b",
-                r"\bper month\b", r"\bmonthly\b", r"\bwithin \w+ days\b", r"\bfollowing month\b")
+#: WHEN salary is paid. "per month" / "monthly" say how often, not when.
+_PAY_WHEN = _rx(r"\b(?:last|final) working day\b", r"\b(?:on|by|before)\s+the\s+\d{1,2}(?:st|nd|rd|th)\b",
+                r"\b(?:on|by|before)\s+the\s+\w+\s+day\b", r"\bwithin\s+(?:the\s+)?(?:first\s+)?\w+\s+days\b",
+                r"\bfollowing month\b", r"\bend of (?:each|every|the) month\b")
 
 
 def employment_pay_date(inp: ScanInput) -> Finding:
     salary = _term_ids(inp, "salary_amount") or _hits(inp, _SALARY)
-    return _located(_with(inp, salary, _PAY_WHEN), salary[:3], "salary_without_pay_date")
+    return _located(inp, _with(inp, salary, _PAY_WHEN), salary[:3], "salary_without_pay_date")
 
 
 def employment_working_hours(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _rx(r"\b\d{1,2}\s*(?:am|pm)\b", r"\bworking hours\b", r"\bhours (?:a|per) (?:day|week)\b",
-                                   r"\bmonday to (?:friday|saturday)\b")), [], "")
+    found = _hits(inp, _rx(r"\b\d{1,2}\s*(?:am|pm)\b", r"\bworking hours\b", r"\bhours (?:a|per) (?:day|week)\b",
+                           r"\bmonday to (?:friday|saturday)\b"))
+    vague = _hits(inp, _rx(r"\bhours\b", r"\btimings?\b"))
+    return _located(inp, found, vague, "hours_not_stated")
+
+
+_PROBATION = _rx(r"\bprobation\w*", r"\btrial period\b", r"\bon trial\b")
 
 
 def employment_probation(inp: ScanInput) -> Finding:
-    return _located(_term_ids(inp, "probation_months"), _hits(inp, _rx(r"\bprobation\w*"))[:3],
-                    "probation_without_length")
+    found = list(dict.fromkeys(_term_ids(inp, "probation_months") + _hits(inp, _PROBATION, also=_LENGTH)))
+    return _located(inp, found, _hits(inp, _PROBATION)[:3], "probation_without_length")
+
+
+_EMPLOYMENT_ENDING = _rx(r"\bterminat\w*", r"\bresign\w*", r"\bsever\w*",
+                         r"\bend(?:ed)?\b[^.;]{0,40}\b(?:agreement|employment|engagement|contract|services?)\b",
+                         r"\b(?:agreement|employment|engagement|contract)\b[^.;]{0,30}\bended\b")
 
 
 def employment_notice_period(inp: ScanInput) -> Finding:
-    endings = _hits(inp, _rx(r"\bterminat\w*", r"\bresign\w*", r"\bend this agreement\b"))
-    return _located(_term_ids(inp, "notice_days"), endings[:3], "ending_without_notice_period")
+    stated = _hits(inp, _rx(r"\bnotice\b", r"\bintimation\b"), also=_LENGTH)
+    found = list(dict.fromkeys(_term_ids(inp, "notice_days") + stated))
+    return _located(inp, found, _hits(inp, _EMPLOYMENT_ENDING)[:3], "ending_without_notice_period")
 
 
 def employment_leave(inp: ScanInput) -> Finding:
-    return _located(_hits(inp, _rx(r"\b(?:annual|casual|sick|paid|earned|medical)\s+leave\b", r"\bleaves?\b")), [], "")
+    return _located(inp, _hits(inp, _rx(r"\b(?:annual|casual|sick|paid|earned|medical)\s+leave\b", r"\bleaves?\b")),
+                    [], "")
 
 
 # ── the whitelist ───────────────────────────────────────────────────────────
