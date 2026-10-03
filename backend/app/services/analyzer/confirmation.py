@@ -414,6 +414,8 @@ async def get_report(*, owner_id: str, run_id: str) -> dict:
     from app.services.analyzer import authorities
 
     ai, by_kind = await _ai_layer(run)
+    from app.services.analyzer import injection
+
     # Four layers, kept apart: the playbook checks (legal_checks), the model's drafting items
     # (model_risks / obligations / summary_points, with `ai` saying how they
     # were produced -- or that they were not), and the authority/source
@@ -423,6 +425,10 @@ async def get_report(*, owner_id: str, run_id: str) -> dict:
             "scope_notice": SCOPE_NOTICE, "legal_checks": findings,
             "ai": ai, "model_risks": by_kind["risk"], "obligations": by_kind["obligation"],
             "summary_points": by_kind["summary_point"],
+            # The SERVER's embedded-instruction notice, from the run's frozen scan:
+            # clause and sentence ids and reason categories only, never the text.
+            # A run made before scans existed says `not_recorded`; it is never back-filled.
+            "security": injection.report_block(run.get("security_scan")),
             "authority": authorities.current_metadata()}
 
 

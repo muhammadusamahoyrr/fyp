@@ -69,6 +69,7 @@ export const ERROR_TEXT = {
     text_not_confirmed: "The scanned text was not confirmed.",
     internal_error: "Something went wrong while reading the document.",
     playbook_invalid: "A checklist could not be loaded, so the document was not checked.",
+    security_scan_mismatch: "The security check did not match this document's text, so it was not checked.",
 };
 
 /* How each result is worded. Never "missing": a check that found nothing
@@ -177,6 +178,9 @@ export const AI_UNAVAILABLE_TEXT = {
     not_recorded: "This analysis was made before AI drafting notes existed.",
     no_confirmed_text: "AI drafting notes need the confirmed text, which was not available.",
     text_integrity: "The stored text did not match its fingerprint, so it was not sent to the AI.",
+    security_scan_not_recorded: "This analysis was made before the security check for embedded instructions "
+        + "existed, so it was not sent to the AI. Start a new analysis to have it checked.",
+    security_scan_mismatch: "The security check did not match this document's text, so it was not sent to the AI.",
 };
 const SEVERITY_TEXT = { low: "Low", medium: "Medium", high: "High" };
 const TAB_EMPTY = {
@@ -227,6 +231,35 @@ function AiNotice({ t, ai }) {
             <div data-ai-provenance style={{ fontSize: 12, color: t.textMuted, marginTop: 4 }}>
                 {ai.provider} · {ai.model} · prompt {ai.prompt_version} · schema {ai.schema_version}
             </div>
+        </Card>
+    );
+}
+
+/* The SERVER's embedded-instruction notice. It names clauses, sentences and
+ * reason categories only -- never the flagged text, which may carry an
+ * attacker's words. Shown to everyone who sees the report. */
+export function SecurityNotice({ t, security }) {
+    if (!security) return null;
+    if (security.status === "not_recorded") {
+        return (
+            <Card role="note" data-security="not_recorded" style={{ padding: 12, fontSize: 13.5 }}>
+                {security.message}
+            </Card>
+        );
+    }
+    const n = security.notice;
+    if (!n) return null;
+    return (
+        <Card role="alert" data-security="embedded_instruction" aria-label="Security notice"
+            style={{ padding: 12, fontSize: 14, borderColor: t.danger || "#c0392b" }}>
+            <div style={{ fontWeight: 700 }}>Security notice (system check, not AI)</div>
+            <p style={{ margin: "4px 0" }}>{n.message}</p>
+            <div data-security-where style={{ fontSize: 13 }}>
+                Where: clause {n.clause_ids.join(", ")} · sentence {n.sentence_ids.join(", ")}
+            </div>
+            <ul data-security-reasons style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 13 }}>
+                {n.reason_text.map(r => <li key={r}>{r}</li>)}
+            </ul>
         </Card>
     );
 }
@@ -324,6 +357,7 @@ function ReportView({ t, runId }) {
     const notices = report.packs.filter(p => PACK_STATUS_TEXT[p.status]);
     return (
         <section data-report aria-label="Report" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <SecurityNotice t={t} security={report.security} />
             <div role="tablist" aria-label="Report sections" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {REPORT_TABS.map(([key, label]) => (
                     <button key={key} type="button" role="tab" data-tab={key} aria-selected={tab === key}
