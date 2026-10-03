@@ -302,3 +302,24 @@ def test_the_independent_validation_1_baseline_is_kept_as_it_failed():
     import hashlib
     for name, digest in manifest["files"].items():
         assert hashlib.sha256((ev.ROOT / "validation-1" / name).read_bytes()).hexdigest() == digest, name
+
+
+def test_the_independent_validation_2_baseline_is_kept_as_scored():
+    """validation-2: a fresh independent author given only the catalogue and
+    LABELLING_RUBRIC.v2.md, frozen before its single scored run. Scored once:
+    0.861 / 0.941, not_passed on per-question weakness. No detector tuning
+    follows from it, so it stays the gate result."""
+    import hashlib
+    import yaml as _yaml
+    [path] = sorted(ev.BASELINES.glob("*_validation-2.yaml"))
+    kept = _yaml.safe_load(path.read_text(encoding="utf-8"))
+    ev.check_record(kept)
+    assert kept["status"] == "not_passed" and kept["dataset"]["role"] == "validation"
+    assert (kept["scanner_only"]["attention_precision"], kept["scanner_only"]["attention_recall"]) == (0.861, 0.941)
+    manifest = ev.freeze_manifest("validation-2")
+    assert kept["dataset"]["frozen_before_run"] is True
+    assert kept["dataset"]["sha256"] == manifest["dataset_sha256"] == ev.load_dataset("validation-2").sha256
+    assert kept["dataset"]["labelling_rubric_sha256"] == manifest["rubric_sha256"] == ev.rubric_sha256("validation-2")
+    assert kept["versions"]["scanner_code_sha256"] == manifest["scanner_code_sha256_at_freeze"]
+    for name, digest in manifest["files"].items():
+        assert hashlib.sha256((ev.ROOT / "validation-2" / name).read_bytes()).hexdigest() == digest, name

@@ -1,0 +1,16 @@
+# validation-2 freeze manifest -- written BEFORE the first detector run on this set.
+# Scored once. No detector tuning after it is seen; a failure stays not_passed.
+# Any change to a document or label is a new dataset name, never an in-place edit.
+frozen_at: 2026-10-03T20:23:20+00:00
+dataset_sha256: 4ce03c06c882fce39674090570d83f2e9bb657934bc7e947502c49e530764d8c
+documents: 70
+catalogue: drafting-hypotheses.v1
+catalogue_sha256: 8594d27a6a8ca6183d85168fa0003bef54031d108726cd896afd4194a68690b4
+rubric: LABELLING_RUBRIC.v2.md
+rubric_sha256: d36d8b54270097523ca60089d77bc877485cf6463c157f17ed2a74f6aaf70341
+scanner_code_sha256_at_freeze: 299cf4139990bce90d8cc355f3c1a1acb602f42a82e4aaa7acf0e20e9fa98957
+author: independent fresh session (separate model), given only the frozen catalogue and LABELLING_RUBRIC.v2.md
+files:
+  employment.yaml: b5363047de3ddfa7894006af471c878e8459db428b0865048ed4fc8f5b4f50db
+  nda.yaml: 4e2d94bd7598125eb5726d65213d60d9bf072e1d03c4042c32367f4e082753fa
+  tenancy.yaml: 5f1ecda5446aaa1618c14ff5ef8b3e0e1d6062aa7c6f2edcffb2f5628ee5f3a8
