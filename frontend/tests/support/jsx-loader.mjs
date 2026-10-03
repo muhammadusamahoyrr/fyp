@@ -54,6 +54,7 @@ const NEXT_STUBS = {
                      toString: () => "" };
         }
         export function usePathname() { return nav.pathname || "/"; }
+        export function redirect(u) { (nav.redirected ||= []).push(u); }
     `,
     "next/dynamic": `
         export default function dynamic(_loader, options = {}) {

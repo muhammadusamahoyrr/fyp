@@ -12,6 +12,7 @@ import MyDocumentsPanel from "./MyDocumentsPanel.jsx";
 import DocumentsHome from "./DocumentsHome.jsx";
 import DocsDrafts from "./documents/DocsDrafts.jsx";
 import DocsVault from "./documents/DocsVault.jsx";
+import { readReviewRequestLink } from "@/lib/reviewRequests.js";
 import { Btn, Pill, Label, Paper, TOKEN_STYLE, VALUE_STYLE, docsTheme } from "./documents/ui.jsx";
 import { useIsMobile } from "@/lib/i18n.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
@@ -553,6 +554,12 @@ const ModDocuments = () => {
     // Which screen the module shows. "flow" is the template flow (home and
     // its steps); the others are whole screens of their own.
     const [view, setView] = useState("flow");
+    // A notification deep link (/documents?tab=review-requests&request=…):
+    // read once from the address, it opens the Vault on its Review requests tab.
+    const [reviewLink] = useState(() => (typeof window === "undefined"
+        ? { open: false, requestId: null, invalid: false }
+        : readReviewRequestLink(window.location.search)));
+    useEffect(() => { if (reviewLink.open) setView("vault"); }, [reviewLink]);
     const [draftsSeed, setDraftsSeed] = useState(null);
     useEffect(() => { announceDocumentsView(view === "flow" ? "new" : view); }, [view]);
     // Details typed in the template's Customize editor, carried into the
@@ -1186,7 +1193,7 @@ const ModDocuments = () => {
             onOpenDocument={restored => { setView("flow"); setViewRev(null); applyRestored(restored); }} />);
     }
     if (view === "vault") {
-        return frame(<DocsVault onBack={backHome}
+        return frame(<DocsVault onBack={backHome} reviewLink={reviewLink}
             onOpen={restored => { setView("flow"); setViewRev(null); applyRestored(restored); }} />);
     }
 

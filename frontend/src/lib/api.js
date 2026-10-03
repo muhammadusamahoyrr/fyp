@@ -2447,3 +2447,72 @@ export async function fetchRevisionPreview(
   return { data: null, error: { message: legacy?.error || 'Preview failed' },
            code: null };
 }
+
+/* ── Document review requests (DOCUMENT_REVIEW_REQUEST_PLAN.md §5) ─────────
+ *
+ * A client shares ONE exact version of a Vault document with the lawyer of an
+ * accepted engagement. Every route answers 404 `feature_disabled` while
+ * DOCUMENT_REVIEW_REQUESTS is off, which is how the Vault knows to hide the
+ * feature. Mutations take an Idempotency-Key (reuse it on a retry) and, for an
+ * existing request, the `expected_state_version` the caller read. */
+export async function reviewRequestEligibleEngagements(documentId) {
+  const params = new URLSearchParams({ document_id: documentId });
+  return apiFetch(`/review-requests/eligible-engagements?${params}`);
+}
+
+export async function listReviewRequests({ status = null, cursor = null, limit = 20 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (status) params.set('status', status);
+  if (cursor) params.set('cursor', cursor);
+  return apiFetch(`/review-requests?${params}`);
+}
+
+export async function getReviewRequest(requestId) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}`);
+}
+
+export async function createReviewRequest(
+  { documentId, revisionId, expectedPdfSha256, engagementId, note = null, focus = [] }, key,
+) {
+  return apiFetch('/review-requests', {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      document_id: documentId, revision_id: revisionId, expected_pdf_sha256: expectedPdfSha256,
+      engagement_id: engagementId, note, focus,
+    }),
+  });
+}
+
+/* Only the fields passed are sent: `note: null` clears the note, an absent
+ * `note` leaves it. */
+export async function editReviewRequest(requestId, { expectedStateVersion, ...changes }, key) {
+  const body = { expected_state_version: expectedStateVersion };
+  if ('note' in changes) body.note = changes.note;
+  if ('focus' in changes) body.focus = changes.focus;
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}`, {
+    method: 'PATCH', headers: v2Headers(key), body: JSON.stringify(body),
+  });
+}
+
+export async function deleteReviewRequest(requestId, { expectedStateVersion }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}`, {
+    method: 'DELETE',
+    headers: { ...v2Headers(key), 'Expected-State-Version': String(expectedStateVersion) },
+  });
+}
+
+export async function submitReviewRequest(requestId, { expectedStateVersion, expectedPdfSha256 = null }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/submit`, {
+    method: 'POST', headers: v2Headers(key),
+    body: JSON.stringify({ expected_state_version: expectedStateVersion,
+                           expected_pdf_sha256: expectedPdfSha256 }),
+  });
+}
+
+export async function cancelReviewRequest(requestId, { expectedStateVersion }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/cancel`, {
+    method: 'POST', headers: v2Headers(key),
+    body: JSON.stringify({ expected_state_version: expectedStateVersion }),
+  });
+}

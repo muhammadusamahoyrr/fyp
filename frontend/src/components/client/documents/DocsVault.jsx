@@ -9,13 +9,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
-import { myDocumentsV2, downloadDocumentFile, getDocumentV2 } from "@/lib/api.js";
+import { myDocumentsV2, downloadDocumentFile, getDocumentV2, listReviewRequests } from "@/lib/api.js";
 import { useMyDocuments, rowActions } from "@/lib/useMyDocuments.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { restoreStateFromDocument } from "@/lib/documentResume.js";
 import { humanise } from "@/lib/fieldReview.js";
 import { useIsMobile } from "@/lib/i18n.jsx";
 import { Btn, IconBtn, Pill, Card, Icon, fieldStyle } from "./ui.jsx";
+import ReviewRequestDialog from "./ReviewRequestDialog.jsx";
+import ReviewRequestsPanel from "./ReviewRequestsPanel.jsx";
 
 const TONE = { info: "info", ok: "low", warn: "medium", danger: "high", muted: "muted" };
 // Same face as the analyzer: Nunito Sans, a free near-match for Avenir.
@@ -28,6 +30,14 @@ export function formatWhen(value, now = new Date()) {
     const sameDay = d.toDateString() === now.toDateString();
     if (sameDay) return "Today";
     return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/* Is the review-request feature switched on? Asked once, by the cheapest real
+ * call: every review-request route answers 404 `feature_disabled` while
+ * DOCUMENT_REVIEW_REQUESTS is off, and then the Vault shows nothing of it.
+ * Any other failure also hides it -- an action that cannot work is not shown. */
+export function reviewRequestsAvailable(res) {
+    return Boolean(res && !res.error && res.data);
 }
 
 /* Who can see a document right now, in the vault's words. */
@@ -57,7 +67,7 @@ export function sortRows(rows, how) {
     return copy.sort((a, b) => when(b) - when(a));
 }
 
-const GRID = "minmax(220px, 2.6fr) minmax(110px, 1fr) 70px minmax(110px, .9fr) 110px 120px 110px";
+const GRID = "minmax(220px, 2.6fr) minmax(110px, 1fr) 70px minmax(110px, .9fr) 110px 120px 140px";
 
 const svg = (d, s = 20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>;
 const I = {
@@ -66,9 +76,10 @@ const I = {
     books: <><path d="M4 4h4v16H4zM10 4h4v16h-4z" /><path d="M16.5 4.5l3.5 1-3.5 14-3.5-1z" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
     filter: <path d="M4 7h16M7 12h10M10 17h4" />,
+    send: <><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4z" /></>,
 };
 
-export default function DocsVault({ onBack, onOpen }) {
+export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
     const t = useT();
     const toast = useToast();
     const isMobile = useIsMobile();
@@ -80,6 +91,32 @@ export default function DocsVault({ onBack, onOpen }) {
     // the sort menu replaces it.
     const [sort, setSort] = useState(null);
     const [sortOpen, setSortOpen] = useState(false);
+    // Document review requests: hidden entirely unless the server has them on.
+    const [rrEnabled, setRrEnabled] = useState(null);         // null = not asked yet
+    const [requesting, setRequesting] = useState(null);      // the row being shared
+    const [rrReload, setRrReload] = useState(0);
+    // The deep link is honoured ONCE the server has said whether the feature is
+    // on. Off: the ordinary Vault, nothing of review requests. Either way the
+    // query is then dropped from the address (a fixed path, never user input),
+    // so a refresh does not replay it.
+    const [linkFocus, setLinkFocus] = useState(null);
+    useEffect(() => {
+        if (!reviewLink?.open || rrEnabled === null) return;
+        if (rrEnabled) {
+            setTab("requests");
+            setLinkFocus({ id: reviewLink.requestId, invalid: reviewLink.invalid });
+        }
+        try { window.history.replaceState(window.history.state, "", "/documents"); } catch { /* not fatal */ }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rrEnabled]);
+    useEffect(() => {
+        let alive = true;
+        (async () => {
+            const res = await listReviewRequests({ limit: 1 });
+            if (alive) setRrEnabled(reviewRequestsAvailable(res));
+        })();
+        return () => { alive = false; };
+    }, []);
     const sortRef = useRef(null);
     const fetchPage = useCallback(({ cursor, limit }) => myDocumentsV2({ cursor, limit }), []);
     const docs = useMyDocuments({ fetchPage, pageSize: 25 });
@@ -194,7 +231,7 @@ export default function DocsVault({ onBack, onOpen }) {
                 <section style={{ display: "flex", flexDirection: "column", borderRadius: 18, background: t.mode === "dark" ? "#141d2c" : t.surface, border: `1px solid ${panelBorder}`, overflow: "visible", minHeight: 300 }}>
                     <div style={{ display: "flex", alignItems: "center", padding: "6px 24px 0", borderBottom: `1px solid ${panelBorder}` }}>
                         <div role="tablist" style={{ display: "flex", gap: 30 }}>
-                            {[["all", "All Documents"], ["folders", "Folder"]].map(([id, name]) => (
+                            {[["all", "All Documents"], ["folders", "Folder"], ...(rrEnabled ? [["requests", "Review requests"]] : [])].map(([id, name]) => (
                                 <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
                                     style={{ minHeight: 48, padding: 0, background: "transparent", border: "none", borderBottom: `3px solid ${tab === id ? "#1f8a5b" : "transparent"}`, color: tab === id ? "#1f8a5b" : t.text, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: VAULT_FONT }}>
                                     {name}
@@ -223,7 +260,10 @@ export default function DocsVault({ onBack, onOpen }) {
                         </div>
                     </div>
 
-                    {tab === "folders" ? (
+                    {tab === "requests" && rrEnabled ? (
+                        <ReviewRequestsPanel reloadSignal={rrReload}
+                            focusId={linkFocus?.id || null} focusInvalid={Boolean(linkFocus?.invalid)} />
+                    ) : tab === "folders" ? (
                         <div style={{ padding: 28, textAlign: "center", color: t.textMuted, fontSize: 13.5 }}>
                             Folders arrive with file uploads. Your generated documents are all under “All Documents”.
                         </div>
@@ -265,6 +305,12 @@ export default function DocsVault({ onBack, onOpen }) {
                                             <span style={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
                                                 <IconBtn label={`Open ${row.title || "document"}`} onClick={() => open(row)} disabled={busyId === row.id} style={{ border: "none" }}>{Icon.eye}</IconBtn>
                                                 <IconBtn label={a.canDownload ? `Download ${row.title || "document"}` : a.reason} onClick={() => a.canDownload && download(row)} disabled={!a.canDownload} style={{ border: "none", opacity: a.canDownload ? 1 : 0.4 }}>{Icon.download}</IconBtn>
+                                                {rrEnabled && (
+                                                    <IconBtn label={a.canDownload ? `Request lawyer review of ${row.title || "document"}` : a.reason}
+                                                        data-request-review={row.id}
+                                                        onClick={() => a.canDownload && setRequesting(row)} disabled={!a.canDownload}
+                                                        style={{ border: "none", opacity: a.canDownload ? 1 : 0.4 }}>{svg(I.send, 17)}</IconBtn>
+                                                )}
                                             </span>
                                         </div>
                                     );
@@ -280,6 +326,17 @@ export default function DocsVault({ onBack, onOpen }) {
                     )}
                 </section>
             </div>
+            {requesting && (
+                <ReviewRequestDialog row={requesting}
+                    onClose={() => setRequesting(null)}
+                    onOpenExisting={() => { setRequesting(null); setTab("requests"); }}
+                    onDone={() => {
+                        setRequesting(null);
+                        toast.show("Sent to your lawyer.", "success", 3000);
+                        setRrReload(n => n + 1);
+                        setTab("requests");
+                    }} />
+            )}
         </div>
     );
 }
