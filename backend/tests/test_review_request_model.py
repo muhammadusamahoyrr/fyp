@@ -19,7 +19,7 @@ KEY = "b" * 64
 
 
 def row(**changes) -> dict:
-    base = {"_id": "req1", "state_version": 1, "status": "draft", "is_open": True,
+    base = {"_id": "req1", "state_version": 1, "event_seq": 1, "status": "draft", "is_open": True,
             "client_id": "c1", "lawyer_id": "l1", "engagement_id": "e1", "case_id": None,
             "document_id": "d1", "revision_id": "r1", "version": 2, "pdf_sha256": SHA,
             "created_at": NOW, "updated_at": NOW, "create_idempotency_key_hash": KEY}

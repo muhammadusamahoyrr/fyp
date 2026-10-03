@@ -86,4 +86,18 @@ REVIEW_REQUEST_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         why=("One total order per request: two writers that both chose the next "
              "seq cannot both append, so the audit history has no gaps or forks."),
     ),
+    IndexSpec(
+        collection="document_review_request_events",
+        name="uniq_review_request_created_key",
+        keys=(("actor_id", ASCENDING), ("detail.idempotency_key_hash", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        partial_filter={"type": "created", "detail.idempotency_key_hash": {"$type": "string"}},
+        why=("A create key is spent FOREVER, not only while its request exists. "
+             "`uniq_review_request_create_key` lives on the request row and goes "
+             "when a draft is deleted; the append-only `created` event stays, so "
+             "this index is the tombstone: a replay after the delete finds it "
+             "(410 request_deleted) and a concurrent replay cannot insert a "
+             "second `created` event, so it cannot make a second request. Per "
+             "client (actor_id): another client's same key is independent."),
+    ),
 )

@@ -39,6 +39,7 @@ from app.api.v1.routes import (
     payments,
     conversations,
     provenance,
+    review_requests,
     users,
     voice,
 )
@@ -535,6 +536,7 @@ app.include_router(bail.router, prefix=API_PREFIX)
 app.include_router(provenance.router, prefix=API_PREFIX)
 app.include_router(conversations.router, prefix=API_PREFIX)
 app.include_router(labeling.router, prefix=API_PREFIX)
+app.include_router(review_requests.router, prefix=API_PREFIX)   # inert unless DOCUMENT_REVIEW_REQUESTS
 
 app.include_router(chat_socket.router)
 app.include_router(notification_socket.router)

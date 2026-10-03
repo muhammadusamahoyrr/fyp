@@ -123,6 +123,9 @@ class DocumentReviewRequest(BaseModel):
 
     id: str = Field(alias="_id", min_length=1)
     state_version: int = Field(ge=1)
+    # The seq of the last audit event appended for this request (events are
+    # numbered 1, 2, ... per request; `uniq_review_request_event_seq`).
+    event_seq: int = Field(ge=1)
     status: ReviewRequestStatus
     is_open: bool
 
@@ -205,7 +208,12 @@ class DocumentReviewRequest(BaseModel):
 #: Keys an audit event's `detail` may hold: ids, hashes and reason codes --
 #: never a note, a reason typed by a person, or any document text.
 EVENT_DETAIL_KEYS = frozenset({"revision_id", "version", "pdf_sha256", "engagement_id", "document_id",
-                               "cancel_reason", "retention_trigger", "retention_until"})
+                               "cancel_reason", "retention_trigger", "retention_until",
+                               # SHA-256 of the Idempotency-Key (never the key) and of
+                               # the request body: a retried delete is recognised, and
+                               # a reused key with another body refused, after the row
+                               # is gone.
+                               "idempotency_key_hash", "request_fingerprint"})
 
 
 class ReviewRequestEvent(BaseModel):

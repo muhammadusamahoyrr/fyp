@@ -45,6 +45,9 @@ def test_the_manifest_declares_the_plans_guarantees():
     assert by_name["uniq_open_review_request"].partial_filter == {"is_open": True}
     assert by_name["uniq_review_request_event_seq"].unique
     assert by_name["uniq_review_request_create_key"].unique
+    created_key = by_name["uniq_review_request_created_key"]
+    assert created_key.unique and created_key.kind == CORRECTNESS
+    assert created_key.partial_filter == {"type": "created", "detail.idempotency_key_hash": {"$type": "string"}}
     assert {"review_requests_lawyer_inbox", "review_requests_client_recent", "review_requests_engagement",
             "review_requests_revision_hold", "review_requests_document"} <= set(by_name)
 
@@ -110,3 +113,21 @@ async def test_startup_warns_while_off_and_refuses_once_on(cols, monkeypatch):
     finally:
         await indexes._review_request_indexes()
     assert await indexes.validate_review_request_indexes() == []
+
+
+async def test_a_create_key_is_spent_for_good_per_client(cols):
+    _, events = cols
+    key = "c" * 64
+
+    def created(actor, request_id, type_="created", key_hash=key):
+        detail = {} if key_hash is None else {"idempotency_key_hash": key_hash}
+        return {"_id": uuid.uuid4().hex, "request_id": request_id, "seq": 1, "type": type_,
+                "actor_id": actor, "detail": detail}
+
+    await events.insert_one(created("c-" + TAG, f"{TAG}-a"))
+    with pytest.raises(DuplicateKeyError):          # even for another request id
+        await events.insert_one(created("c-" + TAG, f"{TAG}-b"))
+    await events.insert_one(created("c2-" + TAG, f"{TAG}-c"))              # another client
+    await events.insert_one(created("c-" + TAG, f"{TAG}-d", type_="draft_deleted"))  # not a create
+    await events.insert_one(created("c-" + TAG, f"{TAG}-e", key_hash=None))
+    await events.insert_one(created("c-" + TAG, f"{TAG}-f", key_hash=None))  # key-less never collide
