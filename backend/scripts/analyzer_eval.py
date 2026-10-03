@@ -11,7 +11,22 @@ AAI_LIVE_TESTS=1 and the AI contract is fully ready (ANALYZER_AI on, verified
 ZDR, synthetic-only; see app/services/analyzer/ai_config.py). Benchmark each
 allowlisted model with its own invocation.
 
-Writes analyzer_eval/results/<date>_<model>_<dataset hash>.json with the
+PACING (live only, the harness -- never the production client). Calls run
+one at a time, with a pause after each success. On HTTP 429 the harness
+waits Groq's Retry-After (else its x-ratelimit-reset-* header, else a
+default) plus random jitter and asks the SAME document of the SAME model
+again, at most --max-attempts times and --max-wait seconds per call. Every
+successful answer is checkpointed; rerunning the same command resumes
+(--fresh starts over). The result records rate-limit retries and waiting
+separately, and is a VALID benchmark only when 100% of the calls were
+answered and every gate passed; anything less exits 1.
+
+BACKTEST (--backtest CHECKPOINT): re-scores a saved checkpoint offline with
+the current validator and scan -- no network, no AI contract needed. The
+result is written as ..._backtest.json, says which prompt produced the
+answers, and is never a valid benchmark.
+
+Writes analyzer_eval/results/<date>_<model>_<dataset hash>_runs<N>.json with the
 dataset hash, model id, prompt and schema versions, date, the policy and ZDR
 record, every metric and per-document detail. Prints the headline metrics
 and exits 1 if a gate fails (evidence validity 100%, no leakage, no
@@ -36,20 +51,52 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
-from app.services.analyzer import ai_config, evaluation  # noqa: E402
+from app.services.analyzer import ai_config, ai_report, evaluation, injection  # noqa: E402
+
+
+def run_backtest(path: Path) -> int:
+    dataset = evaluation.load_dataset()
+    data = evaluation.backtest(dataset, path)
+    m = data["metrics"]
+    print(f"BACKTEST (not a benchmark): {data['note']}")
+    for kind in ("risk", "obligation"):
+        o = m["overall"][kind]
+        print(f"{kind:11} precision {o['precision']}  recall {o['recall']}  "
+              f"({o['matched']} matched / {o['predicted']} predicted / {o['gold']} gold)")
+    print(f"injection {m['injection']}  detection {m['detection']}")
+    print(f"dropped {m['dropped']}")
+    print(f"gates {m['gates']}")
+    out = RESULTS / f"{date.today().isoformat()}_{path.stem.replace('.checkpoint', '')}_backtest.json"
+    out.write_text(json.dumps(data, indent=1, default=str), encoding="utf-8")
+    print(f"wrote {out}")
+    return 0
 
 RESULTS = BACKEND / "analyzer_eval" / "results"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--responder", choices=("oracle", "live"), required=True)
+    parser.add_argument("--responder", choices=("oracle", "live"))
+    parser.add_argument("--backtest", type=Path, metavar="CHECKPOINT",
+                        help="re-score a saved checkpoint offline (never a benchmark)")
     parser.add_argument("--model", help="one allowlisted model id (live only)")
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--price-in", type=float, help="USD per 1M prompt tokens")
     parser.add_argument("--price-out", type=float, help="USD per 1M completion tokens")
     parser.add_argument("--write", action="store_true", help="write the result file (live runs always do)")
+    defaults = evaluation.Pacing()
+    parser.add_argument("--pause", type=float, default=defaults.pause_s,
+                        help="seconds to wait after each successful live call")
+    parser.add_argument("--max-attempts", type=int, default=defaults.max_attempts,
+                        help="tries per call when rate-limited (first try included)")
+    parser.add_argument("--max-wait", type=float, default=defaults.max_wait_s,
+                        help="seconds a call may spend waiting on rate limits")
+    parser.add_argument("--fresh", action="store_true", help="discard this run's checkpoint first")
     args = parser.parse_args()
+    if args.backtest:
+        return run_backtest(args.backtest)
+    if not args.responder:
+        parser.error("--responder is required (or --backtest CHECKPOINT)")
 
     from app.core.config import settings
 
@@ -64,7 +111,8 @@ def main() -> int:
         if args.model not in ai_config.allowlist(settings.analyzer_ai_model_allowlist):
             print("REFUSED: --model must be one allowlisted model")
             return 2
-        responder = evaluation.live_responder(args.model)
+        responder = evaluation.paced_responder(args.model, evaluation.Pacing(
+            pause_s=args.pause, max_attempts=args.max_attempts, max_wait_s=args.max_wait))
     else:
         responder = evaluation.oracle_responder
 
@@ -72,9 +120,22 @@ def main() -> int:
     if price is None and args.responder == "live":
         price = evaluation.price_for(args.model)     # analyzer_eval/prices.yaml; None -> cost null
     dataset = evaluation.load_dataset()
-    result = asyncio.run(evaluation.evaluate(dataset, responder, runs=args.runs,
-                                             model=args.model if args.responder == "live" else "oracle",
-                                             price=price))
+    checkpoint = None
+    if args.responder == "live":
+        RESULTS.mkdir(parents=True, exist_ok=True)
+        # The name carries every version in the identity: a new prompt or
+        # detector starts a new checkpoint instead of resuming an old one.
+        checkpoint = RESULTS / (f"{args.model.replace('/', '_')}_{dataset.sha256[:12]}_runs{args.runs}_"
+                                f"{ai_report.PROMPT_VERSION}_{injection.DETECTOR_VERSION}.checkpoint.json")
+        if args.fresh and checkpoint.exists():
+            checkpoint.unlink()
+    try:
+        result = asyncio.run(evaluation.evaluate(dataset, responder, runs=args.runs,
+                                                 model=args.model if args.responder == "live" else "oracle",
+                                                 price=price, checkpoint=checkpoint))
+    except evaluation.CheckpointError as exc:
+        print(f"REFUSED: {exc} ({checkpoint})")
+        return 2
     result["responder"] = args.responder
     result["contract"] = ai_config.contract(settings) if args.responder == "live" else None
 
@@ -92,14 +153,22 @@ def main() -> int:
     print(f"latency {m['latency_ms']}  tokens {m['tokens']}  cost_usd {m['estimated_cost_usd']}  "
           f"consistency {m['consistency']}")
     print(f"gates {m['gates']}")
+    c = result["completion"]
+    print(f"completion {c['calls_answered']}/{c['calls_expected']} answered "
+          f"({c['resumed_from_checkpoint']} from checkpoint)  rate limit: {c['rate_limit']['retries']} retries, "
+          f"{c['rate_limit']['wait_s']}s waiting, {c['rate_limit']['calls_given_up']} given up, "
+          f"{c['rate_limit']['calls_not_asked']} not asked")
+    print("VALID BENCHMARK" if result["valid_benchmark"] else
+          "NOT A VALID BENCHMARK: " + ("incomplete -- rerun the same command to resume"
+                                       if not c["complete"] else "a gate failed"))
 
     if args.responder == "live" or args.write:
         RESULTS.mkdir(parents=True, exist_ok=True)
         slug = (result["model"] or "oracle").replace("/", "_")
-        path = RESULTS / f"{date.today().isoformat()}_{slug}_{dataset.sha256[:12]}.json"
+        path = RESULTS / f"{date.today().isoformat()}_{slug}_{dataset.sha256[:12]}_runs{args.runs}.json"
         path.write_text(json.dumps(result, indent=1, default=str), encoding="utf-8")
         print(f"wrote {path}")
-    return 0 if all(m["gates"].values()) else 1
+    return 0 if result["valid_benchmark"] else 1
 
 
 if __name__ == "__main__":

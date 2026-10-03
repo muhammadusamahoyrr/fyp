@@ -189,3 +189,7 @@ backend/ocr_eval/fixtures/*
 backend/.test-tmp/
 # Throwaway single-node replica set (scripts/dev_mongo_replset.py).
 backend/.mongo-rs/
+
+# Analyzer benchmark checkpoints (resumable partial runs; never committed)
+backend/analyzer_eval/results/*.checkpoint.json
+backend/analyzer_eval/results/*.checkpoint.json.tmp

@@ -308,3 +308,161 @@ async def test_an_obligation_given_to_the_wrong_party_does_not_match(dataset):
         return answer
     m = (await run(dataset, scripted(swap)))["metrics"]["overall"]["obligation"]
     assert (m["matched"], m["predicted"], m["gold"]) == (49, 50, 50)
+
+
+# ── benchmark pacing: the HARNESS retries a rate limit, the client never does ──
+
+EMPTY_REPORT = {"schema_version": ai_report.SCHEMA_VERSION, "prompt_version": ai_report.PROMPT_VERSION,
+                "risks": [], "obligations": [], "summary_points": []}
+
+
+def groq(script):
+    """A fake Groq answering from `script`: each item is (status, headers)."""
+    seen = []
+
+    def respond(request):
+        body = json.loads(request.content)
+        seen.append(body["model"])
+        status, headers = script[min(len(seen), len(script)) - 1]
+        if status != 200:
+            return httpx.Response(status, headers=headers, json={"error": "x"})
+        return httpx.Response(200, json={"model": body["model"], "usage": {"prompt_tokens": 9},
+                                         "choices": [{"finish_reason": "stop",
+                                                      "message": {"content": json.dumps(EMPTY_REPORT)}}]})
+    return respond, seen
+
+
+def paced(respond, **pacing):
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(round(seconds, 2))
+    responder = ev.paced_responder("openai/gpt-oss-20b", ev.Pacing(**{"pause_s": 1.0, "jitter_s": 0.0, **pacing}),
+                                   sleep=sleep, transport_factory=lambda: httpx.MockTransport(respond))
+    return responder, waits
+
+
+@pytest.mark.parametrize("headers, expected", [
+    ({"retry-after": "7"}, 7.0),
+    ({"retry-after": "2.5", "x-ratelimit-reset-tokens": "40s"}, 2.5),       # Retry-After wins
+    ({"x-ratelimit-reset-tokens": "7.66s", "x-ratelimit-reset-requests": "2m0.5s"}, 120.5),
+    ({"x-ratelimit-reset-tokens": "350ms"}, 0.35),
+    ({"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"}, 30.0),                 # a date -> default
+    ({}, 30.0),
+])
+def test_the_wait_follows_groqs_headers(headers, expected):
+    assert ev.retry_after_seconds(headers, 30.0) == pytest.approx(expected)
+
+
+async def test_a_rate_limited_call_waits_retry_after_and_asks_the_same_model_again(dataset, ready):
+    respond, seen = groq([(429, {"retry-after": "7"}), (429, {"retry-after": "3"}), (200, {})])
+    responder, waits = paced(respond)
+    answer = await responder(dataset.documents[0], [{"role": "user", "content": "x"}])
+    assert answer.error is None and seen == ["openai/gpt-oss-20b"] * 3     # never another model
+    assert waits == [7.0, 3.0, 1.0]                                        # Retry-After, then the pause
+    assert answer.rate_limit == {"retries": 2, "wait_s": 10.0, "gave_up": False}
+
+
+async def test_the_retry_is_bounded_by_attempts_and_by_waiting_time(dataset, ready):
+    respond, seen = groq([(429, {"retry-after": "5"})])
+    responder, _ = paced(respond, max_attempts=3)
+    answer = await responder(dataset.documents[0], [{"role": "user", "content": "x"}])
+    assert answer.error == "ai_rate_limited" and len(seen) == 3
+    assert answer.rate_limit == {"retries": 2, "wait_s": 10.0, "gave_up": True}
+    respond, seen = groq([(429, {"retry-after": "60"})])
+    responder, _ = paced(respond, max_wait_s=100.0)
+    answer = await responder(dataset.documents[0], [{"role": "user", "content": "x"}])
+    assert len(seen) == 2 and answer.rate_limit["gave_up"] and answer.rate_limit["wait_s"] == 60.0
+
+
+async def test_only_a_rate_limit_is_retried(dataset, ready):
+    respond, seen = groq([(500, {})])
+    responder, waits = paced(respond)
+    answer = await responder(dataset.documents[0], [{"role": "user", "content": "x"}])
+    assert answer.error == "ai_provider_error" and len(seen) == 1 and waits == []
+
+
+async def test_the_production_client_still_makes_one_request_and_never_retries(ready):
+    respond, seen = groq([(429, {"retry-after": "1"}), (200, {})])
+    with pytest.raises(ai_client.AIError) as exc:
+        await ai_client.complete([{"role": "user", "content": "x"}], transport=httpx.MockTransport(respond))
+    assert exc.value.code == "ai_rate_limited" and len(seen) == 1
+
+
+async def test_an_interrupted_run_resumes_and_only_a_complete_run_is_valid(dataset, ready, tmp_path):
+    small = ev.Dataset(version="v1", documents=dataset.documents[:3], sha256=dataset.sha256)
+    checkpoint = tmp_path / "run.checkpoint.json"
+    asked = []
+
+    def flaky(fail):
+        async def respond(doc, messages):
+            asked.append(doc.id)
+            if doc.id in fail:
+                return ev.Answer(error="ai_rate_limited", rate_limit={"retries": 7, "wait_s": 90.0, "gave_up": True})
+            return ev.Answer(content=copy.deepcopy(EMPTY_REPORT), raw_text="{}", latency_ms=5,
+                             rate_limit={"retries": 1, "wait_s": 4.0, "gave_up": False})
+        return respond
+
+    first = await run(small, flaky({small.documents[1].id}), runs=2, model="m", checkpoint=checkpoint)
+    c = first["completion"]
+    assert (c["calls_expected"], c["calls_answered"], c["complete"]) == (6, 4, False)
+    assert c["rate_limit"] == {"retries": 18, "wait_s": 196.0, "calls_given_up": 2, "calls_not_asked": 0}
+    assert first["valid_benchmark"] is False
+    asked.clear()
+    second = await run(small, flaky(set()), runs=2, model="m", checkpoint=checkpoint)
+    assert asked == [small.documents[1].id] * 2                    # only the missing calls are asked
+    assert second["completion"]["resumed_from_checkpoint"] == 4 and second["completion"]["complete"] is True
+    with pytest.raises(ev.CheckpointError):
+        await run(small, flaky(set()), runs=2, model="another-model", checkpoint=checkpoint)
+
+
+async def test_after_one_call_gives_up_the_rest_are_not_asked(dataset, ready, tmp_path):
+    """A spent daily budget: one call waits out its limit, the rest are not
+    sent, and a later rerun resumes them from the checkpoint."""
+    respond, seen = groq([(200, {}), (429, {"retry-after": "60"})])
+    responder, _ = paced(respond, max_attempts=2)
+    small = ev.Dataset(version="v1", documents=dataset.documents[:4], sha256=dataset.sha256)
+    result = await run(small, responder, model="openai/gpt-oss-20b", checkpoint=tmp_path / "c.json")
+    c = result["completion"]
+    assert len(seen) == 3                       # doc 1 answered; doc 2 tried twice; docs 3-4 never sent
+    assert (c["calls_answered"], c["complete"]) == (1, False)
+    assert (c["rate_limit"]["calls_given_up"], c["rate_limit"]["calls_not_asked"]) == (1, 2)
+    respond, seen = groq([(200, {})])
+    responder, _ = paced(respond)
+    again = await run(small, responder, model="openai/gpt-oss-20b", checkpoint=tmp_path / "c.json")
+    assert len(seen) == 3 and again["completion"]["complete"] and again["completion"]["resumed_from_checkpoint"] == 1
+
+
+async def test_a_new_prompt_or_detector_makes_an_old_checkpoint_incompatible(dataset, tmp_path):
+    small = ev.Dataset(version="v1", documents=dataset.documents[:2], sha256=dataset.sha256)
+    identity = ev.checkpoint_identity(small, "m", 1)
+    assert identity["prompt_version"] == ai_report.PROMPT_VERSION == "ai-report-prompt.2"
+    assert identity["detector_version"] == "injection-detector.1"
+    old = tmp_path / "old.checkpoint.json"
+    old.write_text(json.dumps({"meta": {**identity, "prompt_version": "ai-report-prompt.1"},
+                               "answers": {}}), encoding="utf-8")
+    with pytest.raises(ev.CheckpointError):
+        await run(small, ev.oracle_responder, model="m", checkpoint=old)
+
+
+async def test_a_backtest_is_labelled_and_never_a_valid_benchmark(dataset, tmp_path):
+    """Answers recorded under prompt 1 are scored as recorded -- the saved
+    content is not rewritten -- with the current validator and scan."""
+    small = ev.Dataset(version="v1", documents=[d for d in dataset.documents
+                                               if d.id in ("tenancy-01", "tenancy-10")], sha256=dataset.sha256)
+    answers = {}
+    for doc in small.documents:
+        ev.prepare(doc)
+        content = {**ev.gold_answer(doc), "prompt_version": "ai-report-prompt.1"}
+        answers[f"{doc.id}#0"] = {**ev.asdict(ev.Answer(content=content, raw_text=json.dumps(content)))}
+    cp = tmp_path / "v1.checkpoint.json"
+    cp.write_text(json.dumps({"meta": {**ev.checkpoint_identity(small, "m", 1),
+                                       "prompt_version": "ai-report-prompt.1"}, "answers": answers}),
+                  encoding="utf-8")
+    result = ev.backtest(small, cp)
+    assert result["kind"] == "backtest" and result["valid_benchmark"] is False
+    assert "ai-report-prompt.1" in result["note"] and result["answers_in_checkpoint"] == 2
+    assert result["scored_with"] == {"prompt_version": "ai-report-prompt.2",
+                                     "detector_version": "injection-detector.1"}
+    assert result["metrics"]["failures"]["by_code"] == {}            # scored as recorded, not refused
+    assert json.loads(cp.read_text(encoding="utf-8"))["answers"] == answers   # nothing rewritten

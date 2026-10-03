@@ -33,11 +33,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 import yaml
 
 from app.services.analyzer import ai_client, ai_report, doc_graph, injection
@@ -162,6 +165,7 @@ class Answer:
     raw_text: str = ""                  # for "obeyed" injection detection only
     latency_ms: int | None = None
     usage: dict = field(default_factory=dict)
+    rate_limit: dict = field(default_factory=dict)   # paced runs: retries, wait_s, gave_up
 
 
 def gold_answer(doc: Document) -> dict:
@@ -208,6 +212,114 @@ def live_responder(model: str, *, transport=None):
     return respond
 
 
+# ── pacing for the benchmark (the HARNESS only) ──────────────────────────────
+#
+# A benchmark is a bulk workload against a rate-limited account. The pacing,
+# the bounded retry on HTTP 429 and the checkpoint live HERE, never in
+# ai_client: the production client keeps its contract -- one request, no
+# retry, no fallback. A retry here calls the SAME document with the SAME model
+# through that same client; it never changes model or provider, and it
+# retries only a rate limit (429). Any other failure is recorded as it is.
+
+@dataclass(frozen=True)
+class Pacing:
+    pause_s: float = 20.0          # after each successful call (free tier: ~8,000 tokens/min)
+    max_attempts: int = 8          # per call, the first try included
+    max_wait_s: float = 900.0      # per call, total time spent waiting on rate limits
+    default_wait_s: float = 30.0   # when the 429 carries no usable Retry-After
+    jitter_s: float = 2.0          # random 0..jitter added to each wait
+
+
+_RATE_HEADERS = ("retry-after", "x-ratelimit-reset-tokens", "x-ratelimit-reset-requests")
+_DURATION = re.compile(r"^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m(?!s))?(?:(\d+(?:\.\d+)?)s)?"
+                       r"(?:(\d+(?:\.\d+)?)ms)?$")
+
+
+class _RecordingTransport(httpx.AsyncBaseTransport):
+    """Forwards each request unchanged and keeps the response's rate-limit
+    headers, so the harness can honour Retry-After without ai_client ever
+    reading or acting on it. One instance per attempt: the client closes it."""
+
+    def __init__(self, inner: httpx.AsyncBaseTransport | None = None):
+        self._inner = inner or httpx.AsyncHTTPTransport()
+        self.headers: dict[str, str] = {}
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await self._inner.handle_async_request(request)
+        self.headers = {k.lower(): v for k, v in response.headers.items() if k.lower() in _RATE_HEADERS}
+        return response
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
+def retry_after_seconds(headers: dict[str, str], default: float) -> float:
+    """Retry-After in seconds; else Groq's x-ratelimit-reset-* ("7.66s",
+    "1m2.5s", "350ms"), the longer of the two; else `default`."""
+    value = (headers.get("retry-after") or "").strip()
+    try:
+        if value:
+            return max(0.0, float(value))
+    except ValueError:
+        pass                                        # an HTTP-date: fall through
+    waits = []
+    for key in ("x-ratelimit-reset-tokens", "x-ratelimit-reset-requests"):
+        m = _DURATION.match((headers.get(key) or "").strip())
+        if m and any(m.groups()):
+            h, mins, s, ms = (float(g) if g else 0.0 for g in m.groups())
+            waits.append(h * 3600 + mins * 60 + s + ms / 1000)
+    return max(waits) if waits else default
+
+
+def paced_responder(model: str, pacing: Pacing = Pacing(), *, sleep=None, rng=None,
+                    transport_factory=None):
+    """live_responder for a bulk benchmark: pauses after each success and, on
+    a 429 only, waits Retry-After (+ jitter) and calls the same document with
+    the same model again -- at most `max_attempts` tries and `max_wait_s` of
+    waiting per call, then the call is recorded as rate-limited. Every
+    answer carries what the rate limit cost it."""
+    import asyncio
+    import random
+
+    sleep = sleep or asyncio.sleep
+    rng = rng or random.Random()
+    # Once one call gives up on a rate limit (e.g. the daily token budget is
+    # spent), the rest are not asked: each would only wait out its own budget.
+    # They are recorded as not answered; a rerun resumes from the checkpoint.
+    stopped = []
+
+    async def respond(doc: Document, messages: list[dict]) -> Answer:
+        if stopped:
+            return Answer(error=ai_client.RATE_LIMITED,
+                          rate_limit={"retries": 0, "wait_s": 0.0, "gave_up": False, "not_asked": True})
+        retries, waited = 0, 0.0
+        for attempt in range(1, pacing.max_attempts + 1):
+            recorder = _RecordingTransport(transport_factory() if transport_factory else None)
+            began = time.monotonic()
+            try:
+                result = await ai_client.complete(messages, max_tokens=ai_report.MAX_TOKENS, model=model,
+                                                  transport=recorder)
+            except ai_client.AIError as exc:
+                latency = int((time.monotonic() - began) * 1000)
+                stats = {"retries": retries, "wait_s": round(waited, 1)}
+                if exc.code != ai_client.RATE_LIMITED:
+                    return Answer(error=exc.code, latency_ms=latency, rate_limit={**stats, "gave_up": False})
+                wait = (min(retry_after_seconds(recorder.headers, pacing.default_wait_s), pacing.max_wait_s)
+                        + rng.uniform(0, pacing.jitter_s))
+                if attempt == pacing.max_attempts or waited + wait > pacing.max_wait_s:
+                    stopped.append(doc.id)
+                    return Answer(error=exc.code, latency_ms=latency, rate_limit={**stats, "gave_up": True})
+                retries, waited = retries + 1, waited + wait
+                await sleep(wait)
+                continue
+            await sleep(pacing.pause_s)
+            return Answer(content=result.content, raw_text=json.dumps(result.content),
+                          latency_ms=result.latency_ms, usage=result.usage,
+                          rate_limit={"retries": retries, "wait_s": round(waited, 1), "gave_up": False})
+        raise AssertionError("unreachable")
+    return respond
+
+
 # ── scoring ──────────────────────────────────────────────────────────────────
 
 def _match(predicted: list[dict], gold: list[dict], same) -> int:
@@ -226,7 +338,7 @@ def _overlap(p: dict, g: dict) -> bool:
     return bool(set(p["sentence_ids"]) & set(g["sentence_ids"]))
 
 
-def score_document(doc: Document, answer: Answer) -> dict:
+def score_document(doc: Document, answer: Answer, *, prompt_version: str | None = None) -> dict:
     out = {"id": doc.id, "document_type": doc.document_type, "variant": doc.variant,
            "error": answer.error, "latency_ms": answer.latency_ms, "usage": answer.usage,
            "gold": {"risks": len(doc.expected["risks"]), "obligations": len(doc.expected["obligations"])},
@@ -247,7 +359,8 @@ def score_document(doc: Document, answer: Answer) -> dict:
         return out
     try:
         report = ai_report.validate(answer.content, doc.text, doc.rows, doc.clause_ids, doc.graph_rows,
-                                    suspect=scan.sentence_ids)
+                                    suspect=scan.sentence_ids,
+                                    prompt_version=prompt_version or ai_report.PROMPT_VERSION)
     except ai_report.SchemaInvalid:
         out["error"] = ai_report.SCHEMA_INVALID
         return out
@@ -374,24 +487,83 @@ def summarise(scored: list[dict], *, runs_by_doc: dict[str, list[set]] | None = 
     }
 
 
+def checkpoint_identity(dataset: Dataset, model: str | None, runs: int) -> dict:
+    """Everything that makes saved answers comparable. A new prompt, schema
+    or detector version makes every earlier checkpoint incompatible."""
+    return {"model": model, "dataset_sha256": dataset.sha256, "runs": runs,
+            "prompt_version": ai_report.PROMPT_VERSION, "schema_version": ai_report.SCHEMA_VERSION,
+            "detector_version": injection.DETECTOR_VERSION}
+
+
+class CheckpointError(ValueError):
+    """The checkpoint belongs to a different run (model, dataset, prompt, schema or runs)."""
+
+
+def _load_checkpoint(path: Path, meta: dict) -> dict[str, Answer]:
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("meta") != meta:
+        raise CheckpointError("the checkpoint is for a different run; start fresh or use its settings")
+    return {key: Answer(**a) for key, a in data["answers"].items()}
+
+
+def _save_checkpoint(path: Path, meta: dict, answers: dict[str, Answer]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps({"meta": meta, "answers": {k: asdict(a) for k, a in answers.items()}},
+                              indent=1), encoding="utf-8")
+    os.replace(tmp, path)                           # never a half-written checkpoint
+
+
 async def evaluate(dataset: Dataset, responder, *, runs: int = 1, model: str | None = None,
-                   price: tuple[float, float] | None = None) -> dict:
-    """Every document `runs` times through `responder`; the full result record."""
-    scored, runs_by_doc = [], {}
+                   price: tuple[float, float] | None = None, checkpoint: Path | None = None) -> dict:
+    """Every document `runs` times through `responder`; the full result record.
+
+    With `checkpoint`, every SUCCESSFUL answer is saved as soon as it
+    arrives and a rerun resumes: saved answers are re-scored, not re-asked;
+    failed calls are asked again. The record's `completion` says how many of
+    the expected calls returned an answer; only a 100% complete run with
+    every gate passed is a valid benchmark."""
+    meta = checkpoint_identity(dataset, model, runs)
+    saved = _load_checkpoint(checkpoint, meta) if checkpoint else {}
+    scored, runs_by_doc, resumed = [], {}, 0
     for doc in dataset.documents:
         prepare(doc)
         messages = ai_report.build_messages(doc.text, doc.rows, doc.scan.sentence_ids)
-        for _ in range(runs):
-            result = score_document(doc, await responder(doc, messages))
+        for run in range(runs):
+            key = f"{doc.id}#{run}"
+            if key in saved:
+                answer, resumed = saved[key], resumed + 1
+            else:
+                answer = await responder(doc, messages)
+                if checkpoint and answer.error is None:
+                    saved[key] = answer
+                    _save_checkpoint(checkpoint, meta, saved)
+            result = score_document(doc, answer)
+            result["rate_limit"] = answer.rate_limit
             scored.append(result)
             runs_by_doc.setdefault(doc.id, []).append(set(result["items"]))
+    expected = len(dataset.documents) * runs
+    completed = sum(1 for r in scored if r["error"] is None or r["error"] == ai_report.SCHEMA_INVALID)
+    limits = [r["rate_limit"] for r in scored if r["rate_limit"]]
+    completion = {
+        "calls_expected": expected, "calls_answered": completed, "resumed_from_checkpoint": resumed,
+        "complete": completed == expected,
+        "rate_limit": {"retries": sum(x.get("retries", 0) for x in limits),
+                       "wait_s": round(sum(x.get("wait_s", 0.0) for x in limits), 1),
+                       "calls_given_up": sum(1 for x in limits if x.get("gave_up")),
+                       "calls_not_asked": sum(1 for x in limits if x.get("not_asked"))},
+    }
+    metrics = summarise(scored, runs_by_doc=runs_by_doc if runs > 1 else None, price=price)
     return {
+        "completion": completion,
+        "valid_benchmark": completion["complete"] and all(metrics["gates"].values()),
         "evaluated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "dataset": {"version": dataset.version, "sha256": dataset.sha256,
                     "documents": len(dataset.documents)},
         "schema_version": ai_report.SCHEMA_VERSION, "prompt_version": ai_report.PROMPT_VERSION,
         "model": model, "runs_per_document": runs,
-        "metrics": summarise(scored, runs_by_doc=runs_by_doc if runs > 1 else None, price=price),
+        "metrics": metrics,
         "documents": [{k: v for k, v in r.items() if k != "items"} for r in scored],
     }
 
@@ -410,3 +582,43 @@ def price_for(model: str | None, path: Path | None = None) -> tuple[float, float
     if isinstance(entry.get("input"), (int, float)) and isinstance(entry.get("output"), (int, float)):
         return float(entry["input"]), float(entry["output"])
     return None
+
+
+# ── backtest: re-scoring saved answers offline ──────────────────────────────
+
+BACKTEST = "backtest"
+
+
+def backtest(dataset: Dataset, checkpoint: Path, *, price: tuple[float, float] | None = None) -> dict:
+    """Re-score a saved checkpoint with the CURRENT validator and scan, with
+    no network. It shows what the current rules would have made of answers
+    produced earlier -- possibly under an earlier prompt, which this record
+    names. It is labelled a backtest and is NEVER a valid benchmark, whatever
+    its numbers: only a live run of the current prompt is."""
+    data = json.loads(checkpoint.read_text(encoding="utf-8"))
+    meta, saved = data["meta"], {k: Answer(**a) for k, a in data["answers"].items()}
+    if meta.get("dataset_sha256") != dataset.sha256:
+        raise CheckpointError("the checkpoint is for a different dataset")
+    runs = meta["runs"]
+    recorded_prompt = meta.get("prompt_version", ai_report.PROMPT_VERSION)
+    scored, runs_by_doc = [], {}
+    for doc in dataset.documents:
+        prepare(doc)
+        for run in range(runs):
+            answer = saved.get(f"{doc.id}#{run}", Answer(error="not_in_checkpoint"))
+            # The saved answer is scored exactly as recorded, against the
+            # prompt version it was produced under.
+            result = score_document(doc, answer, prompt_version=recorded_prompt)
+            scored.append(result)
+            runs_by_doc.setdefault(doc.id, []).append(set(result["items"]))
+    return {"kind": BACKTEST, "valid_benchmark": False,
+            "note": ("Offline re-score of saved answers with the current validator and scan. Not a "
+                     "benchmark: the answers were produced by an earlier run"
+                     + (f" under {recorded_prompt}, before the current prompt." if recorded_prompt !=
+                        ai_report.PROMPT_VERSION else ".")),
+            "source_checkpoint": {"file": checkpoint.name, **meta},
+            "scored_with": {"prompt_version": ai_report.PROMPT_VERSION,
+                            "detector_version": injection.DETECTOR_VERSION},
+            "answers_in_checkpoint": len(saved), "calls_expected": len(dataset.documents) * runs,
+            "evaluated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "metrics": summarise(scored, runs_by_doc=runs_by_doc if runs > 1 else None, price=price)}
