@@ -2,7 +2,10 @@
 
 Run with the ISOLATED environment, never the backend venv:
 
-    <ML>/venv-gliner/Scripts/python.exe backend/scripts/pii_locator/gliner_locate.py <ML> <in.json> <out.json>
+    <ML>/venv-gliner/Scripts/python.exe backend/scripts/pii_locator/gliner_locate.py <ML> <in.json> <out.json> [variant]
+
+[variant]: `as_loaded` (default) or `mistral_regex_fix` -- the tokenizer pre-tokenizer
+replacement transformers applies under `fix_mistral_regex=True`, for the A/B run only.
 
 <in.json>: [{"id", "text"}] -- plain document text only, never labels.
 <out.json>: per document the entities found, with offsets into the ORIGINAL
@@ -99,12 +102,23 @@ def main() -> int:
     model_dir = verified_model_dir()
     model = GLiNER.from_pretrained(str(model_dir), local_files_only=True)
     model.eval()
+    variant = sys.argv[4] if len(sys.argv) > 4 else "as_loaded"
+    if variant == "mistral_regex_fix":
+        # Exactly what transformers does for fix_mistral_regex=True (tokenization_utils_base.py).
+        import tokenizers
+        model.data_processor.transformer_tokenizer.backend_tokenizer.pre_tokenizer[0] = tokenizers.pre_tokenizers.Split(
+            pattern=tokenizers.Regex(
+                r"[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+"),
+            behavior="isolated")
+    elif variant != "as_loaded":
+        raise SystemExit(f"unknown variant {variant!r}")
     load_s = time.perf_counter() - began
     splitter = model.data_processor.words_splitter
     tokenizer = model.data_processor.transformer_tokenizer
     prompt = sum(len(tokenizer.tokenize(f"<<ENT>> {label}")) for label in LABELS) + PROMPT_MARGIN
 
     out = {"model": "urchade/gliner_multi-v2.1", "revision": "443d26d654e0324125a96bebd8e796c14ff2efe6",
+           "tokenizer_variant": variant,
            "labels": LABELS, "threshold_reported": THRESHOLD, "load_seconds": round(load_s, 2),
            "chunk_words": CHUNK_WORDS, "overlap_words": OVERLAP_WORDS, "documents": {}}
     proc = psutil.Process()
