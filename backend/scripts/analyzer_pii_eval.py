@@ -1,7 +1,12 @@
-"""Score PII masking DETECTION (`pii-eval.1`, analyzer_eval/pii/PII_DETECTION_RUBRIC.md).
+"""Score PII masking DETECTION (pii-eval.1 rubric 1 / pii-eval.2 rubric 2).
 
     python scripts/analyzer_pii_eval.py --dataset pii-eval-1 --freeze        # BEFORE any scoring
     python scripts/analyzer_pii_eval.py --dataset pii-eval-1 --write-record  # the single scored run
+
+A rubric-2 set is scored as the PIPELINE the owner chose (2026-10-04): the
+rules plus the local entity locator (`LOCATOR` below), run OFFLINE in its
+isolated environment (`--locator-home <ML>`). The freeze pins that pipeline
+and the masking policy hash; scoring refuses if either changed since.
 
 NEVER a live call: every request goes through the real provider client
 (ai_client.complete) with a FAKE transport that only captures the HTTP body,
@@ -27,6 +32,47 @@ import yaml  # noqa: E402
 from app.core.config import settings  # noqa: E402
 from app.services.analyzer import ai_client, pii_mask  # noqa: E402
 from app.services.analyzer import pii_evaluation as ev  # noqa: E402
+
+#: The locator setup a rubric-2 set is scored with -- pinned by the freeze.
+LOCATOR = {"model": "urchade/gliner_multi-v2.1", "revision": "443d26d654e0324125a96bebd8e796c14ff2efe6",
+           "tokenizer_variant": "as_loaded", "cut_off": 0.3,
+           "labels": {"person": "personal_name", "address": "address", "location": "address"}}
+LOCATOR_MANIFEST = ev.ROOT / "locator" / "gliner_multi-v2.1.manifest.json"
+
+
+def _pipeline(name: str) -> dict | None:
+    return {"rules": pii_mask.MASKING_VERSION, "locator": LOCATOR} if ev.rubric_path(name) != ev.RUBRIC_PATH else None
+
+
+def _file_hashes(manifest: dict) -> dict:
+    return {f"{r['repo']}/{f['name']}": f["sha256"] for r in manifest["repos"] for f in r["files"]}
+
+
+def _locate(dataset, home: Path) -> dict[str, list[dict]]:
+    """Run the pinned locator OFFLINE on the plain texts; its spans are detections."""
+    import subprocess
+    local = json.loads((home / "gliner_multi-v2.1.manifest.json").read_text(encoding="utf-8"))
+    if _file_hashes(local) != _file_hashes(json.loads(LOCATOR_MANIFEST.read_text(encoding="utf-8"))):
+        raise SystemExit("refused: the local locator files do not match the committed manifest")
+    work = home / "gate"
+    work.mkdir(exist_ok=True)
+    texts = work / f"{dataset.name}.texts.json"
+    texts.write_text(json.dumps([{"id": d.id, "text": d.text} for d in dataset.documents], ensure_ascii=False),
+                     encoding="utf-8")
+    out = work / f"{dataset.name}.located.json"
+    try:
+        subprocess.run([str(home / "venv-gliner" / "Scripts" / "python.exe"),
+                        str(Path(__file__).resolve().parent / "pii_locator" / "gliner_locate.py"), str(home),
+                        str(texts), str(out), LOCATOR["tokenizer_variant"]], check=True)
+    finally:
+        texts.unlink()                               # the plain texts are not kept outside the repository
+    located = json.loads(out.read_text(encoding="utf-8"))
+    if (located["model"], located["revision"], located["tokenizer_variant"]) != \
+            (LOCATOR["model"], LOCATOR["revision"], LOCATOR["tokenizer_variant"]):
+        raise SystemExit("refused: the locator output is not from the pinned setup")
+    return {doc_id: [{"start": e["start"], "end": e["end"], "decision": LOCATOR["labels"][e["label"]]}
+                     for e in v["entities"] if e["score"] >= LOCATOR["cut_off"] and e["label"] in LOCATOR["labels"]]
+            for doc_id, v in located["documents"].items()}
 
 #: In-process only: makes the AI layer "ready" so the real client builds and
 #: posts the request -- to a fake transport. The key is not a real key.
@@ -64,6 +110,7 @@ def main() -> int:
     parser.add_argument("--dataset", default="pii-eval-1")
     parser.add_argument("--freeze", action="store_true")
     parser.add_argument("--write-record", action="store_true")
+    parser.add_argument("--locator-home", type=Path, help="the isolated locator directory (rubric-2 sets)")
     args = parser.parse_args()
 
     dataset = ev.load_dataset(args.dataset)
@@ -83,6 +130,7 @@ def main() -> int:
                  f"personal_spans: {cov['personal_spans']}", f"rubric_sha256: {_rubric_sha(dataset.name)}",
                  f"eval_version: {ev.EVAL_VERSION}", f"masking_version: {pii_mask.MASKING_VERSION}",
                  f"policy_sha256_at_freeze: {pii_mask.POLICY_SHA256}",
+                 f"pipeline_json: '{json.dumps(_pipeline(dataset.name), sort_keys=True)}'",
                  f"author: independent fresh session, given only {ev.rubric_path(dataset.name).name}", "files:"]
         lines += [f"  {p.name}: {hashlib.sha256(p.read_bytes()).hexdigest()}"
                   for p in sorted((ev.ROOT / args.dataset).glob("*.yaml"))]
@@ -94,6 +142,17 @@ def main() -> int:
     if not manifest or manifest.get("dataset_sha256") != dataset.sha256 or manifest.get("rubric_sha256") != _rubric_sha(dataset.name):
         print("refused: the set must be frozen (same dataset and rubric hash) before scoring", file=sys.stderr)
         return 2
+    pipeline = _pipeline(dataset.name)
+    extra = None
+    if pipeline is not None:
+        if manifest.get("pipeline_json") != json.dumps(pipeline, sort_keys=True) \
+                or manifest.get("policy_sha256_at_freeze") != pii_mask.POLICY_SHA256:
+            print("refused: the pipeline or masking policy changed since the freeze", file=sys.stderr)
+            return 2
+        if not args.locator_home:
+            print("refused: a rubric-2 set is scored with the pinned locator (--locator-home)", file=sys.stderr)
+            return 2
+        extra = _locate(dataset, args.locator_home.resolve())
 
     for name, value in FAKE_PROVIDER.items():
         setattr(settings, name, value)
@@ -101,7 +160,8 @@ def main() -> int:
     # never be mistaken for a real verification, exactly as the test suite uses.
     from app.services.analyzer import ai_records
     ai_records.POLICY_DIR = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "ai_policies"
-    result = ev.evaluate(dataset, capturing_send())
+    result = ev.evaluate(dataset, capturing_send(), extra_by_doc=extra)
+    result["pipeline"] = pipeline
     result["frozen_before_run"] = True
     for mode in ("auto", "manual"):
         s = result[mode]
@@ -109,7 +169,9 @@ def main() -> int:
               f"coverage={s['character_coverage']} detected={s['detected_rate']} miss={s['miss_rate']} "
               f"leaks={s['leaks']} unnecessary_blocks={s['unnecessary_blocks']} "
               f"false_cand={s['false_candidate_rate']} party={s['party_consistency']} "
-              f"deadlines={s['deadline_preservation']} hygiene={s['request_hygiene']}")
+              f"deadlines={s['deadline_preservation']} hygiene={s['request_hygiene']} "
+              f"sent_rate={s.get('sent_rate')} party_any={s.get('party_consistency_any_token')} "
+              f"address_cov={s.get('address_character_coverage')} by_reason={s.get('blocked_by_reason')}")
     print("gate:", result["gate"]["status"], {k: v for k, v in result["gate"]["checks"].items() if not v})
 
     results_dir = ev.ROOT / "results"
@@ -121,20 +183,21 @@ def main() -> int:
         if ev.DATASET_ROLES.get(args.dataset) == "development":
             print("refused: a development set never writes a gate record", file=sys.stderr)
             return 2
-        if ev.RECORD_PATH.exists():
+        record_path = ev.record_path(args.dataset)
+        if record_path.exists():
             print("refused: a kept detection record is never overwritten", file=sys.stderr)
             return 2
         record = {k: result[k] for k in ("eval_version", "dataset", "dataset_sha256", "masking_version",
                                          "policy_sha256", "rubric_sha256", "coverage", "auto", "manual", "gate",
-                                         "frozen_before_run")}
+                                         "frozen_before_run", "pipeline")}
         record["label_review"] = "developer_only"
         record["approval"] = ("Detection only, on synthetic developer-labelled documents. Not a real-document "
                               "or model-quality approval.")
         record["created"] = date.today().isoformat()
-        ev.RECORD_PATH.write_text("# Kept PII detection result (pii-eval.1). Never overwritten.\n"
+        record_path.write_text(f"# Kept PII detection result ({ev.EVAL_VERSION}, {args.dataset}). Never overwritten.\n"
                                   + yaml.safe_dump(record, sort_keys=False, allow_unicode=True, width=1000),
                                   encoding="utf-8", newline="\n")
-        print("record:", ev.RECORD_PATH)
+        print("record:", record_path)
     return 0
 
 

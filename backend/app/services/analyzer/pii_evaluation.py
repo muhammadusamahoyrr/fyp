@@ -65,7 +65,14 @@ RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH}
 
 def rubric_path(dataset_name: str) -> Path:
     return RUBRIC_BY_DATASET.get(dataset_name, RUBRIC_2_PATH)
-RECORD_PATH = Path(__file__).resolve().parent / "pii_detection_record.yaml"
+RECORD_PATH = Path(__file__).resolve().parent / "pii_detection_record.yaml"   # pii-eval-1's kept record
+
+
+def record_path(dataset_name: str) -> Path:
+    """Each gate set keeps its own record; pii-eval-1's stays where it was."""
+    if dataset_name == "pii-eval-1":
+        return RECORD_PATH
+    return Path(__file__).resolve().parent / f"pii_detection_record_{dataset_name.replace('-', '_')}.yaml"
 PERSONAL = ("NAME", "CNIC", "PHONE", "EMAIL", "ACCOUNT", "ADDRESS")
 KINDS = PERSONAL + ("NOT", "DEADLINE")
 FEATURES = ("repeated_names", "aliases", "urdu_script", "roman_urdu", "ocr_errors", "table", "overlap",

@@ -200,3 +200,18 @@ def test_rubric_2_gates_the_manual_sent_rate_and_address_coverage_only_for_rubri
     assert ev.gate(summary(1.0, 1.0), summary(0.50, 1.0), rubric=2)["checks"]["manual_sent_rate"] is False
     assert ev.gate(summary(1.0, 0.90), summary(1.0, 1.0), rubric=2)["checks"]["address_character_coverage"] is False
     assert "manual_sent_rate" not in ev.gate(summary(1.0, 1.0), summary(0.1, 1.0))["checks"]   # rubric 1 unchanged
+
+
+def test_a_rubric_2_set_is_scored_as_the_pinned_pipeline_and_keeps_its_own_record():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "analyzer_pii_eval", Path(__file__).resolve().parents[1] / "scripts" / "analyzer_pii_eval.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    assert script._pipeline("pii-eval-1") is None                       # scored as recorded, rules only
+    pinned = script._pipeline("pii-eval-2")
+    assert pinned["locator"]["cut_off"] == 0.3 and pinned["locator"]["tokenizer_variant"] == "as_loaded"
+    assert pinned["rules"] == "pii-mask.2"
+    assert ev.record_path("pii-eval-1") == ev.RECORD_PATH
+    assert ev.record_path("pii-eval-2").name == "pii_detection_record_pii_eval_2.yaml"
