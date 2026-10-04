@@ -61,7 +61,7 @@ RUBRIC_PATH = ROOT / "PII_DETECTION_RUBRIC.md"          # pii-eval.1, kept uncha
 RUBRIC_2_PATH = ROOT / "PII_DETECTION_RUBRIC_2.md"
 RUBRIC_3_PATH = ROOT / "PII_DETECTION_RUBRIC_3.md"
 #: The rubric each set is scored under; pii-eval-2 and later use rubric 2.
-RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH, "pii-eval-3": RUBRIC_3_PATH}
+RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH, "pii-eval-3": RUBRIC_3_PATH, "pii-eval-4": RUBRIC_3_PATH}
 
 
 def rubric_path(dataset_name: str) -> Path:
@@ -101,7 +101,8 @@ COVERAGE = {"documents": 40, "per_feature": 6, "personal_spans": 150}
 #: The next gate is a fresh independent pii-eval-2.
 DATASET_ROLES = {"pii-eval-1": "development",
                  "pii-eval-2": "gate_spent",       # scored once 2026-10-04: NOT passed
-                 "pii-eval-3": "gate_sealed"}     # authored 2026-10-04; never read for tuning; see AUTHORED.txt
+                 "pii-eval-3": "gate_spent",       # scored once 2026-10-04 (b907a96): NOT passed
+                 "pii-eval-4": "gate_sealed"}     # authored 2026-10-04; never read for tuning; see AUTHORED.txt
 _OPEN = re.compile(r"\[\[(?P<kind>[A-Z]+):(?P<entity>[A-Za-z0-9_-]+)\|")
 _WORD = re.compile(r"[^\W_]{3,}|\d{3,}", re.UNICODE)
 
@@ -268,9 +269,13 @@ def _missed(doc: Doc, personal: list[Span], masking, decisions: list[dict]) -> l
             continue                                         # inside a span already marked
         mark = {"start": g.start, "end": g.end, "decision": _KIND_DECISION[g.kind]}
         if g.kind == "NAME":
+            # The person's fullest mention that is masked already, or that this
+            # reviewer marked earlier in the same pass (the screen offers both).
+            marked_here = [(o["start"], o["end"]) for o in out if o["decision"] == pii_mask.NAME_DECISION]
             same = [x for x in doc.spans if x.kind == "NAME" and x.entity == g.entity and x is not g
                     and not _overlaps(x.start, x.end, g.start, g.end) and x.end - x.start >= g.end - g.start
-                    and _covered(masking.masked_spans, x.start, x.end) == x.end - x.start]
+                    and (_covered(masking.masked_spans, x.start, x.end) == x.end - x.start
+                         or (x.start, x.end) in marked_here)]
             if same:
                 target = max(same, key=lambda x: x.end - x.start)
                 mark.update(decision=pii_mask.SAME_PERSON, target_start=target.start, target_end=target.end)

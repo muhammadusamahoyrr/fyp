@@ -440,3 +440,20 @@ async def test_scanner_results_and_evidence_are_untouched_by_the_review(http, mo
     after = (await snapshot(get_analysis_hypothesis_results_col()), await snapshot(get_analysis_sentences_col()))
     assert before == after and before[0]                                   # scanner results and evidence intact
     hrs.TRANSPORT = None
+
+
+async def test_a_missed_mention_can_be_linked_to_another_mark_in_the_same_review(clean):
+    client, _, rid, _, received = clean
+    view = await view_of(client, rid)
+    text = (await client.get(f"{BASE}/{rid}/text")).json()["text"]
+    first, second = text.index("Lahore"), text.index("witnesses")
+    decisions = [{"start": first, "end": first + len("Lahore"), "decision": "personal_name"},
+                 {"start": second, "end": second + len("witnesses"), "decision": "same_person",
+                  "target_start": first, "target_end": first + len("Lahore")}]
+    p = (await preview(client, rid, view, decisions)).json()
+    body = p["request"][-1]["content"]
+    token = next(t["token"] for t in p["tokens"] if t["start"] == first)
+    assert "Lahore" not in body and "witnesses" not in body and body.count(token) == 2
+    assert (await submit(client, rid, view, decisions)).status_code == 201
+    assert await runner.process_one("w1") == "done"
+    assert received[0] == p["request"]

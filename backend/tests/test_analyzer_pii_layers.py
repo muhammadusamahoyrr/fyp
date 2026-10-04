@@ -262,3 +262,33 @@ def test_a_marked_detail_is_masked_wherever_it_appears_with_one_token():
     m = pii_mask.prepare(text, rows, {r["sentence_id"] for r in rows}, mark)
     body = sent(m)
     assert "Bhalwal" not in body and body.count("[ADDRESS_1]") == 2 and "[ADDRESS_2]" not in body
+
+
+def test_a_link_into_part_of_a_longer_masked_name_takes_that_names_token():
+    # An honorific the masker keeps in the name ("Syed", "Chaudhry"): the link
+    # target may be only part of the masked name, and must still reach its token.
+    text = 'Made between Syed Ali Raza (the "Landlord") and Mrs. Hina Batool (the "Tenant").\nRaza will repair the roof.\n'
+    m, rows = masked(text)
+    raza = next(u for u in m.uncertain if text[u["start"]:u["end"]] == "Raza")
+    inner = text.index("Ali Raza")
+    linked = pii_mask.prepare(text, rows, {r["sentence_id"] for r in rows},
+                              [{"start": raza["start"], "end": raza["end"], "decision": pii_mask.SAME_PERSON,
+                                "target_start": inner, "target_end": inner + len("Ali Raza")}])
+    body = sent(linked)
+    assert not linked.uncertain and body.count("[NAME_1]") == 2 and "Raza" not in body
+    assert "[NAME_3]" not in body
+
+
+def test_a_chain_of_links_reaches_the_same_person():
+    text = "Signed by Shoukat Ali.\nPayment to Shaukat Ali is due.\nSh. Ali will collect it.\n"
+    m, rows = masked(text)
+    first, second, third = (text.index(v) for v in ("Shoukat Ali", "Shaukat Ali", "Sh. Ali"))
+    decisions = [{"start": first, "end": first + 11, "decision": pii_mask.NAME_DECISION},
+                 {"start": second, "end": second + 11, "decision": pii_mask.SAME_PERSON,
+                  "target_start": first, "target_end": first + 11},
+                 {"start": third, "end": third + 7, "decision": pii_mask.SAME_PERSON,
+                  "target_start": second, "target_end": second + 11}]
+    linked = pii_mask.prepare(text, rows, {r["sentence_id"] for r in rows}, decisions)
+    body = sent(linked)
+    # "Sh." ends a sentence for the segmenter, so that mention spans two: every piece is [NAME_1].
+    assert body.count("[NAME_1]") >= 3 and "[NAME_2]" not in body and "Ali" not in body

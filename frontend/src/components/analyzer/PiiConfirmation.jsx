@@ -319,13 +319,37 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
 
             {added.length > 0 && (
                 <ul data-pii-added-list style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-                    {added.map(a => (
-                        <li key={spanId(a.start, a.end)}>
-                            You marked <b>“{text.slice(a.start, a.end)}”</b> as {(MARK_LABEL[a.decision] || a.decision).toLowerCase()}{" "}
-                            <Btn data-pii-unmark={spanId(a.start, a.end)}
-                                onClick={() => setAdded(prev => prev.filter(x => x !== a))}>Remove</Btn>
-                        </li>
-                    ))}
+                    {added.map(a => {
+                        const isName = a.decision === "personal_name" || a.decision === "same_person";
+                        const others = names.filter(n => !(n.start === a.start && n.end === a.end));
+                        const relink = value => setAdded(prev => prev.map(x => {
+                            if (x !== a) return x;
+                            const n = others.find(o => spanId(o.start, o.end) === value);
+                            return n ? { start: x.start, end: x.end, decision: "same_person", target_start: n.start, target_end: n.end }
+                                     : { start: x.start, end: x.end, decision: "personal_name" };
+                        }));
+                        return (
+                            <li key={spanId(a.start, a.end)}>
+                                You marked <b>“{text.slice(a.start, a.end)}”</b> as{" "}
+                                {(isName ? "personal name" : (MARK_LABEL[a.decision] || a.decision).toLowerCase())}{" "}
+                                {isName && others.length > 0 && (
+                                    /* A missed mention of someone already masked keeps that person's token. */
+                                    <select data-pii-added-target={spanId(a.start, a.end)} aria-label="Same person as"
+                                        value={a.decision === "same_person" ? spanId(a.target_start, a.target_end) : ""}
+                                        onChange={e => relink(e.target.value)}>
+                                        <option value="">A different person</option>
+                                        {others.map(n => (
+                                            <option key={n.token} value={spanId(n.start, n.end)}>
+                                                Same person as {n.token} — {text.slice(n.start, n.end)}
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}{" "}
+                                <Btn data-pii-unmark={spanId(a.start, a.end)}
+                                    onClick={() => setAdded(prev => prev.filter(x => x !== a))}>Remove</Btn>
+                            </li>
+                        );
+                    })}
                 </ul>
             )}
 

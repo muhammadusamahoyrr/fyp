@@ -336,3 +336,41 @@ attempt entry records the review id and the attested hash.
 but the running server has no locator yet. At runtime it is rules plus the
 lawyer's review. Wiring the locator in as a local service is a separate
 step.
+
+## pii-eval-3 party-consistency failure — investigated on development data only (2026-10-04)
+
+pii-eval-3, scored once (b907a96), failed only on party consistency in
+review mode (0.775). Its documents were not read. The investigation used
+pii-eval-1, which did not reproduce the failure, plus new synthetic cases
+written for the purpose.
+
+The only lead taken from pii-eval-3 was its author's report, not its
+documents: honorifics (Syed, Chaudhry, Haji, Mian, Rana, Colonel, Engr)
+were kept outside the name labels. Two causes were reproduced on own cases:
+
+1. **Masker:** a "same person" link into PART of a longer masked name took
+   a new token. Example: the alias "Raza" linked to "Ali Raza", which is
+   inside the masked "Syed Ali Raza". Linking keyed the token by the
+   target's own text, so "ali raza" and "syed ali raza" got two tokens.
+
+   Fix: a link resolves to the token of the masked name that CONTAINS the
+   target. Links are resolved after every other token is known, chains
+   included. The owner's rule still holds: Syed, Malik, Rana and Chaudhry
+   are not stripped from token keys, so different people are not merged.
+2. **Review screen and simulated reviewer:** a MISSED mention the lawyer
+   marked (e.g. a spelling variant "Shaukat Ali" of "Shoukat Ali") could
+   not be tied to the person. The screen offered no "same person as" for
+   added marks, so it got its own token.
+
+   Fix: the screen now offers "Same person as [token]" on a marked name.
+   The simulated reviewer links a missed mention to the person's fullest
+   mention, masked already or marked earlier in the same pass.
+
+After both fixes:
+- the reproduced cases, and further own cases (Engr, Colonel/sahib, Mian,
+  Rana, initials, Mohammad/Muhammad), keep one token per person;
+- pii-eval-1 is unchanged in all three modes (review mode: 0 leaks,
+  coverage 1.0, party consistency 1.0).
+
+These are development results only. The next gate is a fresh, independent
+pii-eval-4 under rubric 3, scored once.

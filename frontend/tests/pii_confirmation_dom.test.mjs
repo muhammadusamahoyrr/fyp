@@ -204,3 +204,32 @@ test("every waiting reason opens the review in the report and the drafting revie
     assert.match(draft, /PII_REVIEW_REASONS\.has\(data\.ai_review_summary\?\.reason\) && \(\s*<PiiConfirmation/);
     assert.match(live, /<ReportView t=\{t\} runId=\{runId\} onChanged=\{reload\} \/>/);
 });
+
+test("a marked missed name can be linked to a person already masked", async () => {
+    const withName = { ...VIEW, candidates: [], tokens: READY.tokens, ready: false };
+    const { container, unmount } = await screen(withName);
+    const original = $(container, '[data-pii-original="s1"]');
+    const node = original.firstChild.firstChild;                              // "Rent is Rs. 85,000."
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, 4);                                                   // "Rent" stands in for a missed name
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await act(async () => { $(container, "[data-pii-panes]").dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true })); });
+    await settle();
+    await click($(container, '[data-pii-mark="personal_name"]'));
+    const pick = $(container, "[data-pii-added-target]");
+    assert.ok(pick, "a marked name offers 'same person as'");
+    const [kStart, kEnd] = at("Kashif Raza");
+    await act(async () => {
+        pick.value = `${kStart}-${kEnd}`;
+        pick.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await settle();
+    await click($(container, "[data-pii-preview]"));
+    const [, sent] = api.__calls("previewPii")[0].args;
+    const link = sent.decisions.find(d => d.decision === "same_person");
+    assert.deepEqual([link.start, link.end, link.target_start, link.target_end], [S0.length + 1, S0.length + 5, kStart, kEnd]);
+    await unmount();
+});

@@ -247,3 +247,22 @@ def test_rubric_3_gates_only_the_review_mode_with_the_owner_thresholds():
     assert ev.THRESHOLDS_3 == {"review_leaks": 0, "review_character_coverage": 0.99,
                                "review_address_character_coverage": 0.95, "review_party_consistency": 1.0,
                                "review_deadline_preservation": 1.0, "review_sent_rate": 0.60}
+
+
+@pytest.mark.parametrize("text", [
+    'Made between Syed [[NAME:p1|Ali Raza]] (the "Landlord") and Mrs. [[NAME:p2|Hina Batool]] (the "Tenant").\n'
+    'The Landlord, [[NAME:p1|Ali Raza]], keeps the keys. [[NAME:p1|Raza]] will repair the roof by 1 June 2026.',
+    'Chaudhry [[NAME:p1|Nadeem Akhtar]] (the "Employer") appoints [[NAME:p2|Sana Iqbal]] (the "Employee").\n'
+    '[[NAME:p1|Nadeem]] shall pay [[NAME:p2|Sana]] within 30 days.',
+    'Signed by [[NAME:p1|Shoukat Ali]] and witnessed by [[NAME:p2|Imran Khan]].\n'
+    'Payment to [[NAME:p1|Shaukat Ali]] is due by 1 July 2026.',
+])
+def test_review_mode_keeps_one_token_per_person_with_honorifics_and_variants(text):
+    d = doc(text, parties=["p1", "p2"])
+    r = ev.score_document(d, send_capture([]), mode="review")
+    assert r["sent"] and r["party_consistent"] is True and not any(s["leak"] for s in r["spans"])
+
+
+def test_pii_eval_4_is_scored_under_the_approved_rubric_3_gate():
+    assert ev.rubric_path("pii-eval-4") == ev.RUBRIC_3_PATH and ev.rubric_number("pii-eval-4") == 3
+    assert ev.DATASET_ROLES["pii-eval-3"] == "gate_spent" and ev.DATASET_ROLES["pii-eval-2"] == "gate_spent"

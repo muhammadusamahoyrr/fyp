@@ -412,17 +412,21 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
     names = [(a, b) for a, b, k in spans if k == "NAME"]
     full_names = [(a, b) for a, b in names if len(pii_layers.name_parts(text[a:b])) >= 2]
     defined = pii_layers.explicit_aliases(text, full_names)
-    linked = {(c["start"], c["end"]): text[c["target_start"]:c["target_end"]]
-              for c in confirmed if c["decision"] == SAME_PERSON and "target_start" in c}
-    link_target = {(c["start"], c["end"]): (c["target_start"], c["target_end"])
+    def container(start: int, end: int) -> tuple[int, int]:
+        # A link targets the MASKED NAME holding the target offsets, so the
+        # alias takes that name's token even when the target is only part of
+        # it ("Ali Raza" inside the masked "Syed Ali Raza").
+        inside = [(x, y) for x, y in names if x <= start and end <= y]
+        return min(inside, key=lambda n: n[1] - n[0]) if inside else (start, end)
+
+    link_target = {(c["start"], c["end"]): container(c["target_start"], c["target_end"])
                    for c in confirmed if c["decision"] == SAME_PERSON and "target_start" in c}
     roles = pii_layers.party_roles(text, full_names)
     canonical: dict[tuple[int, int], str] = {}
     aliases: list[tuple[int, int, str]] = []
     for a, b in names:
-        if (a, b) in linked:
-            canonical[(a, b)] = linked[(a, b)]
-            continue
+        if (a, b) in link_target:
+            continue                                         # resolved below, once every token is known
         raw = [w.lower() for w in pii_layers.name_parts(text[a:b])]
         variant = any(pii_layers.variant_of(text[a:b], text[x:y]) or pii_layers.variant_of(text[x:y], text[a:b])
                       for x, y in names if (x, y) != (a, b) and link_target.get((x, y)) != (a, b))
@@ -444,12 +448,11 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
             else:
                 canonical[(a, b)] = full
                 masking.aliases_auto_linked += 1
-    # A reviewer link whose target is itself a linked alias reaches the same person.
-    for c in confirmed:
-        if c["decision"] == SAME_PERSON and "target_start" in c and (c["start"], c["end"]) in canonical:
-            target = (c["target_start"], c["target_end"])
-            if target in canonical:
-                canonical[(c["start"], c["end"])] = canonical[target]
+    # Reviewer links take the token of the name they point at -- through a
+    # chain of links too (an alias linked to an alias of the person).
+    for _ in range(len(link_target) + 1):
+        for source, target in link_target.items():
+            canonical[source] = canonical.get(target, text[target[0]:target[1]])
     known = {w.lower() for a, b in names for w in pii_layers.name_parts(text[a:b])} | pii_layers.COMMON_NAME_WORDS
 
     for s in sentences:
