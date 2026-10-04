@@ -255,21 +255,79 @@ def refused(masking: Masking) -> dict:
     return {**_policy(), "uncertain": masking.uncertain}
 
 
-async def store(masking: Masking, *, source_id: str):
-    """Write the encrypted map, if any value was masked. Returns (summary,
-    inside): `summary` (no values) goes on the run; `inside(session)` inserts
-    the blob header in the stage's commit transaction, so the map exists
-    exactly when the result it explains is published. A map whose commit
-    never happens is an orphan file, removed by the blob orphan sweep."""
-    from app.db.collections import get_analysis_blobs_col
+#: How long a map may outlive a crashed attempt before the sweep removes it.
+STALE_MAP_AFTER_SECONDS = 24 * 3600
+MAP_RETENTION = "deleted_when_the_attempt_finishes"
+
+
+def summary(masking: Masking) -> dict:
+    """What the run records about masking: version, policy, counts -- never
+    values, and no map id (the map does not outlive the attempt)."""
+    return {**_policy(), "counts": masking.counts, "map_retention": MAP_RETENTION}
+
+
+async def write_map(masking: Masking, *, source_id: str) -> dict | None:
+    """Encrypt and write the map's FILE, before the provider call. Returns the
+    blob header to record in the attempt transaction (`insert_map`), or None
+    when nothing was masked. RETENTION: the map lives only for its attempt --
+    `delete_map` removes it when the attempt finishes; a crashed attempt's map
+    is removed by `sweep_stale_maps` within 24 hours."""
+    from datetime import datetime, timezone
+
     from app.services.analyzer import blob_store
 
     if not masking.tokens:
-        return {**_policy(), "map_blob_id": None, "counts": {}}, None
+        return None
     header = await blob_store.write(masking.blob(), source_id=source_id, purpose="pii_map",
                                     mime="application/json")
+    return {**header, "created_at": datetime.now(timezone.utc)}
+
+
+def insert_map(header: dict | None):
+    """`inside(session)` recording the map's header, or None."""
+    from app.db.collections import get_analysis_blobs_col
+
+    if header is None:
+        return None
 
     async def inside(session):
         await get_analysis_blobs_col().insert_one(header, session=session)
+    return inside
 
-    return {**_policy(), "map_blob_id": header["_id"], "counts": masking.counts}, inside
+
+def delete_map(header: dict | None):
+    """`inside(session)` removing the map's header when the attempt finishes
+    (the file is removed right after the commit: `remove_map_file`)."""
+    from app.db.collections import get_analysis_blobs_col
+
+    if header is None:
+        return None
+
+    async def inside(session):
+        await get_analysis_blobs_col().delete_one({"_id": header["_id"], "purpose": "pii_map"}, session=session)
+    return inside
+
+
+async def remove_map_file(header: dict | None) -> None:
+    from app.services.analyzer import blob_store
+
+    if header is not None:
+        await blob_store.remove_file(header["_id"])
+
+
+async def sweep_stale_maps(*, older_than_seconds: int = STALE_MAP_AFTER_SECONDS, limit: int = 200) -> int:
+    """Remove maps left by attempts that never finished (a crash, a lost
+    lease): file first, then the record. Returns how many."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.db.collections import get_analysis_blobs_col
+    from app.services.analyzer import blob_store
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
+    col = get_analysis_blobs_col()
+    removed = 0
+    async for header in col.find({"purpose": "pii_map", "created_at": {"$lte": cutoff}}, {"_id": 1}).limit(limit):
+        await blob_store.remove_file(header["_id"])
+        await col.delete_one({"_id": header["_id"], "purpose": "pii_map"})
+        removed += 1
+    return removed

@@ -102,14 +102,21 @@ server, so they are unchanged.
 
 ## Storage
 
-- New blob purpose `pii_map` (`blob_store.PURPOSES`), AES-256-GCM envelope
-  per blob, as for the text.
-- JSON `{masking_version, salt, tokens}`. The random salt means the
+- New blob purpose `pii_map` (`blob_store.PURPOSES`). Each blob gets its own
+  AES-256-GCM envelope, as the text does.
+- The JSON is `{masking_version, salt, tokens}`. The random salt means the
   unsalted `plaintext_sha256` in the header cannot be dictionary-matched.
-- The header is inserted in the stage's commit transaction (`inside`).
-- The summary records `pii: {masking_version, map_blob_id, counts}` — no
-  values.
-- Purge: `deletion.purge_source` already removes every blob of the source.
+- The map lives ONLY FOR ITS ATTEMPT (retention decision 2026-10-04):
+  - it is written before the provider call, with its record in the
+    attempt's transaction;
+  - it is deleted in the transaction that publishes the outcome, and its
+    file right after;
+  - a crashed attempt's map is removed within 24 hours by the housekeeping
+    sweep.
+- The run summary records `pii: {masking_version, policy_sha256, counts,
+  map_retention}`. It holds no values and no map id.
+- Reports and evidence never need the map.
+- Purge: `deletion.purge_source` removes every blob of the source.
 
 ## What masking changes about evaluation (owner's correction, 2026-10-04)
 

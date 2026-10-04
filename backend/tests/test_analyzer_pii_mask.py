@@ -206,10 +206,14 @@ async def to_ai_report(client, pages, expect="queued_ai_report"):
     return rid
 
 
-def provider(prompts, build):
+def provider(prompts, build, during=None):
+    """`during`: an async hook run while the request is being answered (the
+    attempt is recorded and the map exists by then)."""
     async def respond(request):
         body = json.loads(request.content)
         prompts.append(body["messages"][1]["content"])
+        if during is not None:
+            await during()
         content = build(body["messages"][1]["content"])
         return httpx.Response(200, json={"model": body["model"], "usage": {"total_tokens": 7},
                                          "choices": [{"finish_reason": "stop",
@@ -243,11 +247,23 @@ async def ready(http, mongo_transactional, monkeypatch):
 async def test_the_model_sees_tokens_the_map_is_encrypted_and_evidence_is_original(ready, caplog):
     client, monkeypatch = ready
     rid = await to_ai_report(client, PII_PAGES)
-    prompts = []
-    monkeypatch.setattr(ai_stage, "TRANSPORT", provider(prompts, landlord_obligation))
+    prompts, seen = [], {}
+    source_id = (await get_analysis_runs_col().find_one({"_id": rid}))["source_id"]
+
+    async def map_during_the_call():
+        header = await get_analysis_blobs_col().find_one({"source_id": source_id, "purpose": "pii_map"})
+        seen["header"] = header
+        seen["map"] = json.loads(await blob_store.read(header["_id"], source_id=source_id, purpose="pii_map"))
+
+    monkeypatch.setattr(ai_stage, "TRANSPORT", provider(prompts, landlord_obligation, during=map_during_the_call))
     with caplog.at_level(logging.DEBUG):
         assert await runner.process_one("w1") == "done"
     assert len(prompts) == 1
+    # During the attempt the map was stored ENCRYPTED; it is gone once the attempt finished.
+    assert seen["map"]["tokens"]["[NAME_1]"] == {"kind": "NAME", "value": "Kashif Raza"}
+    assert seen["header"]["created_at"]
+    assert await get_analysis_blobs_col().count_documents({"_id": seen["header"]["_id"]}) == 0
+    assert not blob_store._path(seen["header"]["_id"]).exists()
     for value in ("Kashif Raza", "Ghulam Rasool", "Hira Batool", "35202-1234567-1", "0300-1234567"):
         assert value not in prompts[0], value
     # Every log line the app or its HTTP client wrote, at any level. (The
@@ -262,19 +278,17 @@ async def test_the_model_sees_tokens_the_map_is_encrypted_and_evidence_is_origin
     summary = run["ai_report"]
     assert summary["status"] == "complete"
     pii = summary["pii"]
-    assert pii["masking_version"] == "pii-mask.1" and pii["counts"]["NAME"] == 3 and pii["map_blob_id"]
+    assert pii["masking_version"] == "pii-mask.1" and pii["counts"]["NAME"] == 3
+    assert pii["map_retention"] == "deleted_when_the_attempt_finishes" and "map_blob_id" not in pii
     assert pii["policy_sha256"] == pii_mask.POLICY_SHA256 and len(pii["policy_sha256"]) == 64
     assert "Kashif" not in json.dumps(summary, default=str)
-    header = await get_analysis_blobs_col().find_one({"_id": pii["map_blob_id"]})
-    assert header["purpose"] == "pii_map" and header["source_id"] == run["source_id"]
-    stored = json.loads(await blob_store.read(pii["map_blob_id"], source_id=run["source_id"], purpose="pii_map"))
-    assert stored["tokens"]["[NAME_1]"] == {"kind": "NAME", "value": "Kashif Raza"}
 
     [item] = [i async for i in get_analysis_ai_items_col().find({"run_id": rid})]
     assert item["party"] == "[NAME_1]"                       # never substituted
     report = (await client.get(f"/documents/analyses/runs/{rid}/report")).json()
     [ob] = report["obligations"]
     assert ob["party"] == "[NAME_1]" and "Kashif Raza" in ob["evidence"][0]["text"]
+    # The saved report and its evidence read WITHOUT the map (cut from the original text).
     # The frozen benchmark measured UNMASKED input: this run says so.
     assert report["ai"]["evaluation"]["masked_input"] == "not_yet_evaluated"
     assert "may not have been detected" in report["ai"]["evaluation"]["note"]
@@ -338,7 +352,8 @@ async def test_the_drafting_question_review_sends_only_masked_evidence(ready):
         assert value not in prompts[0], value
     run = await get_analysis_runs_col().find_one({"_id": rid})
     pii = run["hypotheses"]["ai_review"]["pii"]
-    assert pii["masking_version"] == "pii-mask.1" and pii["map_blob_id"]
+    assert pii["masking_version"] == "pii-mask.1" and pii["map_retention"] == "deleted_when_the_attempt_finishes"
+    assert await get_analysis_blobs_col().count_documents({"source_id": run["source_id"], "purpose": "pii_map"}) == 0
     assert pii["policy_sha256"] == pii_mask.POLICY_SHA256
     monkeypatch.setattr(settings, "analyzer_hypothesis_review_ui", True)
     body = (await client.get(f"/documents/analyses/runs/{rid}/drafting-review")).json()

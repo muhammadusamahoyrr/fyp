@@ -40,7 +40,9 @@ from app.db.collections import (
     get_analysis_sources_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import ai_client, ai_config, ai_report, blob_store, deletion, injection, pii_mask, worker
+from app.services.analyzer import (
+    ai_client, ai_config, ai_report, blob_store, deletion, injection, pii_mask, receipts, worker,
+)
 from app.services.analyzer.terms_stage import published_sentences
 from app.services.analyzer.worker import Lease, LostLease
 
@@ -66,6 +68,8 @@ def wanted() -> tuple[bool, str | None]:
     if ai_config.problems(settings):
         return False, "ai_not_ready"
     return True, None
+
+
 
 
 def unavailable(reason: str) -> dict:
@@ -95,18 +99,43 @@ _PLURAL = {"risk": "risks", "obligation": "obligations", "summary_point": "summa
 _SINGULAR = {v: k for k, v in _PLURAL.items()}
 
 
-async def _finish(lease: Lease, summary: dict, inside=None) -> str:
-    """Publish the run as done with this AI summary (items already written).
-    `inside`: extra writes that must commit with it (the PII map's header)."""
+async def _finish(lease: Lease, summary: dict, inside=None, attempted: dict | None = None,
+                  pii_map: dict | None = None) -> str:
+    """Publish the run as done with this AI summary (items already written),
+    with its processing-receipt entry in the same transaction: the
+    `ai_outcome` of a recorded attempt (`attempted`), or `not_sent`. The
+    attempt's PII map is deleted in that transaction and its file right after."""
+    if attempted is None:
+        entry = receipts.not_sent(stage=STAGE, summary=summary)
+    else:
+        entry = receipts.outcome(stage=STAGE, summary=summary, **attempted)
     try:
         await worker.commit_stage(lease, stage=STAGE, next_status="done",
-                                  set_fields={"ai_report": summary}, inside=inside)
+                                  set_fields={"ai_report": summary},
+                                  inside=receipts.combine(inside, pii_mask.delete_map(pii_map),
+                                                          receipts.recorder(lease, entry)))
     except (LostLease, deletion.StaleSource) as exc:
+        await _drop_map(pii_map)
         if isinstance(exc, LostLease) and await worker.finish_without_result(
                 lease, status="cancelled"):
             return "cancelled"
         return "lost"
+    await pii_mask.remove_map_file(pii_map)
     return "done"
+
+
+async def _drop_map(pii_map: dict | None) -> None:
+    """The attempt ended without publishing (lost, cancelled): remove its map
+    now; if this fails too, the 24-hour sweep removes it."""
+    if pii_map is None:
+        return
+    from app.db.collections import get_analysis_blobs_col
+
+    try:
+        await pii_mask.remove_map_file(pii_map)
+        await get_analysis_blobs_col().delete_one({"_id": pii_map["_id"], "purpose": "pii_map"})
+    except Exception:  # noqa: BLE001 -- best effort; the stale-map sweep is the backstop
+        logger.warning("analyzer_pii_map_cleanup_deferred")
 
 
 async def run_ai_report(lease: Lease) -> str:
@@ -148,23 +177,48 @@ async def run_ai_report(lease: Lease) -> str:
     if masking.uncertain:
         return await _finish(lease, {**unavailable("pii_confirmation_required"), "pii": pii_mask.refused(masking)})
 
+    # The exact messages: built here so the receipt digests what is sent.
+    try:
+        messages = ai_report.build_messages(text, sentences, scan.sentence_ids, masking.bodies)
+    except ai_client.AIError as exc:            # too large / unprepared: nothing was sent
+        logger.warning("analyzer_ai_report_failed run_id=%s code=%s", lease.run_id, exc.code)
+        return await _finish(lease, {"status": FAILED, "error_code": exc.code,
+                                     "schema_version": ai_report.SCHEMA_VERSION,
+                                     "prompt_version": ai_report.PROMPT_VERSION,
+                                     "pii": pii_mask.refused(masking), "provenance": ai_config.contract()})
+    digest = receipts.request_digest(messages)
+    pii_summary = pii_mask.summary(masking)
+
+    # DURABLE ATTEMPT, BEFORE SENDING: source live, lease ours, the encrypted
+    # map recorded and an `ai_attempt` entry appended -- or nothing is sent.
+    pii_map = await pii_mask.write_map(masking, source_id=lease.source_id)
+    try:
+        await receipts.record_attempt(lease, receipts.attempt(
+            stage=STAGE, prompt_version=ai_report.PROMPT_VERSION, schema_version=ai_report.SCHEMA_VERSION,
+            pii=pii_summary, contract=ai_config.contract(), request_sha256=digest, sentence_ids=send_ids,
+            withheld_sentence_ids=[s["sentence_id"] for s in sentences if s["sentence_id"] in scan.sentence_ids]),
+            also=pii_mask.insert_map(pii_map))
+    except (receipts.NotOwned, deletion.StaleSource):
+        await pii_mask.remove_map_file(pii_map)          # its record never committed
+        return "lost"
+
     began = datetime.now(timezone.utc)
     async with worker.keep_alive(lease) as alive:
         try:
             report = await ai_report.generate(text, sentences, clause_ids, graph_rows=graph_rows,
                                               transport=TRANSPORT, suspect=scan.sentence_ids,
-                                              masking=masking)
+                                              masking=masking, messages=messages)
             error = None
         except ai_client.AIError as exc:
             report, error = None, exc.code
     if alive.lost:
-        return "lost"                   # someone else owns the run now; write nothing
+        await _drop_map(pii_map)
+        return "lost"                   # no outcome is recorded: the receipt reads "outcome unknown"
     if alive.cancel:
+        await _drop_map(pii_map)
         await worker.finish_without_result(lease, status="cancelled")
         return "cancelled"
 
-    # The map of what was sent is kept (encrypted) whether or not the call succeeded.
-    pii_summary, pii_inside = await pii_mask.store(masking, source_id=lease.source_id)
     base = {"schema_version": ai_report.SCHEMA_VERSION, "prompt_version": ai_report.PROMPT_VERSION,
             "started_at": began, "finished_at": datetime.now(timezone.utc),
             "text_sha256": hashlib.sha256(raw).hexdigest(),
@@ -173,7 +227,8 @@ async def run_ai_report(lease: Lease) -> str:
     if error is not None:
         logger.warning("analyzer_ai_report_failed run_id=%s code=%s", lease.run_id, error)
         return await _finish(lease, {**base, "status": FAILED, "error_code": error,
-                                     "provenance": ai_config.contract()}, inside=pii_inside)
+                                     "provenance": ai_config.contract()},
+                             attempted={"request_sha256": digest}, pii_map=pii_map)
 
     now = datetime.now(timezone.utc)
     key = {"run_id": lease.run_id, "stage": STAGE, "fence": lease.fence}
@@ -187,8 +242,12 @@ async def run_ai_report(lease: Lease) -> str:
                                   **_row(_SINGULAR[plural], item)}},
                 upsert=True)
             ordinal += 1
+    provenance = report["provenance"]
     return await _finish(lease, {
         **base, "status": PARTIAL if report["dropped"]["count"] else COMPLETE,
         "counts": {p: len(report[p]) for p in ("summary_points", "risks", "obligations")},
         "dropped": report["dropped"], "merged": report["merged"],
-        "provenance": report["provenance"]}, inside=pii_inside)
+        "provenance": provenance},
+        attempted={"request_sha256": digest, "model": provenance.get("model"),
+                   "request_id": provenance.get("request_id"), "usage": provenance.get("usage")},
+        pii_map=pii_map)

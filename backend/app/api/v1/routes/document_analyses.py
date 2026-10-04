@@ -224,6 +224,17 @@ async def get_analysis_report(run_id: str, current_user: dict = Depends(require_
     return await _run(confirmation.get_report(owner_id=str(current_user["_id"]), run_id=run_id))
 
 
+@router.get("/runs/{run_id}/processing-receipt")
+async def get_processing_receipt(run_id: str, current_user: dict = Depends(require_registered_lawyer)):
+    """What left the server for an AI provider -- or why nothing did -- with
+    versions, hashes and codes only; hash-chained and re-verified on read
+    (ANALYZER_PROCESSING_RECEIPT.md)."""
+    from app.services.analyzer import receipts
+
+    _require_available()
+    return await _run(receipts.get_receipt(owner_id=str(current_user["_id"]), run_id=run_id))
+
+
 # ── drafting-question review (INTERNAL, synthetic only) ──────────────────────
 #
 # ANALYZER_HYPOTHESES_PLAN.md §6, services/analyzer/drafting_review.py. The

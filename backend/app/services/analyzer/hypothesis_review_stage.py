@@ -35,7 +35,9 @@ from app.db.collections import (
     get_analysis_sources_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import ai_client, ai_config, ai_stage, blob_store, deletion, injection, pii_mask, worker
+from app.services.analyzer import (
+    ai_client, ai_config, ai_stage, blob_store, deletion, injection, pii_mask, receipts, worker,
+)
 from app.services.analyzer.hypotheses import catalog, review
 from app.services.analyzer.hypothesis_stage import published_results
 from app.services.analyzer.terms_stage import published_sentences
@@ -86,14 +88,26 @@ async def report(run: dict) -> list[dict]:
     return out
 
 
-async def _finish(lease: Lease, summary: dict, inside=None) -> str:
+async def _finish(lease: Lease, summary: dict, inside=None, attempted: dict | None = None,
+                  pii_map: dict | None = None) -> str:
+    """Publish the review outcome with its processing-receipt entry in the
+    same transaction: the `ai_outcome` of a recorded attempt, or `not_sent`.
+    The attempt's PII map is deleted in that transaction, its file right after."""
+    if attempted is None:
+        entry = receipts.not_sent(stage=STAGE, summary=summary)
+    else:
+        entry = receipts.outcome(stage=STAGE, summary=summary, **attempted)
     try:
         await worker.commit_stage(lease, stage=STAGE, next_status="done",
-                                  set_fields={"hypotheses.ai_review": summary}, inside=inside)
+                                  set_fields={"hypotheses.ai_review": summary},
+                                  inside=receipts.combine(inside, pii_mask.delete_map(pii_map),
+                                                          receipts.recorder(lease, entry)))
     except (LostLease, deletion.StaleSource) as exc:
+        await ai_stage._drop_map(pii_map)
         if isinstance(exc, LostLease) and await worker.finish_without_result(lease, status="cancelled"):
             return "cancelled"
         return "lost"
+    await pii_mask.remove_map_file(pii_map)
     return "done"
 
 
@@ -138,17 +152,37 @@ async def run_hypothesis_review(lease: Lease) -> str:
         return await _finish(lease, {**unavailable("pii_confirmation_required"), "withheld": withheld,
                                      "pii": pii_mask.refused(masking)})
 
+    send_ids = sorted({sid for i in items for sid in i["sentence_ids"]})
+    try:
+        messages = review.build_messages(items, questions, text, by_id, masking.bodies)
+    except ai_client.AIError as exc:            # unprepared: nothing was sent
+        return await _finish(lease, {**unavailable(exc.code), "withheld": withheld, "pii": pii_mask.refused(masking)})
+    digest = receipts.request_digest(messages)
+    pii_summary = pii_mask.summary(masking)
+
+    # DURABLE ATTEMPT, BEFORE SENDING (see ai_stage): or nothing is sent.
+    pii_map = await pii_mask.write_map(masking, source_id=lease.source_id)
+    try:
+        await receipts.record_attempt(lease, receipts.attempt(
+            stage=STAGE, prompt_version=review.PROMPT_VERSION, schema_version=review.SCHEMA_VERSION,
+            pii=pii_summary, contract=ai_config.contract(), request_sha256=digest, sentence_ids=send_ids),
+            also=pii_mask.insert_map(pii_map))
+    except (receipts.NotOwned, deletion.StaleSource):
+        await pii_mask.remove_map_file(pii_map)
+        return "lost"
+
     began = datetime.now(timezone.utc)
     async with worker.keep_alive(lease) as alive:
         try:
-            result = await ai_client.complete(review.build_messages(items, questions, text, by_id, masking.bodies),
-                                              max_tokens=review.MAX_TOKENS, transport=TRANSPORT)
+            result = await ai_client.complete(messages, max_tokens=review.MAX_TOKENS, transport=TRANSPORT)
             error = None
         except ai_client.AIError as exc:
             result, error = None, exc.code
     if alive.lost:
-        return "lost"                    # someone else owns the run now; write nothing
+        await ai_stage._drop_map(pii_map)
+        return "lost"                    # no outcome is recorded: the receipt reads "outcome unknown"
     if alive.cancel:
+        await ai_stage._drop_map(pii_map)
         await worker.finish_without_result(lease, status="cancelled")
         return "cancelled"
 
@@ -194,10 +228,13 @@ async def run_hypothesis_review(lease: Lease) -> str:
                "dropped": (validated or {}).get("dropped", {"count": 0, "reasons": {}}),
                "started_at": began, "finished_at": now, "text_sha256": version["text_hash"],
                "detector_version": scan.detector_version}
-    summary["pii"], pii_inside = await pii_mask.store(masking, source_id=lease.source_id)
+    summary["pii"] = pii_summary
     if error is not None or item_reason:
         summary["error_code"] = item_reason
     if result is not None:
         summary["provenance"] = {**result.contract, "request_id": result.request_id,
                                  "usage": result.usage, "latency_ms": result.latency_ms}
-    return await _finish(lease, summary, inside=pii_inside)
+    return await _finish(lease, summary, pii_map=pii_map,
+                         attempted={"request_sha256": digest, "model": result.model if result else None,
+                                    "request_id": result.request_id if result else None,
+                                    "usage": result.usage if result else None})

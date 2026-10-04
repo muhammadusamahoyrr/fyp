@@ -51,6 +51,7 @@ from app.db.collections import (
     get_analysis_hypothesis_decisions_col,
     get_analysis_hypothesis_results_col,
     get_analysis_hypothesis_reviews_col,
+    get_analysis_processing_receipts_col,
     get_analysis_runs_col,
     get_analysis_sentences_col,
     get_analysis_sources_col,
@@ -211,6 +212,7 @@ async def purge_source(source_id: str) -> str:
     await get_analysis_hypothesis_results_col().delete_many({"source_id": source_id})
     await get_analysis_hypothesis_reviews_col().delete_many({"source_id": source_id})
     await get_analysis_hypothesis_decisions_col().delete_many({"source_id": source_id})
+    await get_analysis_processing_receipts_col().delete_many({"source_id": source_id})
 
     # 5. A bare tombstone: nothing derived from the document survives.
     await sources.update_one(
@@ -243,7 +245,7 @@ async def purge_due(*, limit: int = 20) -> dict:
 async def housekeeping_tick() -> dict | None:
     """One pass of expiry + purge + orphan sweep. Inert unless enabled and ready."""
     from app.core.config import settings
-    from app.services.analyzer import extraction_stage, outputs, readiness
+    from app.services.analyzer import extraction_stage, outputs, pii_mask, readiness
 
     if not settings.doc_analyzer or not readiness.is_ready():
         return None
@@ -251,6 +253,8 @@ async def housekeeping_tick() -> dict | None:
         "expired": await expire_due(),
         "purge": await purge_due(),
         "orphans": await blob_store.sweep_orphans(),
+        # A PII map lives only for its attempt; one left by a crash goes within 24 hours.
+        "stale_pii_maps": await pii_mask.sweep_stale_maps(),
         "work_files": extraction_stage.sweep_work_files(),
         "unpublished_pages": await outputs.sweep_unpublished_pages(),
         "unpublished_blocks": await outputs.sweep_unpublished_blocks(),

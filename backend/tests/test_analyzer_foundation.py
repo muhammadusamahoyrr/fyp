@@ -107,7 +107,8 @@ def test_names_are_unique_and_every_collection_is_covered():
         "analysis_context_versions", "analysis_deletion_outbox", "analysis_doc_graph",
         "analysis_findings", "analysis_hypothesis_decisions", "analysis_hypothesis_results",
         "analysis_hypothesis_reviews",
-        "analysis_playbook_approvals", "analysis_reviewer_qualifications", "analysis_runs",
+        "analysis_playbook_approvals", "analysis_processing_receipts", "analysis_reviewer_qualifications",
+        "analysis_runs",
         "analysis_sentences", "analysis_sources", "analysis_text_blocks", "analysis_text_pages",
         "analysis_text_versions")
 

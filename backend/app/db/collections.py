@@ -369,6 +369,14 @@ def get_analysis_hypothesis_reviews_col() -> AsyncIOMotorCollection:
     return get_database()["analysis_hypothesis_reviews"]
 
 
+def get_analysis_processing_receipts_col() -> AsyncIOMotorCollection:
+    """The processing receipt (services/analyzer/receipts.py): one entry per
+    AI-stage outcome -- what left the server, or why nothing did. Ids,
+    hashes, versions and codes only. APPEND-ONLY and hash-chained per run;
+    removed only by the source's purge."""
+    return get_database()["analysis_processing_receipts"]
+
+
 def get_analysis_hypothesis_decisions_col() -> AsyncIOMotorCollection:
     """A reviewer's decisions (a registered lawyer account -- qualification
     not verified) on drafting-question results in the INTERNAL review

@@ -308,6 +308,37 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="The purge removes every decision on a source.",
     ),
+    IndexSpec(
+        collection="analysis_blobs",
+        name="analysis_blobs_stale_pii_maps",
+        keys=(("purpose", ASCENDING), ("created_at", ASCENDING)),
+        kind=QUERY,
+        why="The stale-map sweep finds PII maps left by attempts that never finished (24 hours).",
+    ),
+    # ── analysis_processing_receipts (append-only, hash-chained) ─────────────
+    IndexSpec(
+        collection="analysis_processing_receipts",
+        name="uniq_analysis_processing_receipts_entry",
+        keys=(("run_id", ASCENDING), ("stage", ASCENDING), ("fence", ASCENDING), ("kind", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("Per AI-stage attempt: at most one ai_attempt (written BEFORE the request), one "
+             "ai_outcome (written with the published result) or one not_sent entry. A retried "
+             "or stale stage can never add a second one."),
+    ),
+    IndexSpec(
+        collection="analysis_processing_receipts",
+        name="uniq_analysis_processing_receipts_seq",
+        keys=(("run_id", ASCENDING), ("seq", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why="The hash chain has one entry per position; the reader walks it in order.",
+    ),
+    IndexSpec(
+        collection="analysis_processing_receipts",
+        name="analysis_processing_receipts_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every receipt entry of a source.",
+    ),
     # ── analysis_doc_graph (definitions and cross-references) ────────────────
     IndexSpec(
         collection="analysis_doc_graph",

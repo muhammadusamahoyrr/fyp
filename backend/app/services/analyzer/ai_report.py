@@ -479,14 +479,17 @@ def validate(data, text: str, sentences: list[dict], clause_ids: set[str],
 
 async def generate(text: str, sentences: list[dict], clause_ids: set[str], *,
                    graph_rows: list[dict] | None = None, transport=None,
-                   suspect: frozenset[str] = frozenset(), masking=None) -> dict:
+                   suspect: frozenset[str] = frozenset(), masking=None,
+                   messages: list[dict] | None = None) -> dict:
     """One pinned call (ai_client), then validate. Raises AIError on any failure.
     `suspect`: the run's frozen embedded-instruction scan -- withheld from the
     prompt and forbidden as evidence. `masking`: the PII masking whose bodies
-    are sent instead of the raw sentences (pii_mask.prepare)."""
-    bodies = masking.bodies if masking is not None else None
-    result = await ai_client.complete(build_messages(text, sentences, suspect, bodies), max_tokens=MAX_TOKENS,
-                                      transport=transport)
+    are sent instead of the raw sentences (pii_mask.prepare). `messages`: the
+    exact messages already built by the caller (so it can record their digest)."""
+    if messages is None:
+        bodies = masking.bodies if masking is not None else None
+        messages = build_messages(text, sentences, suspect, bodies)
+    result = await ai_client.complete(messages, max_tokens=MAX_TOKENS, transport=transport)
     report = validate(result.content, text, sentences, clause_ids, graph_rows, suspect=suspect,
                       masking=masking)
     report["provenance"] = {**result.contract, "request_id": result.request_id,
