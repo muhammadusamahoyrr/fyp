@@ -95,11 +95,28 @@ def test_lookalikes_that_block_alone_are_unnecessary_blocks():
         assert r["unnecessary_block"] and r["false_candidates"] == r["uncertain"]
 
 
-def test_aliases_with_different_tokens_break_party_consistency():
+def test_an_undefined_alias_blocks_auto_and_a_reviewer_link_keeps_one_token():
     d = doc('Made between Mr. [[NAME:p1|Kashif Raza]] (the "Landlord") and Mrs. [[NAME:p2|Hira Batool]] '
             '(the "Tenant").\nMr. [[NAME:p1|Raza]] keeps the keys.', parties=["p1", "p2"])
+    auto = ev.score_document(d, send_capture([]), mode="auto")
+    assert not auto["sent"] and auto["block_reasons"] == ["alias_unlinked"]
+    assert auto["party_consistent"] is None                    # nothing sent: not scored (pii-eval.1.1)
+    manual = ev.score_document(d, send_capture([]), mode="manual")
+    assert manual["sent"] and manual["party_consistent"] is True
+
+
+def test_a_defined_alias_shares_the_token_without_review():
+    d = doc('Made between [[NAME:p1|Kashif Raza]] (hereinafter called "[[NAME:p1|Raza]]") and '
+            '[[NAME:p2|Hira Batool]] (the "Tenant").\n[[NAME:p1|Raza]] keeps the keys.', parties=["p1", "p2"])
     r = ev.score_document(d, send_capture([]), mode="auto")
-    assert r["sent"] and r["party_consistent"] is False        # "Kashif Raza" and "Raza" got two tokens
+    assert r["sent"] and r["party_consistent"] is True and not any(s["leak"] for s in r["spans"])
+
+
+def test_urdu_script_is_a_policy_block_a_reviewer_cannot_lift():
+    d = doc("Signed by [[NAME:p1|کاشف رضا]] on 1 June 2026.")
+    for mode in ("auto", "manual"):
+        r = ev.score_document(d, send_capture([]), mode=mode)
+        assert not r["sent"] and "unsupported_script" in r["block_reasons"]
 
 
 def test_hygiene_catches_a_leaked_mark():
@@ -154,3 +171,32 @@ def test_a_locators_extra_spans_are_masked_by_the_harness():
     assert with_locator["spans"][0]["detected"] and not with_locator["spans"][0]["leak"]
     assert "Saima" not in sent[0]
     assert plain["spans"][0]["covered"] < with_locator["spans"][0]["covered"]
+
+
+def test_party_consistency_scores_person_name_references_and_keeps_the_old_metric():
+    d = doc('Made between Mr. [[NAME:p1|Kashif Raza]] (the "Landlord") and Mrs. [[NAME:p2|Hira Batool]] '
+            '(the "Tenant").\nThe premises are [[ADDRESS:a1|House 7, [[NAME:p1|Raza]] Street, Model Town]].',
+            parties=["p1", "p2"])
+    r = ev.score_document(d, send_capture([]), mode="auto")
+    assert r["sent"] and r["party_consistent"] is True            # "Raza Street" is a place reference
+    assert r["party_consistent_any_token"] is False                # the pii-eval.1 definition, kept for comparison
+    summary = ev.summarise([r])
+    assert summary["party_consistency"] == 1.0 and summary["party_consistency_any_token"] == 0.0
+    assert summary["address_character_coverage"] is not None and summary["sent_rate"] == 1.0
+
+
+def test_each_set_is_scored_under_its_own_rubric():
+    assert ev.rubric_path("pii-eval-1").name == "PII_DETECTION_RUBRIC.md"
+    assert ev.rubric_path("pii-eval-2").name == "PII_DETECTION_RUBRIC_2.md"
+
+
+def test_rubric_2_gates_the_manual_sent_rate_and_address_coverage_only_for_rubric_2_sets():
+    def summary(sent_rate, addr):
+        return {"leaks": 0, "character_coverage": 1.0, "detected_rate": 1.0, "miss_rate": 0.0,
+                "unnecessary_block_rate": 0.0, "false_candidate_rate": 0.0, "party_consistency": 1.0,
+                "deadline_preservation": 1.0, "request_hygiene": 1.0, "sent_rate": sent_rate,
+                "address_character_coverage": addr}
+    assert ev.gate(summary(0.04, 1.0), summary(0.71, 1.0), rubric=2)["status"] == "detection_passed"
+    assert ev.gate(summary(1.0, 1.0), summary(0.50, 1.0), rubric=2)["checks"]["manual_sent_rate"] is False
+    assert ev.gate(summary(1.0, 0.90), summary(1.0, 1.0), rubric=2)["checks"]["address_character_coverage"] is False
+    assert "manual_sent_rate" not in ev.gate(summary(1.0, 1.0), summary(0.1, 1.0))["checks"]   # rubric 1 unchanged

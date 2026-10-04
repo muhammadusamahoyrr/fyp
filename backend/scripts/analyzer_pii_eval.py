@@ -37,8 +37,8 @@ FAKE_PROVIDER = {"analyzer_ai": True, "analyzer_ai_provider": "groq", "analyzer_
                  "analyzer_ai_synthetic_only": True, "groq_api_key": "fake-key-not-real"}
 
 
-def _rubric_sha() -> str:
-    return hashlib.sha256(ev.RUBRIC_PATH.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+def _rubric_sha(name: str) -> str:
+    return hashlib.sha256(ev.rubric_path(name).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def capturing_send():
@@ -76,14 +76,14 @@ def main() -> int:
         if not cov["met"]:
             print(f"refused: coverage not met {cov}", file=sys.stderr)
             return 2
-        lines = ["# pii-eval-1 freeze manifest -- written BEFORE the first scored run.",
+        lines = [f"# {args.dataset} freeze manifest -- written BEFORE the first scored run.",
                  "# Scored once; the masking is not tuned against this set.",
                  f"frozen_at: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
                  f"dataset_sha256: {dataset.sha256}", f"documents: {len(dataset.documents)}",
-                 f"personal_spans: {cov['personal_spans']}", f"rubric_sha256: {_rubric_sha()}",
+                 f"personal_spans: {cov['personal_spans']}", f"rubric_sha256: {_rubric_sha(dataset.name)}",
                  f"eval_version: {ev.EVAL_VERSION}", f"masking_version: {pii_mask.MASKING_VERSION}",
                  f"policy_sha256_at_freeze: {pii_mask.POLICY_SHA256}",
-                 "author: independent fresh session, given only PII_DETECTION_RUBRIC.md", "files:"]
+                 f"author: independent fresh session, given only {ev.rubric_path(dataset.name).name}", "files:"]
         lines += [f"  {p.name}: {hashlib.sha256(p.read_bytes()).hexdigest()}"
                   for p in sorted((ev.ROOT / args.dataset).glob("*.yaml"))]
         frozen_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
@@ -91,7 +91,7 @@ def main() -> int:
         return 0
 
     manifest = yaml.safe_load(frozen_path.read_text(encoding="utf-8")) if frozen_path.exists() else None
-    if not manifest or manifest.get("dataset_sha256") != dataset.sha256 or manifest.get("rubric_sha256") != _rubric_sha():
+    if not manifest or manifest.get("dataset_sha256") != dataset.sha256 or manifest.get("rubric_sha256") != _rubric_sha(dataset.name):
         print("refused: the set must be frozen (same dataset and rubric hash) before scoring", file=sys.stderr)
         return 2
 

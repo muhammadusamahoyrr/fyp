@@ -1,6 +1,7 @@
-"""PII masking DETECTION evaluation (`pii-eval.1`, analyzer_eval/pii/PII_DETECTION_RUBRIC.md).
+"""PII masking DETECTION evaluation (`pii-eval.2`; rubric 2 = analyzer_eval/pii/PII_DETECTION_RUBRIC_2.md,
+rubric 1 = PII_DETECTION_RUBRIC.md, kept unchanged for pii-eval-1).
 
-Scores the masker (`pii-mask.1`) on synthetic documents whose personal
+Scores the masker (`pii-mask.2`) on synthetic documents whose personal
 details are marked inline (`[[NAME:p1|Kashif Raza]]`). Everything follows
 the rubric, which was frozen before the first scored run:
 
@@ -19,6 +20,25 @@ The request is captured by `send(messages) -> str`: the script passes one
 that goes through the real provider client with a capturing fake transport,
 so what is inspected is the actual HTTP request body. No live call, ever.
 
+Harness corrections in pii-eval.1.1 (2026-10-04, labelled; the pii-eval.1
+baseline record stays as recorded):
+  * party consistency is scored only on documents actually SENT -- the
+    rubric's "in what is sent"; pii-eval.1 also scored blocked documents;
+  * the L6 leak guard (`pii_mask.leak_check`) runs on the final request, as
+    the stages do: a hit BLOCKS the document before anything is sent;
+  * every blocked document carries its reasons; blocking is reported per
+    reason, apart from leaks, with the documents a block cost needlessly;
+  * a locator's spans are passed as DETECTIONS: pii-eval.1 passed them as
+    reviewer confirmations, so they also silenced every uncertainty they
+    overlapped (this affected the 2026-10-04 locator benchmark);
+  * pii-eval.2 (rubric 2, owner-decided 2026-10-04): party consistency is
+    scored on person-name references (a name inside an address under the
+    address token is not a split); the pii-eval.1 definition is reported
+    alongside as `party_consistency_any_token`; address character coverage
+    and the sent rate are reported as their own metrics;
+  * the manual reviewer links an undefined alias to its person
+    (`same_person`), never a policy block (Urdu script).
+
 A pass is `detection_passed` at most -- never real-document or model-quality
 approval.
 """
@@ -35,9 +55,16 @@ import yaml
 from app.services.analyzer import ai_report, injection, pii_mask
 from app.services.analyzer import segmentation as seg
 
-EVAL_VERSION = "pii-eval.1"
+EVAL_VERSION = "pii-eval.2"
 ROOT = Path(__file__).resolve().parents[3] / "analyzer_eval" / "pii"
-RUBRIC_PATH = ROOT / "PII_DETECTION_RUBRIC.md"
+RUBRIC_PATH = ROOT / "PII_DETECTION_RUBRIC.md"          # pii-eval.1, kept unchanged (its hash is frozen)
+RUBRIC_2_PATH = ROOT / "PII_DETECTION_RUBRIC_2.md"
+#: The rubric each set is scored under; pii-eval-2 and later use rubric 2.
+RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH}
+
+
+def rubric_path(dataset_name: str) -> Path:
+    return RUBRIC_BY_DATASET.get(dataset_name, RUBRIC_2_PATH)
 RECORD_PATH = Path(__file__).resolve().parent / "pii_detection_record.yaml"
 PERSONAL = ("NAME", "CNIC", "PHONE", "EMAIL", "ACCOUNT", "ADDRESS")
 KINDS = PERSONAL + ("NOT", "DEADLINE")
@@ -55,7 +82,8 @@ COVERAGE = {"documents": 40, "per_feature": 6, "personal_spans": 150}
 #: (the local entity-locator benchmark). Its failed baseline -- 194 leaks in
 #: auto mode -- stays kept, unchanged, in pii_detection_record.yaml (7424f38).
 #: The next gate is a fresh independent pii-eval-2.
-DATASET_ROLES = {"pii-eval-1": "development"}
+DATASET_ROLES = {"pii-eval-1": "development",
+                 "pii-eval-2": "gate_sealed"}     # authored 2026-10-04; never read for tuning; see AUTHORED.txt
 _OPEN = re.compile(r"\[\[(?P<kind>[A-Z]+):(?P<entity>[A-Za-z0-9_-]+)\|")
 _WORD = re.compile(r"[^\W_]{3,}|\d{3,}", re.UNICODE)
 
@@ -186,7 +214,20 @@ def _oracle(uncertain: list[dict], gold: list[Span]) -> list[dict]:
     """The manual mode's reviewer: decides each uncertain span by the labels."""
     out = []
     for u in uncertain:
+        if u["kind"] in pii_mask.UNRESOLVABLE:
+            continue                                   # a policy block: no reviewer decision lifts it
         hit = [g for g in gold if g.kind in PERSONAL and _overlaps(u["start"], u["end"], g.start, g.end)]
+        if u["reason"] in ("alias_unlinked", "name_variant", "ocr_unmasked"):
+            # The reviewer links the mention to the same person's fullest OTHER mention.
+            names = [g for g in hit if g.kind == "NAME"]
+            same = [g for g in gold if names and g.kind == "NAME" and g.entity == names[0].entity
+                    and not _overlaps(u["start"], u["end"], g.start, g.end)
+                    and g.end - g.start >= u["end"] - u["start"]]
+            if same:
+                target = max(same, key=lambda g: g.end - g.start)
+                out.append({"start": u["start"], "end": u["end"], "decision": pii_mask.SAME_PERSON,
+                            "target_start": target.start, "target_end": target.end})
+                continue
         decision = (pii_mask.NAME_DECISION if any(g.kind == "NAME" for g in hit)
                     else pii_mask.ADDRESS_DECISION if hit else pii_mask.NOT_PERSONAL)
         out.append({"start": u["start"], "end": u["end"], "decision": decision})
@@ -211,56 +252,92 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
     gold = [g for g in doc.spans if any(r["start"] <= g.start and g.end <= r["end"] for r in in_request)]
     personal = [g for g in gold if g.kind in PERSONAL]
 
-    first = pii_mask.prepare(doc.text, rows, send_ids, list(extra or []) or None)
+    # Locator spans are DETECTIONS, never reviewer confirmations: they mask, and
+    # resolve no uncertainty (pii-eval.1 passed them as confirmations).
+    first = pii_mask.prepare(doc.text, rows, send_ids, None, list(extra or []))
     uncertain = list(first.uncertain)
     masking = first
     if mode == "manual" and uncertain:
-        masking = pii_mask.prepare(doc.text, rows, send_ids, list(extra or []) + _oracle(uncertain, doc.spans))
-    blocked = bool(masking.uncertain)
-
+        # The reviewer sees the re-masked document again: a flag that appears
+        # only after their decisions is decided too (at most three rounds).
+        decisions: list[dict] = []
+        for _ in range(3):
+            fresh = [u for u in masking.uncertain
+                     if not any(c["start"] == u["start"] and c["end"] == u["end"] for c in decisions)]
+            if not fresh:
+                break
+            decisions += _oracle(fresh, doc.spans)
+            masking = pii_mask.prepare(doc.text, rows, send_ids, decisions, list(extra or []))
+    reasons = sorted({u["reason"] for u in masking.uncertain})
+    guard: list[str] = []
     request = None
-    if not blocked:
+    if not reasons:
         messages = ai_report.build_messages(doc.text, rows, suspect, masking.bodies)
-        request = send(messages)
+        guard = pii_mask.leak_check(messages)
+        if guard:
+            reasons = [f"leak_guard:{c}" for c in guard]
+        else:
+            request = send(messages)
+    blocked = bool(reasons)
 
     spans_out = []
     for g in personal:
         covered = _covered(masking.masked_spans, g.start, g.end)
         size = g.end - g.start
         flagged = any(_overlaps(u["start"], u["end"], g.start, g.end) for u in uncertain)
-        leaked = False
-        if request is not None and covered < size:
+        leaked = would_leak = False
+        if covered < size and not masking.uncertain:
             # The span's OWN unmasked characters, in its own sentence's line of the captured request.
             unmasked = "".join(ch if not any(a <= g.start + k < b for a, b, _, _ in masking.masked_spans) else " "
                                for k, ch in enumerate(doc.text[g.start:g.end]))
             sid = next(r["sentence_id"] for r in in_request if r["start"] <= g.start and g.end <= r["end"])
             body = _norm(masking.bodies[sid])
-            leaked = any(w in body for w in _WORD.findall(unmasked)) and body[:60] in _norm(request)
-        spans_out.append({"kind": g.kind, "entity": g.entity, "size": size, "covered": covered,
+            would_leak = any(w in body for w in _WORD.findall(unmasked))
+            leaked = would_leak and request is not None and body[:60] in _norm(request)
+        spans_out.append({"kind": g.kind, "entity": g.entity, "start": g.start, "end": g.end,
+                          "size": size, "covered": covered,
                           "detected": covered == size, "flagged": flagged,
-                          "miss": covered < size and not flagged, "leak": leaked})
+                          "miss": covered < size and not flagged, "leak": leaked, "would_leak": would_leak})
 
     false_candidates = [u for u in uncertain
                         if not any(g.kind in PERSONAL and _overlaps(u["start"], u["end"], g.start, g.end)
                                    for g in doc.spans)]
-    unnecessary_block = bool(first.uncertain) and len(false_candidates) == len(uncertain) and mode == "auto"
+    if guard:
+        # The guard stopped a request: needless only if no personal detail would have gone out.
+        unnecessary_block = mode == "auto" and not any(s["would_leak"] for s in spans_out)
+    else:
+        unnecessary_block = bool(first.uncertain) and len(false_candidates) == len(uncertain) and mode == "auto"
 
     # Meaning: one token per party entity, distinct across entities (fully masked mentions only).
+    # pii-eval.2 scores PERSON-NAME REFERENCES: a party's name inside an
+    # address ("Zaman Street") masked under that address's token is a place
+    # reference, not a second token for the person. Any other mention masked
+    # under a non-NAME token still counts (and breaks consistency). The
+    # pii-eval.1 definition (any covering token) is kept as `_any_token`.
+    addresses = [g for g in doc.spans if g.kind == "ADDRESS"]
     tokens: dict[str, set[str]] = {}
+    tokens_any: dict[str, set[str]] = {}
     for g in personal:
         if g.kind == "NAME" and g.entity in doc.parties:
-            for a, b, _, tok in masking.masked_spans:
+            for a, b, kind, tok in masking.masked_spans:
                 if a <= g.start and g.end <= b:
-                    tokens.setdefault(g.entity, set()).add(tok)
-    consistent = all(len(v) == 1 for v in tokens.values()) and \
-        len(set().union(*tokens.values()) if tokens else set()) == len(tokens)
+                    tokens_any.setdefault(g.entity, set()).add(tok)
+                    in_address = any(x.start <= g.start and g.end <= x.end for x in addresses)
+                    if kind == "NAME" or not in_address:
+                        tokens.setdefault(g.entity, set()).add(tok)
+
+    def _consistent(t: dict[str, set[str]]) -> bool:
+        return all(len(v) == 1 for v in t.values()) and len(set().union(*t.values()) if t else set()) == len(t)
+
+    consistent, consistent_any = _consistent(tokens), _consistent(tokens_any)
     deadlines = [g for g in gold if g.kind == "DEADLINE"]
     preserved = (all(_norm(doc.text[g.start:g.end]) in _norm(request) for g in deadlines)
                  if request is not None else None)
-    return {"id": doc.id, "mode": mode, "blocked": blocked, "sent": request is not None,
+    return {"id": doc.id, "mode": mode, "blocked": blocked, "sent": request is not None, "block_reasons": reasons,
             "uncertain": len(uncertain), "false_candidates": len(false_candidates),
             "unnecessary_block": unnecessary_block, "spans": spans_out,
-            "party_consistent": consistent if tokens else None,
+            "party_consistent": consistent if tokens and request is not None else None,
+            "party_consistent_any_token": consistent_any if tokens_any and request is not None else None,
             "deadlines_preserved": preserved, "deadline_count": len(deadlines),
             "hygiene": _hygiene(request, doc) if request is not None else None}
 
@@ -275,12 +352,21 @@ def summarise(results: list[dict]) -> dict:
     spans = [s for r in results for s in r["spans"]]
     size = sum(s["size"] for s in spans)
     party = [r["party_consistent"] for r in results if r["party_consistent"] is not None]
+    party_any = [r["party_consistent_any_token"] for r in results if r["party_consistent_any_token"] is not None]
     dl = [r for r in results if r["deadlines_preserved"] is not None and r["deadline_count"]]
     hyg = [r["hygiene"] for r in results if r["hygiene"] is not None]
     cands = sum(r["uncertain"] for r in results)
+    by_reason: dict[str, int] = {}
+    for r in results:
+        for reason in r["block_reasons"]:
+            by_reason[reason] = by_reason.get(reason, 0) + 1
     return {
         "documents": len(results), "sent": sum(r["sent"] for r in results),
         "blocked": sum(r["blocked"] for r in results),
+        "sent_rate": _ratio(sum(r["sent"] for r in results), len(results)),
+        "blocked_by_reason": dict(sorted(by_reason.items())),
+        "blocked_only_by_policy": sum(r["block_reasons"] == ["unsupported_script"] for r in results),
+        "party_scored_documents": len(party),
         "personal_spans": len(spans),
         "character_coverage": _ratio(sum(s["covered"] for s in spans), size),
         "detected_rate": _ratio(sum(s["detected"] for s in spans), len(spans)),
@@ -292,16 +378,29 @@ def summarise(results: list[dict]) -> dict:
         "uncertain_spans": cands,
         "false_candidate_rate": _ratio(sum(r["false_candidates"] for r in results), cands),
         "party_consistency": _ratio(sum(party), len(party)),
+        "party_consistency_any_token": _ratio(sum(party_any), len(party_any)),
+        "address_character_coverage": _ratio(sum(s["covered"] for s in spans if s["kind"] == "ADDRESS"),
+                                             sum(s["size"] for s in spans if s["kind"] == "ADDRESS")),
         "deadline_preservation": _ratio(sum(r["deadlines_preserved"] for r in dl), len(dl)),
         "request_hygiene": _ratio(sum(hyg), len(hyg)),
         "by_kind": {k: {"spans": sum(s["kind"] == k for s in spans),
                         "detected": sum(s["kind"] == k and s["detected"] for s in spans),
                         "missed": sum(s["kind"] == k and s["miss"] for s in spans),
-                        "leaked": sum(s["kind"] == k and s["leak"] for s in spans)} for k in PERSONAL},
+                        "leaked": sum(s["kind"] == k and s["leak"] for s in spans),
+                        "character_coverage": _ratio(sum(s["covered"] for s in spans if s["kind"] == k),
+                                                     sum(s["size"] for s in spans if s["kind"] == k))}
+                    for k in PERSONAL},
     }
 
 
-def gate(auto: dict, manual: dict) -> dict:
+#: Rubric 2 adds these (owner decision 2026-10-04): the first launch mode is
+#: lawyer-confirm, so the SENT RATE is gated in manual mode only (auto mode's
+#: is reported), and address coverage is gated in both modes.
+THRESHOLDS_2 = {**THRESHOLDS, "manual_sent_rate": 0.60, "address_character_coverage": 0.95}
+
+
+def gate(auto: dict, manual: dict, rubric: int = 1) -> dict:
+    thresholds = THRESHOLDS_2 if rubric == 2 else THRESHOLDS
     checks = {
         "auto_leaks": auto["leaks"] <= THRESHOLDS["auto_leaks"],
         "manual_leaks": manual["leaks"] <= THRESHOLDS["manual_leaks"],
@@ -317,19 +416,24 @@ def gate(auto: dict, manual: dict) -> dict:
         "request_hygiene": all((x["request_hygiene"] if x["request_hygiene"] is not None else 1)
                                >= THRESHOLDS["request_hygiene"] for x in (auto, manual)),
     }
-    return {"thresholds": THRESHOLDS, "checks": checks,
+    if rubric == 2:
+        checks["manual_sent_rate"] = (manual["sent_rate"] or 0) >= thresholds["manual_sent_rate"]
+        checks["address_character_coverage"] = all(
+            (x["address_character_coverage"] if x["address_character_coverage"] is not None else 1)
+            >= thresholds["address_character_coverage"] for x in (auto, manual))
+    return {"thresholds": thresholds, "checks": checks, "auto_sent_rate_reported": auto.get("sent_rate"),
             "status": "detection_passed" if all(checks.values()) else "not_passed"}
 
 
 def evaluate(dataset: Dataset, send, extra_by_doc: dict[str, list[dict]] | None = None) -> dict:
     out = {"eval_version": EVAL_VERSION, "dataset": dataset.name, "dataset_sha256": dataset.sha256,
            "masking_version": pii_mask.MASKING_VERSION, "policy_sha256": pii_mask.POLICY_SHA256,
-           "rubric_sha256": hashlib.sha256(RUBRIC_PATH.read_bytes().replace(b"\r\n", b"\n")).hexdigest(),
+           "rubric_sha256": hashlib.sha256(rubric_path(dataset.name).read_bytes().replace(b"\r\n", b"\n")).hexdigest(),
            "coverage": coverage(dataset)}
     extra_by_doc = extra_by_doc or {}
     per = {mode: [score_document(d, send, mode=mode, extra=extra_by_doc.get(d.id)) for d in dataset.documents]
            for mode in ("auto", "manual")}
     out["auto"], out["manual"] = summarise(per["auto"]), summarise(per["manual"])
-    out["gate"] = gate(out["auto"], out["manual"])
+    out["gate"] = gate(out["auto"], out["manual"], rubric=1 if rubric_path(dataset.name) == RUBRIC_PATH else 2)
     out["per_document"] = per
     return out

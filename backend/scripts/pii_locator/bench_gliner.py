@@ -30,6 +30,7 @@ from app.services.analyzer import ai_records, pii_mask  # noqa: E402
 from app.services.analyzer import pii_evaluation as ev  # noqa: E402
 
 ML = Path(sys.argv[1]).resolve()
+VARIANT = sys.argv[2] if len(sys.argv) > 2 else "as_loaded"
 ARABIC = re.compile(r"[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]")
 CUTS = (0.3, 0.5, 0.7)
 VARIANTS = {"person+address": {"person": "personal_name", "address": "address"},
@@ -74,11 +75,11 @@ def main() -> int:
     texts = [{"id": d.id, "text": d.text} for d in dataset.documents]
     assert not any("[[" in t["text"] for t in texts), "marks must be stripped before the locator sees anything"
     (inputs / "pii-eval-1.texts.json").write_text(json.dumps(texts, ensure_ascii=False), encoding="utf-8")
-    located_path = ML / "outputs" / "pii-eval-1.gliner.json"
+    located_path = ML / "outputs" / f"pii-eval-1.gliner.{VARIANT}.json"
     located_path.parent.mkdir(exist_ok=True)
     subprocess.run([str(ML / "venv-gliner" / "Scripts" / "python.exe"),
                     str(Path(__file__).resolve().parent / "gliner_locate.py"), str(ML),
-                    str(inputs / "pii-eval-1.texts.json"), str(located_path)], check=True)
+                    str(inputs / "pii-eval-1.texts.json"), str(located_path), VARIANT], check=True)
     located = json.loads(located_path.read_text(encoding="utf-8"))
     docs = located["documents"]
 
@@ -91,7 +92,7 @@ def main() -> int:
     ms = sorted(v["ms"] for v in docs.values())
     report = {"date": date.today().isoformat(), "dataset": "pii-eval-1", "role": "development",
               "dataset_sha256": dataset.sha256, "masking_policy_sha256": pii_mask.POLICY_SHA256,
-              "model": located["model"], "revision": located["revision"],
+              "model": located["model"], "revision": located["revision"], "tokenizer_variant": VARIANT,
               "cpu": {"load_seconds": located["load_seconds"], "total_seconds": located["total_seconds"],
                       "peak_rss_mb": located["peak_rss_mb"], "doc_ms_median": ms[len(ms) // 2],
                       "doc_ms_p95": ms[int(len(ms) * 0.95) - 1], "doc_ms_max": ms[-1],
@@ -106,10 +107,10 @@ def main() -> int:
                      for doc_id, v in docs.items()}
             result = ev.evaluate(dataset, send, extra_by_doc=extra)
             report["pipeline"][f"{variant}@{cut}"] = {m: {k: result[m][k] for k in (
-                "sent", "blocked", "personal_spans", "character_coverage", "detected_rate", "miss_rate", "leaks",
-                "unnecessary_blocks", "false_candidate_rate", "party_consistency", "deadline_preservation",
+                "sent", "blocked", "sent_rate", "blocked_by_reason", "personal_spans", "character_coverage", "detected_rate", "miss_rate", "leaks",
+                "unnecessary_blocks", "false_candidate_rate", "party_consistency", "party_scored_documents", "deadline_preservation",
                 "request_hygiene", "by_kind")} for m in ("auto", "manual")}
-    out = ev.ROOT / "results" / f"{date.today().isoformat()}_pii-eval-1_DEV_gliner_multi-v2.1.json"
+    out = ev.ROOT / "results" / f"{date.today().isoformat()}_pii-eval-1_DEV_gliner_multi-v2.1_{VARIANT}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({"cpu": report["cpu"], "locator_alone": report["locator_alone"]}, indent=1))

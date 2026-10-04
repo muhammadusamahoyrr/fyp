@@ -157,6 +157,10 @@ async def run_hypothesis_review(lease: Lease) -> str:
         messages = review.build_messages(items, questions, text, by_id, masking.bodies)
     except ai_client.AIError as exc:            # unprepared: nothing was sent
         return await _finish(lease, {**unavailable(exc.code), "withheld": withheld, "pii": pii_mask.refused(masking)})
+    guard = pii_mask.leak_check(messages)          # L6 on the final request (see ai_stage)
+    if guard:
+        return await _finish(lease, {**unavailable(pii_mask.LEAK_GUARD), "withheld": withheld,
+                                     "pii": {**pii_mask.refused(masking), "leak_guard": guard}})
     digest = receipts.request_digest(messages)
     pii_summary = pii_mask.summary(masking)
 

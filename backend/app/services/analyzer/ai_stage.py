@@ -186,6 +186,11 @@ async def run_ai_report(lease: Lease) -> str:
                                      "schema_version": ai_report.SCHEMA_VERSION,
                                      "prompt_version": ai_report.PROMPT_VERSION,
                                      "pii": pii_mask.refused(masking), "provenance": ai_config.contract()})
+    # L6: an independent pattern and layout check of the FINAL request.
+    guard = pii_mask.leak_check(messages)
+    if guard:
+        return await _finish(lease, {**unavailable(pii_mask.LEAK_GUARD),
+                                     "pii": {**pii_mask.refused(masking), "leak_guard": guard}})
     digest = receipts.request_digest(messages)
     pii_summary = pii_mask.summary(masking)
 
