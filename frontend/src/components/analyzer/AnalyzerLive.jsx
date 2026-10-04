@@ -22,6 +22,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "@/components/client/theme.js";
 import { Btn, Card, Label } from "@/components/client/documents/ui.jsx";
 import DraftingReview from "@/components/analyzer/DraftingReview.jsx";
+import MaskingNote from "@/components/analyzer/MaskingNote.jsx";
 import {
     cancelAnalysisRun, confirmAnalysisDocument, confirmAnalysisOcr, confirmAnalysisTerms,
     createAnalysis, deleteAnalysis, getAnalysisReport, getAnalysisRun, getAnalysisText,
@@ -189,6 +190,8 @@ export const AI_UNAVAILABLE_TEXT = {
     security_scan_not_recorded: "This analysis was made before the security check for embedded instructions "
         + "existed, so it was not sent to the AI. Start a new analysis to have it checked.",
     security_scan_mismatch: "The security check did not match this document's text, so it was not sent to the AI.",
+    pii_confirmation_required: "Some names or addresses could not be masked with confidence, so nothing was sent "
+        + "to the AI. A person must confirm them first; that confirmation step is not available yet.",
 };
 const SEVERITY_TEXT = { low: "Low", medium: "Medium", high: "High" };
 const TAB_EMPTY = {
@@ -239,6 +242,7 @@ function AiNotice({ t, ai }) {
             <div data-ai-provenance style={{ fontSize: 12, color: t.textMuted, marginTop: 4 }}>
                 {ai.provider} · {ai.model} · prompt {ai.prompt_version} · schema {ai.schema_version}
             </div>
+            <MaskingNote t={t} pii={ai.pii} evaluation={ai.evaluation} />
         </Card>
     );
 }

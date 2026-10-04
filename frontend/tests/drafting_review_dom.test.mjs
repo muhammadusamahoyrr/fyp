@@ -290,3 +290,26 @@ test("nothing on the client side can reach the review", () => {
         .map(p => p.replace(/\\/g, "/").split("/src/")[1]).sort();
     assert.deepEqual(users, ["components/analyzer/AnalyzerLive.jsx", "components/analyzer/DraftingReview.jsx", "lib/api.js"]);
 });
+
+test("a refused PII masking is explained, never shown as an AI result", () => {
+    assert.match(live.AI_UNAVAILABLE_TEXT.pii_confirmation_required, /could not be masked with confidence, so nothing was sent/);
+});
+
+test("masked input is disclosed without claiming all personal data was removed", async () => {
+    const masking = await import("../src/components/analyzer/MaskingNote.jsx");
+    const PII = { masking_version: "pii-mask.1", policy_sha256: "a".repeat(64), map_blob_id: "b1", counts: { NAME: 2 } };
+    const data = body([FOUND], { ai_review_summary: { status: "complete", pii: PII,
+        evaluation: { masked_input: "not_yet_evaluated", note: "x" } } });
+    const { container, unmount } = await screen(data);
+    const note = container.querySelector("[data-pii-masking]");
+    assert.equal(note.getAttribute("data-pii-masking"), "pii-mask.1");
+    assert.match(note.textContent, /may not have been detected/);
+    assert.equal(container.querySelector("[data-masked-not-evaluated]").textContent, masking.MASKED_NOT_EVALUATED);
+    for (const text of [masking.MASKING_TEXT, masking.MASKED_NOT_EVALUATED, container.textContent]) {
+        assert.doesNotMatch(text, /all personal|fully anonymi|completely remov|no personal data|personal data removed/i);
+    }
+    await unmount();
+    const plain = await screen(body([FOUND]));                    // no masking recorded: no note
+    assert.equal(plain.container.querySelector("[data-pii-masking]"), null);
+    await plain.unmount();
+});
