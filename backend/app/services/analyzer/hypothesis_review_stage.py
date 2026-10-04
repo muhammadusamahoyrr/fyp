@@ -35,7 +35,7 @@ from app.db.collections import (
     get_analysis_sources_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import ai_client, ai_config, ai_stage, blob_store, deletion, injection, worker
+from app.services.analyzer import ai_client, ai_config, ai_stage, blob_store, deletion, injection, pii_mask, worker
 from app.services.analyzer.hypotheses import catalog, review
 from app.services.analyzer.hypothesis_stage import published_results
 from app.services.analyzer.terms_stage import published_sentences
@@ -86,10 +86,10 @@ async def report(run: dict) -> list[dict]:
     return out
 
 
-async def _finish(lease: Lease, summary: dict) -> str:
+async def _finish(lease: Lease, summary: dict, inside=None) -> str:
     try:
         await worker.commit_stage(lease, stage=STAGE, next_status="done",
-                                  set_fields={"hypotheses.ai_review": summary})
+                                  set_fields={"hypotheses.ai_review": summary}, inside=inside)
     except (LostLease, deletion.StaleSource) as exc:
         if isinstance(exc, LostLease) and await worker.finish_without_result(lease, status="cancelled"):
             return "cancelled"
@@ -130,10 +130,18 @@ async def run_hypothesis_review(lease: Lease) -> str:
     questions = {q.id: q.question for q in catalog.load().universal
                  + tuple(q for qs in catalog.load().by_type.values() for q in qs)}
 
+    # PII masking at the AI boundary (ANALYZER_PII_MASKING.md): only the
+    # selected evidence sentences are sent, each masked; an unrecognised name
+    # or address in them stops the request for a person to confirm.
+    masking = pii_mask.prepare(text, sentences, {sid for i in items for sid in i["sentence_ids"]})
+    if masking.uncertain:
+        return await _finish(lease, {**unavailable("pii_confirmation_required"), "withheld": withheld,
+                                     "pii": pii_mask.refused(masking)})
+
     began = datetime.now(timezone.utc)
     async with worker.keep_alive(lease) as alive:
         try:
-            result = await ai_client.complete(review.build_messages(items, questions, text, by_id),
+            result = await ai_client.complete(review.build_messages(items, questions, text, by_id, masking.bodies),
                                               max_tokens=review.MAX_TOKENS, transport=TRANSPORT)
             error = None
         except ai_client.AIError as exc:
@@ -150,7 +158,8 @@ async def run_hypothesis_review(lease: Lease) -> str:
         logger.warning("analyzer_hypothesis_review_failed run_id=%s code=%s", lease.run_id, error)
     else:
         try:
-            validated = review.validate(result.content, items, text, sentences, scan.sentence_ids)
+            validated = review.validate(result.content, items, text, sentences, scan.sentence_ids,
+                                        masking=masking)
         except review.SchemaInvalid:
             item_reason = "schema_invalid"
 
@@ -185,9 +194,10 @@ async def run_hypothesis_review(lease: Lease) -> str:
                "dropped": (validated or {}).get("dropped", {"count": 0, "reasons": {}}),
                "started_at": began, "finished_at": now, "text_sha256": version["text_hash"],
                "detector_version": scan.detector_version}
+    summary["pii"], pii_inside = await pii_mask.store(masking, source_id=lease.source_id)
     if error is not None or item_reason:
         summary["error_code"] = item_reason
     if result is not None:
         summary["provenance"] = {**result.contract, "request_id": result.request_id,
                                  "usage": result.usage, "latency_ms": result.latency_ms}
-    return await _finish(lease, summary)
+    return await _finish(lease, summary, inside=pii_inside)

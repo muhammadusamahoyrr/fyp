@@ -42,7 +42,7 @@ from app.db.collections import (
     get_analysis_sources_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import blob_store, deletion, hypothesis_review_stage, states
+from app.services.analyzer import blob_store, deletion, hypothesis_review_stage, pii_mask, states
 from app.services.analyzer.confirmation import _owned_live_run
 from app.services.analyzer.errors import AnalyzerConflict, AnalyzerError, UploadRejected
 from app.services.analyzer.hypotheses import catalog, gate_status
@@ -203,7 +203,12 @@ async def get_review(*, owner_id: str, run_id: str) -> dict:
         "engine_labels": list(ENGINE_LABELS),
         "catalogue": summary.get("catalogue"), "scanner": summary.get("scanner"),
         "document_type": summary.get("document_type"), "skipped": summary.get("skipped", []),
-        "ai_review_summary": {k: (summary.get("ai_review") or {}).get(k) for k in ("status", "reason", "withheld")},
+        "ai_review_summary": {
+            **{k: (summary.get("ai_review") or {}).get(k) for k in ("status", "reason", "withheld", "pii")},
+            # The scanner reads the original text; only the AI signal saw masked
+            # input, and that has not been evaluated.
+            "evaluation": pii_mask.EVALUATION if (summary.get("ai_review") or {}).get("pii") else None,
+        },
         "text_intact": intact,
         "dismiss_reasons": list(DISMISS_REASONS),
         "questions": out,

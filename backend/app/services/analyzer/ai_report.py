@@ -70,6 +70,8 @@ SCHEMA_VERSION = "ai-report.1"
 PROMPT_VERSION = "ai-report-prompt.2"
 SCHEMA_INVALID = "ai_schema_invalid"
 DOCUMENT_TOO_LARGE = "ai_document_too_large"
+#: A sentence to be sent had no masked text: refuse rather than send it raw.
+PII_UNPREPARED = "ai_pii_unprepared"
 
 LABEL = "General drafting attention item"
 LAYER_NOTICE = ("AI-generated drafting attention items. Not legal advice and not a legal "
@@ -163,11 +165,15 @@ def _clean(text: str) -> str:
 WITHHELD = "(withheld: text addressed to an AI system)"
 
 
-def build_messages(text: str, sentences: list[dict], suspect: frozenset[str] = frozenset()) -> list[dict]:
+def build_messages(text: str, sentences: list[dict], suspect: frozenset[str] = frozenset(),
+                   bodies: dict[str, str] | None = None) -> list[dict]:
     """System rules + the document as [id|clause] lines. Blank form fields are
     left out (they state nothing); headings stay, marked. A `suspect`
     sentence (flagged by the embedded-instruction scan) is sent only as a
-    neutral placeholder: none of its text reaches the model."""
+    neutral placeholder: none of its text reaches the model.
+    `bodies`: the PII-masked text of each sentence (pii_mask.prepare). When
+    given, only these are sent; a sentence without one is never sent raw --
+    the whole request is refused instead."""
     lines = []
     for s in sentences:
         if s.get("empty_value"):
@@ -175,7 +181,12 @@ def build_messages(text: str, sentences: list[dict], suspect: frozenset[str] = f
         if s["sentence_id"] in suspect:
             lines.append(f"[{s['sentence_id']}|{s['clause_id']}] {WITHHELD}")
             continue
-        body = _clean(text[s["start"]:s["end"]])
+        if bodies is not None:
+            if s["sentence_id"] not in bodies:
+                raise ai_client.AIError(PII_UNPREPARED)
+            body = _clean(bodies[s["sentence_id"]])
+        else:
+            body = _clean(text[s["start"]:s["end"]])
         if s.get("kind") == seg.KIND_HEADING:
             body = f"(heading) {body}"
         lines.append(f"[{s['sentence_id']}|{s['clause_id']}] {body}")
@@ -362,7 +373,8 @@ class _Guard:
 
 
 def _drop_reason(kind: str, item: dict, units: dict, clause_ids: set, text: str,
-                 doc_shingles: set, groups: list[set[str]], guard: _Guard | None = None) -> str | None:
+                 doc_shingles: set, groups: list[set[str]], guard: _Guard | None = None,
+                 masking=None) -> str | None:
     ids = item["sentence_ids"]
     if any(i not in units for i in ids):
         return "unknown_sentence_id"
@@ -373,6 +385,13 @@ def _drop_reason(kind: str, item: dict, units: dict, clause_ids: set, text: str,
     if all(units[i].get("empty_value") or units[i].get("kind") == seg.KIND_HEADING for i in ids):
         return "no_substantive_evidence"
     fields = [item[name] or "" for name in TEXT_FIELDS[kind]]
+    if masking is not None:
+        # The model saw tokens. One it was never given is invented: drop it.
+        # Every comparison with the document then reads an UNMASKED VIEW;
+        # the stored item keeps the model's own text (tokens included).
+        if any(masking.invented(f) for f in fields):
+            return "invented_token"
+        fields = [masking.unmask(f) for f in fields]
     joined = " ".join(fields)
     if _URL.search(joined):
         return "url"
@@ -387,9 +406,10 @@ def _drop_reason(kind: str, item: dict, units: dict, clause_ids: set, text: str,
         return "verbatim_copy"
     evidence = " ".join(text[units[i]["start"]:units[i]["end"]] for i in ids)
     if kind == "obligations":
-        if not _party_named(item["party"], evidence, groups):
+        view = masking.unmask if masking is not None else (lambda s: s)
+        if not _party_named(view(item["party"]), evidence, groups):
             return "party_not_in_evidence"
-        if item["deadline_status"] == "stated" and not _says(evidence, item["deadline"]):
+        if item["deadline_status"] == "stated" and not _says(evidence, view(item["deadline"])):
             return "deadline_not_in_evidence"
     return None
 
@@ -415,13 +435,15 @@ def evidence(text: str, units: dict, ids: list[str]) -> list[dict]:
 
 def validate(data, text: str, sentences: list[dict], clause_ids: set[str],
              graph_rows: list[dict] | None = None, suspect: frozenset[str] = frozenset(),
-             prompt_version: str = PROMPT_VERSION) -> dict:
+             prompt_version: str = PROMPT_VERSION, masking=None) -> dict:
     """Whole-response schema (raises SchemaInvalid), then per-item checks
     (drops, counted), dedupe by fingerprint, and server-cut evidence.
     `graph_rows`: the published definitions graph, for party aliases.
     `suspect`: sentence ids the embedded-instruction scan flagged.
     `prompt_version`: only an offline BACKTEST of answers recorded under an
-    earlier prompt passes another version; production never does."""
+    earlier prompt passes another version; production never does.
+    `masking`: the run's PII masking (pii_mask.Masking) when the model saw
+    tokens -- invented tokens are dropped and checks read the unmasked view."""
     _check_schema(data, prompt_version)
     units = {s["sentence_id"]: s for s in sentences}
     groups = aliases(text, graph_rows)
@@ -434,7 +456,8 @@ def validate(data, text: str, sentences: list[dict], clause_ids: set[str],
     for kind in FIELDS:
         kept: dict[str, dict] = {}
         for item in data[kind]:
-            reason = _drop_reason(kind, item, units, clause_ids, text, doc_shingles, groups, guard)
+            reason = _drop_reason(kind, item, units, clause_ids, text, doc_shingles, groups, guard,
+                                  masking)
             if reason:
                 out["dropped"]["count"] += 1
                 out["dropped"]["by_reason"][reason] = out["dropped"]["by_reason"].get(reason, 0) + 1
@@ -456,13 +479,16 @@ def validate(data, text: str, sentences: list[dict], clause_ids: set[str],
 
 async def generate(text: str, sentences: list[dict], clause_ids: set[str], *,
                    graph_rows: list[dict] | None = None, transport=None,
-                   suspect: frozenset[str] = frozenset()) -> dict:
+                   suspect: frozenset[str] = frozenset(), masking=None) -> dict:
     """One pinned call (ai_client), then validate. Raises AIError on any failure.
     `suspect`: the run's frozen embedded-instruction scan -- withheld from the
-    prompt and forbidden as evidence."""
-    result = await ai_client.complete(build_messages(text, sentences, suspect), max_tokens=MAX_TOKENS,
+    prompt and forbidden as evidence. `masking`: the PII masking whose bodies
+    are sent instead of the raw sentences (pii_mask.prepare)."""
+    bodies = masking.bodies if masking is not None else None
+    result = await ai_client.complete(build_messages(text, sentences, suspect, bodies), max_tokens=MAX_TOKENS,
                                       transport=transport)
-    report = validate(result.content, text, sentences, clause_ids, graph_rows, suspect=suspect)
+    report = validate(result.content, text, sentences, clause_ids, graph_rows, suspect=suspect,
+                      masking=masking)
     report["provenance"] = {**result.contract, "request_id": result.request_id,
                             "usage": result.usage, "latency_ms": result.latency_ms}
     return report

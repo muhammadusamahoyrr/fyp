@@ -486,8 +486,22 @@ async def _ai_layer(run: dict) -> tuple[dict, dict]:
           # from the frozen record: not_yet_evaluated until a live benchmark
           # passed every gate; label review stays developer_only until a
           # qualified reviewer approved the dataset labels.
-          "evaluation": ai_records.evaluation_for(await _document_type(run))}
+          "evaluation": _masked_evaluation(ai_records.evaluation_for(await _document_type(run)),
+                                           summary.get("pii")),
+          # The run's PII masking: version, policy hash, counts -- never values.
+          "pii": summary.get("pii")}
     return ai, by_kind
+
+
+def _masked_evaluation(evaluation: dict, pii: dict | None) -> dict:
+    """A run whose provider input was MASKED is not what the frozen record
+    measured: the record stays as it is (historical), and this run says its
+    masked input has not been evaluated."""
+    from app.services.analyzer import pii_mask
+
+    if not pii:
+        return evaluation
+    return {**evaluation, **pii_mask.EVALUATION}
 
 
 async def _document_type(run: dict) -> str | None:

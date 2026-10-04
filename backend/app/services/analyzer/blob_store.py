@@ -55,7 +55,8 @@ ALG = "A256GCM"
 NONCE_BYTES = 12
 KEY_BYTES = 32
 TAG_BYTES = 16
-PURPOSES = ("original", "canonical_text")
+#: `pii_map`: the encrypted token -> value map of PII masking (pii_mask.py).
+PURPOSES = ("original", "canonical_text", "pii_map")
 
 _KEK_ID = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 _BLOB_ID = re.compile(r"^[0-9a-f]{32}$")

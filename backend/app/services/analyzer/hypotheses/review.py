@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 
-from app.services.analyzer import ai_report
+from app.services.analyzer import ai_client, ai_report
 
 PROMPT_VERSION = "ai-hypothesis-prompt.1"
 SCHEMA_VERSION = "ai-hypothesis.1"
@@ -80,7 +80,9 @@ def select(results: list[dict], suspect: frozenset[str]) -> tuple[list[dict], li
 
 
 def build_messages(items: list[dict], questions: dict[str, str], text: str,
-                   sentences_by_id: dict[str, dict]) -> list[dict]:
+                   sentences_by_id: dict[str, dict], bodies: dict[str, str] | None = None) -> list[dict]:
+    """`bodies`: the PII-masked text of each sentence (pii_mask.prepare). When
+    given, only these are sent; a sentence without one is never sent raw."""
     lines = ["BEGIN DOCUMENT SENTENCES"]
     for item in items:
         lines.append(f"## item {item['question_id']}")
@@ -88,7 +90,13 @@ def build_messages(items: list[dict], questions: dict[str, str], text: str,
         lines.append(f"scanner status: {item['status']}")
         for sid in item["sentence_ids"]:
             s = sentences_by_id[sid]
-            body = " ".join(text[s["start"]:s["end"]].split())[:MAX_SENTENCE_CHARS]
+            if bodies is not None:
+                if sid not in bodies:
+                    raise ai_client.AIError(ai_report.PII_UNPREPARED)
+                raw = bodies[sid]
+            else:
+                raw = text[s["start"]:s["end"]]
+            body = " ".join(raw.split())[:MAX_SENTENCE_CHARS]
             lines.append(f"[{sid}|{s['clause_id']}] {body}")
     lines.append("END DOCUMENT SENTENCES")
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": "\n".join(lines)}]
@@ -104,11 +112,12 @@ class SchemaInvalid(ValueError):
     pass
 
 
-def _drop_reason(item, sent: set[str], seen: set[str], evidence_shingles: set, guard) -> str | None:
+def _drop_reason(item, sent: set[str], seen: set[str], evidence_shingles: set, guard,
+                 masking=None) -> str | None:
     if not isinstance(item, dict) or set(item) != _ITEM_KEYS:
         return "unexpected_fields"
     qid, signal, explanation = item["question_id"], item["signal"], item["explanation"]
-    if qid not in sent:
+    if not isinstance(qid, str) or qid not in sent:
         return "unknown_question"
     if qid in seen:
         return "duplicate_question"
@@ -116,6 +125,12 @@ def _drop_reason(item, sent: set[str], seen: set[str], evidence_shingles: set, g
         return "unknown_signal"
     if not isinstance(explanation, str) or not explanation.strip() or len(explanation) > EXPLANATION_MAX:
         return "explanation_length"
+    if masking is not None:
+        # A token the run never issued is invented. The checks below read the
+        # unmasked view; the stored explanation keeps the model's tokens.
+        if masking.invented(explanation):
+            return "invented_token"
+        explanation = masking.unmask(explanation)
     if ai_report._URL.search(explanation):
         return "url"
     if ai_report._cites_law(explanation):
@@ -130,7 +145,7 @@ def _drop_reason(item, sent: set[str], seen: set[str], evidence_shingles: set, g
 
 
 def validate(content: dict, items: list[dict], text: str, sentences: list[dict],
-             suspect: frozenset[str]) -> dict:
+             suspect: frozenset[str], masking=None) -> dict:
     """{reviews: {question_id: {signal, explanation}}, dropped: {count, reasons}}.
     Raises SchemaInvalid when the answer as a whole is not this schema."""
     if not isinstance(content, dict) or set(content) != {"schema_version", "prompt_version", "reviews"}:
@@ -147,7 +162,7 @@ def validate(content: dict, items: list[dict], text: str, sentences: list[dict],
     reviews: dict[str, dict] = {}
     reasons: dict[str, int] = {}
     for item in content["reviews"]:
-        why = _drop_reason(item, sent, set(reviews), evidence_shingles, guard)
+        why = _drop_reason(item, sent, set(reviews), evidence_shingles, guard, masking)
         if why:
             reasons[why] = reasons.get(why, 0) + 1
             continue

@@ -40,7 +40,7 @@ from app.db.collections import (
     get_analysis_sources_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import ai_client, ai_config, ai_report, blob_store, deletion, injection, worker
+from app.services.analyzer import ai_client, ai_config, ai_report, blob_store, deletion, injection, pii_mask, worker
 from app.services.analyzer.terms_stage import published_sentences
 from app.services.analyzer.worker import Lease, LostLease
 
@@ -95,11 +95,12 @@ _PLURAL = {"risk": "risks", "obligation": "obligations", "summary_point": "summa
 _SINGULAR = {v: k for k, v in _PLURAL.items()}
 
 
-async def _finish(lease: Lease, summary: dict) -> str:
-    """Publish the run as done with this AI summary (items already written)."""
+async def _finish(lease: Lease, summary: dict, inside=None) -> str:
+    """Publish the run as done with this AI summary (items already written).
+    `inside`: extra writes that must commit with it (the PII map's header)."""
     try:
         await worker.commit_stage(lease, stage=STAGE, next_status="done",
-                                  set_fields={"ai_report": summary})
+                                  set_fields={"ai_report": summary}, inside=inside)
     except (LostLease, deletion.StaleSource) as exc:
         if isinstance(exc, LostLease) and await worker.finish_without_result(
                 lease, status="cancelled"):
@@ -138,11 +139,21 @@ async def run_ai_report(lease: Lease) -> str:
     clause_ids = {c["clause_id"] for c in await _published(get_analysis_clauses_col(), run)}
     graph_rows = await _published(get_analysis_doc_graph_col(), run)
 
+    # PII masking at the AI boundary (ANALYZER_PII_MASKING.md): every sentence
+    # that would be sent is masked; if a name or address could not be
+    # recognised with confidence, NOTHING is sent and a person must confirm.
+    send_ids = {s["sentence_id"] for s in sentences
+                if not s.get("empty_value") and s["sentence_id"] not in scan.sentence_ids}
+    masking = pii_mask.prepare(text, sentences, send_ids)
+    if masking.uncertain:
+        return await _finish(lease, {**unavailable("pii_confirmation_required"), "pii": pii_mask.refused(masking)})
+
     began = datetime.now(timezone.utc)
     async with worker.keep_alive(lease) as alive:
         try:
             report = await ai_report.generate(text, sentences, clause_ids, graph_rows=graph_rows,
-                                              transport=TRANSPORT, suspect=scan.sentence_ids)
+                                              transport=TRANSPORT, suspect=scan.sentence_ids,
+                                              masking=masking)
             error = None
         except ai_client.AIError as exc:
             report, error = None, exc.code
@@ -152,14 +163,17 @@ async def run_ai_report(lease: Lease) -> str:
         await worker.finish_without_result(lease, status="cancelled")
         return "cancelled"
 
+    # The map of what was sent is kept (encrypted) whether or not the call succeeded.
+    pii_summary, pii_inside = await pii_mask.store(masking, source_id=lease.source_id)
     base = {"schema_version": ai_report.SCHEMA_VERSION, "prompt_version": ai_report.PROMPT_VERSION,
             "started_at": began, "finished_at": datetime.now(timezone.utc),
             "text_sha256": hashlib.sha256(raw).hexdigest(),
-            "detector_version": scan.detector_version, "withheld_sentences": len(scan.flagged)}
+            "detector_version": scan.detector_version, "withheld_sentences": len(scan.flagged),
+            "pii": pii_summary}
     if error is not None:
         logger.warning("analyzer_ai_report_failed run_id=%s code=%s", lease.run_id, error)
         return await _finish(lease, {**base, "status": FAILED, "error_code": error,
-                                     "provenance": ai_config.contract()})
+                                     "provenance": ai_config.contract()}, inside=pii_inside)
 
     now = datetime.now(timezone.utc)
     key = {"run_id": lease.run_id, "stage": STAGE, "fence": lease.fence}
@@ -177,4 +191,4 @@ async def run_ai_report(lease: Lease) -> str:
         **base, "status": PARTIAL if report["dropped"]["count"] else COMPLETE,
         "counts": {p: len(report[p]) for p in ("summary_points", "risks", "obligations")},
         "dropped": report["dropped"], "merged": report["merged"],
-        "provenance": report["provenance"]})
+        "provenance": report["provenance"]}, inside=pii_inside)
