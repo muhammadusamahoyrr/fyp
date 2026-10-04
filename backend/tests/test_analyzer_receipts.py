@@ -32,7 +32,7 @@ from app.db.collections import (
 )
 from app.services.analyzer import ai_stage, blob_store, deletion, pii_mask, receipts, runner
 from app.services.analyzer.hypotheses import review
-from tests._analyzer_support import http  # noqa: F401 -- fixture
+from tests._analyzer_support import assert_no_fragments, http, without_ids  # noqa: F401 -- fixture
 from tests.test_analyzer_ai_config import GOOD
 from tests.test_analyzer_pii_mask import PII_PAGES, UNSURE_PAGES, landlord_obligation, masked, to_ai_report, FULL
 
@@ -107,6 +107,10 @@ async def receipt_of(client, rid):
     return r.json()
 
 
+#: What must never appear in a receipt: the fixture's names, numbers and text.
+RECEIPT_SECRETS = ("Kashif", "Hira", "35202", "0300", "Rs. 85,000", "eleven (11) months", "[NAME_1]")
+
+
 async def test_an_attempt_is_durable_before_the_request_and_the_outcome_follows(ready):
     client, _, monkeypatch = ready
     rid = await to_ai_report(client, PII_PAGES)
@@ -134,9 +138,7 @@ async def test_an_attempt_is_durable_before_the_request_and_the_outcome_follows(
     assert body["attempts"] == [{"stage": "ai_report", "fence": attempt["fence"], "attempt_seq": 0, "outcome_seq": 1,
                                  "status": "complete", "label": None,
                                  "request_sha256": attempt["sent"]["request_sha256"]}]
-    dumped = json.dumps(body)
-    for fragment in ("Kashif", "Hira", "35202", "0300", "Rs. 85,000", "eleven (11) months", "[NAME_1]"):
-        assert fragment not in dumped, fragment                   # ids, hashes, codes only
+    assert_no_fragments(body, RECEIPT_SECRETS)                    # ids, hashes, codes only
 
 
 async def test_a_crash_after_sending_reads_outcome_unknown_never_nothing_sent(ready):
@@ -342,3 +344,65 @@ async def test_a_crashed_attempts_map_is_swept_within_a_day(ready):
     assert await get_analysis_blobs_col().count_documents({"_id": fresh["_id"]}) == 1
     await pii_mask.remove_map_file(fresh)
     await get_analysis_blobs_col().delete_one({"_id": fresh["_id"]})
+
+
+async def test_a_hash_that_happens_to_contain_digits_is_not_a_leak(ready, monkeypatch):
+    """The intermittent failure, reproduced deterministically: an entry hash
+    containing "0300" made the privacy check fail with nothing leaked. The
+    check now ignores hashes and ids -- and still catches a real number."""
+    real = receipts._entry_hash
+    monkeypatch.setattr(receipts, "_entry_hash", lambda entry: "0300" + real(entry)[4:])
+    await test_an_attempt_is_durable_before_the_request_and_the_outcome_follows(ready)
+    assert "0300" in without_ids('{"phone": "0300-1234567", "h": "0300' + "a" * 60 + '"}')
+    assert "0300" not in without_ids('{"h": "0300' + "a" * 60 + '"}')
+
+
+async def test_an_unexpected_error_inside_the_provider_call_reads_outcome_unknown(ready):
+    """The request may have left: a crash during the call must never read
+    "nothing sent". The attempt is durable; no outcome is invented."""
+    client, _, monkeypatch = ready
+    rid = await to_ai_report(client, PII_PAGES)
+
+    async def explode(request):
+        raise RuntimeError("transport broke after the request was handed over")
+
+    import httpx
+    monkeypatch.setattr(ai_stage, "TRANSPORT", httpx.MockTransport(explode))
+    status = await runner.process_one("w1")
+    assert status != "done"                                       # the stage did not publish an outcome
+    body = await receipt_of(client, rid)
+    assert [e["kind"] for e in body["entries"]] == ["ai_attempt"]
+    assert body["attempts"][0]["status"] in ("in_progress", receipts.UNKNOWN)
+    assert body["attempts"][0]["status"] != "not_sent" and body["chain"]["intact"] is True
+
+
+async def test_a_timestamp_that_happens_to_contain_digits_is_not_a_leak(ready, monkeypatch):
+    """The second false-failure mechanism, reproduced deterministically: stored
+    timestamps are cut to milliseconds, so ".x03000" contains "0300". With the
+    receipt clock pinned to such a time the privacy check must still pass."""
+    real = receipts.datetime
+
+    class Clock(real):
+        @classmethod
+        def now(cls, tz=None):
+            return real.now(tz).replace(microsecond=503000)
+
+    monkeypatch.setattr(receipts, "datetime", Clock)
+    await test_an_attempt_is_durable_before_the_request_and_the_outcome_follows(ready)
+    assert "0300" not in without_ids('{"at": "2026-10-04T18:50:36.503000+00:00"}')
+
+
+async def test_a_real_number_or_name_in_a_receipt_still_fails_the_privacy_check(ready):
+    """The hex/timestamp-safe check must still catch a REAL leak: a phone
+    number or CNIC written into a receipt fails it, wherever it sits."""
+    client, _, monkeypatch = ready
+    rid = await to_ai_report(client, PII_PAGES)
+    monkeypatch.setattr(ai_stage, "TRANSPORT", provider([], landlord_obligation))
+    assert await runner.process_one("w1") == "done"
+    body = await receipt_of(client, rid)
+    assert_no_fragments(body, RECEIPT_SECRETS)                    # the real receipt is clean
+    for leak in ("0300-1234567", "03001234567", "35202-1234567-1", "Kashif Raza"):
+        tainted = json.loads(json.dumps(body))
+        tainted["entries"][0]["reason"] = f"contact {leak}"
+        with pytest.raises(AssertionError):
+            assert_no_fragments(tainted, RECEIPT_SECRETS)

@@ -158,3 +158,33 @@ def _fake_extraction(monkeypatch, *, before_return=None, ocr=None, pages=None):
         return result_of(pages or [(1, X.PAGE_TEXT_FOUND, "Clause 1.")], ocr=ocr)
 
     monkeypatch.setattr(extraction_runner, "extract_isolated", fake)
+
+
+# Receipts and records carry hashes, ids and timestamps. A digit fragment such
+# as "0300" occurs in them by chance: in random hex about once in 16**4
+# positions, and in a millisecond timestamp whenever the fraction reads
+# ".x03000" (about 1% per timestamp). A privacy check that searches a JSON
+# dump for fragments must ignore those tokens, or it fails at random with
+# nothing leaked -- both mechanisms are reproduced deterministically in
+# test_analyzer_receipts.py.
+_NOT_TEXT = __import__("re").compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"          # uuid
+    r"|\b[0-9a-f]{16,}\b"                                                       # hash / hex id
+    r"|\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")  # timestamp
+
+
+def without_ids(dumped: str) -> str:
+    """A JSON dump with uuids, hashes and timestamps removed -- the TEXT a
+    fragment check should search. Real leaked numbers are not shaped like
+    these, and are still found."""
+    return _NOT_TEXT.sub(" ", dumped)
+
+
+def assert_no_fragments(record, fragments) -> None:
+    """The privacy check for receipts and records: none of `fragments` (names,
+    numbers, document text) appears in the JSON of `record` -- outside the
+    hashes, ids and timestamps that `without_ids` removes."""
+    import json
+    text = without_ids(json.dumps(record, default=str))
+    for fragment in fragments:
+        assert fragment not in text, fragment
