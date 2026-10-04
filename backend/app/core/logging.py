@@ -81,8 +81,12 @@ def setup_logging() -> None:
         # Route uvicorn through the same handler so access/error lines are
         # structured and carry the request id too.
         "loggers": {
-            name: {"level": "INFO", "handlers": ["default"], "propagate": False}
-            for name in ("uvicorn", "uvicorn.error", "uvicorn.access")
+            **{name: {"level": "INFO", "handlers": ["default"], "propagate": False}
+               for name in ("uvicorn", "uvicorn.error", "uvicorn.access")},
+            # The MongoDB driver's DEBUG command log prints whole documents --
+            # document text, names, CNICs. Never below WARNING, whatever
+            # LOG_LEVEL says (ANALYZER_PII_MASKING.md: no raw values in logs).
+            **{name: {"level": "WARNING"} for name in ("pymongo", "motor")},
         },
     })
 
