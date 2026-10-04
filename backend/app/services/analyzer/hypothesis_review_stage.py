@@ -185,7 +185,8 @@ async def run_hypothesis_review(lease: Lease) -> str:
     async with worker.keep_alive(lease) as alive:
         try:
             result = await ai_client.complete(messages, max_tokens=review.MAX_TOKENS, transport=TRANSPORT,
-                                              expected_sha256=digest)
+                                              expected_sha256=digest,
+                                              pre_send=pii_confirmation.pre_send_check(run, version, digest))
             error = None
         except ai_client.AIError as exc:
             result, error = None, exc.code

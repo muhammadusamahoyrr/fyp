@@ -27,11 +27,23 @@ from pathlib import Path
 
 from app.services.analyzer import pii_layers
 
-MASKING_VERSION = "pii-mask.2"
-#: SHA-256 of this module's source: the masking POLICY a run used. Any change
-#: to what is detected, kept or stopped changes it, even under the same version.
-#: Line endings are normalised so every checkout hashes the same.
-POLICY_SHA256 = hashlib.sha256(Path(__file__).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+MASKING_VERSION = "pii-mask.4"
+
+
+def _policy_sha256() -> str:
+    """SHA-256 over EVERY source file that decides what is masked: this module
+    and its detection layers (pii_layers.py). A change to either changes the
+    hash, so every review approval made under the old policy becomes stale.
+    (Before pii-mask.4 only this file was hashed.) Line endings normalised."""
+    blob = b""
+    for source in (Path(__file__), Path(pii_layers.__file__)):
+        blob += source.read_bytes().replace(b"\r\n", b"\n") + b"\n--\n"
+    return hashlib.sha256(blob).hexdigest()
+
+
+#: The masking POLICY a run used. Any change to what is detected, kept or
+#: stopped changes it, even under the same version.
+POLICY_SHA256 = _policy_sha256()
 #: Masking changes what the provider receives. No benchmark has measured the
 #: model on masked input, and detection completeness is not measured either.
 EVALUATION = {"masked_input": "not_yet_evaluated",
@@ -158,7 +170,32 @@ def _names_someone(phrase: str) -> bool:
     return any(w and w not in _GENERIC for w in words)
 
 
-def _spans(text: str, extra: list[tuple[int, int, str]] = ()) -> list[tuple[int, int, str]]:
+#: A marked value is repeated automatically only when its canonical form has at
+#: least this many characters; a shorter repeat is left to the reviewer.
+MIN_REPEAT = 5
+
+
+def _repeats(text: str, x: int, y: int, kind: str) -> list[tuple[int, int]]:
+    """Other occurrences of the SAME typed value as text[x:y] -- verified by the
+    kind's canonical form (digits for numbers, OCR confusables read), never a
+    bare substring: a number must be a whole number-like run, a word value a
+    whole word sequence."""
+    value = text[x:y].strip()
+    canon = _norm(kind, value)
+    out = set()
+    for m in re.finditer(rf"(?<![\w]){re.escape(value)}(?![\w])", text):
+        out.add((m.start(), m.end()))
+    if kind in ("CNIC", "PHONE", "ACCOUNT"):
+        for m in pii_layers._NUMBERISH.finditer(text):
+            raw = m.group(0)
+            if "\n" not in raw and _norm(kind, raw.translate(pii_layers._CONFUSABLE)) == canon:
+                out.add((m.start(), m.end()))
+    out.discard((x, y))
+    return sorted(out)
+
+
+def _spans(text: str, extra: list[tuple[int, int, str]] = (), keep: frozenset = frozenset(),
+           repeat_flags: list | None = None) -> list[tuple[int, int, str]]:
     """(start, end, kind) for every confident value in the whole text, plus
     `extra`: spans a reviewer confirmed as a personal name or an address. A
     confirmed name is masked wherever else it appears, like any other name."""
@@ -186,13 +223,18 @@ def _spans(text: str, extra: list[tuple[int, int, str]] = ()) -> list[tuple[int,
     for name in names:             # every other exact occurrence of a confident name
         for m in re.finditer(rf"(?<![\w]){re.escape(name)}(?![\w])", text):
             found.append((m.start(), m.end(), "NAME"))
-    # A marked address or number is masked wherever else it appears too: a
-    # detail the reviewer marked once is never sent from another sentence.
+    # A marked or located address or number is masked wherever the SAME typed
+    # value appears again (canonical identity, verified offsets). A short value
+    # is not repeated blindly: its other occurrences are left to the reviewer.
     for x, y, kind in extra:
-        value = text[x:y].strip()
-        if kind != "NAME" and value:
-            for m in re.finditer(rf"(?<![\w]){re.escape(value)}(?![\w])", text):
-                found.append((m.start(), m.end(), kind))
+        if kind == "NAME" or not text[x:y].strip():
+            continue
+        long_enough = len(_norm(kind, text[x:y].strip())) >= MIN_REPEAT
+        for a, b in _repeats(text, x, y, kind):
+            if long_enough:
+                found.append((a, b, kind))
+            elif repeat_flags is not None:
+                repeat_flags.append((a, b, kind))
     for m in _PREMISES.finditer(text):
         found.append((m.start(), m.end(), "ADDRESS"))
     for m in _RESIDENCE.finditer(text):
@@ -220,10 +262,10 @@ def _spans(text: str, extra: list[tuple[int, int, str]] = ()) -> list[tuple[int,
         if cut and cut.start() > 0:
             b = a + cut.start()
         cleaned += pii_layers.clean_locator_name(text, a, b)
-    return _choose(text, cleaned)
+    return _choose(text, cleaned, keep)
 
 
-def _choose(text: str, found: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
+def _choose(text: str, found: list[tuple[int, int, str]], keep: frozenset = frozenset()) -> list[tuple[int, int, str]]:
     """Non-overlapping spans, earliest and longest first -- except that a FULL
     name (two or more name words) is placed first: a full name inside an
     address ("House of Kashif Raza, ...") keeps its own name token, and the
@@ -243,11 +285,16 @@ def _choose(text: str, found: list[tuple[int, int, str]]) -> list[tuple[int, int
         return start, end
 
     names: list[tuple[int, int, str]] = []
-    full = [f for f in found if f[2] == "NAME" and len(pii_layers.name_parts(text[f[0]:f[1]])) >= 2]
-    for start, end, kind in sorted(full, key=lambda x: (x[0], -(x[1] - x[0]))):
-        start, end = whole_words(*trim(start, end))
-        if end > start and not (names and start < names[-1][1]):
+    # Placed first: a reviewer's explicit decision (exactly as marked, whatever
+    # its length or kind), then full names; derived spans are split around them.
+    full = [f for f in found if (f[0], f[1]) in keep
+            or (f[2] == "NAME" and len(pii_layers.name_parts(text[f[0]:f[1]])) >= 2)]
+    for start, end, kind in sorted(full, key=lambda x: ((x[0], x[1]) not in keep, x[0], -(x[1] - x[0]))):
+        if (start, end) not in keep:
+            start, end = whole_words(*trim(start, end))
+        if end > start and not any(start < b and a < end for a, b, _ in names):
             names.append((start, end, kind))
+    names.sort()
     pieces: list[tuple[int, int, str]] = []
     for start, end, kind in (f for f in found if f not in full):
         at = start
@@ -272,7 +319,8 @@ def _choose(text: str, found: list[tuple[int, int, str]]) -> list[tuple[int, int
         end = end if touches_right and kind != "NAME" else trimmed[1]
         if kind == "NAME":
             start, end = whole_words(start, end)
-        if end - start < 3 or any(start < b and a < end for a, b, _ in taken):
+        # A reviewer's explicit mark is never dropped for being short.
+        if (end - start < 3 and (start, end) not in keep) or any(start < b and a < end for a, b, _ in taken):
             continue
         chosen.append((start, end, kind))
         taken.append((start, end, kind))
@@ -322,10 +370,15 @@ def _candidates(sentence_id: str, offset: int, held: str) -> list[dict]:
 #: `target_end`. Masker-level only: the confirmation API (Slice B, on hold)
 #: does not accept it until it validates the target.
 SAME_PERSON = "same_person"
+#: A reviewer's decision that this mention is a person of its OWN -- even if
+#: another mention is spelled the same (ANALYZER_PII_IDENTITY.md).
+DIFFERENT_PERSON = "different_person"
 #: A missed number or address a reviewer marks: the decision names its kind.
 KIND_DECISIONS = {"cnic": "CNIC", "phone": "PHONE", "email": "EMAIL", "account": "ACCOUNT"}
-#: Uncertainty kinds a reviewer cannot resolve: a policy block.
-UNRESOLVABLE = {"SCRIPT"}
+#: Uncertainty kinds a reviewer cannot resolve with a decision on that span:
+#: a policy block, or a conflict in the reviewer's own decisions (a mark inside
+#: a deadline, a link to something that is not exactly a masked name).
+UNRESOLVABLE = {"SCRIPT", "CONFLICT"}
 
 
 def _alias_spans(text: str, spans: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
@@ -336,8 +389,13 @@ def _alias_spans(text: str, spans: list[tuple[int, int, str]]) -> list[tuple[int
     out = []
     for w in parts:
         for m in re.finditer(rf"(?<![\w]){re.escape(w)}(?![\w])", text):
-            if not any(a <= m.start() and m.end() <= b for a, b, _ in spans):
-                out.append((m.start(), m.end(), "NAME"))
+            if any(a <= m.start() and m.end() <= b for a, b, _ in spans):
+                continue
+            # Not inside a firm's name ("Mehmood Traders (Pvt) Ltd"): a business is not a person.
+            phrase = re.match(r"[A-Z][\w'’.&-]*(?:[ \t]+(?:&[ \t]+)?[A-Z(][\w'’.&()-]*){0,5}", text[m.start():])
+            if phrase and _is_firm(phrase.group(0)):
+                continue
+            out.append((m.start(), m.end(), "NAME"))
     return out
 
 
@@ -367,8 +425,10 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
     confirmed = confirmed or []
     detected = detected or []
 
-    def token_for(kind: str, value: str) -> str:
-        key = (kind, _norm(kind, value))
+    def token_for(kind: str, value: str, identity: tuple | None = None) -> str:
+        # A person's token follows their REVIEWED IDENTITY (`identity`), not
+        # the spelling; other kinds keep one token per typed value.
+        key = (kind,) + (identity if identity is not None else (_norm(kind, value),))
         if key not in by_value:
             counters[kind] += 1
             tok = f"[{kind}_{counters[kind]}]"
@@ -377,7 +437,7 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
         return by_value[key]
 
     def as_span(c: dict) -> tuple[int, int, str] | None:
-        if c["decision"] in (NAME_DECISION, SAME_PERSON):
+        if c["decision"] in (NAME_DECISION, SAME_PERSON, DIFFERENT_PERSON):
             return (c["start"], c["end"], "NAME")
         if c["decision"] == ADDRESS_DECISION:
             return (c["start"], c["end"], "ADDRESS")
@@ -403,8 +463,40 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
     detected = [x for c in detected for x in located(c)]
     extra = [sp for sp in map(as_span, confirmed + detected) if sp]
     resolved = [(c["start"], c["end"]) for c in confirmed]
-    spans = _spans(text, extra)
-    spans = _choose(text, spans + _alias_spans(text, spans))
+    explicit = frozenset((c["start"], c["end"]) for c in confirmed if c["decision"] != NOT_PERSONAL)
+    repeat_flags: list[tuple[int, int, str]] = []
+    spans = _spans(text, extra, explicit, repeat_flags)
+    spans = _choose(text, spans + _alias_spans(text, spans), explicit)
+
+    # Protected expressions (deadlines, periods, dates, amounts) are never
+    # changed by a mask. A mask that would change one is NOT applied: the span
+    # becomes uncertain, and only a reviewer's "not personal" lets it through
+    # unchanged. A reviewer's own mark inside one is a conflict: fail closed.
+    protected = pii_layers.protected_spans(text)
+    held_back: list[tuple[int, int, str, str]] = []
+    for c in confirmed:
+        if (c["start"], c["end"]) in explicit and pii_layers.overlaps_protected(c["start"], c["end"], protected):
+            held_back.append((c["start"], c["end"], "CONFLICT", "protected_conflict"))
+    kept_spans = []
+    for a, b, kind in spans:
+        # An address never runs into a later date or period: its boundary is
+        # moved to before it (a verified offset, not a guess about meaning).
+        cut = min((x for x, _ in protected if a < x < b), default=None)
+        if kind == "ADDRESS" and cut is not None:
+            b = len(text[:cut].rstrip(" ,.;:\n\t"))
+            if b <= a:
+                continue
+        derived_temporal = (a, b) not in explicit and pii_layers.is_temporal_word(text[a:b])
+        if pii_layers.overlaps_protected(a, b, protected) or derived_temporal:
+            if not any(a < y and x < b for x, y, _, _ in held_back):
+                held_back.append((a, b, kind, "protected_overlap"))
+            continue
+        kept_spans.append((a, b, kind))
+    spans = kept_spans
+    held_back += [(a, b, kind, "protected_overlap" if pii_layers.overlaps_protected(a, b, protected)
+                   else "repeat_unconfirmed")
+                  for a, b, kind in repeat_flags
+                  if not any(a < y and x < b for x, y, _ in spans) and (a, b) not in explicit]
 
     # Aliases and variants of a masked name. Exact short forms may link by the
     # narrow rule (pii_layers.auto_link); OCR or spelling variants never link
@@ -412,15 +504,39 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
     names = [(a, b) for a, b, k in spans if k == "NAME"]
     full_names = [(a, b) for a, b in names if len(pii_layers.name_parts(text[a:b])) >= 2]
     defined = pii_layers.explicit_aliases(text, full_names)
-    def container(start: int, end: int) -> tuple[int, int]:
-        # A link targets the MASKED NAME holding the target offsets, so the
-        # alias takes that name's token even when the target is only part of
-        # it ("Ali Raza" inside the masked "Syed Ali Raza").
-        inside = [(x, y) for x, y in names if x <= start and end <= y]
-        return min(inside, key=lambda n: n[1] - n[0]) if inside else (start, end)
-
-    link_target = {(c["start"], c["end"]): container(c["target_start"], c["target_end"])
-                   for c in confirmed if c["decision"] == SAME_PERSON and "target_start" in c}
+    # A reviewer link must name EXACTLY a masked name as its target (the
+    # screen offers only those). Anything else -- part of a name, a non-name,
+    # itself, a cycle of links -- is a conflict: the request is blocked, never
+    # resolved by guessing which person was meant.
+    name_spans = set(names)
+    link_target: dict[tuple[int, int], tuple[int, int]] = {}
+    invalid_links: list[tuple[int, int]] = []
+    # One mention, two contradicting decisions (e.g. "different person" and
+    # "same person as X"): a conflict, never resolved by order.
+    decided: dict[tuple[int, int], set[str]] = {}
+    for c in confirmed:
+        decided.setdefault((c["start"], c["end"]), set()).add(c["decision"])
+    invalid_links += [span for span, kinds in decided.items() if len(kinds) > 1]
+    separate = {(c["start"], c["end"]) for c in confirmed
+                if c["decision"] == DIFFERENT_PERSON and (c["start"], c["end"]) in name_spans}
+    for c in confirmed:
+        if c["decision"] != SAME_PERSON or "target_start" not in c:
+            continue
+        source, target = (c["start"], c["end"]), (c["target_start"], c["target_end"])
+        if target in name_spans and target != source and source in name_spans:
+            link_target[source] = target
+        else:
+            invalid_links.append(source)
+    for source in list(link_target):
+        seen, at = {source}, link_target[source]
+        while at in link_target:
+            if at in seen:
+                invalid_links.append(source)
+                break
+            seen.add(at)
+            at = link_target[at]
+    for source in invalid_links:
+        link_target.pop(source, None)
     roles = pii_layers.party_roles(text, full_names)
     canonical: dict[tuple[int, int], str] = {}
     aliases: list[tuple[int, int, str]] = []
@@ -448,11 +564,28 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
             else:
                 canonical[(a, b)] = full
                 masking.aliases_auto_linked += 1
-    # Reviewer links take the token of the name they point at -- through a
-    # chain of links too (an alias linked to an alias of the person).
+    # IDENTITY of every masked name mention (ANALYZER_PII_IDENTITY.md):
+    #   * default -- a PROPOSAL from the normalised spelling (or the defined
+    #     full name an alias stands for); approving the exact request confirms it;
+    #   * "different person" -- a person of its own, whatever its spelling;
+    #   * "same person as" -- the identity of its exact target, chains resolved.
+    identity: dict[tuple[int, int], tuple] = {}
+    for a, b in names:
+        if (a, b) in separate:
+            identity[(a, b)] = ("mention", a, b)
+        else:
+            identity[(a, b)] = ("spelling", pii_layers.name_key(canonical.get((a, b), text[a:b])))
     for _ in range(len(link_target) + 1):
-        for source, target in link_target.items():
+        for source, target in sorted(link_target.items()):
+            identity[source] = identity.get(target, ("spelling", pii_layers.name_key(text[target[0]:target[1]])))
             canonical[source] = canonical.get(target, text[target[0]:target[1]])
+    # The same spelling designated as two different parties: not one person by
+    # default -- every such mention waits for a reviewer's identity decision.
+    conflicts = pii_layers.role_conflicts(text, full_names)
+    linked_to = set(link_target.values())                  # the target of an explicit link is decided too
+    ambiguous = [(a, b) for a, b in names
+                 if identity[(a, b)][0] == "spelling" and identity[(a, b)][1] in conflicts
+                 and (a, b) not in decided and (a, b) not in linked_to]
     known = {w.lower() for a, b in names for w in pii_layers.name_parts(text[a:b])} | pii_layers.COMMON_NAME_WORDS
 
     for s in sentences:
@@ -470,7 +603,8 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
                 continue
             pieces.append(text[at:a])
             held.append(text[at:a])
-            token = token_for(kind, canonical.get(whole, text[whole[0]:whole[1]]))
+            token = token_for(kind, canonical.get(whole, text[whole[0]:whole[1]]),
+                              identity.get(whole) if kind == "NAME" else None)
             masking.masked_spans.append((a, b, kind, token))
             pieces.append(token)
             held.append(_HELD * (b - a))
@@ -486,8 +620,16 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
                   for x, y in pii_layers.ocr_suspects(body_held, start)]
         found += [{"sentence_id": sid, "kind": "NAME", "reason": "ocr_unmasked", "start": x, "end": y}
                   for x, y in pii_layers.misspelt_names(body_held, start, known)]
-        found += [{"sentence_id": sid, "kind": "NAME", "reason": reason, "start": a, "end": b}
-                  for a, b, reason in aliases if start <= a and b <= end]
+        # Every flag is raised in EVERY sentence it touches, clipped to it: a span
+        # crossing a sentence edge can never vanish unmasked and unflagged.
+        found += [{"sentence_id": sid, "kind": "NAME", "reason": reason, "start": max(a, start), "end": min(b, end)}
+                  for a, b, reason in aliases if a < end and start < b]
+        found += [{"sentence_id": sid, "kind": "CONFLICT", "reason": "link_invalid", "start": max(a, start),
+                   "end": min(b, end)} for a, b in sorted(set(invalid_links)) if a < end and start < b]
+        found += [{"sentence_id": sid, "kind": "NAME", "reason": "identity_ambiguous", "start": max(a, start),
+                   "end": min(b, end)} for a, b in ambiguous if a < end and start < b]
+        found += [{"sentence_id": sid, "kind": kind, "reason": reason, "start": max(a, start), "end": min(b, end)}
+                  for a, b, kind, reason in held_back if a < end and start < b]
         masking.uncertain += [c for c in found
                               if c["kind"] in UNRESOLVABLE
                               or not any(x <= c["start"] and c["end"] <= y for x, y in resolved)]

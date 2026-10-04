@@ -481,7 +481,7 @@ async def generate(text: str, sentences: list[dict], clause_ids: set[str], *,
                    graph_rows: list[dict] | None = None, transport=None,
                    suspect: frozenset[str] = frozenset(), masking=None,
                    messages: list[dict] | None = None,
-                   expected_sha256: str | None = None) -> dict:
+                   expected_sha256: str | None = None, pre_send=None) -> dict:
     """One pinned call (ai_client), then validate. Raises AIError on any failure.
     `suspect`: the run's frozen embedded-instruction scan -- withheld from the
     prompt and forbidden as evidence. `masking`: the PII masking whose bodies
@@ -491,7 +491,7 @@ async def generate(text: str, sentences: list[dict], clause_ids: set[str], *,
         bodies = masking.bodies if masking is not None else None
         messages = build_messages(text, sentences, suspect, bodies)
     result = await ai_client.complete(messages, max_tokens=MAX_TOKENS, transport=transport,
-                                      expected_sha256=expected_sha256)
+                                      expected_sha256=expected_sha256, pre_send=pre_send)
     report = validate(result.content, text, sentences, clause_ids, graph_rows, suspect=suspect,
                       masking=masking)
     report["provenance"] = {**result.contract, "request_id": result.request_id,

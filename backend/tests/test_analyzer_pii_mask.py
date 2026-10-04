@@ -99,7 +99,7 @@ def test_invented_tokens_and_the_unmasked_view():
 def test_the_stored_map_is_salted():
     m, _ = masked(FULL)
     a, b = json.loads(m.blob()), json.loads(m.blob())
-    assert a["tokens"] == b["tokens"] and a["salt"] != b["salt"] and a["masking_version"] == "pii-mask.2"
+    assert a["tokens"] == b["tokens"] and a["salt"] != b["salt"] and a["masking_version"] == "pii-mask.4"
 
 
 # ── the prompt builders ─────────────────────────────────────────────────────
@@ -280,7 +280,7 @@ async def test_the_model_sees_tokens_the_map_is_encrypted_and_evidence_is_origin
     summary = run["ai_report"]
     assert summary["status"] == "complete"
     pii = summary["pii"]
-    assert pii["masking_version"] == "pii-mask.2" and pii["counts"]["NAME"] == 3
+    assert pii["masking_version"] == "pii-mask.4" and pii["counts"]["NAME"] == 3
     assert pii["map_retention"] == "deleted_when_the_attempt_finishes" and "map_blob_id" not in pii
     assert pii["policy_sha256"] == pii_mask.POLICY_SHA256 and len(pii["policy_sha256"]) == 64
     assert "Kashif" not in json.dumps(summary, default=str)
@@ -354,7 +354,7 @@ async def test_the_drafting_question_review_sends_only_masked_evidence(ready):
         assert value not in prompts[0], value
     run = await get_analysis_runs_col().find_one({"_id": rid})
     pii = run["hypotheses"]["ai_review"]["pii"]
-    assert pii["masking_version"] == "pii-mask.2" and pii["map_retention"] == "deleted_when_the_attempt_finishes"
+    assert pii["masking_version"] == "pii-mask.4" and pii["map_retention"] == "deleted_when_the_attempt_finishes"
     assert await get_analysis_blobs_col().count_documents({"source_id": run["source_id"], "purpose": "pii_map"}) == 0
     assert pii["policy_sha256"] == pii_mask.POLICY_SHA256
     monkeypatch.setattr(settings, "analyzer_hypothesis_review_ui", True)
@@ -385,7 +385,8 @@ def test_the_policy_hash_is_the_masking_source():
     import hashlib
     from pathlib import Path
 
-    source = Path(pii_mask.__file__).read_bytes().replace(b"\r\n", b"\n")
-    assert pii_mask.POLICY_SHA256 == hashlib.sha256(source).hexdigest()
+    from app.services.analyzer import pii_layers
+    blob = b"".join(Path(mod.__file__).read_bytes().replace(b"\r\n", b"\n") + b"\n--\n" for mod in (pii_mask, pii_layers))
+    assert pii_mask.POLICY_SHA256 == hashlib.sha256(blob).hexdigest()   # the masker AND its detection layers
     m, _ = masked(FULL)
     assert pii_mask.refused(m)["policy_sha256"] == pii_mask.POLICY_SHA256

@@ -123,6 +123,7 @@ def label_kind(label: str) -> str | None:
     forms "Name of (the) Tenant", "Tenant's Name", "Address of the Lessee",
     "Tenant CNIC"."""
     label = " ".join(label.strip().split()).rstrip(".")
+    label = re.split(r"\.\s+", label)[-1]           # "TENANCY AGREEMENT. Landlord" -> "Landlord"
     for rx, kind in _LABEL_KIND:
         if rx.match(label):
             return kind
@@ -150,6 +151,12 @@ def _value_span(text: str, start: int, end: int, kind: str) -> tuple[int, int] |
         # A firm in a person field ("M/s X (Pvt) Ltd") is kept: it is not a person.
         if re.search(r"\b(?:ltd|limited|pvt|traders|industries|company|enterprises|bank)\b", value, re.I):
             return None
+    if kind == "NAME":
+        # A name ends at its sentence: "Tenant: Usman Farooq. Rent is ..." is the
+        # name "Usman Farooq", not the rest of the line.
+        stop = re.search(r"\.\s+(?=[A-Z0-9])", value)
+        if stop:
+            value = value[:stop.start()]
     value = value.rstrip(" ,.")
     if _BLANKISH.match(value):
         return None
@@ -183,6 +190,12 @@ _CNIC_AFTER = re.compile(r"[ \t]*[,(][ \t]*(?:c\s*n\s*[il1]\s*c|n\s*[il1]\s*c|ni
 _CAP_RUN = re.compile(r"(?:[A-Z][\w'’.-]+(?:[ \t]+|-\n))*[A-Z][\w'’.-]+$")
 
 
+#: A given name followed by a female name suffix common in Pakistani documents
+#: ("Rubina Bibi", "Saira Begum", "Naseem Akhtar Khatoon" -> "Akhtar Khatoon").
+#: One given word only, so a preceding city ("Islamabad Rubina Bibi") is not taken.
+_FEMALE_SUFFIX = re.compile(r"\b[A-Z][a-z]{2,}[ \t]+(?:Bibi|Begum|Khatoon|Khatun|Bano|Mai)\b")
+
+
 def cue_name_spans(text: str) -> list[tuple[int, int, str]]:
     """Names written right before a CNIC: "… and Shakeel Ahrned (CNIC 71301-…)".
     The capitalised words before the cue, cleaned of role words; a firm is not a name."""
@@ -197,6 +210,10 @@ def cue_name_spans(text: str) -> list[tuple[int, int, str]]:
                      value, re.I):
             continue
         out += [sp for sp in clean_locator_name(text, start, m.start()) if sp[2] == "NAME"]
+    # A female name suffix marks a person, also inside an address chain: the
+    # name keeps its own token and the address is split around it.
+    out += [(m.start(), m.end(), "NAME") for m in _FEMALE_SUFFIX.finditer(text)
+            if not _FUNCTION.match(m.group(0).split()[0])]
     return out
 
 
@@ -250,6 +267,63 @@ def table_spans(text: str) -> list[tuple[int, int, str]]:
     return out
 
 
+# ── protected expressions: deadlines, periods, dates, amounts ───────────────
+#
+# Text whose exact words drafting analysis needs. No DERIVED mask (a repeat of
+# a value, a part of a name, an address chain's growth) may change it; a mask
+# that would is not applied -- the span becomes uncertain and the request is
+# blocked until a person decides (pii_mask.prepare). A reviewer's own mark
+# inside one is a conflict and blocks too: fail closed, never guess.
+
+_MONTH = (r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+          r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)")
+_NUMWORD = (r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+            r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|forty-five|fifty|sixty|ninety|"
+            r"a|an|half|several)")
+_UNIT = r"(?:(?:working|business|calendar|clear)\s+)?(?:days?|weeks?|fortnights?|months?|quarters?|years?|hours?)"
+_WEEKDAY = (r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+            r"juma|jumma|jumu'?ah|jumerat|jumeraat|peer|pir|somwar|mangal|budh|hafta|itwar|itwaar)")
+_PERIOD_END = (r"(?:current\s+|next\s+|this\s+|said\s+|the\s+)?(?:quarter|month|year|financial\s+year|fiscal\s+year|"
+               r"calendar\s+year|term|lease|tenancy|week|day|probation(?:ary)?\s+period|notice\s+period)")
+_ISLAMIC = (r"(?:eid(?:[\s-]+u[ld][\s-]+(?:fitr|adha|azha|zuha))?|ramzan|ramadan|muharram|safar|"
+            r"rabi[\s-]+ul[\s-]+(?:awwal|aakhir|thani)|jamadi[\s-]+ul[\s-]+(?:awwal|aakhir|thani)|rajab|"
+            r"shaban|sha'ban|shawwal|zi?l[\s-]*qa(?:d|ad|da)|zi?l[\s-]*hajj?|christmas|easter|diwali)")
+_PROTECTED = re.compile(
+    rf"\b\d{{1,2}}(?:st|nd|rd|th)?(?:\s+(?:day\s+)?of)?\s+{_MONTH}\.?,?\s+\d{{4}}\b"     # 1 June 2026
+    rf"|\b{_MONTH}\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}}\b"                           # June 1, 2026
+    rf"|\b\d{{1,2}}[-/.]\d{{1,2}}[-/.]\d{{2,4}}\b"                                           # 01/06/2026
+    rf"|\b{_MONTH}\.?\s+\d{{4}}\b"                                                         # June 2026
+    rf"|\b(?:{_NUMWORD}\s*(?:\(\s*\d{{1,4}}\s*\)\s*)?|\d{{1,4}}\s*)-?\s*{_UNIT}\b"    # 45 days, eleven (11) months
+    rf"|\b(?:rs\.?|pkr|usd|\$|£|€)\s*\d[\d,]*(?:\.\d+)?(?:\s*/-)?"                    # Rs. 85,000
+    rf"|\b\d[\d,]*(?:\.\d+)?\s*(?:/-|rupees\b)"                                           # 85,000/-
+    rf"|\b(?:month\s+of|during|before|after|until|till|by|from|on|in)\s+(?:the\s+)?{_ISLAMIC}\b"  # after Eid
+    rf"|\b(?:the\s+)?(?:end|start|beginning|close|expiry|expiration)\s+of\s+(?:the\s+)?{_PERIOD_END}\b"  # end of the quarter
+    rf"|\b(?:a|one|two|each|every)?\s*fortnights?\b"                                     # within a fortnight
+    rf"|\b(?:every|each|on|by|before|after|until|till|next|this|coming|following)\s+{_WEEKDAY}\b"  # every Friday / Juma
+    rf"|\b(?:the\s+)?(?:next|following|same)\s+(?:working|business|calendar)\s+day\b",  # the next working day
+    re.I)
+
+#: Single words that are times or dates themselves. A DERIVED mask that is just
+#: one of these (a name part "Juma" or "Peer" repeated elsewhere) is held back
+#: for a person to decide, even outside every listed deadline wording: an
+#: unknown phrasing must fail closed, not be masked silently.
+_TEMPORAL_WORD = re.compile(rf"^(?:{_MONTH}|{_WEEKDAY}|{_ISLAMIC}|days?|weeks?|fortnights?|months?|quarters?|"
+                            rf"years?|today|tomorrow|tonight|noon|midnight)\.?$", re.I)
+
+
+def is_temporal_word(value: str) -> bool:
+    return bool(_TEMPORAL_WORD.match(value.strip()))
+
+
+def protected_spans(text: str) -> list[tuple[int, int]]:
+    """Offsets of dates, periods, amounts and festival/month deadlines."""
+    return [(m.start(), m.end()) for m in _PROTECTED.finditer(text)]
+
+
+def overlaps_protected(start: int, end: int, protected: list[tuple[int, int]]) -> bool:
+    return any(start < b and a < end for a, b in protected)
+
+
 # ── addresses ───────────────────────────────────────────────────────────────
 
 #: One word of an address part; a word hyphenated across a line ("Rawal-\npindi") stays one word.
@@ -292,10 +366,18 @@ def address_spans(text: str) -> list[tuple[int, int, str]]:
         out.append((m.start(), len(text[:m.end()].rstrip(" ,.;\n")), "ADDRESS"))
     # A premises chain continues across ", <Part>" pieces up to a trailing
     # city, also over one line break (", Bhatti Gate,\nLahore").
+    # The chain stops before a date, period or amount: "..., Lahore, 15 June
+    # 2026" keeps the date, which is not part of the address.
+    protected = protected_spans(text)
     grown = []
     for a, b, k in out:
         tail = re.match(rf"(?:{_LINK}(?:{_REL}|{_PART}))+", text[b:])
-        grown.append((a, len(text[:b + tail.end()].rstrip(" ,.;\n")) if tail else b, k))
+        end = len(text[:b + tail.end()].rstrip(" ,.;\n")) if tail else b
+        cut = min((x for x, _ in protected if a < x < end), default=None)
+        if cut is not None:
+            end = len(text[:cut].rstrip(" ,.;\n\t"))
+        if end > a:
+            grown.append((a, end, k))
     return grown
 
 
@@ -387,7 +469,7 @@ def party_roles(text: str, full_names: list[tuple[int, int]]) -> dict[str, str]:
         cuts = list(_SEGMENT_CUT.finditer(text, 0, m.start()))
         seg_start = cuts[-1].end() if cuts else 0
         inside = sorted(n for n in full_names if seg_start <= n[0] and n[1] <= m.start())
-        if not inside or re.search(r"(?:jointly|collectively|together|both|each)", m.group(0), re.I):
+        if not inside or re.search(r"\b(?:jointly|collectively|together|both|each)\b", m.group(0), re.I):
             continue
         if cuts and cuts[-1].group(0).lower() == "and":
             # "X and Y (the Landlord)": X has no designation of its own -- a joint role, ambiguous.
@@ -399,7 +481,7 @@ def party_roles(text: str, full_names: list[tuple[int, int]]) -> dict[str, str]:
             continue                                     # two unrelated people: ambiguous
         found.setdefault(name_key(text[party[0]:party[1]]), set()).add(" ".join(m.group("role").lower().split()))
     for m in _LABEL_LINE.finditer(text):
-        label = " ".join(m.group("label").split())
+        label = re.split(r"\.\s+", " ".join(m.group("label").split()))[-1]
         role = re.fullmatch(rf"(?:name\s+of\s+(?:the\s+)?)?(?P<role>{_ROLE})(?:'?s|’s)?(?:\s+name)?", label, re.I)
         if not role:
             continue
@@ -407,9 +489,22 @@ def party_roles(text: str, full_names: list[tuple[int, int]]) -> dict[str, str]:
         if inside and all(_KINSHIP_BEFORE.search(text[max(0, a - 30):a]) for a, _ in inside[1:]):
             found.setdefault(name_key(text[inside[0][0]:inside[0][1]]), set()).add(
                 " ".join(role.group("role").lower().split()))
+    _ROLE_CONFLICTS.clear()
+    _ROLE_CONFLICTS.update(k for k, v in found.items() if len(v) > 1)
     roles = {k: next(iter(v)) for k, v in found.items() if len(v) == 1}
     taken = [r for r in roles.values()]
     return {k: r for k, r in roles.items() if taken.count(r) == 1}
+
+
+#: Name spellings the document designates as TWO OR MORE different parties
+#: ("Landlord: Usman Farooq" ... "Tenant: Usman Farooq"), from the last
+#: `party_roles` call. Equal spelling is not identity: these must be decided.
+_ROLE_CONFLICTS: set[str] = set()
+
+
+def role_conflicts(text: str, full_names: list[tuple[int, int]]) -> set[str]:
+    party_roles(text, full_names)
+    return set(_ROLE_CONFLICTS)
 
 
 def auto_link(text: str, alias: tuple[int, int], sentence: tuple[int, int],

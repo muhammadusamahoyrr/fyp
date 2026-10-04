@@ -59,21 +59,30 @@ from app.services.analyzer.txn import run_in_transaction
 REQUIRED = "pii_confirmation_required"        # masking flagged spans it could not decide
 REVIEW_REQUIRED = "pii_review_required"       # lawyer-confirm mode: nothing reviewed yet
 OUTDATED = "pii_review_outdated"              # the attested preview is not the request any more
-WAITING = frozenset({REQUIRED, REVIEW_REQUIRED, OUTDATED})
+#: The final leak check stopped the request: the lawyer can open the review
+#: and mark what it saw (the preview shows its codes); nothing is sent until clean.
+LEAK_GUARD = pii_mask.LEAK_GUARD
+WAITING = frozenset({REQUIRED, REVIEW_REQUIRED, OUTDATED, LEAK_GUARD})
 
 #: The decisions a reviewer can make on a flagged span. `same_person` needs target offsets.
 DECISIONS = pii_mask.DECISIONS + (pii_mask.SAME_PERSON,)
 #: The decisions allowed on a span masking did NOT flag (a missed detail):
 #: any personal kind, so nothing missed is left unmaskable.
-ADDED_DECISIONS = (pii_mask.NAME_DECISION, pii_mask.ADDRESS_DECISION, pii_mask.SAME_PERSON)     + tuple(pii_mask.KIND_DECISIONS)
-ALL_DECISIONS = DECISIONS + tuple(pii_mask.KIND_DECISIONS)
+ADDED_DECISIONS = (pii_mask.NAME_DECISION, pii_mask.ADDRESS_DECISION, pii_mask.SAME_PERSON) \
+    + tuple(pii_mask.KIND_DECISIONS)
+#: Identity decisions on ANY masked person mention, flagged or not
+#: (ANALYZER_PII_IDENTITY.md): "same person as" an exact masked name, or "a
+#: different person" -- equal spelling never decides identity by itself.
+IDENTITY_DECISIONS = (pii_mask.SAME_PERSON, pii_mask.DIFFERENT_PERSON)
+ALL_DECISIONS = DECISIONS + tuple(pii_mask.KIND_DECISIONS) + (pii_mask.DIFFERENT_PERSON,)
 MAX_DECISIONS = 500
 MAX_SPAN = 300
 
 NOTICE = ("Your review covers this exact request. It does not mean all personal information was removed, "
           "and it is not an accuracy approval.")
 ATTESTATION = ("I reviewed the original text beside this exact masked request, marked every personal "
-               "detail I found, and approve sending exactly this request.")
+               "detail I found, checked which mentions refer to the same person, and approve sending "
+               "exactly this request.")
 _KEY = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 #: The AI stage each engine re-queues, and where its blocked summary lives.
 _STAGES = {
@@ -93,7 +102,14 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def review_required() -> bool:
+def review_required(synthetic_source: bool = True) -> bool:
+    """Lawyer-confirm mode. It may be switched off ONLY for synthetic test
+    documents under a synthetic-only configuration (unrelated AI tests). Any
+    other configuration or source requires the lawyer's review, whatever
+    `analyzer_pii_review_required` says -- a flag change can never let a
+    real document bypass it."""
+    if not synthetic_source or getattr(settings, "analyzer_ai_synthetic_only", True) is not True:
+        return True
     return bool(getattr(settings, "analyzer_pii_review_required", True))
 
 
@@ -162,6 +178,34 @@ def send_check(review: dict | None, digest: str) -> str | None:
     return None if review["preview_sha256"] == digest else OUTDATED
 
 
+def pre_send_check(run: dict, version: dict, digest: str):
+    """The re-check a stage hands to the provider client, run IMMEDIATELY
+    before the HTTP call: the text version still has the hash the request
+    was built from, the masking policy is unchanged, and (in lawyer-confirm
+    mode) the latest approval still names exactly this request."""
+    policy = pii_mask.POLICY_SHA256
+
+    async def still_approved() -> bool:
+        current = await get_analysis_text_versions_col().find_one({"_id": version["_id"]}, {"text_hash": 1})
+        if current is None or current.get("text_hash") != version["text_hash"]:
+            return False
+        if pii_mask.POLICY_SHA256 != policy or pii_mask._policy_sha256() != policy:
+            return False
+        if not review_required():
+            return True
+        return send_check(await applicable(run, version["text_hash"]), digest) is None
+
+    return still_approved
+
+
+def offsets_reliable(text: str) -> bool:
+    """The review screen counts UTF-16 units; the server counts code points.
+    They agree only when no character lies outside the BMP. Otherwise every
+    highlighted span and every mark could shift, so such a text is not
+    reviewable: the request stays blocked (fail closed)."""
+    return all(ord(ch) <= 0xFFFF for ch in text)
+
+
 def stage_summary(review: dict | None) -> dict:
     """What the attempt records about the review: ids and hashes only."""
     if review is None:
@@ -187,7 +231,11 @@ async def _inputs(run: dict):
     scan_ids = scan.sentence_ids if scan else frozenset()
     sentences = await published_sentences(run)
     send_ids = await send_ids_for(run, sentences, scan_ids)
-    return raw.decode("utf-8"), version["text_hash"], sentences, scan_ids, send_ids
+    text = raw.decode("utf-8")
+    if not offsets_reliable(text):
+        raise AnalyzerConflict("unsupported_characters", "This text has characters the review screen cannot place "
+                                                         "exactly, so it cannot be reviewed. Nothing was sent.")
+    return text, version["text_hash"], sentences, scan_ids, send_ids
 
 
 async def _blocked(owner_id: str, run_id: str) -> tuple[dict, tuple[str, str, str]]:
@@ -247,6 +295,14 @@ def _validated(text: str, sentences: list[dict], send_ids: set[str], decisions: 
     return clean
 
 
+def people_of(text: str, masking: pii_mask.Masking) -> list[dict]:
+    """Every masked PERSON mention with its token, as offsets: the screen shows
+    each one beside the original and lets the lawyer decide identity for ANY
+    of them -- not only for flagged or newly marked names. No words."""
+    del text                                                   # offsets only: the screen holds the text
+    return [{"start": a, "end": b, "token": token} for a, b, kind, token in masking.masked_spans if kind == "NAME"]
+
+
 def _origin(c: dict, flagged: set[tuple[int, int]]) -> str:
     return "flagged" if (c["start"], c["end"]) in flagged else "added"
 
@@ -261,6 +317,7 @@ async def _preview(run: dict, text: str, sentences: list[dict], scan_ids, send_i
                           "masked": masking.bodies.get(s["sentence_id"], "")} for s in order],
            "candidates": [{"id": f"{c['start']}-{c['end']}", **c} for c in masking.uncertain],
            "tokens": sorted(names.values(), key=lambda n: n["start"]),
+           "people": people_of(text, masking),
            "request": None, "request_sha256": None, "leak_guard": [], "ready": False, "request_error": None}
     if masking.uncertain:
         return out

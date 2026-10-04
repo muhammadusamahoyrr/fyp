@@ -44,6 +44,39 @@ def _pipeline(name: str) -> dict | None:
     return {"rules": pii_mask.MASKING_VERSION, "locator": LOCATOR} if ev.rubric_path(name) != ev.RUBRIC_PATH else None
 
 
+def harness_sha256() -> str:
+    """SHA-256 over the code that SCORES a set (the evaluation harness, this
+    script and the locator runner). Pinned by the freeze, so a set frozen on
+    uncommitted code is still scored by exactly the code it was frozen with."""
+    here = Path(__file__).resolve()
+    blob = b""
+    for source in (Path(ev.__file__), here, here.parent / "pii_locator" / "gliner_locate.py"):
+        blob += source.read_bytes().replace(b"\r\n", b"\n") + b"\n--\n"
+    return hashlib.sha256(blob).hexdigest()
+
+
+#: Every file that decides what is masked or how a set is scored. A gate is
+#: frozen only when all of them are COMMITTED and unchanged, so the run can be
+#: reproduced from the recorded commit (pii-eval-5's freeze could not be).
+PIPELINE_FILES = ("app/services/analyzer/pii_mask.py", "app/services/analyzer/pii_layers.py",
+                  "app/services/analyzer/pii_evaluation.py", "scripts/analyzer_pii_eval.py",
+                  "scripts/pii_locator/gliner_locate.py", "analyzer_eval/pii/locator/gliner_multi-v2.1.manifest.json")
+
+
+def _source_state() -> tuple[str, list[str]]:
+    """(HEAD commit, pipeline files with uncommitted changes)."""
+    import subprocess
+    backend = Path(__file__).resolve().parents[1]
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=backend, capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(["git", "status", "--porcelain", "--", *PIPELINE_FILES], cwd=backend,
+                           capture_output=True, text=True).stdout.split("\n")
+    return head, [line for line in dirty if line.strip()]
+
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def _file_hashes(manifest: dict) -> dict:
     return {f"{r['repo']}/{f['name']}": f["sha256"] for r in manifest["repos"] for f in r["files"]}
 
@@ -123,6 +156,10 @@ def main() -> int:
         if not cov["met"]:
             print(f"refused: coverage not met {cov}", file=sys.stderr)
             return 2
+        head, dirty = _source_state()
+        if _pipeline(dataset.name) is not None and dirty:
+            print(f"refused: commit the pipeline files before freezing a gate set: {dirty}", file=sys.stderr)
+            return 2
         lines = [f"# {args.dataset} freeze manifest -- written BEFORE the first scored run.",
                  "# Scored once; the masking is not tuned against this set.",
                  f"frozen_at: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
@@ -131,6 +168,9 @@ def main() -> int:
                  f"eval_version: {ev.EVAL_VERSION}", f"masking_version: {pii_mask.MASKING_VERSION}",
                  f"policy_sha256_at_freeze: {pii_mask.POLICY_SHA256}",
                  f"pipeline_json: '{json.dumps(_pipeline(dataset.name), sort_keys=True)}'",
+                 f"harness_sha256: {harness_sha256()}",
+                 f"source_commit: {head}",
+                 f"locator_manifest_sha256: {_sha(LOCATOR_MANIFEST)}",
                  f"author: independent fresh session, given only {ev.rubric_path(dataset.name).name}", "files:"]
         lines += [f"  {p.name}: {hashlib.sha256(p.read_bytes()).hexdigest()}"
                   for p in sorted((ev.ROOT / args.dataset).glob("*.yaml"))]
@@ -146,9 +186,15 @@ def main() -> int:
     extra = None
     if pipeline is not None:
         if manifest.get("pipeline_json") != json.dumps(pipeline, sort_keys=True) \
-                or manifest.get("policy_sha256_at_freeze") != pii_mask.POLICY_SHA256:
+                or manifest.get("policy_sha256_at_freeze") != pii_mask.POLICY_SHA256 \
+                or ("harness_sha256" in manifest and manifest["harness_sha256"] != harness_sha256()):
             print("refused: the pipeline or masking policy changed since the freeze", file=sys.stderr)
             return 2
+        if "source_commit" in manifest:
+            head, dirty = _source_state()
+            if dirty or _sha(LOCATOR_MANIFEST) != manifest.get("locator_manifest_sha256"):
+                print(f"refused: pipeline files changed since the freeze: {dirty}", file=sys.stderr)
+                return 2
         if not args.locator_home:
             print("refused: a rubric-2 set is scored with the pinned locator (--locator-home)", file=sys.stderr)
             return 2

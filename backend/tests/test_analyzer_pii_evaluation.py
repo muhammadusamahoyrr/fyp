@@ -212,7 +212,8 @@ def test_a_rubric_2_set_is_scored_as_the_pinned_pipeline_and_keeps_its_own_recor
     assert script._pipeline("pii-eval-1") is None                       # scored as recorded, rules only
     pinned = script._pipeline("pii-eval-2")
     assert pinned["locator"]["cut_off"] == 0.3 and pinned["locator"]["tokenizer_variant"] == "as_loaded"
-    assert pinned["rules"] == "pii-mask.2"
+    from app.services.analyzer import pii_mask
+    assert pinned["rules"] == pii_mask.MASKING_VERSION
     assert ev.record_path("pii-eval-1") == ev.RECORD_PATH
     assert ev.record_path("pii-eval-2").name == "pii_detection_record_pii_eval_2.yaml"
 
@@ -266,3 +267,42 @@ def test_review_mode_keeps_one_token_per_person_with_honorifics_and_variants(tex
 def test_pii_eval_4_is_scored_under_the_approved_rubric_3_gate():
     assert ev.rubric_path("pii-eval-4") == ev.RUBRIC_3_PATH and ev.rubric_number("pii-eval-4") == 3
     assert ev.DATASET_ROLES["pii-eval-3"] == "gate_spent" and ev.DATASET_ROLES["pii-eval-2"] == "gate_spent"
+
+
+def test_review_mode_restores_a_party_name_hidden_in_an_address_token():
+    d = doc("Mera ghar [[ADDRESS:a1|Plot 4, Sector F-8, Islamabad]] [[NAME:p1|Sughran]] ko diya.\n"
+            "[[NAME:p1|Sughran]] pays [[DEADLINE:d1|within 30 days]].", parties=["p1"])
+    r = ev.score_document(d, send_capture([]), mode="review")
+    assert r["sent"] and r["party_consistent"] is True and r["deadlines_preserved"] is True
+    assert not any(s["leak"] for s in r["spans"])
+
+
+def test_review_mode_does_not_treat_a_surname_in_a_place_name_as_the_person():
+    d = doc('Made between [[NAME:p1|Hira Zaman]] (the "Tenant") and [[NAME:p2|Naveed Anjum]] (the "Landlord").\n'
+            "The flat is at [[ADDRESS:a1|H.No 7, [[NAME:p1|Zaman]] Street, Gulberg III, Lahore]].", parties=["p1", "p2"])
+    r = ev.score_document(d, send_capture([]), mode="review")
+    assert r["sent"] and r["party_consistent"] is True and r["block_reasons"] == []
+
+
+def test_a_freeze_pins_the_scoring_code_as_well_as_the_masking_policy():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "analyzer_pii_eval", Path(__file__).resolve().parents[1] / "scripts" / "analyzer_pii_eval.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    assert len(script.harness_sha256()) == 64 and script.harness_sha256() == script.harness_sha256()
+    assert ev.rubric_path("pii-eval-5") == ev.RUBRIC_3_PATH and ev.DATASET_ROLES["pii-eval-4"] == "gate_spent"
+
+
+def test_a_gate_freeze_requires_committed_pipeline_files_and_pins_the_commit():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "analyzer_pii_eval", Path(__file__).resolve().parents[1] / "scripts" / "analyzer_pii_eval.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    head, dirty = script._source_state()
+    assert len(head) == 40 and isinstance(dirty, list)
+    assert "app/services/analyzer/pii_layers.py" in script.PIPELINE_FILES
+    assert ev.rubric_path("pii-eval-6") == ev.RUBRIC_3_PATH and ev.DATASET_ROLES["pii-eval-5"] == "gate_spent"

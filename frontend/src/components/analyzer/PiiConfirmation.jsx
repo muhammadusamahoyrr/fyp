@@ -19,7 +19,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Btn, Card } from "@/components/client/documents/ui.jsx";
 import { confirmPii, getAnalysisText, getPiiConfirmation, idempotencyKey, previewPii } from "@/lib/api.js";
 
-export const PII_REVIEW_REASONS = new Set(["pii_confirmation_required", "pii_review_required", "pii_review_outdated"]);
+export const PII_REVIEW_REASONS = new Set(["pii_confirmation_required", "pii_review_required", "pii_review_outdated", "pii_leak_guard"]);
 export const DECISION_LABEL = {
     personal_name: "Personal name",
     address: "Address",
@@ -44,6 +44,16 @@ const REASON_TEXT = {
     name_variant: "A different spelling of a masked name",
     ocr_unmasked: "Looks like a damaged or split name",
     unsupported_script: "Urdu or Arabic script cannot be sent",
+    protected_overlap: "Part of a deadline, date or amount — it is kept as written unless you decide",
+    repeat_unconfirmed: "The same short value as a detail you marked — decide this one too",
+    protected_conflict: "Your mark falls inside a deadline, date or amount",
+    link_invalid: "This “same person” link does not point to exactly one masked name",
+    identity_ambiguous: "The same name is given to two different parties — say who this mention is",
+};
+/* Conflicts no decision on the span can lift: the mark or link itself must change. */
+const CONFLICT_TEXT = {
+    protected_conflict: "This cannot be sent: masking it would change a deadline, date or amount. Remove or narrow your mark.",
+    link_invalid: "This cannot be sent: choose a masked name as the person, or remove the link.",
 };
 const LEAK_TEXT = {
     arabic_script: "Urdu or Arabic script",
@@ -105,6 +115,65 @@ function OriginalSentence({ t, text, sentence, flagged, added, focus, onFocus })
         style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.6 }}>{parts}</div>;
 }
 
+/* Every masked person token with ALL its mentions. Equal spelling is only a
+ * proposal: the lawyer can mark any mention as a different person, or link
+ * it to another token -- for names that were never flagged too. */
+function PeoplePanel({ t, text, people, identity, setIdentity }) {
+    const groups = [];
+    people.forEach(p => {
+        const g = groups.find(x => x.token === p.token);
+        if (g) g.mentions.push(p); else groups.push({ token: p.token, mentions: [p] });
+    });
+    if (groups.length === 0) return null;
+    const choose = (m, value) => setIdentity(prev => {
+        const next = { ...prev };
+        const id = spanId(m.start, m.end);
+        if (!value) delete next[id];
+        else if (value === "different") next[id] = { start: m.start, end: m.end, decision: "different_person" };
+        else {
+            const [ts, te] = value.split("-").map(Number);
+            next[id] = { start: m.start, end: m.end, decision: "same_person", target_start: ts, target_end: te };
+        }
+        return next;
+    });
+    const valueOf = m => {
+        const d = identity[spanId(m.start, m.end)];
+        if (!d) return "";
+        return d.decision === "different_person" ? "different" : `${d.target_start}-${d.target_end}`;
+    };
+    return (
+        <section data-pii-people aria-label="People" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5 }}>People in this request</div>
+            <div style={{ fontSize: 12.5, color: t.textMuted }}>
+                Names spelled alike are shown as one person. Check each mention; mark it as a different person,
+                or as the same person as another token.
+            </div>
+            {groups.map(g => (
+                <div key={g.token} data-pii-person={g.token} style={{ fontSize: 13 }}>
+                    <b>{g.token}</b>
+                    <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                        {g.mentions.map(m => (
+                            <li key={spanId(m.start, m.end)} data-pii-mention={spanId(m.start, m.end)}>
+                                “{text.slice(m.start, m.end)}”{" "}
+                                <select data-pii-identity={spanId(m.start, m.end)} aria-label="Who this mention is"
+                                    value={valueOf(m)} onChange={e => choose(m, e.target.value)}>
+                                    <option value="">As shown ({g.token})</option>
+                                    <option value="different">A different person</option>
+                                    {groups.filter(o => o.token !== g.token).map(o => (
+                                        <option key={o.token} value={spanId(o.mentions[0].start, o.mentions[0].end)}>
+                                            Same person as {o.token} — {text.slice(o.mentions[0].start, o.mentions[0].end)}
+                                        </option>
+                                    ))}
+                                </select>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            ))}
+        </section>
+    );
+}
+
 export default function PiiConfirmation({ t, runId, onQueued }) {
     const [view, setView] = useState(null);
     const [text, setText] = useState(null);
@@ -112,6 +181,7 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
     const [flagged, setFlagged] = useState([]);          // every span masking flagged, kept once seen
     const [choices, setChoices] = useState({});          // flagged id -> {decision, target?}
     const [added, setAdded] = useState([]);              // missed details the lawyer marked
+    const [identity, setIdentity] = useState({});        // mention id -> same/different person, for ANY masked name
     const [preview, setPreview] = useState(null);
     const [previewKey, setPreviewKey] = useState(null);  // the decisions the preview was made for
     const [selection, setSelection] = useState(null);
@@ -136,20 +206,30 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
             setFlagged(data.candidates);
             const made = data.decisions_made || [];
             const flaggedIds = new Set(data.candidates.map(c => c.id));
+            const peopleIds = new Set((data.people || []).map(p => spanId(p.start, p.end)));
+            const isIdentity = d => !flaggedIds.has(spanId(d.start, d.end)) && peopleIds.has(spanId(d.start, d.end))
+                && (d.decision === "same_person" || d.decision === "different_person");
+            setIdentity(Object.fromEntries(made.filter(isIdentity).map(d => [spanId(d.start, d.end), d])));
             setChoices(Object.fromEntries(made.filter(d => flaggedIds.has(spanId(d.start, d.end)))
                 .map(d => [spanId(d.start, d.end), d])));
-            setAdded(made.filter(d => !flaggedIds.has(spanId(d.start, d.end))));
+            setAdded(made.filter(d => !flaggedIds.has(spanId(d.start, d.end)) && !isIdentity(d)));
             setPreviewKey(JSON.stringify(made));
             setAttested(false);
         });
         return () => { live = false; };
     }, [runId, tick]);
 
-    const decisions = useMemo(() => [
-        ...flagged.filter(c => choices[c.id]).map(c => ({ start: c.start, end: c.end, ...choices[c.id] })),
-        ...added.map(a => ({ start: a.start, end: a.end, decision: a.decision,
-                             ...(a.target_start !== undefined ? { target_start: a.target_start, target_end: a.target_end } : {}) })),
-    ].sort((a, b) => a.start - b.start), [flagged, choices, added]);
+    const decisions = useMemo(() => {
+        // One decision per mention; an identity decision made in the People
+        // panel is the lawyer's last word on that mention.
+        const byId = new Map();
+        flagged.filter(c => choices[c.id]).forEach(c => byId.set(c.id, { start: c.start, end: c.end, ...choices[c.id] }));
+        added.forEach(a => byId.set(spanId(a.start, a.end), { start: a.start, end: a.end, decision: a.decision,
+            ...(a.target_start !== undefined ? { target_start: a.target_start, target_end: a.target_end } : {}) }));
+        Object.entries(identity).forEach(([id, d]) => byId.set(id, { start: d.start, end: d.end, decision: d.decision,
+            ...(d.decision === "same_person" ? { target_start: d.target_start, target_end: d.target_end } : {}) }));
+        return [...byId.values()].sort((a, b) => a.start - b.start || a.end - b.end);
+    }, [flagged, choices, added, identity]);
     const key = JSON.stringify(decisions);
     const fresh = preview && previewKey === key;
 
@@ -286,6 +366,10 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
                                     <div data-pii-policy style={{ fontSize: 13 }}>
                                         This cannot be sent: Urdu and Arabic script are not supported yet.
                                     </div>
+                                ) : c.kind === "CONFLICT" ? (
+                                    <div data-pii-conflict={c.reason} role="alert" style={{ fontSize: 13 }}>
+                                        {CONFLICT_TEXT[c.reason] || "This cannot be sent as it is."}
+                                    </div>
                                 ) : (
                                     <div role="radiogroup" aria-label={`Decide “${text.slice(c.start, c.end)}”`}
                                         style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 13 }}>
@@ -352,6 +436,8 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
                     })}
                 </ul>
             )}
+
+            <PeoplePanel t={t} text={text} people={preview.people || []} identity={identity} setIdentity={setIdentity} />
 
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <Btn data-pii-preview disabled={busy || fresh} onClick={refresh}>Update the preview</Btn>

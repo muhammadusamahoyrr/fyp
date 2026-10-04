@@ -55,13 +55,14 @@ import yaml
 from app.services.analyzer import ai_report, injection, pii_mask
 from app.services.analyzer import segmentation as seg
 
-EVAL_VERSION = "pii-eval.2"
+EVAL_VERSION = "pii-eval.2.1"
 ROOT = Path(__file__).resolve().parents[3] / "analyzer_eval" / "pii"
 RUBRIC_PATH = ROOT / "PII_DETECTION_RUBRIC.md"          # pii-eval.1, kept unchanged (its hash is frozen)
 RUBRIC_2_PATH = ROOT / "PII_DETECTION_RUBRIC_2.md"
 RUBRIC_3_PATH = ROOT / "PII_DETECTION_RUBRIC_3.md"
 #: The rubric each set is scored under; pii-eval-2 and later use rubric 2.
-RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH, "pii-eval-3": RUBRIC_3_PATH, "pii-eval-4": RUBRIC_3_PATH}
+RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH, "pii-eval-3": RUBRIC_3_PATH, "pii-eval-4": RUBRIC_3_PATH,
+                     "pii-eval-5": RUBRIC_3_PATH, "pii-eval-6": RUBRIC_3_PATH}
 
 
 def rubric_path(dataset_name: str) -> Path:
@@ -100,9 +101,12 @@ COVERAGE = {"documents": 40, "per_feature": 6, "personal_spans": 150}
 #: auto mode -- stays kept, unchanged, in pii_detection_record.yaml (7424f38).
 #: The next gate is a fresh independent pii-eval-2.
 DATASET_ROLES = {"pii-eval-1": "development",
+                 "identity-dev": "development",   # inspectable identity fixtures (ANALYZER_PII_IDENTITY.md)
                  "pii-eval-2": "gate_spent",       # scored once 2026-10-04: NOT passed
                  "pii-eval-3": "gate_spent",       # scored once 2026-10-04 (b907a96): NOT passed
-                 "pii-eval-4": "gate_sealed"}     # authored 2026-10-04; never read for tuning; see AUTHORED.txt
+                 "pii-eval-4": "gate_spent",       # scored once 2026-10-04 (5a4afa8): NOT passed
+                 "pii-eval-5": "gate_spent",       # scored once 2026-10-04: NOT passed
+                 "pii-eval-6": "gate_sealed"}     # authored 2026-10-04; never read for tuning; see AUTHORED.txt
 _OPEN = re.compile(r"\[\[(?P<kind>[A-Z]+):(?P<entity>[A-Za-z0-9_-]+)\|")
 _WORD = re.compile(r"[^\W_]{3,}|\d{3,}", re.UNICODE)
 
@@ -229,26 +233,47 @@ def _norm(s: str) -> str:
     return " ".join(s.split())
 
 
-def _oracle(uncertain: list[dict], gold: list[Span]) -> list[dict]:
-    """The manual mode's reviewer: decides each uncertain span by the labels."""
+def _person_tokens(masking, gold: list[Span], entity: str) -> list[tuple[int, int]]:
+    """The EXACT masked name spans that hold a mention of `entity` -- the only
+    targets the review screen offers for "same person as"."""
+    return [(a, b) for a, b, kind, _ in masking.masked_spans
+            if kind == "NAME" and any(g.kind == "NAME" and g.entity == entity and a <= g.start and g.end <= b
+                                      for g in gold)]
+
+
+def _representative(candidates: list[tuple[int, int]]) -> tuple[int, int] | None:
+    """ONE masked name per person that every other mention links to (the
+    longest, then the first): the reviewer never links two mentions to each
+    other, so no cycle of links is made."""
+    return max(candidates, key=lambda t: (t[1] - t[0], -t[0])) if candidates else None
+
+
+def _oracle(uncertain: list[dict], gold: list[Span], masking=None, rep: dict | None = None) -> list[dict]:
+    """The reviewer: decides each uncertain span by the labels. A link always
+    targets an exact masked name of the same person, as the screen does."""
     out = []
     for u in uncertain:
         if u["kind"] in pii_mask.UNRESOLVABLE:
-            continue                                   # a policy block: no reviewer decision lifts it
+            continue                                   # a policy block or a conflict: no decision lifts it
         hit = [g for g in gold if g.kind in PERSONAL and _overlaps(u["start"], u["end"], g.start, g.end)]
-        if u["reason"] in ("alias_unlinked", "name_variant", "ocr_unmasked"):
-            # The reviewer links the mention to the same person's fullest OTHER mention.
+        if u["reason"] in ("alias_unlinked", "name_variant", "ocr_unmasked") and masking is not None:
             names = [g for g in hit if g.kind == "NAME"]
-            same = [g for g in gold if names and g.kind == "NAME" and g.entity == names[0].entity
-                    and not _overlaps(u["start"], u["end"], g.start, g.end)
-                    and g.end - g.start >= u["end"] - u["start"]]
-            if same:
-                target = max(same, key=lambda g: g.end - g.start)
+            if not names:
+                target = None
+            elif rep is not None:
+                target = rep.get(names[0].entity)
+            else:
+                target = _representative(_person_tokens(masking, gold, names[0].entity))
+            if target is not None and not _overlaps(u["start"], u["end"], *target):
                 out.append({"start": u["start"], "end": u["end"], "decision": pii_mask.SAME_PERSON,
-                            "target_start": target.start, "target_end": target.end})
+                            "target_start": target[0], "target_end": target[1]})
                 continue
-        decision = (pii_mask.NAME_DECISION if any(g.kind == "NAME" for g in hit)
-                    else pii_mask.ADDRESS_DECISION if hit else pii_mask.NOT_PERSONAL)
+        if any(g.kind == "NAME" for g in hit):
+            decision = pii_mask.NAME_DECISION
+        elif hit:
+            decision = _KIND_DECISION[hit[0].kind]
+        else:
+            decision = pii_mask.NOT_PERSONAL
         out.append({"start": u["start"], "end": u["end"], "decision": decision})
     return out
 
@@ -257,30 +282,118 @@ _KIND_DECISION = {"NAME": pii_mask.NAME_DECISION, "ADDRESS": pii_mask.ADDRESS_DE
                   **{kind: decision for decision, kind in pii_mask.KIND_DECISIONS.items()}}
 
 
-def _missed(doc: Doc, personal: list[Span], masking, decisions: list[dict]) -> list[dict]:
-    """`review` mode: the gold personal details still not fully masked, as the
-    reviewer would mark them -- the outermost span only; a person's other
-    mention linked to their fullest masked mention (`same person`)."""
-    out: list[dict] = []
+def _missed(personal: list[Span], masking, marked: list[Span]) -> list[Span]:
+    """`review` mode: the gold personal details still not fully masked and
+    not marked yet -- the outermost span only."""
+    out: list[Span] = []
+    addresses = [g for g in personal if g.kind == "ADDRESS"]
     for g in sorted(personal, key=lambda g: (g.start, -(g.end - g.start))):
-        if _covered(masking.masked_spans, g.start, g.end) >= g.end - g.start:
+        in_place = any(x.start <= g.start and g.end <= x.end for x in addresses)   # "Zaman Street": a place reference
+        hidden = g.kind == "NAME" and not in_place and not any(
+            a <= g.start and g.end <= b and kind == "NAME" for a, b, kind, _ in masking.masked_spans)
+        if _covered(masking.masked_spans, g.start, g.end) >= g.end - g.start and not hidden:
             continue
-        if any(o["start"] <= g.start and g.end <= o["end"] for o in out):
+        # (A name masked only under another kind's token -- "…, Islamabad Rubina
+        # Bibi" inside an address -- is marked as a name too: the screen shows the
+        # reviewer which token replaced it, and a person keeps one identity.)
+        if any(o.start <= g.start and g.end <= o.end for o in out + marked):
             continue                                         # inside a span already marked
-        mark = {"start": g.start, "end": g.end, "decision": _KIND_DECISION[g.kind]}
-        if g.kind == "NAME":
-            # The person's fullest mention that is masked already, or that this
-            # reviewer marked earlier in the same pass (the screen offers both).
-            marked_here = [(o["start"], o["end"]) for o in out if o["decision"] == pii_mask.NAME_DECISION]
-            same = [x for x in doc.spans if x.kind == "NAME" and x.entity == g.entity and x is not g
-                    and not _overlaps(x.start, x.end, g.start, g.end) and x.end - x.start >= g.end - g.start
-                    and (_covered(masking.masked_spans, x.start, x.end) == x.end - x.start
-                         or (x.start, x.end) in marked_here)]
-            if same:
-                target = max(same, key=lambda x: x.end - x.start)
-                mark.update(decision=pii_mask.SAME_PERSON, target_start=target.start, target_end=target.end)
-        out.append(mark)
+        out.append(g)
     return out
+
+
+def _identity(doc: Doc, masking, marks: list[Span], covered: list[tuple[int, int]]) -> list[dict]:
+    """`review` mode: the reviewer's IDENTITY decisions for EVERY labelled
+    person -- not only flagged or missed mentions (ANALYZER_PII_IDENTITY.md).
+    Per person: one representative mention, decided "different person" (a
+    person of their own, whatever their spelling), and every other mention
+    linked "same person as" it. Gold entity ids choose the decisions; the
+    decisions themselves are exactly what the screen and API can express."""
+    out: list[dict] = []
+    taken: set[tuple[int, int]] = set()
+    for entity in sorted({g.entity for g in doc.spans if g.kind == "NAME"}):
+        mentions = [t for t in _person_tokens(masking, doc.spans, entity)
+                    if t not in taken and not any(x <= t[0] and t[1] <= y for x, y in covered)]
+        mentions += [(g.start, g.end) for g in marks if g.kind == "NAME" and g.entity == entity
+                     and (g.start, g.end) not in taken]
+        target = _representative(mentions)
+        if target is None:
+            continue
+        out.append({"start": target[0], "end": target[1], "decision": pii_mask.DIFFERENT_PERSON})
+        taken.add(target)
+        for t in sorted(set(mentions)):
+            if t != target and not _overlaps(t[0], t[1], *target):
+                out.append({"start": t[0], "end": t[1], "decision": pii_mask.SAME_PERSON,
+                            "target_start": target[0], "target_end": target[1]})
+                taken.add(t)
+    return out
+
+
+def _review(doc: Doc, flags: list[dict], marks: list[Span], masking, reconcile: bool = False) -> list[dict]:
+    """The reviewer's WHOLE set of decisions against the current masking, made
+    afresh each round as a person revisiting the screen would: every flagged
+    span decided, every marked detail masked, and each person's mentions
+    linked to ONE representative masked name -- never to each other."""
+    entities = {g.entity for g in doc.spans if g.kind == "NAME"}
+    # A masked name the reviewer's own address/number mark is about to cover
+    # this round will not stay a masked name: it is never chosen as a target.
+    covered = [(g.start, g.end) for g in marks if g.kind != "NAME"]
+    rep = {e: _representative([t for t in _person_tokens(masking, doc.spans, e)
+                               if not any(x <= t[0] and t[1] <= y for x, y in covered)]
+                              + [(g.start, g.end) for g in marks if g.kind == "NAME" and g.entity == e])
+           for e in entities}
+    decisions = _oracle(flags, doc.spans, masking, rep)
+    for g in marks:
+        mark = {"start": g.start, "end": g.end, "decision": _KIND_DECISION[g.kind]}
+        target = rep.get(g.entity) if g.kind == "NAME" else None
+        if target is not None and not _overlaps(g.start, g.end, *target):
+            mark.update(decision=pii_mask.SAME_PERSON, target_start=target[0], target_end=target[1])
+        decisions = [c for c in decisions if not (c["start"] < g.end and g.start < c["end"])] + [mark]
+    if reconcile:
+        for c in _identity(doc, masking, marks, covered):
+            decisions = [d for d in decisions if not (d["start"] < c["end"] and c["start"] < d["end"])] + [c]
+    return sorted(decisions, key=lambda c: (c["start"], c["end"]))
+
+
+def _simulate(doc: Doc, rows: list[dict], send_ids: set[str], personal: list[Span], first, mode: str,
+              extra: list[dict] | None):
+    """The simulated reviewer's rounds. Flag-only (`manual`) decides flagged
+    spans; `review` also marks every miss and reconciles every identity. It
+    runs until its decisions no longer change -- never stopping merely because
+    nothing new was flagged or missed. Returns (masking, decisions, marked)."""
+    masking, decisions, marked = first, [], 0
+    flags: list[dict] = []
+    marks: list[Span] = []
+    for _ in range(6):
+        fresh = [u for u in masking.uncertain
+                 if not any(f["start"] == u["start"] and f["end"] == u["end"] for f in flags)]
+        added = _missed(personal, masking, marks) if mode == "review" else []
+        flags += fresh
+        marks += added
+        marked += len(added)
+        new = _review(doc, flags, marks, masking, reconcile=mode == "review")
+        if new == decisions and not fresh and not added:
+            break
+        decisions = new
+        masking = pii_mask.prepare(doc.text, rows, send_ids, decisions, list(extra or []))
+    return masking, decisions, marked
+
+
+def simulated_decisions(doc: Doc, mode: str = "review", extra: list[dict] | None = None) -> list[dict]:
+    """The decisions the simulated reviewer submits for `doc` -- for parity
+    tests against the real API's validation."""
+    rows = _rows(doc.text)
+    send_ids = {r["sentence_id"] for r in rows if not r.get("empty_value")
+                and r["sentence_id"] not in injection.scan(doc.text, rows).sentence_ids}
+    personal = [g for g in doc.spans if g.kind in PERSONAL
+                and any(r["start"] <= g.start and g.end <= r["end"] for r in rows if r["sentence_id"] in send_ids)]
+    first = pii_mask.prepare(doc.text, rows, send_ids, None, list(extra or []))
+    return _simulate(doc, rows, send_ids, personal, first, mode, extra)[1]
+
+
+def consistent_tokens(tokens: dict[str, set[str]]) -> bool:
+    """One token per person, and no token shared by two people."""
+    return all(len(v) == 1 for v in tokens.values()) and len(set().union(*tokens.values()) if tokens else set()) == len(tokens)
 
 
 def _hygiene(request: str, doc: Doc) -> bool:
@@ -306,7 +419,7 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
     first = pii_mask.prepare(doc.text, rows, send_ids, None, list(extra or []))
     uncertain = list(first.uncertain)
     masking = first
-    marked = 0
+    marked, decisions = 0, []
     if mode in ("manual", "review") and (uncertain or mode == "review"):
         # The reviewer sees the re-masked document again: a flag that appears
         # only after their decisions is decided too (at most three rounds).
@@ -316,20 +429,7 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
         # (marked details are masked, never sent, one token per person), not
         # whether a real lawyer would catch them -- `reviewer_marked` reports
         # how much was left to the lawyer.
-        decisions: list[dict] = []
-        for _ in range(3):
-            fresh = [u for u in masking.uncertain
-                     if not any(c["start"] == u["start"] and c["end"] == u["end"] for c in decisions)]
-            added: list[dict] = []
-            if mode == "review":
-                added = _missed(doc, personal, masking, decisions)
-            if not fresh and not added:
-                break
-            decisions += _oracle(fresh, doc.spans)
-            for a in added:
-                decisions = [c for c in decisions if not (c["start"] < a["end"] and a["start"] < c["end"])] + [a]
-            marked += len(added)
-            masking = pii_mask.prepare(doc.text, rows, send_ids, decisions, list(extra or []))
+        masking, decisions, marked = _simulate(doc, rows, send_ids, personal, first, mode, extra)
     reasons = sorted({u["reason"] for u in masking.uncertain})
     guard: list[str] = []
     request = None
@@ -376,29 +476,35 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
     # reference, not a second token for the person. Any other mention masked
     # under a non-NAME token still counts (and breaks consistency). The
     # pii-eval.1 definition (any covering token) is kept as `_any_token`.
+    # pii-eval.2.1: a party mention (not a place reference) that is NOT fully
+    # masked under one token is an INCOMPLETE reference -- it fails party
+    # consistency instead of silently dropping out of the score.
     addresses = [g for g in doc.spans if g.kind == "ADDRESS"]
     tokens: dict[str, set[str]] = {}
     tokens_any: dict[str, set[str]] = {}
+    incomplete: set[str] = set()
     for g in personal:
         if g.kind == "NAME" and g.entity in doc.parties:
-            for a, b, kind, tok in masking.masked_spans:
-                if a <= g.start and g.end <= b:
-                    tokens_any.setdefault(g.entity, set()).add(tok)
-                    in_address = any(x.start <= g.start and g.end <= x.end for x in addresses)
-                    if kind == "NAME" or not in_address:
-                        tokens.setdefault(g.entity, set()).add(tok)
+            in_address = any(x.start <= g.start and g.end <= x.end for x in addresses)
+            covering = [(kind, tok) for a, b, kind, tok in masking.masked_spans if a <= g.start and g.end <= b]
+            if not covering and not in_address:
+                incomplete.add(g.entity)
+            for kind, tok in covering:
+                tokens_any.setdefault(g.entity, set()).add(tok)
+                if kind == "NAME" or not in_address:
+                    tokens.setdefault(g.entity, set()).add(tok)
 
-    def _consistent(t: dict[str, set[str]]) -> bool:
-        return all(len(v) == 1 for v in t.values()) and len(set().union(*t.values()) if t else set()) == len(t)
-
-    consistent, consistent_any = _consistent(tokens), _consistent(tokens_any)
+    consistent = consistent_tokens(tokens) and not incomplete
+    consistent_any = consistent_tokens(tokens_any)
     deadlines = [g for g in gold if g.kind == "DEADLINE"]
     preserved = (all(_norm(doc.text[g.start:g.end]) in _norm(request) for g in deadlines)
                  if request is not None else None)
     return {"id": doc.id, "mode": mode, "blocked": blocked, "sent": request is not None, "block_reasons": reasons,
             "uncertain": len(uncertain), "false_candidates": len(false_candidates), "reviewer_marked": marked,
             "unnecessary_block": unnecessary_block, "spans": spans_out,
-            "party_consistent": consistent if tokens and request is not None else None,
+            "party_consistent": consistent if (tokens or incomplete) and request is not None else None,
+            "identity_decisions": sum(c["decision"] in (pii_mask.SAME_PERSON, pii_mask.DIFFERENT_PERSON)
+                                      for c in decisions),
             "party_consistent_any_token": consistent_any if tokens_any and request is not None else None,
             "deadlines_preserved": preserved, "deadline_count": len(deadlines),
             "hygiene": _hygiene(request, doc) if request is not None else None}
@@ -437,6 +543,7 @@ def summarise(results: list[dict]) -> dict:
         "leaks": sum(s["leak"] for s in spans),
         "unnecessary_blocks": sum(r["unnecessary_block"] for r in results),
         "reviewer_marked": sum(r.get("reviewer_marked", 0) for r in results),
+        "identity_decisions": sum(r.get("identity_decisions", 0) for r in results),
         "unnecessary_block_rate": _ratio(sum(r["unnecessary_block"] for r in results), len(results)),
         "uncertain_spans": cands,
         "false_candidate_rate": _ratio(sum(r["false_candidates"] for r in results), cands),

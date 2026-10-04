@@ -197,7 +197,7 @@ test("the server's notice is shown and nothing claims all personal data was remo
 });
 
 test("every waiting reason opens the review in the report and the drafting review", () => {
-    assert.deepEqual([...PII_REVIEW_REASONS].sort(), ["pii_confirmation_required", "pii_review_outdated", "pii_review_required"]);
+    assert.deepEqual([...PII_REVIEW_REASONS].sort(), ["pii_confirmation_required", "pii_leak_guard", "pii_review_outdated", "pii_review_required"]);
     const live = readFileSync(new URL("../src/components/analyzer/AnalyzerLive.jsx", import.meta.url), "utf8");
     const draft = readFileSync(new URL("../src/components/analyzer/DraftingReview.jsx", import.meta.url), "utf8");
     assert.match(live, /PII_REVIEW_REASONS\.has\(report\.ai\?\.reason\) && \(\s*<PiiConfirmation/);
@@ -231,5 +231,38 @@ test("a marked missed name can be linked to a person already masked", async () =
     const [, sent] = api.__calls("previewPii")[0].args;
     const link = sent.decisions.find(d => d.decision === "same_person");
     assert.deepEqual([link.start, link.end, link.target_start, link.target_end], [S0.length + 1, S0.length + 5, kStart, kEnd]);
+    await unmount();
+});
+
+test("a conflict offers no decision: only changing the mark or link can lift it", async () => {
+    const [start, end] = at("Lahore");
+    const conflict = { id: `${start}-${end}`, sentence_id: "s0", kind: "CONFLICT", reason: "protected_conflict", start, end };
+    const { container, unmount } = await screen({ ...VIEW, candidates: [conflict] });
+    const row = $(container, `[data-pii-row="${conflict.id}"]`);
+    assert.ok(row.querySelector('[data-pii-conflict="protected_conflict"]'));
+    assert.equal(row.querySelectorAll("[data-pii-decision]").length, 0);
+    assert.match(row.textContent, /deadline, date or amount/);
+    assert.equal($(container, "[data-pii-submit]").disabled, true);
+    await unmount();
+});
+
+test("every masked person mention can be decided in the People panel, flagged or not", async () => {
+    const TXT2 = "Landlord: Usman Farooq.\nTenant: Usman Farooq.";
+    const a1 = [10, 22], a2 = [32, 44];
+    const people = [{ start: a1[0], end: a1[1], token: "[NAME_1]" }, { start: a2[0], end: a2[1], token: "[NAME_1]" }];
+    const view = { ...VIEW, candidates: [], people, sentences: [{ sentence_id: "s0", start: 0, end: 23, masked: "Landlord: [NAME_1]." },
+                                                               { sentence_id: "s1", start: 24, end: 45, masked: "Tenant: [NAME_1]." }] };
+    api.__respond("getPiiConfirmation", { data: view, error: null, status: 200 });
+    api.__respond("getAnalysisText", { data: { text: TXT2, clauses: [], sentences: [], text_version: {} }, error: null, status: 200 });
+    api.__respond("previewPii", (_r, { decisions }) => ({ data: { ...READY, people, decisions_made: decisions }, error: null, status: 200 }));
+    const { container, unmount } = await mount({});
+    const person = $(container, '[data-pii-person="[NAME_1]"]');
+    assert.equal(person.querySelectorAll("[data-pii-mention]").length, 2);   // both mentions, neither flagged
+    const pick = $(container, `[data-pii-identity="${a2[0]}-${a2[1]}"]`);
+    await act(async () => { pick.value = "different"; pick.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
+    await settle();
+    await click($(container, "[data-pii-preview]"));
+    const [, sent] = api.__calls("previewPii")[0].args;
+    assert.deepEqual(sent.decisions, [{ start: a2[0], end: a2[1], decision: "different_person" }]);
     await unmount();
 });

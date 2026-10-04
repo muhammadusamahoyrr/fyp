@@ -218,7 +218,8 @@ async def run_ai_report(lease: Lease) -> str:
         try:
             report = await ai_report.generate(text, sentences, clause_ids, graph_rows=graph_rows,
                                               transport=TRANSPORT, suspect=scan.sentence_ids,
-                                              masking=masking, messages=messages, expected_sha256=digest)
+                                              masking=masking, messages=messages, expected_sha256=digest,
+                                              pre_send=pii_confirmation.pre_send_check(run, version, digest))
             error = None
         except ai_client.AIError as exc:
             report, error = None, exc.code

@@ -264,19 +264,23 @@ def test_a_marked_detail_is_masked_wherever_it_appears_with_one_token():
     assert "Bhalwal" not in body and body.count("[ADDRESS_1]") == 2 and "[ADDRESS_2]" not in body
 
 
-def test_a_link_into_part_of_a_longer_masked_name_takes_that_names_token():
-    # An honorific the masker keeps in the name ("Syed", "Chaudhry"): the link
-    # target may be only part of the masked name, and must still reach its token.
+def test_a_link_must_target_an_exact_masked_name_or_the_request_is_blocked():
+    # pii-mask.3: the target of "same person as" is EXACTLY a masked name. A
+    # target that is only part of one ("Ali Raza" inside the masked "Syed Ali
+    # Raza") is not guessed into a token: it blocks (`link_invalid`).
     text = 'Made between Syed Ali Raza (the "Landlord") and Mrs. Hina Batool (the "Tenant").\nRaza will repair the roof.\n'
     m, rows = masked(text)
+    ids = {r["sentence_id"] for r in rows}
     raza = next(u for u in m.uncertain if text[u["start"]:u["end"]] == "Raza")
     inner = text.index("Ali Raza")
-    linked = pii_mask.prepare(text, rows, {r["sentence_id"] for r in rows},
-                              [{"start": raza["start"], "end": raza["end"], "decision": pii_mask.SAME_PERSON,
-                                "target_start": inner, "target_end": inner + len("Ali Raza")}])
-    body = sent(linked)
-    assert not linked.uncertain and body.count("[NAME_1]") == 2 and "Raza" not in body
-    assert "[NAME_3]" not in body
+    partial = pii_mask.prepare(text, rows, ids, [{"start": raza["start"], "end": raza["end"], "decision": pii_mask.SAME_PERSON,
+                                                  "target_start": inner, "target_end": inner + len("Ali Raza")}])
+    assert "link_invalid" in reasons(partial)
+    full = text.index("Syed Ali Raza")
+    exact = pii_mask.prepare(text, rows, ids, [{"start": raza["start"], "end": raza["end"], "decision": pii_mask.SAME_PERSON,
+                                                "target_start": full, "target_end": full + len("Syed Ali Raza")}])
+    body = sent(exact)
+    assert not exact.uncertain and body.count("[NAME_1]") == 2 and "Raza" not in body and "[NAME_3]" not in body
 
 
 def test_a_chain_of_links_reaches_the_same_person():
@@ -292,3 +296,13 @@ def test_a_chain_of_links_reaches_the_same_person():
     body = sent(linked)
     # "Sh." ends a sentence for the segmenter, so that mention spans two: every piece is [NAME_1].
     assert body.count("[NAME_1]") >= 3 and "[NAME_2]" not in body and "Ali" not in body
+
+
+def test_a_joint_designation_defines_no_single_party():
+    # Regression: the word boundaries of this check were stored as backspace
+    # characters (79c8a27), so "jointly"/"both" never matched.
+    from app.services.analyzer import pii_layers
+    for joint in ("jointly", "both of them", "collectively"):
+        text = f'Kashif Raza (the "Landlord", {joint}) lets the house.'
+        assert pii_layers.party_roles(text, [(0, 11)]) == {}, joint
+    assert pii_layers.party_roles('Kashif Raza (the "Landlord") lets the house.', [(0, 11)]) == {"kashif raza": "landlord"}

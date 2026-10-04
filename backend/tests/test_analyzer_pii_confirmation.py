@@ -27,7 +27,7 @@ from app.core.config import settings
 from app.db.collections import get_analysis_pii_confirmations_col, get_analysis_runs_col, get_analysis_sources_col
 from app.services.analyzer import ai_report, ai_stage, deletion, pii_confirmation, pii_mask, receipts, runner
 from app.services.analyzer.hypotheses import review
-from tests._analyzer_support import http  # noqa: F401 -- fixture
+from tests._analyzer_support import http, without_ids  # noqa: F401 -- fixture
 from tests.test_analyzer_ai_config import GOOD
 from tests.test_analyzer_pii_mask import PII_PAGES, UNSURE_PAGES, line_of, _obligation, _report, to_ai_report
 from tests.test_analyzer_receipts import provider
@@ -325,16 +325,18 @@ async def test_the_drafting_question_review_waits_for_the_lawyer_too(http, mongo
 
 # ── the approval contract, proved against the HTTP body on the wire ─────────
 
-def raw_provider(bodies):
-    """A fake provider that keeps the RAW request bytes it received."""
+def raw_provider(bodies, build=None):
+    """A fake provider that keeps the RAW request bytes it received. `build`
+    makes the answer from the prompt (default: an obligation for [NAME_1])."""
     import httpx
 
     async def respond(request):
         bodies.append(request.content)
         msgs = json.loads(request.content)["messages"]
+        answer = (build or answer_with_token)(msgs[1]["content"])
         return httpx.Response(200, json={"model": json.loads(request.content)["model"], "id": "req-1",
                                          "usage": {"total_tokens": 9}, "choices": [{"finish_reason": "stop",
-                                         "message": {"content": json.dumps(answer_with_token(msgs[1]["content"]))}}]})
+                                         "message": {"content": json.dumps(answer)}}]})
     return httpx.MockTransport(respond)
 
 
@@ -353,7 +355,7 @@ async def test_the_wire_request_has_the_attested_fingerprint(clean):
     assert receipts.request_digest(on_wire) == p["request_sha256"]         # its fingerprint
     receipt = (await client.get(f"{BASE}/{rid}/processing-receipt")).json()
     assert receipt["attempts"][0]["request_sha256"] == p["request_sha256"]
-    dumped = json.dumps(receipt, default=str)
+    dumped = without_ids(json.dumps(receipt, default=str))
     assert "Kashif" not in dumped and "Hira" not in dumped and "35202" not in dumped   # no names in the receipt
 
 
@@ -457,3 +459,34 @@ async def test_a_missed_mention_can_be_linked_to_another_mark_in_the_same_review
     assert (await submit(client, rid, view, decisions)).status_code == 201
     assert await runner.process_one("w1") == "done"
     assert received[0] == p["request"]
+
+
+# ── pii-mask.3: deadlines exact, ambiguity fails closed ─────────────────────
+
+async def test_deadlines_reach_the_provider_exactly_as_written(clean):
+    client, _, rid, monkeypatch, _ = clean
+    bodies = []
+    monkeypatch.setattr(ai_stage, "TRANSPORT", raw_provider(bodies))
+    view = await view_of(client, rid)
+    assert (await submit(client, rid, view, [])).status_code == 201
+    assert await runner.process_one("w1") == "done"
+    on_wire = json.loads(bodies[0])["messages"][1]["content"]
+    for deadline in ("eleven (11) months", "Rs. 85,000", "3 May 2026"):
+        assert deadline in on_wire, deadline
+
+
+async def test_a_mark_inside_a_deadline_is_ambiguous_and_nothing_is_sent(clean):
+    client, _, rid, _, received = clean
+    view = await view_of(client, rid)
+    text = (await client.get(f"{BASE}/{rid}/text")).json()["text"]
+    start = text.index("85,000")
+    mark = [{"start": start, "end": start + len("85,000"), "decision": "account"}]
+    p = (await preview(client, rid, view, mark)).json()
+    assert p["ready"] is False and p["request"] is None
+    assert [c["reason"] for c in p["candidates"]] == ["protected_conflict"]
+    r = await submit(client, rid, view, mark)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "unresolved_candidates"
+    assert await get_analysis_pii_confirmations_col().count_documents({"run_id": rid}) == 0
+    assert received == []
+    run = await get_analysis_runs_col().find_one({"_id": rid})
+    assert run["status"] == "done" and stage_reason(run) == pii_confirmation.REVIEW_REQUIRED

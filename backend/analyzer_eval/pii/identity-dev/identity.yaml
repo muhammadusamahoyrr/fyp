@@ -1,0 +1,93 @@
+dataset: identity-dev
+label_review: developer_only
+documents:
+- id: id-01-two-spellings-one-person
+  document_type: letter
+  features: [aliases, repeated_names, deadlines]
+  parties: [p1]
+  text: |
+    Mr. [[NAME:p1|Usman Farooq]] signs this document.
+    1. The same individual uses the professional name [[NAME:p1|Bilal Qureshi]].
+    [[NAME:p1|Bilal Qureshi]] will deliver the drawings [[DEADLINE:d1|within 14 days]].
+- id: id-02-same-name-two-parties
+  document_type: tenancy
+  features: [repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    Landlord: [[NAME:p1|Usman Farooq]].
+    Tenant: [[NAME:p2|Usman Farooq]].
+    Rent is Rs. 45,000 payable by [[NAME:p2|Usman Farooq]] [[DEADLINE:d1|within 30 days]] of each invoice.
+- id: id-03-three-parties-one-surname
+  document_type: tenancy
+  features: [repeated_names, aliases, untitled_names]
+  parties: [p1, p2, p3]
+  text: |
+    Made between [[NAME:p1|Kashif Raza]] (the "Landlord"), [[NAME:p2|Imran Raza]] (the "Tenant") and [[NAME:p3|Hina Raza]] (the "Guarantor").
+    [[NAME:p2|Imran Raza]] pays rent to [[NAME:p1|Kashif Raza]]. [[NAME:p3|Hina Raza]] guarantees it.
+- id: id-04-several-aliases
+  document_type: nda
+  features: [aliases, repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    This agreement is between [[NAME:p1|Muhammad Aslam Khan]] and [[NAME:p2|Sobia Nawaz]].
+    [[NAME:p1|M. A. Khan]] discloses the designs. [[NAME:p1|Aslam Khan]] keeps the originals.
+    [[NAME:p2|Sobia Nawaz]] keeps them secret for [[DEADLINE:d1|two years]].
+- id: id-05-same-first-names
+  document_type: employment
+  features: [repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    Employer: [[NAME:p1|Sana Javed]]. Employee: [[NAME:p2|Sana Mir]].
+    [[NAME:p1|Sana Javed]] pays [[NAME:p2|Sana Mir]] a monthly salary.
+- id: id-06-name-in-address
+  document_type: tenancy
+  features: [overlap, repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    Made between [[NAME:p1|Tariq Mehmood]] (the "Seller") and [[NAME:p2|Asma Noreen]] (the "Buyer").
+    The shop is at [[ADDRESS:a1|House of [[NAME:p1|Tariq Mehmood]], Street 4, Lahore]].
+    [[NAME:p2|Asma Noreen]] pays [[DEADLINE:d1|by 15 June 2026]].
+- id: id-07-honorifics
+  document_type: tenancy
+  features: [aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    Syed [[NAME:p1|Ali Raza]] (the "Landlord") and Mrs. [[NAME:p2|Hina Batool]] (the "Tenant").
+    The Landlord, [[NAME:p1|Ali Raza]], keeps the keys. [[NAME:p1|Raza]] repairs the roof.
+- id: id-08-alias-missed
+  document_type: nda
+  features: [aliases, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Made between [[NAME:p1|Rehan Akhtar]] (the "Discloser") and [[NAME:p2|Nida Rauf]] (the "Recipient").
+    The designs belong to [[NAME:p1|Rehan]] alone. [[NAME:p2|Nida]] must not copy them.
+- id: id-09-numbers-and-dates
+  document_type: tenancy
+  features: [repeated_names, deadlines]
+  parties: [p1]
+  text: |
+    Tenant: [[NAME:p1|Hamza Tariq]], mobile [[PHONE:t1|0300-1234567]].
+    Emergency contact [[PHONE:t1|0300 1234567]] [[DEADLINE:d1|before 1 June 2026]].
+    [[NAME:p1|Hamza Tariq]] pays Rs. 1,234,567 [[DEADLINE:d2|within 30 days]].
+- id: id-10-temporal-name
+  document_type: tenancy
+  features: [repeated_names, deadlines, roman_urdu]
+  parties: [p1, p2]
+  text: |
+    Made between [[NAME:p1|Juma Khan]] (the "Landlord") and [[NAME:p2|Sana Riaz]] (the "Tenant").
+    Rent is due [[DEADLINE:d1|every Juma]] before noon. [[NAME:p1|Juma Khan]] issues receipts.
+- id: id-11-same-name-witnesses
+  document_type: letter
+  features: [repeated_names, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Witness one: [[NAME:p1|Zubair Ahmed]].
+    Witness two: [[NAME:p2|Zubair Ahmed]].
+    Both witnesses sign before the notary.
+- id: id-12-glued-name
+  document_type: tenancy
+  features: [overlap, roman_urdu, deadlines]
+  parties: [p1]
+  text: |
+    Mera ghar [[ADDRESS:a1|House 12, Street 5, Multan]] [[NAME:p1|Saima Begum]] ko diya gaya.
+    [[NAME:p1|Saima Begum]] kiraya [[DEADLINE:d1|within 30 days]] dein gi.

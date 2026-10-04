@@ -70,6 +70,7 @@ def _settings():
 #: The last check before the HTTP call refused the request (nothing was sent).
 REQUEST_CHANGED = "request_changed"
 LEAK_GUARD = "pii_leak_guard"
+APPROVAL_CHANGED = "approval_changed"
 
 
 def _final_guard(messages: list[dict], expected_sha256: str) -> None:
@@ -88,7 +89,8 @@ def _final_guard(messages: list[dict], expected_sha256: str) -> None:
 
 async def complete(messages: list[dict], *, max_tokens: int = 4096,
                    transport: httpx.AsyncBaseTransport | None = None,
-                   model: str | None = None, expected_sha256: str | None = None) -> AIResult:
+                   model: str | None = None, expected_sha256: str | None = None,
+                   pre_send=None) -> AIResult:
     """One call to the pinned model. Raises AIError; never falls back.
 
     `model` is for the EVALUATION only (analyzer/evaluation.py), which
@@ -107,6 +109,12 @@ async def complete(messages: list[dict], *, max_tokens: int = 4096,
         pinned = model
     if expected_sha256 is not None:      # the analyzer stages always pass it
         _final_guard(messages, expected_sha256)
+    # The stage's re-check of the approval, the source-text hash and the masking
+    # policy -- read again NOW, after the attempt was recorded. Anything changed:
+    # nothing is sent.
+    if pre_send is not None and not await pre_send():
+        logger.warning("analyzer_ai_call refused code=%s", APPROVAL_CHANGED)
+        raise AIError(APPROVAL_CHANGED)
     body = {"model": pinned, "messages": messages, "temperature": 0,
             "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
     headers = {"Authorization": f"Bearer {settings.groq_api_key}",

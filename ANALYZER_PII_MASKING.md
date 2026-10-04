@@ -374,3 +374,134 @@ After both fixes:
 
 These are development results only. The next gate is a fresh, independent
 pii-eval-4 under rubric 3, scored once.
+
+## `pii-mask.3` — deadlines exact, typed repeats, exact identity links (2026-10-04, UNCOMMITTED, for review)
+
+pii-eval-4 failed on review-mode deadlines (0.971) and party consistency
+(0.868). Neither pii-eval-3 nor pii-eval-4 was opened. Causes were
+established on pii-eval-1 (development) and on new synthetic regression
+fixtures.
+
+### Causes found
+
+**Deadlines** — reproduced with new fixtures (pii-eval-1 alone did not show
+it):
+
+1. **Name-part expansion masked deadline words.** Every standalone word of a
+   masked full name was masked everywhere. A person named "Ramzan Ali" or
+   "Eid Muhammad" turned "the month of Ramzan" and "after Eid" into tokens.
+2. **Address chains grew over the next date or period.** For example,
+   "…, Lahore, 15 June 2026" and "…, Rawalpindi, 11 months lease".
+3. **Number repeats were not the stated cause.** A marked number did not
+   reach "45 days" in the probes, but they found something worse: a
+   reviewer mark shorter than 3 characters was silently dropped, so a
+   confirmed detail stayed visible.
+
+**Party consistency** — reproduced on pii-eval-1, rules-only review mode:
+
+1. **An address chain absorbed the next person's name.** In
+   "…, Islamabad Rubina Bibi ko…", one address "part" may hold 5
+   capitalised words. The party then sat under an ADDRESS token.
+2. **A single-word name the reviewer marked lost to a derived address
+   span.** The mark was dropped, and a link pointing at it was then
+   invalid.
+3. **The simulated reviewer:**
+   - linked mentions to each other (A→B and B→A, also across rounds);
+   - linked to a target only *inside* a masked name;
+   - re-used targets that a later mark covered.
+
+   The old masker quietly turned such links into new tokens.
+4. **Not reproduced:** about 30 further naming patterns (honorifics,
+   initials, transliterations, shared surnames, possessives, word order,
+   case) kept one token. Other causes may remain in the spent sets.
+
+### Policy changes (`pii-mask.3`)
+
+The version string and the policy hash change, so every earlier review
+approval is stale.
+
+- **Protected expressions** (`pii_layers.protected_spans`): dates, periods
+  ("45 days", "eleven (11) months"), amounts ("Rs. 85,000", "85,000/-")
+  and festival/month deadlines ("after Eid", "the month of Ramzan").
+  - A mask that would change one is **not applied**; the span becomes
+    uncertain (`protected_overlap`). Only a reviewer's "not personal"
+    sends it, unchanged.
+  - A reviewer's own mark inside one is a conflict (`protected_conflict`,
+    kind `CONFLICT`). No decision lifts it; only changing the mark does.
+    Fail closed.
+- **Address boundaries:** an address never runs into a later date, period
+  or amount; its end is moved to before it. A capitalised word plus a
+  female name suffix (Bibi, Begum, Khatoon, Bano, Mai) is a person's name,
+  so an address chain is split around it.
+- **Explicit decisions:** a reviewer's mark is placed first, exactly as
+  marked, and is never dropped for being short.
+- **Typed repeats:** a marked or located value is repeated only by typed,
+  canonical identity: digits for numbers, OCR confusables read, a whole
+  word sequence for text. It is repeated only when its canonical form has
+  at least 5 characters. A shorter repeat is uncertain
+  (`repeat_unconfirmed`), never masked blindly.
+- **Firm names:** a name part is not expanded into a firm's name
+  ("Mehmood Traders (Pvt) Ltd").
+- **Identity links:** a "same person" link must target EXACTLY a masked
+  name. A partial target, a non-name, itself or a cycle of links is a
+  conflict (`link_invalid`): blocked, never guessed. Links resolve after
+  every other token, so chains share one token. People are never merged on
+  a shared surname, title, role or approximate spelling: a variant only
+  flags.
+
+### Development diagnostic (pii-eval-1 only; NOT a gate)
+
+Review mode, rules-only and rules + GLiNER:
+- 0 leaks, coverage 1.0, address coverage 1.0;
+- party consistency 1.0, deadlines 1.0;
+- 36/48 sent: 11 blocked by the Urdu policy, 1 by the leak guard.
+
+These are optimistic: the fixes were found on this data. pii-eval-5 is
+NOT created or scored; the next step waits for the owner's review.
+
+## `pii-mask.4` — audit fixes (2026-10-04, UNCOMMITTED, for review)
+
+An audit of the full data path, written test-first in
+`tests/test_analyzer_pii_invariants.py`. The path runs: text →
+detection → lawyer marks and links → masking → preview → approval hashes →
+final guard → provider → receipt.
+
+**Reproduced and fixed**
+
+1. **The policy hash covered `pii_mask.py` only.** Detection and the
+   protected-expression rules live in `pii_layers.py`, so a change there
+   left old approvals valid. The hash now covers both files; the version is
+   `pii-mask.4`, and every earlier approval is stale.
+2. **Deadline wordings outside the pattern list were unprotected**, and a
+   name part that is a temporal word was masked silently. For a person
+   "Juma Khan", "every Juma" became "every [NAME_3]". Fixes:
+   - New protected wordings: end/start/expiry of the quarter, month, year,
+     term or lease; fortnights; weekday deadlines (English and Urdu: Juma,
+     Peer, …); the next working day.
+   - A fail-closed net: a DERIVED mask that is one temporal word (a month,
+     weekday, festival or time unit) is never applied silently. It is held
+     back (`protected_overlap`) for the lawyer, even outside every listed
+     wording.
+3. **Screen and server offsets disagree outside the BMP.** The screen
+   counts UTF-16 units, the server code points; after one emoji every
+   highlight and mark shifts. Such a text is now not reviewable
+   (`unsupported_characters`), so nothing is sent.
+4. **No re-check of the approval just before the HTTP call.** The stage
+   now hands the provider client a re-check that runs immediately before
+   the request. It re-reads the text version's hash, the masking policy
+   hash and the latest approval. Any change raises `approval_changed`, and
+   nothing is sent. This is in addition to the fingerprint and leak checks
+   that already ran there.
+
+**Audited and found to hold already** (pinned by tests):
+- typed repeats of a personal number with one token, dates and amounts kept;
+- a one-word reviewer mark inside an address chain survives;
+- links to a target a later mark covers, or to an address token, block;
+- the approved preview equals the request on the wire, byte for byte;
+- no names in logs, receipts, review records or error responses.
+
+**Not reproduced / remaining hypotheses**: other wording patterns in the
+spent sets cannot be checked without opening them.
+
+pii-eval-5 is scored under the approved rubric 3 gate (`RUBRIC_BY_DATASET`);
+pii-eval-4 is marked spent.
