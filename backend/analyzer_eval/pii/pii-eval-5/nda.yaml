@@ -1,0 +1,234 @@
+dataset: pii-eval-5
+label_review: developer_only
+documents:
+- id: p5-nda-01
+  document_type: nda
+  features: [lookalikes, deadlines, untitled_names, repeated_names]
+  parties: [p1, p2]
+  text: |
+    MUTUAL NON-DISCLOSURE AGREEMENT
+
+    This Mutual Non-Disclosure Agreement is entered into on 12 January 2026 between:
+
+    [[NOT:n1|Indus Agritech Solutions (Private) Limited]], a company incorporated in Pakistan having its office at [[NOT:n2|Arfa Software Technology Park]], [[NOT:n3|Lahore]], acting through its Chief Executive [[NAME:p1|Bilal Ahmed Chaudhry]] ("Indus"); and
+
+    [[NOT:n4|Kohistan Cold Chain (Pvt) Ltd]], having its registered office in [[NOT:n5|Hattar Industrial Estate]], acting through its Director [[NAME:p2|Mariam Khattak]] ("Kohistan").
+
+    1. Purpose. The parties wish to evaluate a joint venture called "[[NOT:n6|Project Sabz Tokri]]" for cold storage of produce in [[NOT:n7|Haripur]].
+    2. Confidential Information includes business plans, customer lists, pricing and the technical design of [[NOT:n6|Project Sabz Tokri]].
+    3. Each party shall keep Confidential Information secret [[DEADLINE:d1|for a period of three (3) years from the date of disclosure]].
+    4. On written request, the receiving party shall return or destroy all Confidential Information [[DEADLINE:d2|within ten (10) business days]].
+    5. This Agreement terminates automatically if no definitive agreement is signed [[DEADLINE:d3|by 30 June 2026]].
+    6. Governing law: laws of Pakistan; courts at [[NOT:n3|Lahore]] shall have exclusive jurisdiction.
+
+    For [[NOT:n1|Indus Agritech Solutions (Private) Limited]]
+    [[NAME:p1|Bilal Ahmed Chaudhry]], CEO
+
+    For [[NOT:n4|Kohistan Cold Chain (Pvt) Ltd]]
+    [[NAME:p2|Mariam Khattak]], Director
+
+    Witness: [[NAME:p3|Sidra Latif]]
+- id: p5-nda-02
+  document_type: nda
+  features: [overlap, aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY AND NON-DISCLOSURE AGREEMENT (INDEPENDENT CONSULTANT)
+
+    Between [[NOT:n1|Shalimar Digital Health Ltd]] ("Company"), represented by Dr. [[NAME:p2|Huma Nadeem]], Head of Product, and
+
+    Engr. [[NAME:p1|Faisal Mukhtar]] son of [[NAME:p3|Mukhtar Ahmad]], CNIC [[CNIC:c1|35202-5552019-5]], residing at [[ADDRESS:a1|House of [[NAME:p3|Mukhtar Ahmad]], Street 4, Mohallah Shadbagh, Lahore]] ("Consultant").
+
+    Background: Mr. [[NAME:p1|Mukhtar]] will review the "[[NOT:n2|Sehat Saathi]]" mobile application for the Company.
+
+    1. The Consultant will not disclose any patient data, source code or business information of the Company.
+    2. The obligations survive [[DEADLINE:d1|for five (5) years after the end of the engagement]].
+    3. [[NAME:p1|Faisal]] shall report any accidental disclosure [[DEADLINE:d2|within 24 hours of becoming aware of it]].
+    4. All materials shall be returned to Dr. [[NAME:p2|Nadeem]] [[DEADLINE:d3|within seven days of termination]].
+    5. Notices to the Consultant: [[EMAIL:e1|faisal.mukhtar.eng@example.com]], [[PHONE:t1|0323-5557402]].
+
+    Signed:
+    [[NAME:p1|Faisal Mukhtar]]                [[NAME:p2|Huma Nadeem]]
+    Consultant                    for [[NOT:n1|Shalimar Digital Health Ltd]]
+- id: p5-nda-03
+  document_type: nda
+  features: [table, deadlines, untitled_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NDA - KEY TERMS
+
+    Disclosing party: [[NOT:n1|Ravi River Textiles Ltd]] (signatory: [[NAME:p1|Omer Saleem]])
+    Receiving party: [[NOT:n2|Chenab Fabric Testing Lab]] (signatory: [[NAME:p2|Nazia Rauf]])
+    Purpose: testing of fabric samples for the "[[NOT:n3|Winter Lawn 2027]]" collection
+    Confidentiality period: [[DEADLINE:d1|2 years from signing]]
+    Return of samples: [[DEADLINE:d2|within 14 days of the test report]]
+
+    Authorised recipients at the receiving party:
+
+    | Name | Designation | Mobile | Email |
+    |---|---|---|---|
+    | [[NAME:p3|Khurram Shahzad]] | Lab Manager | [[PHONE:t1|0300-5553871]] | [[EMAIL:e1|khurram.s@example.org]] |
+    | [[NAME:p4|Amna Tariq]] | Chemist | [[PHONE:t2|0334-5550296]] | [[EMAIL:e2|amna.tariq@example.org]] |
+    | [[NAME:p5|Hafeez Ullah]] | Technician | [[PHONE:t3|0311-5558160]] | - |
+
+    No other person may access the samples without [[NAME:p1|Omer Saleem]]'s written approval.
+- id: p5-nda-04
+  document_type: nda
+  features: [urdu_script, repeated_names, deadlines, untitled_names, lookalikes]
+  parties: [p1]
+  text: |
+    رازداری کا حلف نامہ
+    CONFIDENTIALITY UNDERTAKING
+
+    میں [[NAME:p1|ثمینہ رشید]] دختر [[NAME:p2|رشید احمد]]، شناختی کارڈ نمبر [[CNIC:c1|37101-5553094-6]]، ساکن [[ADDRESS:a1|مکان نمبر 44، گلی نمبر 2، ڈھوک کشمیریاں، راولپنڈی]]، حلفاً اقرار کرتی ہوں کہ [[NOT:n1|پوٹھوہار مائیکروفنانس بینک]] کے صارفین کی معلومات کسی کو نہیں بتاؤں گی۔
+
+    I, [[NAME:p1|Samina Rasheed]], undertake that I will keep confidential all customer information of [[NOT:n2|Pothohar Microfinance Bank]], during my employment and [[DEADLINE:d1|for three years after it ends]], and will return my access card [[DEADLINE:d2|on my last working day]].
+
+    دستخط: [[NAME:p1|ثمینہ رشید]]
+    Mobile: [[PHONE:t1|0335-5552417]]
+- id: p5-nda-05
+  document_type: nda
+  features: [ocr_errors, repeated_names, deadlines, lookalikes, untitled_names, aliases]
+  parties: [p1, p2]
+  text: |
+    NON-D1SCLOSURE AGREEMENT
+    (copy obtained from scanner, some text unclear)
+
+    This NDA is between [[NOT:n1|Zarghun Minerals (Pvt.) Ltd]], [[NOT:n2|Quetta]], through [[NAME:p1|Abdul Wahid Kakar]], CNlC [[CNIC:c1|54400-555O811-9]], and [[NAME:p2|Naveed Baloch]], geo1ogist, CN1C [[CNIC:c2|5440l-5552270-l]], r/o [[ADDRESS:a1|H. No. 1O, Jinnah
+    Town, Quetta]], Ce1l [[PHONE:t1|0333-55578 40]].
+
+    2. [[NAME:p2|Naveed Ba1och]] sha1l not disc1ose survey data of the [[NOT:n3|Zarghun Block-II]] site.
+    3. Obligation continues for [[DEADLINE:d1|4 (four) years frorn date of signing]].
+    4. Breach to be notified [[DEADLINE:d2|with in 48 hours]].
+
+    [[NAME:p1|A. Wahid Kakar]]                [[NAME:p2|Naveed Baloch]]
+- id: p5-nda-06
+  document_type: nda
+  features: [aliases, repeated_names, deadlines, lookalikes, overlap]
+  parties: [p1, p2]
+  text: |
+    NON-DISCLOSURE AGREEMENT
+
+    THIS AGREEMENT is made between Prof. Dr. [[NAME:p1|Shazia Parveen Malik]] of [[ADDRESS:a1|Flat 9, Faculty Residences, University Road, Bahawalpur]] (the "Researcher") and [[NAME:p2|Muhammad Talha Siddiqui]] trading as [[NOT:n1|Siddiqui Data Labs]], of [[ADDRESS:a2|Office 2, First Floor, above [[NAME:p3|Saeed Akhtar]] Medical Store, Circular Road, Bahawalpur]] (the "Recipient").
+
+    1. Dr. [[NAME:p1|Malik]] will share survey data collected for the study "[[NOT:n2|Cholistan Water Access Survey]]".
+    2. The said [[NAME:p2|Talha]] shall use the data only to build dashboards for the Researcher.
+    3. [[NAME:p2|Siddiqui]] shall delete all copies [[DEADLINE:d1|within 30 days of delivering the dashboards]] and confirm deletion in writing.
+    4. Neither [[NAME:p2|Muhammad Talha Siddiqui]] nor [[NOT:n1|Siddiqui Data Labs]] shall publish any part of the data.
+    5. This Agreement remains in force [[DEADLINE:d2|until 31 December 2027]].
+
+    Prof. Dr. [[NAME:p1|Shazia P. Malik]]
+    [[NAME:p2|M. Talha Siddiqui]]
+- id: p5-nda-07
+  document_type: nda
+  features: [roman_urdu, untitled_names, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    RAZDARI KA IQRARNAMA
+
+    Main [[NAME:p2|Tanveer Hussain]] walad [[NAME:p3|Manzoor Hussain]], karigar, sakin [[ADDRESS:a1|Mohallah Kumharanwala, Gali No. 5, Wazirabad]], shanakhti card [[CNIC:c1|34104-5559982-3]], iqrar karta hoon ke Ustad [[NAME:p1|Rafiq]] ki factory mein chhuriyan banane ka jo tareeqa mujhe sikhaya gaya hai woh kisi aur karkhane ko nahi bataoon ga.
+
+    1. Yeh pabandi kaam chhorne ke [[DEADLINE:d1|do saal baad tak]] rahegi.
+    2. Agar main ne raaz bataya to [[NAME:p1|Rafiq]] sahib ko Rs. 500,000 harjana dene ka paband hoon ga.
+    3. Kaam chhorne par saare design aur sanche [[DEADLINE:d2|teen din ke andar]] wapas karoon ga.
+
+    Dastakhat [[NAME:p2|Tanveer]]
+    Malik: [[NAME:p1|Muhammad Rafiq]], [[PHONE:t1|0306-5558845]]
+    Gawah: [[NAME:p4|Shaukat Ali]]
+- id: p5-nda-08
+  document_type: nda
+  features: [repeated_names, aliases, deadlines, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    From: [[NAME:p2|Ayesha Kamal]] <[[EMAIL:e2|ayesha.kamal@example.pk]]>
+    To: [[NAME:p1|Hassan Raza Jafri]] <[[EMAIL:e1|hr.jafri@example.com]]>
+    Cc: [[NAME:p3|Kashif Mehmood]] <[[EMAIL:e3|kashif.m@example.pk]]>
+    Subject: NDA for [[NOT:n1|Project Neelum]] - signed copy needed by Friday
+
+    Dear [[NAME:p1|Hassan]],
+
+    Please find attached the NDA between you and [[NOT:n2|Neelum Valley Resorts]] for the [[NOT:n1|Project Neelum]] feasibility study. Kindly sign and return [[DEADLINE:d1|by Friday, 6 March 2026]] so that [[NAME:p3|Kashif]] can release the site data.
+
+    Key points, for your convenience:
+    - you may not disclose the land details or investor names;
+    - the duty lasts [[DEADLINE:d2|three years from the date of signing]];
+    - any copies must be returned [[DEADLINE:d3|within 7 days of our request]].
+
+    If anything is unclear, call me at [[PHONE:t1|0302-5554620]] or Mr. [[NAME:p3|Mehmood]] at [[PHONE:t2|0300-5559917]].
+
+    Regards,
+    [[NAME:p2|Ayesha]]
+    Legal Associate, [[NOT:n2|Neelum Valley Resorts]]
+- id: p5-nda-09
+  document_type: nda
+  features: [lookalikes, overlap, deadlines, repeated_names, untitled_names]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY AGREEMENT - SALE OF FARMHOUSE
+
+    Seller: Mian [[NAME:p1|Khurshid Anwar]]
+    Prospective buyer: [[NAME:p2|Sadaf Ilyas]]
+    Broker: [[NOT:n1|Gulberg Realtors]]
+
+    The Seller proposes to sell the property known as "[[NOT:n2|Anwar Farms]]", situated at [[ADDRESS:a1|Farmhouse of [[NAME:p1|Khurshid Anwar]], Plot 19, Bedian Road, near Barki, Lahore]].
+
+    [[NAME:p2|Sadaf Ilyas]] agrees:
+    (i) not to disclose the asking price, title documents or the identity of the Seller to any person other than her lawyer;
+    (ii) not to approach the Seller's tenants at [[NOT:n2|Anwar Farms]] directly;
+    (iii) that these duties last [[DEADLINE:d1|until twelve months after the end of negotiations]];
+    (iv) to return copies of the fard and registry [[DEADLINE:d2|within five working days]] if she does not proceed.
+
+    [[NOT:n1|Gulberg Realtors]] and its agent [[NAME:p3|Fahad Noor]] are bound by the same terms.
+
+    [[NAME:p1|Khurshid Anwar]]
+    [[NAME:p2|Sadaf Ilyas]]
+    [[NAME:p3|Fahad Noor]]
+- id: p5-nda-10
+  document_type: nda
+  features: [table, ocr_errors, repeated_names, deadlines, untitled_names]
+  parties: [p1, p2, p3]
+  text: |
+    SCHEDULE A - PERSONS RECEIVING CONFIDENTIAL INFORMATION
+    (annexed to NDA dated O3-02-2026)
+
+    | Sr | Name | CNIC | Phone | Access until |
+    |---|---|---|---|---|
+    | 1 | [[NAME:p1|Rehan Akhtar]] | [[CNIC:c1|35202-5556O19-1]] | [[PHONE:t1|0321-555O812]] | [[DEADLINE:d1|31-12-2026]] |
+    | 2 | [[NAME:p2|Saba Jamil]] | [[CNIC:c2|3520l-5553377-4]] | [[PHONE:t2|0300 5552 194]] | [[DEADLINE:d2|30-06-2026]] |
+    | 3 | [[NAME:p3|Ghazanfar Al i]] | [[CNIC:c3|35202-55588 21-7]] | [[PHONE:t3|O345-5551630]] | [[DEADLINE:d3|30-O6-2026]] |
+
+    Each person listed above must sign this schedule. [[NAME:p1|Rehan Akhtar]] is responsible for keeping the access log.
+    [[NAME:p3|Ghazanfar Ali]] - signature not legible
+- id: p5-nda-11
+  document_type: nda
+  features: [untitled_names, deadlines, lookalikes, aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    UNILATERAL NON-DISCLOSURE AGREEMENT
+
+    Disclosing Party: [[NAME:p1|Rabia Shaheen]], sole proprietor of [[NOT:n1|Shaheen Bakers]], [[ADDRESS:a1|Shop 2, Commercial Area, Satellite Town, Rawalpindi]]
+    Receiving Party: [[NAME:p2|Junaid Iqbal Mughal]], [[ADDRESS:a2|House 410, Street 22, Chaklala Scheme III, Rawalpindi]]
+
+    [[NAME:p1|Rabia]] is disclosing her recipes and supplier list so that [[NAME:p2|Junaid]] can prepare a franchise proposal. [[NAME:p2|Mughal]] will not use the recipes for any other bakery, including [[NOT:n2|Royal Mughal Sweets]], in which his brother has a share.
+
+    The obligations last [[DEADLINE:d1|five years]]. The proposal is due [[DEADLINE:d2|within 45 days of this agreement]].
+
+    [[NAME:p1|Rabia Shaheen]]'s contact: [[PHONE:t1|051-5554387]]
+    [[NAME:p2|Junaid Mughal]]'s contact: [[PHONE:t2|0312-5556095]]
+
+    Signed at [[NOT:n3|Rawalpindi]], 22 February 2026.
+    [[NAME:p1|Rabia Shaheen]]                    [[NAME:p2|Junaid Iqbal Mughal]]
+- id: p5-nda-12
+  document_type: nda
+  features: [overlap, deadlines, roman_urdu, untitled_names, repeated_names, aliases, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Short NDA (school fee software)
+
+    * Parties: [[NAME:p1|Nabeel Asghar]] (developer) and [[NAME:p2|Shumaila Yaqoob]] (principal, [[NOT:n1|Al-Huda Grammar School]])
+    * School address: [[ADDRESS:a1|Building of Haji [[NAME:p3|Muhammad Yaqoob]] Trust, Canal Road, Okara]]
+    * [[NAME:p1|Nabeel Asghar]] will not share student names, fee records or parents' numbers.
+    * Data to be deleted from his laptop [[DEADLINE:d1|within 10 days of project handover]].
+    * Note in Urdu for staff: "Bachon ka data kisi ko nahi dena, [[NAME:p1|Nabeel]] bhai ko bhi sirf school mein dikhana hai."
+    * Duration: [[DEADLINE:d2|until 31 March 2027]]
+    * [[NAME:p2|Shumaila Yaqoob]] - [[PHONE:t1|044-5552910]]

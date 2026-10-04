@@ -1,0 +1,311 @@
+dataset: pii-eval-5
+label_review: developer_only
+documents:
+- id: p5-emp-01
+  document_type: employment
+  features: [deadlines, lookalikes, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Margalla Fintech (Pvt) Ltd]]
+    Ref: MF/HR/2026/041
+    Date: 3 February 2026
+
+    Ms. [[NAME:p1|Hira Batool]]
+    [[ADDRESS:a1|House 15, Street 3, Gulshan-e-Iqbal Block 13-D, Karachi]]
+    [[EMAIL:e1|hira.batool92@example.com]]
+
+    Subject: Offer of Employment - Senior Business Analyst
+
+    Dear Ms. [[NAME:p1|Batool]],
+
+    We are pleased to offer you the position of Senior Business Analyst in our Payments team, reporting to Mr. [[NAME:p2|Usman Khalid]], Head of [[NOT:n2|Digital Lending]].
+
+    1. Gross salary: Rs. 420,000 per month.
+    2. Probation: [[DEADLINE:d1|three (3) months from the date of joining]].
+    3. Joining date: on or before 1 March 2026.
+    4. Notice period after confirmation: [[DEADLINE:d2|two months]].
+
+    Please confirm your acceptance [[DEADLINE:d3|within seven (7) days of the date of this letter]], failing which this offer will lapse.
+
+    [[NAME:p1|Hira]], we look forward to welcoming you to [[NOT:n1|Margalla Fintech]].
+
+    Yours sincerely,
+    [[NAME:p3|Saira Anwar]]
+    Manager Human Resources
+    [[PHONE:t1|021-5553-4410]]
+- id: p5-emp-02
+  document_type: employment
+  features: [repeated_names, deadlines, untitled_names, lookalikes, aliases]
+  parties: [p1, p2]
+  text: |
+    APPOINTMENT LETTER
+
+    [[NOT:n1|Sialkot Surgical Works]]
+    [[NOT:n2|Small Industrial Estate]], [[NOT:n3|Sialkot]]
+
+    Name: [[NAME:p1|Muhammad Asif Butt]]
+    Father's name: [[NAME:p3|Muhammad Saleem Butt]]
+    CNIC: [[CNIC:c1|34603-5556672-1]]
+    Address: [[ADDRESS:a1|Mohallah Kashmiri Pura, Street 6, House 23, Sialkot]]
+    Mobile: [[PHONE:t1|0300-5556218]]
+    Salary account: [[ACCOUNT:b1|PK00 SBNK 0012 5550 9087 6543]]
+
+    [[NAME:p1|Muhammad Asif Butt]] is appointed as Quality Inspector in the Forging Section with effect from 1 March 2026 on a monthly salary of Rs. 68,000.
+
+    - Probation of [[DEADLINE:d1|six months]] will apply.
+    - Salary is paid [[DEADLINE:d2|by the 7th of the following month]] into the account above.
+    - [[NAME:p1|Asif Butt]] must report to the Section In-charge [[NAME:p2|Ghulam Mustafa]] at 8:00 a.m.
+    - Either side may end employment on [[DEADLINE:d3|one month's notice or one month's salary in lieu]].
+
+    [[NAME:p2|Ghulam Mustafa]]                        [[NAME:p1|Asif Butt]]
+    Section In-charge                      Employee
+- id: p5-emp-03
+  document_type: employment
+  features: [table, deadlines, aliases, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT AGREEMENT
+
+    This Employment Agreement is made on 10 January 2026 between [[NOT:n1|Thar Coal Services Ltd]] (the "Employer"), acting through its HR Director [[NAME:p2|Kamal Hyder]], and [[NAME:p1|Rizwana Memon]] daughter of [[NAME:p3|Ali Nawaz Memon]], CNIC [[CNIC:c1|44103-5550284-0]], of [[ADDRESS:a1|Bungalow 7, Housing Society Phase I, Mithi, District Tharparkar]] (the "Employee").
+
+    1. Position: Environmental Officer, based at the [[NOT:n2|Islamkot Site Office]].
+    2. Term: [[DEADLINE:d1|two years from 15 January 2026]], renewable.
+    3. Compensation:
+
+    | Component | Monthly (Rs.) |
+    |---|---|
+    | Basic salary | 180,000 |
+    | House rent allowance | 81,000 |
+    | Utilities | 18,000 |
+    | Site allowance | 40,000 |
+    | Total | 319,000 |
+
+    4. Salary will be credited [[DEADLINE:d2|on the last working day of each month]].
+    5. Ms. [[NAME:p1|Memon]] may terminate on [[DEADLINE:d3|sixty (60) days' written notice]].
+    6. Mr. [[NAME:p2|Hyder]] or his nominee shall evaluate the Employee's performance [[DEADLINE:d4|every six months]].
+
+    For the Employer: [[NAME:p2|Kamal Hyder]]
+    Employee: [[NAME:p1|Rizwana Memon]]
+- id: p5-emp-04
+  document_type: employment
+  features: [untitled_names, lookalikes, repeated_names]
+  parties: [p1]
+  text: |
+    TO WHOM IT MAY CONCERN
+
+    EXPERIENCE CERTIFICATE
+
+    This is to certify that [[NAME:p1|Shahid Nawaz Gondal]], son of [[NAME:p2|Nawaz Gondal]], CNIC [[CNIC:c1|33100-5554921-5]], worked with [[NOT:n1|Gondal Motors]], [[NOT:n2|Sargodha Road]], [[NOT:n3|Faisalabad]] as Accounts Officer from 1 August 2021 to 31 January 2026.
+
+    [[NAME:p1|Shahid Nawaz Gondal]] has no relation with the proprietors of [[NOT:n1|Gondal Motors]] despite the common surname. During his service he handled the [[NOT:n4|Hyundai Dealer Incentive]] reconciliations and the payroll of 84 staff.
+
+    We found him honest and hard-working and wish him success.
+
+    [[NAME:p3|Ijaz Ahmed]]
+    General Manager
+- id: p5-emp-05
+  document_type: employment
+  features: [aliases, repeated_names, deadlines, overlap]
+  parties: [p1, p2]
+  text: |
+    PRIVATE & CONFIDENTIAL
+
+    Mr. [[NAME:p1|Atif Rasheed Qazi]]
+    [[ADDRESS:a1|c/o [[NAME:p3|Rasheed Ahmad Qazi]], House 91-C, Satellite Town, Quetta]]
+
+    Subject: Termination of Employment
+
+    Dear Mr. [[NAME:p1|Qazi]],
+
+    Further to the inquiry held on 2 March 2026, the Management has decided to terminate your employment as Store Keeper with immediate effect. The inquiry officer, Mr. [[NAME:p2|Javed Lehri]], found that [[NAME:p1|Atif]] had issued stock without gate passes on three occasions.
+
+    1. Your final settlement will be paid [[DEADLINE:d1|within thirty (30) days of this letter]] after clearance.
+    2. You must return the company laptop and store keys [[DEADLINE:d2|by 10 March 2026]].
+    3. You may appeal to the Chief Executive [[DEADLINE:d3|within 15 days of receiving this letter]].
+
+    The said [[NAME:p1|Atif Rasheed]] is advised that the company's decision is without prejudice to its right to recover losses.
+
+    [[NAME:p2|Javed Lehri]]
+    Manager Administration
+- id: p5-emp-06
+  document_type: employment
+  features: [roman_urdu, untitled_names, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    DRIVER KI MULAZMAT KA MUAHIDA
+
+    Aaj mori 1 March 2026 ko [[NAME:p1|Seemi Rauf]] sakin [[ADDRESS:a1|Kothi No. 22, Street 7, F-7/3, Islamabad]] aur [[NAME:p2|Liaqat Ali]] walad [[NAME:p3|Barkat Ali]], sakin [[ADDRESS:a2|Mouza Dhoke Hassu, Tehsil Gujar Khan, District Rawalpindi]], shanakhti card [[CNIC:c1|37401-5556390-1]] ke darmiyan tay paya ke:
+
+    1. [[NAME:p2|Liaqat]] driver ki tankhwah Rs. 45,000 mahana hogi jo [[DEADLINE:d1|har maheene ki pehli tareekh ko]] di jaye gi.
+    2. Hafte mein ek chutti, Itwar.
+    3. Naukri chhorne se [[DEADLINE:d2|ek maheena pehle]] batana hoga, warna ek maheene ki tankhwah kaat li jaye gi.
+    4. Baji [[NAME:p1|Seemi]] gaari ka fuel aur maintenance khud karengi.
+    5. Pehle [[DEADLINE:d3|teen maheene]] azmaishi hain.
+
+    [[NAME:p2|Liaqat Ali]] ka mobile: [[PHONE:t1|0313-5551287]]
+    [[NAME:p1|Seemi Rauf]] ka mobile: [[PHONE:t2|0300-5558440]]
+
+    Dastakhat: [[NAME:p1|Seemi Rauf]]          Angootha: [[NAME:p2|Liaqat Ali]]
+- id: p5-emp-07
+  document_type: employment
+  features: [urdu_script, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    تقرر نامہ
+
+    [[NOT:n1|دارالارقم ماڈل اسکول]]، [[NOT:n2|بہاولنگر]]
+
+    محترمہ [[NAME:p1|فرزانہ کوثر]] دختر [[NAME:p3|محمد صادق]]، ساکن [[ADDRESS:a1|مکان نمبر 17، محلہ فاروق آباد، بہاولنگر]]، کو بطور معلمہ اردو مورخہ یکم اپریل 2026 سے تعینات کیا جاتا ہے۔
+
+    1. ماہانہ تنخواہ 32,000 روپے ہوگی۔
+    2. آزمائشی مدت [[DEADLINE:d1|تین ماہ]] ہوگی۔
+    3. ملازمت چھوڑنے کی صورت میں [[DEADLINE:d2|ایک ماہ پہلے]] تحریری اطلاع دینا ہوگی۔
+
+    English summary: [[NAME:p1|Farzana Kausar]] is appointed Urdu teacher at [[NOT:n3|Dar-ul-Arqam Model School]] by the principal [[NAME:p2|Abdul Qayyum]]. Her mobile is [[PHONE:t1|0304-5553308]].
+
+    دستخط پرنسپل: [[NAME:p2|عبدالقیوم]]
+    دستخط معلمہ: [[NAME:p1|فرزانہ کوثر]]
+- id: p5-emp-08
+  document_type: employment
+  features: [ocr_errors, repeated_names, deadlines, aliases, lookalikes]
+  parties: [p1, p2]
+  text: |
+    APP0INTMENT LETTER
+    [[NOT:n1|Mehran Sugar Mi1ls Ltd]], [[NOT:n2|Tando Allahyar]]
+
+    Ref No. MSM/HR/l12/2026                     Dated: 05-0l-2026
+
+    Mr. [[NAME:p1|Sajjad Hussa1n Soomro]]
+    S/o [[NAME:p3|Ghulam Hussain Soomr0]]
+    CNlC # [[CNIC:c1|4l306-5552907-3]]
+    [[ADDRESS:a1|Village Khan Muhammad Soomro, Post Office Chambar,
+    Distt. Tando Allahyar]]
+
+    You are appointed as Shift Chemist during the crushing season [[DEADLINE:d1|from 10-01-2026 to 3l-03-2026]] on a consolidated salary of Rs. 95,OOO/- per month.
+
+    Mr. [[NAME:p1|S0omro]] will report to the Chief Chemist [[NAME:p2|Pir Bux Jamali]] and will not leave the station without permission.
+
+    Salary payab1e [[DEADLINE:d2|by l0th of next month]].
+
+    [[NAME:p2|P1r Bux Jamali]]
+    Chief Chemist
+- id: p5-emp-09
+  document_type: employment
+  features: [table, untitled_names, deadlines, repeated_names]
+  parties: [p1, p2, p3, p4]
+  text: |
+    NEW JOINERS - MARCH 2026 (HR internal list)
+
+    Approved by: [[NAME:p5|Sobia Kanwal]], HR Business Partner
+
+    Name	Department	Mobile	Personal email	Documents due
+    [[NAME:p1|Arslan Haider]]	Finance	[[PHONE:t1|0331-5552086]]	[[EMAIL:e1|arslan.haider@example.com]]	[[DEADLINE:d1|by 15 March]]
+    [[NAME:p2|Mahnoor Zafar]]	Marketing	[[PHONE:t2|0321-5559471]]	[[EMAIL:e2|mahnoor.z@example.net]]	[[DEADLINE:d2|by 15 March]]
+    [[NAME:p3|Qasim Raza Shah]]	IT	[[PHONE:t3|0345-5550733]]	[[EMAIL:e3|qasim.shah.it@example.com]]	[[DEADLINE:d3|by 20 March]]
+    [[NAME:p4|Eman Fatima]]	Legal	[[PHONE:t4|0300-5554106]]	[[EMAIL:e4|eman.fatima.law@example.org]]	[[DEADLINE:d4|by 20 March]]
+
+    [[NAME:p3|Qasim Raza Shah]] still needs to submit his police character certificate.
+    [[NAME:p4|Eman Fatima]] joins from 16 March; [[NAME:p5|Sobia Kanwal]] to arrange laptop.
+- id: p5-emp-10
+  document_type: employment
+  features: [aliases, deadlines, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    SHOW CAUSE NOTICE
+
+    To: [[NAME:p1|Mudassar Iqbal]], Sales Officer, [[NOT:n1|Gujrat Region]]
+    From: [[NAME:p2|Nauman Saeed]], Regional Sales Manager
+    Date: 11 February 2026
+
+    It has been reported that you, [[NAME:p1|Mudassar Iqbal]], collected Rs. 340,000 from [[NOT:n2|Al-Madina Traders]] and [[NOT:n3|Chaudhry Fans Outlet]] on 2 February 2026 but deposited only Rs. 210,000.
+
+    You are hereby directed to show cause in writing [[DEADLINE:d1|within three (3) working days of receipt of this notice]] as to why disciplinary action should not be taken against you.
+
+    If no reply is received from Mr. [[NAME:p1|Iqbal]] within that time, it will be presumed that he has no defence and the matter will be decided ex parte.
+
+    You are also suspended [[DEADLINE:d2|for fourteen days, from 12 February 2026]], during which [[NAME:p1|Mudassar]] shall not visit any dealer.
+
+    [[NAME:p2|Nauman Saeed]]
+- id: p5-emp-11
+  document_type: employment
+  features: [deadlines, repeated_names, untitled_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Acceptance of resignation and final settlement
+
+    Dear [[NAME:p1|Owais Tariq]],
+
+    Your resignation dated 2 January 2026 is accepted. Your last working day will be 1 February 2026, after completion of your [[DEADLINE:d1|one-month notice period]].
+
+    Final settlement:
+    - salary for January, leave encashment for 9 days and the pro-rata bonus will be paid [[DEADLINE:d2|within 21 days of your last working day]];
+    - the amount will be transferred to your account [[ACCOUNT:b1|0123-5550-7788-01]] at the [[NOT:n1|Blue Area Branch]];
+    - your provident fund balance is paid by the [[NOT:n2|Staff Provident Fund Trust]] [[DEADLINE:d3|within 45 days]].
+
+    Kindly hand over the company phone and the files of the [[NOT:n3|Project Chenab Bridge]] tender to [[NAME:p2|Rabia Aslam]] before you leave.
+
+    Best wishes,
+    [[NAME:p2|Rabia Aslam]]
+    Head of Administration
+
+    Copy: [[NAME:p1|Owais Tariq]], [[ADDRESS:a1|Flat 12, Block 6, Sector I-8/1, Islamabad]]
+- id: p5-emp-12
+  document_type: employment
+  features: [lookalikes, aliases, repeated_names, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    CONFIRMATION IN SERVICE
+
+    Date: 2 April 2026
+
+    [[NAME:p1|Hamid Ullah Khan Niazi]]
+    Software Engineer, [[NOT:n1|Team Tarbela]]
+
+    Dear [[NAME:p1|Hamid]],
+
+    We are pleased to confirm you in service with effect from 1 April 2026 on successful completion of your probation. Your line manager [[NAME:p2|Saadia Imtiaz]] has rated your work on the "[[NOT:n2|Khyber Pass]]" release as excellent.
+
+    Your notice period from now on is [[DEADLINE:d1|sixty days]]. Please note that "[[NOT:n2|Khyber Pass]]" and "[[NOT:n3|Shandur]]" are internal product code names and must not be referred to outside the company.
+
+    Mr. [[NAME:p1|Niazi]] will be eligible for the annual increment [[DEADLINE:d2|from 1 July 2026]].
+
+    [[NAME:p2|Saadia Imtiaz]], Engineering Manager
+    [[NAME:p3|Kamran Yousaf]], Director People & Culture
+- id: p5-emp-13
+  document_type: employment
+  features: [overlap, deadlines, untitled_names, repeated_names, aliases, lookalikes]
+  parties: [p1, p2]
+  text: |
+    INTERNSHIP LETTER
+
+    [[NAME:p1|Laiba Noreen]]
+    [[ADDRESS:a1|Hostel room of [[NAME:p1|Laiba Noreen]], Room 214, Fatima Jinnah Girls Hostel, Old Campus, Jamshoro]]
+
+    Dear [[NAME:p1|Laiba]],
+
+    [[NOT:n1|Kirthar Renewable Energy]] is pleased to offer you an unpaid summer internship in the [[NOT:n2|Wind Assessment Unit]] at our [[NOT:n3|Jhimpir]] office [[DEADLINE:d1|for eight weeks starting 1 June 2026]].
+
+    Please send scanned copies of your student card and the no-objection letter from your supervisor to [[EMAIL:e1|internships@kirthar-renewable.example]] [[DEADLINE:d2|before 15 May 2026]]. Your supervisor during the internship will be [[NAME:p2|Zubair Lashari]] ([[PHONE:t1|022-5557318]]).
+
+    Transport will be provided from [[ADDRESS:a2|the residence of [[NAME:p4|Noreen Akhtar]], Bungalow 5, Qasimabad Phase II, Hyderabad]] on working days, as requested by your mother.
+
+    [[NAME:p2|Zubair Lashari]]
+    Senior Engineer
+- id: p5-emp-14
+  document_type: employment
+  features: [ocr_errors, roman_urdu, aliases, repeated_names, deadlines, overlap, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Chowkidar / security guard agreement (photo of handwritten page typed by clerk, errors as in original)
+
+    Employer: [[NAME:p1|Malik Zafar Iqba l]], [[ADDRESS:a1|Plot 5, Godown of [[NAME:p1|Zafar Iqbal]], Sabzi Mandi, G1T Road, Gujranwala]]
+    Guard: [[NAME:p2|Nazir Ahmed]] s/o [[NAME:p3|Fateh Muhammad]], CNlC [[CNIC:c1|34l01-5557042-9]]
+    Mobile: [[PHONE:t1|0307-555 1923]]
+
+    1. Duty raat 8 baje se subah 8 baje tak.
+    2. Tankhwah Rs. 38,000 [[DEADLINE:d1|har maheene ki 5 tareekh tak]].
+    3. Pehle [[DEADLINE:d2|2 maheene]] azmaishi.
+    4. [[NAME:p2|Nazir]] kisi ko godown ki chaabi nahi dega; seth [[NAME:p1|Zafar]] sahib ki ijazat ke baghair koi gaari andar nahi aaye gi.
+    5. Naukri chhorne ka notice [[DEADLINE:d3|15 din]].
+
+    [[NAME:p1|Zafar Iqbal]]                   [[NAME:p2|Nazir Ahmad]] (thumb)
