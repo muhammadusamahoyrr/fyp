@@ -1,0 +1,289 @@
+dataset: pii-eval-4
+label_review: developer_only
+documents:
+- id: p4-ten-01
+  document_type: tenancy
+  features: [repeated_names, aliases, overlap, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    TENANCY AGREEMENT
+
+    This Tenancy Agreement is made at [[NOT:n1|Lahore]] on this 2nd day of March 2026 BETWEEN:
+
+    [[NAME:p1|Tariq Mehmood Butt]] s/o [[NAME:p3|Ghulam Nabi Butt]], holding CNIC No. [[CNIC:c1|35202-4418273-5]], resident of [[ADDRESS:a1|House No. 47-B, Block J, Johar Town, Lahore]] (hereinafter called the "LANDLORD", which expression shall include his heirs and assigns) of the ONE PART;
+
+    AND
+
+    [[NAME:p2|Saima Iftikhar]] w/o [[NAME:p4|Iftikhar Ahmed Qureshi]], holding CNIC No. [[CNIC:c2|35201-9930461-8]], presently residing at [[ADDRESS:a2|Flat 3, Second Floor, Rehman Plaza, Ferozepur Road, Lahore]] (hereinafter called the "TENANT") of the OTHER PART.
+
+    WHEREAS the Landlord is the lawful owner in possession of the upper portion of the house of [[ADDRESS:a3|[[NAME:p1|Tariq Mehmood Butt]], 112-C, Shadman II, Lahore]] (the "Premises") and has agreed to let the same to the Tenant on the following terms:
+
+    1. The tenancy shall be for a period of [[DEADLINE:d1|eleven (11) months commencing from 1 April 2026]] and may be renewed by mutual consent.
+    2. The monthly rent shall be Rs. 85,000/- (Rupees Eighty-Five Thousand only), payable in advance [[DEADLINE:d2|on or before the 5th day of each calendar month]].
+    3. The Tenant has paid a security deposit of Rs. 170,000/- which shall be refunded, without interest, [[DEADLINE:d3|within thirty (30) days of the Premises being vacated]], after adjusting any dues.
+    4. Either party may terminate this tenancy by giving the other [[DEADLINE:d4|two (2) months' prior written notice]].
+    5. Mr. [[NAME:p1|Butt]] shall pay the property tax. Mrs. [[NAME:p2|Saima]] shall pay the electricity, gas and water bills for the period of her occupation.
+    6. The Tenant shall not sublet the Premises or any part of it. The said [[NAME:p2|Saima Iftikhar]] shall use the Premises for residence only.
+    7. Any dispute shall be subject to the exclusive jurisdiction of the courts at [[NOT:n2|Lahore]].
+
+    IN WITNESS WHEREOF the parties have signed this agreement on the date first written above.
+
+    LANDLORD: ____________________  [[NAME:p1|Tariq M. Butt]]
+    TENANT:   ____________________  [[NAME:p2|Saima Iftikhar]]
+
+    WITNESSES:
+    1. [[NAME:p5|Naveed Akhtar]], CNIC [[CNIC:c3|35202-1176930-1]]
+    2. [[NAME:p6|Rubina Kausar]], CNIC [[CNIC:c4|35202-8820417-4]]
+- id: p4-ten-02
+  document_type: tenancy
+  features: [table, deadlines, lookalikes, repeated_names]
+  parties: [p1, p2]
+  text: |
+    RENT TERMS - SUMMARY SHEET
+
+    Property: [[ADDRESS:a1|Flat No. C-204, Sea Breeze Apartments, Block 2, Clifton, Karachi]]
+    Owner: [[NAME:p1|Farhan Ali Siddiqui]]
+    Owner CNIC: [[CNIC:c1|42301-6672910-3]]
+    Owner Mobile: [[PHONE:t1|0333-2194460]]
+    Tenant: [[NAME:p2|Hina Zubair]]
+    Tenant CNIC: [[CNIC:c2|42101-3385027-6]]
+    Tenant Mobile: [[PHONE:t2|+92 300 8261734]]
+    Tenant Email: [[EMAIL:e1|hina.zubair84@inboxpk.net]]
+    Estate agent: [[NOT:n1|Noor-e-Sahar Estate Agency]], [[ADDRESS:a2|Shop 6, Bahria Complex III, Khayaban-e-Shamsheer, Karachi]]
+
+    | Item | Amount (Rs.) | When payable |
+    |---|---|---|
+    | Monthly rent | 120,000 | [[DEADLINE:d1|by the 10th of every month]] |
+    | Security deposit | 360,000 | [[DEADLINE:d2|on signing]] |
+    | Building maintenance | 8,000 | [[DEADLINE:d3|quarterly in advance]] |
+    | Agent commission | 60,000 | [[DEADLINE:d4|within 7 days of signing]] |
+
+    Term: [[DEADLINE:d5|one (1) year from 1 May 2026]].
+    Rent increase: 10% [[DEADLINE:d6|after every twelve months]].
+    Rent to be deposited in owner's account [[ACCOUNT:b1|PK42MEZN0002140106784231]] (title: [[NAME:p1|Farhan Ali Siddiqui]]).
+    Owner confirms that [[NAME:p2|Hina Zubair]] may keep one car in the basement parking.
+    Notice to vacate: [[DEADLINE:d7|60 days]] either side.
+
+    Agreed: [[NAME:p1|Farhan Ali Siddiqui]] / [[NAME:p2|Hina Zubair]]
+- id: p4-ten-03
+  document_type: tenancy
+  features: [roman_urdu, lookalikes, deadlines, aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    KIRAYANAMA DUKAAN
+
+    Main [[NAME:p1|Muhammad Aslam]] walad [[NAME:p3|Fazal Din]], shanakhti card number [[CNIC:c1|34101-2287516-1]], sakin [[ADDRESS:a1|Makan No. 14, Gali No. 6, Mohallah Islamabad, Gujranwala]], iqrar karta hun ke main ne apni dukaan wake [[ADDRESS:a2|Shop No. 3, Ground Floor, Main GT Road, near Sheranwala Bagh, Gujranwala]] [[NAME:p2|Shahid Iqbal]] walad [[NAME:p4|Muhammad Iqbal]], sakin [[ADDRESS:a3|Mohallah Kotli Rustam, Gali Darziyan Wali, Gujranwala]], ko [[DEADLINE:d1|aik saal ke liye]] kiraye par di hai.
+
+    Sharait:
+    - Mahana kiraya 35,000 rupay hoga jo [[DEADLINE:d2|har mahine ki 7 tareekh tak]] ada karna hoga.
+    - Zar-e-zamanat 1,00,000 rupay [[NAME:p1|Aslam]] sahib ko wusool ho chuka hai.
+    - Agar kirayedar [[DEADLINE:d3|do mahine]] ka kiraya ada na kare to malik dukaan khali karwa sakta hai.
+    - [[NAME:p2|Shahid]] dukaan mein [[NOT:n1|Iqbal Cloth House]] ke naam se kapre ka karobar karega, koi aur karobar nahi.
+    - Bijli aur gas ka bill kirayedar ada karega.
+    - Dukaan khali karne se [[DEADLINE:d4|aik mahina pehle]] likhit notice dena hoga.
+
+    Kirayedar ka mobile: [[PHONE:t1|0300 6427319]]
+
+    Dastakhat malik: [[NAME:p1|Muhammad Aslam]]
+    Dastakhat kirayedar: [[NAME:p2|Shahid Iqbal]]
+
+    Gawah No. 1: [[NAME:p5|Abdul Ghafoor]]
+    Gawah No. 2: [[NAME:p6|Zahid Mehmood Rana]]
+- id: p4-ten-04
+  document_type: tenancy
+  features: [urdu_script, deadlines, aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    کرایہ نامہ
+
+    منکہ [[NAME:p1|محمد یوسف]] ولد [[NAME:p3|عبدالرحیم]]، شناختی کارڈ نمبر [[CNIC:c1|36302-1184935-7]]، ساکن [[ADDRESS:a1|مکان نمبر 22، گلی نمبر 4، محلہ قاسم آباد، ملتان]]، اقرار کرتا ہوں کہ میں نے اپنا مکان [[NAME:p2|نسیم اختر]] ولد [[NAME:p4|اختر حسین]] کو [[DEADLINE:d1|گیارہ ماہ]] کے لیے کرایہ پر دیا ہے۔
+
+    ماہانہ کرایہ 30,000 روپے ہو گا جو [[DEADLINE:d2|ہر ماہ کی 10 تاریخ تک]] ادا کیا جائے گا۔ [[NAME:p2|نسیم]] مکان کسی اور کو کرایہ پر نہیں دے گا۔
+
+    کرایہ دار کا موبائل نمبر: [[PHONE:t1|0301-7735102]]
+
+    دستخط مالک: [[NAME:p1|محمد یوسف]]
+    دستخط کرایہ دار: [[NAME:p2|نسیم اختر]]
+    گواہ: [[NAME:p5|غلام مصطفیٰ]]
+
+    (Office note, English: Landlord [[NAME:p1|Muhammad Yousaf]]; tenant [[NAME:p2|Naseem Akhtar]]. Copy of tenant's CNIC [[CNIC:c2|36302-5509184-1]] attached. Police verification to be done [[DEADLINE:d3|within 15 days]].)
+- id: p4-ten-05
+  document_type: tenancy
+  features: [ocr_errors, aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    TENANCY AGREEMENT  (scanned copy - page 1 of 2)
+
+    THIS AGREEMENT is executed at [[NOT:n1|Rawa1pindi]] on 15-0l-2026 between [[NAME:p1|lmran Shah1d]] s/o [[NAME:p3|Shahid Pervaiz]], CNlC No. [[CNIC:c1|37405-662l904-3]], r/o [[ADDRESS:a1|House No. 1l8, Street 9, Gulistan Colony, Rawal-
+    pindi]] (Landlord) and Mst. [[NAME:p2|Shazia Parveen]] d/o [[NAME:p4|Muhammad Saleem]], CNIC No. [[CNIC:c2|37405-l193628-0]], Mobile [[PHONE:t1|0335-51 72 908]] (Tenant).
+
+    l. The Landlord has let out the ground floor of the above house to the Tenant for [[DEADLINE:d1|11 rnonths w.e.f. 01-02-2026]].
+    2. Rent Rs. 45,OOO/- per month payable [[DEADLINE:d2|before 5th of each rnonth]].
+    3. The said [[NAME:p1|lmran]] shall carry out major repairs; minor repairs by the Tenant.
+    4. Tenant [[NAME:p2|Shazia Parv
+    een]] shall not keep any commercial goods in the premises.
+    5. Security Rs. 9O,000 refundable [[DEADLINE:d3|within 15 days of handing over possession]].
+
+    Landlord: [[NAME:p1|Imran Shahid]]            Tenant: [[NAME:p2|Shazia Parveen]]
+    Witness: [[NAME:p5|Kh4lid Mahmood]]   Mob [[PHONE:t2|0312-55O8 214]]
+- id: p4-ten-06
+  document_type: tenancy
+  features: [overlap, repeated_names, untitled_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    LEASE OF RESIDENTIAL PORTION
+
+    Premises: [[ADDRESS:a1|Ground floor portion, House of [[NAME:p3|Abdul Majeed]] (late), Street 11, Sector G-9/2, Islamabad]]
+
+    Landlady: [[NAME:p1|Rehana Majeed]], widow of [[NAME:p3|Abdul Majeed]], CNIC [[CNIC:c1|61101-4402816-2]]
+    Tenant: [[NAME:p2|Usman Ghani Khattak]], CNIC [[CNIC:c2|17301-8854012-9]]
+
+    Address of the Tenant for notices: [[ADDRESS:a2|c/o [[NAME:p5|Zafar Iqbal Awan]], Flat 9, Block 14, F-10 Markaz, Islamabad]]
+
+    Terms
+    a) Lease period [[DEADLINE:d1|from 1 June 2026 to 30 April 2027]].
+    b) Rent Rs. 95,000 per month, to be paid [[DEADLINE:d2|by the 3rd of the month]].
+    c) [[NAME:p1|Rehana Majeed]] will hand over the keys on 31 May 2026 after the inventory is signed.
+    d) [[NAME:p2|Usman Ghani Khattak]] works with [[NOT:n1|Margalla Hills Software House]] and the premises shall be used by him and his family only.
+    e) Any increase in rent shall be agreed [[DEADLINE:d3|at least 30 days before the lease expires]].
+    f) Disputes: courts at [[NOT:n2|Islamabad]].
+
+    Signed
+    [[NAME:p1|Rehana Majeed]]  [[NAME:p2|Usman Ghani Khattak]]
+- id: p4-ten-07
+  document_type: tenancy
+  features: [lookalikes, table, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    COMMERCIAL LEASE DEED
+
+    This lease is made between [[NAME:p1|Waqar Ahmed Sheikh]] s/o [[NAME:p3|Rashid Ahmed Sheikh]], resident of [[ADDRESS:a1|P-71, Street 2, Peoples Colony No. 1, Faisalabad]] ("Lessor") and [[NOT:n1|Zarnab Pharma (Pvt.) Ltd]], a company having its registered office at [[ADDRESS:a2|Office 4, Second Floor, Kohinoor Trade Centre, Jaranwala Road, Faisalabad]] ("Lessee"), acting through its Director, [[NAME:p2|Asma Nadeem]].
+
+    1. The Lessor lets the warehouse at [[ADDRESS:a3|Plot No. 38, Small Industrial Estate, Sargodha Road, Faisalabad]] to the Lessee for [[DEADLINE:d1|three (3) years from 1 July 2026]].
+    2. Rent shall increase as below:
+
+    | Lease year | Monthly rent (Rs.) | Payable |
+    |---|---|---|
+    | Year 1 | 250,000 | [[DEADLINE:d2|in advance by the 5th]] |
+    | Year 2 | 275,000 | [[DEADLINE:d3|in advance by the 5th]] |
+    | Year 3 | 302,500 | [[DEADLINE:d4|in advance by the 5th]] |
+
+    3. The Lessee shall not store any inflammable chemicals other than those permitted by the [[NOT:n2|Punjab Pharmacy Council]] licence.
+    4. Mr. [[NAME:p1|Waqar]] may inspect the warehouse with [[DEADLINE:d5|24 hours' notice]].
+    5. Ms. [[NAME:p2|Nadeem]] confirms she is authorised by a board resolution of [[NOT:n3|Zarnab Pharma]].
+    6. Lessor's account for rent: [[ACCOUNT:b1|0118-0079314502]], [[NOT:n4|Faisal Town Branch]].
+
+    For the Lessor: [[NAME:p1|Waqar Ahmed Sheikh]]
+    For the Lessee: [[NAME:p2|Asma Nadeem]], Director
+- id: p4-ten-08
+  document_type: tenancy
+  features: [untitled_names, deadlines, repeated_names]
+  parties: [p1, p2]
+  text: |
+    Renewal addendum
+
+    The tenancy of [[ADDRESS:a1|House 9, Lane 3, Askari 11, Lahore]] between [[NAME:p1|Kamran Yousaf]] and [[NAME:p2|Ayesha Noreen]] is renewed [[DEADLINE:d1|for eleven months from 1 August 2026]].
+
+    [[NAME:p1|Kamran Yousaf]] and [[NAME:p2|Ayesha Noreen]] agree that the rent will be Rs. 140,000 per month. All other terms of the agreement dated 1 September 2025 remain the same. [[NAME:p2|Ayesha Noreen]] will pay the difference in security deposit [[DEADLINE:d2|by 15 August 2026]].
+
+    [[NAME:p1|Kamran Yousaf]]
+    [[NAME:p2|Ayesha Noreen]]
+    Witness: [[NAME:p3|Fahad Nisar]]
+- id: p4-ten-09
+  document_type: tenancy
+  features: [roman_urdu, untitled_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    flat rent terms (as discussed on whatsapp)
+
+    owner - [[NAME:p1|Bilal Hassan Rizvi]] [[PHONE:t1|0321 4096 773]]
+    rent par lene wala - [[NAME:p2|Zeeshan Haider]] [[PHONE:t2|03458812094]]
+    flat - [[ADDRESS:a1|Flat 12-A, 4th floor, Gulshan-e-Iqbal Block 13-D, Karachi]]
+
+    * kiraya 55k mahana, [[DEADLINE:d1|har mahine 5 tareekh se pehle]]
+    * advance 2 mahine ka = 110k
+    * [[NAME:p1|bilal]] bhai ne kaha paani ka tanker kharcha [[NAME:p2|zeeshan]] ka hoga
+    * agreement [[DEADLINE:d2|11 mahine]] ka, phir renewal
+    * [[NAME:p1|Rizvi]] sahab chabi [[DEADLINE:d3|1 tareekh tak]] de denge
+    * [[NAME:p2|zeeshan]] [[NOT:n1|Shan Mobile Accessories]] wali dukan pe kaam karta hai, salary proof diya hai
+    * society maintenance [[NOT:n2|Al-Rehman Residency Welfare Association]] ko direct
+
+    ok from both sides
+    [[NAME:p1|bilal]] / [[NAME:p2|zeeshan]]
+- id: p4-ten-10
+  document_type: tenancy
+  features: [urdu_script, aliases, overlap, deadlines, repeated_names]
+  parties: [p1, p2]
+  text: |
+    ROOM RENT AGREEMENT - HOSTEL ACCOMMODATION
+
+    Owner: [[NAME:p1|Gul Rehman Afridi]] ([[NAME:p1|گل رحمان آفریدی]])
+    Address of the room: [[ADDRESS:a1|Room 6, First Floor, building of [[NAME:p1|Gul Rehman Afridi]], Mohallah Jangi, Peshawar]]
+    Resident student: [[NAME:p2|Fawad Khan Yousafzai]] ([[NAME:p2|فواد خان یوسفزئی]])
+    Guardian: [[NAME:p3|Sher Afzal Khan]], [[PHONE:t1|0346-9210557]]
+
+    1. Rent Rs. 18,000 per month including electricity, payable [[DEADLINE:d1|by the 7th of every month]].
+    2. The room is rented for [[DEADLINE:d2|one academic semester, ending on 31 January 2027]].
+    3. Mr. [[NAME:p2|Yousafzai]] will not bring guests to stay overnight.
+    4. [[NAME:p1|Afridi]] sahib will give [[DEADLINE:d3|one month]] notice if the room is needed back.
+
+    دستخط: [[NAME:p1|گل رحمان]]          دستخط: [[NAME:p2|فواد]]
+- id: p4-ten-11
+  document_type: tenancy
+  features: [repeated_names, deadlines, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    AGREEMENT TO LET
+
+    Landlord: [[NAME:p1|Nasrullah Kakar]], CNIC [[CNIC:c1|54400-3318729-1]], [[ADDRESS:a1|House No. 3/17, Jinnah Town, Quetta]]
+    Tenant: [[NAME:p2|Mahnoor Baloch]], CNIC [[CNIC:c2|54401-6620538-4]], phone [[PHONE:t1|081-2861403]]
+
+    Key points:
+    - Property: [[ADDRESS:a2|Portion B, House No. 41, Samungli Housing Scheme, Quetta]].
+    - Term: [[DEADLINE:d1|12 months starting 1 October 2026]].
+    - Rent: Rs. 60,000 per month, payable [[DEADLINE:d2|within the first week of each month]] by bank transfer to IBAN [[ACCOUNT:b1|PK61HABB0027480012345601]].
+    - Late rent: a surcharge of Rs. 1,000 for each day of delay [[DEADLINE:d3|after the 7th]].
+    - [[NAME:p1|Nasrullah Kakar]] will repair the gas heater before handover.
+    - [[NAME:p2|Mahnoor Baloch]] is employed at [[NOT:n1|Bolan Medical Complex]] and will occupy the portion with her mother.
+    - Termination: [[DEADLINE:d4|thirty days' notice]] in writing.
+
+    Signed at [[NOT:n2|Quetta]].
+    [[NAME:p1|Nasrullah Kakar]]                [[NAME:p2|Mahnoor Baloch]]
+- id: p4-ten-12
+  document_type: tenancy
+  features: [table, untitled_names, overlap, repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    SCHEDULE B - PERSONS PERMITTED TO RESIDE IN THE PREMISES
+
+    Premises: [[ADDRESS:a1|Upper portion, House 15-A, Street 7, Wapda Town Phase 1, Lahore]]
+    Landlord: [[NAME:p1|Junaid Akram Cheema]]
+    Tenant: [[NAME:p2|Sobia Rafiq]]
+
+    | Name | Relation to tenant | CNIC / B-Form | Mobile |
+    |---|---|---|---|
+    | [[NAME:p2|Sobia Rafiq]] | self | [[CNIC:c1|35202-7746109-2]] | [[PHONE:t1|0322-4481057]] |
+    | [[NAME:p3|Rafiq Ahmad]] | father | [[CNIC:c2|35202-1029384-7]] | [[PHONE:t2|0300-4412690]] |
+    | [[NAME:p4|Areeba Rafiq]] | sister | [[CNIC:c3|35202-5560192-8]] | - |
+    | [[NAME:p5|Hamza Rafiq]] | brother | B-Form [[CNIC:c4|35202-9918273-3]] | - |
+
+    No other person shall reside in the premises for more than [[DEADLINE:d1|fifteen (15) days]] without the Landlord's consent. The family's earlier address was [[ADDRESS:a2|c/o [[NAME:p3|Rafiq Ahmad]], Chak No. 204 RB, Tehsil Jaranwala, District Faisalabad]].
+
+    Initialled: [[NAME:p1|J. A. Cheema]] / [[NAME:p2|S. Rafiq]]
+- id: p4-ten-13
+  document_type: tenancy
+  features: [ocr_errors, table, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    RENT RECElPT REGISTER  -  [[ADDRESS:a1|Shop 2l, Ka1ma Market, Bahawalpur]]
+
+    Landlord: [[NAME:p1|A1taf Hussain Gondal]]      Tenant: [[NAME:p2|Mudassar Na2ir]]
+
+    | Month | Amount | Received by | Paid by |
+    |---|---|---|---|
+    | Jan 2026 | 22,OOO | [[NAME:p1|Altaf Hussian]] | [[NAME:p2|Mudassar]] |
+    | Feb 2026 | 22,000 | [[NAME:p1|A. Hussain]] | [[NAME:p2|Mudasar Nazir]] |
+    | Mar 2026 | 22,0O0 | [[NAME:p3|Waseem]] (son) | [[NAME:p2|M. Nazir]] |
+
+    Note: rent for April 2026 not received. Tenant to clear arrears [[DEADLINE:d1|by 2O April 2026]], otherwise the landlord may issue [[DEADLINE:d2|15-day]] eviction notice.
+    Tenant CNlC [[CNIC:c1|31202-44l0973-5]]   Ph. [[PHONE:t1|0302-71 8834 6]]

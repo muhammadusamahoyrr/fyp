@@ -1,0 +1,272 @@
+dataset: pii-eval-4
+label_review: developer_only
+documents:
+- id: p4-let-01
+  document_type: letter
+  features: [repeated_names, aliases, deadlines, lookalikes, overlap]
+  parties: [p1, p2]
+  text: |
+    LEGAL NOTICE
+
+    Through Registered A.D. and Courier
+
+    To,
+    Mr. [[NAME:p2|Kaleem Ullah Niazi]]
+    [[ADDRESS:a1|Flat 8, Second Floor, Iqbal Mansion, 41-Davis Road, Lahore]]
+
+    Subject: Notice for payment of arrears of rent and vacation of premises
+
+    Sir,
+
+    Under instructions from and on behalf of my client, [[NAME:p1|Shaista Perveen Gondal]] w/o [[NAME:p3|Javed Iqbal Gondal]], resident of [[ADDRESS:a2|the house of [[NAME:p3|Javed Iqbal Gondal]], 5-Tufail Road, Lahore Cantt]], I serve you with this notice as follows:
+
+    1. That my client let out the above flat to you under a tenancy agreement dated 1 November 2024 at a monthly rent of Rs. 70,000.
+    2. That you, [[NAME:p2|Kaleem Ullah Niazi]], have failed to pay rent for the months of March to July 2026, amounting to Rs. 350,000.
+    3. That my client's repeated requests to Mr. [[NAME:p2|Niazi]] have been ignored.
+
+    You are therefore called upon to pay the arrears [[DEADLINE:d1|within fifteen (15) days of receipt of this notice]] and to vacate the flat [[DEADLINE:d2|by 30 September 2026]], failing which my client shall file an eviction petition before the Rent Controller, [[NOT:n1|Lahore]], at your risk as to costs.
+
+    A copy of this notice is retained in my office for record.
+
+    [[NAME:p4|Saqib Javed Warraich]]
+    Advocate High Court
+    [[ADDRESS:a3|Chamber No. 14, Lahore High Court Bar, Lahore]]
+    [[PHONE:t1|0321-8814032]]
+- id: p4-let-02
+  document_type: letter
+  features: [untitled_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    6 August 2026
+
+    Dear [[NAME:p2|Nauman]],
+
+    Thank you for meeting me on Saturday. As agreed, I am sending you the signed copy of the NDA for the [[NOT:n1|Sapphire Lane Housing]] plans. Please return your countersigned copy [[DEADLINE:d1|by Friday, 14 August]].
+
+    [[NAME:p3|Farah Deeba]] from my office will collect the copy from your clinic at [[ADDRESS:a1|Shop 3, Mall Road Plaza, Murree]]. If she cannot find it, call her on [[PHONE:t1|0313-5579120]].
+
+    Regards,
+    [[NAME:p1|Wasif Rasheed]]
+
+    cc: [[NAME:p3|Farah Deeba]]
+- id: p4-let-03
+  document_type: letter
+  features: [urdu_script, deadlines, lookalikes, aliases]
+  parties: [p1, p2]
+  text: |
+    بخدمت جناب سیکرٹری صاحب
+    [[NOT:n1|انجمن فلاح و بہبود ماڈل ٹاؤن]]، [[NOT:n2|گوجرانوالہ]]
+
+    موضوع: پانی کی لائن کی مرمت
+
+    جناب عالی،
+    گزارش ہے کہ میں [[NAME:p1|ارشد محمود چیمہ]]، ساکن [[ADDRESS:a1|مکان نمبر 112، بلاک سی، ماڈل ٹاؤن، گوجرانوالہ]]، آپ کی توجہ اس طرف دلانا چاہتا ہوں کہ میرے ہمسائے [[NAME:p2|ریاض احمد]] کے گھر کے سامنے پانی کی لائن [[DEADLINE:d1|پچھلے دو ہفتوں]] سے ٹوٹی ہوئی ہے۔ [[NAME:p2|ریاض]] صاحب نے بھی کئی بار شکایت کی ہے۔
+
+    براہ کرم [[DEADLINE:d2|ایک ہفتے کے اندر]] مرمت کروائی جائے۔
+
+    العارض
+    [[NAME:p1|ارشد محمود]]
+    موبائل: [[PHONE:t1|0300-7419935]]
+- id: p4-let-04
+  document_type: letter
+  features: [roman_urdu, untitled_names, deadlines, aliases]
+  parties: [p1, p2]
+  text: |
+    Bhai [[NAME:p2|Tanveer]],
+
+    Assalam-o-alaikum. Umeed hai aap khairiyat se honge. Ammi ne kaha tha ke main aap ko likh kar bata doon ke plot ka masla kya hai.
+
+    Plot [[ADDRESS:a1|No. 27, Street 5, Shalimar Colony, Multan]] abbu ke naam par tha. Ab warasat ka intaqal hona hai. [[NAME:p4|Nasreen Akhtar]] aapa aur [[NAME:p5|Shahida]] baji dono ne kaha hai ke woh apna hissa [[NAME:p2|Tanveer Ahmed]] ke naam karne ko tayyar hain, magar patwari [[NAME:p6|Allah Bakhsh]] keh raha hai ke sab warison ko [[DEADLINE:d1|agle mahine ki 15 tareekh tak]] tehsil mein hazir hona hoga.
+
+    Aap [[DEADLINE:d2|10 din ke andar]] apna shanakhti card ki copy bhej dein. Mera number [[PHONE:t1|0303-6650741]] hai.
+
+    Aap ka bhai,
+    [[NAME:p1|Rizwan Ahmed]]
+- id: p4-let-05
+  document_type: letter
+  features: [ocr_errors, overlap, deadlines, aliases]
+  parties: [p1, p2]
+  text: |
+    NOTlCE OF TERMINATION OF TENANCY
+
+    From: Mrs. [[NAME:p1|Ruksana Ja1il]]
+    [[ADDRESS:a1|Bungalow No. 7, near the c1inic of Dr [[NAME:p3|Ja1il Akhtar]], Cantt Area, Hyder-
+    abad]]
+
+    To: [[NAME:p2|Ka1eem Shah]], [[ADDRESS:a2|Upper F1oor, Qasimabad Phase l, Hyderabad]]
+
+    Dear [[NAME:p2|Kaleem Shah]],
+    You are hereby given notice that your tenancy wi1l end [[DEADLINE:d1|on 3l October 2026]]. Please hand over vacant possession [[DEADLINE:d2|by that date]]. Your security deposit of Rs. 6O,000 will be returned [[DEADLINE:d3|within l4 days]] after inspection.
+
+    Contact: [[PHONE:t1|022-27 8l 594]] / [[EMAIL:e1|ruksana.jalil@hydmail.pk]]
+
+    ([[NAME:p1|R. Jalil]])
+- id: p4-let-06
+  document_type: letter
+  features: [table, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Rehmat Law Associates]]
+    [[ADDRESS:a1|Office 5, Ground Floor, Saeed Plaza, Blue Area, Islamabad]]
+
+    18 August 2026
+
+    Ms. [[NAME:p2|Sundas Mehboob]]
+    [[ADDRESS:a2|House 9, Street 64, Sector G-6/4, Islamabad]]
+
+    Re: Payments received from your tenant
+
+    Dear Ms. [[NAME:p2|Mehboob]],
+
+    On behalf of our client [[NAME:p1|Atif Saleem Abbasi]], we set out below the rent payments he has made to you:
+
+    | Date | Amount (Rs.) | Mode | Reference |
+    |---|---|---|---|
+    | 2 May 2026 | 110,000 | bank transfer | from [[ACCOUNT:b1|PK73SONE0004120011873301]] |
+    | 4 June 2026 | 110,000 | bank transfer | from [[ACCOUNT:b2|PK73SONE0004120011873301]] |
+    | 3 July 2026 | 110,000 | cheque | cheque no. 00418823 |
+
+    Mr. [[NAME:p1|Abbasi]] disputes your claim of arrears. Please share any documents in support of your claim [[DEADLINE:d1|within ten days]] so that the matter may be resolved without litigation.
+
+    Yours faithfully,
+    [[NAME:p3|Omar Rehmat]]
+    Partner
+- id: p4-let-07
+  document_type: letter
+  features: [untitled_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    REFERENCE LETTER
+
+    I have known [[NAME:p1|Adeel Mushtaq]] for six years, first as a student at [[NOT:n1|Government College of Commerce]], [[NOT:n2|Okara]], and later as an articled clerk at [[NOT:n3|Mushtaq & Wattoo Chartered Accountants]], a firm unrelated to his family.
+
+    [[NAME:p1|Adeel Mushtaq]] is careful with numbers and honest with people. I recommend him without reservation for the position of audit assistant.
+
+    Yours sincerely,
+    [[NAME:p2|Saira Wattoo]]
+    [[EMAIL:e1|saira.wattoo@mwca.com.pk]]
+- id: p4-let-08
+  document_type: letter
+  features: [lookalikes, deadlines, aliases]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Thar Coal Workers Cooperative Housing Society]]
+    [[ADDRESS:a1|Society Office, Plot 1, Main Boulevard, Hyderabad Bypass, Hyderabad]]
+
+    No. TCW/NOC/266
+    10 September 2026
+
+    Mr. [[NAME:p1|Pir Bux Mangrio]]
+    [[ADDRESS:a2|House A-19, Thar Coal Workers Society, Hyderabad]]
+
+    Subject: No Objection Certificate for sale of House A-19
+
+    With reference to your application, the society has no objection to the transfer of the above house from Mr. [[NAME:p1|Mangrio]] to [[NAME:p2|Saeeda Bano Kalhoro]], subject to:
+
+    (a) clearance of maintenance dues of Rs. 64,000 [[DEADLINE:d1|before the transfer is recorded]];
+    (b) the transfer deed being lodged with the society [[DEADLINE:d2|within sixty (60) days of this letter]], after which this NOC shall lapse.
+
+    Mrs. [[NAME:p2|Kalhoro]] will become a member once the transfer fee is paid.
+
+    [[NAME:p3|Abdul Sattar Memon]]
+    Secretary
+- id: p4-let-09
+  document_type: letter
+  features: [urdu_script, roman_urdu, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Mohtaram [[NAME:p2|Javed Iqbal Khokhar]] sahib,
+
+    Aap ki dukaan ka kiraya [[DEADLINE:d1|teen mahine]] se baqaya hai. [[NAME:p2|Javed Iqbal Khokhar]] se guzarish hai ke [[DEADLINE:d2|30 October 2026 tak]] tamam raqam ada kar dein.
+
+    یہ خط [[NAME:p1|نوید اختر]] کی طرف سے ہے۔ رقم اکاؤنٹ نمبر [[ACCOUNT:b1|0201-7738190-01]] میں جمع کروائیں۔
+
+    Shukriya,
+    [[NAME:p1|Naveed Akhtar]]
+    [[PHONE:t1|0304-1182760]]
+    cc: [[NAME:p3|Muneer Hussain]], munshi
+- id: p4-let-10
+  document_type: letter
+  features: [overlap, untitled_names, repeated_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    15 July 2026
+
+    The Station House Officer
+    [[NOT:n1|Police Station Saddar]], [[NOT:n2|Mardan]]
+
+    Subject: Tenant information (under the tenancy registration requirement)
+
+    I, [[NAME:p1|Liaquat Ali Mohmand]], owner of [[ADDRESS:a1|the shop below the residence of [[NAME:p1|Liaquat Ali Mohmand]], Bank Road, Mardan]], inform you that I have let the shop to [[NAME:p2|Ihsan Ullah]] s/o [[NAME:p3|Fazal Rabi]] of [[ADDRESS:a2|Village Gujar Garhi, Tehsil and District Mardan]], CNIC [[CNIC:c1|16101-2209134-5]], from 1 July 2026.
+
+    [[NAME:p2|Ihsan Ullah]] runs a mobile repair business there under the name [[NOT:n3|Al-Madina Mobile Zone]]. His helpers are [[NAME:p4|Sajid Khan]] and [[NAME:p5|Waqas Ahmad]].
+
+    Kindly register the tenancy. I undertake to inform the police station of any change [[DEADLINE:d1|within seven days]].
+
+    [[NAME:p1|Liaquat Ali Mohmand]]
+    [[PHONE:t1|0937-861452]]
+- id: p4-let-11
+  document_type: letter
+  features: [ocr_errors, untitled_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Ch3nab Insurance Brokers]]
+    Ref: CIB/CL/2O26/88
+
+    To [[NAME:p2|Moharnmad Shafqat]]
+    [[ADDRESS:a1|H.No. 9l, Ga1i 4, Dhok Rat-
+    ta, Rawalpindi]]
+
+    Your claim for water damage to the rented premises has been received. Please submit the following [[DEADLINE:d1|within 2l days]]:
+    1. copy of the tenancy agreement with your landlord [[NAME:p3|Basharat Hussain]];
+    2. photographs of the damage;
+    3. repair estimate.
+
+    Claims not completed [[DEADLINE:d2|by l5 November 2026]] wi1l be closed.
+
+    [[NAME:p1|Sh4ista Kanwal]]
+    Claims Officer   [[PHONE:t1|051-48l 0773]]
+- id: p4-let-12
+  document_type: letter
+  features: [aliases, repeated_names, deadlines, lookalikes, table]
+  parties: [p1, p2]
+  text: |
+    PRIVATE AND CONFIDENTIAL
+
+    [[NAME:p2|Zainab Hamid Bhatti]]
+    [[ADDRESS:a1|House 4, Block K, Phase 2, Hayatabad, Peshawar]]
+
+    Dear [[NAME:p2|Zainab]],
+
+    Breach of confidentiality undertaking dated 2 January 2026
+
+    We act for [[NAME:p1|Shahrukh Javed Qureshi]], owner of [[NOT:n1|Qureshi Herbal Remedies]]. Our client has learned that the formulation of the product "[[NOT:n2|Shifa Plus]]" was shared with a competitor, [[NOT:n3|Gandhara Naturals]], after you left his employment.
+
+    The relevant events are:
+
+    | Date | Event |
+    |---|---|
+    | 2 January 2026 | Ms. [[NAME:p2|Bhatti]] signs the undertaking |
+    | 30 April 2026 | Employment of [[NAME:p2|Z. H. Bhatti]] ends |
+    | 12 June 2026 | [[NOT:n4|Gandhara Naturals]] launches a similar product |
+
+    Mr. [[NAME:p1|Qureshi]] requires you to (i) confirm in writing [[DEADLINE:d1|within 7 days]] that you hold no copies of the formulation; and (ii) refrain from any further disclosure. If we do not hear from you [[DEADLINE:d2|by 25 September 2026]], our client will sue for damages and an injunction.
+
+    [[NAME:p3|Kamran Afzal]]
+    Advocate, for [[NAME:p1|Shahrukh J. Qureshi]]
+- id: p4-let-13
+  document_type: letter
+  features: [urdu_script, ocr_errors, deadlines]
+  parties: [p1, p2]
+  text: |
+    بنام: [[NAME:p2|شاہد محمود]]
+    پتہ: [[ADDRESS:a1|مکان نمبر 4، گلی نمبر 8، محلہ نور پورہ، سرگودھا]]
+
+    محترم [[NAME:p2|شاہد محمود]]،
+    آپ کو مطلع کیا جاتا ہے کہ مکان کا کرایہ نامہ [[DEADLINE:d1|31 دسمبر 2026 کو]] ختم ہو رہا ہے۔ اگر آپ تجدید چاہتے ہیں تو [[DEADLINE:d2|ایک ماہ پہلے]] اطلاع دیں۔
+
+    (scan note: sender's CNlC printed as [[CNIC:c1|38403-l1907 25-6]], phone [[PHONE:t1|0300 60l 4472]])
+
+    مالک مکان
+    [[NAME:p1|عبدالقیوم]]
+    [[NAME:p1|Abdu1 Qayyum]]
