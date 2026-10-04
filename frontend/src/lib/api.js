@@ -2077,6 +2077,32 @@ export async function deleteAnalysis(sourceId) {
   return apiFetch(`/documents/analyses/${encodeURIComponent(sourceId)}`, { method: 'DELETE' });
 }
 
+/* The lawyer's review before anything is sent to the AI (lawyer-confirm
+ * mode): the original text beside the masked request, flagged spans, and the
+ * exact final request. Bound to the text and masking-policy hashes the screen
+ * received; the submit attests the previewed request hash. */
+export async function getPiiConfirmation(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/pii-confirmation`);
+}
+
+export async function previewPii(runId, { textSha256, policySha256, decisions }) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/pii-confirmation/preview`, {
+    method: 'POST',
+    body: JSON.stringify({ text_sha256: textSha256, policy_sha256: policySha256, decisions }),
+  });
+}
+
+export async function confirmPii(runId, { textSha256, policySha256, expectedStateVersion, decisions,
+                                          previewSha256, attested }, key) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/pii-confirmation`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+    body: JSON.stringify({ text_sha256: textSha256, policy_sha256: policySha256,
+                           expected_state_version: expectedStateVersion, decisions,
+                           preview_sha256: previewSha256, attested }),
+  });
+}
+
 /* The INTERNAL drafting-question review (synthetic documents only). Every
  * response carries the server's evaluation status; a decision must echo it
  * back (`evaluationAck`), so the screen cannot act without showing it.

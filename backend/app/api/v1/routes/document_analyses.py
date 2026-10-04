@@ -235,6 +235,59 @@ async def get_processing_receipt(run_id: str, current_user: dict = Depends(requi
     return await _run(receipts.get_receipt(owner_id=str(current_user["_id"]), run_id=run_id))
 
 
+class PiiPreviewBody(BaseModel):
+    text_sha256: str = Field(min_length=64, max_length=64)
+    policy_sha256: str = Field(min_length=64, max_length=64)
+    #: [{start, end, decision, target_start?, target_end?}] -- flagged spans
+    #: decided, and missed details the lawyer marked.
+    decisions: list[dict] = Field(default_factory=list, max_length=500)
+
+
+class PiiConfirmationBody(PiiPreviewBody):
+    expected_state_version: int = Field(ge=0)
+    #: The SHA-256 of the exact request the lawyer reviewed, and their attestation.
+    preview_sha256: str = Field(min_length=64, max_length=64)
+    attested: bool = False
+
+
+@router.get("/runs/{run_id}/pii-confirmation")
+async def get_pii_confirmation(run_id: str, current_user: dict = Depends(require_registered_lawyer)):
+    """The lawyer's review before anything is sent to the AI: the original
+    text beside the masked request, flagged spans as offsets, and the exact
+    request (ANALYZER_PII_MASKING.md, slice B)."""
+    from app.services.analyzer import pii_confirmation
+
+    _require_available()
+    return await _run(pii_confirmation.get_view(owner_id=str(current_user["_id"]), run_id=run_id))
+
+
+@router.post("/runs/{run_id}/pii-confirmation/preview")
+async def preview_pii_confirmation(run_id: str, body: PiiPreviewBody = Body(...),
+                                   current_user: dict = Depends(require_registered_lawyer)):
+    """Re-mask with the lawyer's decisions and return the exact request and its
+    hash. Stores nothing and sends nothing."""
+    from app.services.analyzer import pii_confirmation
+
+    _require_available()
+    return await _run(pii_confirmation.preview(
+        owner_id=str(current_user["_id"]), run_id=run_id, text_sha256=body.text_sha256,
+        policy_sha256=body.policy_sha256, decisions=body.decisions))
+
+
+@router.post("/runs/{run_id}/pii-confirmation", status_code=201)
+async def confirm_pii(run_id: str, body: PiiConfirmationBody = Body(...),
+                      idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+                      current_user: dict = Depends(require_registered_lawyer)):
+    from app.services.analyzer import pii_confirmation
+
+    _require_available()
+    return await _run(pii_confirmation.confirm(
+        owner_id=str(current_user["_id"]), actor=current_user, run_id=run_id, text_sha256=body.text_sha256,
+        policy_sha256=body.policy_sha256, expected_state_version=body.expected_state_version,
+        decisions=body.decisions, preview_sha256=body.preview_sha256, attested=body.attested,
+        idempotency_key=idempotency_key))
+
+
 # ── drafting-question review (INTERNAL, synthetic only) ──────────────────────
 #
 # ANALYZER_HYPOTHESES_PLAN.md §6, services/analyzer/drafting_review.py. The

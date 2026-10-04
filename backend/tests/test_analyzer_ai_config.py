@@ -22,7 +22,10 @@ GOOD = {"analyzer_ai": True, "analyzer_ai_provider": "groq",
         "analyzer_ai_policy_id": "AAI-AI-TEST-001", "analyzer_ai_zdr_status": "verified",
         "analyzer_ai_zdr_verified_on": "2026-09-30",
         "analyzer_ai_zdr_evidence": "Groq data controls export, kept in ops/zdr/2026-09-30",
-        "analyzer_ai_synthetic_only": True, "groq_api_key": "test-key-not-real"}
+        "analyzer_ai_synthetic_only": True, "groq_api_key": "test-key-not-real",
+        # Lawyer-confirm mode is on by default; tests of unrelated AI behaviour
+        # switch it off here, and the review tests switch it back on.
+        "analyzer_pii_review_required": False}
 
 
 def config(**changes):

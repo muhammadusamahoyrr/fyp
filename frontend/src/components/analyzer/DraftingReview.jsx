@@ -26,6 +26,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Btn, Card } from "@/components/client/documents/ui.jsx";
 import { getAnalysisText, getDraftingReview, idempotencyKey, recordDraftingDecision } from "@/lib/api.js";
 import MaskingNote from "@/components/analyzer/MaskingNote.jsx";
+import PiiConfirmation, { PII_REVIEW_REASONS } from "@/components/analyzer/PiiConfirmation.jsx";
 
 export const SCANNER_LABEL = {
     present: "Found",
@@ -174,7 +175,7 @@ function Question({ t, q, reasons, onFocus, onDecide, busy, picking, onStartPick
 
 /* ── the screen ───────────────────────────────────────────────────────────── */
 
-export default function DraftingReview({ t, runId }) {
+export default function DraftingReview({ t, runId, onChanged }) {
     const [data, setData] = useState(null);
     const [issue, setIssue] = useState(null);
     const [doc, setDoc] = useState(null);
@@ -252,6 +253,9 @@ export default function DraftingReview({ t, runId }) {
             </Card>
             <div data-engine-labels style={{ fontSize: 12.5, color: "inherit" }}>{data.engine_labels.join(" · ")}</div>
             <MaskingNote t={t} pii={data.ai_review_summary?.pii} evaluation={data.ai_review_summary?.evaluation} />
+            {PII_REVIEW_REASONS.has(data.ai_review_summary?.reason) && (
+                <PiiConfirmation t={t} runId={runId} onQueued={onChanged} />
+            )}
             {notice && <div role="alert" style={{ fontSize: 13 }}>{notice}</div>}
             {picking && (
                 <Card role="status" data-picking={picking.question_id} style={{ padding: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>

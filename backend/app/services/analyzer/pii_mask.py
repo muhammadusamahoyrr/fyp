@@ -186,6 +186,13 @@ def _spans(text: str, extra: list[tuple[int, int, str]] = ()) -> list[tuple[int,
     for name in names:             # every other exact occurrence of a confident name
         for m in re.finditer(rf"(?<![\w]){re.escape(name)}(?![\w])", text):
             found.append((m.start(), m.end(), "NAME"))
+    # A marked address or number is masked wherever else it appears too: a
+    # detail the reviewer marked once is never sent from another sentence.
+    for x, y, kind in extra:
+        value = text[x:y].strip()
+        if kind != "NAME" and value:
+            for m in re.finditer(rf"(?<![\w]){re.escape(value)}(?![\w])", text):
+                found.append((m.start(), m.end(), kind))
     for m in _PREMISES.finditer(text):
         found.append((m.start(), m.end(), "ADDRESS"))
     for m in _RESIDENCE.finditer(text):
@@ -255,7 +262,14 @@ def _choose(text: str, found: list[tuple[int, int, str]]) -> list[tuple[int, int
     chosen = list(names)
     taken = names[:]
     for start, end, kind in sorted(pieces, key=lambda x: (x[0], -(x[1] - x[0]))):
-        start, end = trim(start, end)
+        # A piece of an address split around a name keeps the separator that
+        # touches the name: "House of [NAME_1][ADDRESS_1]" masks ", Street 4"
+        # whole, and leaves no stray characters of the address unmasked.
+        touches_left = any(b == start for _, b, _ in names)
+        touches_right = any(a == end for a, _, _ in names)
+        trimmed = trim(start, end)
+        start = start if touches_left and kind != "NAME" else trimmed[0]
+        end = end if touches_right and kind != "NAME" else trimmed[1]
         if kind == "NAME":
             start, end = whole_words(start, end)
         if end - start < 3 or any(start < b and a < end for a, b, _ in taken):
@@ -308,6 +322,8 @@ def _candidates(sentence_id: str, offset: int, held: str) -> list[dict]:
 #: `target_end`. Masker-level only: the confirmation API (Slice B, on hold)
 #: does not accept it until it validates the target.
 SAME_PERSON = "same_person"
+#: A missed number or address a reviewer marks: the decision names its kind.
+KIND_DECISIONS = {"cnic": "CNIC", "phone": "PHONE", "email": "EMAIL", "account": "ACCOUNT"}
 #: Uncertainty kinds a reviewer cannot resolve: a policy block.
 UNRESOLVABLE = {"SCRIPT"}
 
@@ -365,6 +381,8 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
             return (c["start"], c["end"], "NAME")
         if c["decision"] == ADDRESS_DECISION:
             return (c["start"], c["end"], "ADDRESS")
+        if c["decision"] in KIND_DECISIONS:
+            return (c["start"], c["end"], KIND_DECISIONS[c["decision"]])
         return None
 
     def located(c: dict) -> list[dict]:

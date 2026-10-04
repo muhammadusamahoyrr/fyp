@@ -23,6 +23,7 @@ import { useT } from "@/components/client/theme.js";
 import { Btn, Card, Label } from "@/components/client/documents/ui.jsx";
 import DraftingReview from "@/components/analyzer/DraftingReview.jsx";
 import MaskingNote from "@/components/analyzer/MaskingNote.jsx";
+import PiiConfirmation, { PII_REVIEW_REASONS } from "@/components/analyzer/PiiConfirmation.jsx";
 import {
     cancelAnalysisRun, confirmAnalysisDocument, confirmAnalysisOcr, confirmAnalysisTerms,
     createAnalysis, deleteAnalysis, getAnalysisReport, getAnalysisRun, getAnalysisText,
@@ -191,7 +192,10 @@ export const AI_UNAVAILABLE_TEXT = {
         + "existed, so it was not sent to the AI. Start a new analysis to have it checked.",
     security_scan_mismatch: "The security check did not match this document's text, so it was not sent to the AI.",
     pii_confirmation_required: "Some names or addresses could not be masked with confidence, so nothing was sent "
-        + "to the AI. A person must confirm them first; that confirmation step is not available yet.",
+        + "to the AI. Review them below before anything is sent.",
+    pii_review_required: "Nothing is sent to the AI until you review the exact masked request below.",
+    pii_review_outdated: "The request changed after your review, so nothing was sent. Review it again below.",
+    pii_leak_guard: "The final request still looked like it held personal details, so nothing was sent.",
 };
 const SEVERITY_TEXT = { low: "Low", medium: "Medium", high: "High" };
 const TAB_EMPTY = {
@@ -356,7 +360,7 @@ const REPORT_TABS = [["checks", "Checks"], ["summary_points", "Summary"], ["mode
 
 /* ── the report ──────────────────────────────────────────────────────────── */
 
-function ReportView({ t, runId }) {
+function ReportView({ t, runId, onChanged }) {
     const [report, setReport] = useState(null);
     const [issue, setIssue] = useState(null);
     const [tab, setTab] = useState("checks");
@@ -378,6 +382,9 @@ function ReportView({ t, runId }) {
     const notices = report.packs.filter(p => PACK_STATUS_TEXT[p.status]);
     return (
         <section data-report aria-label="Report" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {PII_REVIEW_REASONS.has(report.ai?.reason) && (
+                <PiiConfirmation t={t} runId={runId} onQueued={onChanged} />
+            )}
             <SecurityNotice t={t} security={report.security} />
             <div role="tablist" aria-label="Report sections" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {REPORT_TABS.map(([key, label]) => (
@@ -606,10 +613,10 @@ function RunView({ t, runId, onBack }) {
             {status === "needs_ocr_confirmation" && <OcrStep t={t} run={run} onDone={reload} />}
             {status === "needs_document_confirmation" && <DocumentStep t={t} run={run} onDone={reload} />}
             {status === "needs_terms_confirmation" && <TermsStep t={t} run={run} onDone={reload} />}
-            {status === "done" && run.engine === HYPOTHESIS_ENGINE && <DraftingReview t={t} runId={runId} />}
+            {status === "done" && run.engine === HYPOTHESIS_ENGINE && <DraftingReview t={t} runId={runId} onChanged={reload} />}
             {status === "done" && run.engine !== HYPOTHESIS_ENGINE && (
                 <>
-                    <ReportView t={t} runId={runId} />
+                    <ReportView t={t} runId={runId} onChanged={reload} />
                     <TextViewer t={t} runId={runId} />
                 </>
             )}

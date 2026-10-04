@@ -59,12 +59,22 @@ EVAL_VERSION = "pii-eval.2"
 ROOT = Path(__file__).resolve().parents[3] / "analyzer_eval" / "pii"
 RUBRIC_PATH = ROOT / "PII_DETECTION_RUBRIC.md"          # pii-eval.1, kept unchanged (its hash is frozen)
 RUBRIC_2_PATH = ROOT / "PII_DETECTION_RUBRIC_2.md"
+RUBRIC_3_PATH = ROOT / "PII_DETECTION_RUBRIC_3.md"
 #: The rubric each set is scored under; pii-eval-2 and later use rubric 2.
-RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH}
+RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH, "pii-eval-3": RUBRIC_3_PATH}
 
 
 def rubric_path(dataset_name: str) -> Path:
     return RUBRIC_BY_DATASET.get(dataset_name, RUBRIC_2_PATH)
+
+
+def rubric_number(dataset_name: str) -> int:
+    return {RUBRIC_PATH: 1, RUBRIC_3_PATH: 3}.get(rubric_path(dataset_name), 2)
+
+
+def modes_for(dataset_name: str) -> tuple[str, ...]:
+    """Rubric 3 adds the `review` (lawyer-confirm) mode beside auto and flag-only."""
+    return ("auto", "manual", "review") if rubric_number(dataset_name) == 3 else ("auto", "manual")
 RECORD_PATH = Path(__file__).resolve().parent / "pii_detection_record.yaml"   # pii-eval-1's kept record
 
 
@@ -90,7 +100,8 @@ COVERAGE = {"documents": 40, "per_feature": 6, "personal_spans": 150}
 #: auto mode -- stays kept, unchanged, in pii_detection_record.yaml (7424f38).
 #: The next gate is a fresh independent pii-eval-2.
 DATASET_ROLES = {"pii-eval-1": "development",
-                 "pii-eval-2": "gate_sealed"}     # authored 2026-10-04; never read for tuning; see AUTHORED.txt
+                 "pii-eval-2": "gate_spent",       # scored once 2026-10-04: NOT passed
+                 "pii-eval-3": "gate_sealed"}     # authored 2026-10-04; never read for tuning; see AUTHORED.txt
 _OPEN = re.compile(r"\[\[(?P<kind>[A-Z]+):(?P<entity>[A-Za-z0-9_-]+)\|")
 _WORD = re.compile(r"[^\W_]{3,}|\d{3,}", re.UNICODE)
 
@@ -241,6 +252,32 @@ def _oracle(uncertain: list[dict], gold: list[Span]) -> list[dict]:
     return out
 
 
+_KIND_DECISION = {"NAME": pii_mask.NAME_DECISION, "ADDRESS": pii_mask.ADDRESS_DECISION,
+                  **{kind: decision for decision, kind in pii_mask.KIND_DECISIONS.items()}}
+
+
+def _missed(doc: Doc, personal: list[Span], masking, decisions: list[dict]) -> list[dict]:
+    """`review` mode: the gold personal details still not fully masked, as the
+    reviewer would mark them -- the outermost span only; a person's other
+    mention linked to their fullest masked mention (`same person`)."""
+    out: list[dict] = []
+    for g in sorted(personal, key=lambda g: (g.start, -(g.end - g.start))):
+        if _covered(masking.masked_spans, g.start, g.end) >= g.end - g.start:
+            continue
+        if any(o["start"] <= g.start and g.end <= o["end"] for o in out):
+            continue                                         # inside a span already marked
+        mark = {"start": g.start, "end": g.end, "decision": _KIND_DECISION[g.kind]}
+        if g.kind == "NAME":
+            same = [x for x in doc.spans if x.kind == "NAME" and x.entity == g.entity and x is not g
+                    and not _overlaps(x.start, x.end, g.start, g.end) and x.end - x.start >= g.end - g.start
+                    and _covered(masking.masked_spans, x.start, x.end) == x.end - x.start]
+            if same:
+                target = max(same, key=lambda x: x.end - x.start)
+                mark.update(decision=pii_mask.SAME_PERSON, target_start=target.start, target_end=target.end)
+        out.append(mark)
+    return out
+
+
 def _hygiene(request: str, doc: Doc) -> bool:
     if "[[" in request or re.search(r"\b(?:NAME|CNIC|PHONE|EMAIL|ACCOUNT|ADDRESS|NOT|DEADLINE):[A-Za-z0-9_-]+\|", request):
         return False
@@ -264,16 +301,29 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
     first = pii_mask.prepare(doc.text, rows, send_ids, None, list(extra or []))
     uncertain = list(first.uncertain)
     masking = first
-    if mode == "manual" and uncertain:
+    marked = 0
+    if mode in ("manual", "review") and (uncertain or mode == "review"):
         # The reviewer sees the re-masked document again: a flag that appears
         # only after their decisions is decided too (at most three rounds).
+        # In `review` mode (lawyer-confirm, rubric 3) the reviewer ALSO marks
+        # every personal detail masking missed without flagging it. That
+        # simulates a reviewer who catches everything: it tests the MECHANISM
+        # (marked details are masked, never sent, one token per person), not
+        # whether a real lawyer would catch them -- `reviewer_marked` reports
+        # how much was left to the lawyer.
         decisions: list[dict] = []
         for _ in range(3):
             fresh = [u for u in masking.uncertain
                      if not any(c["start"] == u["start"] and c["end"] == u["end"] for c in decisions)]
-            if not fresh:
+            added: list[dict] = []
+            if mode == "review":
+                added = _missed(doc, personal, masking, decisions)
+            if not fresh and not added:
                 break
             decisions += _oracle(fresh, doc.spans)
+            for a in added:
+                decisions = [c for c in decisions if not (c["start"] < a["end"] and a["start"] < c["end"])] + [a]
+            marked += len(added)
             masking = pii_mask.prepare(doc.text, rows, send_ids, decisions, list(extra or []))
     reasons = sorted({u["reason"] for u in masking.uncertain})
     guard: list[str] = []
@@ -341,7 +391,7 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
     preserved = (all(_norm(doc.text[g.start:g.end]) in _norm(request) for g in deadlines)
                  if request is not None else None)
     return {"id": doc.id, "mode": mode, "blocked": blocked, "sent": request is not None, "block_reasons": reasons,
-            "uncertain": len(uncertain), "false_candidates": len(false_candidates),
+            "uncertain": len(uncertain), "false_candidates": len(false_candidates), "reviewer_marked": marked,
             "unnecessary_block": unnecessary_block, "spans": spans_out,
             "party_consistent": consistent if tokens and request is not None else None,
             "party_consistent_any_token": consistent_any if tokens_any and request is not None else None,
@@ -381,6 +431,7 @@ def summarise(results: list[dict]) -> dict:
         "flagged_spans": sum(s["flagged"] for s in spans),
         "leaks": sum(s["leak"] for s in spans),
         "unnecessary_blocks": sum(r["unnecessary_block"] for r in results),
+        "reviewer_marked": sum(r.get("reviewer_marked", 0) for r in results),
         "unnecessary_block_rate": _ratio(sum(r["unnecessary_block"] for r in results), len(results)),
         "uncertain_spans": cands,
         "false_candidate_rate": _ratio(sum(r["false_candidates"] for r in results), cands),
@@ -404,6 +455,31 @@ def summarise(results: list[dict]) -> dict:
 #: lawyer-confirm, so the SENT RATE is gated in manual mode only (auto mode's
 #: is reported), and address coverage is gated in both modes.
 THRESHOLDS_2 = {**THRESHOLDS, "manual_sent_rate": 0.60, "address_character_coverage": 0.95}
+
+
+#: Rubric 3 (owner-approved 2026-10-04): the gate is the REVIEW (lawyer-confirm)
+#: mode only; auto and flag-only results are report-only. A pass is a synthetic
+#: engineering gate of the masking mechanism -- not lawyer validation, not
+#: production approval.
+THRESHOLDS_3 = {"review_leaks": 0, "review_character_coverage": 0.99, "review_address_character_coverage": 0.95,
+                "review_party_consistency": 1.0, "review_deadline_preservation": 1.0, "review_sent_rate": 0.60}
+
+
+def gate_3(review: dict) -> dict:
+    def value(key, missing):
+        return review[key] if review.get(key) is not None else missing
+    checks = {
+        "review_leaks": review["leaks"] <= THRESHOLDS_3["review_leaks"],
+        "review_character_coverage": value("character_coverage", 0) >= THRESHOLDS_3["review_character_coverage"],
+        "review_address_character_coverage":
+            value("address_character_coverage", 1) >= THRESHOLDS_3["review_address_character_coverage"],
+        "review_party_consistency": value("party_consistency", 1) >= THRESHOLDS_3["review_party_consistency"],
+        "review_deadline_preservation":
+            value("deadline_preservation", 1) >= THRESHOLDS_3["review_deadline_preservation"],
+        "review_sent_rate": value("sent_rate", 0) >= THRESHOLDS_3["review_sent_rate"],
+    }
+    return {"thresholds": THRESHOLDS_3, "checks": checks, "report_only": ["auto", "manual", "request_hygiene"],
+            "status": "detection_passed" if all(checks.values()) else "not_passed"}
 
 
 def gate(auto: dict, manual: dict, rubric: int = 1) -> dict:
@@ -432,15 +508,18 @@ def gate(auto: dict, manual: dict, rubric: int = 1) -> dict:
             "status": "detection_passed" if all(checks.values()) else "not_passed"}
 
 
-def evaluate(dataset: Dataset, send, extra_by_doc: dict[str, list[dict]] | None = None) -> dict:
+def evaluate(dataset: Dataset, send, extra_by_doc: dict[str, list[dict]] | None = None,
+             modes: tuple[str, ...] = ("auto", "manual")) -> dict:
     out = {"eval_version": EVAL_VERSION, "dataset": dataset.name, "dataset_sha256": dataset.sha256,
            "masking_version": pii_mask.MASKING_VERSION, "policy_sha256": pii_mask.POLICY_SHA256,
            "rubric_sha256": hashlib.sha256(rubric_path(dataset.name).read_bytes().replace(b"\r\n", b"\n")).hexdigest(),
            "coverage": coverage(dataset)}
     extra_by_doc = extra_by_doc or {}
     per = {mode: [score_document(d, send, mode=mode, extra=extra_by_doc.get(d.id)) for d in dataset.documents]
-           for mode in ("auto", "manual")}
-    out["auto"], out["manual"] = summarise(per["auto"]), summarise(per["manual"])
-    out["gate"] = gate(out["auto"], out["manual"], rubric=1 if rubric_path(dataset.name) == RUBRIC_PATH else 2)
+           for mode in modes}
+    for mode in modes:
+        out[mode] = summarise(per[mode])
+    rubric = rubric_number(dataset.name)
+    out["gate"] = gate_3(out["review"]) if rubric == 3 else gate(out["auto"], out["manual"], rubric=rubric)
     out["per_document"] = per
     return out

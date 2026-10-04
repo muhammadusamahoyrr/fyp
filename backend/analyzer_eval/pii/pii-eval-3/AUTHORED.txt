@@ -1,0 +1,17 @@
+# pii-eval-3 — AUTHORED and SEALED, NOT YET FROZEN (2026-10-04)
+# Not scored, and not to be read for tuning. FROZEN.txt is written only after the owner approves
+# rubric 3's PROPOSED scoring section; scoring refuses until then.
+# Any change to these files before the freeze must be reported, not silently made.
+author: fresh independent agent session, given only PII_DETECTION_RUBRIC_3.md
+author_declared_reads: PII_DETECTION_RUBRIC_3.md only (plus its own output folder; it saw interpreter paths from `where python`, opened none)
+author_limitation: a subagent cannot be technically prevented from seeing project context; independence rests on its instructions and its declaration
+rubric_note: the author read rubric 3 while its scoring section said "owner decision pending"; the PROPOSED scoring was written afterwards. The document-writing sections are unchanged.
+developer_view: loaded by the loader for counts and hashes only; no document text was displayed to the developer
+dataset_sha256: afd80baad51431fef99204ae7f082d10295e23d6b5cd6bb8d8827666e95274bf
+documents: 52
+personal_spans: 563
+files:
+  employment.yaml: 9eda2dc417daf95e7a1ae58aed500ba0e9a616704bdd92d0f187a4ce6af4c757
+  letter.yaml: dfe9643e49905e919817de0e3eb16cda89cdc481bd668abebd2780fed8f81fa5
+  nda.yaml: e37eca5597b282092990401fd5ec378fbf4c3b4ca0a7b91e16bcbd94d6cd5a5d
+  tenancy.yaml: b39f9e4d47262449b12a251f694fcccfb8e09021aa3f18a3dec9d0d33727840c

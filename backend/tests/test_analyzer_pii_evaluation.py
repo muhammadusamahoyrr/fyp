@@ -215,3 +215,35 @@ def test_a_rubric_2_set_is_scored_as_the_pinned_pipeline_and_keeps_its_own_recor
     assert pinned["rules"] == "pii-mask.2"
     assert ev.record_path("pii-eval-1") == ev.RECORD_PATH
     assert ev.record_path("pii-eval-2").name == "pii_detection_record_pii_eval_2.yaml"
+
+
+def test_review_mode_marks_what_masking_missed_and_reports_how_much():
+    d = doc("Payment is due by 5 June 2026. Contact [[NAME:p1|Rehan Akhtar]] about it; "
+            "his number is [[PHONE:t1|03001234567]].", parties=["p1"])
+    auto = ev.score_document(d, send_capture([]), mode="auto")
+    reviewed = ev.score_document(d, send_capture([]), mode="review")
+    assert reviewed["sent"] and not any(s["leak"] for s in reviewed["spans"])
+    assert all(s["covered"] == s["size"] for s in reviewed["spans"])
+    missed = sum(s["covered"] < s["size"] for s in auto["spans"])
+    assert reviewed["reviewer_marked"] == missed                     # the lawyer's share, reported
+    assert ev.summarise([reviewed])["reviewer_marked"] == missed
+
+
+def test_evaluate_can_score_the_review_mode_beside_the_others():
+    d = doc("Signed by [[NAME:p1|Kashif Raza]] on 1 June 2026.", parties=["p1"])
+    out = ev.evaluate(ev.Dataset("tiny", [d], "0" * 64), send_capture([]), modes=("auto", "manual", "review"))
+    assert {"auto", "manual", "review"} <= set(out) and out["review"]["documents"] == 1
+
+
+def test_rubric_3_gates_only_the_review_mode_with_the_owner_thresholds():
+    assert ev.rubric_number("pii-eval-1") == 1 and ev.rubric_number("pii-eval-2") == 2
+    assert ev.rubric_number("pii-eval-3") == 3 and ev.modes_for("pii-eval-3") == ("auto", "manual", "review")
+    good = {"leaks": 0, "character_coverage": 0.995, "address_character_coverage": 0.96, "party_consistency": 1.0,
+            "deadline_preservation": 1.0, "sent_rate": 0.65}
+    assert ev.gate_3(good)["status"] == "detection_passed"
+    for key, bad in (("leaks", 1), ("character_coverage", 0.98), ("address_character_coverage", 0.94),
+                     ("party_consistency", 0.99), ("deadline_preservation", 0.99), ("sent_rate", 0.59)):
+        assert ev.gate_3({**good, key: bad})["status"] == "not_passed", key
+    assert ev.THRESHOLDS_3 == {"review_leaks": 0, "review_character_coverage": 0.99,
+                               "review_address_character_coverage": 0.95, "review_party_consistency": 1.0,
+                               "review_deadline_preservation": 1.0, "review_sent_rate": 0.60}

@@ -369,6 +369,14 @@ def get_analysis_hypothesis_reviews_col() -> AsyncIOMotorCollection:
     return get_database()["analysis_hypothesis_reviews"]
 
 
+def get_analysis_pii_confirmations_col() -> AsyncIOMotorCollection:
+    """A reviewer's decisions on spans PII masking could not recognise
+    (services/analyzer/pii_confirmation.py): offsets, decisions and the text and
+    masking-policy hashes they were made against -- never the words. APPEND-ONLY;
+    removed only by the source's purge."""
+    return get_database()["analysis_pii_confirmations"]
+
+
 def get_analysis_processing_receipts_col() -> AsyncIOMotorCollection:
     """The processing receipt (services/analyzer/receipts.py): one entry per
     AI-stage outcome -- what left the server, or why nothing did. Ids,

@@ -236,6 +236,11 @@ class Settings(BaseSettings):
     analyzer_ai_zdr_verified_on: str = ""        # YYYY-MM-DD
     analyzer_ai_zdr_evidence: str = ""           # where the proof is kept
     analyzer_ai_synthetic_only: bool = True
+    # Lawyer-confirm mode (owner decision 2026-10-04): NO analyzer AI request
+    # leaves the server until the owner lawyer has reviewed and attested the
+    # EXACT final request (services/analyzer/pii_confirmation.py). On by
+    # default; switching it off is for tests of unrelated AI behaviour only.
+    analyzer_pii_review_required: bool = True
     # ANALYZER_HYPOTHESES_PLAN.md: new runs use the fixed drafting-question
     # engine (`ai-hypothesis.1`) instead of the open AI report (`ai-report.1`).
     # Read when a run is CREATED; existing runs keep their engine. Off by default.

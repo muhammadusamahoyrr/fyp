@@ -239,3 +239,26 @@ def test_locator_address_spans_without_words_are_left_to_the_number_layers():
     det = [{"start": 6, "end": 21, "decision": pii_mask.ADDRESS_DECISION}]
     m = pii_mask.prepare(text, rows, {r["sentence_id"] for r in rows}, None, det)
     assert "[CNIC_1]" in sent(m) and "ADDRESS" not in sent(m)
+
+
+def test_a_reviewer_can_mark_any_missed_personal_kind():
+    text = "Reference 3520212345671 and phone 0300 1234567 and mail a.b@example.com and acct 00112233445566.\n"
+    m, rows = masked(text)
+    marks = [{"start": text.index(v), "end": text.index(v) + len(v), "decision": k} for v, k in
+             (("3520212345671", "cnic"), ("0300 1234567", "phone"), ("a.b@example.com", "email"),
+              ("00112233445566", "account"))]
+    m = pii_mask.prepare(text, rows, {r["sentence_id"] for r in rows}, marks)
+    body = sent(m)
+    for v, _ in (("3520212345671", 0), ("1234567", 0), ("a.b@example.com", 0), ("00112233445566", 0)):
+        assert v not in body, v
+    assert {"CNIC", "PHONE", "EMAIL", "ACCOUNT"} <= set(m.counts)
+
+
+def test_a_marked_detail_is_masked_wherever_it_appears_with_one_token():
+    text = "The plot at Chak 45 Bhalwal is sold.\nPossession of Chak 45 Bhalwal is given on 1 June 2026.\n"
+    m, rows = masked(text)
+    start = text.index("Chak 45 Bhalwal")
+    mark = [{"start": start, "end": start + len("Chak 45 Bhalwal"), "decision": pii_mask.ADDRESS_DECISION}]
+    m = pii_mask.prepare(text, rows, {r["sentence_id"] for r in rows}, mark)
+    body = sent(m)
+    assert "Bhalwal" not in body and body.count("[ADDRESS_1]") == 2 and "[ADDRESS_2]" not in body

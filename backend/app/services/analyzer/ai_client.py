@@ -67,9 +67,28 @@ def _settings():
     return settings
 
 
+#: The last check before the HTTP call refused the request (nothing was sent).
+REQUEST_CHANGED = "request_changed"
+LEAK_GUARD = "pii_leak_guard"
+
+
+def _final_guard(messages: list[dict], expected_sha256: str) -> None:
+    """IMMEDIATELY before the provider call: the messages must still be the
+    exact request the stage recorded (and the lawyer attested), and the
+    pattern/layout leak check must still be clean. Raises AIError; logs codes only."""
+    from app.services.analyzer import pii_mask, receipts
+
+    if receipts.request_digest(messages) != expected_sha256:
+        logger.warning("analyzer_ai_call refused code=%s", REQUEST_CHANGED)
+        raise AIError(REQUEST_CHANGED)
+    if pii_mask.leak_check(messages):
+        logger.warning("analyzer_ai_call refused code=%s", LEAK_GUARD)
+        raise AIError(LEAK_GUARD)
+
+
 async def complete(messages: list[dict], *, max_tokens: int = 4096,
                    transport: httpx.AsyncBaseTransport | None = None,
-                   model: str | None = None) -> AIResult:
+                   model: str | None = None, expected_sha256: str | None = None) -> AIResult:
     """One call to the pinned model. Raises AIError; never falls back.
 
     `model` is for the EVALUATION only (analyzer/evaluation.py), which
@@ -86,6 +105,8 @@ async def complete(messages: list[dict], *, max_tokens: int = 4096,
         if model not in ai_config.allowlist(settings.analyzer_ai_model_allowlist):
             raise AIError(NOT_CONFIGURED)
         pinned = model
+    if expected_sha256 is not None:      # the analyzer stages always pass it
+        _final_guard(messages, expected_sha256)
     body = {"model": pinned, "messages": messages, "temperature": 0,
             "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
     headers = {"Authorization": f"Bearer {settings.groq_api_key}",

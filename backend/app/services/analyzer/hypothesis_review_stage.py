@@ -36,7 +36,7 @@ from app.db.collections import (
     get_analysis_text_versions_col,
 )
 from app.services.analyzer import (
-    ai_client, ai_config, ai_stage, blob_store, deletion, injection, pii_mask, receipts, worker,
+    ai_client, ai_config, ai_stage, blob_store, deletion, injection, pii_confirmation, pii_mask, receipts, worker,
 )
 from app.services.analyzer.hypotheses import catalog, review
 from app.services.analyzer.hypothesis_stage import published_results
@@ -147,9 +147,11 @@ async def run_hypothesis_review(lease: Lease) -> str:
     # PII masking at the AI boundary (ANALYZER_PII_MASKING.md): only the
     # selected evidence sentences are sent, each masked; an unrecognised name
     # or address in them stops the request for a person to confirm.
-    masking = pii_mask.prepare(text, sentences, {sid for i in items for sid in i["sentence_ids"]})
+    review_record = await pii_confirmation.applicable(run, version["text_hash"])
+    masking = pii_mask.prepare(text, sentences, {sid for i in items for sid in i["sentence_ids"]},
+                               pii_confirmation.decisions_of(review_record))
     if masking.uncertain:
-        return await _finish(lease, {**unavailable("pii_confirmation_required"), "withheld": withheld,
+        return await _finish(lease, {**unavailable(pii_confirmation.REQUIRED), "withheld": withheld,
                                      "pii": pii_mask.refused(masking)})
 
     send_ids = sorted({sid for i in items for sid in i["sentence_ids"]})
@@ -162,7 +164,11 @@ async def run_hypothesis_review(lease: Lease) -> str:
         return await _finish(lease, {**unavailable(pii_mask.LEAK_GUARD), "withheld": withheld,
                                      "pii": {**pii_mask.refused(masking), "leak_guard": guard}})
     digest = receipts.request_digest(messages)
-    pii_summary = pii_mask.summary(masking)
+    # Lawyer-confirm mode: only the EXACT request the lawyer attested is sent.
+    waiting = pii_confirmation.send_check(review_record, digest)
+    if waiting:
+        return await _finish(lease, {**unavailable(waiting), "withheld": withheld, "pii": pii_mask.refused(masking)})
+    pii_summary = {**pii_mask.summary(masking), **pii_confirmation.stage_summary(review_record)}
 
     # DURABLE ATTEMPT, BEFORE SENDING (see ai_stage): or nothing is sent.
     pii_map = await pii_mask.write_map(masking, source_id=lease.source_id)
@@ -178,7 +184,8 @@ async def run_hypothesis_review(lease: Lease) -> str:
     began = datetime.now(timezone.utc)
     async with worker.keep_alive(lease) as alive:
         try:
-            result = await ai_client.complete(messages, max_tokens=review.MAX_TOKENS, transport=TRANSPORT)
+            result = await ai_client.complete(messages, max_tokens=review.MAX_TOKENS, transport=TRANSPORT,
+                                              expected_sha256=digest)
             error = None
         except ai_client.AIError as exc:
             result, error = None, exc.code

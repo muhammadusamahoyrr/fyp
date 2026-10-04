@@ -315,6 +315,28 @@ ANALYZER_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
         kind=QUERY,
         why="The stale-map sweep finds PII maps left by attempts that never finished (24 hours).",
     ),
+    # ── analysis_pii_confirmations (append-only) ─────────────────────────────
+    IndexSpec(
+        collection="analysis_pii_confirmations",
+        name="uniq_analysis_pii_confirmations_key",
+        keys=(("run_id", ASCENDING), ("actor_user_id", ASCENDING), ("idempotency_key", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why="A retried confirmation (same Idempotency-Key) is recorded once.",
+    ),
+    IndexSpec(
+        collection="analysis_pii_confirmations",
+        name="analysis_pii_confirmations_latest",
+        keys=(("run_id", ASCENDING), ("text_sha256", ASCENDING), ("policy_sha256", ASCENDING), ("at", DESCENDING)),
+        kind=QUERY,
+        why="The stage uses the latest confirmation made against the current text and masking policy.",
+    ),
+    IndexSpec(
+        collection="analysis_pii_confirmations",
+        name="analysis_pii_confirmations_source",
+        keys=(("source_id", ASCENDING),),
+        kind=QUERY,
+        why="The purge removes every confirmation of a source.",
+    ),
     # ── analysis_processing_receipts (append-only, hash-chained) ─────────────
     IndexSpec(
         collection="analysis_processing_receipts",

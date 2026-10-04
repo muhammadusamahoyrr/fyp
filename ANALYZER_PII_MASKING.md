@@ -145,9 +145,194 @@ server, so they are unchanged.
 Masking raises only fixed-vocabulary errors; no value, token map or
 sentence text is logged. The existing logs carry codes only.
 
-## Next (not in this slice)
+## Slice B — confirming uncertain names and addresses (built 2026-10-04)
 
-- B: a confirmation step for uncertain items (endpoint + screen), after
-  which the AI stage may run.
-- C: the masked display toggle on the review screen.
-- Neither enables real documents.
+The run's AI layer ends `unavailable: pii_confirmation_required`. The owner
+lawyer then works through the review:
+
+1. `GET /documents/analyses/runs/{id}/pii-confirmation` returns the
+   uncertain spans as OFFSETS into the original text. The checks run on the
+   original sentence with masked spans held at the same length, so the
+   positions are exact. It also returns the text-version hash, the
+   masking-policy hash and the run's state version.
+2. The screen (`PiiConfirmation.jsx`) highlights each span in the original
+   text. The lawyer marks each one "Personal name", "Address" or "Not
+   personal information".
+3. `POST` the same route with the hashes, state version and one decision per
+   span. The server refuses the request when:
+   - a hash changed (`confirmation_outdated`);
+   - the state moved;
+   - a span is unknown or decided twice;
+   - a decision is invalid;
+   - any span is left undecided.
+   It then re-masks with the decisions and refuses again if anything is
+   still uncertain. Otherwise, in ONE transaction, it:
+   - stores the confirmation APPEND-ONLY in `analysis_pii_confirmations`
+     (offsets, decisions, hashes, actor; never the words);
+   - re-queues ONLY the blocked AI stage.
+4. The stage uses the latest confirmation made against the CURRENT text hash
+   and masking-policy hash:
+   - "Personal name" and "Address" spans are masked, and a confirmed name
+     is masked wherever else it appears;
+   - "Not personal information" leaves the words.
+   A confirmation made under another text or policy is ignored, so the
+   layer is blocked again and the screen says the earlier confirmation no
+   longer applies.
+5. The stage then runs the normal attempt → outcome path, so every provider
+   attempt is in the processing receipt. The run summary records
+   `confirmed_spans` (a count).
+
+The ownership, synthetic-only and `not_passed` restrictions are unchanged. A
+confirmation decides only the highlighted spans. It is not "all PII removed",
+and not an accuracy approval (the server's notice says so).
+
+## Next
+
+- C: a masking DETECTION evaluation on synthetic documents, measuring:
+  - personal details missed;
+  - unnecessary blocking;
+  - whether party and deadline meaning are preserved.
+- Then a live benchmark of the masked model.
+- D: the masked display toggle on the review screen (lower priority).
+- None of these enables real documents.
+
+## Detection v2 (`pii-mask.2`) — design, revised after pii-eval-1 (2026-10-04)
+
+**Evidence.** pii-eval-1 (frozen, independent) FAILED:
+- 194 details leaked in auto mode;
+- names fully masked 43 / 241, character coverage 0.36.
+
+Regex plus "confirm what was noticed" cannot stop what is never noticed:
+untitled names, names in tables, Urdu-script names and OCR-damaged names. A
+capitalised-name block alone would also miss Urdu script (no case) and OCR
+damage. So detection becomes LAYERED and fails closed.
+
+| Layer | What it does | Closes |
+|---|---|---|
+| L0 scope gate | Text the detector does not support (Arabic or Urdu script when the entity model cannot read it, too much OCR damage, an unknown script) **blocks the whole AI request** | unsupported text silently sent |
+| L1 format normalisation | CNIC, phone and account read through OCR confusables (`l/I→1`, `O→0`, stray spaces and line breaks inside digit groups) and table cells; one normalised value is one token | `CNlC 35202-l234567-1`, `0300-12345 67` |
+| L2 structure | label lines and TABLES: a column headed Name, Tenant, Witness or CNIC makes every cell in that column a value of that kind | names and numbers in tables |
+| L3 local multilingual entity detector | a local transformer model (CPU, no network at run time) tags PERSON and LOCATION. High confidence → mask. Middle band → uncertain (confirmation). ORG → kept (not personal) | untitled names, aliases in prose, Roman-Urdu names |
+| L4 alias handling (owner's correction) | a partial or variant mention of a masked name ("Raza", "Kashif", "Kash1f Raza") is MASKED, with its own token and marked uncertain. It is LINKED to a party's token only by an explicit definition in the document (`Kashif Raza (hereinafter "Raza")`) or by a reviewer's confirmation, never automatically: two people can share a surname | partial names leaking; wrong merging of two people |
+| L5 OCR uncertainty | a sentence with OCR-noise signals (letter-digit mixes inside words, broken words) that still holds unmasked proper-noun tokens → uncertain | damaged names slipping through |
+| L6 leak guard (last, independent of L3) | checks the FINAL request with methods DIFFERENT from the entity model, because a second pass of the same detector misses what the first missed. PATTERNS: digit runs ≥ 7 after OCR-confusable normalisation, emails, CNIC- and IBAN-like shapes, any Arabic-script letter. LAYOUT: unmasked values on person-label lines (`Name:`, `Tenant:`, `Witness:`), in table columns with person headers, after `s/o` / `d/o` / `w/o`, `Mr.` / `Mrs.` / `Dr.`, and on signature lines. Any hit → block the request | anything the layers above missed |
+
+Urdu-script text stays BLOCKED (L0) unless Urdu detection is demonstrated
+on the evaluation, whatever a model card claims.
+
+The L3 candidates, with sizes, licences, revisions and dependencies, are
+listed in ANALYZER_PII_MODEL_SHORTLIST.md (shortlist only, nothing
+downloaded or selected).
+
+Unchanged:
+- "confident or stop": uncertain spans go to the confirmation screen, and a
+  block sends nothing;
+- tokens are never substituted back into model text;
+- the receipt records the masker version and policy hash;
+- synthetic-only.
+
+**The L3 model is an owner decision** (a new download, several hundred MB;
+`transformers` and `torch` CPU are already installed):
+
+- Candidates: a multilingual token-classification NER model (XLM-R based),
+  or a PII-specialised multilingual model.
+- Selection criteria:
+  - licence allows commercial use;
+  - runs offline on CPU within the latency budget;
+  - covers English and Roman Urdu;
+  - says honestly whether it reads Urdu script. If it does not, L0 blocks
+    Urdu-script text.
+- The model id and its weights hash are pinned, and are part of the policy
+  hash.
+
+**Evaluation plan.**
+
+- pii-eval-1:
+  - its failed baseline stays kept (7424f38);
+  - it is marked a DEVELOPMENT set from the first tuning change;
+  - it is used to build v2.
+- The next gate is a FRESH independent **pii-eval-2**:
+  - same rubric and thresholds, frozen before its single scored run;
+  - no tuning after it is seen.
+- Detection passing is still not a real-document approval. The live
+  masked-model benchmark waits until detection passes.
+
+## Slice B v2 — the lawyer reviews the exact request (lawyer-confirm mode, 2026-10-04)
+
+**Owner decision.** The first launch mode is lawyer-confirm. pii-eval-2,
+scored once, did NOT pass: with flag-only review there were 16 leaks, all
+names that detection missed without flagging, so a lawyer never saw them.
+The review therefore covers the whole request, not only flagged spans.
+
+**The rule.** `settings.analyzer_pii_review_required` is on by default. No
+analyzer AI request leaves the server until the owner lawyer has attested
+the EXACT final request.
+
+**The flow** (`services/analyzer/pii_confirmation.py`):
+
+1. **View** — `GET /runs/{id}/pii-confirmation`:
+   - every sent sentence, ORIGINAL beside MASKED;
+   - flagged spans, as offsets;
+   - the masked-name tokens, for "same person as";
+   - the exact request and its SHA-256, once nothing is uncertain;
+   - the leak-check codes.
+2. **Mark** — the lawyer:
+   - decides every flagged span: personal name, address, not personal, or
+     same person as a masked name;
+   - marks any MISSED detail by selecting it in the original: personal
+     name, address, CNIC, phone, email or account.
+   - `not personal` can only clear a flag; it never unmasks a detection.
+   - A `same person` target must be a masked name.
+3. **Preview** — `POST /runs/{id}/pii-confirmation/preview`. The server
+   re-masks and returns the exact request, its hash and the leak checks.
+   It stores nothing and sends nothing.
+4. **Attest and submit** — `POST /runs/{id}/pii-confirmation` with
+   `preview_sha256` and `attested: true`. The server rebuilds the request
+   and refuses unless all of these hold:
+   - its hash equals the attested one;
+   - nothing is uncertain;
+   - the leak checks are clean;
+   - the text and masking-policy hashes match.
+
+   Then, in one transaction, the review is stored (append-only) and the
+   blocked stage is re-queued.
+5. **Send** — the stage rebuilds the request. It sends only if
+   `request_digest(messages)` equals the attested `preview_sha256`;
+   otherwise it stops with `pii_review_outdated` and nothing leaves. So a
+   changed text, policy, prompt or decision invalidates the review.
+6. **Last check** — inside `ai_client.complete`, immediately before the
+   HTTP call (`expected_sha256`), the client re-hashes the messages against
+   the recorded request and re-runs the leak check. If either fails, it
+   raises (`request_changed` / `pii_leak_guard`) and no request is made.
+
+A detail the lawyer marks once is masked wherever the same value appears,
+under one token, whatever its kind.
+
+**What is stored:** offsets, decisions, origin (flagged or added), hashes,
+the attestation statement, the actor and the time. Never the words. A
+marked detail is masked like any other: its value exists only in the
+encrypted per-attempt map and never reaches the provider. The receipt's
+attempt entry records the review id and the attested hash.
+
+**What it is not:**
+
+- not a statement that all personal information was removed;
+- not an accuracy approval;
+- not proof that a lawyer will catch every missed detail. That needs a
+  separate usability trial with a lawyer on synthetic documents.
+- It does not lift Urdu script (a policy block), the synthetic-only gate or
+  the `not_passed` evaluations. Real documents stay blocked.
+
+**Evaluation.** The harness adds a `review` mode, which rubric 3 will use:
+
+- A simulated reviewer marks every missed gold detail. This tests the
+  MECHANISM: marked details are masked, never sent, and keep one token per
+  person.
+- It does not test a real lawyer's reliability.
+- It reports `reviewer_marked`: how many details were left for the lawyer
+  to catch by hand.
+
+**Not yet built:** the GLiNER locator is part of the evaluated pipeline,
+but the running server has no locator yet. At runtime it is rules plus the
+lawyer's review. Wiring the locator in as a local service is a separate
+step.

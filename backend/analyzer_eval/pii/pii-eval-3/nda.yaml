@@ -1,0 +1,259 @@
+dataset: pii-eval-3
+label_review: developer_only
+documents:
+- id: p3-nda-01
+  document_type: nda
+  features: [lookalikes, untitled_names, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    MUTUAL NON-DISCLOSURE AGREEMENT
+
+    This Mutual Non-Disclosure Agreement is entered into on 14 April 2026 by and between:
+
+    [[NOT:n1|Sabz Kaar Agritech (Private) Limited]], a company incorporated under the Companies Act, 2017,
+    having its registered office in [[NOT:n2|Faisalabad]], acting through its Chief Executive
+    [[NAME:p1|Omer Farooq Sheikh]] ("Sabz Kaar");
+
+    AND
+
+    [[NOT:n3|Nadeem & Nadeem Logistics]], a registered partnership, acting through its managing partner
+    [[NAME:p2|Hamza Nadeem]] ("NNL").
+
+    1. PURPOSE. The parties wish to evaluate a joint cold-chain service for growers in the
+       [[NOT:n4|Okara]] and [[NOT:n5|Sahiwal]] districts (the "[[NOT:n6|Project Sunehri]]").
+    2. CONFIDENTIAL INFORMATION means all business, technical and pricing information disclosed by
+       either party, whether marked confidential or not.
+    3. OBLIGATIONS. The receiving party shall use Confidential Information only for the Purpose and
+       shall return or destroy it [[DEADLINE:d1|within fourteen (14) days of a written request]].
+    4. TERM. This Agreement remains in force [[DEADLINE:d2|for two (2) years from the date above]], and
+       the obligations of confidentiality survive [[DEADLINE:d3|for three (3) years after termination]].
+    5. NOTICES. Notices to Sabz Kaar shall be sent to [[NAME:p1|Omer]] at [[EMAIL:e1|omer.sheikh@sabzkaar.example.pk]];
+       notices to NNL to [[NAME:p2|Hamza]] at [[EMAIL:e2|hamza@nnlogistics.example.pk]] or [[PHONE:t1|0300-7765012]].
+    6. GOVERNING LAW. The laws of Pakistan; courts at [[NOT:n7|Lahore]] shall have jurisdiction.
+
+    For Sabz Kaar: [[NAME:p1|Omer Farooq Sheikh]], CEO
+    For NNL: [[NAME:p2|Hamza Nadeem]], Managing Partner
+    Witness: [[NAME:p3|Sana Tariq]] (Legal Counsel, Sabz Kaar)
+
+- id: p3-nda-02
+  document_type: nda
+  features: [table, deadlines, lookalikes, repeated_names]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY AGREEMENT - KEY TERMS
+
+    | Field | Disclosing Party | Recipient |
+    |---|---|---|
+    | Name | [[NOT:n1|Mehran Software House]] | [[NAME:p2|Kamran Ali Soomro]] |
+    | Represented by | [[NAME:p1|Shazia Memon]], Director | in person |
+    | CNIC | [[CNIC:c1|41304-6672019-2]] | [[CNIC:c2|43203-1180456-9]] |
+    | Address | [[NOT:n2|Hyderabad]] office | [[ADDRESS:a1|House C-41, Qasimabad Phase 2, Hyderabad]] |
+    | Email | [[EMAIL:e1|shazia.memon@mehransoft.example.pk]] | [[EMAIL:e2|kamran.soomro88@example.com]] |
+    | Mobile | [[PHONE:t1|0300-3018842]] | [[PHONE:t2|0346-2275190]] |
+
+    Scope: source code, client lists and pricing of the [[NOT:n3|Sindh Land Records Digitisation]] bid.
+    Period of confidentiality: [[DEADLINE:d1|five years from the date of last disclosure]].
+    Return of material: [[DEADLINE:d2|within 7 days of completion or termination of the engagement]].
+    Breach notice: [[NAME:p2|Kamran Ali Soomro]] must inform [[NAME:p1|Shazia Memon]] of any leak [[DEADLINE:d3|within 48 hours]].
+    [[NAME:p2|Kamran Ali Soomro]] acknowledges that the [[NOT:n4|Mehran]] name and logo are the company's property.
+
+- id: p3-nda-03
+  document_type: nda
+  features: [ocr_errors, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    NON DlSCLOSURE AGREEMENT
+
+    Th1s Agreement is made at Karachi on 2O March 2O26 between [[NAME:p1|Ad1l Hussa1n Rizvi]],
+    CNlC [[CNIC:c1|42201-89O3l27-5]], residing at [[ADDRESS:a1|Flat 7O3, Sea Breeze Towers, Block 2,
+    Clifton, Karach1]] (the "Disclosing Party") and [[NAME:p2|Fa1za Qureshi]], CNIC
+    [[CNIC:c2|4210l-77l2O34-8]], of [[ADDRESS:a2|R-118, Sector 15-A/4, Buffer Zone, Kar-
+    achi]] (the "Recipient").
+
+    1. Ms. [[NAME:p2|Qure5hi]] shall keep all recipes and supplier rates confidential.
+    2. The obligation lasts [[DEADLINE:d1|for 3 (three) years from the date hereof]].
+    3. [[NAME:p1|Rizv1]] may demand return of all papers, which shall be returned [[DEADLINE:d2|with1n l0 days]].
+    4. Contact: [[NAME:p1|Adil]] - [[PHONE:t1|O3O2-2l1 4589]] ; [[NAME:p2|Faiza]] - [[PHONE:t2|0335 77O 1290]]
+
+    Signed  [[NAME:p1|Adil Hussain Rizvi]]           Signed  [[NAME:p2|Faiza Qureshi]]
+
+- id: p3-nda-04
+  document_type: nda
+  features: [urdu_script, aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY UNDERTAKING / رازداری کا اقرار نامہ
+
+    I, [[NAME:p2|Rabia Khalid]] ([[NAME:p2|رابعہ خالد]]), daughter of [[NAME:p3|Khalid Pervaiz]], CNIC [[CNIC:c1|35202-3390817-6]],
+    undertake to [[NAME:p1|Tahir Javed Malik]] ([[NAME:p1|طاہر جاوید ملک]]), proprietor of [[NOT:n1|Malik Embroidery Works]],
+    that I will not disclose any design, pattern or buyer detail that I see while working on the
+    [[NOT:n2|Eid Collection 2026]].
+
+    میں، [[NAME:p2|رابعہ خالد]]، اقرار کرتی ہوں کہ [[DEADLINE:d1|کام ختم ہونے کے دو سال بعد تک]] کوئی ڈیزائن کسی اور کو نہیں دکھاؤں گی۔
+    اگر [[NAME:p1|طاہر]] صاحب مانگیں تو تمام نمونے [[DEADLINE:d2|تین دن کے اندر]] واپس کروں گی۔
+
+    Undertaking valid [[DEADLINE:d3|for two years after the work ends]].
+    [[NAME:p2|Rabia]]'s address: [[ADDRESS:a1|House 88, Gali 5, Ichhra, Lahore]]. Mobile [[PHONE:t1|0304-6618273]].
+
+    دستخط: [[NAME:p2|رابعہ خالد]]
+    Accepted: [[NAME:p1|Tahir J. Malik]]
+
+- id: p3-nda-05
+  document_type: nda
+  features: [roman_urdu, untitled_names, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    Raazdari ka Muahida
+
+    Yeh muahida [[NAME:p1|Waseem Asghar Gondal]] aur [[NAME:p2|Nadia Bashir]] ke darmiyan aaj tay paya.
+    [[NAME:p1|Waseem]] ki catering ka kaam hai aur [[NAME:p2|Nadia]] un ke saath menu aur rates par kaam karegi.
+
+    1. [[NAME:p2|Nadia]] kisi aur caterer ko hamare clients ki list, rates ya recipes nahi batayegi.
+    2. Yeh paabandi [[DEADLINE:d1|kaam chhorne ke baad ek saal tak]] rahegi.
+    3. Agar [[NAME:p1|Gondal]] sahib kahen to sab kaghzaat aur WhatsApp groups ka data [[DEADLINE:d2|teen din ke andar]] wapis/delete karna hoga.
+    4. Khilaf warzi par Rs. 200,000 jurmana hoga jo [[DEADLINE:d3|30 din mein]] ada hoga.
+
+    [[NAME:p1|Waseem]]: [[PHONE:t1|0300-8812046]], [[ADDRESS:a1|Kothi No. 4, Mohallah Shadman, Sargodha]]
+    [[NAME:p2|Nadia]]: [[PHONE:t2|0318-4402917]], CNIC [[CNIC:c1|38403-5521786-4]]
+
+    Dastakhat: [[NAME:p1|Waseem Asghar]] ______   [[NAME:p2|Nadia Bashir]] ______
+
+- id: p3-nda-06
+  document_type: nda
+  features: [overlap, lookalikes, deadlines, aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    NON-DISCLOSURE AGREEMENT (ONE-WAY)
+
+    DISCLOSER: [[NOT:n1|Zaidi Textile Mills Limited]], [[NOT:n2|Kot Lakhpat Industrial Area]], Lahore, through
+    its Company Secretary [[NAME:p1|Asma Zaidi]].
+
+    RECIPIENT: [[NAME:p2|Faheem Ullah]], independent consultant, whose correspondence address is
+    [[ADDRESS:a1|c/o Mian [[NAME:p3|Abdul Qadeer]], 45-Y, Phase 3, DHA, Lahore]] and whose personal email is
+    [[EMAIL:e1|faheem.u.consult@example.com]].
+
+    Ms. [[NAME:p1|Zaidi]] will share the energy audit data of the [[NOT:n3|Sundar Plant]] with [[NAME:p2|Faheem]].
+    [[NAME:p2|Faheem Ullah]] shall not use the data except to prepare his report, which is due
+    [[DEADLINE:d1|by 30 June 2026]]. All copies shall be deleted [[DEADLINE:d2|within 10 working days after the report is accepted]].
+    The confidentiality obligation continues [[DEADLINE:d3|indefinitely for trade secrets and for four years for other information]].
+
+    Any notice to the Recipient may also be left at the above address with Mr. [[NAME:p3|Qadeer]].
+
+- id: p3-nda-07
+  document_type: nda
+  features: [lookalikes, untitled_names, deadlines]
+  parties: [p1, p2, p3]
+  text: |
+    NDA - SUMMARY OF TERMS
+
+    * Parties: [[NOT:n1|Habib Brothers Pharmacy]] (owner [[NAME:p1|Junaid Habib]]) and [[NAME:p2|Erum Saleem]],
+      software developer; [[NAME:p3|Talha Mirza]] joins as second developer.
+    * Project: [[NOT:n2|Project Zainab]] - inventory app for the pharmacy chain in [[NOT:n3|Gujrat]] and [[NOT:n4|Mandi Bahauddin]].
+    * Confidential: prescriptions data, supplier names, margins.
+    * Developers sign on behalf of themselves only; the role of [[NOT:n5|Project Manager]] remains with the pharmacy.
+    * Duration: [[DEADLINE:d1|24 months from signing]]; patient data must never be disclosed.
+    * Return/delete: [[DEADLINE:d2|within 5 days of the end of the project]].
+    * Disputes: first mediation at [[NOT:n5b|Gujrat Chamber of Commerce]] [[DEADLINE:d3|within 21 days of the dispute notice]].
+
+    [[NAME:p1|Junaid Habib]]     [[NAME:p2|Erum Saleem]]     [[NAME:p3|Talha Mirza]]
+
+- id: p3-nda-08
+  document_type: nda
+  features: [table, ocr_errors, deadlines, repeated_names, aliases]
+  parties: [p1, p2, p3]
+  text: |
+    ANNEX B - AUTHORISED RECIPIENTS OF CONFIDENTIAL INFORMATION
+
+    S.No	Name	Designation	CNIC	Mobile
+    1	[[NAME:p1|Mudassar Iqbal]]	Site Engineer	[[CNIC:c1|33100-4419270-1]]	[[PHONE:t1|0300-6694128]]
+    2	[[NAME:p2|Sidra Mushtaq]]	Quantity Surveyor	[[CNIC:c2|33l00-87O2245-6]]	[[PHONE:t2|O321-66O 4417]]
+    3	[[NAME:p3|Usama Tariq]]	Draftsman	[[CNIC:c3|33100 2208819 3]]	[[PHONE:t3|0333-6O17725]]
+
+    Each person listed above has signed the individual undertaking in Annex C.
+    Access ends automatically [[DEADLINE:d1|on 31 December 2026]] or [[DEADLINE:d2|on the day the person leaves the project]],
+    whichever is earlier. [[NAME:p2|Sidra Mushtaq]] will keep the access register and send it to the client
+    [[DEADLINE:d3|every fortnight]]. Drawings handed to [[NAME:p3|Usama Tariq]] or [[NAME:p1|Mudassar Iqbal]] must be returned
+    [[DEADLINE:d4|within 24 hours]] of a request. Register kept by: [[NAME:p2|S1dra Mushtaq]].
+
+- id: p3-nda-09
+  document_type: nda
+  features: [untitled_names, repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    From: [[NAME:p1|Bilal Ahmed Khan]] <[[EMAIL:e1|bilal.khan@pakfreight.example.pk]]>
+    To: [[NAME:p2|Mariam Ijaz]] <[[EMAIL:e2|mariam.ijaz91@example.com]]>
+    Cc: [[NAME:p3|Shoaib Anwar Rana]] <[[EMAIL:e3|s.rana@pakfreight.example.pk]]>
+    Subject: NDA - acceptance by email
+
+    Dear [[NAME:p2|Mariam]],
+
+    As discussed, before we share the route plans for the [[NOT:n1|Karachi-Quetta corridor]] please confirm
+    the following by reply:
+    1. You will not share any route, rate or customer of [[NOT:n2|PakFreight Movers]] with anyone.
+    2. You will delete all files [[DEADLINE:d1|within 7 days after the assignment ends]].
+    3. This undertaking applies [[DEADLINE:d2|for two years from today]].
+
+    [[NAME:p3|Shoaib]] will add you to the shared folder once you reply. Regards, [[NAME:p1|Bilal]]
+    Cell [[PHONE:t1|+92 300 2214709]]
+
+    ---
+    Reply from [[NAME:p2|Mariam Ijaz]]:
+    Dear [[NAME:p1|Bilal]] sahib, I confirm all three points. [[NAME:p2|Mariam]]
+    [[PHONE:t2|0341-7720156]]
+
+- id: p3-nda-10
+  document_type: nda
+  features: [urdu_script, ocr_errors, overlap, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    NON-DISCLOSURE AGREEMENT
+
+    Between [[NAME:p1|Sarfraz Ahmed Baloch]] ([[NAME:p1|سرفراز احمد بلوچ]]), CNIC [[CNIC:c1|54400-l987234-7]],
+    of [[ADDRESS:a1|House of Haji [[NAME:p3|Dad Muhammad]], Jinnah Town, Quetta]], and [[NAME:p2|Gulalai Kakar]]
+    ([[NAME:p2|گلالئی کاکڑ]]), CNIC [[CNIC:c2|5440l-6620O19-2]], of [[ADDRESS:a2|Flat 4, Ka-
+    sia Apartments, Samungli Road, Quetta]].
+
+    The recipient shall keep confidential all information about the dry-fruit export contracts and shall
+    return all documents [[DEADLINE:d1|within fifteen days after the deal is closed or abandoned]].
+    The obligation ends [[DEADLINE:d2|three years after signing]].
+
+    دستخط: [[NAME:p1|سرفراز احمد]]          دستخط: [[NAME:p2|گلالئی]]
+
+- id: p3-nda-11
+  document_type: nda
+  features: [roman_urdu, overlap, table, untitled_names, repeated_names, deadlines, aliases]
+  parties: [p1, p2]
+  text: |
+    Confidentiality terms - salon franchise baat cheet
+
+    | Kaun | Tafseel |
+    |---|---|
+    | Franchise dene wali | [[NAME:p1|Mahnoor Abbasi]] |
+    | Franchise lene wala | [[NAME:p2|Kashan Haider]] |
+    | [[NAME:p2|Kashan]] ka pata | [[ADDRESS:a1|Upar wala portion, ghar [[NAME:p3|Nusrat Jahan]] ka, Street 8, G-9/3, Islamabad]] |
+    | Rabta | [[PHONE:t1|0336-5512870]] / [[EMAIL:e1|kashan.haider@example.pk]] |
+
+    [[NAME:p2|Kashan]] product formulas, supplier rates aur client list kisi ko nahi batayega.
+    Yeh paabandi [[DEADLINE:d1|teen saal]] tak hai, chahe franchise na bhi bane.
+    Agar baat na bani to [[NAME:p2|Kashan]] saare documents [[DEADLINE:d2|ek hafte ke andar]] [[NAME:p1|Mahnoor]] ko wapis karega.
+    [[NAME:p1|Mahnoor Abbasi]] ka koi bhi naya treatment menu bhi confidential hai.
+
+- id: p3-nda-12
+  document_type: nda
+  features: [lookalikes, aliases, repeated_names, deadlines, ocr_errors]
+  parties: [p1, p2]
+  text: |
+    STANDARD NDA - Schedule of Particulars
+
+    Company: [[NOT:n1|Faisal Movers & Packers]] (not connected with any individual of that name)
+    Company representative: [[NAME:p1|Faisal Nawaz Cheema]], Head of Operations
+    Counterparty: [[NAME:p2|Zara Imran]], freelance auditor, [[ADDRESS:a1|Apartment 12-C, Cantt View Residencia, Sarwar Road, Lahore Cantt]]
+    Account for audit fee: [[ACCOUNT:b1|PK12 SCRC 0001 2203 4519 7708]] (title: [[NAME:p2|Zara Imran]])
+    Email: [[EMAIL:e1|zara.imran.audits@example.com]]
+
+    [[NAME:p1|Faisal]] will provide the fleet records; Ms. [[NAME:p2|Imran]] will not disclose them except to the
+    [[NOT:n2|Auditor General of Pakistan]] if legally required, and then only after informing Mr. [[NAME:p1|Cheema]]
+    [[DEADLINE:d1|at least 3 days before disclosure]]. The audit fee is paid [[DEADLINE:d2|within 15 days of the final report]].
+    Records go back [[DEADLINE:d3|on completion]]. Obligations survive [[DEADLINE:d4|for 2 years]].
+
+    Sgd. [[NAME:p1|Fa1sal N. Cheema]]                      Sgd. [[NAME:p2|Zara lmran]]

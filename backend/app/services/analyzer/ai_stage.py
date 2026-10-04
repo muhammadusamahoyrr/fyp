@@ -41,7 +41,7 @@ from app.db.collections import (
     get_analysis_text_versions_col,
 )
 from app.services.analyzer import (
-    ai_client, ai_config, ai_report, blob_store, deletion, injection, pii_mask, receipts, worker,
+    ai_client, ai_config, ai_report, blob_store, deletion, injection, pii_confirmation, pii_mask, receipts, worker,
 )
 from app.services.analyzer.terms_stage import published_sentences
 from app.services.analyzer.worker import Lease, LostLease
@@ -173,9 +173,11 @@ async def run_ai_report(lease: Lease) -> str:
     # recognised with confidence, NOTHING is sent and a person must confirm.
     send_ids = {s["sentence_id"] for s in sentences
                 if not s.get("empty_value") and s["sentence_id"] not in scan.sentence_ids}
-    masking = pii_mask.prepare(text, sentences, send_ids)
+    # A lawyer's review counts only when made against THIS text and policy.
+    review = await pii_confirmation.applicable(run, version["text_hash"])
+    masking = pii_mask.prepare(text, sentences, send_ids, pii_confirmation.decisions_of(review))
     if masking.uncertain:
-        return await _finish(lease, {**unavailable("pii_confirmation_required"), "pii": pii_mask.refused(masking)})
+        return await _finish(lease, {**unavailable(pii_confirmation.REQUIRED), "pii": pii_mask.refused(masking)})
 
     # The exact messages: built here so the receipt digests what is sent.
     try:
@@ -192,7 +194,11 @@ async def run_ai_report(lease: Lease) -> str:
         return await _finish(lease, {**unavailable(pii_mask.LEAK_GUARD),
                                      "pii": {**pii_mask.refused(masking), "leak_guard": guard}})
     digest = receipts.request_digest(messages)
-    pii_summary = pii_mask.summary(masking)
+    # Lawyer-confirm mode: only the EXACT request the lawyer attested is sent.
+    waiting = pii_confirmation.send_check(review, digest)
+    if waiting:
+        return await _finish(lease, {**unavailable(waiting), "pii": pii_mask.refused(masking)})
+    pii_summary = {**pii_mask.summary(masking), **pii_confirmation.stage_summary(review)}
 
     # DURABLE ATTEMPT, BEFORE SENDING: source live, lease ours, the encrypted
     # map recorded and an `ai_attempt` entry appended -- or nothing is sent.
@@ -212,7 +218,7 @@ async def run_ai_report(lease: Lease) -> str:
         try:
             report = await ai_report.generate(text, sentences, clause_ids, graph_rows=graph_rows,
                                               transport=TRANSPORT, suspect=scan.sentence_ids,
-                                              masking=masking, messages=messages)
+                                              masking=masking, messages=messages, expected_sha256=digest)
             error = None
         except ai_client.AIError as exc:
             report, error = None, exc.code

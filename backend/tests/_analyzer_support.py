@@ -77,7 +77,7 @@ def SOURCE_SCOPED():
             C.get_analysis_context_versions_col(), C.get_analysis_findings_col(),
             C.get_analysis_ai_items_col(), C.get_analysis_hypothesis_results_col(),
             C.get_analysis_hypothesis_reviews_col(), C.get_analysis_hypothesis_decisions_col(),
-            C.get_analysis_processing_receipts_col())
+            C.get_analysis_processing_receipts_col(), C.get_analysis_pii_confirmations_col())
 
 
 def files_on_disk() -> list:

@@ -160,10 +160,10 @@ def main() -> int:
     # never be mistaken for a real verification, exactly as the test suite uses.
     from app.services.analyzer import ai_records
     ai_records.POLICY_DIR = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "ai_policies"
-    result = ev.evaluate(dataset, capturing_send(), extra_by_doc=extra)
+    result = ev.evaluate(dataset, capturing_send(), extra_by_doc=extra, modes=ev.modes_for(dataset.name))
     result["pipeline"] = pipeline
     result["frozen_before_run"] = True
-    for mode in ("auto", "manual"):
+    for mode in ev.modes_for(dataset.name):
         s = result[mode]
         print(f"{mode:6s} docs={s['documents']} sent={s['sent']} blocked={s['blocked']} spans={s['personal_spans']} "
               f"coverage={s['character_coverage']} detected={s['detected_rate']} miss={s['miss_rate']} "
@@ -190,6 +190,8 @@ def main() -> int:
         record = {k: result[k] for k in ("eval_version", "dataset", "dataset_sha256", "masking_version",
                                          "policy_sha256", "rubric_sha256", "coverage", "auto", "manual", "gate",
                                          "frozen_before_run", "pipeline")}
+        if "review" in result:
+            record["review"] = result["review"]
         record["label_review"] = "developer_only"
         record["approval"] = ("Detection only, on synthetic developer-labelled documents. Not a real-document "
                               "or model-quality approval.")
