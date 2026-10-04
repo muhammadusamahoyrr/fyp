@@ -1,0 +1,252 @@
+dataset: pii-eval-2
+label_review: developer_only
+documents:
+- id: p2-let-01
+  document_type: letter
+  features: [repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    LEGAL NOTICE
+
+    Through Courier
+
+    To,
+    Mr. [[NAME:p2|Asif Nawaz Cheema]]
+    [[ADDRESS:a1|House No. 3, Street 14, Satellite Town, Gujranwala]]
+
+    Subject: Recovery of Rs. 2,500,000/- against dishonoured cheque
+
+    Sir,
+
+    Under instructions from my client, Mr. [[NAME:p1|Khalid Mehmood Sandhu]] son of [[NAME:p3|Muhammad Bota Sandhu]], resident of [[ADDRESS:a2|Sandhu Farm House, Sialkot Road, Gujranwala]], I serve this notice upon you as follows:
+
+    1. That you, [[NAME:p2|Asif Nawaz Cheema]], issued cheque No. 0081129 drawn on [[NOT:n1|Margalla Bank Limited]], [[NOT:n2|G.T. Road Branch]], from account [[ACCOUNT:b1|0091-0021876-01]], in favour of my client.
+    2. That the said cheque was dishonoured on presentation on 2 May 2026.
+    3. That you, Mr. [[NAME:p2|Cheema]], are called upon to pay the amount [[DEADLINE:d1|within fifteen (15) days of receipt of this notice]], failing which my client shall initiate proceedings, including a complaint before the [[NOT:n3|Sessions Court Gujranwala]].
+
+    A copy of this notice is retained in my office for record.
+
+    [[NAME:p4|Muhammad Usman Bajwa]]
+    Advocate High Court
+    [[PHONE:t1|0300-6428817]]
+
+- id: p2-let-02
+  document_type: letter
+  features: [roman_urdu, untitled_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    Pyare [[NAME:p2|Nabeel]],
+
+    Assalam o Alaikum. Ummeed hai tum theek ho. Main [[NAME:p1|Shaista]] likh rahi hoon — tumhari khala.
+    Tumhara kiraya wala makan [[ADDRESS:a1|Gali No. 2, Mohalla Sadiqabad, Rawalpindi]] mein [[NAME:p3|Tufail]] ne khaali kar diya hai. Chaabi [[NAME:p3|Tufail Ahmed]] ne mujhe de di hai.
+    Tum [[DEADLINE:d1|agle mahine ki 10 tareekh tak]] aa jao to naya kirayedar dekh lena.
+    Mera naya number [[PHONE:t1|0318-5520714]] hai.
+
+    Dua'on ke saath,
+    [[NAME:p1|Shaista Parveen]]
+
+- id: p2-let-03
+  document_type: letter
+  features: [table, lookalikes, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Fazal Steel Re-Rolling Mills]]
+    Accounts Department
+
+    [[NAME:p2|Mudassar Hanif]]
+    [[ADDRESS:a1|Shop 22, Loha Market, Badami Bagh, Lahore]]
+
+    Statement of account — outstanding invoices
+
+    | Invoice | Date | Amount (Rs.) | Due |
+    |---|---|---|---|
+    | INV-3381 | 04-02-2026 | 742,000 | [[DEADLINE:d1|within 45 days of the invoice]] |
+    | INV-3417 | 19-02-2026 | 518,500 | [[DEADLINE:d2|by 5 April 2026]] |
+    | INV-3502 | 08-03-2026 | 260,000 | [[DEADLINE:d3|by 22 April 2026]] |
+
+    Kindly arrange payment to IBAN [[ACCOUNT:b1|PK77FZSL0001102938475600]].
+
+    [[NAME:p1|Shakeel Anjum]]
+    Accounts Officer
+
+- id: p2-let-04
+  document_type: letter
+  features: [urdu_script, repeated_names, overlap, deadlines]
+  parties: [p1, p2]
+  text: |
+    بخدمت جناب چوہدری [[NAME:p2|اکرم]] صاحب
+
+    جناب عالی،
+    گزارش ہے کہ میں [[NAME:p1|ریحانہ بی بی]]، رہائشی [[ADDRESS:a1|حویلی چوہدری [[NAME:p2|اکرم]]، موضع چک 12، تحصیل پنڈی بھٹیاں، ضلع حافظ آباد]]، آپ سے درخواست کرتی ہوں کہ میرے کمرے کی چھت کی مرمت کروائی جائے۔
+    بارش سے پہلے یعنی [[DEADLINE:d1|پندرہ جون تک]] مرمت ضروری ہے۔
+    چوہدری [[NAME:p2|اکرم]] صاحب نے پچھلے سال بھی وعدہ کیا تھا۔
+
+    آپ کی تابعدار
+    [[NAME:p1|ریحانہ بی بی]]
+    فون: [[PHONE:t1|0347-6620195]]
+
+- id: p2-let-05
+  document_type: letter
+  features: [ocr_errors, repeated_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    AUTHORITY LETTER (scanned)
+
+    l, [[NAME:p1|Tahira Yasm-
+    een]], holder of CNlC [[CNIC:c1|4220l-55O9128-4]], hereby authorise my nephew [[NAME:p2|Hamid Raza]] (CNIC [[CNIC:c2|42201-77l2093-9]]) to collect my pension cheque from the [[NOT:n1|National Savings Centre]], [[NOT:n2|Tariq Road]], Karachi.
+
+    [[NAME:p2|Ham1d Raza]] may also sign the receipt on my behalf.
+    This authority is valid [[DEADLINE:d1|for the month of June 2026 only]].
+
+    Sd/- [[NAME:p1|Tahira Yasmeen]]
+    Res: [[ADDRESS:a1|B-1O5, Block 7, F.B. Area, Karach1]]
+
+- id: p2-let-06
+  document_type: letter
+  features: [untitled_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Dear [[NAME:p2|Saba]],
+
+    Further to our meeting at [[NOT:n1|Qahwa Corner]] on Tuesday, I attach the draft partnership deed for the boutique. Please send your comments [[DEADLINE:d1|by Friday 12 June]]; the stamp paper must be purchased [[DEADLINE:d2|within a week of finalising the text]].
+
+    [[NAME:p3|Uzma]] has agreed to be the second witness.
+
+    Best,
+    [[NAME:p1|Hira]]
+    [[EMAIL:e1|hira.qazi.designs@example.com]]
+
+- id: p2-let-07
+  document_type: letter
+  features: [aliases, repeated_names, overlap, lookalikes]
+  parties: [p1, p2]
+  text: |
+    REPLY TO LEGAL NOTICE
+
+    To: Barrister [[NAME:p4|Sana Pirzada]], counsel for Mr. [[NAME:p1|Wajid Ali Shah]]
+
+    My client, Mr. [[NAME:p2|Ehsan-ul-Haq Rana]], resident of [[ADDRESS:a1|Rana Villa, 15 Canal Bank Road, opposite [[NAME:p1|Wajid Ali Shah]]'s house, Faisalabad]], denies every allegation in your notice dated 2 June 2026.
+
+    1. Mr. [[NAME:p2|Rana]] never agreed to purchase the plot in [[NOT:n1|Wapda City]].
+    2. The so-called agreement was drafted by your client, the said [[NAME:p1|Wajid]], without my client's signature.
+    3. [[NAME:p2|Ehsan]] reserves the right to claim damages.
+
+    [[NAME:p3|Kashif Mahmood Warraich]]
+    Advocate
+
+- id: p2-let-08
+  document_type: letter
+  features: [table, urdu_script, roman_urdu, untitled_names, deadlines]
+  parties: [p1, p2, p3]
+  text: |
+    Committee (BC) ki list — mohalla committee, likhne wali: [[NAME:p1|Rukhsana]]
+
+    | Naam | Phone | Qist | Baari |
+    |---|---|---|---|
+    | [[NAME:p1|Rukhsana Javed]] | [[PHONE:t1|0321-7704418]] | 10,000 | Jan |
+    | [[NAME:p2|Kulsoom]] ([[NAME:p2|کلثوم]]) | [[PHONE:t2|0300-4418209]] | 10,000 | Feb |
+    | [[NAME:p3|Nighat Sultana]] | [[PHONE:t3|0333-9912076]] | 10,000 | Mar |
+
+    Har member apni qist [[DEADLINE:d1|har mahine ki 5 tareekh tak]] [[NAME:p1|Rukhsana]] ke ghar jama karwaye: [[ADDRESS:a1|Makan 19, Gali 7, Dhoke Hassu, Rawalpindi]].
+    [[NAME:p2|کلثوم]] باجی نے کہا ہے کہ وہ فروری کی باری مارچ سے بدل سکتی ہیں۔
+
+- id: p2-let-09
+  document_type: letter
+  features: [ocr_errors, overlap, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    LETTER OF DEMAND (fax copy, partly illegible)
+
+    To: Mr . [[NAME:p2|Babar Sul-
+    tan]] (sic)
+    Address: [[ADDRESS:a1|Sultan Manzil, behind Haji [[NAME:p3|Sultan Ahmed]] Masjid, Mohalla Shah Rukn-e-Alam, Multan]]
+
+    You, [[NAME:p2|8abar]], borrowed Rs. 600,000 from my client [[NAME:p1|Imran Qadeer]] on 10-10-2025 and promised repayment [[DEADLINE:d1|with in six months]].
+    Mr. [[NAME:p2|Su1tan]] is required to repay [[DEADLINE:d2|by 30 June 2O26]], failing which a suit for recovery shall be filed.
+
+    [[NAME:p1|Imran Qadeer]]'s contact: [[PHONE:t1|0300-63l 4428]]
+    Counsel: [[NAME:p4|Atif Raheem]]
+
+- id: p2-let-10
+  document_type: letter
+  features: [lookalikes, deadlines, untitled_names, repeated_names]
+  parties: [p1, p2]
+  text: |
+    From: [[EMAIL:e1|omer.sheikh.ops@example.org]]
+    Sent: 22 April 2026 09:14
+    To: [[EMAIL:e2|tanzeela.w@example.com]]
+    Subject: Handover of the Clifton office keys
+
+    [[NAME:p2|Tanzeela]],
+
+    The landlord's agent from [[NOT:n1|Seaview Property Consultants]] will meet you at [[ADDRESS:a1|Office 11, Fourth Floor, Seabreeze Arcade, Block 4, Clifton, Karachi]] at 3 pm. Please complete the inventory with him and hand over all keys [[DEADLINE:d1|before close of business on 30 April 2026]].
+
+    The security deposit is to be refunded [[DEADLINE:d2|within 30 days of handover]]; please make sure he signs the meter readings.
+
+    [[NAME:p1|Omer Sheikh]]
+    [[NOT:n2|Operations Lead]], [[NOT:n3|Karachi Hub]]
+    Cell [[PHONE:t1|0334-2108847]]
+
+    --
+    Reply from [[NAME:p2|Tanzeela Waheed]]: Done. Agent was [[NAME:p3|Shoaib]]; he has signed. — [[NAME:p2|T. Waheed]]
+
+- id: p2-let-11
+  document_type: letter
+  features: [urdu_script, aliases, overlap, roman_urdu, deadlines]
+  parties: [p1, p2]
+  text: |
+    Succession certificate — covering letter to the clerk (copied from WhatsApp voice note transcript)
+
+    Clerk sahab, marhoom Mian [[NAME:p3|Abdul Majeed]] (میاں [[NAME:p3|عبدالمجید]]) ke warisan ki list ye hai:
+    1. Bewa: [[NAME:p1|Zubaida Khatoon]] ([[NAME:p1|زبیدہ خاتون]])
+    2. Beta: Mian [[NAME:p2|Shoaib Majeed]] urf [[NAME:p2|Shabbo]]
+    Marhoom ka ghar: [[ADDRESS:a1|Majeed Manzil, Mian [[NAME:p3|Abdul Majeed]] Road, Mohalla Kashmiri, Sialkot]]
+
+    [[NAME:p2|Shabbo]] (yani [[NAME:p2|Shoaib]]) hi court mein pesh hoga. [[NAME:p1|زبیدہ]] بی بی بیمار ہیں۔
+    Darkhwast [[DEADLINE:d1|agli peshi, 18 August 2026]] se pehle file karni hai.
+    Rabta: [[PHONE:t1|0310-4428871]]
+
+- id: p2-let-12
+  document_type: letter
+  features: [ocr_errors, table, lookalikes]
+  parties: [p1, p2]
+  text: |
+    BANK MANDATE CHANGE REQUEST (scan)
+
+    The Manager,
+    [[NOT:n1|Indus Crescent Bank Ltd]], [[NOT:n2|Saddar Branch]], Hyderabad
+
+    We request that the joint account be operated as follows:
+
+    | Account holder | CNIC | Account |
+    |---|---|---|
+    | [[NAME:p1|Kh-
+    alida Parveen]] | [[CNIC:c1|4l303-2290l18-2]] | [[ACCOUNT:b1|PK46 ICBL 0OO1 2290 1188 0021]] |
+    | [[NAME:p2|Rafaqat Ali Memon]] | [[CNIC:c2|41303-9918203-5]] | same |
+
+    Mode of operation: either or survivor.
+    Mailing address: [[ADDRESS:a1|Bungalow 2l, Qasimabad Phase 1, Hyderabad]]
+
+    Sd/ [[NAME:p1|Khalida Parveen]]    Sd/ [[NAME:p2|R. A. Mem0n]]
+
+- id: p2-let-13
+  document_type: letter
+  features: [untitled_names, deadlines, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    [[NAME:p1|Yasir Hameed]]
+    [[ADDRESS:a1|Plot 88, Street 4, Hayatabad Phase 2, Peshawar]]
+    [[PHONE:t1|091-5810427]]
+
+    5 May 2026
+
+    [[NAME:p2|Shahida Noor]]
+    [[NOT:n1|Principal, Frontier Model School]]
+
+    Re: Fee concession for my son
+
+    Respected Madam,
+
+    My son is in Class 6 at the school. Due to my transfer to [[NOT:n2|Kohat]], I request a 30% fee concession [[DEADLINE:d1|for the remaining four months of the academic year]]. I will submit the transfer order [[DEADLINE:d2|within seven days]] if required.
+
+    [[NAME:p1|Yasir Hameed]]
