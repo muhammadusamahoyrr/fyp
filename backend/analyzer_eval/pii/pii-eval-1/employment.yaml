@@ -1,0 +1,165 @@
+# pii-eval-1 (employment). Synthetic, developer-labelled, written independently from PII_DETECTION_RUBRIC.md only.
+dataset: pii-eval-1
+label_review: developer_only
+documents:
+- id: pe-025
+  document_type: employment
+  features: [repeated_names, aliases, lookalikes, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    LETTER OF APPOINTMENT
+
+    Dear [[NAME:p1|Rabia Naseer]],
+
+    [[NOT:n1|Crescent Textile Mills Limited]] is pleased to appoint you as [[NOT:n2|Assistant Manager Accounts]] at its [[NOT:n3|Faisalabad]] plant. Your CNIC on file is [[CNIC:c1|33100-4455667-2]].
+
+    You will report to Mr. [[NAME:p2|Shahzad Anjum]], General Manager. [[NAME:p1|Rabia]], your joining date is [[DEADLINE:d1|1 August 2026]] and the probation is [[DEADLINE:d2|six months from joining]].
+
+    Salary will be credited to [[ACCOUNT:ac1|PK55ALFH0012003456789012]]. Please confirm acceptance [[DEADLINE:d3|within 7 days of this letter]].
+
+    Yours sincerely,
+    [[NAME:p2|Shahzad Anjum]]
+- id: pe-026
+  document_type: employment
+  features: [table, untitled_names, repeated_names]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT PARTICULARS
+
+    | Item | Detail |
+    |---|---|
+    | Employee | [[NAME:p1|Umair Saleem]] |
+    | Father's name | [[NAME:p2|Saleem Akhtar]] |
+    | CNIC | [[CNIC:c1|35202-9081726-5]] |
+    | Residence | [[ADDRESS:a1|House 55, Block D, Johar Town, Lahore]] |
+    | Mobile | [[PHONE:ph1|0333-2233445]] |
+    | Designation | [[NOT:n1|Senior Software Engineer]] |
+    | Employer | [[NOT:n2|Pixel Forge Technologies]] |
+    | Notice period | [[DEADLINE:d1|60 days]] |
+
+    [[NAME:p1|Umair]] confirms the details above. [[NAME:p2|Saleem Akhtar]] is nominated for benefits.
+- id: pe-027
+  document_type: employment
+  features: [urdu_script, aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    ملازمت کا معاہدہ
+
+    آجر: [[NAME:p1|خالد محمود]]
+    ملازم: [[NAME:p2|ثمینہ بیگم]]، شناختی کارڈ [[CNIC:c1|35202-5566778-4]]
+
+    [[NAME:p1|خالد]] صاحب [[NAME:p2|ثمینہ]] کو بطور کلرک رکھتے ہیں۔ ملازمت کی مدت [[DEADLINE:d1|ایک سال]] ہوگی۔
+
+    English summary: [[NAME:p1|Khalid Mehmood]] hires [[NAME:p2|Samina Begum]]. Samina must report [[DEADLINE:d2|by 9 am on 2 September 2026]].
+- id: pe-028
+  document_type: employment
+  features: [roman_urdu, aliases, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Naukri ka muahida
+
+    Main [[NAME:p1|Mohsin Raza]] apni dukaan par [[NAME:p2|Gulzar Hussain]] ko munshi rakhta hun. [[NAME:p1|Mohsin]] sahib har mahine ki 1 tareekh ko tankhwah denge.
+
+    [[NAME:p2|Gulzar]] ka mobile [[PHONE:ph1|0300-7766554]]. Notice [[DEADLINE:d1|ek mahina pehle]] dena hoga.
+
+    Dukaan ka naam: [[NOT:n1|New Lahore Cloth House]]. Jagah: [[NOT:n2|Anarkali Bazaar]].
+- id: pe-029
+  document_type: employment
+  features: [ocr_errors, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    EMPL0YMENT LETTER (scan)
+
+    To: [[NAME:p1|Moh ammad Aslam]]
+    CNlC No. [[CNIC:c1|42201-l357924-0]]
+    Cell: [[PHONE:ph1|03I2-3344556]]
+
+    Dear Mr. [[NAME:p1|Aslam]],
+    You are appointed by Dr. [[NAME:p2|Ruqaiya Hashmi]]'s clinic, [[NOT:n1|Shifa Care Clinic]]. [[NAME:p1|Muhammad Aslam]] shall start [[DEADLINE:d1|15 days after acceptance]].
+
+    Signed [[NAME:p2|Ruqaiya Hashmi]]
+- id: pe-030
+  document_type: employment
+  features: [overlap, repeated_names, untitled_names]
+  parties: [p1, p2]
+  text: |
+    HOUSEHOLD STAFF AGREEMENT
+
+    [[NAME:p1|Iqbal Hussain]], of [[ADDRESS:a1|Kothi of [[NAME:p1|Iqbal Hussain]], Street 2, Chaklala Scheme 3, Rawalpindi]], employs [[NAME:p2|Parveen Akhtar]] as cook.
+
+    [[NAME:p1|Iqbal Hussain]] shall pay Rs. 25,000 monthly. [[NAME:p2|Parveen]] lives at [[ADDRESS:a2|Servant quarter, rear of the house of [[NAME:p1|Iqbal Hussain]], Chaklala Scheme 3, Rawalpindi]].
+    Either side may end this on [[DEADLINE:d1|one month written notice]].
+- id: pe-031
+  document_type: employment
+  features: [deadlines, lookalikes, aliases]
+  parties: [p1, p2]
+  text: |
+    TERMINATION NOTICE
+
+    To: [[NAME:p1|Adeel Chaudhry]]
+
+    [[NOT:n1|Delta Logistics (Pvt) Ltd]] terminates your employment as [[NOT:n2|Warehouse Supervisor]]. Mr. [[NAME:p1|Chaudhry]], your last working day is [[DEADLINE:d1|30 September 2026]].
+
+    Dues will be paid [[DEADLINE:d2|within 30 days of the invoice]]. Return the laptop [[DEADLINE:d3|by 5 June 2026]] or [[DEADLINE:d4|within three working days]], whichever is earlier.
+
+    HR: [[NAME:p2|Sobia Latif]]. [[NAME:p1|Adeel]] may contact [[EMAIL:e1|sobia.latif@delta-demo.pk]].
+- id: pe-032
+  document_type: employment
+  features: [table, ocr_errors, overlap]
+  parties: [p1, p2]
+  text: |
+    Payroll sheet extract
+
+    Emp | Name | Bank account | Address
+    101 | [[NAME:p1|Hira Zaman]] | [[ACCOUNT:ac1|PK98MUCB1234567890123456]] | [[ADDRESS:a1|H.No 7, [[NAME:p1|Zaman]] Street, Gulberg III, Lahore]]
+    102 | [[NAME:p2|Naveed Anjum]] | [[ACCOUNT:ac2|0987654321098]] | [[ADDRESS:a2|Flat 3, Block B, [[NAME:p2|Anjum]] Apartments,
+    Satellite Town, Sargodha]]
+    103 | [[NAME:p1|Hira Zarnan]] | [[ACCOUNT:ac3|PK98MUCB l234567890123457]] | n/a
+- id: pe-033
+  document_type: employment
+  features: [urdu_script, roman_urdu, table, overlap]
+  parties: [p1, p2]
+  text: |
+    Muazzin / Teacher contract
+
+    | Naam | نام | Pata |
+    |---|---|---|
+    | [[NAME:p1|Hafiz Abdul Rehman]] | [[NAME:p1|حافظ عبدالرحمٰن]] | [[ADDRESS:a1|Masjid Road, [[NAME:p1|Abdul Rehman]] Colony, Sialkot]] |
+    | [[NAME:p2|Mehwish Anwar]] | [[NAME:p2|مہوش انور]] | [[ADDRESS:a2|Ghar number 5, Gali Anwar Sahib, Gujrat]] |
+
+    Madrassa ka naam [[NOT:n1|Jamia Noor-ul-Huda]]. Tankhwah [[DEADLINE:d1|har mahine ki 5 tareekh se pehle]] di jaye gi.
+- id: pe-034
+  document_type: employment
+  features: [untitled_names, aliases, repeated_names, deadlines]
+  parties: [p1, p2, p3]
+  text: |
+    INTERNSHIP LETTER
+
+    [[NOT:n1|Ali Raza Memorial Trust]] offers [[NAME:p1|Zoya Khan]] an internship. [[NAME:p1|Zoya]] will be supervised by [[NAME:p2|Fahad Mirza]] and mentored by Dr. [[NAME:p3|Anila Shams]].
+
+    [[NAME:p1|Zoya Khan]] should report on [[DEADLINE:d1|3 November 2026]] and finish [[DEADLINE:d2|twelve weeks later]]. [[NAME:p2|Fahad]] will sign her logbook; [[NAME:p3|Anila]] will review the report.
+
+    Email: [[EMAIL:e1|zoya.khan@campus-test.edu.pk]]
+- id: pe-035
+  document_type: employment
+  features: [ocr_errors, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT CONTRACT (OCR)
+
+    Between [[NOT:n1|Karakoram Mining Corp]] and [[NAME:p1|Shakeel Ahrned]] (CNIC [[CNIC:c1|71301-O246810-9]]).
+
+    The [[NOT:n2|Chief Executive Officer]], [[NAME:p2|Tanveer Qadir]], signs for the company. Place of work: [[NOT:n3|Gilgit]].
+
+    Notice: [[DEADLINE:d1|90 days]]. Mobile of employee [[PHONE:ph1|0 345-1234567]].
+- id: pe-036
+  document_type: employment
+  features: [aliases, repeated_names, roman_urdu, deadlines]
+  parties: [p1, p2]
+  text: |
+    Service agreement (mixed)
+
+    The Employer, [[NAME:p1|Arif Wazir]], and the Employee, [[NAME:p2|Kamran Gul]], agree. [[NAME:p1|Arif]] sahib will give a joining letter. Mr. [[NAME:p2|Gul]] ko [[DEADLINE:d1|teen din ke andar]] join karna hai.
+
+    The said [[NAME:p2|Kamran]] shall serve [[DEADLINE:d2|eleven months from 1 July 2026]].
+    [[NAME:p1|Arif Wazir]]'s contact: [[PHONE:ph1|091-5701234]].

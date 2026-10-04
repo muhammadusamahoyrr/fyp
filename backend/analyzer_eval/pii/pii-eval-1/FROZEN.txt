@@ -1,0 +1,16 @@
+# pii-eval-1 freeze manifest -- written BEFORE the first scored run.
+# Scored once; the masking is not tuned against this set.
+frozen_at: 2026-10-04T12:00:17+00:00
+dataset_sha256: 2cdd9ecbe939b02069bf85784dc87583949eaf3772ef710fa7ac86ffdefe44af
+documents: 48
+personal_spans: 338
+rubric_sha256: 676ea3413373e35d7189a34fca66bc4f6db78fea627260bba8a0d9214ea2f831
+eval_version: pii-eval.1
+masking_version: pii-mask.1
+policy_sha256_at_freeze: 97b96fc5bbc04882b7ccb396fc1da34109d19e07a7f47a86fdd27b16472a9594
+author: independent fresh session, given only PII_DETECTION_RUBRIC.md
+files:
+  employment.yaml: 2ba2e3d18614a85732781bf7b93273bb5b7a77699cb44260f2be734bbe88bdf3
+  letters.yaml: ca3745e129964ec6c613a594c4407faac8977d6d043bb8d60acc4585bd14be9d
+  nda.yaml: 75db80a80e795e2e98cc94e227b8d453322c1498709c33e2b60ce564ff9277e7
+  tenancy.yaml: 09b5a659ae2b6ad1f7581753b247d4cdc9802148869726df6c9cdf89149d36ba

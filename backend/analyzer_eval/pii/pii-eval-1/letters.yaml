@@ -1,0 +1,156 @@
+# pii-eval-1 (letters). Synthetic, developer-labelled, written independently from PII_DETECTION_RUBRIC.md only.
+dataset: pii-eval-1
+label_review: developer_only
+documents:
+- id: pe-037
+  document_type: letter
+  features: [aliases, repeated_names, deadlines, overlap]
+  parties: [p1, p2]
+  text: |
+    LEGAL NOTICE
+
+    To: [[NAME:p1|Kamran Butt]], [[ADDRESS:a1|[[NAME:p1|Butt]] House, Street 12, Sector F-10, Islamabad]]
+
+    Under instructions of my client [[NAME:p2|Nazia Rehman]] (CNIC [[CNIC:c1|61101-7788990-6]]), you are called upon to pay Rs. 500,000 [[DEADLINE:d1|within 15 days of receipt of this notice]].
+
+    Mr. [[NAME:p1|Butt]] has ignored the reminders of [[NAME:p2|Nazia]]. If [[NAME:p1|Kamran]] fails, proceedings will be filed at [[NOT:n1|Islamabad]].
+
+    Contact: [[PHONE:ph1|0300-1230045]]
+- id: pe-038
+  document_type: letter
+  features: [untitled_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    Dear [[NAME:p1|Sajida]],
+
+    Thank you for your note. Please tell [[NAME:p2|Rizwan Elahi]] that the stall at [[NOT:n1|Liberty Market]] has been booked in the name of [[NOT:n2|Elahi Fabrics]].
+
+    Payment of the booking fee is due [[DEADLINE:d1|by 5 June 2026]]. I will send [[NAME:p1|Sajida Perveen]] the receipt.
+
+    Regards,
+    [[NAME:p3|Humaira]]
+- id: pe-039
+  document_type: letter
+  features: [urdu_script, aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    محترم جناب [[NAME:p1|ظفر اقبال]] صاحب،
+
+    السلام علیکم۔ آپ کے خط کا شکریہ۔ [[NAME:p2|محمد یوسف]] نے بتایا کہ [[NAME:p1|ظفر]] صاحب [[DEADLINE:d1|اگلے ہفتے تک]] جواب دیں گے۔
+
+    پتہ: [[ADDRESS:a1|مکان 12، محلہ شاہ جمال، لاہور]]
+
+    Footnote: [[NAME:p1|Zafar Iqbal]]'s reply, if any, goes to [[NAME:p2|Muhammad Yousuf]].
+- id: pe-040
+  document_type: letter
+  features: [roman_urdu, aliases, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Mohtaram [[NAME:p1|Latif Ahmad]] sahib,
+
+    Aap ka khat mila. [[NAME:p2|Shagufta Bano]] ne kaha hai ke woh [[DEADLINE:d1|10 tareekh tak]] raqam bhej degi. [[NAME:p1|Latif]] sahib, meharbani karke intezar karen.
+
+    Hamari dukaan [[NOT:n1|Rehmat Medical Store]] [[NOT:n2|Chowk Yadgar]] ke paas hai. Shagufta ka CNIC [[CNIC:c1|35202-2468013-4]].
+
+    Wassalam,
+    [[NAME:p3|Hammad]]
+- id: pe-041
+  document_type: letter
+  features: [ocr_errors, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    RE: REFUND REQUEST (scanned)
+
+    I, [[NAME:p1|Sh0ukat Ali]], CNlC [[CNIC:c1|35202-l597531-8]], request a refund from [[NOT:n1|Metro Cash and Carry Branch 4]].
+
+    Please deposit in IBAN [[ACCOUNT:ac1|PK12 SCBL 0000 0012 3456 7890]]. Phone [[PHONE:ph1|0300-98765 43]].
+
+    Mr. [[NAME:p1|Shoukat]] has waited [[DEADLINE:d1|since 1 March 2026]]. Contact Ms. [[NAME:p2|Lubna Hanif]], manager.
+- id: pe-042
+  document_type: letter
+  features: [overlap, ocr_errors, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Dear Neighbour,
+
+    I live at [[ADDRESS:a1|Bungalow 8, Street 3, Mian [[NAME:p1|Saeed]] Park Colony,
+    Jauhar Town, La-
+    hore]]. My name is [[NAME:p1|Saeed Mian]]. The tree belongs to [[NAME:p2|Rukhsana Kausar]] who lives at [[ADDRESS:a2|House of [[NAME:p2|Rukhsana Kausar]], Street 4, Jauhar Town, Lahore]].
+
+    Please trim it [[DEADLINE:d1|within 2 weeks]].
+- id: pe-043
+  document_type: letter
+  features: [table, untitled_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Covering letter for invoices
+
+    Attached are the invoices:
+
+    | Invoice | Client | Contact | Due |
+    |---|---|---|---|
+    | INV-101 | [[NAME:p1|Asma Rauf]] | [[EMAIL:e1|asma.rauf@shop-test.pk]] | [[DEADLINE:d1|within 30 days of the invoice]] |
+    | INV-102 | [[NOT:n1|Gulshan Bakery]] | [[PHONE:ph1|021-34567890]] | [[DEADLINE:d2|by 5 June 2026]] |
+    | INV-103 | [[NAME:p2|Hassan Ijaz]] | [[PHONE:ph2|0321-5566778]] | [[DEADLINE:d3|15 days from receipt]] |
+
+    Prepared for the team at [[NOT:n2|Orion Accounting Services]].
+- id: pe-044
+  document_type: letter
+  features: [repeated_names, aliases, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Character certificate
+
+    Certified that [[NAME:p1|Muhammad Bilal Shah]] attended [[NOT:n1|Government College University]] and was of good character. [[NAME:p1|Bilal]] was a diligent student and [[NAME:p1|Bilal Shah]] led the debating society.
+
+    Issued at the request of Mr. [[NAME:p1|Shah]] by Prof. [[NAME:p2|Saima Altaf]]. CNIC of the student: [[CNIC:c1|35202-4040404-1]].
+
+    Valid for [[DEADLINE:d1|six months from the date of issue]].
+- id: pe-045
+  document_type: letter
+  features: [urdu_script, roman_urdu, overlap, ocr_errors]
+  parties: [p1, p2]
+  text: |
+    Darkhwast (scanned, mixed)
+
+    Janab, main [[NAME:p1|Munir Hussain]] ([[NAME:p1|منیر حسین]]) wald Ghulam Hussain, [[ADDRESS:a1|Ghar [[NAME:p1|Munir Hussain]] Wala, Mohalla Pir Colony, Mu-
+    ltan]] ka rehne wala hun. Mera CNlC [[CNIC:c1|36302-l2345 67-9]] hai.
+
+    [[NAME:p2|Rafiq Ahmad]] ne meri zameen par qabza kiya. Faisla [[DEADLINE:d1|ek hafte ke andar]] chahiye.
+- id: pe-046
+  document_type: letter
+  features: [lookalikes, deadlines, untitled_names]
+  parties: [p1]
+  text: |
+    Reminder from the Bar
+
+    The [[NOT:n1|Lahore High Court Bar Association]] reminds members to file returns. Barrister [[NAME:p1|Ehsan Malik]] chairs the [[NOT:n2|Welfare Committee]].
+
+    Returns for [[NOT:n3|Financial Year 2025-26]] are due [[DEADLINE:d1|by 30 June 2026]]. Late filing within [[DEADLINE:d2|14 days of the deadline]] attracts a fee.
+
+    Queries to the office: [[PHONE:ph1|042-99200111]]
+- id: pe-047
+  document_type: letter
+  features: [aliases, repeated_names, overlap, deadlines, ocr_errors]
+  parties: [p1, p2]
+  text: |
+    Demand letter
+
+    Mr. [[NAME:p1|Faraz Ansari]] of [[ADDRESS:a1|[[NAME:p1|Faraz Ansari]] Manzil, Street 6, Nazimabad, Karachi]] writes to [[NAME:p2|Sidra Mubeen]].
+
+    Dear [[NAME:p2|Sidra]], the amount of Rs. 120,000 is due [[DEADLINE:d1|within 10 days of this letter]]. [[NAME:p1|Faraz]] has the receipt dated [[DEADLINE:d2|12 May 2026]].
+
+    [[NAME:p2|Sidra Mubeen]]'s number was noted as [[PHONE:ph1|0300-I234 567]] and CNIC as [[CNIC:c1|42101-3141592-6]]; kindly correct if wrong.
+- id: pe-048
+  document_type: letter
+  features: [table, untitled_names, urdu_script, deadlines]
+  parties: [p1, p2]
+  text: |
+    Cheque register / چیک رجسٹر
+
+    | Payee | Payee (Urdu) | Account | Date |
+    |---|---|---|---|
+    | [[NAME:p1|Nasir Mahmood]] | [[NAME:p1|ناصر محمود]] | [[ACCOUNT:ac1|PK30MPBL0001234567890123]] | [[DEADLINE:d1|by 20 July 2026]] |
+    | [[NAME:p2|Gulnaz Akhtar]] | [[NAME:p2|گلناز اختر]] | [[ACCOUNT:ac2|PK45NBPA0020001234567890]] | [[DEADLINE:d2|within 7 days of the invoice]] |
+
+    Authorised by [[NAME:p3|Shabbir Hussain]]. Cleared by the [[NOT:n1|Accounts Department]].

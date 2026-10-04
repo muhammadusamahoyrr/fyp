@@ -1,0 +1,147 @@
+# Kept PII detection result (pii-eval.1). Never overwritten.
+eval_version: pii-eval.1
+dataset: pii-eval-1
+dataset_sha256: 2cdd9ecbe939b02069bf85784dc87583949eaf3772ef710fa7ac86ffdefe44af
+masking_version: pii-mask.1
+policy_sha256: 97b96fc5bbc04882b7ccb396fc1da34109d19e07a7f47a86fdd27b16472a9594
+rubric_sha256: 676ea3413373e35d7189a34fca66bc4f6db78fea627260bba8a0d9214ea2f831
+coverage:
+  documents: 48
+  per_feature:
+    repeated_names: 24
+    aliases: 25
+    urdu_script: 11
+    roman_urdu: 10
+    ocr_errors: 13
+    table: 11
+    overlap: 16
+    untitled_names: 23
+    lookalikes: 14
+    deadlines: 16
+  personal_spans: 338
+  features_short: []
+  met: true
+auto:
+  documents: 48
+  sent: 39
+  blocked: 9
+  personal_spans: 337
+  character_coverage: 0.3607
+  detected_rate: 0.2819
+  miss_rate: 0.6795
+  flagged_spans: 13
+  leaks: 194
+  unnecessary_blocks: 0
+  unnecessary_block_rate: 0.0
+  uncertain_spans: 13
+  false_candidate_rate: 0.0769
+  party_consistency: 0.9231
+  deadline_preservation: 1.0
+  request_hygiene: 1.0
+  by_kind:
+    NAME:
+      spans: 241
+      detected: 43
+      missed: 191
+      leaked: 160
+    CNIC:
+      spans: 26
+      detected: 15
+      missed: 11
+      leaked: 10
+    PHONE:
+      spans: 23
+      detected: 13
+      missed: 10
+      leaked: 9
+    EMAIL:
+      spans: 8
+      detected: 8
+      missed: 0
+      leaked: 0
+    ACCOUNT:
+      spans: 11
+      detected: 10
+      missed: 1
+      leaked: 1
+    ADDRESS:
+      spans: 28
+      detected: 6
+      missed: 16
+      leaked: 14
+manual:
+  documents: 48
+  sent: 48
+  blocked: 0
+  personal_spans: 337
+  character_coverage: 0.4037
+  detected_rate: 0.3086
+  miss_rate: 0.6706
+  flagged_spans: 13
+  leaks: 233
+  unnecessary_blocks: 0
+  unnecessary_block_rate: 0.0
+  uncertain_spans: 13
+  false_candidate_rate: 0.0769
+  party_consistency: 0.8929
+  deadline_preservation: 1.0
+  request_hygiene: 1.0
+  by_kind:
+    NAME:
+      spans: 241
+      detected: 52
+      missed: 188
+      leaked: 189
+    CNIC:
+      spans: 26
+      detected: 15
+      missed: 11
+      leaked: 11
+    PHONE:
+      spans: 23
+      detected: 13
+      missed: 10
+      leaked: 10
+    EMAIL:
+      spans: 8
+      detected: 8
+      missed: 0
+      leaked: 0
+    ACCOUNT:
+      spans: 11
+      detected: 10
+      missed: 1
+      leaked: 1
+    ADDRESS:
+      spans: 28
+      detected: 6
+      missed: 16
+      leaked: 22
+gate:
+  thresholds:
+    auto_leaks: 0
+    manual_leaks: 0
+    auto_character_coverage: 0.95
+    auto_detected_rate: 0.85
+    auto_miss_rate: 0.05
+    unnecessary_block_rate: 0.15
+    false_candidate_rate: 0.3
+    party_consistency: 1.0
+    deadline_preservation: 1.0
+    request_hygiene: 1.0
+  checks:
+    auto_leaks: false
+    manual_leaks: false
+    auto_character_coverage: false
+    auto_detected_rate: false
+    auto_miss_rate: false
+    unnecessary_block_rate: true
+    false_candidate_rate: true
+    party_consistency: false
+    deadline_preservation: true
+    request_hygiene: true
+  status: not_passed
+frozen_before_run: true
+label_review: developer_only
+approval: Detection only, on synthetic developer-labelled documents. Not a real-document or model-quality approval.
+created: '2026-10-04'
