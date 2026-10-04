@@ -541,7 +541,7 @@ def _undefined_phrases(inp: ScanInput) -> list[tuple[str, str]]:
             words = words[:next((n for n, w in enumerate(words) if w in _PLAIN_WORDS), len(words))]
             if not words:
                 continue
-            if not _TERM_LEAD.search(before) or re.match(r"\s*(?:no|\d)", body[m.end():], re.I):
+            if not _TERM_LEAD.search(before) or re.match(r"\s*(?:no\b|\d)", body[m.end():], re.I):
                 continue                                    # a term is used as one ("the Salary Schedule"),
                                                             # an address part ("House No. 4") is not
             found.append((s["sentence_id"], phrase))

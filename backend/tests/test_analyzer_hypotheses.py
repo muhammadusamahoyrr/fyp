@@ -406,3 +406,15 @@ Har saal kiraya Rs. 2,000 barhe ga.
     out = run(text, "tenancy")["by_id"]
     for q in ("rent_amount", "rent_due", "security_deposit", "rent_increase"):
         assert out[q]["status"] == "present", q
+
+
+def test_an_address_part_after_a_capitalised_term_is_not_an_undefined_term():
+    """The word-boundary after "no" in the undefined-term check was stored as
+    a BACKSPACE byte (cccdc76), so it never matched: "the Head Office no. 4"
+    was reported as an undefined term. "no" after the phrase marks an
+    address part; an ordinary word that merely starts with "no" ("now") does
+    not. (A capital "No" is read as part of the phrase itself -- unchanged.)"""
+    address = "1. The Employee shall work at the Head Office no. 4, Jail Road, Lahore.\n"
+    assert run(address, "employment")["by_id"]["undefined_terms"]["status"] == "not_located"
+    term = "1. The Employee shall follow the Store Procedures now in force.\n"
+    assert run(term, "employment")["by_id"]["undefined_terms"]["status"] == "present"
