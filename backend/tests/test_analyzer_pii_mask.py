@@ -83,8 +83,10 @@ def test_firms_are_not_personal_names():
 ])
 def test_what_cannot_be_recognised_with_confidence_stops_the_request(text, kind, reason):
     m, _ = masked(text)
-    assert [(u["kind"], u["reason"]) for u in m.uncertain] == [(kind, reason)]
-    assert set(m.uncertain[0]) == {"sentence_id", "kind", "reason"}   # ids and codes only, never text
+    assert {(u["kind"], u["reason"]) for u in m.uncertain} == {(kind, reason)}   # one span per unrecognised name
+    u = m.uncertain[0]
+    assert set(u) == {"sentence_id", "kind", "reason", "start", "end"}  # ids, codes, offsets -- never text
+    assert text[u["start"]:u["end"]] in ("Kashif Raza", "Amna", "Bilal Haider", "Street 9")
 
 
 def test_invented_tokens_and_the_unmasked_view():

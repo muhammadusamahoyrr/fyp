@@ -203,7 +203,7 @@ async def test_a_refusal_is_one_not_sent_entry(ready):
     body = await receipt_of(client, rid)
     [e] = body["entries"]
     assert (e["kind"], e["reason"], e["sent"], e["provider"]) == ("not_sent", "pii_confirmation_required", None, None)
-    assert e["masking"]["uncertain"] == 1 and e["masking"]["policy_sha256"] == pii_mask.POLICY_SHA256
+    assert e["masking"]["uncertain"] == 2 and e["masking"]["policy_sha256"] == pii_mask.POLICY_SHA256   # one per name
     assert body["attempts"] == [] and body["chain"] == {"intact": True, "entries": 1}
 
 

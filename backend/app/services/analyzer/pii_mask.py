@@ -102,6 +102,9 @@ class Masking:
     bodies: dict[str, str] = field(default_factory=dict)
     tokens: dict[str, dict] = field(default_factory=dict)
     uncertain: list[dict] = field(default_factory=list)
+    #: (start, end, kind, token) of every masked span, in ORIGINAL-text offsets.
+    #: Server-side only (evaluation and audit of coverage); never sent.
+    masked_spans: list[tuple[int, int, str, str]] = field(default_factory=list)
 
     @property
     def counts(self) -> dict[str, int]:
@@ -149,9 +152,11 @@ def _names_someone(phrase: str) -> bool:
     return any(w and w not in _GENERIC for w in words)
 
 
-def _spans(text: str) -> list[tuple[int, int, str]]:
-    """(start, end, kind) for every confident value in the whole text."""
-    found: list[tuple[int, int, str]] = []
+def _spans(text: str, extra: list[tuple[int, int, str]] = ()) -> list[tuple[int, int, str]]:
+    """(start, end, kind) for every confident value in the whole text, plus
+    `extra`: spans a reviewer confirmed as a personal name or an address. A
+    confirmed name is masked wherever else it appears, like any other name."""
+    found: list[tuple[int, int, str]] = list(extra)
     for rx, kind in ((_IBAN, "ACCOUNT"), (_EMAIL, "EMAIL"), (_CNIC, "CNIC"), (_MOBILE, "PHONE")):
         found += [(m.start(), m.end(), kind) for m in rx.finditer(text)]
     for m in _LANDLINE.finditer(text):
@@ -160,7 +165,7 @@ def _spans(text: str) -> list[tuple[int, int, str]]:
     for m in _ACCOUNT.finditer(text):
         if _ACCOUNT_CUE.search(text[max(0, m.start() - 30):m.start()]):
             found.append((m.start(), m.end(), "ACCOUNT"))
-    names: set[str] = set()
+    names: set[str] = {text[x:y].strip() for x, y, kind in extra if kind == "NAME" and text[x:y].strip()}
     for rx in (_TITLED, _KIN, _FIRST_PERSON, _BEFORE_DESIGNATION, _ROLE_LINE):
         for m in rx.finditer(text):
             name = m.group("name").strip()
@@ -189,33 +194,58 @@ def _spans(text: str) -> list[tuple[int, int, str]]:
     return chosen
 
 
-def _uncertain(sentence_id: str, original: str, masked: str) -> list[dict]:
-    out = []
-    bare = TOKEN.sub(" ", masked)          # a token's own digits are not a leftover address
-    for m in _BETWEEN.finditer(masked):
-        for side in (m.group("a"), m.group("b")):
-            if TOKEN.search(side):
+#: Stands in for a masked span while uncertainty is checked, same length, so
+#: every candidate keeps its exact offsets in the ORIGINAL text.
+_HELD = "§"
+#: A reviewer's decision on one uncertain span (pii_confirmation.py).
+NAME_DECISION, ADDRESS_DECISION, NOT_PERSONAL = "personal_name", "address", "not_personal"
+DECISIONS = (NAME_DECISION, ADDRESS_DECISION, NOT_PERSONAL)
+
+
+def _candidates(sentence_id: str, offset: int, held: str) -> list[dict]:
+    """Uncertain spans of one sentence (`held`: the original sentence with
+    every masked span replaced by `_HELD` of the same length). Offsets are in
+    the original text; no text or value is returned."""
+    out: list[dict] = []
+
+    def add(kind: str, reason: str, a: int, b: int) -> None:
+        item = {"sentence_id": sentence_id, "kind": kind, "reason": reason, "start": offset + a, "end": offset + b}
+        if item not in out:
+            out.append(item)
+
+    for m in _BETWEEN.finditer(held):
+        for group in ("a", "b"):
+            side = m.group(group)
+            if _HELD in side:
                 continue
-            if any(not _is_firm(p) and _names_someone(p) for p in _CAPS.findall(side)):
-                out.append({"sentence_id": sentence_id, "kind": "NAME", "reason": "party_name_not_recognised"})
-                break
-    if _DEAR.search(masked):
-        out.append({"sentence_id": sentence_id, "kind": "NAME", "reason": "addressee_not_recognised"})
-    for m in _SIGNER.finditer(masked):
-        rest = m.group("rest")
-        if any(not _is_firm(p) and _names_someone(p) for p in _CAPS.findall(rest) if not TOKEN.search(p)):
-            out.append({"sentence_id": sentence_id, "kind": "NAME", "reason": "signer_not_recognised"})
-            break
-    if _ADDRESS_LEFT.search(bare):
-        out.append({"sentence_id": sentence_id, "kind": "ADDRESS", "reason": "address_not_delimited"})
+            for c in _CAPS.finditer(side):
+                if not _is_firm(c.group(0)) and _names_someone(c.group(0)):
+                    add("NAME", "party_name_not_recognised", m.start(group) + c.start(), m.start(group) + c.end())
+    for m in _DEAR.finditer(held):
+        add("NAME", "addressee_not_recognised", m.start("name"), m.end("name"))
+    for m in _SIGNER.finditer(held):
+        for c in _CAPS.finditer(m.group("rest")):
+            phrase = c.group(0)
+            if _HELD not in phrase and not _is_firm(phrase) and _names_someone(phrase):
+                add("NAME", "signer_not_recognised", m.start("rest") + c.start(), m.start("rest") + c.end())
+    for m in _ADDRESS_LEFT.finditer(held):
+        add("ADDRESS", "address_not_delimited", m.start(), m.end())
     return out
 
 
-def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str]) -> Masking:
-    """Mask every sentence that will be sent. `uncertain` non-empty = send nothing."""
+def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str],
+            confirmed: list[dict] | None = None) -> Masking:
+    """Mask every sentence that will be sent. `uncertain` non-empty = send nothing.
+
+    `confirmed`: a reviewer's decisions on uncertain spans, `[{start, end,
+    decision}]` -- already checked against this text version and this policy
+    (pii_confirmation.py). A personal name or address is masked (a name
+    everywhere it appears); "not personal information" leaves the text and
+    resolves the span. Anything still uncertain stays uncertain."""
     masking = Masking()
     by_value: dict[tuple[str, str], str] = {}
     counters = {k: 0 for k in KINDS}
+    confirmed = confirmed or []
 
     def token_for(kind: str, value: str) -> str:
         key = (kind, _norm(kind, value))
@@ -226,13 +256,16 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
             masking.tokens[tok] = {"kind": kind, "value": value}
         return by_value[key]
 
-    spans = _spans(text)
+    extra = [(c["start"], c["end"], "NAME" if c["decision"] == NAME_DECISION else "ADDRESS")
+             for c in confirmed if c["decision"] in (NAME_DECISION, ADDRESS_DECISION)]
+    resolved = [(c["start"], c["end"]) for c in confirmed]
+    spans = _spans(text, extra)
     for s in sentences:
         sid = s["sentence_id"]
         if sid not in send_ids:
             continue
         start, end = s["start"], s["end"]
-        pieces, at = [], start
+        pieces, held, at = [], [], start
         for a, b, kind in spans:
             if b <= start or a >= end:
                 continue
@@ -240,14 +273,18 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
             if a < at:
                 continue
             pieces.append(text[at:a])
-            pieces.append(token_for(kind, text[a:b]))
+            held.append(text[at:a])
+            token = token_for(kind, text[a:b])
+            masking.masked_spans.append((a, b, kind, token))
+            pieces.append(token)
+            held.append(_HELD * (b - a))
             at = b
         pieces.append(text[at:end])
-        masked = "".join(pieces)
-        masking.bodies[sid] = masked
-        masking.uncertain += _uncertain(sid, text[start:end], masked)
+        held.append(text[at:end])
+        masking.bodies[sid] = "".join(pieces)
+        masking.uncertain += [c for c in _candidates(sid, start, "".join(held))
+                              if not any(x <= c["start"] and c["end"] <= y for x, y in resolved)]
     return masking
-
 
 def refused(masking: Masking) -> dict:
     """The AI layer's summary when masking could not be done with confidence:
