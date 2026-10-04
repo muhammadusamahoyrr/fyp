@@ -136,3 +136,21 @@ def test_the_failed_pii_eval_1_baseline_is_kept_linked_to_its_freeze():
     assert record["auto"]["leaks"] == 194 and record["auto"]["personal_spans"] == 337
     for name, digest in manifest["files"].items():
         assert hashlib.sha256((ev.ROOT / "pii-eval-1" / name).read_bytes()).hexdigest() == digest, name
+
+
+def test_pii_eval_1_is_a_development_set_and_writes_no_gate_record():
+    assert ev.DATASET_ROLES["pii-eval-1"] == "development"
+    src = (ev.ROOT.parents[1] / "scripts" / "analyzer_pii_eval.py").read_text(encoding="utf-8")
+    assert "a development set never writes a gate record" in src
+
+
+def test_a_locators_extra_spans_are_masked_by_the_harness():
+    d = doc("Signed by [[NAME:p1|Saima Noreen]] at the office today.")
+    plain = ev.score_document(d, send_capture([]), mode="auto")
+    [g] = d.spans
+    sent = []
+    with_locator = ev.score_document(d, send_capture(sent), mode="auto",
+                                     extra=[{"start": g.start, "end": g.end, "decision": "personal_name"}])
+    assert with_locator["spans"][0]["detected"] and not with_locator["spans"][0]["leak"]
+    assert "Saima" not in sent[0]
+    assert plain["spans"][0]["covered"] < with_locator["spans"][0]["covered"]

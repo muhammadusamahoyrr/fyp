@@ -118,6 +118,9 @@ def main() -> int:
     out.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
     print("results:", out)
     if args.write_record:
+        if ev.DATASET_ROLES.get(args.dataset) == "development":
+            print("refused: a development set never writes a gate record", file=sys.stderr)
+            return 2
         if ev.RECORD_PATH.exists():
             print("refused: a kept detection record is never overwritten", file=sys.stderr)
             return 2

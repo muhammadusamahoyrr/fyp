@@ -51,6 +51,11 @@ THRESHOLDS = {
     "party_consistency": 1.0, "deadline_preservation": 1.0, "request_hygiene": 1.0,
 }
 COVERAGE = {"documents": 40, "per_feature": 6, "personal_spans": 150}
+#: pii-eval-1 became a DEVELOPMENT set on 2026-10-04, at the first tuning step
+#: (the local entity-locator benchmark). Its failed baseline -- 194 leaks in
+#: auto mode -- stays kept, unchanged, in pii_detection_record.yaml (7424f38).
+#: The next gate is a fresh independent pii-eval-2.
+DATASET_ROLES = {"pii-eval-1": "development"}
 _OPEN = re.compile(r"\[\[(?P<kind>[A-Z]+):(?P<entity>[A-Za-z0-9_-]+)\|")
 _WORD = re.compile(r"[^\W_]{3,}|\d{3,}", re.UNICODE)
 
@@ -194,8 +199,10 @@ def _hygiene(request: str, doc: Doc) -> bool:
     return "PII_DETECTION_RUBRIC" not in request and "pii-eval" not in request
 
 
-def score_document(doc: Doc, send, *, mode: str) -> dict:
-    """`send(messages) -> str`: the captured provider request body (text)."""
+def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None) -> dict:
+    """`send(messages) -> str`: the captured provider request body (text).
+    `extra`: spans a development locator proposes, as `[{start, end, decision}]`
+    (personal_name / address) -- masked like confirmed spans. None = the masker alone."""
     rows = _rows(doc.text)
     scan = injection.scan(doc.text, rows)
     suspect = scan.sentence_ids
@@ -204,11 +211,11 @@ def score_document(doc: Doc, send, *, mode: str) -> dict:
     gold = [g for g in doc.spans if any(r["start"] <= g.start and g.end <= r["end"] for r in in_request)]
     personal = [g for g in gold if g.kind in PERSONAL]
 
-    first = pii_mask.prepare(doc.text, rows, send_ids)
+    first = pii_mask.prepare(doc.text, rows, send_ids, list(extra or []) or None)
     uncertain = list(first.uncertain)
     masking = first
     if mode == "manual" and uncertain:
-        masking = pii_mask.prepare(doc.text, rows, send_ids, _oracle(uncertain, doc.spans))
+        masking = pii_mask.prepare(doc.text, rows, send_ids, list(extra or []) + _oracle(uncertain, doc.spans))
     blocked = bool(masking.uncertain)
 
     request = None
@@ -314,12 +321,14 @@ def gate(auto: dict, manual: dict) -> dict:
             "status": "detection_passed" if all(checks.values()) else "not_passed"}
 
 
-def evaluate(dataset: Dataset, send) -> dict:
+def evaluate(dataset: Dataset, send, extra_by_doc: dict[str, list[dict]] | None = None) -> dict:
     out = {"eval_version": EVAL_VERSION, "dataset": dataset.name, "dataset_sha256": dataset.sha256,
            "masking_version": pii_mask.MASKING_VERSION, "policy_sha256": pii_mask.POLICY_SHA256,
            "rubric_sha256": hashlib.sha256(RUBRIC_PATH.read_bytes().replace(b"\r\n", b"\n")).hexdigest(),
            "coverage": coverage(dataset)}
-    per = {mode: [score_document(d, send, mode=mode) for d in dataset.documents] for mode in ("auto", "manual")}
+    extra_by_doc = extra_by_doc or {}
+    per = {mode: [score_document(d, send, mode=mode, extra=extra_by_doc.get(d.id)) for d in dataset.documents]
+           for mode in ("auto", "manual")}
     out["auto"], out["manual"] = summarise(per["auto"]), summarise(per["manual"])
     out["gate"] = gate(out["auto"], out["manual"])
     out["per_document"] = per
