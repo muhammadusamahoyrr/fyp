@@ -1,0 +1,17 @@
+# pii-eval-4 freeze manifest -- written BEFORE the first scored run.
+# Scored once; the masking is not tuned against this set.
+frozen_at: 2026-10-04T16:09:12+00:00
+dataset_sha256: 50013540c0a493a8eed6f779faab2b940d44be19658be8f99728aa653dae3524
+documents: 52
+personal_spans: 530
+rubric_sha256: 1ec2dd48162d50b987468f021729c21f56d81e8840c8e519cb688d10352a0a16
+eval_version: pii-eval.2
+masking_version: pii-mask.2
+policy_sha256_at_freeze: 3fd1e1879e54e11e9bfd30430863d81c811061c6bf75980e645e7b7b4e85227c
+pipeline_json: '{"locator": {"cut_off": 0.3, "labels": {"address": "address", "location": "address", "person": "personal_name"}, "model": "urchade/gliner_multi-v2.1", "revision": "443d26d654e0324125a96bebd8e796c14ff2efe6", "tokenizer_variant": "as_loaded"}, "rules": "pii-mask.2"}'
+author: independent fresh session, given only PII_DETECTION_RUBRIC_3.md
+files:
+  employment.yaml: 3e5e5df5e5c861648294597ff5491995daeca3e24adfbe6f48a13893592f7495
+  letter.yaml: 2f4c5661d69aebc7f184f73977ab627c431ac5a959f9f34166073c8301dc21d2
+  nda.yaml: 9c2f79a83ab0e6a259162f85e64c1624ef6756897784e689b237a9cc0a60701b
+  tenancy.yaml: fc3a500f0831f484dad3b1f93d47d30a3a3f9e82b8118c2c9444585fecbffa5c
