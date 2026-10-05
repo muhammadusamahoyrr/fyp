@@ -1,0 +1,275 @@
+# Kept PII detection result (pii-eval.2.3, pii-eval-7). Never overwritten.
+eval_version: pii-eval.2.3
+dataset: pii-eval-7
+dataset_sha256: 66f4de019ed61577bb532e92f96e13e02dfe7477321a63fb899aa8cd9719a52c
+masking_version: pii-mask.7
+policy_sha256: 339cc2f302228638ed8a96423ca756eb5b5f6c60e68d268ee2430e60a863e379
+rubric_sha256: 1ec2dd48162d50b987468f021729c21f56d81e8840c8e519cb688d10352a0a16
+coverage:
+  documents: 48
+  per_feature:
+    repeated_names: 34
+    aliases: 25
+    urdu_script: 12
+    roman_urdu: 12
+    ocr_errors: 17
+    table: 14
+    overlap: 15
+    untitled_names: 26
+    lookalikes: 27
+    deadlines: 33
+  personal_spans: 402
+  features_short: []
+  met: true
+auto:
+  documents: 48
+  sent: 9
+  blocked: 39
+  sent_rate: 0.1875
+  blocked_by_reason:
+    address_not_delimited: 1
+    addressee_not_recognised: 2
+    alias_unlinked: 20
+    leak_guard:long_number: 2
+    leak_guard:title_or_kinship_name: 1
+    name_continues: 9
+    name_variant: 1
+    ocr_unmasked: 7
+    party_name_not_recognised: 2
+    row_name_unrecognised: 1
+    signer_not_recognised: 1
+    title_as_surname: 3
+    unsupported_script: 12
+  blocked_only_by_policy: 6
+  party_scored_documents: 9
+  personal_spans: 404
+  character_coverage: 0.6424
+  detected_rate: 0.5248
+  miss_rate: 0.302
+  flagged_spans: 107
+  leaks: 31
+  unnecessary_blocks: 2
+  reviewer_marked: 0
+  identity_decisions: 0
+  unnecessary_block_rate: 0.0417
+  uncertain_spans: 139
+  false_candidate_rate: 0.1871
+  party_consistency: 0.1111
+  party_consistency_any_token: 1.0
+  person_consistency: 0.1111
+  merged_spans: 1
+  people_to_confirm: 10
+  person_mentions: 14
+  review_not_converged: 0
+  guard_repairs: 0
+  address_character_coverage: 0.6964
+  deadline_preservation: 1.0
+  request_hygiene: 1.0
+  by_kind:
+    NAME:
+      spans: 261
+      detected: 101
+      missed: 102
+      leaked: 29
+      character_coverage: 0.4463
+    CNIC:
+      spans: 30
+      detected: 29
+      missed: 1
+      leaked: 0
+      character_coverage: 0.9667
+    PHONE:
+      spans: 38
+      detected: 34
+      missed: 4
+      leaked: 0
+      character_coverage: 0.8958
+    EMAIL:
+      spans: 14
+      detected: 14
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ACCOUNT:
+      spans: 10
+      detected: 9
+      missed: 1
+      leaked: 0
+      character_coverage: 0.9327
+    ADDRESS:
+      spans: 51
+      detected: 25
+      missed: 14
+      leaked: 2
+      character_coverage: 0.6964
+manual:
+  documents: 48
+  sent: 28
+  blocked: 20
+  sent_rate: 0.5833
+  blocked_by_reason:
+    api_rejected:overlapping_spans: 2
+    leak_guard:long_number: 4
+    leak_guard:signature_name: 1
+    leak_guard:title_or_kinship_name: 1
+    unsupported_script: 12
+  blocked_only_by_policy: 12
+  party_scored_documents: 28
+  personal_spans: 404
+  character_coverage: 0.7001
+  detected_rate: 0.5644
+  miss_rate: 0.2797
+  flagged_spans: 107
+  leaks: 59
+  unnecessary_blocks: 0
+  reviewer_marked: 0
+  identity_decisions: 68
+  unnecessary_block_rate: 0.0
+  uncertain_spans: 139
+  false_candidate_rate: 0.1871
+  party_consistency: 0.1786
+  party_consistency_any_token: 0.8636
+  person_consistency: 0.1429
+  merged_spans: 1
+  people_to_confirm: 80
+  person_mentions: 142
+  review_not_converged: 0
+  guard_repairs: 0
+  address_character_coverage: 0.7101
+  deadline_preservation: 1.0
+  request_hygiene: 1.0
+  by_kind:
+    NAME:
+      spans: 261
+      detected: 117
+      missed: 93
+      leaked: 49
+      character_coverage: 0.5712
+    CNIC:
+      spans: 30
+      detected: 29
+      missed: 1
+      leaked: 0
+      character_coverage: 0.9667
+    PHONE:
+      spans: 38
+      detected: 34
+      missed: 4
+      leaked: 0
+      character_coverage: 0.8958
+    EMAIL:
+      spans: 14
+      detected: 14
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ACCOUNT:
+      spans: 10
+      detected: 9
+      missed: 1
+      leaked: 0
+      character_coverage: 0.9327
+    ADDRESS:
+      spans: 51
+      detected: 25
+      missed: 14
+      leaked: 10
+      character_coverage: 0.7101
+gate:
+  thresholds:
+    review_leaks: 0
+    review_character_coverage: 0.99
+    review_address_character_coverage: 0.95
+    review_party_consistency: 1.0
+    review_deadline_preservation: 1.0
+    review_sent_rate: 0.6
+  checks:
+    review_leaks: true
+    review_character_coverage: true
+    review_address_character_coverage: true
+    review_party_consistency: true
+    review_deadline_preservation: true
+    review_sent_rate: true
+  report_only:
+  - auto
+  - manual
+  - request_hygiene
+  status: detection_passed
+frozen_before_run: true
+pipeline:
+  pipeline: production-rules-only
+  rules: pii-mask.7
+  review: pii-review.2
+  locator: null
+review:
+  documents: 48
+  sent: 36
+  blocked: 12
+  sent_rate: 0.75
+  blocked_by_reason:
+    unsupported_script: 12
+  blocked_only_by_policy: 12
+  party_scored_documents: 36
+  personal_spans: 404
+  character_coverage: 1.0
+  detected_rate: 1.0
+  miss_rate: 0.0
+  flagged_spans: 107
+  leaks: 0
+  unnecessary_blocks: 0
+  reviewer_marked: 186
+  identity_decisions: 248
+  unnecessary_block_rate: 0.0
+  uncertain_spans: 139
+  false_candidate_rate: 0.1871
+  party_consistency: 1.0
+  party_consistency_any_token: 0.8889
+  person_consistency: 1.0
+  merged_spans: 1
+  people_to_confirm: 115
+  person_mentions: 207
+  review_not_converged: 0
+  guard_repairs: 0
+  address_character_coverage: 1.0
+  deadline_preservation: 1.0
+  request_hygiene: 1.0
+  by_kind:
+    NAME:
+      spans: 261
+      detected: 261
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    CNIC:
+      spans: 30
+      detected: 30
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    PHONE:
+      spans: 38
+      detected: 38
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    EMAIL:
+      spans: 14
+      detected: 14
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ACCOUNT:
+      spans: 10
+      detected: 10
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ADDRESS:
+      spans: 51
+      detected: 51
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+label_review: developer_only
+approval: Detection only, on synthetic developer-labelled documents. Not a real-document or model-quality approval.
+created: '2026-10-05'
