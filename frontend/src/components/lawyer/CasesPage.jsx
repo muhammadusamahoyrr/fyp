@@ -661,6 +661,8 @@ function Modal({ title, subtitle, onClose, children, width = 560 }) {
     );
 }
 
+// Value-based: onChange receives the string. The shared components.jsx `Input`
+// passes the DOM event and has no label, so labelled forms here must use this.
 function FieldInput({ label, value, onChange, type = "text", placeholder }) {
     const { t } = useTheme();
     return (
@@ -914,12 +916,12 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                 <Modal title={modal === "add" ? "Schedule New Hearing" : "Edit Hearing"} subtitle={`Case: ${caseId}`} onClose={() => setModal(null)}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            <Input label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
-                            <Input label="Time" type="time" value={form.time} onChange={v => setForm(p => ({ ...p, time: v }))} />
+                            <FieldInput label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
+                            <FieldInput label="Time" type="time" value={form.time} onChange={v => setForm(p => ({ ...p, time: v }))} />
                         </div>
-                        <Input label="Court *" value={form.court} onChange={v => setForm(p => ({ ...p, court: v }))} placeholder="e.g. Lahore High Court" />
-                        <Input label="Judge / Presiding Officer" value={form.judge} onChange={v => setForm(p => ({ ...p, judge: v }))} placeholder="e.g. Hon. Justice Mehta" />
-                        <Input label="Purpose / Agenda *" value={form.purpose} onChange={v => setForm(p => ({ ...p, purpose: v }))} placeholder="e.g. Evidence hearing — witness examination" />
+                        <FieldInput label="Court *" value={form.court} onChange={v => setForm(p => ({ ...p, court: v }))} placeholder="e.g. Lahore High Court" />
+                        <FieldInput label="Judge / Presiding Officer" value={form.judge} onChange={v => setForm(p => ({ ...p, judge: v }))} placeholder="e.g. Hon. Justice Mehta" />
+                        <FieldInput label="Purpose / Agenda *" value={form.purpose} onChange={v => setForm(p => ({ ...p, purpose: v }))} placeholder="e.g. Evidence hearing — witness examination" />
                         <div style={{ borderTop: `1px dashed ${T.border}`, paddingTop: 14, marginTop: 2 }}>
                             <Textarea label="Outcome / Order (fill after hearing)" value={form.outcome} onChange={v => setForm(p => ({ ...p, outcome: v }))} rows={3} placeholder="Leave blank if hearing hasn't occurred yet..." />
                         </div>
@@ -949,8 +951,8 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                         </div>
                         <Textarea label="Note for the client (optional)" value={oForm.note} onChange={v => setOForm(p => ({ ...p, note: v }))} rows={2} placeholder="e.g. Opposing counsel sought time to file reply" />
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            <Input label="Next hearing date (auto-schedules)" type="date" value={oForm.next_date} onChange={v => setOForm(p => ({ ...p, next_date: v }))} />
-                            <Input label="Time" type="time" value={oForm.next_time} onChange={v => setOForm(p => ({ ...p, next_time: v }))} />
+                            <FieldInput label="Next hearing date (auto-schedules)" type="date" value={oForm.next_date} onChange={v => setOForm(p => ({ ...p, next_date: v }))} />
+                            <FieldInput label="Time" type="time" value={oForm.next_time} onChange={v => setOForm(p => ({ ...p, next_time: v }))} />
                         </div>
                         <div style={{ fontSize: 11.5, color: T.textMuted }}>
                             The client is notified instantly with a plain-language explanation of what this outcome means — in English and Urdu.
@@ -1079,7 +1081,7 @@ function DocumentsTab({ caseId, docs, setDocs, timeline, setTimeline }) {
             {(modal === "add" || modal === "edit") && (
                 <Modal title={modal === "add" ? "Add Document" : "Edit Document"} subtitle={`Case: ${caseId}`} onClose={() => setModal(null)} width={700}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                        <Input label="Document Title *" value={form.title} onChange={v => setForm(p => ({ ...p, title: v }))} placeholder="e.g. Plaint — Singh vs. Municipal Corp." />
+                        <FieldInput label="Document Title *" value={form.title} onChange={v => setForm(p => ({ ...p, title: v }))} placeholder="e.g. Plaint — Singh vs. Municipal Corp." />
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <Select label="Document Type" value={form.type} onChange={v => setForm(p => ({ ...p, type: v }))} options={docTypes} />
                             <Select label="Status" value={form.status} onChange={v => setForm(p => ({ ...p, status: v }))} options={docStatuses} />
@@ -1226,7 +1228,7 @@ function TimelineTab({ caseId, timeline, setTimeline, cases }) {
                 <Modal title={editEntry ? "Edit Timeline Entry" : "Add Timeline Entry"} subtitle={`Case: ${caseId}`} onClose={() => setModal(false)}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            <Input label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
+                            <FieldInput label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
                             <Select label="Entry Type" value={form.type} onChange={v => setForm(p => ({ ...p, type: v }))} options={typeOptions} />
                         </div>
                         <Textarea label="Description *" value={form.text} onChange={v => setForm(p => ({ ...p, text: v }))} rows={3} placeholder="Describe what happened or what was done..." />
