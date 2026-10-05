@@ -6,11 +6,11 @@ import { useCase } from "./theme.js";
 import { useNotif } from "./theme.js";
 import { Card, Badge, Divider } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
-import { CSB } from "./data.js";
+import { CSB, fmtDate } from "./data.js";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { listCases, listAppointments } from "@/lib/api.js";
-import { caseStatusLabel } from "@/lib/caseStatus.js";
+import { listCases, listAppointments, reviewQueueV2, listReviewQueue, errorCode } from "@/lib/api.js";
+import { caseStatusLabel, activeCases } from "@/lib/caseStatus.js";
 
 function _mapCase(c) {
     return {
@@ -21,7 +21,8 @@ function _mapCase(c) {
         court: c.province || "—",
         type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
         status: caseStatusLabel(c.status),
-        nextHearing: "",
+        // The next hearing without an outcome, as the Cases page computes it.
+        nextHearing: (c.hearing_dates || []).find(h => !h.outcome)?.date || "",
         urgent: c.urgency === "high",
     };
 }
@@ -32,13 +33,39 @@ function DashboardPage() {
     const { addNotif } = useNotif();
     const { user } = useAuth();
     const [rawCases, setRawCases] = useState([]);
+    // The server's total case count, or null until the list has answered. When
+    // it exceeds the rows loaded (the API caps a page at 50), counts derived
+    // from those rows are a floor, and are shown as one ("50+").
+    const [casesTotal, setCasesTotal] = useState(null);
+    // Documents awaiting this lawyer's review; null = not known.
+    const [pendingDocs, setPendingDocs] = useState(null);
     // `null` = not known (not yet read, or the read failed). Distinct from 0,
     // which is a real answer meaning "none".
     const [aptCount, setAptCount] = useState(null);
     const [appts, setAppts] = useState([]);
 
     useEffect(() => {
-        listCases({ page_size: 50 }).then(({ data }) => { if (data?.items) setRawCases(data.items); });
+        listCases({ page_size: 50 }).then(({ data }) => {
+            if (!data?.items) return;
+            setRawCases(data.items);
+            setCasesTotal(Number.isInteger(data.total) ? data.total : data.items.length);
+        });
+
+        // The review queue's own `submitted` total (first page carries counts);
+        // on the legacy queue, which is unpaginated, counting its rows is exact.
+        reviewQueueV2({ status: "submitted", limit: 1 }).then(async (v2) => {
+            if (!v2.error) {
+                const n = v2.data?.counts?.submitted;
+                setPendingDocs(Number.isInteger(n) ? n : null);
+                return;
+            }
+            if (v2.status === 404 && errorCode(v2.error) === "feature_disabled") {
+                const legacy = await listReviewQueue();
+                if (Array.isArray(legacy.data)) {
+                    setPendingDocs(legacy.data.filter(d => d.review_status === "submitted").length);
+                }
+            }
+        });
         // THE COUNT COMES FROM THE SERVER'S `total`, NOT FROM COUNTING ROWS.
         //
         // This used to fetch the first fifty appointments and count the
@@ -77,13 +104,20 @@ function DashboardPage() {
 
     const displayCases = rawCases.slice(0, 4).map(_mapCase);
     const greetName = user?.full_name?.split(" ")[0] || "Counselor";
-    const activeCnt = rawCases.filter(c => ["open", "active"].includes(c.status)).length;
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+    // Open, awaiting-lawyer and in-progress — not drafts, not ended matters.
+    const activeCnt = activeCases(rawCases).length;
     const clientCnt = new Set(rawCases.map(c => c.client_id).filter(Boolean)).size;
+    // "—" until known; a real 0 once the server has said so; "N+" when only
+    // part of the case list was loaded.
+    const partial = casesTotal !== null && casesTotal > rawCases.length;
+    const fromCases = (n) => (casesTotal === null ? "—" : partial ? `${n}+` : String(n));
 
     const stats = [
-        { l: "Active Cases", v: rawCases.length ? String(activeCnt) : "—", c: "#3EECD6", ic: "cases", ch: "Assigned to you", pg: "cases" },
-        { l: "Pending Docs", v: "—", c: "#FFBE45", ic: "fileText", ch: "See documents", pg: "documents" },
-        { l: "Total Clients", v: rawCases.length ? String(clientCnt) : "—", c: "#42D4A0", ic: "clients", ch: "Across all cases", pg: "clients" },
+        { l: "Active Cases", v: fromCases(activeCnt), c: "#3EECD6", ic: "cases", ch: "Assigned to you", pg: "cases" },
+        { l: "Pending Docs", v: pendingDocs === null ? "—" : String(pendingDocs), c: "#FFBE45", ic: "fileText", ch: "Awaiting your review", pg: "documents" },
+        { l: "Total Clients", v: fromCases(clientCnt), c: "#42D4A0", ic: "clients", ch: "Across all cases", pg: "clients" },
         { l: "Appointments", v: aptCount === null ? "—" : String(aptCount), c: "#4AAFFF", ic: "gavel", ch: "Pending + Confirmed", pg: "appointments" },
     ];
     // Today's real appointments. This used to be four hardcoded entries —
@@ -113,7 +147,7 @@ function DashboardPage() {
         <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
             <div style={{ flex: 1, overflowY: "auto", padding: 0 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-                    <div className="fade-up"><div className="serif" style={{ fontSize: 24, fontWeight: 700, color: t.text }}>Good morning, {greetName} ☀️</div><div style={{ fontSize: 13, color: t.textMuted, marginTop: 3 }}>Here's what's happening across your practice today.</div></div>
+                    <div className="fade-up"><div className="serif" style={{ fontSize: 24, fontWeight: 700, color: t.text }}>{greeting}, {greetName}</div><div style={{ fontSize: 13, color: t.textMuted, marginTop: 3 }}>Here's what's happening across your practice today.</div></div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
                         {stats.map((s, i) => (
                             <Card key={s.l} className={`fade-up s${i + 1}`} style={{ padding: 16, cursor: "pointer" }} onClick={() => setPage(s.pg)}>
@@ -123,7 +157,6 @@ function DashboardPage() {
                                         <div style={{ fontSize: 12, color: t.textFaint, marginTop: 6 }}>{s.ch}</div></div>
                                     <div style={{ width: 40, height: 40, borderRadius: 11, background: `${s.c}18`, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon d={I[s.ic]} size={18} style={{ color: s.c }} /></div>
                                 </div>
-                                <div style={{ marginTop: 12, height: 2, borderRadius: 2, background: t.border }}><div style={{ height: "100%", borderRadius: 2, background: s.c, width: `${40 + i * 13}%` }} /></div>
                             </Card>
                         ))}
                     </div>
@@ -145,7 +178,7 @@ function DashboardPage() {
                                         <td style={{ padding: "12px 16px", fontSize: 13, color: t.text, fontWeight: 500 }}>{c.title}</td>
                                         <td style={{ padding: "12px 16px" }}><Badge type="gray">{c.type}</Badge></td>
                                         <td style={{ padding: "12px 16px" }}><Badge type={CSB[c.status]}>{c.status}</Badge></td>
-                                        <td style={{ padding: "12px 16px", fontSize: 12, color: t.textMuted }}>{c.nextHearing || "—"}</td>
+                                        <td style={{ padding: "12px 16px", fontSize: 12, color: t.textMuted }}>{c.nextHearing ? fmtDate(c.nextHearing) : "—"}</td>
                                         <td style={{ padding: "12px 16px" }}><button style={{ background: "none", border: "none", color: t.textFaint, cursor: "pointer" }}><Icon d={I.more} size={15} /></button></td>
                                     </tr>
                                 ))}
@@ -186,7 +219,7 @@ function DashboardPage() {
                             <div style={{ display: "flex", gap: 6 }}>{[
                                 { v: String(events.length), l: "Today", c: t.info, pg: "appointments" },
                                 { v: aptCount === null ? "—" : String(aptCount), l: "Upcoming", c: t.success, pg: "appointments" },
-                                { v: String(activeCnt), l: "Active cases", c: t.warn, pg: "cases" },
+                                { v: fromCases(activeCnt), l: "Active cases", c: t.warn, pg: "cases" },
                             ].map(s => (
                                 <div key={s.l} onClick={() => setPage(s.pg)} style={{ flex: 1, padding: "9px 6px", borderRadius: 9, background: t.primaryGlow2, border: `1px solid ${t.border}`, textAlign: "center", cursor: "pointer" }}>
                                     <div className="mono" style={{ fontSize: 17, fontWeight: 700, color: s.c }}>{s.v}</div>
