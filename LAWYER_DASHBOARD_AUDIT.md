@@ -105,3 +105,38 @@ Documents: Upload Document, AI Generate, row checkbox, "Request changes" toggle,
 - How many judgments/statutes are actually indexed in Chroma.
 - Runtime confirmation of LD-03 and LD-06 (inferred from code; LD-03's payload was separately validated against the Pydantic model by the Codex review).
 - Payments module (out of scope).
+
+---
+
+## 7. Fix log (branch `fix/lawyer-dashboard`, not pushed)
+
+Every commit has a regression test that fails without the fix and passes with it; the full frontend suite was green after each commit and the production build passed at each phase boundary. The original findings above are left unchanged.
+
+| Item | Commit | What changed |
+|---|---|---|
+| LD-01 | `216c12d` | Documents inbox no longer crashes; stat cards use server counts (V2) or loaded rows (legacy) |
+| LD-02 | `d5af894` | Hearing forms store typed values (value-based `FieldInput`) |
+| LD-03 | `b98f8a2` | Delete-draft returns its declared `StatusResponse` (HTTP-level test) |
+| LD-04 | `792ef5d` | Onboarding Step 1 validation; 422 shown as text |
+| LD-05 | `7a16f52` | Clients → Message opens the case by `case_number \|\| _id` |
+| LD-06 | `9c4043b` | AI Assistant sends case questions into a thread bound to that case |
+| LD-06 follow-up | `ef3a414` | No stray empty thread while cases load; opening a thread from another case adopts its case, or shows a notice |
+| 2.1 | `31d594b` | Case status labels cover every backend status, shared by Cases and Dashboard |
+| 2.2 | `8ec1a4f` | Dashboard: active cases include `in_progress`; pending docs from the review queue; real zeros; "N+" when only part of the list loaded; fake progress bars removed |
+| 2.4 | `0947a5f` | Hearings seed however a case is opened; scheduled and auto-scheduled hearings take server ids |
+| 2.6a | `8bc4376` | AI Assistant names 403/409/413/422 failures; ratings and thread actions report errors |
+| 2.6b | `83bf105` | Failed PDF downloads show their reason (Documents, My Documents, Draft Generator) |
+| 2.6c | `9f10780` | Profile and hearing-outcome errors show the server's message |
+| 3.1 | `992a336` | Settings → Delete Account wired to `closeAccount` behind a password |
+| 3.2 | `8bc749e` | Settings notification toggles removed (no store) |
+| 3.3 | `8336e4a` | Documents: AI Generate → Draft Generator; Upload, Request-changes toggle, notes box, checkbox removed |
+| 3.4 | `60a9abe` | Appointments: View Details removed; false click affordances dropped |
+| 3.5 | `21b87c4` | AI Assistant: clock opens history; globe, mic, Pro badge, Upgrade Plan removed |
+| 3.6 | `187f8b1` | Draft Generator: no-op Insert Link removed |
+| 3.7 | `89be26e` | Clients/Dashboard: fake Add Client, fake notifications, inert overflow buttons removed |
+| 3.8a | `9fa98a1` | Profile: inert camera button removed |
+| 3.8b | `e46d996` | Onboarding: never-sent fields (council, max fee, fee tier, phone type, schedule) and dead support link removed |
+| 3.9 | `7978b08` | Case workspace: browser-only Documents/Timeline tabs and hearing edit/delete hidden |
+| 3.10 | `1ba40e7` | Never-rendered components deleted (WorkspaceAI, Documents/Timeline tabs, EditMenu, StatusBadge, DocTopbar, Topbar, LoginPage stub) |
+
+**Still open:** the demo smoke test (manual click-through, release gate); onboarding Step 2 (Credentials & Photo) is entirely inert — removing it makes the wizard 3 steps and needs approval; the deferred Phase 2 items (2.3, 2.5, 2.7–2.10) and Phase 4.
