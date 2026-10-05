@@ -267,7 +267,8 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
         // One decision per mention; an identity decision made in the People
         // panel is the lawyer's last word on that mention.
         const byId = new Map();
-        flagged.filter(c => choices[c.id]).forEach(c => byId.set(c.id, { start: c.start, end: c.end, ...choices[c.id] }));
+        flagged.filter(c => choices[c.id] && !added.some(a => a.start < c.end && c.start < a.end))
+            .forEach(c => byId.set(c.id, { start: c.start, end: c.end, ...choices[c.id] }));
         added.forEach(a => byId.set(spanId(a.start, a.end), { start: a.start, end: a.end, decision: a.decision,
             ...(a.target_start !== undefined ? { target_start: a.target_start, target_end: a.target_end } : {}) }));
         Object.entries(identity).forEach(([id, d]) => byId.set(id, { start: d.start, end: d.end, decision: d.decision,
@@ -327,13 +328,26 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
     const peopleConfirmed = groups.filter(g => g.key).map(g => g.key);
     const allPeopleConfirmed = peopleConfirmed.every(k => confirmed[k]);
     const canSubmit = fresh && preview.ready && remaining.length === 0 && attested && allPeopleConfirmed && !busy;
+    // A highlighted region the server still reports, or one already decided.
+    const openIds = new Set(remaining.map(c => c.id));
+    const shown = flagged.filter(c => openIds.has(c.id) || choices[c.id]);
+    const insideRegion = sel => [...remaining, ...flagged].some(c => c.start <= sel.start && sel.end <= c.end);
 
     const mark = decision => {
         if (!selection) return;
-        if ([...added, ...flagged].some(c => c.start < selection.end && selection.start < c.end)) {
+        // Marks never overlap each other. A mark MAY lie inside or across a
+        // highlighted region (pii-mask.9): it decides that part, the region's
+        // own choice gives way to it, and any part left undecided stays
+        // highlighted after the next preview.
+        if (added.some(c => c.start < selection.end && selection.start < c.end)) {
             setNotice(ERROR_TEXT.overlapping_spans);
             return;
         }
+        if (decision === "not_personal" && !insideRegion(selection)) return;
+        setChoices(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => {
+            const c = flagged.find(f => f.id === id);
+            return !c || !(c.start < selection.end && selection.start < c.end);
+        })));
         setAdded(prev => [...prev, { ...selection, decision }]);
         setSelection(null);
         window.getSelection?.()?.removeAllRanges?.();
@@ -399,17 +413,22 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
                 {(view.added_decisions || []).filter(d => MARK_LABEL[d]).map(d => (
                     <Btn key={d} data-pii-mark={d} disabled={!selection} onClick={() => mark(d)}>{MARK_LABEL[d]}</Btn>
                 ))}
+                {selection && insideRegion(selection) && (
+                    <Btn data-pii-mark="not_personal" onClick={() => mark("not_personal")}>Not personal information</Btn>
+                )}
             </div>
 
-            {flagged.length > 0 && (
+            {shown.length > 0 && (
                 <ol data-pii-flagged style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8 }}>
-                    {flagged.map(c => {
+                    {shown.map(c => {
                         const choice = choices[c.id];
                         return (
                             <li key={c.id} data-pii-row={c.id} aria-current={focus === c.id ? "true" : undefined}>
                                 <div style={{ fontSize: 13.5 }}>
                                     <b>“{text.slice(c.start, c.end)}”</b>{" "}
-                                    <span style={{ color: t.textMuted }}>({REASON_TEXT[c.reason] || c.reason})</span>
+                                    <span data-pii-reasons style={{ color: t.textMuted }}>
+                                        ({(c.reasons || [c.reason]).map(r => REASON_TEXT[r] || r).join("; ")})
+                                    </span>
                                 </div>
                                 {c.kind === "SCRIPT" ? (
                                     <div data-pii-policy style={{ fontSize: 13 }}>

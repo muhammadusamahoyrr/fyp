@@ -63,6 +63,10 @@ by the stage's own function (`pii_pipeline.compose`). pii-eval-2..6 were
 scored with rules + the GLiNER locator -- a DIFFERENT pipeline from the one
 production runs; their records stay labelled as such.
 
+pii-eval.2.4 (2026-10-05, pii-mask.9): an uncertainty may be a REGION joining
+overlapping flags with several `reasons`; block reasons and the simulated
+reviewer read every reason, not only the first.
+
 Also in pii-eval.2.3: a final-guard stop is shown to the lawyer at its
 place in the original (pii-mask.6); the simulated reviewer masks an unlabelled
 hit there, as the screen allows, and `guard_repairs` counts it as reviewer work.
@@ -83,7 +87,7 @@ import yaml
 from app.services.analyzer import ai_report, injection, pii_mask, pii_pipeline
 from app.services.analyzer import segmentation as seg
 
-EVAL_VERSION = "pii-eval.2.3"
+EVAL_VERSION = "pii-eval.2.4"
 ROOT = Path(__file__).resolve().parents[3] / "analyzer_eval" / "pii"
 RUBRIC_PATH = ROOT / "PII_DETECTION_RUBRIC.md"          # pii-eval.1, kept unchanged (its hash is frozen)
 RUBRIC_2_PATH = ROOT / "PII_DETECTION_RUBRIC_2.md"
@@ -322,7 +326,8 @@ def _oracle(uncertain: list[dict], gold: list[Span], masking=None, rep: dict | N
         if u["kind"] in pii_mask.UNRESOLVABLE:
             continue                                   # a policy block or a conflict: no decision lifts it
         hit = [g for g in gold if g.kind in PERSONAL and _overlaps(u["start"], u["end"], g.start, g.end)]
-        if u["reason"] in ("alias_unlinked", "name_variant", "ocr_unmasked", "name_continues") and masking is not None:
+        linkable = {"alias_unlinked", "name_variant", "ocr_unmasked", "name_continues"}
+        if set(u.get("reasons", [u["reason"]])) & linkable and masking is not None:
             names = [g for g in hit if g.kind == "NAME"]
             if not names:
                 target = None
@@ -546,7 +551,7 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
         # whether a real lawyer would catch them -- `reviewer_marked` reports
         # how much was left to the lawyer.
         masking, decisions, marked, converged, repairs = _simulate(doc, rows, send_ids, personal, first, mode, extra)
-    reasons = sorted({u["reason"] for u in masking.uncertain})
+    reasons = sorted({r for u in masking.uncertain for r in u.get("reasons", [u["reason"]])})
     guard: list[str] = []
     request = None
     if pipeline == pii_pipeline.PIPELINE:

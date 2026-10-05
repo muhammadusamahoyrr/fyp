@@ -292,7 +292,10 @@ def _validated(text: str, sentences: list[dict], send_ids: set[str], decisions: 
     flagged = {(u["start"], u["end"]) for u in pii_mask.prepare(text, sentences, send_ids).uncertain} | \
         {(u["start"], u["end"]) for u in pii_mask.prepare(text, sentences, send_ids, positive).uncertain}
     for c in clean:
-        if c["decision"] == pii_mask.NOT_PERSONAL and (c["start"], c["end"]) not in flagged:
+        # Any part of a highlighted region may be "not personal" (pii-mask.9):
+        # a region joins overlapping flags, and each part is decided on its own.
+        if c["decision"] == pii_mask.NOT_PERSONAL \
+                and not any(x <= c["start"] and c["end"] <= y for x, y in flagged):
             raise UploadRejected("not_flagged", "Only a highlighted detail can be marked not personal.")
     names = {(a, b) for a, b, kind, _ in pii_mask.prepare(text, sentences, send_ids, positive).masked_spans
              if kind == "NAME"}

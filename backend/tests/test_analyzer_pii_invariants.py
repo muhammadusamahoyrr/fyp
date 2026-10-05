@@ -36,7 +36,7 @@ def sent(m):
 
 
 def reasons(m):
-    return sorted({u["reason"] for u in m.uncertain})
+    return sorted({r for u in m.uncertain for r in u.get("reasons", [u["reason"]])})
 
 
 def remask(text, rows, decisions):
@@ -57,7 +57,7 @@ def test_the_policy_hash_covers_the_masker_and_its_detection_layers():
     for module in (pii_mask, pii_layers):
         parts += Path(module.__file__).read_bytes().replace(b"\r\n", b"\n") + b"\n--\n"
     assert pii_mask.POLICY_SHA256 == hashlib.sha256(parts).hexdigest()
-    assert pii_mask.MASKING_VERSION == "pii-mask.8"
+    assert pii_mask.MASKING_VERSION == "pii-mask.9"
 
 
 # ── deadlines: every wording kept, or fail closed ───────────────────────────

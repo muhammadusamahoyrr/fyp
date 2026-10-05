@@ -85,7 +85,7 @@ def test_what_cannot_be_recognised_with_confidence_stops_the_request(text, kind,
     m, _ = masked(text)
     assert {(u["kind"], u["reason"]) for u in m.uncertain} == {(kind, reason)}   # one span per unrecognised name
     u = m.uncertain[0]
-    assert set(u) == {"sentence_id", "kind", "reason", "start", "end"}  # ids, codes, offsets -- never text
+    assert set(u) == {"sentence_id", "kind", "reason", "reasons", "start", "end"}  # ids, codes, offsets -- never text
     assert text[u["start"]:u["end"]] in ("Kashif Raza", "Amna", "Bilal Haider", "Street 9")
 
 
@@ -99,7 +99,7 @@ def test_invented_tokens_and_the_unmasked_view():
 def test_the_stored_map_is_salted():
     m, _ = masked(FULL)
     a, b = json.loads(m.blob()), json.loads(m.blob())
-    assert a["tokens"] == b["tokens"] and a["salt"] != b["salt"] and a["masking_version"] == "pii-mask.8"
+    assert a["tokens"] == b["tokens"] and a["salt"] != b["salt"] and a["masking_version"] == "pii-mask.9"
 
 
 # ── the prompt builders ─────────────────────────────────────────────────────
@@ -280,7 +280,7 @@ async def test_the_model_sees_tokens_the_map_is_encrypted_and_evidence_is_origin
     summary = run["ai_report"]
     assert summary["status"] == "complete"
     pii = summary["pii"]
-    assert pii["masking_version"] == "pii-mask.8" and pii["counts"]["NAME"] == 3
+    assert pii["masking_version"] == "pii-mask.9" and pii["counts"]["NAME"] == 3
     assert pii["map_retention"] == "deleted_when_the_attempt_finishes" and "map_blob_id" not in pii
     assert pii["policy_sha256"] == pii_mask.POLICY_SHA256 and len(pii["policy_sha256"]) == 64
     assert "Kashif" not in json.dumps(summary, default=str)
@@ -354,7 +354,7 @@ async def test_the_drafting_question_review_sends_only_masked_evidence(ready):
         assert value not in prompts[0], value
     run = await get_analysis_runs_col().find_one({"_id": rid})
     pii = run["hypotheses"]["ai_review"]["pii"]
-    assert pii["masking_version"] == "pii-mask.8" and pii["map_retention"] == "deleted_when_the_attempt_finishes"
+    assert pii["masking_version"] == "pii-mask.9" and pii["map_retention"] == "deleted_when_the_attempt_finishes"
     assert await get_analysis_blobs_col().count_documents({"source_id": run["source_id"], "purpose": "pii_map"}) == 0
     assert pii["policy_sha256"] == pii_mask.POLICY_SHA256
     monkeypatch.setattr(settings, "analyzer_hypothesis_review_ui", True)

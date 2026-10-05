@@ -16,7 +16,7 @@ def sent(m):
 
 
 def reasons(m):
-    return sorted({u["reason"] for u in m.uncertain})
+    return sorted({r for u in m.uncertain for r in u.get("reasons", [u["reason"]])})
 
 
 def test_ocr_damaged_numbers_are_masked():

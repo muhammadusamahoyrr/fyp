@@ -667,3 +667,50 @@ The current policy is pii-mask.8 (`327d8e37…`). pii-eval-7 describes pii-mask.
 pii-mask.8 has no gate result of its own. Per the evaluation rules, a further gate set
 was NOT generated after this pass. Re-gating pii-mask.8 needs a fresh independent set,
 and that is the owner's call.
+
+## Overlapping flags (pii-mask.9, 2026-10-05)
+
+**The dead end.** It was reproduced on new synthetic fixtures
+(`tests/test_analyzer_pii_overlap.py`); pii-eval-7 was not opened. In "Signed by Bilal
+Malik House 12 Butt Road 3.", two detectors flag "Butt Road" (a signer?) and "Road 3"
+(an address?). The flags overlap, and neither contains the other. Three rules combined
+into a request the lawyer could never send:
+
+- a flag counted as decided only when ONE decision contained it;
+- the API refuses overlapping decisions;
+- the screen refused a selection that touched a flag.
+
+**A second, silent defect.** Deciding "Road 3" removed the "Butt" uncertainty without any
+decision about "Butt". Once "Road 3" was masked, the signer detector no longer saw a
+two-word name.
+
+**Where the defect was.** Neither candidate generation (two detectors genuinely
+disagree) nor masking. It was in how a flag counts as RESOLVED, and in the screen and
+the API that mirror that rule.
+
+**The representation now** (`pii_mask._regions`):
+
+- Each flag keeps only its UNDECIDED part: the flag minus the reviewer's decisions,
+  character by character, trimmed to letters and digits.
+- A flag raised before the decisions is kept until decisions or masking actually cover
+  it, so no flag disappears because a decision changed what a detector sees.
+- Overlapping leftovers in one sentence merge into ONE region carrying every reason
+  (`reasons`); `reason` is the first.
+- Policy blocks (Urdu script) and conflicts are reported exactly as raised.
+- **API:** "not personal" is accepted on any part of a flagged region. Overlapping
+  decisions are still refused, so incompatible name, address or identity decisions on
+  the same characters block.
+- **Screen:**
+  - a region row lists every reason;
+  - a selection may lie inside or across a region;
+  - "Not personal" is offered for a part of a region;
+  - a mark replaces the region's own choice where they overlap;
+  - only regions the server still reports (or already decided) are listed.
+- **Identity:** reviewed identities are unaffected by how a region is resolved (test).
+- **Approval:** each different resolution is a different request, so it needs its own
+  approval.
+
+Harness pii-eval.2.4 reads every reason of a region.
+
+This is a policy change: pii-mask.9 has no gate result. pii-eval-7 describes pii-mask.7.
+

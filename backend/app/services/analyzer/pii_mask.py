@@ -27,7 +27,7 @@ from pathlib import Path
 
 from app.services.analyzer import pii_layers
 
-MASKING_VERSION = "pii-mask.8"
+MASKING_VERSION = "pii-mask.9"
 
 
 def _policy_sha256() -> str:
@@ -439,6 +439,7 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
     counters = {k: 0 for k in KINDS}
     confirmed = confirmed or []
     detected = detected or []
+    as_detected = [dict(c) for c in detected]           # the caller's own locator spans, for the pass before decisions
 
     def token_for(kind: str, value: str, identity: tuple | None = None) -> str:
         # A person's token follows their REVIEWED IDENTITY (`identity`), not
@@ -667,13 +668,80 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
                    "end": min(b, end)} for a, b in ambiguous if a < end and start < b]
         found += [{"sentence_id": sid, "kind": kind, "reason": reason, "start": max(a, start), "end": min(b, end)}
                   for a, b, kind, reason in held_back if a < end and start < b]
-        masking.uncertain += [c for c in found
-                              if c["kind"] in UNRESOLVABLE
-                              or not any(x <= c["start"] and c["end"] <= y for x, y in resolved)]
-    # One span flagged twice (two layers, one reason) is ONE thing to decide.
-    masking.uncertain = list({(c["sentence_id"], c["kind"], c["reason"], c["start"], c["end"]): c
-                              for c in masking.uncertain}.values())
+        masking.uncertain += found
+    # pii-mask.9 -- what is left to decide (ANALYZER_PII_MASKING.md, "Overlapping flags"):
+    #   * a flag is resolved only where DECISIONS cover it, character by
+    #     character; an uncovered part stays flagged (a flag used to need ONE
+    #     decision containing it, so two partly overlapping flags could never
+    #     both be decided -- the API refuses overlapping decisions);
+    #   * a flag raised before the reviewer's decisions is never dropped just
+    #     because a decision changed what the detectors see ("Road 3" masked
+    #     no longer let "Butt Road" read as a name): it stays until decisions
+    #     or masking cover it;
+    #   * overlapping leftovers are ONE region keeping every reason.
+    raised = list(masking.uncertain)
+    if confirmed:
+        before = prepare(text, sentences, send_ids, None, as_detected)
+        covered = [(a, b) for a, b, _, _ in masking.masked_spans] + resolved
+        raised += [dict(c, _covers="masked") for c in before.uncertain if c["kind"] not in UNRESOLVABLE]
+    else:
+        covered = []
+    masking.uncertain = _regions(text, raised, resolved, covered)
     return masking
+
+
+def _remainder(text: str, a: int, b: int, covers: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """[a, b) minus every cover, each piece trimmed to its letters and digits."""
+    pieces, at = [], a
+    for x, y in sorted(covers):
+        if y <= at or x >= b:
+            continue
+        if x > at:
+            pieces.append((at, x))
+        at = max(at, y)
+    if at < b:
+        pieces.append((at, b))
+    out = []
+    for s, e in pieces:
+        while s < e and not text[s].isalnum():
+            s += 1
+        while e > s and not text[e - 1].isalnum():
+            e -= 1
+        if s < e:
+            out.append((s, e))
+    return out
+
+
+def _regions(text: str, raised: list[dict], resolved: list[tuple[int, int]],
+             covered: list[tuple[int, int]]) -> list[dict]:
+    """What the reviewer still has to decide: each flag's undecided part
+    (`resolved` -- the reviewer's decisions; a flag from before the decisions
+    also counts `covered`, what is now masked), overlapping parts merged into
+    one region per sentence with every reason kept. A policy block or a
+    conflict is reported exactly as raised: no decision lifts it."""
+    fixed: list[dict] = []
+    parts: list[dict] = []
+    for c in raised:
+        if c["kind"] in UNRESOLVABLE:
+            item = {k: v for k, v in c.items() if k != "_covers"}
+            if item not in fixed:
+                fixed.append(item)
+            continue
+        covers = covered if c.get("_covers") == "masked" else resolved
+        parts += [{"sentence_id": c["sentence_id"], "kind": c["kind"], "reason": c["reason"], "start": s, "end": e}
+                  for s, e in _remainder(text, c["start"], c["end"], covers)]
+    regions: list[dict] = []
+    for p in sorted(parts, key=lambda p: (p["sentence_id"], p["start"], -p["end"])):
+        last = regions[-1] if regions else None
+        if last and last["sentence_id"] == p["sentence_id"] and p["start"] < last["end"]:
+            last["end"] = max(last["end"], p["end"])
+            if p["reason"] not in last["reasons"]:
+                last["reasons"].append(p["reason"])
+            continue
+        regions.append({**p, "reasons": [p["reason"]]})
+    for r in regions:
+        r["reasons"] = sorted(r["reasons"])
+    return sorted(fixed + regions, key=lambda c: (c["start"], c["end"], c["reason"]))
 
 
 #: A request line's sentence prefix (`[s3|c2] (heading) `).

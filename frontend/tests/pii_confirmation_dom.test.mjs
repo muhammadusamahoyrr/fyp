@@ -337,3 +337,49 @@ test("a stop the check cannot place says so instead of pointing nowhere", async 
     assert.ok($(container, "[data-pii-guard-unplaced]"));
     await unmount();
 });
+
+test("an overlapping-flag region shows every reason, parts can be decided, and the rest stays to decide", async () => {
+    const TX = "Landlord: Bilal Malik.\nSigned by Bilal Malik House 12 Butt Road 3.";
+    const s0 = { sentence_id: "s0", start: 0, end: 22, masked: "Landlord: [NAME_1]." };
+    const s1 = { sentence_id: "s1", start: 23, end: TX.length, masked: "Signed by [NAME_1] [ADDRESS_1]." };
+    const pos = w => [TX.indexOf(w), TX.indexOf(w) + w.length];
+    const region = (w, reasons) => { const [start, end] = pos(w);
+        return { id: `${start}-${end}`, sentence_id: "s1", kind: "NAME", reason: reasons[0], reasons, start, end }; };
+    const whole = region("Butt Road 3", ["address_not_delimited", "signer_not_recognised"]);
+    const rest = region("Road 3", ["address_not_delimited", "signer_not_recognised"]);
+    const view = { ...VIEW, sentences: [s0, s1], candidates: [whole], people: [], people_groups: [] };
+    api.__respond("getPiiConfirmation", { data: view, error: null, status: 200 });
+    api.__respond("getAnalysisText", { data: { text: TX, clauses: [], sentences: [], text_version: {} }, error: null, status: 200 });
+    // The server reports what is left: after "Butt" is decided, "Road 3" still waits.
+    api.__respond("previewPii", (_r, { decisions }) => {
+        const covered = w => decisions.some(d => d.start <= pos(w)[0] && pos(w)[1] <= d.end);
+        const left = covered("Road 3") ? [] : [rest];
+        return { data: { ...READY, sentences: [s0, s1], candidates: left, ready: left.length === 0,
+                         people: [], people_groups: [], decisions_made: decisions }, error: null, status: 200 };
+    });
+    const { container, unmount } = await mount({});
+    assert.match($(container, `[data-pii-row="${whole.id}"] [data-pii-reasons]`).textContent,
+                 /part of an address.*signer's name/);                       // both reasons kept
+    await click($(container, `[data-pii-row="${whole.id}"] [data-pii-decision="address"]`));
+    // Select "Butt" INSIDE the highlighted region: "Not personal" is offered for a part of a region.
+    const mark = $(container, `[data-pii-candidate="${whole.id}"]`);
+    const node = mark.firstChild;
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, "Butt".length);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    await act(async () => { $(container, "[data-pii-panes]").dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true })); });
+    await settle();
+    await click($(container, '[data-pii-mark="not_personal"]'));
+    await click($(container, "[data-pii-preview]"));
+    let sent = api.__calls("previewPii").at(-1).args[1].decisions;
+    assert.deepEqual(sent, [{ start: pos("Butt")[0], end: pos("Butt")[1], decision: "not_personal" }]);  // the region's own choice gave way
+    assert.ok($(container, `[data-pii-row="${rest.id}"]`), "the undecided rest is shown on its own");
+    assert.equal($(container, "[data-pii-submit]").disabled, true);
+    await click($(container, `[data-pii-row="${rest.id}"] [data-pii-decision="address"]`));
+    await click($(container, "[data-pii-preview]"));
+    sent = api.__calls("previewPii").at(-1).args[1].decisions;
+    assert.deepEqual(sent.map(d => [TX.slice(d.start, d.end), d.decision]), [["Butt", "not_personal"], ["Road 3", "address"]]);
+    await unmount();
+});

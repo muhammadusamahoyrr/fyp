@@ -27,7 +27,7 @@ def sent(m):
 
 
 def reasons(m):
-    return sorted({u["reason"] for u in m.uncertain})
+    return sorted({r for u in m.uncertain for r in u.get("reasons", [u["reason"]])})
 
 
 def remask(text, rows, decisions, detected=None):
