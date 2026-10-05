@@ -9,6 +9,7 @@ import { Icon, I } from "./icons.jsx";
 import { fmtDate, fmtTime, CSB, typeColor, typeIcon, DSB, PRIO } from "./data.js";
 import { listCases, addHearing as apiAddHearing, recordHearingOutcome as apiRecordOutcome, aiResearch, cancelResearchTurn, openSourceDocument, listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask, toggleTask as apiToggleTask, listEngagements, proposeEngagementTerms, declineEngagement, completeEngagement, terminateEngagement } from "@/lib/api.js";
 import { avatarBg } from "./utils.js";
+import { caseStatusLabel } from "@/lib/caseStatus.js";
 import { newAttempt, retryAttempt, isAmbiguousFailure } from "@/lib/attempt.js";
 /* Shared with the AI Legal page and the client chatbot. This surface is why the
    module exists: it mapped `citations` itself and dropped `url` and `source`,
@@ -1621,7 +1622,9 @@ function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {} 
     const [statusF, setStatusF] = useState("All");
     const [sort, setSort] = useState({ field: "id", dir: "asc" });
 
-    const statuses = ["All", "Filed", "Under Hearing", "Adjourned", "Closed"];
+    // Only statuses the backend has. "Under Hearing" and "Adjourned" had no
+    // source and could never match a case.
+    const statuses = ["All", "Open", "In Progress", "Awaiting Lawyer", "Closed", "Dismissed"];
     const filtered = cases.filter(c =>
         (statusF === "All" || c.status === statusF) &&
         (c.title.toLowerCase().includes(search.toLowerCase()) || c.id.toLowerCase().includes(search.toLowerCase()) || c.client.toLowerCase().includes(search.toLowerCase()))
@@ -1629,9 +1632,9 @@ function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {} 
 
     const stats = [
         { l: "Total", v: cases.length, c: T.text, f: null },
-        { l: "Under Hearing", v: cases.filter(c => c.status === "Under Hearing").length, c: T.info, f: "Under Hearing" },
-        { l: "Filed", v: cases.filter(c => c.status === "Filed").length, c: T.success, f: "Filed" },
-        { l: "Adjourned", v: cases.filter(c => c.status === "Adjourned").length, c: T.warn, f: "Adjourned" },
+        { l: "In Progress", v: cases.filter(c => c.status === "In Progress").length, c: T.success, f: "In Progress" },
+        { l: "Open", v: cases.filter(c => c.status === "Open").length, c: T.info, f: "Open" },
+        { l: "Awaiting Lawyer", v: cases.filter(c => c.status === "Awaiting Lawyer").length, c: T.warn, f: "Awaiting Lawyer" },
         { l: "Closed", v: cases.filter(c => c.status === "Closed").length, c: T.textMuted, f: "Closed" },
     ];
 
@@ -1718,7 +1721,6 @@ function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {} 
 // CASES PAGE — ties CasesList + CaseWorkspace
 // ─────────────────────────────────────────────
 
-const _CS = { open: "Filed", active: "Under Hearing", closed: "Closed", dismissed: "Closed" };
 function _mapApiCase(c) {
     const hearings = (c.hearing_dates || []).map((h, idx) => ({
         id: `DB-${idx}-${c._id}`,
@@ -1741,7 +1743,7 @@ function _mapApiCase(c) {
         client: c.client_name || "—",
         court: c.province || "—",
         type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
-        status: _CS[c.status] || "Filed",
+        status: caseStatusLabel(c.status),
         nextHearing: nextUpcoming?.date || "",
         urgent: c.urgency === "high",
         value: "—",

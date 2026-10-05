@@ -78,6 +78,22 @@ export function isUnknownCase(c) {
 /* Cases to SHOW as the client's own: everything except an unconfirmed draft.
  * An ended case stays — a closed matter belongs in a history. So does a case
  * with a status we do not recognise. */
+/* Display labels for every backend CaseStatus (core/constants.py). The lawyer
+ * screens used to map only open/active/closed/dismissed — `active` is not a
+ * status at all — so in_progress and pending_lawyer, the commonest states of a
+ * lawyer's cases, all fell through to "Filed". */
+export const CASE_STATUS_LABEL = {
+    draft: "Draft",
+    open: "Open",
+    pending_lawyer: "Awaiting Lawyer",
+    in_progress: "In Progress",
+    closed: "Closed",
+    dismissed: "Dismissed",
+};
+export function caseStatusLabel(status) {
+    return CASE_STATUS_LABEL[status] || "Unknown";
+}
+
 export function confirmedCases(cases) {
     return (Array.isArray(cases) ? cases : []).filter(c => !isDraftCase(c));
 }
@@ -98,6 +114,6 @@ export function hireableCases(cases, pendingByCase = {}) {
 }
 
 export default {
-    isDraftCase, isEndedCase, isUnknownCase,
+    isDraftCase, isEndedCase, isUnknownCase, caseStatusLabel,
     confirmedCases, activeCases, hireableCases,
 };

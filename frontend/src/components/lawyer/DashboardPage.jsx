@@ -10,8 +10,8 @@ import { CSB } from "./data.js";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { listCases, listAppointments } from "@/lib/api.js";
+import { caseStatusLabel } from "@/lib/caseStatus.js";
 
-const _STAT_MAP = { open: "Filed", active: "Under Hearing", closed: "Closed", dismissed: "Closed" };
 function _mapCase(c) {
     return {
         id: c.case_number || c._id,
@@ -20,7 +20,7 @@ function _mapCase(c) {
         client: c.client_name || "—",
         court: c.province || "—",
         type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
-        status: _STAT_MAP[c.status] || "Filed",
+        status: caseStatusLabel(c.status),
         nextHearing: "",
         urgent: c.urgency === "high",
     };
