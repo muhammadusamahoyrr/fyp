@@ -163,3 +163,36 @@ test("3.6 Draft Generator: no Insert Link button wired to nothing", async () => 
     assert.doesNotMatch(src, /label="Insert Link"/);
     assert.doesNotMatch(src, /onClick=\{\(\) => \{ \}\}/, "a toolbar button with an empty handler remains");
 });
+
+/* ── 3.7 Clients and Dashboard ────────────────────────────────────────── */
+
+const CLIENT_CASE = { _id: "665f00000000000000000001", case_number: "CIV-2026-001", title: "Rent dispute",
+    client_id: "cl1", client_name: "Ayesha", province: "punjab", case_type: "civil", status: "in_progress",
+    hearing_dates: [], created_at: "2026-09-01T00:00:00Z" };
+
+test("3.7 Clients: no fake Add Client; Schedule navigates without a fake notification", async () => {
+    api.__respond("listCases", { data: { items: [CLIENT_CASE], total: 1 }, error: null });
+    const { ClientsPage } = await import("../src/components/lawyer/ClientsPage.jsx");
+    const notifs = [];
+    const pages = [];
+    const view = await mountPage(ClientsPage, { notif: n => notifs.push(n), caseCtx: { setPage: p => pages.push(p) } });
+    assert.ok(!buttonTexts(view.container).some(t => /Add Client/.test(t)));
+    // Each card's buttons are Message and Schedule only — no inert "more".
+    assert.deepEqual(buttonTexts(view.container).filter(Boolean), ["Message", "Schedule"]);
+    const schedule = [...view.container.querySelectorAll("button")].find(b => b.textContent.includes("Schedule"));
+    await act(async () => { schedule.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    assert.deepEqual(pages, ["appointments"]);
+    assert.deepEqual(notifs, [], "a fake notification was raised");
+    await view.unmount();
+});
+
+test("3.7 Dashboard: case rows carry no inert overflow button", async () => {
+    api.__respond("listCases", { data: { items: [CLIENT_CASE], total: 1 }, error: null });
+    api.__respond("listAppointments", { data: { items: [], total: 0, pages: 0 }, error: null });
+    const { DashboardPage } = await import("../src/components/lawyer/DashboardPage.jsx");
+    const view = await mountPage(DashboardPage);
+    const row = [...view.container.querySelectorAll("tbody tr")].find(r => r.textContent.includes("Rent dispute"));
+    assert.ok(row, "the case row did not render");
+    assert.equal(row.querySelectorAll("button").length, 0);
+    await view.unmount();
+});

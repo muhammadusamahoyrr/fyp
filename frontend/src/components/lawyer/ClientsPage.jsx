@@ -2,7 +2,6 @@
 import { useState, useEffect } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
-import { useNotif } from "./theme.js";
 import { Card, Btn, Input, Badge, Divider } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import { listCases } from "@/lib/api.js";
@@ -10,7 +9,6 @@ import { listCases } from "@/lib/api.js";
 function ClientsPage() {
     const { t } = useTheme();
     const { setPage, setOpenCaseId } = useCase();
-    const { addNotif } = useNotif();
     const [search, setSearch] = useState("");
     const [clients, setClients] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -64,9 +62,8 @@ function ClientsPage() {
                                 {loading ? "Loading…" : `${clients.length} client${clients.length !== 1 ? "s" : ""} across your cases`}
                             </div>
                         </div>
-                        <Btn onClick={() => addNotif({ type: "appointment", title: "New Client Added", body: "Client profile has been created", time: "Just now" })}>
-                            <Icon d={I.plus} size={14} /> Add Client
-                        </Btn>
+                        {/* "Add Client" only pushed a fake "Client profile has been
+                            created" notification. Clients come from engagements. */}
                     </div>
 
                     <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clients…" prefix={<Icon d={I.search} size={13} />} style={{ width: 240 }} className="fade-up s1" />
@@ -91,7 +88,6 @@ function ClientsPage() {
                                                     <div style={{ marginTop: 3 }}><Badge type={client.status === "Active" ? "success" : "gray"}>{client.status}</Badge></div>
                                                 </div>
                                             </div>
-                                            <button style={{ background: "none", border: "none", color: t.textFaint, cursor: "pointer" }}><Icon d={I.more} size={13} /></button>
                                         </div>
                                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                                             {[
@@ -111,7 +107,7 @@ function ClientsPage() {
                                             <Btn variant="accent" size="sm" style={{ flex: 1 }} onClick={() => openMessageFor(client)}>
                                                 <Icon d={I.chat} size={12} /> Message
                                             </Btn>
-                                            <Btn variant="secondary" size="sm" style={{ flex: 1 }} onClick={() => { addNotif({ type: "appointment", title: "Appointment Requested", body: `Booking for ${client.name}`, time: "Just now" }); setPage("appointments"); }}>
+                                            <Btn variant="secondary" size="sm" style={{ flex: 1 }} onClick={() => setPage("appointments")}>
                                                 <Icon d={I.calendar} size={12} /> Schedule
                                             </Btn>
                                         </div>

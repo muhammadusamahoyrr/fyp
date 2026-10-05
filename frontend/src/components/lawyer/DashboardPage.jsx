@@ -167,7 +167,7 @@ function DashboardPage() {
                                 <button onClick={() => setPage("cases")} style={{ fontSize: 12, color: t.primary, background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>View all <Icon d={I.arrowRight} size={12} /></button>
                             </div>
                             <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                                <thead><tr style={{ fontSize: 11, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.07em" }}>{["Case ID", "Title", "Type", "Status", "Date", ""].map(h => <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontWeight: 700, borderBottom: `1px solid ${t.border}` }}>{h}</th>)}</tr></thead>
+                                <thead><tr style={{ fontSize: 11, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.07em" }}>{["Case ID", "Title", "Type", "Status", "Next hearing"].map(h => <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontWeight: 700, borderBottom: `1px solid ${t.border}` }}>{h}</th>)}</tr></thead>
                                 <tbody>
                                 {displayCases.map(c => (
                                     <tr key={c.id} style={{ borderBottom: `1px solid ${t.border}`, cursor: "pointer" }} onClick={() => openCaseFromDashboard(c)}>
@@ -179,11 +179,10 @@ function DashboardPage() {
                                         <td style={{ padding: "12px 16px" }}><Badge type="gray">{c.type}</Badge></td>
                                         <td style={{ padding: "12px 16px" }}><Badge type={CSB[c.status]}>{c.status}</Badge></td>
                                         <td style={{ padding: "12px 16px", fontSize: 12, color: t.textMuted }}>{c.nextHearing ? fmtDate(c.nextHearing) : "—"}</td>
-                                        <td style={{ padding: "12px 16px" }}><button style={{ background: "none", border: "none", color: t.textFaint, cursor: "pointer" }}><Icon d={I.more} size={15} /></button></td>
                                     </tr>
                                 ))}
                                 {!displayCases.length && (
-                                    <tr><td colSpan={6} style={{ padding: "32px 16px", textAlign: "center", fontSize: 13, color: t.textMuted }}>No cases assigned yet</td></tr>
+                                    <tr><td colSpan={5} style={{ padding: "32px 16px", textAlign: "center", fontSize: 13, color: t.textMuted }}>No cases assigned yet</td></tr>
                                 )}
                             </tbody>
                             </table>
