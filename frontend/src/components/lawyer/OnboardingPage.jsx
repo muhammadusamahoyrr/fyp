@@ -97,8 +97,6 @@ const STEPS = [
 // Labels map to the platform's case types — matching runs on these values
 const SPECS_CORE = ["Civil Litigation", "Criminal", "Family", "Constitutional"];
 const SPEC_VALUE = { "Civil Litigation": "civil", Criminal: "criminal", Family: "family", Constitutional: "constitutional" };
-const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
-const DAY_FULL = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const CONTENT_PAD = 18;
 
 // ─── Shared UI Atoms ──────────────────────────────────────────────────────────
@@ -298,7 +296,6 @@ function StepProfessional({ onNext }) {
   const [name, setName] = useState("");
   const [exp, setExp] = useState("");
   const [license, setLicense] = useState("");
-  const [council, setCouncil] = useState("Punjab Bar Council");
   const [coreSpecs, setCoreSpecs] = useState([]);
   const [problem, setProblem] = useState(null);
 
@@ -306,7 +303,7 @@ function StepProfessional({ onNext }) {
     const specs = coreSpecs.map(s => SPEC_VALUE[s]).filter(Boolean);
     const p = stepOneProblem({ license, specs });
     setProblem(p);
-    if (!p) onNext({ name, exp, license: license.trim(), council, specs });
+    if (!p) onNext({ name, exp, license: license.trim(), specs });
   };
 
   useEffect(() => {
@@ -432,20 +429,6 @@ function StepProfessional({ onNext }) {
                 {Ic.shield(T.primary)}
               </div>
               <span style={{ fontSize: 17, fontWeight: 800, color: T.text }}>License Information</span>
-            </div>
-            <div>
-              <Label>Bar Council</Label>
-              <div style={{ position: "relative" }}>
-                <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2"><path d="M15 12l-8.5 8.5a2.12 2.12 0 01-3-3L12 9M18 9l3-3M17 3l4 4" /></svg>
-                </span>
-                <input value={council} onChange={e => setCouncil(e.target.value)} style={{
-                  width: "100%", boxSizing: "border-box", background: T.inputBg,
-                  border: `1.5px solid ${T.inputBorder}`, borderRadius: T.r.md,
-                  color: T.text, fontSize: 13.5, padding: "10px 12px 10px 36px",
-                  outline: "none", fontFamily: "inherit",
-                }} />
-              </div>
             </div>
             <div>
               <div style={{ marginBottom: 6 }}>
@@ -771,13 +754,8 @@ function StepOffice({ onNext, onBack, saving, error }) {
   const [city, setCity] = useState("Lahore, 54000");
   const [phone, setPhone] = useState("");
   const [minFee, setMinFee] = useState(5000);
-  const [maxFee, setMaxFee] = useState(25000);
   const [feeNote, setFeeNote] = useState("");
-  const [activeDays, setActiveDays] = useState([0, 1, 2, 3, 4]);
-  const [schedule, setSchedule] = useState("Standard 9 AM - 5 PM");
-  const [feeTier, setFeeTier] = useState("10k-25k");
 
-  const togDay = (i) => setActiveDays(p => p.includes(i) ? p.filter(d => d !== i) : [...p, i].sort((a, b) => a - b));
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -828,7 +806,7 @@ function StepOffice({ onNext, onBack, saving, error }) {
           </div>
         </div>
 
-        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "1fr", gap: 12, flex: 1 }}>
+        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr", gap: 12, flex: 1 }}>
           {/* Location & Contact */}
           <CardPanel>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -840,7 +818,6 @@ function StepOffice({ onNext, onBack, saving, error }) {
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                 <Label>Office address</Label>
-                <span style={{ fontSize: 11, color: T.primary, cursor: "pointer" }}>Map Preview</span>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                 <div style={{ flex: 1 }}>
@@ -867,18 +844,7 @@ function StepOffice({ onNext, onBack, saving, error }) {
                 <div style={{ flex: 1 }}>
                   <Input placeholder="+92" icon={Ic.phone(T.textFaint)} value={phone} onChange={setPhone} />
                 </div>
-                <select style={{
-                  background: T.inputBg, border: `1.5px solid ${T.inputBorder}`,
-                  borderRadius: T.r.md, color: T.textMuted, fontSize: 12,
-                  padding: "10px 10px", outline: "none",
-                }}>
-                  <option>Primary/</option>
-                  <option>Secondary/</option>
-                </select>
               </div>
-            </div>
-            <div style={{ padding: "10px 12px", background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: T.r.sm, fontSize: 12, color: T.textFaint }}>
-              Map Preview
             </div>
           </CardPanel>
 
@@ -900,76 +866,14 @@ function StepOffice({ onNext, onBack, saving, error }) {
                 style={{ width: "100%", accentColor: T.primary }} />
             </div>
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <Label>Maximum Fee</Label>
-                <Label>Max: PKR 50,000</Label>
-              </div>
-              <input type="range" min="0" max="50000" step="1000" value={maxFee}
-                onChange={e => setMaxFee(+e.target.value)}
-                style={{ width: "100%", accentColor: T.primary }} />
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {["<10k", "10k-25k", ">25k"].map(t => (
-                <button key={t} onClick={() => setFeeTier(t)} style={{
-                  flex: 1, padding: "8px 6px", borderRadius: T.r.sm, fontSize: 12, fontWeight: 600, cursor: "pointer",
-                  background: feeTier === t ? T.primaryGlow : T.inputBg,
-                  border: `1.5px solid ${feeTier === t ? T.primary : T.border}`,
-                  color: feeTier === t ? T.primaryLight : T.textMuted,
-                }}>{t}</button>
-              ))}
-            </div>
-            <div>
               <Label>Explain your fees <span style={{ color: T.textFaint }}>(optional)</span></Label>
               <Textarea placeholder="" rows={3} value={feeNote} onChange={setFeeNote} />
             </div>
           </CardPanel>
 
-          {/* Working Schedule */}
-          <CardPanel>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-              <div style={{ width: 30, height: 30, borderRadius: 8, background: T.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                {Ic.clock(T.primary)}
-              </div>
-              <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>Working Schedule</span>
-            </div>
-            <div>
-              <Label>Working Days</Label>
-              <div style={{ display: "flex", gap: 5, marginTop: 6 }}>
-                {DAYS.map((d, i) => (
-                  <button key={i} onClick={() => togDay(i)} style={{
-                    width: 30, height: 30, borderRadius: "50%", border: `1.5px solid ${activeDays.includes(i) ? T.primary : T.border}`,
-                    background: activeDays.includes(i) ? T.primaryGlow : T.inputBg,
-                    color: activeDays.includes(i) ? T.primaryLight : T.textFaint,
-                    fontSize: 11, fontWeight: 700, cursor: "pointer",
-                  }}>{d}</button>
-                ))}
-              </div>
-              <p style={{ fontSize: 11, color: T.textFaint, marginTop: 6 }}>
-                Selected: {activeDays.length} Days ({activeDays.map(i => DAY_FULL[i]).join("-")})
-              </p>
-            </div>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <Label>Office Hours</Label>
-                <span style={{ fontSize: 10, color: T.textFaint }}>ⓘ</span>
-              </div>
-              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                {["AM", "Min", "AM", "Min"].map((p, i) => (
-                  <select key={i} style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: T.r.sm, color: T.textMuted, fontSize: 12, padding: "8px 6px", outline: "none" }}>
-                    <option>{p}</option>
-                  </select>
-                ))}
-              </div>
-            </div>
-            <div style={{ padding: "10px 14px", background: T.primaryGlow2, border: `1px solid ${T.primary}30`, borderRadius: T.r.sm }}>
-              <p style={{ fontSize: 12, fontWeight: 600, color: T.primaryLight }}>Standard 9 AM - 5 PM</p>
-              <p style={{ fontSize: 11, color: T.textFaint, marginTop: 2 }}>Selected: 9 AM - 5 PM (Mon-Fri)</p>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Exception/Holiday Schedule</span>
-              <span style={{ color: T.textMuted }}>▾</span>
-            </div>
-          </CardPanel>
+          {/* A "Working Schedule" card sat here: days, office hours and a holiday
+              schedule that were never sent. Working hours are set, and enforced,
+              in Appointments. */}
         </div>
       </div>
 
@@ -1076,10 +980,6 @@ function StepSubmitted({ onBack, onComplete }) {
               <div style={{ width: "15%", height: "100%", background: `linear-gradient(90deg, ${T.primary}, ${T.primaryLight})`, borderRadius: 99 }} />
             </div>
             <p style={{ fontSize: 11, color: T.textFaint }}>15% Admin verification (Step 1/2) in progress.</p>
-          </div>
-          <div style={{ flex: "1 1 240px", maxWidth: 240, minWidth: 0, background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: T.r.lg, padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 20 }}>✉️</span>
-            <p style={{ fontSize: 12, color: T.textMuted }}>Questions? Contact <span style={{ color: T.primaryLight, cursor: "pointer" }}>Admin Support</span>.</p>
           </div>
         </div>
 

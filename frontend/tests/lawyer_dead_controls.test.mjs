@@ -207,3 +207,41 @@ test("3.8a Profile: no camera button for an avatar upload that does not exist", 
     assert.equal(iconOnly.length, 0);
     await view.unmount();
 });
+
+/* ── 3.8b Onboarding ──────────────────────────────────────────────────── */
+
+test("3.8b Onboarding: no fields that are never sent, and no dead support link", async () => {
+    api.__respond("updateMe", { data: {}, error: null, status: 200 });
+    api.__respond("updateLawyerProfile", { data: {}, error: null, status: 200 });
+    const { OnboardingPage } = await import("../src/components/lawyer/OnboardingPage.jsx");
+    const view = await mountPage(() => h(OnboardingPage, { onComplete: () => {} }));
+    const root = view.container;
+    const press = async (text) => {
+        const b = [...root.querySelectorAll("button")].find(x => x.textContent.includes(text));
+        assert.ok(b, `no "${text}" button`);
+        await act(async () => { b.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+        await settle();
+    };
+
+    // Step 1: no Bar Council input (it was never sent).
+    assert.equal([...root.querySelectorAll("input")].filter(i => i.value === "Punjab Bar Council").length, 0);
+    const license = root.querySelector('input[placeholder="e.g. PBC/12345/2019"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    await act(async () => { setter.call(license, "PBC/12345/2019"); license.dispatchEvent(new Event("input", { bubbles: true })); });
+    const civil = [...root.querySelectorAll("span")].find(x => x.textContent.trim() === "Civil Litigation");
+    await act(async () => { civil.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await press("Continue");
+    await press("Continue");
+
+    // Step 3: only fields that reach the server.
+    const text = root.textContent;
+    for (const gone of ["Maximum Fee", "Working Days", "Office Hours", "Map Preview", "Exception/Holiday"]) {
+        assert.ok(!text.includes(gone), `"${gone}" is still offered`);
+    }
+    assert.equal(root.querySelectorAll("select").length, 0, "an unsent select remains");
+
+    await press("Submit for Verification");
+    assert.equal(api.__calls("updateLawyerProfile").length, 1);
+    assert.ok(!root.textContent.includes("Admin Support"), "the dead support link remains");
+    await view.unmount();
+});
