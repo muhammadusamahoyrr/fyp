@@ -743,6 +743,13 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
 
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
+    // Replace this case and its hearings with the server's returned CaseOut.
+    const applyServerCase = (apiCase) => {
+        const mapped = _mapApiCase(apiCase);
+        setCases(prev => prev.map(x => x._id === mapped._id ? mapped : x));
+        setHearings(prev => ({ ...prev, [caseId]: mapped._apiHearings }));
+    };
+
     const openAdd = () => { setForm(emptyForm); setModal("add"); };
     const openEdit = (h) => { setForm({ ...h }); setModal(h.id); };
 
@@ -752,10 +759,11 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
         const updated = { ...form, id: isEdit ? modal : "H-" + Date.now(), status: form.outcome ? "past" : "upcoming" };
 
         // Persist new hearings to backend; edits are local-only (no backend edit endpoint)
+        let fromServer = false;
         if (!isEdit) {
             // Find the real _id of the case (case items have both id=case_number and _id=mongo_id)
             const realCaseId = cases.find(x => x.id === caseId)?._id || caseId;
-            const { error } = await apiAddHearing(realCaseId, {
+            const { data, error } = await apiAddHearing(realCaseId, {
                 date: new Date(form.date).toISOString(),
                 court: form.court,
                 judge: form.judge || null,
@@ -764,15 +772,16 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                 outcome: form.outcome || null,
             });
             if (error) { showToast("❌ " + (error.message || "Failed to save hearing")); return; }
+            // The server's copy, so the new hearing carries its `_id` and
+            // "Add Outcome" works on it without a reload.
+            if (data) { applyServerCase(data); fromServer = true; }
+            else setHearings(prev => ({ ...prev, [caseId]: [...(prev[caseId] || []), updated] }));
+        } else {
+            setHearings(prev => ({ ...prev, [caseId]: (prev[caseId] || []).map(h => h.id === modal ? updated : h) }));
         }
 
-        setHearings(prev => {
-            const list = prev[caseId] || [];
-            return { ...prev, [caseId]: isEdit ? list.map(h => h.id === modal ? updated : h) : [...list, updated] };
-        });
-
-        // Update case next hearing date
-        if (!form.outcome) {
+        // Update case next hearing date (the server's copy already has it)
+        if (!form.outcome && !fromServer) {
             setCases(prev => prev.map(x => x.id === caseId ? { ...x, nextHearing: form.date } : x));
         }
 
@@ -801,7 +810,7 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
         const h = outcomeModal;
         const realCaseId = cases.find(x => x.id === caseId)?._id || caseId;
         setOBusy(true);
-        const { error } = await apiRecordOutcome(realCaseId, h._id, {
+        const { data, error } = await apiRecordOutcome(realCaseId, h._id, {
             outcome: oForm.outcome,
             note: oForm.note || null,
             next_date: oForm.next_date ? new Date(oForm.next_date).toISOString() : null,
@@ -811,18 +820,12 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
         if (error) { showToast("❌ " + (error.detail || error.message || "Failed to record outcome")); return; }
 
         const label = OUTCOME_OPTIONS.find(([k]) => k === oForm.outcome)?.[1] || oForm.outcome;
-        setHearings(prev => {
-            let list = (prev[caseId] || []).map(x => x.id === h.id
-                ? { ...x, outcome: oForm.outcome, outcomeLabel: label, outcomeNote: oForm.note, status: "past" }
-                : x);
-            if (oForm.next_date) {
-                list = [...list, { id: "H-" + Date.now(), _id: null, date: oForm.next_date, time: oForm.next_time, court: h.court, judge: h.judge, purpose: "Next hearing", outcome: "", status: "upcoming" }];
-            }
-            return { ...prev, [caseId]: list };
-        });
-        if (oForm.next_date) {
-            setCases(prev => prev.map(x => x.id === caseId ? { ...x, nextHearing: oForm.next_date } : x));
-        }
+        // The server's copy carries the auto-scheduled next hearing WITH its
+        // `_id`; a locally built one had `_id: null` and refused "Add Outcome".
+        if (data) applyServerCase(data);
+        else setHearings(prev => ({ ...prev, [caseId]: (prev[caseId] || []).map(x => x.id === h.id
+            ? { ...x, outcome: oForm.outcome, outcomeLabel: label, outcomeNote: oForm.note, status: "past" }
+            : x) }));
         const tlEntry = { id: "TL-" + Date.now(), date: h.date, type: "hearing", text: `Hearing outcome — ${label}${oForm.note ? ": " + oForm.note : ""}`, icon: "⚖️" };
         setTimeline(prev => ({ ...prev, [caseId]: [tlEntry, ...(prev[caseId] || [])] }));
         setOutcomeModal(null);
@@ -1252,7 +1255,9 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
     const { t: T } = useTheme();
     const [tab, setTab] = useState("overview");
     const c = cases.find(x => x.id === caseId);
-    if (!c) return null;
+    // Opened from elsewhere before the case list has loaded: say so, rather
+    // than rendering an empty page.
+    if (!c) return <div style={{ padding: 24, fontSize: 14, color: T.textMuted }}>Loading case…</div>;
 
     const cHearings = hearings[caseId] || [];
     const cDocs = docs[caseId] || [];
@@ -1792,16 +1797,18 @@ function CasesPage() {
     const handleOpenCase = (caseId) => {
         setOpenCaseId(caseId);
         setActiveCase(caseId);
-        // Seed hearings from DB data if not already loaded locally
-        setHearings(prev => {
-            if (prev[caseId]?.length) return prev;
-            const caseData = cases.find(c => c.id === caseId);
-            if (caseData?._apiHearings?.length) {
-                return { ...prev, [caseId]: caseData._apiHearings };
-            }
-            return prev;
-        });
     };
+
+    // Seed an open case's hearings from its record, however it was opened.
+    // This used to happen only inside handleOpenCase, so a case opened from
+    // the Dashboard or the active-case banner (which set openCaseId directly)
+    // showed no hearings at all.
+    useEffect(() => {
+        if (!openCaseId) return;
+        const caseData = cases.find(c => c.id === openCaseId);
+        if (!caseData) return;
+        setHearings(prev => (openCaseId in prev ? prev : { ...prev, [openCaseId]: caseData._apiHearings || [] }));
+    }, [openCaseId, cases]);
 
     const handleBack = () => {
         setOpenCaseId(null);
