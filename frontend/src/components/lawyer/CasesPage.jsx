@@ -817,7 +817,7 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
             next_time: oForm.next_date ? oForm.next_time : null,
         });
         setOBusy(false);
-        if (error) { showToast("❌ " + (error.detail || error.message || "Failed to record outcome")); return; }
+        if (error) { showToast("❌ " + (error.message || "Failed to record outcome")); return; }
 
         const label = OUTCOME_OPTIONS.find(([k]) => k === oForm.outcome)?.[1] || oForm.outcome;
         // The server's copy carries the auto-scheduled next hearing WITH its

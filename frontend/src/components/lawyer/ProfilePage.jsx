@@ -58,7 +58,9 @@ function ProfilePage() {
         ]);
         setSaving(false);
         if (r1.error || r2.error) {
-            toast.show("❌ " + ((r1.error || r2.error)?.detail || "Save failed"), "danger");
+            // `.message` is the formatted string; `.detail` is the raw body field,
+            // undefined on the error envelope and an array of objects on a 422.
+            toast.show("❌ " + ((r1.error || r2.error)?.message || "Save failed"), "danger");
         } else {
             toast.show("✅ Profile updated", "success");
         }
