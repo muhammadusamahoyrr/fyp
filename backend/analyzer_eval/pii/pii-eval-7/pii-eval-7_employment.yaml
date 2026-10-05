@@ -1,0 +1,213 @@
+dataset: pii-eval-7
+label_review: developer_only
+documents:
+- id: p7-emp-01
+  document_type: employment
+  features: [lookalikes, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    OFFER OF EMPLOYMENT
+
+    [[NOT:n1|Indus Valley Softworks (Pvt) Ltd]]
+    [[ADDRESS:a1|Office 501, Fifth Floor, Arfa Software Technology Park, Ferozepur Road, Lahore]]
+
+    18 May 2026
+
+    Mr. [[NAME:p1|Usman Ghani Sheikh]]
+    [[ADDRESS:a2|House 12, Street 5, Mustafa Town, Lahore]]
+
+    Dear Mr. [[NAME:p1|Sheikh]],
+
+    We are pleased to offer you the position of [[NOT:n2|Senior Backend Engineer]] on the [[NOT:n3|Project Shalimar]] team. Your gross monthly salary will be Rs. 420,000.
+
+    Please confirm your acceptance [[DEADLINE:d1|within 7 days of the date of this letter]]. You will be on probation for [[DEADLINE:d2|three months from your joining date]], and your joining date must be no later than 1 July 2026.
+
+    Salary will be credited to your account [[ACCOUNT:b1|PK29UNIL0109000287441903]] [[DEADLINE:d3|by the last working day of each month]].
+
+    [[NAME:p1|Usman]], we look forward to working with you.
+
+    Yours sincerely,
+    [[NAME:p2|Mariam Javaid]]
+    Head of People, [[NOT:n4|Indus Valley Softworks]]
+- id: p7-emp-02
+  document_type: employment
+  features: [table, ocr_errors, repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    EMPLOYEE DATA SHEET (OCR export)
+
+    | Field | Entry |
+    |---|---|
+    | Employee name | [[NAME:p1|Sadia Parveen Qaz1]] |
+    | CNIC | [[CNIC:c1|3740l-2298015-4]] |
+    | Mobile | [[PHONE:t1|0331-55 08 217]] |
+    | Personal email | [[EMAIL:e1|sadia.qazi@exarnple.com]] |
+    | Home address | [[ADDRESS:a1|House 9-A, Lane 3, Chaklala Scheme III, Rawal pindi]] |
+    | Emergency contact | [[NAME:p3|Nadeem Qazi]], [[PHONE:t2|0300-51l9024]] |
+    | Line manager | [[NAME:p2|Asif Mehmood]] |
+    | Bank account | [[ACCOUNT:b1|0042-0081773O-03]] |
+
+    Probation review due [[DEADLINE:d1|on completion of 90 days of service]].
+    Signed by [[NAME:p1|Sadia Qazi]] and countersigned by [[NAME:p2|Asif Mehmood]].
+- id: p7-emp-03
+  document_type: employment
+  features: [aliases, repeated_names, overlap, untitled_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT AGREEMENT
+
+    This Agreement is made on 2 February 2026 between [[NOT:n1|Crescent Agro Foods Limited]], having its registered office at [[ADDRESS:a1|14-Industrial Estate, Kot Lakhpat, Lahore]] (the "Company"), acting through its Director [[NAME:p2|Nauman Rasheed]], and [[NAME:p1|Arslan Haider Naqvi]], CNIC [[CNIC:c1|35202-7710458-1]], resident of [[ADDRESS:a2|Quarter No. 4, Staff Colony of [[NAME:p4|Syed Haider Naqvi]], Kot Lakhpat, Lahore]] (the "Employee").
+
+    1. APPOINTMENT. The Company appoints the Employee as [[NOT:n2|Plant Supervisor]].
+    2. TERM. The appointment is for [[DEADLINE:d1|two years from 1 March 2026]], renewable by mutual consent.
+    3. NOTICE. After confirmation, either party may terminate on [[DEADLINE:d2|one month's notice]] or pay in lieu.
+    4. FINAL SETTLEMENT. The Company shall pay all dues [[DEADLINE:d3|within 30 days of the last working day]].
+    5. The said [[NAME:p1|Arslan]] shall not disclose production formulas. Mr. [[NAME:p1|Naqvi]] shall return all Company property on exit.
+
+    For the Company: [[NAME:p2|Nauman Rasheed]]
+    Employee: [[NAME:p1|Arslan Haider Naqvi]]
+    Witness: [[NAME:p3|Tahira Yasmeen]]
+- id: p7-emp-04
+  document_type: employment
+  features: [urdu_script, roman_urdu, untitled_names, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Tasdeeq-e-Mulazmat
+
+    Tasdeeq ki jati hai ke [[NAME:p1|Muhammad Riaz]] wald [[NAME:p3|Allah Rakha]] ([[NAME:p1|محمد ریاض]]) hamari factory [[NOT:n1|Sialkot Sports Works]] mein 2019 se bator [[NOT:n2|machine operator]] kaam kar raha hai.
+    [[NAME:p1|Riaz]] ki mahana tankhwah Rs. 45,000 hai.
+    Iska pata [[ADDRESS:a1|Mohallah Rang Pura, Gali Haji Bashir wali, Sialkot]] hai.
+    Rabta: [[PHONE:t1|0302-6647193]]
+
+    Jari karda: [[NAME:p2|Khawaja Saleem Butt]] ([[NAME:p2|خواجہ سلیم بٹ]])
+- id: p7-emp-05
+  document_type: employment
+  features: [ocr_errors, overlap, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    SHOW CAUSE NOTICE
+
+    Ref: [[NOT:n1|PGL]]/HR/2026/117
+    Date: 9 April 2026
+
+    To,
+    Mr. [[NAME:p1|Farhan Ali Mirza]]
+    [[ADDRESS:a1|C/o [[NAME:p3|Ahmed Mirza]], House 44, St-
+    reet 2, Gulgasht Colony, Multan]]
+
+    Mr. [[NAME:p1|Farh an Mirza]], it is reported that you were absent without leave from 2 to 6 April 2026. You are directed to explain your absence in writing [[DEADLINE:d1|within 3 working days of receipt of this notice]], failing which disciplinary action may follow under the [[NOT:n2|Standing Orders]].
+
+    The said [[NAME:p1|Farhan]] may be accompanied at the hearing by a co-worker.
+
+    [[NAME:p2|Rukhsana Kaus ar]]
+    Manager HR, [[NOT:n3|Punjab Ginners Limited]]
+    [[EMAIL:e1|rukhsana.kausar@exarnple.org]]
+- id: p7-emp-06
+  document_type: employment
+  features: [table, lookalikes, untitled_names, deadlines]
+  parties: [p1, p2, p3, p4]
+  text: |
+    SHIFT ROSTER AND CONTACTS - [[NOT:n1|Margalla Medical Centre]], Week 23
+
+    Name	Role	Shift	Mobile
+    [[NAME:p1|Sana Ullah]]	Nurse	Night	[[PHONE:t1|0345-9012738]]
+    [[NAME:p2|Kiran Shahbaz]]	Nurse	Day	[[PHONE:t2|0314-2208456]]
+    [[NAME:p3|Zubair Anwar]]	Ward boy	Day	[[PHONE:t3|0300-6601249]]
+    [[NAME:p4|Noreen Akhtar]]	Supervisor	Evening	[[PHONE:t4|0321-7730518]]
+
+    Swap requests must be submitted [[DEADLINE:d1|at least 48 hours before the shift]].
+    Overtime claims must reach the [[NOT:n2|Accounts Office]] [[DEADLINE:d2|by 25 June 2026]].
+- id: p7-emp-07
+  document_type: employment
+  features: [repeated_names, aliases, untitled_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    RELIEVING AND EXPERIENCE LETTER
+
+    This is to certify that [[NAME:p1|Hira Batool Jafri]] worked with us as Content Lead from 1 September 2023 to 30 April 2026.
+    During her tenure [[NAME:p1|Hira]] led the Urdu newsroom and trained four juniors.
+    Ms. [[NAME:p1|Jafri]] has returned all company property and has no outstanding dues.
+    Her final salary and gratuity will be transferred [[DEADLINE:d1|within 15 days of this letter]] to [[ACCOUNT:b1|PK48BAHL1022009800156602]].
+    We wish [[NAME:p1|H. B. Jafri]] success in her future career.
+
+    [[NAME:p2|Kashan Ilyas]]
+    Chief Operating Officer
+    [[PHONE:t1|0333-4100927]]
+- id: p7-emp-08
+  document_type: employment
+  features: [urdu_script, ocr_errors, overlap, repeated_names]
+  parties: [p1, p2]
+  text: |
+    ملازمت کا معاہدہ
+
+    آجر: [[NAME:p2|شاہد محمود]]
+    ملازم: [[NAME:p1|عمران حیدر]]
+    شناختی کارڈ: [[CNIC:c1|36302-4419O27-5]]
+    پتہ: [[ADDRESS:a1|ڈیرہ [[NAME:p2|شاہد محمود]]، موضع کوٹ ادو، ضلع مظفر گڑھ]]
+
+    English note: [[NAME:p1|lmran Haider]] will work as tractor driver at the farm of [[NAME:p2|Shahid Mehmood]]. Wages Rs. 38,000 per month. Contact [[PHONE:t1|0306-71 18 342]].
+    [[NAME:p1|Imran]] gets two days' leave each month.
+- id: p7-emp-09
+  document_type: employment
+  features: [roman_urdu, aliases, repeated_names, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Subject: Joining confirmation - [[NAME:p1|Bilal Hussain urf Billu]]
+
+    [[NAME:p2|Shazia]] sahiba,
+
+    [[NAME:p1|Bilal]] ne aaj [[NOT:n1|Karachi]] wale godam par joining de di hai. Uska CNIC [[CNIC:c1|42301-6608217-3]] aur mobile [[PHONE:t1|0312-2297408]] hai. Ghar ka pata [[ADDRESS:a1|Makan No. R-118, Sector 11-B, North Karachi, Karachi]] hai.
+    [[NAME:p1|Billu]] ko [[NOT:n2|Al-Rehman Logistics]] ka ID card kal milega.
+    [[NAME:p1|Bilal Hussain]] ki pehli tankhwah agle mahine aayegi.
+
+    Shukriya,
+    [[NAME:p3|Tariq Jameel Abbasi]]
+    [[EMAIL:e1|tariq.abbasi@example.net]]
+- id: p7-emp-10
+  document_type: employment
+  features: [table, roman_urdu, ocr_errors, deadlines, lookalikes]
+  parties: [p1]
+  text: |
+    SALARY SLIP - JUNE 2026
+    [[NOT:n1|Zamzam Textile Mills Ltd]]
+
+    | Field | Value |
+    |---|---|
+    | Name | [[NAME:p1|Ghulam Fareed]] wald [[NAME:p3|Noor Muhammad]] |
+    | Employee No. | ZTM-0442 |
+    | CNIC | [[CNIC:c1|33l02-5590183-7]] |
+    | Account | [[ACCOUNT:b1|PK15ALFH0057001004418820]] |
+    | Basic | 32,000 |
+    | Allowances | 9,500 |
+    | Net | 41,500 |
+
+    EOBI contribution is deposited [[DEADLINE:d1|by the 15th of the following month]].
+    Queries: [[NAME:p2|Sh agufta Noor]], Payroll, extension 214.
+- id: p7-emp-11
+  document_type: employment
+  features: [repeated_names, deadlines, lookalikes, aliases]
+  parties: [p1, p2]
+  text: |
+    RESIGNATION
+
+    [[NAME:p1|Danish Kamal]]
+    [[ADDRESS:a1|Flat 5, Kamal Mansion, opposite Liaquat National Hospital, Karachi]]
+    [[EMAIL:e1|danish.kamal@example.com]]
+
+    To: Ms. [[NAME:p2|Ambreen Hashmi]], Regional Manager, [[NOT:n2|Seaport Freight Services]]
+
+    I resign from my post of Operations Officer. As required by my contract, I am serving [[DEADLINE:d1|one month's notice from 1 June 2026]], so my last working day will be 30 June 2026. Please release my provident fund [[DEADLINE:d2|within 45 days of my last working day]].
+
+    [[NAME:p1|Danish]]
+- id: p7-emp-12
+  document_type: employment
+  features: [urdu_script, aliases, repeated_names, ocr_errors, untitled_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    INTERNSHIP LETTER
+
+    [[NAME:p1|Laiba Noor Chaudhry]] ([[NAME:p1|لائبہ نور]]) is offered an unpaid internship with the legal department from 1 July 2026 for [[DEADLINE:d1|eight weeks]].
+    [[NAME:p1|Laiba]] will report to [[NAME:p2|Saqib Rauf]].
+    [[NAME:p1|L aiba Ch audhry]] must submit her university letter [[DEADLINE:d2|before 20 June 2026]].
+    Contact for the intern: [[PHONE:t1|+92 3OO 8812 405]].
+    [[NAME:p2|Rauf]] will sign the completion certificate.

@@ -143,7 +143,8 @@ DATASET_ROLES = {"pii-eval-1": "development",
                  "pii-eval-3": "gate_spent",       # scored once 2026-10-04 (b907a96): NOT passed
                  "pii-eval-4": "gate_spent",       # scored once 2026-10-04 (5a4afa8): NOT passed
                  "pii-eval-5": "gate_spent",       # scored once 2026-10-04: NOT passed
-                 "pii-eval-6": "gate_sealed"}     # authored 2026-10-04; never read for tuning; see AUTHORED.txt
+                 "pii-eval-6": "gate_spent",       # scored once 2026-10-05 (75c3f57): NOT passed
+                 "pii-eval-7": "gate_sealed"}     # authored 2026-10-05; production-rules-only gate; see AUTHORED.txt
 _OPEN = re.compile(r"\[\[(?P<kind>[A-Z]+):(?P<entity>[A-Za-z0-9_-]+)\|")
 _WORD = re.compile(r"[^\W_]{3,}|\d{3,}", re.UNICODE)
 
