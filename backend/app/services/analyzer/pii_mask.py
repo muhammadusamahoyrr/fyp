@@ -27,7 +27,7 @@ from pathlib import Path
 
 from app.services.analyzer import pii_layers
 
-MASKING_VERSION = "pii-mask.9"
+MASKING_VERSION = "pii-mask.10"
 
 
 def _policy_sha256() -> str:
@@ -321,6 +321,17 @@ def _choose(text: str, found: list[tuple[int, int, str]], keep: frozenset = froz
             at = max(at, b)
         if at < end:
             pieces.append((at, end, kind))
+    # Overlapping ADDRESS pieces are one address (pii-mask.10): the leftover of
+    # "Faisal Mehmood Khan House" split around the name (" House") used to win
+    # over the overlapping "House 12" and leave "12" unmasked and unflagged.
+    # Names never merge; pieces on two sides of a name never overlap.
+    merged: list[tuple[int, int, str]] = []
+    for start, end, kind in sorted(p for p in pieces if p[2] == "ADDRESS"):
+        if merged and start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end), kind)
+        else:
+            merged.append((start, end, kind))
+    pieces = [p for p in pieces if p[2] != "ADDRESS"] + merged
     chosen = list(names)
     taken = names[:]
     for start, end, kind in sorted(pieces, key=lambda x: (x[0], -(x[1] - x[0]))):

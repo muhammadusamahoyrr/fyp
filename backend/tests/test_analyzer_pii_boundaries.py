@@ -183,3 +183,16 @@ def test_a_currency_or_calendar_word_after_a_masked_name_is_not_its_continuation
     m, _ = masked(text)
     assert not [u for u in m.uncertain if u["reason"] == "name_continues"], \
         [(u["reason"], text[u["start"]:u["end"]]) for u in m.uncertain]
+
+
+# ── found by the offline BROWSER smoke test (scripts/analyzer_browser_smoke.py) ──
+
+def test_a_name_run_ending_in_a_premises_word_never_leaves_the_house_number_visible():
+    """"Signed by Faisal Mehmood Khan House 12 Butt Road 3." was sent as
+    "[NAME_2][ADDRESS_1] 12 ..." -- the run "Faisal Mehmood Khan House" read as
+    an ADDRESS (it ends in a place word), the name was masked inside it, and
+    the leftover " House" stole the premises match: "12" went out unflagged."""
+    text = "Tenant: Faisal Mehmood Khan.\nSigned by Faisal Mehmood Khan House 12 Butt Road 3.\n"
+    m, _ = masked(text)
+    assert safe(m, text, "12"), (sent(m), m.uncertain)
+    assert "House 12" not in sent(m)

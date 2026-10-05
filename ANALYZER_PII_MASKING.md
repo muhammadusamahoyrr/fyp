@@ -714,3 +714,167 @@ Harness pii-eval.2.4 reads every reason of a region.
 
 This is a policy change: pii-mask.9 has no gate result. pii-eval-7 describes pii-mask.7.
 
+## Both engines, the PDF path, current-policy status and the browser smoke test (pii-mask.10, 2026-10-05)
+
+### One request path per engine
+
+`pii_pipeline.compose` (the AI report) and `pii_pipeline.compose_hypothesis`
+(the drafting-question review signal) are the ONLY builders of a final
+request. These callers use them:
+
+- production `ai_stage` and `hypothesis_review_stage`;
+- the lawyer's preview (`pii_confirmation._preview`);
+- the evaluation.
+
+The old preview-only builder was removed.
+
+Each engine keeps its own prompt and schema. These are shared:
+
+- masking with the lawyer's decisions;
+- the digest that the approval binds to;
+- the final leak check;
+- the receipt.
+
+The drafting-question path sends ONLY the items the scanner selected
+(`review.select`), with their sentences minus those the injection scan
+flagged. It reads scanner statuses and never changes them.
+
+### The PDF path
+
+Synthetic documents are rendered to PDF (`render_pdf`), then run through the
+same code as production:
+
+- the production extractor, in its child process;
+- `extraction_stage.assemble`, which produces the canonical text;
+- `segmentation_stage.structure`, a pure function the stage itself now calls.
+
+Gold labels are MAPPED onto the extracted text by occurrence, matched
+whitespace-insensitively (`map_gold`). Plain-text offsets are never reused.
+A label whose count differs after extraction raises `MappingError`. The
+message contains kinds and counts only, and the document is reported
+unmapped, not scored.
+
+**Parity, end to end** (`tests/test_analyzer_pii_pdf_path.py`): for both
+engines, the lawyer's preview, the worker's wire request and the evaluation's
+request are the same bytes. The evaluation also reproduces the app's
+canonical text from the same PDF.
+
+**Layout fixtures:**
+
+- two columns, both drawn as spaces and as separate text objects;
+- adjacent label fields;
+- a name across lines;
+- a table;
+- a signature row;
+- a party repeated across pages;
+- headings, an address, an amount and a deadline.
+
+**What the PDF path does NOT cover:**
+
+- **scanned or image-only PDFs.** OCR text needs the lawyer's confirmation,
+  and OCR output is not evaluated;
+- **Urdu/Arabic script.** It is blocked by policy. The synthetic PDF writer
+  cannot render it, so such documents are scored on their plain text and
+  listed as `text_fallback`;
+- **reading order of real flowing multi-column layouts**, rotated text,
+  stamps, handwriting, form fields and annotations, encrypted PDFs;
+- **DOCX through this harness.** The DOCX extraction path exists but is not
+  evaluated here;
+- **fonts without Unicode maps.**
+
+Real scans will be noisier than these synthetic text PDFs.
+
+### Evaluation status bound to the running code
+
+`pii_gate_status` fingerprints the code that is running:
+
+- masking version and policy hash;
+- review version;
+- pipeline;
+- `processing_sha256` over every extraction, segmentation, masking, request
+  and scanner file;
+- the harness hash.
+
+A kept gate record counts as current ONLY when all of these match its pins.
+The possible states are:
+
+- `current_pass`;
+- `current_not_passed`;
+- `historical_pass_only` -- this is the case today, because pii-eval-7
+  passed on pii-mask.7;
+- `no_applicable_evaluation`;
+- `records_unreadable`, which fails closed.
+
+A historical pass never authorizes real documents. A current pass is
+necessary but not sufficient: synthetic-only mode and the attestation still
+apply. The review screen and the report show the state. From pii-eval-8 on,
+records carry their pins.
+
+### The overlapping-flag fix and the defect the browser found
+
+The overlapping-flag fix is pii-mask.9 (see above). The offline browser
+smoke test then found a masking defect that unit tests had missed
+(pii-mask.10).
+
+- **The defect.** In "Signed by Faisal Mehmood Khan House 12 Butt Road 3.",
+  the run "Faisal Mehmood Khan House" was read as an address, because it
+  ends in a place word. The name was masked inside it, and the leftover
+  " House" beat the overlapping premises match "House 12". The house number
+  "12" was sent unmasked and unflagged.
+- **The fix.** Overlapping ADDRESS pieces now merge into one address. Names
+  never merge.
+
+### The offline browser smoke test
+
+`scripts/analyzer_browser_smoke.py` is a test tool only. It runs the real app
+on 127.0.0.1 with:
+
+- a scratch database (`aai_smoke_*`) on the local replica set;
+- hosted services blanked before settings are built;
+- a socket guard that refuses non-loopback connections;
+- a capturing fake provider injected in-process.
+
+Production cannot switch this on (`tests/test_analyzer_smoke_isolation.py`):
+
+- normal startup leaves the provider hooks unset;
+- no setting selects a fake provider;
+- no app code references the tool;
+- the tool refuses a non-loopback database.
+
+The real frontend was built against it and driven in a real Chromium, with
+every non-loopback request blocked; only Google Fonts were attempted, and
+all were blocked.
+
+**Observed:**
+
+- **Upload and confirmation.** Lawyer login, upload, text and type
+  confirmation and key-terms confirmation all worked. The scanner results
+  showed "Found" and the neutral "Not located automatically", each with
+  sentence evidence.
+- **Review screen.** It showed the evaluation note ("historical"). The
+  People panel had three people, each with a confirmation checkbox. The
+  overlapping region "Butt Road 3" was shown with both reasons and resolved
+  with one decision.
+- **Missed name.** "Bushra Javed" (undetected) was marked by selecting it in
+  the original text.
+- **Identity edit.** Linking the landlord's trading name to the landlord made
+  the preview stale (attestation and person checkboxes disabled) and changed
+  the fingerprint.
+- **Approval.** All persons confirmed, then attested and approved. Exactly
+  ONE request reached the fake provider. Its digest equalled the approved
+  fingerprint and the receipt's `ai_attempt`/`ai_outcome`. It held no
+  personal value, and the amount and deadline were intact.
+- **Report.** It showed the AI item with its masked wording and exact
+  original evidence.
+- **Refusals.** A client was sent away from the lawyer area and got 403 on
+  every Analyzer request. Another lawyer saw no analyses and got 404 on
+  every request for the first lawyer's run.
+- **Two passes.** Pass 1 (pii-mask.9) exposed the "12" defect; the lawyer
+  had to mark it by hand before approving. Pass 2 (pii-mask.10) sent the
+  address fully masked, with no manual repair.
+- **Cleanup.** The scratch databases were dropped and the files removed. A
+  forced stop needs `--cleanup`, which was used.
+
+The receipt has no screen yet. It was read through the app's API from the
+logged-in browser session.
+
