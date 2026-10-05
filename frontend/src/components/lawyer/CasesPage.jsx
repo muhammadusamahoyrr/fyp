@@ -632,10 +632,11 @@ function WorkspaceTasks({ caseId, c }) {
     );
 }
 
+// Documents and Timeline tabs were removed for the demo: everything they held
+// lived in browser state and was lost on reload (LAWYER_DASHBOARD_FIX_PLAN,
+// Phase 4 skipped). Messages and Tasks are server-backed.
 const CASE_TABS = [
     { id: "overview", label: "Overview", emoji: "🏠" },
-    { id: "documents", label: "Documents", emoji: "📄" },
-    { id: "timeline", label: "Timeline", emoji: "🕐" },
     { id: "messages", label: "Messages", emoji: "💬" },
     { id: "tasks", label: "Tasks", emoji: "✅" },
 ];
@@ -750,8 +751,9 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
         setHearings(prev => ({ ...prev, [caseId]: mapped._apiHearings }));
     };
 
+    // Scheduling only: hearing edit and delete were local-only (no backend
+    // endpoint) and were removed rather than shown as if they saved.
     const openAdd = () => { setForm(emptyForm); setModal("add"); };
-    const openEdit = (h) => { setForm({ ...h }); setModal(h.id); };
 
     const save = async () => {
         if (!form.date || !form.purpose || !form.court) { showToast("⚠️ Date, court and purpose are required"); return; }
@@ -795,10 +797,6 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
         setModal(null);
     };
 
-    const remove = (id) => {
-        setHearings(prev => ({ ...prev, [caseId]: (prev[caseId] || []).filter(h => h.id !== id) }));
-        showToast("🗑 Hearing removed");
-    };
 
     const markOutcome = (h) => {
         if (!h._id) { showToast("⚠️ This hearing predates outcome tracking — schedule hearings through the app to enable it"); return; }
@@ -863,9 +861,7 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                                         </div>
                                     </div>
                                     <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                                        <Btn variant="secondary" size="sm" onClick={() => openEdit(h)}>✏️ Edit</Btn>
                                         <Btn variant="success" size="sm" onClick={() => markOutcome(h)}>📋 Add Outcome</Btn>
-                                        <Btn variant="danger" size="sm" onClick={() => remove(h.id)}>🗑</Btn>
                                     </div>
                                 </div>
                             </Card>
@@ -899,7 +895,6 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                                             </div>
                                         )}
                                     </div>
-                                    <Btn variant="ghost" size="sm" onClick={() => openEdit(h)}>✏️</Btn>
                                 </div>
                             </Card>
                         ))}
@@ -1260,8 +1255,6 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
     if (!c) return <div style={{ padding: 24, fontSize: 14, color: T.textMuted }}>Loading case…</div>;
 
     const cHearings = hearings[caseId] || [];
-    const cDocs = docs[caseId] || [];
-    const cTimeline = timeline[caseId] || [];
     const nextHearing = cHearings.filter(h => h.status === "upcoming").sort((a, b) => new Date(a.date) - new Date(b.date))[0];
 
     return (
@@ -1295,9 +1288,7 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                     <div style={{ display: "flex", gap: 0, borderLeft: `1px solid ${T.border}`, flexShrink: 0 }}>
                         {[
                             ["Next Hearing", nextHearing ? fmtDate(nextHearing.date) : "None", T.primary],
-                            ["Docs", cDocs.length, T.info],
                             ["Hearings", cHearings.length, T.textMuted],
-                            ["Timeline", cTimeline.length, T.textMuted],
                         ].map(([l, v, clr]) => (
                             <div key={l} style={{ textAlign: "center", padding: "0 16px", borderRight: `1px solid ${T.border}` }}>
                                 <div style={{ fontSize: 10, fontWeight: 700, color: T.textFaint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>{l}</div>
@@ -1325,10 +1316,8 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
                             {[
-                                { l: "Documents", v: cDocs.length, c: T.primary, emoji: "📄", gotoTab: "documents" },
                                 { l: "Hearings", v: cHearings.length, c: T.info, emoji: "⚖️", gotoTab: "hearings" },
                                 { l: "Upcoming", v: cHearings.filter(h => h.status === "upcoming").length, c: T.warn, emoji: "📅", gotoTab: "hearings" },
-                                { l: "Timeline Events", v: cTimeline.length, c: T.textMuted, emoji: "🕐", gotoTab: "timeline" },
                             ].map(s => (
                                 <Card key={s.l} style={{ padding: 16, cursor: "pointer" }} onClick={() => setTab(s.gotoTab)}>
                                     <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -1342,7 +1331,7 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                             ))}
                         </div>
 
-                        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+                        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 18 }}>
                             {/* Next Hearing */}
                             <Card style={{ padding: 18 }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
@@ -1366,58 +1355,13 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                                 )}
                             </Card>
 
-                            {/* Recent Docs */}
-                            <Card style={{ padding: 18 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                                    <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Recent Documents</div>
-                                    <button onClick={() => setTab("documents")} style={{ fontSize: 11, color: T.primary, background: "none", border: "none", cursor: "pointer" }}>Manage →</button>
-                                </div>
-                                {cDocs.slice(0, 3).map(doc => {
-                                    const DSB = { Draft: "gray", "Under Review": "warn", Approved: "success", Final: "primary" };
-                                    return (
-                                        <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
-                                            <span style={{ fontSize: 14 }}>📄</span>
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ fontSize: 12, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>{doc.title}</div>
-                                                <div style={{ fontSize: 10, color: T.textFaint }}>{doc.type}</div>
-                                            </div>
-                                            <Badge type={DSB[doc.status]} style={{ fontSize: 10, padding: "1px 7px" }}>{doc.status}</Badge>
-                                        </div>
-                                    );
-                                })}
-                                {cDocs.length === 0 && <div style={{ fontSize: 12, color: T.textFaint, padding: "12px 0", textAlign: "center" }}>No documents yet</div>}
-                            </Card>
                         </div>
 
-                        {/* Recent timeline */}
-                        <Card style={{ padding: 18 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
-                                <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Recent Activity</div>
-                                <button onClick={() => setTab("timeline")} style={{ fontSize: 11, color: T.primary, background: "none", border: "none", cursor: "pointer" }}>Full Timeline →</button>
-                            </div>
-                            <div style={{ position: "relative", paddingLeft: 22 }}>
-                                <div style={{ position: "absolute", left: 7, top: 0, bottom: 0, width: 2, background: `linear-gradient(to bottom, ${T.primary}80, transparent)`, borderRadius: 2 }} />
-                                {cTimeline.slice(0, 4).map(e => (
-                                    <div key={e.id} style={{ position: "relative", marginBottom: 14 }}>
-                                        <div style={{ position: "absolute", left: -18, top: 5, width: 10, height: 10, borderRadius: "50%", background: typeColor[e.type] || T.textMuted, border: `2px solid ${T.bg}` }} />
-                                        <div style={{ fontSize: 13, color: T.text }}>{e.icon} {e.text}</div>
-                                        <div style={{ fontSize: 11, color: T.textFaint, marginTop: 2 }}>{fmtDate(e.date)}</div>
-                                    </div>
-                                ))}
-                                {cTimeline.length === 0 && <div style={{ fontSize: 12, color: T.textFaint, paddingLeft: 4 }}>No activity recorded</div>}
-                            </div>
-                        </Card>
                     </div>
                 )}
 
                 {tab === "hearings" && (
                     <HearingsTab caseId={caseId} cases={cases} setCases={setCases} hearings={hearings} setHearings={setHearings} timeline={timeline} setTimeline={setTimeline} />
-                )}
-                {tab === "documents" && (
-                    <DocumentsTab caseId={caseId} docs={docs} setDocs={setDocs} timeline={timeline} setTimeline={setTimeline} />
-                )}
-                {tab === "timeline" && (
-                    <TimelineTab caseId={caseId} timeline={timeline} setTimeline={setTimeline} cases={cases} />
                 )}
                 {tab === "messages" && <WorkspaceMessages caseId={cases.find(x => x.id === caseId)?._id || caseId} c={c} />}
                 {tab === "tasks" && <WorkspaceTasks caseId={cases.find(x => x.id === caseId)?._id || caseId} c={c} />}

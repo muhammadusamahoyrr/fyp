@@ -245,3 +245,26 @@ test("3.8b Onboarding: no fields that are never sent, and no dead support link",
     assert.ok(!root.textContent.includes("Admin Support"), "the dead support link remains");
     await view.unmount();
 });
+
+/* ── 3.9 Case workspace ───────────────────────────────────────────────── */
+
+test("3.9 Case workspace: no browser-only Documents/Timeline tabs or hearing edit/delete", async () => {
+    const CASE = { ...CLIENT_CASE, hearing_dates: [{ _id: "h1", date: "2026-11-20T00:00:00Z", time: "10:00",
+                                                    court: "Civil Court", purpose: "Framing of issues" }] };
+    api.__respond("listCases", { data: { items: [CASE], total: 1 }, error: null });
+    api.__respond("listEngagements", { data: [], error: null });
+    const { CasesPage } = await import("../src/components/lawyer/CasesPage.jsx");
+    const view = await mountPage(CasesPage, { caseCtx: { openCaseId: CASE.case_number, activeCase: null } });
+    const tabs = buttonTexts(view.container).filter(t => /Overview|Documents|Timeline|Messages|Tasks/.test(t));
+    assert.deepEqual(tabs, ["🏠 Overview", "💬 Messages", "✅ Tasks"]);
+    assert.doesNotMatch(view.container.textContent, /Recent Documents|Recent Activity|Full Timeline/);
+
+    const manage = [...view.container.querySelectorAll("button")].find(b => b.textContent.includes("Manage →"));
+    await act(async () => { manage.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await settle();
+    const texts = buttonTexts(view.container);
+    assert.ok(texts.some(t => t.includes("Schedule Hearing")), "scheduling must stay");
+    assert.ok(texts.some(t => t.includes("Add Outcome")), "outcome recording must stay");
+    assert.ok(!texts.some(t => /Edit|🗑/.test(t)), "local-only hearing edit/delete is still offered");
+    await view.unmount();
+});
