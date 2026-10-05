@@ -1,0 +1,24 @@
+# pii-eval-8 — AUTHORED and SEALED (2026-10-05). Role: gate (one scoring only).
+# Not to be read for tuning. Frozen and scored ONCE under rubric 3 (review-mode thresholds, unchanged) on the
+# PRODUCTION pipeline, per input path: pdf/report and pdf/hypothesis REQUIRED, text/report reported.
+# Pins recorded BEFORE authoring (source e7c3de7): masking pii-mask.10 aa43e0f4..., review pii-review.2,
+# pipeline production-rules-only, processing 554429bb..., harness 65839b79... -- FROZEN.txt records the pins at
+# freeze. The role is recorded here and in FROZEN.txt, not in pii_evaluation.DATASET_ROLES: editing that table
+# would change the harness hash the result is pinned to.
+author: fresh agent session that had not seen any earlier PII set, the masking code, the harness, results or this work
+author_given: PII_DETECTION_RUBRIC_3.md (unchanged, 1ec2dd48...) and INPUT_FORMAT_PDF.md (82f1138c..., how a gate document becomes application input); the dataset name and the rubric's document types
+author_declared_reads: those two files only; no other repository file, dataset, code, note, git history or folder listing
+author_declared_actions: wrote four YAML files and a stdlib-only checker (deleted) in a scratch folder outside the repository; bash heredocs, inline python string edits, sed, grep and rm on its own files only; no installs, no network
+author_labelling_choices_declared: titles/honorifics (Mr, Mrs, Ms, Dr, Ch, Chaudhry, Haji, Bibi, Sardar, Janab, sahib) outside NAME; clan/surname words (Rana, Malik, Shah, Begum as a middle name) inside; witnesses, fathers, guarantors and relatives marked NAME (only parties listed in `parties`); company/institution premises NOT, personal residences/shops/offices ADDRESS; Urdu-script documents pair the Urdu name with the Latin name under one id; repeated values written identically; no marked text left unmarked elsewhere in its document; pipe tables only (no tabs)
+author_noted: a first-name alias also occurs inside its full-name mark; placement by n-th occurrence counts both texts alike, so it maps consistently as long as extraction keeps the words
+enforced: the brief named only the two files; the author wrote outside the repository; its output was installed by copy and the scratch copy deleted
+not_enforced: a subagent can technically read repository files; independence rests on its instructions and declaration. Same model family as the engineer, not a human annotator
+developer_view: loaded for counts, coverage and hashes only; no document text was displayed to the engineer
+dataset_sha256: 74833f2b6b29b5af614bf2ac5b3ecdf3c6311aa13b5ead5366ceabaa6d7f794d
+documents: 48
+personal_spans: 470
+files:
+  employment.yaml: be015ce646b2d4a525825e9135d1693c8cbf7898597d44135c286a76c1c93efe
+  letter.yaml: 79061249553f7c0a1bc7419a8d25107375bfe52548016e0271562613d657470e
+  nda.yaml: 0b641bc7cedb55c363a2023c71ac1d0fb3bfc94965914509824602def5ef76e7
+  tenancy.yaml: 6348e5e0eb440ea23364b5df1e46ff6d2dcb85716bd13afc15289aa47c2c57a4

@@ -1,0 +1,275 @@
+dataset: pii-eval-8
+label_review: developer_only
+documents:
+- id: p8-emp-01
+  document_type: employment
+  features: [repeated_names, aliases, lookalikes, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|EMPLOYMENT AGREEMENT]]
+
+    This Agreement is made on 1 September 2026 between [[NOT:n2|Indus Valley Textiles (Pvt.) Ltd.]]
+    (the "Employer"), represented by its HR Director [[NAME:p1|Shabnam Riaz Khawaja]], and
+    [[NAME:p2|Arsalan Mujtaba Rizvi]], CNIC [[CNIC:c1|42101-6612083-3]], residing at
+    [[ADDRESS:a1|House A-118, Block 7, Gulistan-e-Jauhar, Karachi]] (the "Employee").
+
+    1. POSITION
+       The Employee is appointed as [[NOT:n3|Assistant Manager Supply Chain]] at the
+       [[NOT:n4|Korangi Spinning Unit]].
+
+    2. COMMENCEMENT AND PROBATION
+       Employment starts on 15 September 2026. The first [[DEADLINE:d1|three months from the joining date]]
+       are a probation period, during which either party may end employment with
+       [[DEADLINE:d2|seven days' notice]].
+
+    3. SALARY
+       Gross salary is Rs. 310,000 per month, paid [[DEADLINE:d3|by the 1st working day of the following month]]
+       into the Employee's account [[ACCOUNT:b1|PK41QWRT0000781234509966]].
+
+    4. WORKING HOURS
+       Monday to Friday, 9 am to 5:30 pm, with Saturday duty when the plant manager requires.
+
+    5. LEAVE
+       20 days of annual leave, 10 days of casual leave and 8 days of sick leave per year.
+
+    6. CONFIDENTIALITY
+       Mr. [[NAME:p2|Rizvi]] shall keep the Employer's supplier terms confidential during employment and
+       [[DEADLINE:d4|for two years after it ends]].
+
+    7. TERMINATION
+       After confirmation, either party may terminate this Agreement by giving
+       [[DEADLINE:d5|one month's notice in writing]] or one month's salary in lieu.
+
+    8. FINAL SETTLEMENT
+       Dues shall be settled [[DEADLINE:d6|within 30 days of the last working day]].
+
+    9. REPORTING
+       [[NAME:p2|Arsalan]] will report to [[NAME:p3|Waqar Hussain Shah]], Plant Manager.
+
+    10. GOVERNING LAW
+        This Agreement is governed by the laws of Pakistan applicable in [[NOT:n5|Sindh]].
+
+    For the Employer                         Employee
+    [[NAME:p1|Shabnam Riaz Khawaja]]                     [[NAME:p2|Arsalan Mujtaba Rizvi]]
+
+    Emergency contact of the said [[NAME:p2|Arsalan]]: [[NAME:p4|Kulsoom Rizvi]], [[PHONE:t1|0300-2587731]]
+- id: p8-emp-02
+  document_type: employment
+  features: [ocr_errors, table, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    OFFER LETTER - KEY TERMS (scanned)
+
+    | Term | Detail |
+    | Candidate | [[NAME:p2|Muhammad Bi1al Hanif]] |
+    | CNIC | [[CNIC:c1|35202-77l2054-9]] |
+    | Mobile | [[PHONE:t1|0321-44 70183]] |
+    | Address | [[ADDRESS:a1|House 4, Street 15, Samanabad,
+    Lahore]] |
+    | Designation | Software Engineer |
+    | Joining | [[DEADLINE:d1|on or before 1 November 2026]] |
+    | Offer valid | [[DEADLINE:d2|until 20 October 2026]] |
+
+    Dear [[NAME:p2|Bi1al]],
+
+    We are pleased to offer you this role. Please sign and return the offer
+    [[DEADLINE:d3|within 5 days of receipt]]. Mr. [[NAME:p2|Hanif]] should bring his original degree on the
+    first day.
+
+    [[NAME:p1|Aleena Majeed]]
+    Talent Acquisition
+- id: p8-emp-03
+  document_type: employment
+  features: [urdu_script, roman_urdu, repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    APPOINTMENT LETTER - DRIVER
+
+    [[NOT:n1|Al-Madina Transport Company]] appoints [[NAME:p2|Ghulam Mustafa Jatt]] ([[NAME:p2|غلام مصطفیٰ جٹ]])
+    walad [[NAME:p3|Noor Muhammad]] as a driver with effect from 1 October 2026.
+
+    1. Tankhwah Rs. 48,000 mahana, [[DEADLINE:d1|har mahine ki 5 tareekh tak]] ada hogi.
+    2. [[NAME:p2|Mustafa]] ko [[DEADLINE:d2|teen mahine]] probation par rakha jaye ga.
+    3. Gari ke kaghzat aur license [[DEADLINE:d3|joining se 7 din ke andar]] jama karwane honge.
+    4. [[NAME:p2|Ghulam Mustafa]] chhutti se pehle supervisor ko ittila de ga.
+
+    Manager: [[NAME:p1|Sajjad Haider Naqvi]]
+    Driver ke dastakhat: [[NAME:p2|غلام مصطفیٰ جٹ]]
+- id: p8-emp-04
+  document_type: employment
+  features: [overlap, untitled_names, deadlines, repeated_names]
+  parties: [p1, p2]
+  text: |
+    DOMESTIC STAFF EMPLOYMENT TERMS
+
+    - Employer: [[NAME:p1|Shehla Anjum Malik]]
+    - Employee: [[NAME:p2|Parveen Akhtar]], cook
+    - Place of work and residence: [[ADDRESS:a1|Servant Quarter, House of [[NAME:p1|Shehla Anjum Malik]], 23-B, Street 4,
+      Cavalry Ground, Lahore Cantt]]
+    - Salary: Rs. 35,000 per month, paid [[DEADLINE:d1|on the last day of each month]]
+    - Weekly off: Sunday
+    - Annual leave: 14 days, to be taken [[DEADLINE:d2|between 1 June and 31 August]]
+    - Notice: [[DEADLINE:d3|fifteen days]] by either side
+    - Guarantor: [[NAME:p3|Iqbal Gill]], [[PHONE:t1|0322-4038812]]
+
+    [[NAME:p2|Parveen Akhtar]] has been read these terms in Urdu and agrees to them.
+    [[NAME:p1|Shehla Anjum Malik]] will keep the original and give a copy to [[NAME:p2|Parveen Akhtar]].
+- id: p8-emp-05
+  document_type: employment
+  features: [table, lookalikes, deadlines, untitled_names]
+  parties: [p1, p2, p3]
+  text: |
+    [[NOT:n1|SHIFT ROSTER AND CONTACT LIST - NOVEMBER 2026]]
+    [[NOT:n2|Margalla Heights Hospital]], [[NOT:n3|Emergency Department]]
+
+    | Staff | Designation | Mobile | Contract ends |
+    | Dr. [[NAME:p1|Rehana Gul]] | Consultant | [[PHONE:t1|0300-5126490]] | [[DEADLINE:d1|31 March 2027]] |
+    | [[NAME:p2|Kamil Shahzad]] | Charge Nurse | [[PHONE:t2|0333-5091726]] | [[DEADLINE:d2|30 June 2027]] |
+    | [[NAME:p3|Iram Nawaz Satti]] | Pharmacist | [[PHONE:t3|0345-5508132]] | [[DEADLINE:d3|31 December 2026]] |
+
+    Contract renewals must be requested [[DEADLINE:d4|at least 60 days before the contract end date]].
+- id: p8-emp-06
+  document_type: employment
+  features: [ocr_errors, aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    EXPERIENCE AND RELIEVING LETTER (OCR copy)
+
+    To whom it may concern,
+
+    This is to certify that [[NAME:p2|Sadaf
+    Jabeen Qureshi]], CNlC [[CNIC:c1|61101-48l2297-0]], worked with [[NOT:n1|Faisal Mosque Tutors Academy]] as a
+    mathematics teacher from 1 March 2022 to 31 August 2026.
+
+    Ms. [[NAME:p2|Qureshl]] was punctual and well liked by students. The said [[NAME:p2|Sadaf]] has returned
+    all academy property and has no dues outstanding. Her final salary will be paid
+    [[DEADLINE:d1|within 10 days of this letter]].
+
+    Verification: [[NAME:p1|Nasir Mehmood Abbasi]], Principal, [[PHONE:t1|051-22O 4519]]
+- id: p8-emp-07
+  document_type: employment
+  features: [roman_urdu, untitled_names, repeated_names, deadlines, overlap]
+  parties: [p1, p2]
+  text: |
+    Mulazmat ka Muahida - Chowkidar
+
+    Malik: Sardar [[NAME:p1|Muhammad Ashraf Dogar]]
+    Mulazim: [[NAME:p2|Allah Rakha]] walad [[NAME:p3|Fazal Din]]
+    Rehaish: [[ADDRESS:a1|Kothri, Dera Sardar [[NAME:p1|Muhammad Ashraf Dogar]], Mauza Pipli, Tehsil Pattoki, District Kasur]]
+
+    [[NAME:p2|Allah Rakha]] raat ki duty karega. Tankhwah Rs. 30,000 mahana [[DEADLINE:d1|har mahine ke aakhri din]]
+    milegi. Naukri chhorne se pehle [[DEADLINE:d2|ek mahina pehle]] batana hoga.
+
+    Zamin: [[NAME:p4|Bashir Ahmad Kamboh]], [[CNIC:c1|35103-2297456-1]]
+    Dastakhat: Sardar [[NAME:p1|Muhammad Ashraf Dogar]]     Angootha: [[NAME:p2|Allah Rakha]]
+- id: p8-emp-08
+  document_type: employment
+  features: [table, ocr_errors, untitled_names, deadlines, lookalikes]
+  parties: [p1, p2, p3, p4]
+  text: |
+    PAYROLL BANK DETAILS - NEW JOINERS (scanned from register)
+
+    Employer: [[NOT:n1|Ravi Auto Parts Manufacturing]]
+
+    | Employee | IBAN | Phone | First salary |
+    | [[NAME:p1|Junaid Ashraf]] | [[ACCOUNT:b1|PK19ZXQB00O0441298870012]] | [[PHONE:t1|0300-41 22650]] | [[DEADLINE:d1|31 October 2026]] |
+    | [[NAME:p2|Sobia Nazl]] | [[ACCOUNT:b2|PK63QWRT0000l56601239847]] | [[PHONE:t2|0321-4O87216]] | [[DEADLINE:d2|15 November 2026]] |
+    | [[NAME:p3|Tauseef Ahmad Gill]] | [[ACCOUNT:b3|PK88ZXQB0000339012876654]] | [[PHONE:t3|0345-4419083]] | [[DEADLINE:d3|30 November 2026]] |
+    | [[NAME:p4|Mehak Rasool]] | [[ACCOUNT:b4|PK25QWRT0000902218345571]] | [[PHONE:t4|0313-4467920]] | [[DEADLINE:d4|15 December 2026]] |
+
+    Corrections must reach the payroll office [[DEADLINE:d5|by the 20th of the month]].
+- id: p8-emp-09
+  document_type: employment
+  features: [aliases, repeated_names, overlap, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    SHOW CAUSE NOTICE
+
+    To: [[NAME:p2|Kashan Ali Bukhari]], [[NOT:n1|Senior Sales Officer]], [[NOT:n2|Northern Region]]
+    Home address on file: [[ADDRESS:a1|Flat 11, Plaza of [[NAME:p3|Mukhtar Ali Bukhari]], Saddar Road, Abbottabad]]
+
+    Dear Mr. [[NAME:p2|Bukhari]],
+
+    It has been reported that you were absent from 2 to 9 September 2026 without leave. You are
+    required to explain your absence in writing [[DEADLINE:d1|within 7 days of receiving this notice]].
+    If no reply is received, [[NAME:p2|Kashan]] may face disciplinary action under the
+    [[NOT:n3|Employee Code of Conduct]].
+
+    The said [[NAME:p2|Kashan]] may also attend a hearing [[DEADLINE:d2|on 25 September 2026 at 11 am]].
+
+    [[NAME:p1|Rubina Kanwal Awan]]
+    Manager Human Resources
+    [[EMAIL:e1|rubina.awan@hazara-foods.example.com]]
+- id: p8-emp-10
+  document_type: employment
+  features: [urdu_script, repeated_names, aliases, untitled_names, deadlines, overlap, lookalikes]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT CONTRACT - FIXED TERM
+
+    THIS CONTRACT is made on 5 October 2026.
+
+    BETWEEN [[NOT:n1|Sufi Saeen Rice Exporters]], [[NOT:n2|Larkana]] (the "Employer"), acting through its owner
+    [[NAME:p1|Abdul Qadeer Mahar]] ([[NAME:p1|عبدالقدیر مہر]]),
+
+    AND [[NAME:p2|Saira Bano Soomro]] ([[NAME:p2|سائرہ بانو سومرو]]), CNIC [[CNIC:c1|43203-6618092-4]], of
+    [[ADDRESS:a1|House of [[NAME:p3|Bano Begum]], Mohalla Bakrani, Ward 6, Larkana City]]
+    (the "Employee").
+
+    1. Role. The Employee will work as quality inspector at the rice mill.
+    2. Term. [[DEADLINE:d1|Twelve months from 15 October 2026]], ending automatically unless renewed.
+    3. Pay. Rs. 55,000 per month, paid [[DEADLINE:d2|by the 7th of the next month]].
+    4. Hours. 8 am to 4 pm, six days a week, with Friday prayer break.
+    5. Duties.
+       (a) Inspect each lot before bagging.
+       (b) Keep moisture records for every lot.
+       (c) Report defects to [[NAME:p1|Abdul Qadeer Mahar]] on the same day.
+    6. Leave. 12 days of paid leave, applied for [[DEADLINE:d3|at least 3 days in advance]].
+    7. Safety. [[NAME:p2|Saira]] must wear the mask and gloves provided.
+    8. Termination. Either side may end the contract with [[DEADLINE:d4|30 days' notice]].
+    9. Final dues. Paid [[DEADLINE:d5|within 15 days of the end of employment]].
+    10. Disputes. Referred to the labour court having jurisdiction.
+
+    Employer: [[NAME:p1|عبدالقدیر مہر]]          Employee: [[NAME:p2|سائرہ بانو سومرو]]
+
+    Witnesses: [[NAME:p4|Hyder Bux Chandio]] ([[PHONE:t1|0300-3412098]]), [[NAME:p5|Naseem Akhtar Shaikh]]
+- id: p8-emp-11
+  document_type: employment
+  features: [roman_urdu, ocr_errors, repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    INTERNSHIP LETTER
+
+    Dear [[NAME:p2|Hafsa Naeem]],
+
+    [[NOT:n1|Shaheen Software House]] is pleased to offer you a paid internship in its
+    [[NOT:n2|Mobile Apps Team]] for [[DEADLINE:d1|three months from 3 November 2026]]. Your stipend will be
+    Rs. 40,000 per month.
+
+    Please confirm acceptance [[DEADLINE:d2|by 25 October 2026]] by replying to this email. On the first
+    day, [[NAME:p2|Hafsa]] should bring a copy of her CNIC ([[CNIC:c1|37405-9921O46-8]]) and her
+    university letter.
+
+    Your supervisor will be [[NAME:p3|Bilawal Junejo]]. Ammi ji ki ijazat ka letter bhi saath laiyen,
+    as Ms. [[NAME:p2|Naeem]] is under 21.
+
+    Best wishes,
+    [[NAME:p1|Atif Jamil Paracha]]
+    [[EMAIL:e1|atif.paracha@shaheen-soft.example.com]] | [[PHONE:t1|051-84 71206]]
+- id: p8-emp-12
+  document_type: employment
+  features: [untitled_names, lookalikes, deadlines, table]
+  parties: [p1, p2]
+  text: |
+    MINUTES - EXIT INTERVIEW
+
+    Present: [[NAME:p1|Asma Javed Toor]], [[NAME:p2|Faraz Haider Zaidi]], [[NAME:p3|Mohsin Riaz]]
+    Company: [[NOT:n1|Lyallpur Packaging Industries]]
+
+    | Item | Outcome | Deadline |
+    | Laptop and badge | to be returned | [[DEADLINE:d1|by 31 October 2026]] |
+    | Final settlement | to be paid | [[DEADLINE:d2|within 30 days of the last working day]] |
+    | Non-solicitation | applies | [[DEADLINE:d3|for 12 months after leaving]] |
+
+    [[NAME:p2|Faraz Haider Zaidi]] said he was leaving for a role at [[NOT:n2|Chenab Board Mills]].
+    [[NAME:p1|Asma Javed Toor]] thanked him for his work on [[NOT:n3|Project Roshni]].
