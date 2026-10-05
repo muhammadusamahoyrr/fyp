@@ -46,14 +46,14 @@ const USER = { _id: "l1", role: "lawyer", full_name: "Lawyer" };
 
 // A stand-in for the server's conversation binding rule.
 let bindings;
-function stubServer({ casesDelayMs = 0 } = {}) {
+function stubServer({ casesDelayMs = 0, cases = [CASE] } = {}) {
     bindings = {};
     let n = 0;
     api.__reset();
     api.__respond("bootstrapAuth", true);
     api.__respond("getMe", { data: USER, error: null });
     api.__respond("listCases", () => new Promise(r => setTimeout(
-        () => r({ data: { items: [CASE] }, error: null }), casesDelayMs)));
+        () => r({ data: { items: cases }, error: null }), casesDelayMs)));
     api.__respond("listResearchConversations", { data: { items: [], next_cursor: null }, error: null });
     api.__respond("createResearchConversation", ({ caseId } = {}) => {
         const sid = `s${++n}`;
@@ -125,3 +125,95 @@ test("a remembered unbound thread is not reused for a case question", async () =
     assert.notEqual(sid, "old");
     assert.equal(bindings[sid], CASE._id);
 });
+
+/* ── Follow-up: no stray threads, no silent switches ─────────────────────── */
+
+const CASE_B = { _id: "665f00000000000000000002", case_number: "CIV-2026-002", title: "Boundary wall",
+                 case_type: "civil", province: "punjab", client_name: "Bilal" };
+
+// The real App keeps the selected case in state; so does this host, so that
+// adopting a conversation's case actually changes what the page sends.
+async function mountWithCaseState(initialCase) {
+    const selections = [];
+    function Host() {
+        const [activeCase, setActive] = React.useState(initialCase);
+        const setActiveCase = (v) => { selections.push(v); setActive(v); };
+        return h(CaseCtx.Provider, { value: { activeCase, setActiveCase } }, h(AILegalPage));
+    }
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(h(AuthProvider, null, h(Host))); });
+    await settle(250);
+    return { container, selections,
+             unmount: async () => { await act(async () => root.unmount()); container.remove(); } };
+}
+
+async function typeInto(input, value) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    await act(async () => {
+        setter.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+}
+
+async function ask(container, question) {
+    const box = container.querySelector('input[placeholder="Ask Attorney AI..."]');
+    await typeInto(box, question);
+    await act(async () => {
+        box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await settle(100);
+}
+
+async function openSearchHit(container, title) {
+    await typeInto(container.querySelector('input[placeholder="Search research"]'), "wall");
+    await settle(500);   // the search is debounced
+    const hit = [...container.querySelectorAll("div")]
+        .find(d => d.children.length === 0 && d.textContent.trim() === title);
+    assert.ok(hit, `search hit "${title}" was not rendered`);
+    await act(async () => { hit.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await settle(100);
+}
+
+test("a slow case list does not leave an empty general conversation behind", async () => {
+    stubServer({ casesDelayMs: 120 });
+    const view = await mountWithCaseState(CASE.case_number);
+    const created = api.__calls("createResearchConversation").map(c => c.args[0]?.caseId ?? null);
+    assert.deepEqual(created, [CASE._id], "an unbound conversation was created before the case loaded");
+    await view.unmount();
+});
+
+test("opening a search hit from another case adopts that case, and the next question stays in that thread", async () => {
+    stubServer({ cases: [CASE, CASE_B] });
+    bindings.sB = CASE_B._id;
+    api.__respond("searchResearchConversations",
+        { data: { results: [{ session_id: "sB", title: "Wall thread", snippet: "the wall" }] }, error: null });
+
+    const view = await mountWithCaseState(CASE.case_number);
+    await openSearchHit(view.container, "Wall thread");
+    assert.deepEqual(view.selections, [CASE_B.case_number], "the page did not switch to the thread's case");
+
+    const before = api.__calls("createResearchConversation").length;
+    await ask(view.container, "Who owns the wall?");
+    const { sid, caseId } = lastTurn();
+    assert.equal(sid, "sB", "the question silently went to a different thread");
+    assert.equal(caseId, CASE_B._id);
+    assert.equal(api.__calls("createResearchConversation").length, before, "a new thread was created on submit");
+    await view.unmount();
+});
+
+test("a search hit whose case is not loaded shows an explicit notice instead of switching silently", async () => {
+    stubServer();
+    bindings.sX = "665f0000000000000000dead";
+    api.__respond("searchResearchConversations",
+        { data: { results: [{ session_id: "sX", title: "Other thread", snippet: "the wall" }] }, error: null });
+
+    const view = await mountWithCaseState(CASE.case_number);
+    await openSearchHit(view.container, "Other thread");
+    const notice = view.container.querySelector('[role="status"]');
+    assert.ok(notice, "no notice was shown");
+    assert.match(notice.textContent, /new thread/);
+    await view.unmount();
+});
+

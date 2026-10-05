@@ -270,15 +270,23 @@ function RequestIdChip({ requestId, open, onToggle, t }) {
 // ============================================================
 function AILegalPage() {
     const { t } = useTheme();
-    const { activeCase } = useCase();
+    const { activeCase, setActiveCase } = useCase();
     const { user } = useAuth();
     const firstName = user?.full_name?.split(" ")[0] || "Counselor";
     const [apiCases, setApiCases] = useState([]);
     const [msgs, setMsgs] = useState([]);
     const [conversationError, setConversationError] = useState(null);
+    // Shown when an opened conversation belongs to a case this page cannot
+    // select (not among the loaded cases), so the switch is never silent.
+    const [caseNotice, setCaseNotice] = useState(null);
+    // Has the case list answered (either way)? The mount bootstrap waits for it
+    // when a case is selected, so it can start the thread bound to that case
+    // instead of an unbound one that is immediately replaced and left empty.
+    const [casesLoaded, setCasesLoaded] = useState(false);
 
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => {
+            setCasesLoaded(true);
             if (!data?.items) return;
             setApiCases(data.items.map(c => ({
                 id: c.case_number || c._id,
@@ -295,10 +303,12 @@ function AILegalPage() {
                 province: c.province || null,
                 nextHearing: c.hearing_dates?.find(h => !h.outcome)?.date?.split("T")[0] || "TBD",
             })));
-        });
+        }).catch(() => setCasesLoaded(true));
     }, []);
 
     const activeCaseObj = apiCases.find(c => c.id === activeCase) || null;
+    const apiCasesRef = useRef(apiCases);
+    apiCasesRef.current = apiCases;
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(false);
     const [sideOpen, setSideOpen] = useState(true);
@@ -593,7 +603,12 @@ function AILegalPage() {
         }]);
     }, [openGeneration, loadThread]);
 
-    const openConversation = useCallback(async (id) => {
+    // `adopt`: the lawyer picked this conversation (history or search), so the
+    // page follows it to its case rather than keeping a selection the thread
+    // does not belong to — which would make the next question start a different
+    // thread without saying so. The mount restore does not adopt: a case chosen
+    // elsewhere (e.g. from the Cases page) wins over a remembered thread.
+    const openConversation = useCallback(async (id, { adopt = false } = {}) => {
         if (!id) return;
         setConversationError(null);
         const ticket = openGeneration.next();
@@ -608,6 +623,15 @@ function AILegalPage() {
         setHasOlder(thread.hasOlder);
         sessionIdRef.current = id;
         boundCaseRef.current = header?.case_id || null;
+        setCaseNotice(null);
+        if (adopt && boundCaseRef.current !== wantedCaseRef.current) {
+            const bound = boundCaseRef.current;
+            const match = bound ? apiCasesRef.current.find(c => c._id === bound) : null;
+            if (!bound) setActiveCase?.(null);
+            else if (match) setActiveCase?.(match.id);
+            else setCaseNotice("This conversation belongs to a case that isn't in your loaded case list. "
+                + "Your next question will start a new thread for the case selected here.");
+        }
         setSessionId(id);
         writeActiveSession("research", user?._id, id);
         setMsgs(restored);
@@ -622,7 +646,7 @@ function AILegalPage() {
         clearTimeout(recoverRef.current);
         setRecovering(!!header?.pending_turn);
         if (header?.pending_turn) recoverPending(id, ticket);
-    }, [user?._id, recoverPending, loadThread, openGeneration]);
+    }, [user?._id, recoverPending, loadThread, openGeneration, setActiveCase]);
 
 
     const startConversation = useCallback(async (caseId) => {
@@ -634,6 +658,7 @@ function AILegalPage() {
         }
         sessionIdRef.current = data.session_id;
         boundCaseRef.current = caseId || null;
+        setCaseNotice(null);
         setSessionId(data.session_id);
         writeActiveSession("research", user?._id, data.session_id);
         setMsgs([]);
@@ -645,11 +670,17 @@ function AILegalPage() {
     }, [user?._id]);
 
     // Restore on mount: the conversation this tab was last in, or a new one.
+    // With a case selected it waits for the case list, which is what turns the
+    // selection into a case id the new thread can be bound to.
+    const casesReady = !activeCase || casesLoaded;
+    const bootedFor = useRef(null);
     useEffect(() => {
         let live = true;
         (async () => {
             // No user yet: the bootstrap re-runs when the account resolves.
-            if (!user?._id) return;
+            if (!user?._id || !casesReady) return;
+            if (bootedFor.current === user._id) return;
+            bootedFor.current = user._id;
             const remembered = readActiveSession("research", user._id);
             if (remembered) await openConversation(remembered);
             else await startConversation(wantedCaseRef.current);
@@ -662,10 +693,10 @@ function AILegalPage() {
             if (live) refreshHistory();
         })();
         return () => { live = false; };
-        // Re-runs on an ACCOUNT CHANGE only: a new user must not inherit the
-        // previous one's open thread.
+        // Runs once per ACCOUNT (a new user must not inherit the previous one's
+        // open thread); `casesReady` only delays that one run.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?._id]);
+    }, [user?._id, casesReady]);
 
     useEffect(() => { refreshHistory(); }, [refreshHistory]);
 
@@ -991,7 +1022,7 @@ function AILegalPage() {
                         </div>
                         {messageHits.map(hit => (
                             <div key={`hit-${hit.session_id}`}
-                                 onClick={() => openConversation(hit.session_id)}
+                                 onClick={() => openConversation(hit.session_id, { adopt: true })}
                                  style={{
                                      padding: "7px 8px", borderRadius: 8,
                                      cursor: "pointer", marginBottom: 2,
@@ -1043,7 +1074,7 @@ function AILegalPage() {
                                 const active = item.session_id === sessionId;
                                 return (
                                     <div key={item.session_id}
-                                        onClick={() => openConversation(item.session_id)}
+                                        onClick={() => openConversation(item.session_id, { adopt: true })}
                                         title={item.title}
                                         style={{
                                             padding: "7px 9px", borderRadius: 9, fontSize: 12,
@@ -1191,6 +1222,16 @@ function AILegalPage() {
                             border: "1px solid rgba(232,82,106,0.35)", fontSize: 12,
                         }}>
                             {conversationError}
+                        </div>
+                    )}
+                    {caseNotice && (
+                        <div role="status" style={{
+                            width: "100%", maxWidth: 800, marginBottom: 12,
+                            padding: "10px 13px", borderRadius: 10,
+                            color: t.warn, background: `${t.warn}14`,
+                            border: `1px solid ${t.warn}55`, fontSize: 12,
+                        }}>
+                            {caseNotice}
                         </div>
                     )}
 
