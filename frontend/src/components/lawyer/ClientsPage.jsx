@@ -25,7 +25,10 @@ function ClientsPage() {
                 if (!map[cid]) {
                     map[cid] = {
                         id: cid,
-                        caseId: c.id,
+                        // The key CasesPage's workspace looks cases up by
+                        // (_mapApiCase: case_number || _id). The API sends `_id`,
+                        // never `id`, so `c.id` left Message with nothing to open.
+                        caseId: c.case_number || c._id,
                         name: c.client_name || `Client ${cid.slice(0, 6)}`,
                         email: c.client_email || "—",
                         phone: "—",
