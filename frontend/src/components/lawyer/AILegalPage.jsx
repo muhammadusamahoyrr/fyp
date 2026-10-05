@@ -337,6 +337,10 @@ function AILegalPage() {
     // created. A browser-minted id meant a refresh silently started a new
     // conversation and orphaned the previous one.
     const sessionIdRef = useRef(null);
+    // The case the open conversation is BOUND to (its _id, or null for general
+    // research); undefined while none is open. The server refuses (409) a turn
+    // whose case_id differs from the binding, so every send checks it.
+    const boundCaseRef = useRef(undefined);
     const [sessionId, setSessionId] = useState(null);
     // "Is this response still wanted?" Selecting thread A then B used to let
     // A's slower page loop call setMsgs last, so B was the active thread with
@@ -381,13 +385,24 @@ function AILegalPage() {
     // A conversation belongs to one matter, so switching case starts a new one
     // BOUND to that case — the server verifies the binding before storing it,
     // so what the conversation records is a checked fact rather than a claim.
-    const firstCaseRender = useRef(true);
+    //
+    // Keyed on the RESOLVED case id, not `activeCase`: the case list loads after
+    // mount, so `activeCaseObj` is null on the first render even when a case is
+    // selected. The old effect skipped its first run and fired on `activeCase`,
+    // leaving the mount-time thread unbound while sends carried a case_id — a
+    // 409 on the lawyer's first question. Only a thread whose binding differs
+    // is replaced; one already bound to this case is kept.
+    const wantedCaseId = activeCaseObj?._id || null;
+    // Read by the mount bootstrap, whose closure would see the first render's null.
+    const wantedCaseRef = useRef(null);
+    wantedCaseRef.current = wantedCaseId;
     useEffect(() => {
-        if (firstCaseRender.current) { firstCaseRender.current = false; return; }
+        if (boundCaseRef.current === undefined) return;   // the mount bootstrap decides
+        if (boundCaseRef.current === wantedCaseId) return;
         setQuery("");
-        startConversation(activeCaseObj ? (activeCaseObj._id || null) : null);
+        startConversation(wantedCaseId);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeCase]);
+    }, [wantedCaseId]);
 
     /* ── Conversations ────────────────────────────────────────────────── */
 
@@ -592,6 +607,7 @@ function AILegalPage() {
         setOlderCursor(thread.olderCursor);
         setHasOlder(thread.hasOlder);
         sessionIdRef.current = id;
+        boundCaseRef.current = header?.case_id || null;
         setSessionId(id);
         writeActiveSession("research", user?._id, id);
         setMsgs(restored);
@@ -617,6 +633,7 @@ function AILegalPage() {
             return null;
         }
         sessionIdRef.current = data.session_id;
+        boundCaseRef.current = caseId || null;
         setSessionId(data.session_id);
         writeActiveSession("research", user?._id, data.session_id);
         setMsgs([]);
@@ -634,12 +651,14 @@ function AILegalPage() {
             // No user yet: the bootstrap re-runs when the account resolves.
             if (!user?._id) return;
             const remembered = readActiveSession("research", user._id);
-            if (remembered) {
-                await openConversation(remembered);
-                if (live) refreshHistory();
-                return;
+            if (remembered) await openConversation(remembered);
+            else await startConversation(wantedCaseRef.current);
+            // The case list may have resolved while this ran; the case-change
+            // effect skipped it (nothing was open yet), so reconcile here.
+            if (live && boundCaseRef.current !== undefined
+                && boundCaseRef.current !== wantedCaseRef.current) {
+                await startConversation(wantedCaseRef.current);
             }
-            await startConversation(null);
             if (live) refreshHistory();
         })();
         return () => { live = false; };
@@ -699,8 +718,10 @@ function AILegalPage() {
         // The conversation is the unit of storage AND the LangGraph thread key,
         // so a turn cannot run before one exists.
         let sid = sessionIdRef.current;
-        if (!sid) {
-            sid = await startConversation(activeCaseObj ? (activeCaseObj._id || null) : null);
+        // A thread bound to a different case (a remembered one, or one opened
+        // from search) would be refused with a 409: start one for this case.
+        if (!sid || boundCaseRef.current !== wantedCaseId) {
+            sid = await startConversation(wantedCaseId);
             if (!sid) { setMsgs(p => [...p, { role: "assistant", content: "Could not start a conversation. Please try again." }]); return; }
         }
         const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
