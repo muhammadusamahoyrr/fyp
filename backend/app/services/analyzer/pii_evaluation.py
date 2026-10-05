@@ -39,6 +39,27 @@ baseline record stays as recorded):
   * the manual reviewer links an undefined alias to its person
     (`same_person`), never a policy block (Urdu script).
 
+Harness corrections in pii-eval.2.2 (2026-10-05, after pii-eval-6; frozen
+records stay as recorded and are NOT directly comparable):
+  * a gold mention crossing a sentence edge is scored as one piece per sent
+    sentence -- pii-eval.2.1 dropped it from EVERY metric (coverage, leaks,
+    consistency) and from the simulated review, so a name sent half unmasked
+    across a sentence edge could not count as a leak;
+  * `person_consistency` (report-only) scores every labelled person, not only
+    parties: a party merged with a witness of the same spelling was invisible;
+  * `merged_spans` counts masked names holding two labelled people BEFORE
+    review, so a merge the reviewer repairs stays visible;
+  * the simulated reviewer splits a masked span holding two people (a mark
+    on each person, as the screen allows) instead of accepting it as one
+    person's mention;
+  * review effort is reported: `people_to_confirm` (person groups the lawyer
+    confirms), `person_mentions`, and whether the review settled
+    (`review_converged`).
+
+pii-eval.2.3 (2026-10-05): a final-guard stop is shown to the lawyer at its
+place in the original (pii-mask.6); the simulated reviewer masks an unlabelled
+hit there, as the screen allows, and `guard_repairs` counts it as reviewer work.
+
 A pass is `detection_passed` at most -- never real-document or model-quality
 approval.
 """
@@ -55,7 +76,7 @@ import yaml
 from app.services.analyzer import ai_report, injection, pii_mask
 from app.services.analyzer import segmentation as seg
 
-EVAL_VERSION = "pii-eval.2.1"
+EVAL_VERSION = "pii-eval.2.3"
 ROOT = Path(__file__).resolve().parents[3] / "analyzer_eval" / "pii"
 RUBRIC_PATH = ROOT / "PII_DETECTION_RUBRIC.md"          # pii-eval.1, kept unchanged (its hash is frozen)
 RUBRIC_2_PATH = ROOT / "PII_DETECTION_RUBRIC_2.md"
@@ -102,6 +123,7 @@ COVERAGE = {"documents": 40, "per_feature": 6, "personal_spans": 150}
 #: The next gate is a fresh independent pii-eval-2.
 DATASET_ROLES = {"pii-eval-1": "development",
                  "identity-dev": "development",   # inspectable identity fixtures (ANALYZER_PII_IDENTITY.md)
+                 "identity-dev-2": "development", # fresh-author identity diagnosis set, 2026-10-05 (not a gate)
                  "pii-eval-2": "gate_spent",       # scored once 2026-10-04: NOT passed
                  "pii-eval-3": "gate_spent",       # scored once 2026-10-04 (b907a96): NOT passed
                  "pii-eval-4": "gate_spent",       # scored once 2026-10-04 (5a4afa8): NOT passed
@@ -233,12 +255,40 @@ def _norm(s: str) -> str:
     return " ".join(s.split())
 
 
+def _holds_another(a: int, b: int, gold: list[Span], entity: str) -> bool:
+    return any(h.kind == "NAME" and h.entity != entity and _overlaps(a, b, h.start, h.end) for h in gold)
+
+
 def _person_tokens(masking, gold: list[Span], entity: str) -> list[tuple[int, int]]:
     """The EXACT masked name spans that hold a mention of `entity` -- the only
-    targets the review screen offers for "same person as"."""
+    targets the review screen offers for "same person as". A span that also
+    holds ANOTHER person is not that person's mention: the reviewer splits it."""
     return [(a, b) for a, b, kind, _ in masking.masked_spans
             if kind == "NAME" and any(g.kind == "NAME" and g.entity == entity and a <= g.start and g.end <= b
-                                      for g in gold)]
+                                      for g in gold) and not _holds_another(a, b, gold, entity)]
+
+
+def _split_at_sentences(doc: Doc, rows: list[dict]) -> Doc:
+    """The same document with every gold span cut into one piece per sentence
+    it touches (pii-eval.2.2). A reviewer decides inside one sentence, and the
+    request is built per sentence, so a mention crossing a sentence edge is
+    scored -- and reviewed -- piece by piece instead of dropping out."""
+    pieces: list[Span] = []
+    for g in doc.spans:
+        touched = [r for r in rows if r["start"] < g.end and g.start < r["end"]]
+        if len(touched) <= 1:
+            pieces.append(g)
+            continue
+        for r in touched:
+            a, b = max(g.start, r["start"]), min(g.end, r["end"])
+            while a < b and not doc.text[a].isalnum():
+                a += 1
+            while b > a and not doc.text[b - 1].isalnum():
+                b -= 1
+            if a < b:
+                pieces.append(Span(g.kind, g.entity, a, b))
+    return Doc(doc.id, doc.document_type, doc.features, doc.parties, doc.text,
+               sorted(pieces, key=lambda s: (s.start, -s.end)))
 
 
 def _representative(candidates: list[tuple[int, int]]) -> tuple[int, int] | None:
@@ -256,7 +306,7 @@ def _oracle(uncertain: list[dict], gold: list[Span], masking=None, rep: dict | N
         if u["kind"] in pii_mask.UNRESOLVABLE:
             continue                                   # a policy block or a conflict: no decision lifts it
         hit = [g for g in gold if g.kind in PERSONAL and _overlaps(u["start"], u["end"], g.start, g.end)]
-        if u["reason"] in ("alias_unlinked", "name_variant", "ocr_unmasked") and masking is not None:
+        if u["reason"] in ("alias_unlinked", "name_variant", "ocr_unmasked", "name_continues") and masking is not None:
             names = [g for g in hit if g.kind == "NAME"]
             if not names:
                 target = None
@@ -289,8 +339,11 @@ def _missed(personal: list[Span], masking, marked: list[Span]) -> list[Span]:
     addresses = [g for g in personal if g.kind == "ADDRESS"]
     for g in sorted(personal, key=lambda g: (g.start, -(g.end - g.start))):
         in_place = any(x.start <= g.start and g.end <= x.end for x in addresses)   # "Zaman Street": a place reference
+        # Hidden: no masked NAME holds exactly this person here -- none at all, or
+        # only one that also holds someone else (two people, one token).
         hidden = g.kind == "NAME" and not in_place and not any(
-            a <= g.start and g.end <= b and kind == "NAME" for a, b, kind, _ in masking.masked_spans)
+            a <= g.start and g.end <= b and kind == "NAME" and not _holds_another(a, b, personal, g.entity)
+            for a, b, kind, _ in masking.masked_spans)
         if _covered(masking.masked_spans, g.start, g.end) >= g.end - g.start and not hidden:
             continue
         # (A name masked only under another kind's token -- "…, Islamabad Rubina
@@ -355,6 +408,23 @@ def _review(doc: Doc, flags: list[dict], marks: list[Span], masking, reconcile: 
     return sorted(decisions, key=lambda c: (c["start"], c["end"]))
 
 
+def _guard_decision(code: str) -> str | None:
+    """What a reviewer marks a located final-guard hit as when no label covers
+    it: masking it is the screen's only way past the guard (the safe
+    direction); Urdu script has none."""
+    kind = code.split("_", 1)[1].upper() if code.startswith(("label_", "table_")) else {
+        "long_number": "ACCOUNT", "iban_shape": "ACCOUNT", "email": "EMAIL",
+        "title_or_kinship_name": "NAME", "signature_name": "NAME"}.get(code)
+    return _KIND_DECISION.get(kind) if kind else None
+
+
+def _guard_hits(doc: Doc, rows: list[dict], masking) -> list[dict]:
+    if masking.uncertain:
+        return []
+    messages = ai_report.build_messages(doc.text, rows, injection.scan(doc.text, rows).sentence_ids, masking.bodies)
+    return pii_mask.locate_guard_hits(masking, messages) if pii_mask.leak_check(messages) else []
+
+
 def _simulate(doc: Doc, rows: list[dict], send_ids: set[str], personal: list[Span], first, mode: str,
               extra: list[dict] | None):
     """The simulated reviewer's rounds. Flag-only (`manual`) decides flagged
@@ -364,19 +434,35 @@ def _simulate(doc: Doc, rows: list[dict], send_ids: set[str], personal: list[Spa
     masking, decisions, marked = first, [], 0
     flags: list[dict] = []
     marks: list[Span] = []
+    converged = False
+    guard_marks: list[dict] = []
     for _ in range(6):
         fresh = [u for u in masking.uncertain
                  if not any(f["start"] == u["start"] and f["end"] == u["end"] for f in flags)]
         added = _missed(personal, masking, marks) if mode == "review" else []
+        # pii-eval.2.3: a final-guard stop is shown at its place; the reviewer
+        # masks what it found there (a labelled detail is marked by `_missed`).
+        repaired = []
+        if mode == "review" and not added:
+            for h in _guard_hits(doc, rows, masking):
+                decision = _guard_decision(h["code"])
+                labelled = any(_overlaps(h["start"], h["end"], g.start, g.end) for g in personal)
+                decided = any(_overlaps(h["start"], h["end"], c["start"], c["end"]) for c in guard_marks + decisions)
+                if decision and not labelled and not decided:
+                    repaired.append({"start": h["start"], "end": h["end"], "decision": decision})
+        guard_marks += repaired
         flags += fresh
         marks += added
         marked += len(added)
         new = _review(doc, flags, marks, masking, reconcile=mode == "review")
-        if new == decisions and not fresh and not added:
+        new = sorted(new + [g for g in guard_marks if not any(_overlaps(g["start"], g["end"], c["start"], c["end"])
+                                                           for c in new)], key=lambda c: (c["start"], c["end"]))
+        if new == decisions and not fresh and not added and not repaired:
+            converged = True
             break
         decisions = new
         masking = pii_mask.prepare(doc.text, rows, send_ids, decisions, list(extra or []))
-    return masking, decisions, marked
+    return masking, decisions, marked, converged, len(guard_marks)
 
 
 def simulated_decisions(doc: Doc, mode: str = "review", extra: list[dict] | None = None) -> list[dict]:
@@ -385,6 +471,7 @@ def simulated_decisions(doc: Doc, mode: str = "review", extra: list[dict] | None
     rows = _rows(doc.text)
     send_ids = {r["sentence_id"] for r in rows if not r.get("empty_value")
                 and r["sentence_id"] not in injection.scan(doc.text, rows).sentence_ids}
+    doc = _split_at_sentences(doc, rows)
     personal = [g for g in doc.spans if g.kind in PERSONAL
                 and any(r["start"] <= g.start and g.end <= r["end"] for r in rows if r["sentence_id"] in send_ids)]
     first = pii_mask.prepare(doc.text, rows, send_ids, None, list(extra or []))
@@ -407,6 +494,7 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
     `extra`: spans a development locator proposes, as `[{start, end, decision}]`
     (personal_name / address) -- masked like confirmed spans. None = the masker alone."""
     rows = _rows(doc.text)
+    doc = _split_at_sentences(doc, rows)
     scan = injection.scan(doc.text, rows)
     suspect = scan.sentence_ids
     send_ids = {r["sentence_id"] for r in rows if not r.get("empty_value") and r["sentence_id"] not in suspect}
@@ -419,7 +507,7 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
     first = pii_mask.prepare(doc.text, rows, send_ids, None, list(extra or []))
     uncertain = list(first.uncertain)
     masking = first
-    marked, decisions = 0, []
+    marked, decisions, converged, repairs = 0, [], None, 0
     if mode in ("manual", "review") and (uncertain or mode == "review"):
         # The reviewer sees the re-masked document again: a flag that appears
         # only after their decisions is decided too (at most three rounds).
@@ -429,7 +517,7 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
         # (marked details are masked, never sent, one token per person), not
         # whether a real lawyer would catch them -- `reviewer_marked` reports
         # how much was left to the lawyer.
-        masking, decisions, marked = _simulate(doc, rows, send_ids, personal, first, mode, extra)
+        masking, decisions, marked, converged, repairs = _simulate(doc, rows, send_ids, personal, first, mode, extra)
     reasons = sorted({u["reason"] for u in masking.uncertain})
     guard: list[str] = []
     request = None
@@ -479,23 +567,33 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
     # pii-eval.2.1: a party mention (not a place reference) that is NOT fully
     # masked under one token is an INCOMPLETE reference -- it fails party
     # consistency instead of silently dropping out of the score.
+    # pii-eval.2.2: the same is scored for EVERY labelled person (report-only
+    # `person_consistency`), so a party sharing a token with a non-party shows.
     addresses = [g for g in doc.spans if g.kind == "ADDRESS"]
-    tokens: dict[str, set[str]] = {}
+    people: dict[str, set[str]] = {}
     tokens_any: dict[str, set[str]] = {}
-    incomplete: set[str] = set()
+    incomplete_people: set[str] = set()
     for g in personal:
-        if g.kind == "NAME" and g.entity in doc.parties:
+        if g.kind == "NAME":
             in_address = any(x.start <= g.start and g.end <= x.end for x in addresses)
             covering = [(kind, tok) for a, b, kind, tok in masking.masked_spans if a <= g.start and g.end <= b]
             if not covering and not in_address:
-                incomplete.add(g.entity)
+                incomplete_people.add(g.entity)
             for kind, tok in covering:
-                tokens_any.setdefault(g.entity, set()).add(tok)
+                if g.entity in doc.parties:
+                    tokens_any.setdefault(g.entity, set()).add(tok)
                 if kind == "NAME" or not in_address:
-                    tokens.setdefault(g.entity, set()).add(tok)
+                    people.setdefault(g.entity, set()).add(tok)
+    tokens = {e: t for e, t in people.items() if e in doc.parties}
+    incomplete = {e for e in incomplete_people if e in doc.parties}
 
     consistent = consistent_tokens(tokens) and not incomplete
     consistent_any = consistent_tokens(tokens_any)
+    person_consistent = consistent_tokens(people) and not incomplete_people
+    gold_names = [g for g in personal if g.kind == "NAME"]
+    merged_spans = sum(1 for a, b, kind, _ in first.masked_spans if kind == "NAME"
+                       and len({g.entity for g in gold_names if a <= g.start and g.end <= b}) > 1)
+    sent_names = [tok for _, _, kind, tok in masking.masked_spans if kind == "NAME"] if request is not None else []
     deadlines = [g for g in gold if g.kind == "DEADLINE"]
     preserved = (all(_norm(doc.text[g.start:g.end]) in _norm(request) for g in deadlines)
                  if request is not None else None)
@@ -503,6 +601,9 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
             "uncertain": len(uncertain), "false_candidates": len(false_candidates), "reviewer_marked": marked,
             "unnecessary_block": unnecessary_block, "spans": spans_out,
             "party_consistent": consistent if (tokens or incomplete) and request is not None else None,
+            "person_consistent": person_consistent if (people or incomplete_people) and request is not None else None,
+            "merged_spans": merged_spans, "review_converged": converged, "guard_repairs": repairs,
+            "people_to_confirm": len(set(sent_names)), "person_mentions": len(sent_names),
             "identity_decisions": sum(c["decision"] in (pii_mask.SAME_PERSON, pii_mask.DIFFERENT_PERSON)
                                       for c in decisions),
             "party_consistent_any_token": consistent_any if tokens_any and request is not None else None,
@@ -549,6 +650,13 @@ def summarise(results: list[dict]) -> dict:
         "false_candidate_rate": _ratio(sum(r["false_candidates"] for r in results), cands),
         "party_consistency": _ratio(sum(party), len(party)),
         "party_consistency_any_token": _ratio(sum(party_any), len(party_any)),
+        "person_consistency": _ratio(sum(r["person_consistent"] for r in results if r.get("person_consistent") is not None),
+                                     sum(1 for r in results if r.get("person_consistent") is not None)),
+        "merged_spans": sum(r.get("merged_spans", 0) for r in results),
+        "people_to_confirm": sum(r.get("people_to_confirm", 0) for r in results),
+        "person_mentions": sum(r.get("person_mentions", 0) for r in results),
+        "review_not_converged": sum(r.get("review_converged") is False for r in results),
+        "guard_repairs": sum(r.get("guard_repairs", 0) for r in results),
         "address_character_coverage": _ratio(sum(s["covered"] for s in spans if s["kind"] == "ADDRESS"),
                                              sum(s["size"] for s in spans if s["kind"] == "ADDRESS")),
         "deadline_preservation": _ratio(sum(r["deadlines_preserved"] for r in dl), len(dl)),

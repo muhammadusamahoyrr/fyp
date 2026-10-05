@@ -2093,13 +2093,14 @@ export async function previewPii(runId, { textSha256, policySha256, decisions })
 }
 
 export async function confirmPii(runId, { textSha256, policySha256, expectedStateVersion, decisions,
-                                          previewSha256, attested }, key) {
+                                          previewSha256, attested, peopleConfirmed = [] }, key) {
   return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/pii-confirmation`, {
     method: 'POST',
     headers: { 'Idempotency-Key': key },
     body: JSON.stringify({ text_sha256: textSha256, policy_sha256: policySha256,
                            expected_state_version: expectedStateVersion, decisions,
-                           preview_sha256: previewSha256, attested }),
+                           preview_sha256: previewSha256, attested,
+                           people_confirmed: peopleConfirmed }),
   });
 }
 

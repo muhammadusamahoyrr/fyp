@@ -90,10 +90,12 @@ async def preview(client, rid, view, decisions):
 
 
 async def submit(client, rid, view, decisions, key=KEY, **override):
+    """A lawyer who previewed, confirmed every person group shown, and attested."""
     p = await preview(client, rid, view, decisions)
     sha = p.json().get("request_sha256") if p.status_code == 200 else None
+    groups = [g["key"] for g in p.json().get("people_groups", [])] if p.status_code == 200 else []
     body = {**hashes(view), "expected_state_version": view["state_version"], "decisions": decisions,
-            "preview_sha256": sha or "0" * 64, "attested": True, **override}
+            "preview_sha256": sha or "0" * 64, "attested": True, "people_confirmed": groups, **override}
     return await client.post(f"{BASE}/{rid}/pii-confirmation", json=body, headers=key)
 
 

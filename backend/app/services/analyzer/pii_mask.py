@@ -27,7 +27,7 @@ from pathlib import Path
 
 from app.services.analyzer import pii_layers
 
-MASKING_VERSION = "pii-mask.4"
+MASKING_VERSION = "pii-mask.6"
 
 
 def _policy_sha256() -> str:
@@ -84,7 +84,7 @@ _ROLE_LINE = re.compile(rf"^[ \t]*(?:[-•*][ \t]*)?(?:{_PERSON_ROLES})[ \t]*(?:
 _FIRM = re.compile(r"\b(?:ltd|limited|pvt|private|inc|llc|company|co|traders|industries|enterprises|associates|"
                    r"group|bank|mills|services|systems|foods|textiles|motors|builders|logistics|clinics?|hospital|"
                    r"school|schools|university|labs?|media|electronics|pharma|cement|steel|agro|kilns|trust|"
-                   r"foundation|corporation|corp|plc|llp|firm)\b\.?", re.I)
+                   r"foundation|corporation|corp|plc|llp|firm|centre|center|store|mart)\b\.?", re.I)
 
 _PREMISES_START = r"(?i:House|Flat|Shop|Plot|Office|Apartment|Bungalow|Unit|Godown|Suite|Room)"
 #: One address component: words that start with a capital or a digit
@@ -121,6 +121,10 @@ class Masking:
     masked_spans: list[tuple[int, int, str, str]] = field(default_factory=list)
     #: How many short forms the narrow rule linked to a defined party (no values).
     aliases_auto_linked: int = 0
+    #: Per sent sentence, where each UNMASKED piece of its body sits in the
+    #: original: (body offset, original offset, length). Server-side only --
+    #: it lets a final-guard hit be shown at its place in the original text.
+    segments: dict[str, list[tuple[int, int, int]]] = field(default_factory=dict)
 
     @property
     def counts(self) -> dict[str, int]:
@@ -503,12 +507,26 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
     # by themselves -- a lawyer decides (`name_variant`).
     names = [(a, b) for a, b, k in spans if k == "NAME"]
     full_names = [(a, b) for a, b in names if len(pii_layers.name_parts(text[a:b])) >= 2]
+    # The rest of a name a sentence edge cut off is never sent unmasked and
+    # unflagged: it waits for the reviewer (pii-mask.5).
+    continued = [(x, y, "name_continues") for x, y in pii_layers.name_continuations(text, names, sentences, spans)]
+    # A word touching a masked name, a cell in a row of masked names, a title
+    # word used as a surname: may be (part of) a person -- flagged, never
+    # masked by guess (pii-mask.6).
+    continued += [n for n in pii_layers.name_neighbours(text, spans, lambda w: w.lower() in _GENERIC or _is_firm(w))
+                  if not any(x < n[1] and n[0] < y for x, y, _ in continued)]
     defined = pii_layers.explicit_aliases(text, full_names)
     # A reviewer link must name EXACTLY a masked name as its target (the
     # screen offers only those). Anything else -- part of a name, a non-name,
     # itself, a cycle of links -- is a conflict: the request is blocked, never
     # resolved by guessing which person was meant.
     name_spans = set(names)
+    # A name crossing a sentence edge is shown (and recorded) as one piece per
+    # sentence; a link to any of its pieces is a link to the whole name.
+    whole_of = {(max(a, s["start"]), min(b, s["end"])): (a, b)
+                for a, b in names for s in sentences
+                if s["sentence_id"] in send_ids and s["start"] < b and a < s["end"]
+                and (s["start"] > a or s["end"] < b)}
     link_target: dict[tuple[int, int], tuple[int, int]] = {}
     invalid_links: list[tuple[int, int]] = []
     # One mention, two contradicting decisions (e.g. "different person" and
@@ -523,6 +541,7 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
         if c["decision"] != SAME_PERSON or "target_start" not in c:
             continue
         source, target = (c["start"], c["end"]), (c["target_start"], c["target_end"])
+        target = whole_of.get(target, target)
         if target in name_spans and target != source and source in name_spans:
             link_target[source] = target
         else:
@@ -594,6 +613,8 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
             continue
         start, end = s["start"], s["end"]
         pieces, held, at = [], [], start
+        segments: list[tuple[int, int, int]] = []
+        body_at = 0
         for a, b, kind in spans:
             if b <= start or a >= end:
                 continue
@@ -603,14 +624,19 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
                 continue
             pieces.append(text[at:a])
             held.append(text[at:a])
+            segments.append((body_at, at, a - at))
+            body_at += a - at
             token = token_for(kind, canonical.get(whole, text[whole[0]:whole[1]]),
                               identity.get(whole) if kind == "NAME" else None)
             masking.masked_spans.append((a, b, kind, token))
             pieces.append(token)
             held.append(_HELD * (b - a))
+            body_at += len(token)
             at = b
         pieces.append(text[at:end])
         held.append(text[at:end])
+        segments.append((body_at, at, end - at))
+        masking.segments[sid] = [seg for seg in segments if seg[2] > 0]
         body_held = "".join(held)
         masking.bodies[sid] = "".join(pieces)
         found = _candidates(sid, start, body_held)
@@ -623,7 +649,7 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
         # Every flag is raised in EVERY sentence it touches, clipped to it: a span
         # crossing a sentence edge can never vanish unmasked and unflagged.
         found += [{"sentence_id": sid, "kind": "NAME", "reason": reason, "start": max(a, start), "end": min(b, end)}
-                  for a, b, reason in aliases if a < end and start < b]
+                  for a, b, reason in aliases + continued if a < end and start < b]
         found += [{"sentence_id": sid, "kind": "CONFLICT", "reason": "link_invalid", "start": max(a, start),
                    "end": min(b, end)} for a, b in sorted(set(invalid_links)) if a < end and start < b]
         found += [{"sentence_id": sid, "kind": "NAME", "reason": "identity_ambiguous", "start": max(a, start),
@@ -636,6 +662,8 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
     return masking
 
 
+#: A request line's sentence prefix (`[s3|c2] (heading) `).
+_PREFIX = re.compile(r"^\[s\d+\|[^\]\n]*\] (?:\(heading\) )?")
 #: The reason a stage records when L6 stops a request.
 LEAK_GUARD = "pii_leak_guard"
 
@@ -644,10 +672,39 @@ def leak_check(messages: list[dict]) -> list[str]:
     """L6 on the FINAL request (every non-system message): pattern and layout
     codes only, never text; any code stops the request. Independent of the
     masker -- not a second pass of the same detector."""
-    content = "\n".join(re.sub(r"^\[s\d+\|[^\]\n]*\] (?:\(heading\) )?", "", line)
-                        for m in messages if m.get("role") != "system"
-                        for line in str(m.get("content", "")).split("\n"))
+    content = _guard_content(messages)
     return pii_layers.leak_guard(content)
+
+
+def _guard_content(messages: list[dict]) -> str:
+    """What the final guard reads: every non-system line, its sentence prefix removed."""
+    return "\n".join(_PREFIX.sub("", line)
+                     for m in messages if m.get("role") != "system"
+                     for line in str(m.get("content", "")).split("\n"))
+
+
+def locate_guard_hits(masking: Masking, messages: list[dict]) -> list[dict]:
+    """Each final-guard hit placed in the ORIGINAL text -- `{code, start, end,
+    sentence_id}`, offsets only -- so the lawyer is shown exactly what to mark.
+    A hit is placed only where it lies in unmasked text of a sent sentence's
+    body; anything else is left to the code shown with the request."""
+    content = _guard_content(messages)
+    out: list[dict] = []
+    for code, hs, he in pii_layers.leak_guard_spans(content):
+        for sid, body in masking.bodies.items():
+            if not body.strip():
+                continue
+            at = content.find(body)
+            while at != -1:
+                if at <= hs and he <= at + len(body):
+                    for b0, o0, n in masking.segments.get(sid, []):
+                        lo, hi = max(hs - at, b0), min(he - at, b0 + n)
+                        if lo < hi:
+                            hit = {"code": code, "start": o0 + lo - b0, "end": o0 + hi - b0, "sentence_id": sid}
+                            if hit not in out:
+                                out.append(hit)
+                at = content.find(body, at + 1)
+    return sorted(out, key=lambda h: (h["start"], h["end"], h["code"]))
 
 def refused(masking: Masking) -> dict:
     """The AI layer's summary when masking could not be done with confidence:

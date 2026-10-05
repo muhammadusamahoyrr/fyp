@@ -467,6 +467,8 @@ async def test_a_leak_check_stop_opens_a_usable_review(http, mongo_transactional
     assert view["leak_guard"] == ["long_number"] and view["ready"] is False
     text = (await client.get(f"{BASE}/{rid}/text")).json()["text"]
     ref = at(text, "4455667788")
+    # pii-mask.6: the stop says WHERE -- the screen highlights exactly that text.
+    assert [(g["start"], g["end"], g["code"]) for g in view["guard_spans"]] == [(*ref, "long_number")]
     mark = [{"start": ref[0], "end": ref[1], "decision": "account"}]
     p = (await preview(client, rid, view, mark)).json()
     assert p["ready"] and p["leak_guard"] == []

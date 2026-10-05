@@ -154,7 +154,8 @@ async def body_of(client, rid, view):
     preview = (await client.post(f"{BASE}/{rid}/pii-confirmation/preview",
                                  json={**hashes, "decisions": decisions})).json()
     return {**hashes, "expected_state_version": view["state_version"], "decisions": decisions,
-            "preview_sha256": preview["request_sha256"], "attested": True}
+            "preview_sha256": preview["request_sha256"], "attested": True,
+            "people_confirmed": [g["key"] for g in preview["people_groups"]]}
 
 
 async def test_two_racing_confirmations_requeue_once(ready):

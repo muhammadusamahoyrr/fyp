@@ -77,6 +77,12 @@ IDENTITY_DECISIONS = (pii_mask.SAME_PERSON, pii_mask.DIFFERENT_PERSON)
 ALL_DECISIONS = DECISIONS + tuple(pii_mask.KIND_DECISIONS) + (pii_mask.DIFFERENT_PERSON,)
 MAX_DECISIONS = 500
 MAX_SPAN = 300
+#: pii-review.2 (2026-10-05): the lawyer confirms EVERY person group shown in
+#: the People panel -- its exact mentions -- not only flagged spans. A mention
+#: left "as shown" was an implicit keep, so an unnoticed split or merge could
+#: be approved without the lawyer looking at that person. An approval written
+#: under an earlier review version is not an approval.
+REVIEW_VERSION = "pii-review.2"
 
 NOTICE = ("Your review covers this exact request. It does not mean all personal information was removed, "
           "and it is not an accuracy approval.")
@@ -154,7 +160,8 @@ async def applicable(run: dict, text_sha256: str) -> dict | None:
     """The latest review for this run made against THIS text and THIS masking
     policy: `{"decisions": [...], "preview_sha256", "confirmation_id"}`."""
     latest = await get_analysis_pii_confirmations_col().find_one(
-        {"run_id": run["_id"], "text_sha256": text_sha256, "policy_sha256": pii_mask.POLICY_SHA256},
+        {"run_id": run["_id"], "text_sha256": text_sha256, "policy_sha256": pii_mask.POLICY_SHA256,
+         "review_version": REVIEW_VERSION},
         sort=[("at", -1)])
     if latest is None:
         return None
@@ -303,6 +310,29 @@ def people_of(text: str, masking: pii_mask.Masking) -> list[dict]:
     return [{"start": a, "end": b, "token": token} for a, b, kind, token in masking.masked_spans if kind == "NAME"]
 
 
+def people_groups(masking: pii_mask.Masking) -> list[dict]:
+    """One group per masked PERSON (token), with every mention as offsets, in
+    the order the people first appear. `key` names the token AND its exact
+    mentions: confirming it confirms that partition, and any change to who is
+    who gives a different key. No words."""
+    groups: dict[str, list[list[int]]] = {}
+    for a, b, kind, token in masking.masked_spans:
+        if kind == "NAME":
+            groups.setdefault(token, []).append([a, b])
+    return [{"token": token, "mentions": mentions,
+             "key": token + "@" + ",".join(f"{a}-{b}" for a, b in mentions)}
+            for token, mentions in groups.items()]
+
+
+def guard_spans(text: str, sentences: list[dict], masking: pii_mask.Masking, messages: list[dict]) -> list[dict]:
+    """Where the final leak check saw each hit, in the ORIGINAL text:
+    `[{code, start, end, sentence_id}]`, offsets only. The screen highlights
+    them so a stopped request is always repairable -- the lawyer marks the
+    exact text -- instead of naming a code with nowhere to act."""
+    del text, sentences                                        # offsets only: the masking knows its pieces
+    return pii_mask.locate_guard_hits(masking, messages)
+
+
 def _origin(c: dict, flagged: set[tuple[int, int]]) -> str:
     return "flagged" if (c["start"], c["end"]) in flagged else "added"
 
@@ -318,7 +348,9 @@ async def _preview(run: dict, text: str, sentences: list[dict], scan_ids, send_i
            "candidates": [{"id": f"{c['start']}-{c['end']}", **c} for c in masking.uncertain],
            "tokens": sorted(names.values(), key=lambda n: n["start"]),
            "people": people_of(text, masking),
-           "request": None, "request_sha256": None, "leak_guard": [], "ready": False, "request_error": None}
+           "people_groups": people_groups(masking),
+           "request": None, "request_sha256": None, "leak_guard": [], "guard_spans": [], "ready": False,
+           "request_error": None}
     if masking.uncertain:
         return out
     try:
@@ -327,6 +359,7 @@ async def _preview(run: dict, text: str, sentences: list[dict], scan_ids, send_i
         out["request_error"] = exc.code
         return out
     out["leak_guard"] = pii_mask.leak_check(messages)
+    out["guard_spans"] = guard_spans(text, sentences, masking, messages) if out["leak_guard"] else []
     out["request"] = messages
     out["request_sha256"] = receipts.request_digest(messages)
     out["ready"] = not out["leak_guard"]
@@ -350,6 +383,7 @@ async def get_view(*, owner_id: str, run_id: str) -> dict:
             "text_sha256": text_sha256, "policy_sha256": pii_mask.POLICY_SHA256,
             "masking_version": pii_mask.MASKING_VERSION, "decisions_made": decisions,
             "previous_confirmation_outdated": stale, "decisions": list(DECISIONS),
+            "review_version": REVIEW_VERSION,
             "added_decisions": list(ADDED_DECISIONS), "notice": NOTICE, "attestation": ATTESTATION,
             **await _preview(run, text, sentences, scan_ids, send_ids, decisions)}
 
@@ -368,7 +402,7 @@ async def preview(*, owner_id: str, run_id: str, text_sha256: str, policy_sha256
 
 async def confirm(*, owner_id: str, actor: dict, run_id: str, text_sha256: str, policy_sha256: str,
                   expected_state_version: int, decisions: list[dict], preview_sha256: str | None,
-                  attested: bool, idempotency_key: str | None) -> dict:
+                  attested: bool, idempotency_key: str | None, people_confirmed: list[str] | None = None) -> dict:
     if not idempotency_key or not _KEY.match(idempotency_key):
         raise UploadRejected("invalid_idempotency_key", "A valid Idempotency-Key header is required.")
     if attested is not True or not preview_sha256:
@@ -392,12 +426,20 @@ async def confirm(*, owner_id: str, actor: dict, run_id: str, text_sha256: str, 
                                                  "details. Mark them, then review again.")
     if view["request_sha256"] != preview_sha256:
         raise AnalyzerConflict("preview_changed", "The request changed since your preview. Review it again.")
+    # Every person shown, exactly as grouped, confirmed by the lawyer -- no
+    # implicit keep. Fails closed: missing, extra or out-of-date groups refuse.
+    groups = [g["key"] for g in view["people_groups"]]
+    if not isinstance(people_confirmed, list) or sorted(people_confirmed) != sorted(groups) \
+            or len(set(people_confirmed)) != len(people_confirmed):
+        raise AnalyzerConflict("people_unconfirmed", "Confirm each person in the People panel -- that all of "
+                                                     "their mentions are one person -- before approving.")
 
     flagged = {(u["start"], u["end"]) for u in pii_mask.prepare(text, sentences, send_ids).uncertain}
     by_sentence = {s["sentence_id"]: s for s in sentences}
     doc = {"_id": str(uuid.uuid4()), "run_id": run_id, "source_id": run["source_id"], "stage": stage,
            "text_sha256": current_hash, "policy_sha256": pii_mask.POLICY_SHA256,
            "masking_version": pii_mask.MASKING_VERSION, "preview_sha256": preview_sha256,
+           "review_version": REVIEW_VERSION, "people_confirmed": groups,
            "decisions": [{**c, "origin": _origin(c, flagged),
                           "sentence_id": next(sid for sid, s in by_sentence.items()
                                               if sid in send_ids and s["start"] <= c["start"] and c["end"] <= s["end"])}
@@ -426,7 +468,7 @@ async def confirm(*, owner_id: str, actor: dict, run_id: str, text_sha256: str, 
         raise AnalyzerConflict("idempotency_key_reused", "That review was already submitted.") from None
     return {"confirmation_id": doc["_id"], "status": queued, "decided": len(clean),
             "added": sum(d["origin"] == "added" for d in doc["decisions"]),
-            "preview_sha256": preview_sha256, "notice": NOTICE}
+            "preview_sha256": preview_sha256, "people_confirmed": len(groups), "notice": NOTICE}
 
 
 class _Moved(Exception):

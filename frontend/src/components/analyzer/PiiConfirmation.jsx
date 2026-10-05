@@ -9,7 +9,9 @@
  *   2. marks any MISSED name or address by selecting it in the original;
  *   3. reads the server's re-masked preview of the exact final request, with
  *      its hash and the automatic leak checks;
- *   4. attests that they reviewed exactly that request, and submits.
+ *   4. confirms each person in the People panel -- all of that token's
+ *      mentions are one person, and no one else (the server refuses otherwise);
+ *   5. attests that they reviewed exactly that request, and submits.
  *
  * The server rebuilds the request and refuses unless it equals the attested
  * one. A marked detail is masked like any other; its words are never sent.
@@ -49,6 +51,9 @@ const REASON_TEXT = {
     protected_conflict: "Your mark falls inside a deadline, date or amount",
     link_invalid: "This “same person” link does not point to exactly one masked name",
     identity_ambiguous: "The same name is given to two different parties — say who this mention is",
+    name_continues: "May be part of a masked name, beside it or cut off at a line break or full stop",
+    row_name_unrecognised: "In the same row as a masked name — may be another person",
+    title_as_surname: "A title word used as a surname — this may be a person's name",
 };
 /* Conflicts no decision on the span can lift: the mark or link itself must change. */
 const CONFLICT_TEXT = {
@@ -62,6 +67,10 @@ const LEAK_TEXT = {
     long_number: "a long number",
     signature_name: "a name next to a signature",
     title_or_kinship_name: "a name after a title or s/o, d/o, w/o",
+    label_name: "a name after a field label",
+    label_address: "an address after a field label",
+    label_cnic: "an ID number after a field label",
+    label_phone: "a phone number after a field label",
 };
 const ERROR_TEXT = {
     confirmation_outdated: "The text or the masking rules changed. Review the document again.",
@@ -72,6 +81,7 @@ const ERROR_TEXT = {
     not_attested: "Confirm that you reviewed this exact request.",
     overlapping_spans: "Marked details must not overlap.",
     span_not_sent: "Mark only text that would be sent.",
+    people_unconfirmed: "Confirm each person in the People panel before approving.",
 };
 
 function errorCode(error) {
@@ -88,11 +98,12 @@ function offsetIn(el, node, offset) {
     return range.toString().length;
 }
 
-function OriginalSentence({ t, text, sentence, flagged, added, focus, onFocus }) {
+function OriginalSentence({ t, text, sentence, flagged, added, guard = [], focus, onFocus }) {
     const marks = useMemo(() => [
         ...flagged.filter(c => c.start >= sentence.start && c.end <= sentence.end).map(c => ({ ...c, type: "flagged" })),
         ...added.filter(c => c.start >= sentence.start && c.end <= sentence.end).map(c => ({ ...c, type: "added" })),
-    ].sort((a, b) => a.start - b.start), [flagged, added, sentence]);
+        ...guard.filter(c => c.start >= sentence.start && c.end <= sentence.end).map(c => ({ ...c, type: "guard" })),
+    ].sort((a, b) => a.start - b.start), [flagged, added, guard, sentence]);
     const parts = [];
     let at = sentence.start;
     marks.forEach(m => {
@@ -101,10 +112,11 @@ function OriginalSentence({ t, text, sentence, flagged, added, focus, onFocus })
         const id = spanId(m.start, m.end);
         parts.push(
             <mark key={id} data-pii-candidate={m.type === "flagged" ? id : undefined} data-pii-added={m.type === "added" ? id : undefined}
+                data-pii-guard-hit={m.type === "guard" ? id : undefined}
                 tabIndex={0} role="button" aria-current={focus === id ? "true" : undefined}
                 onClick={() => onFocus(id)}
                 onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onFocus(id); } }}
-                style={{ background: m.type === "added" ? "#cfe8ff" : (focus === id ? "#f6d58a" : "#fbecc4"),
+                style={{ background: m.type === "added" ? "#cfe8ff" : m.type === "guard" ? "#f8c9c4" : (focus === id ? "#f6d58a" : "#fbecc4"),
                          borderRadius: 3, cursor: "pointer" }}>
                 {text.slice(m.start, m.end)}
             </mark>);
@@ -115,16 +127,30 @@ function OriginalSentence({ t, text, sentence, flagged, added, focus, onFocus })
         style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.6 }}>{parts}</div>;
 }
 
+/* The person groups of a preview: the server's `people_groups` (token, exact
+ * mentions, and the key the lawyer confirms). */
+export function personGroups(preview) {
+    if (preview?.people_groups) {
+        return preview.people_groups.map(g => ({
+            token: g.token, key: g.key, mentions: g.mentions.map(([start, end]) => ({ start, end, token: g.token })),
+        }));
+    }
+    const groups = [];
+    (preview?.people || []).forEach(p => {
+        const g = groups.find(x => x.token === p.token);
+        if (g) g.mentions.push(p); else groups.push({ token: p.token, key: null, mentions: [p] });
+    });
+    return groups;
+}
+
 /* Every masked person token with ALL its mentions. Equal spelling is only a
  * proposal: the lawyer can mark any mention as a different person, or link
- * it to another token -- for names that were never flagged too. */
-function PeoplePanel({ t, text, people, identity, setIdentity }) {
-    const groups = [];
-    people.forEach(p => {
-        const g = groups.find(x => x.token === p.token);
-        if (g) g.mentions.push(p); else groups.push({ token: p.token, mentions: [p] });
-    });
+ * it to another token -- for names that were never flagged too. Each person
+ * must then be CONFIRMED explicitly (pii-review.2): leaving a mention "as
+ * shown" is no longer an unnoticed approval of who is who. */
+function PeoplePanel({ t, text, groups, identity, setIdentity, confirmed, setConfirmed, fresh }) {
     if (groups.length === 0) return null;
+    const done = groups.filter(g => g.key && confirmed[g.key]).length;
     const choose = (m, value) => setIdentity(prev => {
         const next = { ...prev };
         const id = spanId(m.start, m.end);
@@ -146,8 +172,13 @@ function PeoplePanel({ t, text, people, identity, setIdentity }) {
             <div style={{ fontWeight: 700, fontSize: 13.5 }}>People in this request</div>
             <div style={{ fontSize: 12.5, color: t.textMuted }}>
                 Names spelled alike are shown as one person. Check each mention; mark it as a different person,
-                or as the same person as another token.
+                or as the same person as another token. Then confirm each person below.
             </div>
+            {groups.some(g => g.key) && (
+                <div data-pii-people-progress role="status" style={{ fontSize: 12.5 }}>
+                    {done} of {groups.length} {groups.length === 1 ? "person" : "people"} confirmed.
+                </div>
+            )}
             {groups.map(g => (
                 <div key={g.token} data-pii-person={g.token} style={{ fontSize: 13 }}>
                     <b>{g.token}</b>
@@ -168,6 +199,17 @@ function PeoplePanel({ t, text, people, identity, setIdentity }) {
                             </li>
                         ))}
                     </ul>
+                    {g.key && (
+                        <label style={{ display: "flex", gap: 6, alignItems: "flex-start", marginTop: 4, fontSize: 12.5 }}>
+                            <input type="checkbox" data-pii-person-confirm={g.key} disabled={!fresh}
+                                checked={Boolean(confirmed[g.key])}
+                                onChange={e => setConfirmed(prev => ({ ...prev, [g.key]: e.target.checked }))} />
+                            <span>
+                                {g.mentions.length === 1 ? "This mention is one person" : `All ${g.mentions.length} mentions are one person`},
+                                and no other mention in this request is {g.token}.
+                            </span>
+                        </label>
+                    )}
                 </div>
             ))}
         </section>
@@ -182,6 +224,7 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
     const [choices, setChoices] = useState({});          // flagged id -> {decision, target?}
     const [added, setAdded] = useState([]);              // missed details the lawyer marked
     const [identity, setIdentity] = useState({});        // mention id -> same/different person, for ANY masked name
+    const [confirmed, setConfirmed] = useState({});      // person-group key -> confirmed (a key names exact mentions)
     const [preview, setPreview] = useState(null);
     const [previewKey, setPreviewKey] = useState(null);  // the decisions the preview was made for
     const [selection, setSelection] = useState(null);
@@ -215,6 +258,7 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
             setAdded(made.filter(d => !flaggedIds.has(spanId(d.start, d.end)) && !isIdentity(d)));
             setPreviewKey(JSON.stringify(made));
             setAttested(false);
+            setConfirmed({});
         });
         return () => { live = false; };
     }, [runId, tick]);
@@ -277,7 +321,12 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
     const masked = Object.fromEntries((preview.sentences || []).map(s => [s.sentence_id, s.masked]));
     const userMessage = (preview.request || []).filter(m => m.role !== "system").map(m => m.content).join("\n");
     const systemMessage = (preview.request || []).filter(m => m.role === "system").map(m => m.content).join("\n");
-    const canSubmit = fresh && preview.ready && remaining.length === 0 && attested && !busy;
+    const groups = personGroups(preview);
+    // A group's key names its exact mentions, so a confirmation never carries
+    // over to a person whose mentions changed.
+    const peopleConfirmed = groups.filter(g => g.key).map(g => g.key);
+    const allPeopleConfirmed = peopleConfirmed.every(k => confirmed[k]);
+    const canSubmit = fresh && preview.ready && remaining.length === 0 && attested && allPeopleConfirmed && !busy;
 
     const mark = decision => {
         if (!selection) return;
@@ -301,7 +350,7 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
         setNotice(null);
         const r = await confirmPii(runId, {
             textSha256: view.text_sha256, policySha256: view.policy_sha256, expectedStateVersion: view.state_version,
-            decisions, previewSha256: preview.request_sha256, attested,
+            decisions, previewSha256: preview.request_sha256, attested, peopleConfirmed,
         }, idempotencyKey());
         setBusy(false);
         if (r.error) {
@@ -337,7 +386,7 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
                         gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 12, padding: "8px 12px",
                         borderBottom: `1px solid ${t.border}` }}>
                         <OriginalSentence t={t} text={text} sentence={s} flagged={flagged} added={added}
-                            focus={focus} onFocus={setFocus} />
+                            guard={fresh ? (preview.guard_spans || []) : []} focus={focus} onFocus={setFocus} />
                         <div data-pii-masked={s.sentence_id} style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.6,
                             opacity: fresh ? 1 : 0.55 }}>{masked[s.sentence_id] ?? ""}</div>
                     </div>
@@ -437,7 +486,8 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
                 </ul>
             )}
 
-            <PeoplePanel t={t} text={text} people={preview.people || []} identity={identity} setIdentity={setIdentity} />
+            <PeoplePanel t={t} text={text} groups={groups} identity={identity} setIdentity={setIdentity}
+                confirmed={confirmed} setConfirmed={setConfirmed} fresh={fresh} />
 
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <Btn data-pii-preview disabled={busy || fresh} onClick={refresh}>Update the preview</Btn>
@@ -471,6 +521,19 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
                     <div role="alert" data-pii-leak style={{ fontSize: 13 }}>
                         The automatic check still sees {preview.leak_guard.map(c => LEAK_TEXT[c] || c).join(", ")} in
                         this request. Mark it in the original text; this request cannot be sent as it is.
+                        {(preview.guard_spans || []).length > 0 ? (
+                            <ul data-pii-guard-list style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                                {preview.guard_spans.map(g => (
+                                    <li key={`${g.code}-${g.start}-${g.end}`}>
+                                        “{text.slice(g.start, g.end)}” ({LEAK_TEXT[g.code] || g.code}){" "}
+                                        <Btn data-pii-guard-select={spanId(g.start, g.end)}
+                                            onClick={() => setSelection({ start: g.start, end: g.end })}>Select to mark</Btn>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <div data-pii-guard-unplaced>It could not be placed in the original text: read the request above.</div>
+                        )}
                     </div>
                 )}
             </div>

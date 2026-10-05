@@ -217,7 +217,7 @@ def test_two_distinct_parties_and_a_name_inside_an_address_or_firm_keep_their_ow
 
 def test_the_policy_version_and_hash_changed_so_old_approvals_are_stale():
     # pii-mask.4: the hash covers the masker and its detection layers (see test_analyzer_pii_invariants).
-    assert pii_mask.MASKING_VERSION == "pii-mask.4" and len(pii_mask.POLICY_SHA256) == 64
+    assert pii_mask.MASKING_VERSION == "pii-mask.6" and len(pii_mask.POLICY_SHA256) == 64
 
 
 def test_a_name_glued_to_an_address_chain_keeps_its_own_token():

@@ -248,6 +248,9 @@ class PiiConfirmationBody(PiiPreviewBody):
     #: The SHA-256 of the exact request the lawyer reviewed, and their attestation.
     preview_sha256: str = Field(min_length=64, max_length=64)
     attested: bool = False
+    #: The `key` of EVERY person group in the preview (People panel), each
+    #: confirmed by the lawyer: token + exact mention offsets, no words.
+    people_confirmed: list[str] = Field(default_factory=list, max_length=500)
 
 
 @router.get("/runs/{run_id}/pii-confirmation")
@@ -285,7 +288,7 @@ async def confirm_pii(run_id: str, body: PiiConfirmationBody = Body(...),
         owner_id=str(current_user["_id"]), actor=current_user, run_id=run_id, text_sha256=body.text_sha256,
         policy_sha256=body.policy_sha256, expected_state_version=body.expected_state_version,
         decisions=body.decisions, preview_sha256=body.preview_sha256, attested=body.attested,
-        idempotency_key=idempotency_key))
+        idempotency_key=idempotency_key, people_confirmed=body.people_confirmed))
 
 
 # ── drafting-question review (INTERNAL, synthetic only) ──────────────────────

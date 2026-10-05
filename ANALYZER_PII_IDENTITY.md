@@ -192,3 +192,164 @@ unless noted):
 | 11 | No raw names in logs, receipts, records or errors | held | invariants file; receipt tests (now hex-safe) |
 | — | Feature flag cannot bypass review | **FIXED** (failed before) | `test_review_cannot_be_switched_off_outside_a_synthetic_only_configuration` |
 | — | Simulator parity and gold isolation | held | `test_every_simulated_decision_on_the_identity_set_passes_the_real_api`, `test_gold_labels_never_reach_production_masking` |
+
+## Identity path audit after pii-eval-6 (2026-10-05)
+
+pii-eval-6 scored review-mode party consistency 0.973: one of 37 sent
+documents failed. pii-eval-3..6 are spent and were NOT opened. Aggregate
+metrics cannot say which cause produced that one failure, and nothing below
+claims to. The diagnosis used only development data: identity-dev,
+pii-eval-1, hand-written probes, and a NEW fresh-author set,
+`identity-dev-2` (`analyzer_eval/pii/identity-dev-2/AUTHORED.txt`).
+
+### The path, and the failure classes tested
+
+detection -> masking proposal -> People panel decision -> API validation
+(`_validated`) -> identity key -> token -> approved preview (hash) -> provider
+request -> scoring.
+
+| Class | Result | Where | Test (`tests/test_analyzer_pii_identity_path.py` unless noted) |
+|---|---|---|---|
+| Two people merged into one token | **REPRODUCED, fixed** | masking: a name value ran across a column gap into a second person on the same line ("Landlord: A    Tenant: B"; a row of signatures, where "Sheikh" read as a title) | `test_two_labelled_people_on_one_line_…`, `test_a_row_of_signatures_…` |
+| …and accepted as one person in review | **REPRODUCED, fixed** | simulated reviewer: a masked span holding two people was taken as one person's mention and never split | `test_the_simulated_reviewer_splits_a_masked_span_that_holds_two_people` |
+| One person split into two tokens | not reproduced in review mode | spelling proposal; the review links the mentions (identity-dev-2: no split after review) | existing identity tests; dev-set test |
+| A mention under an ADDRESS token instead of a NAME | not reproduced as a failure | a full name inside an address keeps its own token; a place reference is scored as one | existing `test_a_name_inside_an_address_…` |
+| An initial or honorific treated inconsistently with the full name | not reproduced in review mode | the reviewer links initials and title-less forms; "A.R." / "Sr." break sentences (see below) | probes; dev-set test |
+| A review decision lost or changed in a preview rebuild | not reproduced | every identity partition gives its own request digest, so an approval binds it | `test_every_identity_partition_gives_a_different_request_digest` |
+| A simulated decision the real UI cannot express | not reproduced | every simulated decision on all three development sets passes `_validated` | `test_every_simulated_review_decision_on_the_development_sets_…` |
+| **A link the UI offers but the masker refuses** | **REPRODUCED, fixed** | API/masker: a name crossing a sentence ("A.R. Khan (CNIC …)") is shown as one piece per sentence; the API accepted a link to a piece, the masker blocked it as `link_invalid`, and the lawyer could not lift it | `test_a_link_to_any_offered_piece_of_a_name_crossing_sentences_is_resolved` |
+| Incomplete mentions excluded from scoring | **REPRODUCED, fixed (scorer)** | a gold mention crossing a sentence edge dropped out of EVERY metric and out of the simulated review | `test_a_gold_mention_crossing_a_sentence_boundary_is_scored` |
+| A party merged with a non-party, unscored | **REPRODUCED, fixed (scorer, report-only metric)** | party consistency never looked at non-parties | `test_a_party_merged_with_a_non_party_is_a_person_inconsistency` |
+| An ambiguous identity sent without a decision | not reproduced | `identity_ambiguous` blocks; contradictions, cycles and invalid links block | existing identity tests |
+
+### A fail-open defect found on the way (production masking, fixed)
+
+`Tenant: Kashif\nRaza.` masked only "Kashif". The label value stops at the
+line break, which is also a sentence edge, so "Raza" was SENT UNMASKED AND
+UNFLAGGED, and the final leak check did not catch it. `Owner: Imran Sr. Khan.`
+behaved the same way, because the segmenter reads "Sr." as a full stop. The
+scorer could not see either case (see the class above).
+
+`pii_layers.name_continuations` now flags the capitalised start of the next
+sentence (`name_continues`). It fires only when:
+
+- a masked name ends its sentence and the next sentence opens with a short
+  capitalised fragment; or
+- the name ends in an abbreviation ("Sr.", "R.", "A.R.").
+
+The lawyer then decides. On the three development sets it fired once, on a
+real name, with no false flags.
+
+### Fixes (the smallest change per cause)
+
+| Fix | Layer | Version |
+|---|---|---|
+| A column gap (a tab, or 3+ spaces) separates two values and never joins two words of one name (`pii_layers.clean_locator_name`). Two spaces still join ("Kashif  Raza", an OCR variant). | production masking | pii-mask.5 → .6 |
+| The `name_continues` flag (above). | production masking | pii-mask.5 → .6 |
+| A link to a sentence piece of a name resolves to the whole name (`pii_mask.prepare`, `whole_of`). | production masking | pii-mask.5 → .6 |
+| Explicit confirmation of every person group (below). | API + screen | pii-review.2 |
+| The harness: gold spans scored per sentence piece; `person_consistency` (report-only); `merged_spans` (first pass, before review); review-effort counters; `review_converged`; the reviewer splits a span holding two people. | harness | pii-eval.2.2 → .3 |
+
+**Hashes.** pii-mask.5 and pii-eval.2.2 were intermediate states that were
+never committed. They were folded into the versions committed with the name
+boundaries below:
+
+- policy pii-mask.6: `5221868f0c49e1e23c669c964f67f74aa817d64837e9a4cdeb9717295b07b20d`
+  (pii-mask.4 was `5e257d3b…`). Every earlier approval is stale.
+- harness pii-eval.2.3: `36dfb8d6fe0cd78b17e3c88b68ae6ee8cc63486befd09b7c801e82f3ef5e5dba`
+  (pii-eval.2.1 was `d0a0fbd6…`).
+
+The frozen records of pii-eval-1..6 are unchanged. They are NOT directly
+comparable with new scores, for two reasons:
+
+- the piece-wise scorer counts mentions that pii-eval.2.1 silently dropped;
+- the simulated reviewer now repairs merged spans.
+
+That repair is why `merged_spans` is reported separately: a production merge
+stays visible even when the reviewer fixes it.
+
+### No implicit keep: every person is confirmed
+
+Before this change, a mention left "as shown" in the People panel was an
+implicit keep. The request digest did bind the identity partition, but a
+lawyer could approve an unnoticed split or merge without ever looking at that
+person.
+
+The new flow:
+
+- **The preview** returns `people_groups`: each token with every mention as
+  offsets, and a `key` naming the token and those exact mentions.
+- **The screen** shows one checkbox per person: "All N mentions are one
+  person, and no other mention in this request is [NAME_k]". The checkbox is
+  disabled on a stale preview, and Approve stays disabled until every person
+  is confirmed.
+- **The server** refuses with `people_unconfirmed` unless
+  `people_confirmed` equals the current groups exactly. Missing, extra and
+  out-of-date groups are all refused.
+- **Storage:** the confirmation keeps the keys (offsets, no words) and
+  `review_version: pii-review.2`.
+- **Older approvals:** one written under an earlier review version is
+  ignored (`applicable`), so the stage stops at `pii_review_required`.
+
+**Review cost on synthetic development documents** (sent documents, review
+mode):
+
+| Set | Sent docs | Person confirmations added (one per group) | Masked person mentions | Simulated identity decisions |
+|---|---|---|---|---|
+| identity-dev | 12 | 22 (1.8 per doc) | 42 | 42 |
+| identity-dev-2 | 26 | 109 (4.2 per doc) | 243 | 253 |
+| pii-eval-1 | 36 | 92 (2.6 per doc) | 187 | 232 |
+
+That is one checkbox per person, about half the clicks of confirming each
+mention. These are synthetic counts. They say nothing about a real lawyer's
+time or accuracy; that needs the usability trial.
+
+### Development-only results (NOT a gate)
+
+Rules-only masking (the production pipeline), fake capture, no network.
+
+| Set, review mode | Before (HEAD 75c3f57) | After |
+|---|---|---|
+| identity-dev-2: party consistency | 0.8846 (3 of 26 sent failed, all two-people-in-one-span) | 1.0 |
+| identity-dev-2: person consistency | not measured | 1.0 |
+| identity-dev-2: leaks / deadlines / sent | 0 / 1.0 / 26 | 0 / 1.0 / 26 |
+| identity-dev, pii-eval-1: party consistency | 1.0, 1.0 | 1.0, 1.0 (person 1.0, 1.0) |
+
+### Name boundaries and the final guard (pii-mask.6)
+
+Each case below failed a test first (`tests/test_analyzer_pii_boundaries.py`).
+Every one was sent unmasked and unflagged before the fix, or stopped with
+nothing the lawyer could act on. A genuine uncertainty now STOPS the request
+with an action the lawyer can take. Nothing guesses who a person is.
+
+| Case | Before | Now |
+|---|---|---|
+| Only the SECOND part of a name masked ("received by Muhammad\nKashif Raza") | "Muhammad" sent | `name_continues`: the capitalised word right before a masked name (same line or the line above), or right after it on the same line, is flagged. Role, function, title, lead and firm words are skipped. |
+| A person in a column row who was never detected ("Omar Sheikh   [NAME_1]   [NAME_2]   Tariq Mehmood") | sent | `row_name_unrecognised`: every unmasked capitalised cell in a row that holds a masked name is flagged |
+| A title word used as a surname ("paid to Omar Sheikh") | never detected | `title_as_surname`: a given name followed by Sheikh, Malik, Syed, Rana, Chaudhry, Qazi, Mian, Hafiz or Butt is flagged |
+| A guard false positive: "son of Late [NAME_1]"; a label holding only a title ("To: Prof.", cut by the segmenter) | request blocked, nothing to repair | The honorific before a masked name is not a hit; a title-only value is no name |
+| Any remaining guard stop | a CODE only | The preview returns `guard_spans`: each hit placed in the original as offsets. The screen highlights it and offers "Select to mark", and masking it clears the stop. A hit that cannot be placed is said so. Whether to stop is still decided by `leak_guard` alone, unchanged. |
+
+On the three development sets, the new flags fired 32 times, all on
+labelled personal details. Before the lead-word, honorific and firm lists
+were completed (if/agar/surety, Syeda, "Centre"), 5 of 37 flags were false.
+Review mode now sends all 28 identity-dev-2 documents (26 before), with 0
+leaks and party and person consistency of 1.0. Flag-only (manual) leaks fell
+from 46 to 24 (identity-dev-2) and from 80 to 57 (pii-eval-1); that mode is
+report-only. The simulated reviewer repairs a placed guard hit as the screen
+allows, counted as `guard_repairs` (harness pii-eval.2.3).
+
+### Not resolved here, and not covered
+
+- **The evaluated pipeline is not the production pipeline.** pii-eval-2..6
+  were scored with rules plus the local GLiNER locator (`extra`). Production
+  calls `pii_mask.prepare` WITHOUT a locator. Wiring a model into production
+  is an owner decision, and no gate result yet describes what production
+  runs.
+- **Detection misses that touch nothing masked.** A name with no masked
+  neighbour, no cue, and no row or label is still not detected. Only the
+  lawyer can mark it, by selecting it in the original text (the People
+  panel lists masked people only). This is why the review is mandatory.
+- **Identity across documents.** Out of scope: tokens are per request.
+- **The simulator is not a lawyer.** Whether lawyers confirm people
+  correctly needs the usability trial.

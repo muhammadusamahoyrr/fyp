@@ -266,3 +266,74 @@ test("every masked person mention can be decided in the People panel, flagged or
     assert.deepEqual(sent.decisions, [{ start: a2[0], end: a2[1], decision: "different_person" }]);
     await unmount();
 });
+
+test("every person must be confirmed explicitly before approval, and the keys travel with it", async () => {
+    const TXT2 = "Landlord: Usman Farooq.\nTenant: Hina Batool.";
+    const u = [10, 22], h = [32, 43];
+    const people = [{ start: u[0], end: u[1], token: "[NAME_1]" }, { start: h[0], end: h[1], token: "[NAME_2]" }];
+    const groups = [{ token: "[NAME_1]", mentions: [u], key: `[NAME_1]@${u[0]}-${u[1]}` },
+                    { token: "[NAME_2]", mentions: [h], key: `[NAME_2]@${h[0]}-${h[1]}` }];
+    const sentences = [{ sentence_id: "s0", start: 0, end: 23, masked: "Landlord: [NAME_1]." },
+                       { sentence_id: "s1", start: 24, end: 44, masked: "Tenant: [NAME_2]." }];
+    const ready = { ...READY, sentences, people, people_groups: groups };
+    api.__respond("getPiiConfirmation", { data: { ...VIEW, ...ready, candidates: [], decisions_made: [] }, error: null, status: 200 });
+    api.__respond("getAnalysisText", { data: { text: TXT2, clauses: [], sentences: [], text_version: {} }, error: null, status: 200 });
+    api.__respond("confirmPii", { data: { status: "queued_ai_report" }, error: null, status: 201 });
+    const { container, unmount } = await mount({});
+    await click($(container, "[data-pii-attest]"));
+    assert.equal($(container, "[data-pii-submit]").disabled, true);               // attested, but no person confirmed
+    assert.match($(container, "[data-pii-people-progress]").textContent, /0 of 2/);
+    await click($(container, `[data-pii-person-confirm="${groups[0].key}"]`));
+    assert.equal($(container, "[data-pii-submit]").disabled, true);               // one person still unconfirmed
+    await click($(container, `[data-pii-person-confirm="${groups[1].key}"]`));
+    assert.equal($(container, "[data-pii-submit]").disabled, false);
+    await click($(container, "[data-pii-submit]"));
+    const [, args] = api.__calls("confirmPii")[0].args;
+    assert.deepEqual(args.peopleConfirmed, groups.map(g => g.key));
+    await unmount();
+});
+
+test("a person confirmation cannot be given on a stale preview", async () => {
+    const TXT2 = "Landlord: Usman Farooq.\nTenant: Usman Farooq.";
+    const a1 = [10, 22], a2 = [32, 44];
+    const people = [{ start: a1[0], end: a1[1], token: "[NAME_1]" }, { start: a2[0], end: a2[1], token: "[NAME_1]" }];
+    const groups = [{ token: "[NAME_1]", mentions: [a1, a2], key: `[NAME_1]@${a1[0]}-${a1[1]},${a2[0]}-${a2[1]}` }];
+    const sentences = [{ sentence_id: "s0", start: 0, end: 23, masked: "Landlord: [NAME_1]." },
+                       { sentence_id: "s1", start: 24, end: 45, masked: "Tenant: [NAME_1]." }];
+    api.__respond("getPiiConfirmation", { data: { ...VIEW, ...READY, sentences, people, people_groups: groups, candidates: [] },
+                                          error: null, status: 200 });
+    api.__respond("getAnalysisText", { data: { text: TXT2, clauses: [], sentences: [], text_version: {} }, error: null, status: 200 });
+    const { container, unmount } = await mount({});
+    assert.equal($(container, `[data-pii-person-confirm="${groups[0].key}"]`).disabled, false);
+    const pick = $(container, `[data-pii-identity="${a2[0]}-${a2[1]}"]`);
+    await act(async () => { pick.value = "different"; pick.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
+    await settle();
+    assert.equal($(container, `[data-pii-person-confirm="${groups[0].key}"]`).disabled, true);   // update the preview first
+    assert.equal($(container, "[data-pii-submit]").disabled, true);
+    await unmount();
+});
+
+test("a leak-check stop shows WHERE it is, and the lawyer can select and mask that exact text", async () => {
+    const [s, e] = at("85,000");                               // stands in for a located hit
+    const guarded = { ...READY, ready: false, leak_guard: ["long_number"],
+                      guard_spans: [{ code: "long_number", start: s, end: e, sentence_id: "s1" }] };
+    const { container, unmount } = await screen(VIEW, guarded);
+    await decideAll(container);
+    await click($(container, "[data-pii-preview]"));
+    assert.match($(container, "[data-pii-guard-list]").textContent, /85,000/);
+    assert.ok($(container, `[data-pii-guard-hit="${s}-${e}"]`), "the hit is highlighted in the original");
+    await click($(container, `[data-pii-guard-select="${s}-${e}"]`));
+    await click($(container, '[data-pii-mark="account"]'));
+    await click($(container, "[data-pii-preview]"));
+    const sent = api.__calls("previewPii").at(-1).args[1];
+    assert.ok(sent.decisions.some(d => d.start === s && d.end === e && d.decision === "account"));
+    await unmount();
+});
+
+test("a stop the check cannot place says so instead of pointing nowhere", async () => {
+    const { container, unmount } = await screen(VIEW, { ...READY, ready: false, leak_guard: ["email"], guard_spans: [] });
+    await decideAll(container);
+    await click($(container, "[data-pii-preview]"));
+    assert.ok($(container, "[data-pii-guard-unplaced]"));
+    await unmount();
+});

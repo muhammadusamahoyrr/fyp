@@ -110,8 +110,11 @@ _LABEL_KIND = [
 _BLANKISH = re.compile(r"^[\s_.\-–—]*$|^\[[^\]]*\]$")
 _LABEL_LINE = re.compile(r"^[ \t]*(?:[-•*]|\(?[a-z0-9]{1,3}[.)])?[ \t]*(?P<label>[A-Za-z][A-Za-z'’/ .]{0,30}?)[ \t]*"
                          r"(?:\([^)\n]{1,30}\))?[ \t]*[:：][ \t]*(?P<value>[^\n]+?)[ \t]*$", re.M)
+#: Titles before a name, dropped from a labelled name value -- also when the
+#: value is ONLY a title ("To: Prof." where the segmenter cut after "Prof."),
+#: which is no name at all (pii-mask.6).
 _TITLES = re.compile(r"^(?:(?:mr|mrs|ms|miss|dr|haji|ch|chaudhry|malik|syed|mian|begum|sheikh|rana|hafiz|qazi|"
-                     r"prof|barrister|maulvi|m/s)\.?\s+)+", re.I)
+                     r"prof|barrister|maulvi|m/s|mst|engr|late|syeda)(?:\.?\s+|\.?$))+", re.I)
 
 
 _QUALIFIED = re.compile(rf"^(?P<field>.+?)\s+of\s+(?:the\s+)?(?:{_PERSON_LABEL})$|"
@@ -158,7 +161,7 @@ def _value_span(text: str, start: int, end: int, kind: str) -> tuple[int, int] |
         if stop:
             value = value[:stop.start()]
     value = value.rstrip(" ,.")
-    if _BLANKISH.match(value):
+    if not value.strip() or _BLANKISH.match(value):
         return None
     return (start, start + len(value))
 
@@ -552,6 +555,122 @@ _FUNCTION = re.compile(rf"^(?:{_ROLE}|between|and|by|to|from|of|with|dear|signed
 _PARTICLES = {"bin", "binte", "bint", "ul", "ud", "al", "el", "e", "de", "ur", "un", "uz", "us"}
 _KIN_SPLIT = re.compile(r"\s+(?:s/o|d/o|w/o|son\s+of|daughter\s+of|wife\s+of|widow\s+of|wald|walad)\s+",
                         re.I)
+_COLUMN_GAP = re.compile(r"[ ]*\t[ \t]*|[ ]{3,}")
+_CONTINUATION = re.compile(r"[A-Z][a-z'’-]+(?:[ \t]{1,2}[A-Z][a-z'’-]+){0,2}")
+#: A name that ends in an abbreviation ("Imran Sr.", "Kashif R.", "A.R.") whose
+#: full stop the segmenter took for a sentence end.
+_ABBREVIATED_END = re.compile(r"(?:\b[A-Z][a-z]?|(?:[A-Z]\.)+[A-Z]?)\.?$")
+
+
+def name_continuations(text: str, names: list[tuple[int, int]], sentences: list[dict],
+                       masked: list[tuple[int, int, str]]) -> list[tuple[int, int]]:
+    """Capitalised words that may be the REST of a masked name cut by a sentence
+    edge: "Tenant: Kashif\\nRaza." (a line break inside a label value), "Owner:
+    Imran Sr. Khan" ("Sr." read as a full stop). Masking stops at the edge, so
+    without this the rest would be sent unmasked and unflagged. Flagged only
+    when the name ends its sentence and the next sentence opens with a short
+    capitalised fragment, or the name ends in an abbreviation. Offsets only."""
+    order = sorted(sentences, key=lambda s: s["start"])
+    out: list[tuple[int, int]] = []
+    for a, b in names:
+        here = next((s for s in order if s["start"] < b <= s["end"]), None)
+        if here is None or text[b:here["end"]].strip(" .") != "":
+            continue
+        nxt = next((s for s in order if s["start"] >= here["end"]), None)
+        if nxt is None or "\n\n" in text[here["end"]:nxt["start"]]:
+            continue
+        m = _CONTINUATION.match(text, nxt["start"])
+        if not m or _FUNCTION.match(m.group(0).split()[0]) \
+                or any(x < m.end() and m.start() < y for x, y, _ in masked):
+            continue
+        tail = text[m.end():nxt["end"]]
+        fragment = not tail.strip() or tail[0] in ".,;(\n"
+        abbreviated = bool(_ABBREVIATED_END.search(text[a:b + 1].rstrip()))
+        if (fragment or abbreviated) and (m.start(), m.end()) not in out:
+            out.append((m.start(), m.end()))
+    return out
+
+
+_RUN = r"[A-Z][a-z'’-]+(?:[ ]{1,2}[A-Z][a-z'’-]+){0,2}"
+_BEFORE_NAME = re.compile(rf"(?P<run>{_RUN})(?:[ ]{{1,2}}|[ ]*\n[ ]*)$")
+_AFTER_NAME = re.compile(rf"(?P<gap>[ ]{{1,2}}|[ ]*\n[ ]*)(?P<run>{_RUN})")
+#: A word that is a title before a name AND a common surname after a given name.
+_TITLE_SURNAME = re.compile(r"\b(?P<given>[A-Z][a-z'’-]+)[ ]+(?:Sheikh|Malik|Syed|Rana|Chaudhry|Qazi|Mian|Hafiz|Butt)"
+                            r"\b(?!\.)")
+
+
+#: Capitalised words that open a clause or name a role, in English and Roman
+#: Urdu: never part of a person's name beside a masked one.
+_LEAD_WORDS = {"if", "when", "where", "while", "after", "before", "unless", "until", "once", "since", "so", "then",
+               "also", "both", "either", "neither", "however", "thereafter", "agar", "jab", "magar", "lekin", "aur",
+               "ya", "phir", "surety", "sureties", "guarantor", "nominee", "heir", "heirs"}
+
+
+def _plain_word(word: str, skip) -> bool:
+    """A capitalised word that is not a role, function word, title or firm."""
+    w = word.strip(".,;:'’")
+    return bool(w) and not _FUNCTION.match(w) and not _TITLES.match(w + " ") and not _PLACE_END.search(w) \
+        and w.lower() not in _LEAD_WORDS and not skip(w)
+
+
+def name_neighbours(text: str, masked: list[tuple[int, int, str]], skip) -> list[tuple[int, int, str]]:
+    """Unmasked capitalised words touching a masked name that may be part of it
+    or a person beside it (pii-mask.6). Flagged, never masked by guess:
+      * `name_continues` -- the word right before a masked name, on the same
+        line or the line above ("received by Muhammad\\nKashif Raza" masked
+        only "Kashif Raza"), or right after it on the same line;
+      * `row_name_unrecognised` -- a cell of a column row (cells apart by a
+        tab or 3+ spaces) that also holds a masked name ("Omar Sheikh
+        [NAME_1]   [NAME_2]   Tariq Mehmood");
+      * `title_as_surname` -- "Omar Sheikh": a title word after a given name
+        is a surname, and the pair a name the title rules never see.
+    `skip(word)`: the caller's generic words. Offsets and codes only."""
+    out: list[tuple[int, int, str]] = []
+    names = [(a, b) for a, b, k in masked if k == "NAME"]
+
+    def free(a: int, b: int) -> bool:
+        return not any(x < b and a < y for x, y, _ in masked)
+
+    def add(a: int, b: int, reason: str) -> None:
+        if a < b and free(a, b) and not skip(text[a:b]) and not any(x < b and a < y for x, y, _ in out):
+            out.append((a, b, reason))
+
+    for a, b in names:
+        window = max(0, a - 60)
+        before = _BEFORE_NAME.search(text[window:a])
+        if before:
+            base = window + before.start("run")
+            words = list(re.finditer(r"\S+", before.group("run")))
+            while words and not _plain_word(words[0].group(0), skip):
+                words.pop(0)                              # "Received by" / "Witness" lead in: not a name
+            if words and all(_plain_word(w.group(0), skip) for w in words):
+                add(base + words[0].start(), base + words[-1].end(), "name_continues")
+        after = _AFTER_NAME.match(text, b)
+        if after and "\n" not in after.group("gap"):
+            base = after.start("run")
+            kept = []
+            for w in re.finditer(r"\S+", after.group("run")):
+                if not _plain_word(w.group(0), skip):
+                    break                                 # "Kashif Raza Advocate": the role ends it
+                kept.append(w)
+            if kept:
+                add(base + kept[0].start(), base + kept[-1].end(), "name_continues")
+    at = 0
+    for line in text.split("\n"):
+        cells = [(at + m.start(), at + m.end()) for m in re.finditer(r"\S(?:.*?\S)?(?=\t|[ ]{3,}|$)", line)]
+        if len(cells) >= 2 and any(any(x < e and s < y for x, y in names) for s, e in cells):
+            for s, e in cells:
+                cell = text[s:e]
+                run = re.fullmatch(_RUN.replace("[ ]{1,2}", "[ ]"), cell.rstrip(".,;"))
+                if run and all(_plain_word(w, skip) for w in cell.split()[:1]):
+                    add(s, s + len(cell.rstrip(".,;")), "row_name_unrecognised")
+        at += len(line) + 1
+    for m in _TITLE_SURNAME.finditer(text):
+        if _plain_word(m.group("given"), skip):
+            add(m.start(), m.end(), "title_as_surname")
+    return sorted(out)
+
+
 _PLACE_END = re.compile(r"\b(?:colony|town|park|road|street|gali|manzil|lodge|villa|house|heights|plaza|market|"
                         r"bazaar|block|sector|society|scheme|chowk|gate|mohalla|nagar|abad|garden|gardens|city|"
                         r"enclave|avenue|lane)$", re.I)
@@ -566,6 +685,10 @@ def clean_locator_name(text: str, start: int, end: int) -> list[tuple[int, int, 
     out = []
     pieces, at = [], start
     seps = [(m.start(), m.end()) for m in _KIN_SPLIT.finditer(text, start, end)]
+    # A column gap (a tab, or three or more spaces) separates two values on one
+    # line -- "Landlord: A    Tenant: B", a row of signatures -- never two
+    # words of one name (pii-mask.5: such a span gave two people one token).
+    seps += [(m.start(), m.end()) for m in _COLUMN_GAP.finditer(text, start, end)]
     # An ordinary lowercase word ends a name ("Fatima Zahra gives notice to
     # Owais Qureshi" is two people) -- but not a name particle, nor the tail
     # of a name OCR split in two ("Mu hammad").
@@ -741,9 +864,54 @@ def leak_guard(request: str) -> list[str]:
             hits.append(f"table_{kind.lower()}")
             break
     for m in _KIN_OR_TITLE.finditer(request):
-        if m.group("next").lower() not in {"the", "said"}:
+        if _kin_hit(request, m):
             hits.append("title_or_kinship_name")
             break
     if _SIGNATURE.search(request):
         hits.append("signature_name")
     return sorted(set(hits))
+
+
+#: An honorific after "son of" / "Mr." that stands BEFORE a masked name
+#: ("son of Late [NAME_1]") is not itself a name (pii-mask.6).
+_HONORIFIC = re.compile(r"(?:late|marhoom|marhum|mst|mr|mrs|ms|dr|haji|ch|syed|syeda|mian|begum|sheikh|malik|rana|hafiz|"
+                        r"qazi|prof|engr|brig|col|capt|advocate)\.?$", re.I)
+
+
+def _kin_hit(request: str, m: re.Match) -> bool:
+    nxt = m.group("next")
+    if nxt.lower() in {"the", "said"}:
+        return False
+    return not (_HONORIFIC.match(nxt) and re.match(r"\.?[ \t]+\[NAME_\d{1,4}\]", request[m.end("next"):]))
+
+
+def leak_guard_spans(request: str) -> list[tuple[str, int, int]]:
+    """WHERE `leak_guard` sees each hit, as (code, start, end) in `request`, so
+    the lawyer can be shown the exact text to mark. Best effort and for the
+    screen only: whether to stop is decided by `leak_guard` alone."""
+    out: list[tuple[str, int, int]] = []
+    # Same-length blanking keeps every offset in `request` coordinates.
+    def blank(rx, s):
+        return rx.sub(lambda x: " " * len(x.group(0)), s)
+    bare = blank(_TOKEN, request)
+    out += [("arabic_script", m.start(), m.end()) for m in ARABIC_SCRIPT.finditer(bare)]
+    out += [("email", m.start(), m.end()) for m in _EMAIL.finditer(bare)]
+    out += [("iban_shape", m.start(), m.end()) for m in _IBAN.finditer(bare)]
+    scrubbed = blank(_AMOUNT, blank(_DATE, bare))
+    for m in _NUMBERISH.finditer(scrubbed):
+        norm = re.sub(r"\D", "", m.group(0).translate(_CONFUSABLE))
+        if len(norm) >= 7 and sum(ch.isdigit() for ch in m.group(0)) >= 6:
+            out.append(("long_number", m.start(), m.start() + len(m.group(0).rstrip())))
+    for m in _LABEL_LINE.finditer(request):
+        kind = label_kind(m.group("label"))
+        if kind and not _TOKEN.search(m.group("value")):
+            span = _value_span(request, m.start("value"), m.end("value"), kind)
+            if span:
+                out.append((f"label_{kind.lower()}", *span))
+    for start, end, kind in table_spans(request):
+        if not _TOKEN.fullmatch(request[start:end].strip()):
+            out.append((f"table_{kind.lower()}", start, end))
+    out += [("title_or_kinship_name", m.start("next"), m.end("next"))
+            for m in _KIN_OR_TITLE.finditer(request) if _kin_hit(request, m)]
+    out += [("signature_name", m.start("rest"), m.end("rest")) for m in _SIGNATURE.finditer(request)]
+    return out
