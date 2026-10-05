@@ -64,7 +64,11 @@ export default function MyDocuments({ t }) {
             row.id, `${(row.title || "document").replace(/[^\w\s-]/g, "").trim() || "document"}.pdf`,
             { revisionId: row.revision_id, expectedPdfSha256: row.pdf_sha256 });
         setBusyId(null);
-        if (result?.error) setActionIssue(result.error.message || "Could not download that document.");
+        // downloadDocumentFile returns { error: <string> }; `.message` on it
+        // was undefined, so the server's reason was always replaced.
+        if (result?.error) setActionIssue(
+            (typeof result.error === "string" ? result.error : result.error.message)
+            || "Could not download that document.");
     };
 
     const open = async (row) => {

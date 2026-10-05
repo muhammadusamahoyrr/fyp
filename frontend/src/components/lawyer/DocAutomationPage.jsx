@@ -552,10 +552,11 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
         const v2 = await pleadingUrduDocumentV2(payload, urduKeyRef.current);
 
         if (!v2.error) {
-            await downloadDocumentFile(v2.docId, filename, {
+            const saved = await downloadDocumentFile(v2.docId, filename, {
                 revisionId: v2.revisionId, expectedPdfSha256: v2.pdfSha256,
             });
             setUrduPdfBusy(false);
+            if (saved?.error) setUrduIssue(saved.error);
             return;
         }
 
@@ -576,8 +577,9 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
             setUrduIssue(error?.message || "Could not produce the PDF.");
             return;
         }
-        await downloadDocumentFile(data.doc_id, filename, {
+        const saved = await downloadDocumentFile(data.doc_id, filename, {
             revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
+        if (saved?.error) setUrduIssue(saved.error);
     };
 
     const FONT_OPTIONS = ["Default Font", "Georgia", "Times New Roman", "Courier New", "Arial"];
@@ -766,11 +768,15 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
 
                     {published && (
                         <button
-                            onClick={() => downloadDocumentFile(
-                                published.docId,
-                                `${(draft?.title || tmpl.name).replace(/[^\w\s-]/g, "").trim() || "document"}.pdf`,
-                                { revisionId: published.revisionId,
-                                  expectedPdfSha256: published.pdfSha256 })}
+                            onClick={async () => {
+                                setPublishIssue("");
+                                const saved = await downloadDocumentFile(
+                                    published.docId,
+                                    `${(draft?.title || tmpl.name).replace(/[^\w\s-]/g, "").trim() || "document"}.pdf`,
+                                    { revisionId: published.revisionId,
+                                      expectedPdfSha256: published.pdfSha256 });
+                                if (saved?.error) setPublishIssue(saved.error);
+                            }}
                             style={{
                                 padding: "5px 13px", borderRadius: 8,
                                 border: `1px solid ${t.border}`, background: t.card,

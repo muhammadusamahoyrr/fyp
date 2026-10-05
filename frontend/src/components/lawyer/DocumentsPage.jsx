@@ -646,6 +646,30 @@ function ScreenInbox({
 // Lawyer reads the full document, runs compliance checks
 // Mirrors client Screen 2 (Review & Edit) — but lawyer perspective
 // ═══════════════════════════════════════════════════════════════
+/* The revision-bound PDF download, with its failure said out loud.
+   downloadDocumentFile resolves with { error: <string> } instead of throwing,
+   and both screens ignored it: a failed download did nothing at all. */
+function DownloadPdfButton({ doc, t, style }) {
+    const [issue, setIssue] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const download = async () => {
+        setIssue(null);
+        setBusy(true);
+        const result = await downloadDocumentFile(doc.id, `${doc.title || "document"}.pdf`, {
+            revisionId: doc.viewRevisionId,
+            expectedPdfSha256: doc.viewPdfSha256,
+        });
+        setBusy(false);
+        if (result?.error) setIssue(typeof result.error === "string" ? result.error : (result.error.message || "Download failed"));
+    };
+    return (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+            <button onClick={download} disabled={busy} style={style}>{busy ? "Downloading…" : "⬇ Download PDF"}</button>
+            {issue && <div role="alert" style={{ fontSize: 11, color: t.danger }}>{issue}</div>}
+        </div>
+    );
+}
+
 function ScreenReview({ doc, t, onBack, onContinue }) {
     const [mode, setMode] = useState("view");
     // The REAL generated PDF, rendered inline. This replaced DOC_CONTENT — a
@@ -775,14 +799,11 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
 
                 {/* Export bar */}
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                    <button onClick={() => downloadDocumentFile(doc.id, `${doc.title || "document"}.pdf`, {
-                        revisionId: doc.viewRevisionId,
-                        expectedPdfSha256: doc.viewPdfSha256,
-                    })} style={{
-                        flex: 1, padding: "9px 0", borderRadius: 9,
+                    <DownloadPdfButton doc={doc} t={t} style={{
+                        padding: "9px 0", borderRadius: 9,
                         border: `1px solid ${t.primary}50`, background: t.card, color: t.primary,
                         fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
-                    }}>⬇ Download PDF</button>
+                    }} />
                 </div>
             </div>
 
@@ -1249,14 +1270,11 @@ function ScreenFinal({ doc, t, onBack }) {
                 {/* Export. PDF / Email / Print had no handlers and did nothing;
                     only the revision-bound download is real, so only it is shown. */}
                 <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => downloadDocumentFile(doc.id, `${doc.title || "document"}.pdf`, {
-                        revisionId: doc.viewRevisionId,
-                        expectedPdfSha256: doc.viewPdfSha256,
-                    })} style={{
-                        flex: 1, padding: "10px 0", borderRadius: 10,
+                    <DownloadPdfButton doc={doc} t={t} style={{
+                        padding: "10px 0", borderRadius: 10,
                         border: `1px solid ${t.primary}50`, background: t.card, color: t.primary,
                         fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
-                    }}>⬇ Download PDF</button>
+                    }} />
                 </div>
             </div>
 
