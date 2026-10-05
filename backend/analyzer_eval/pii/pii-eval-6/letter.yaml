@@ -1,0 +1,292 @@
+dataset: pii-eval-6
+label_review: developer_only
+documents:
+- id: p6-l01
+  document_type: letter
+  features: [overlap, aliases, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    To
+    The SHO,
+    [[NOT:n1|Police Station Gulshan-e-Maymar]],
+    [[NOT:n2|Karachi]]
+
+    Subject: Complaint against obstruction of passage
+
+    Respected Sir,
+
+    I, [[NAME:p1|Shakeel Ahmed Qaimkhani]], resident of [[ADDRESS:a1|House No. R-219, Sector X-4, Gulshan-e-Maymar, Karachi]], CNIC [[CNIC:c1|42401-1938450-7]], beg to state that my neighbour [[NAME:p2|Javed Iqbal Baloch]] has built a boundary wall that blocks the common street between our houses.
+
+    The street runs from my gate up to [[ADDRESS:a2|the plot of Mst. [[NAME:p3|Zubaida Khatoon]], House No. R-221, Sector X-4, Gulshan-e-Maymar, Karachi]], who is an elderly widow and is also affected.
+
+    I asked Mr. [[NAME:p2|Baloch]] politely on several occasions, but [[NAME:p2|Javed]] Sahib refused and threatened me. The said [[NAME:p2|Javed Iqbal]] has also parked his trucks of [[NOT:n3|Baloch Goods Transport]] in the street.
+
+    It is requested that the wall be removed and action be taken according to law.
+
+    Yours obediently,
+    [[NAME:p1|Shakeel Ahmed]]
+    Cell: [[PHONE:ph1|0302-2146608]]
+- id: p6-l02
+  document_type: letter
+  features: [urdu_script, repeated_names, deadlines, lookalikes]
+  parties: [p1]
+  text: |
+    بخدمت جناب سیکرٹری صاحب،
+    [[NOT:n1|یونین کونسل نمبر 42]]، [[NOT:n2|سرگودھا]]
+
+    عنوان: پیدائش کے اندراج کی درستگی
+
+    جناب عالی!
+    گزارش ہے کہ میں [[NAME:p1|غلام حیدر]] ولد [[NAME:p2|اللہ بخش]]، شناختی کارڈ نمبر [[CNIC:c1|38403-6629104-1]]، ساکن [[ADDRESS:a1|چک نمبر 46 شمالی، تحصیل و ضلع سرگودھا]] ہوں۔ میرے بیٹے [[NAME:p3|محمد حسنین]] کے پیدائشی سرٹیفکیٹ میں والد کا نام غلط درج ہو گیا ہے۔
+
+    [[NAME:p1|غلام حیدر]] کی بجائے "[[NAME:p1|غلام حیدری]]" لکھا گیا ہے۔ بچے کا داخلہ [[DEADLINE:d1|30 اکتوبر 2026 تک]] سکول میں کروانا ہے، اس لیے درستگی [[DEADLINE:d2|پندرہ دن کے اندر]] فرما دی جائے۔
+
+    العارض
+    [[NAME:p1|غلام حیدر]]
+    موبائل: [[PHONE:ph1|0307-6610428]]
+- id: p6-l03
+  document_type: letter
+  features: [roman_urdu, aliases, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Mohtaram Chaudhry [[NAME:p2|Riasat Ali]] sahib,
+    Assalam o Alaikum.
+
+    Main [[NAME:p1|Nabeela Shaukat]], aap ke makan [[ADDRESS:a1|House No. 33, Street 5, Shadman Colony, Bahawalnagar]] ki kirayedar, aap ko yeh khat likh rahi hoon.
+
+    Pichle do maheenon se chhat se paani tapak raha hai aur maine [[NAME:p2|Riasat]] sahib ko teen dafa phone par bataya hai. Aap ke munshi [[NAME:p3|Akram]] ne kaha tha ke mistri [[DEADLINE:d1|agle hafte]] aayega magar koi nahi aaya.
+
+    Guzarish hai ke [[DEADLINE:d2|15 October 2026 tak]] chhat ki marammat karwa dein, warna main marammat khud karwa ke kharcha kiraye mein se kaat loongi.
+
+    Shukriya,
+    [[NAME:p1|Nabeela]]
+    [[PHONE:ph1|0345-7120936]]
+- id: p6-l04
+  document_type: letter
+  features: [deadlines, repeated_names, lookalikes, untitled_names]
+  parties: [p1]
+  text: |
+    The Branch Manager
+    [[NOT:n1|Allied Crescent Bank Limited]]
+    [[NOT:n2|Satellite Town Branch]], [[NOT:n3|Gujranwala]]
+
+    Subject: Request to close account and transfer balance
+
+    Dear Sir/Madam,
+
+    I, [[NAME:p1|Ahmad Nawaz Virk]], maintain a current account No. [[ACCOUNT:ac1|0418-0100-2276-1903]] (IBAN [[ACCOUNT:ac2|PK61ACBL0418010022761903]]) in your branch. I request that the account be closed and the entire balance be transferred to my account in another bank, IBAN [[ACCOUNT:ac3|PK33MEZN0012190104558201]], title [[NAME:p1|Ahmad Nawaz Virk]].
+
+    Kindly also cancel the standing instruction in favour of [[NAME:p2|Faiza Nawaz]] for her monthly university fee, which ends [[DEADLINE:d1|after the October 2026 payment]].
+
+    The unused cheque leaves (serial 7742301-7742325) are returned herewith. Please complete the closure [[DEADLINE:d2|within 7 working days]] and send the closure certificate to [[ADDRESS:a1|House 9-B, Block C, Model Town, Gujranwala]].
+
+    CNIC: [[CNIC:c1|34101-3317290-5]]
+    Mobile: [[PHONE:ph1|0300-6417822]]
+
+    [[NAME:p1|Ahmad Nawaz Virk]]
+- id: p6-l05
+  document_type: letter
+  features: [ocr_errors, repeated_names, overlap, aliases]
+  parties: [p1]
+  text: |
+    T0 WH0M IT MAY C0NCERN
+    (photocopy, faded)
+
+    lt is certified that Mst. [[NAME:p1|Shaz1a Parveen]] w/o Late [[NAME:p2|Muharnmad Yousaf]], CNlC [[CNIC:c1|35l04-7720l89-6]], is a permanent resident of [[ADDRESS:a1|Gali No. 2, near the house of Ch. [[NAME:p3|Fazal Din]], Mohallah Kot Rukn Din, Kasur]] and is known to me for the last twenty years.
+
+    [[NAME:p1|Shazia Bibi]] is a widow and has no other source of income. Her late husband [[NAME:p2|M. Yousaf]] was a daily wage labourer. [[NAME:p1|Shaz ia]] bears a good moral character.
+
+    Numberdar [[NAME:p4|Allah Rakha]]
+    Mob. [[PHONE:ph1|0301-46 72 815]]
+- id: p6-l06
+  document_type: letter
+  features: [lookalikes, untitled_names, repeated_names]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Department of Electrical Engineering]]
+    [[NOT:n2|Government College of Technology, Taxila]]
+
+    18 August 2026
+
+    Admissions Committee
+    [[NOT:n3|Graduate School of Engineering]]
+
+    Letter of Recommendation for [[NAME:p2|Muhammad Hamza Iftikhar]]
+
+    I have taught [[NAME:p2|Hamza Iftikhar]] in two courses, Power Electronics and Control Systems, and supervised his final year project, "[[NOT:n4|Smart Feeder Monitoring for Taxila Grid]]". His group, which included [[NAME:p3|Ali Raza Kiani]] and [[NAME:p4|Momina Tahir]], won second prize at the [[NOT:n5|Allama Iqbal Open Innovation Fair]].
+
+    [[NAME:p2|Hamza]] was in the top five percent of his class. I recommend him without reservation.
+
+    Engr. Prof. [[NAME:p1|Shahid Mahmood Awan]]
+    [[EMAIL:e1|smawan.gct@example.edu.pk]]
+    [[PHONE:ph1|051-4590218]]
+- id: p6-l07
+  document_type: letter
+  features: [table, urdu_script, untitled_names, deadlines]
+  parties: [p1]
+  text: |
+    To: The Manager, [[NOT:n1|NADRA Registration Centre]], [[NOT:n2|Shalimar Town]], Lahore
+
+    Subject: Application for Family Registration Certificate in respect of the legal heirs of late Mian [[NAME:p2|Abdul Majeed]]
+
+    Sir,
+
+    I, [[NAME:p1|Tayyaba Majeed]], daughter of the deceased, request issuance of the FRC. My father passed away on 3 June 2026 at our home, [[ADDRESS:a1|House No. 5, Gali Haji Noor, Baghbanpura, Lahore]]. The legal heirs are:
+
+    | Name | Name (Urdu) | Relation | CNIC |
+    |---|---|---|---|
+    | [[NAME:p3|Kaneez Fatima]] | [[NAME:p3|کنیز فاطمہ]] | Widow | [[CNIC:c1|35201-1109844-8]] |
+    | [[NAME:p1|Tayyaba Majeed]] | [[NAME:p1|طیبہ مجید]] | Daughter | [[CNIC:c2|35201-6627310-4]] |
+    | [[NAME:p4|Awais Majeed]] | [[NAME:p4|اویس مجید]] | Son | [[CNIC:c3|35201-8830271-9]] |
+    | [[NAME:p5|Hira Majeed]] | [[NAME:p5|حرا مجید]] | Daughter (minor) | - |
+
+    The certificate is needed for the succession petition, which must be filed [[DEADLINE:d1|before 15 November 2026]].
+
+    [[NAME:p1|Tayyaba Majeed]]
+    [[PHONE:ph1|0322-4108367]]
+- id: p6-l08
+  document_type: letter
+  features: [deadlines, aliases, repeated_names, overlap]
+  parties: [p1, p2]
+  text: |
+    REGISTERED A.D.
+
+    To,
+    [[NAME:p2|Sajjad Hussain Dogar]]
+    [[ADDRESS:a1|Dogar Poultry Farm, adjacent to the dera of [[NAME:p3|Rana Muhammad Ashraf]], Chak 212 RB, Faisalabad]]
+
+    Subject: Demand for repayment of friendly loan of Rs. 1,200,000/-
+
+    Sir,
+
+    On behalf of my client [[NAME:p1|Muhammad Arif Bajwa]], I state as follows:
+
+    1. That on 10 January 2026 you, [[NAME:p2|Sajjad Hussain Dogar]], borrowed Rs. 1,200,000/- from my client as a friendly loan, promising to return it [[DEADLINE:d1|within six months]].
+    2. That you issued cheque No. 4471029 dated 10 July 2026, drawn on account No. [[ACCOUNT:ac1|1002-6639-0021-7748]], which was dishonoured on presentation.
+    3. That Mr. [[NAME:p2|Dogar]] has since avoided my client's calls on [[PHONE:ph1|0300-7652914]].
+
+    You are hereby called upon to pay the said amount [[DEADLINE:d2|within fifteen days of receipt of this letter]], failing which my client, Mr. [[NAME:p1|Bajwa]], shall initiate proceedings under section 489-F PPC and file a suit for recovery.
+
+    [[NAME:p4|Kiran Nisar]]
+    Advocate
+    Copy to: [[NAME:p1|Arif]] Sahib for information.
+- id: p6-l09
+  document_type: letter
+  features: [roman_urdu, untitled_names, ocr_errors, deadlines]
+  parties: [p1, p2]
+  text: |
+    subject: re: re: plot transfer documents
+
+    [[NAME:p2|zubair]] bhai salam,
+
+    [[NAME:p3|kamran]] se baat hui thi, unhon ne kaha ke file [[ADDRESS:a1|plot no 1l4, block Q, phase 2, sitara colony, sheikhupura]] ki society office mein jama hai. mera matlab hai meri taraf se sab documents complete hain.
+
+    aap apni wife [[NAME:p4|Rida Zubair]] ka CNIC copy bhi bhej dein, [[CNIC:c1|3540 4-2219 038-2]] wala jo pichli dafa bheja tha woh dhundla tha.
+
+    transfer fee [[DEADLINE:d1|30 tareekh se pehle]] jama karwani hai warna jurmana lagega.
+
+    [[NAME:p1|Moazzam Ali]]
+    [[PHONE:ph1|0321 84O 1172]]
+    [[EMAIL:e1|moazzam.ali.pk@example.com]]
+- id: p6-l10
+  document_type: letter
+  features: [untitled_names, deadlines, lookalikes, repeated_names, aliases]
+  parties: [p1]
+  text: |
+    The Principal
+    [[NOT:n1|Beaconfield Grammar School]], [[NOT:n2|Johar Town Campus]]
+
+    Subject: Fee concession for my children
+
+    Respected Madam,
+
+    My two children, [[NAME:p2|Eman Fatima]] (Class 6-B) and [[NAME:p3|Muhammad Ahad]] (Class 3-A), study in your school. Since my husband's business closed in July, our family is facing serious financial difficulty.
+
+    I request a 50% fee concession for both children for the current academic year. [[NAME:p2|Eman Fatima]] has secured first position in her class for two years and [[NAME:p3|Muhammad Ahad]] is also a regular student.
+
+    The fee for the second quarter is due [[DEADLINE:d1|by 10 October 2026]]; I request that the decision be conveyed before that date so that I can arrange the remaining amount.
+
+    Yours sincerely,
+    [[NAME:p1|Asma Jabeen]]
+    Mother of [[NAME:p2|Eman]] and [[NAME:p3|Ahad]]
+    [[ADDRESS:a1|House 140, Block R-1, Johar Town, Lahore]]
+    [[PHONE:ph1|0333-4502719]]
+- id: p6-l11
+  document_type: letter
+  features: [urdu_script, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Dear [[NAME:p2|Junaid]] bhai,
+
+    I am sending the power of attorney through [[NOT:n1|Rahbar Couriers]] as we discussed on the phone. It has been attested at the [[NOT:n2|Consulate General of Pakistan, Manchester]]. Please collect it from the courier office near [[NOT:n3|Liberty Market]].
+
+    The POA is in your name, [[NAME:p2|Junaid Akhtar Malik]] ([[NAME:p2|جنید اختر ملک]]), CNIC [[CNIC:c1|35202-5518720-3]], so that you can sign the sale deed of our late mother's plot at [[ADDRESS:a1|Plot No. 88, Block E, Wapda Town Phase 1, Lahore]] on my behalf.
+
+    The buyer, [[NAME:p3|Shahbaz Gill Warraich]], has agreed to pay the balance [[DEADLINE:d1|within 30 days of registration]]. The registry must be done [[DEADLINE:d2|by 20 November 2026]] because the buyer's bank approval expires after that.
+
+    Please ask [[NAME:p3|Warraich]] sahib to transfer my share to my UK account; my Pakistani account [[ACCOUNT:ac1|PK73HABB0007127900412655]] can be used if the bank delays.
+
+    امی کی دعائیں ساتھ ہیں۔ آپ کی بہن
+    [[NAME:p1|ثمینہ اختر]]
+    ([[NAME:p1|Samina Akhtar]], [[ADDRESS:a2|14 Ashgrove Road, Rusholme, Manchester]])
+    [[PHONE:ph1|+44 7700 914 382]]
+- id: p6-l12
+  document_type: letter
+  features: [overlap, deadlines, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    The Secretary
+    [[NOT:n1|Canal View Co-operative Housing Society]]
+    Lahore
+
+    Subject: Issuance of NOC for transfer of House No. 17, Block B
+
+    Dear Sir,
+
+    I, [[NAME:p1|Rehan Asghar Malik]], am the allottee of [[ADDRESS:a1|House No. 17, Block B, Canal View Housing Society, Lahore]], membership No. CV-2208. I have sold the house to [[NAME:p2|Uzma Rasheed]], wife of [[NAME:p3|Rasheed Ahmad Cheema]].
+
+    The house is commonly known in the block as [[ADDRESS:a2|Colonel [[NAME:p4|Zafar]]'s corner house, Street 3, Block B, Canal View Housing Society, Lahore]] because the original allottee was a retired officer.
+
+    I request that the NOC be issued [[DEADLINE:d1|within ten working days]] so that the registry can be completed [[DEADLINE:d2|before 31 October 2026]]. All dues up to September 2026 have been cleared.
+
+    Mrs. [[NAME:p2|Uzma Rasheed]] can be contacted at [[PHONE:ph1|0300-4227165]] and [[EMAIL:e1|uzma.rasheed@example.com]].
+
+    [[NAME:p1|Rehan A. Malik]]
+    CNIC [[CNIC:c1|35202-9067413-1]]
+- id: p6-l13
+  document_type: letter
+  features: [roman_urdu, overlap, untitled_names, aliases]
+  parties: [p1, p2]
+  text: |
+    Sulahnama
+
+    Hum dono fareeqain, [[NAME:p1|Muhammad Rafiq Sandhu]] sakin [[ADDRESS:a1|Dera [[NAME:p1|Rafiq Sandhu]], Mauza Bhoe Asal, Tehsil Kasur]] aur [[NAME:p2|Nasir Mehmood Sindhu]] sakin [[ADDRESS:a2|Makan No. 12, nazd ghar [[NAME:p3|Iqbal Joiya]], Basti Ludhran, Tehsil Kasur]], iqrar karte hain ke 20 August 2026 ko pani ki baari par jo jhagra hua tha, woh panchayat mein khatam ho gaya hai.
+
+    Panchayat ke sarbarah [[NAME:p4|Malik Allah Yar]] the.
+
+    [[NAME:p2|Nasir]] ne [[NAME:p1|Rafiq]] ki fasal ke nuqsan ke 40,000 rupay ada kar diye hain. Ab [[NAME:p1|Sandhu]] sahib police mein di gayi darkhwast wapis le lega.
+
+    Aainda koi fareeq doosre ke khilaf karwai nahi karega.
+
+    Angootha/Dastakhat:
+    [[NAME:p1|M. Rafiq]]          [[NAME:p2|Nasir Mehmood]]
+- id: p6-l14
+  document_type: letter
+  features: [ocr_errors, table, repeated_names, lookalikes]
+  parties: [p1]
+  text: |
+    [[NOT:n1|SAHIL P0WER SUPPLY C0MPANY]] - CUSTOMER SERVICE
+    Ref: complaint about bill (copy from scanner, text recognised automatically)
+
+    Consumer: [[NAME:p1|Ghazala Begum Ans
+    ari]]
+    Address: [[ADDRESS:a1|Flat 9, 2nd F1oor, Rahat Apartrnents, Block l3, Gulistan-e-Jauhar, Karachi]]
+    Contact: [[PHONE:ph1|O3l2-2O48 559]]
+
+    | Month | Units | Amount |
+    |---|---|---|
+    | June 2O26 | 41O | 21,880 |
+    | July 2O26 | 1,92O | 98,450 |
+    | Aug 2O26 | 39O | 20,710 |
+
+    The July bill is clearly wrong. My son [[NAME:p2|Fahad Ansar1]] has visited the [[NOT:n2|Gulistan-e-Jauhar IBC]] twice. Please correct the bill. - [[NAME:p1|G. B. Ansari]]

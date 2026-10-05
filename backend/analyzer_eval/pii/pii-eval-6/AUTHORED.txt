@@ -1,0 +1,21 @@
+# pii-eval-6 — AUTHORED and SEALED (2026-10-05)
+# Not to be read for tuning. Frozen and scored ONCE under rubric 3 (review-mode gate) on COMMITTED
+# pii-mask.4 code (identity contract, ebad29b; HEAD at freeze recorded in FROZEN.txt), so unlike
+# pii-eval-5 the run can be reproduced from Git.
+author: fresh agent session that had not seen pii-eval-1..5, the masking code, the harness or the identity fixtures
+author_given: PII_DETECTION_RUBRIC_3.md (unchanged) and the document-type instructions (tenancy, employment, nda, letter); nothing else
+author_declared_reads: PII_DETECTION_RUBRIC_3.md and its own output folder only
+author_labelling_choices_declared: honorifics/prefixes (Dr, Mr, Mst, Haji, Ch, Syed, Mian, Brig, Engr, Late) left outside NAME marks; initials marked NAME; shop names containing a party's name marked NOT
+enforced: the author's prompt contained no project paths except the rubric; it wrote to a scratch folder outside the repository; its output was installed into the repository by copy, then the scratch copy deleted
+not_enforced: a subagent cannot be technically prevented from reading project files (it has repository read access); independence rests on its instructions and its own declaration. The author is a model of the same family as the engineer, so shared blind spots are possible -- this is not human-authored data
+rubric_3_sha256_when_authored: 1ec2dd48162d50b987468f021729c21f56d81e8840c8e519cb688d10352a0a16 (the approved rubric, unchanged)
+developer_view: loaded by the loader for counts, coverage and hashes only; no document text was displayed to the engineer
+dataset_sha256: 93a04dd5388e6b52ceaf026e484acd220ac77dab79ed34e1fb93d7288a9b2a85
+documents: 53
+personal_spans: 543
+files:
+  employment.yaml: 8787068decd09a5723ffc4b78cc5af3bdbf62a0d2b5531d73d30083142a5142a
+  letter.yaml: 1fe910fb6649d7d95fcb872c3f2c2721c6a40d427a7bb83e5c9ede644dfbcdcc
+  nda.yaml: ef88bde0b1beb4673b250f32447e65c246a181e4d4414e52d9f104a5f7120185
+  tenancy.yaml: cdbdfb625945cbac5936d0aee633173c39f5f01b44cacda87c10cda9faafd22f
+developer_view_exception: AFTER the single scored run (gate already recorded not_passed), the staged-diff secret scan printed three dataset lines that matched the words "token" / "Secretary" (one letter sentence, one signature-block title, one witness line with a labelled NAME). Nothing was changed or rerun because of them; the set is spent.
