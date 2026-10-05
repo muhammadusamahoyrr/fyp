@@ -383,3 +383,16 @@ test("an overlapping-flag region shows every reason, parts can be decided, and t
     assert.deepEqual(sent.map(d => [TX.slice(d.start, d.end), d.decision]), [["Butt", "not_personal"], ["Road 3", "address"]]);
     await unmount();
 });
+
+test("the screen says which masking evaluation applies to the rules running now", async () => {
+    const view = { ...VIEW, evaluation: { state: "historical_pass_only", masking_version: "pii-mask.9", applicable: null,
+                                          historical_passes: [{ dataset: "pii-eval-7", masking_version: "pii-mask.7" }],
+                                          authorizes_real_documents: false } };
+    const { container, unmount } = await screen(view);
+    const note = $(container, '[data-pii-evaluation="historical_pass_only"]');
+    assert.ok(note, "the evaluation state is shown");
+    assert.match(note.textContent, /historical/);
+    assert.match(note.textContent, /pii-mask\.9/);
+    assert.doesNotMatch(note.textContent, /passed their synthetic evaluation\./);   // never shown as a current pass
+    await unmount();
+});

@@ -94,11 +94,18 @@ RUBRIC_2_PATH = ROOT / "PII_DETECTION_RUBRIC_2.md"
 RUBRIC_3_PATH = ROOT / "PII_DETECTION_RUBRIC_3.md"
 #: The rubric each set is scored under; pii-eval-2 and later use rubric 2.
 RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH, "pii-eval-3": RUBRIC_3_PATH, "pii-eval-4": RUBRIC_3_PATH,
-                     "pii-eval-5": RUBRIC_3_PATH, "pii-eval-6": RUBRIC_3_PATH, "pii-eval-7": RUBRIC_3_PATH}
+                     "pii-eval-5": RUBRIC_3_PATH, "pii-eval-6": RUBRIC_3_PATH, "pii-eval-7": RUBRIC_3_PATH,
+                     "pii-eval-8": RUBRIC_3_PATH}
 #: The pipeline a gate set is scored with. pii-eval-2..6 used rules + the
 #: GLiNER locator, which production does NOT run; from pii-eval-7 a gate scores
 #: exactly the production pipeline (rules only, `pii_pipeline.compose`).
-PIPELINE_BY_DATASET = {"pii-eval-7": pii_pipeline.PIPELINE}
+PIPELINE_BY_DATASET = {"pii-eval-7": pii_pipeline.PIPELINE, "pii-eval-8": pii_pipeline.PIPELINE}
+#: pii-eval-8 on: the production pipeline is scored per INPUT PATH and ENGINE.
+#: Required for the gate: a PDF through the production extractor into each
+#: engine. Reported beside it: the plain-text path (comparable with pii-eval-7).
+PRODUCTION_PATHS = (("pdf", "report"), ("pdf", "hypothesis"), ("text", "report"))
+REQUIRED_PATHS = (("pdf", "report"), ("pdf", "hypothesis"))
+PATHS_BY_DATASET = {"pii-eval-8": PRODUCTION_PATHS}
 
 
 def pipeline_for(dataset_name: str) -> str | None:
@@ -446,15 +453,21 @@ def _guard_decision(code: str) -> str | None:
     return _KIND_DECISION.get(kind) if kind else None
 
 
-def _guard_hits(doc: Doc, rows: list[dict], masking) -> list[dict]:
+def _guard_hits(doc: Doc, rows: list[dict], masking, messages_for=None) -> list[dict]:
     if masking.uncertain:
         return []
-    messages = ai_report.build_messages(doc.text, rows, injection.scan(doc.text, rows).sentence_ids, masking.bodies)
+    if messages_for is not None:
+        messages = messages_for(masking)
+        if messages is None:
+            return []
+    else:
+        messages = ai_report.build_messages(doc.text, rows, injection.scan(doc.text, rows).sentence_ids,
+                                            masking.bodies)
     return pii_mask.locate_guard_hits(masking, messages) if pii_mask.leak_check(messages) else []
 
 
 def _simulate(doc: Doc, rows: list[dict], send_ids: set[str], personal: list[Span], first, mode: str,
-              extra: list[dict] | None):
+              extra: list[dict] | None, messages_for=None):
     """The simulated reviewer's rounds. Flag-only (`manual`) decides flagged
     spans; `review` also marks every miss and reconciles every identity. It
     runs until its decisions no longer change -- never stopping merely because
@@ -472,7 +485,7 @@ def _simulate(doc: Doc, rows: list[dict], send_ids: set[str], personal: list[Spa
         # masks what it found there (a labelled detail is marked by `_missed`).
         repaired = []
         if mode == "review" and not added:
-            for h in _guard_hits(doc, rows, masking):
+            for h in _guard_hits(doc, rows, masking, messages_for):
                 decision = _guard_decision(h["code"])
                 labelled = any(_overlaps(h["start"], h["end"], g.start, g.end) for g in personal)
                 decided = any(_overlaps(h["start"], h["end"], c["start"], c["end"]) for c in guard_marks + decisions)
@@ -493,17 +506,158 @@ def _simulate(doc: Doc, rows: list[dict], send_ids: set[str], personal: list[Spa
     return masking, decisions, marked, converged, len(guard_marks)
 
 
-def simulated_decisions(doc: Doc, mode: str = "review", extra: list[dict] | None = None) -> list[dict]:
+def simulated_decisions(doc: Doc, mode: str = "review", extra: list[dict] | None = None,
+                        structure: "Structure | None" = None, engine: str = "report") -> list[dict]:
     """The decisions the simulated reviewer submits for `doc` -- for parity
     tests against the real API's validation."""
-    rows = _rows(doc.text)
-    send_ids = {r["sentence_id"] for r in rows if not r.get("empty_value")
-                and r["sentence_id"] not in injection.scan(doc.text, rows).sentence_ids}
+    st = structure or plain_structure(doc, engine)
+    rows, send_ids = st.rows, _engine_send_ids(doc, st, engine)
     doc = _split_at_sentences(doc, rows)
     personal = [g for g in doc.spans if g.kind in PERSONAL
                 and any(r["start"] <= g.start and g.end <= r["end"] for r in rows if r["sentence_id"] in send_ids)]
     first = pii_mask.prepare(doc.text, rows, send_ids, None, list(extra or []))
-    return _simulate(doc, rows, send_ids, personal, first, mode, extra)[1]
+    return _simulate(doc, rows, send_ids, personal, first, mode, extra, _messages_for(doc, st, engine))[1]
+
+
+# -- the input path: plain text, or a PDF through the production extractor --
+
+@dataclass
+class Structure:
+    """What the AI stages read for a document: sentence rows, the injection
+    scan, the document graph -- built by the production code
+    (segmentation_stage.structure), from plain text or from an extracted PDF."""
+    rows: list[dict]
+    suspect: frozenset
+    graph_rows: list[dict]
+    layout: str = "text"
+
+
+class MappingError(ValueError):
+    """A gold label could not be placed on the extracted text. Never guessed:
+    the document is reported unmapped, not scored."""
+
+
+def plain_structure(doc: Doc, engine: str = "report") -> Structure:
+    if engine == "report":
+        rows = _rows(doc.text)
+        return Structure(rows, injection.scan(doc.text, rows).sentence_ids, [])
+    from app.services.analyzer import segmentation_stage
+    _, sents, graph_rows, _, scan = segmentation_stage.structure(doc.text, [], [])
+    return Structure([segmentation_stage.sentence_row(s) for s in sents], scan.sentence_ids, graph_rows)
+
+
+def render_pdf(text: str, *, lines_per_page: int = 40, width: int = 110) -> bytes:
+    """A synthetic document as a text PDF: Courier (column gaps keep their
+    width), long lines wrapped at a word, a new page every `lines_per_page`
+    lines -- so a party repeats across pages and labels cross line breaks."""
+    import io
+    import textwrap
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    lines = [w for line in text.split("\n")
+             for w in (textwrap.wrap(line, width, replace_whitespace=False, drop_whitespace=False) or [""])]
+    for i, line in enumerate(lines):
+        if i and i % lines_per_page == 0:
+            c.showPage()
+        c.setFont("Courier", 8)
+        c.drawString(36, 800 - (i % lines_per_page) * 18, line)
+    c.save()
+    return buf.getvalue()
+
+
+async def _extract(pdf: bytes) -> tuple[str, list[dict], list[dict]]:
+    import os
+    import tempfile
+
+    from app.ai import extraction_runner
+    from app.services.analyzer import extraction_stage
+
+    fd, path = tempfile.mkstemp(suffix=".pdf")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(pdf)
+        result, raw = await extraction_runner.extract_isolated(path, content_type="application/pdf", timeout=120)
+    finally:
+        os.unlink(path)
+    built = extraction_stage.assemble(result, raw, kind="pdf")
+    if not built.ok:
+        raise MappingError(f"extraction_failed:{built.error_code}")
+    return built.text, built.pages, built.blocks
+
+
+def _value_rx(value: str) -> re.Pattern:
+    return re.compile(r"(?<!\w)" + r"\s+".join(re.escape(w) for w in value.split()) + r"(?!\w)")
+
+
+def map_gold(doc: Doc, canonical: str) -> Doc:
+    """The same document on its EXTRACTED text: every gold span placed by its
+    occurrence (whitespace and line breaks may differ), never by reusing the
+    plain-text offsets. A label that occurs a different number of times after
+    extraction, or not at a match, raises MappingError (counts and kinds only,
+    never text)."""
+    spans = []
+    for g in doc.spans:
+        rx = _value_rx(doc.text[g.start:g.end])
+        before = list(rx.finditer(doc.text))
+        after = list(rx.finditer(canonical))
+        at = next((k for k, m in enumerate(before) if m.start() == g.start), None)
+        if at is None or len(before) != len(after):
+            raise MappingError(f"{doc.id}: a {g.kind} label occurs {len(before)}x in the source and "
+                               f"{len(after)}x after extraction")
+        spans.append(Span(g.kind, g.entity, after[at].start(), after[at].end()))
+    return Doc(doc.id, doc.document_type, doc.features, doc.parties, canonical,
+               sorted(spans, key=lambda s: (s.start, -s.end)))
+
+
+def pdf_document(doc: Doc, pdf: bytes | None = None) -> tuple[Doc, Structure]:
+    """`doc` rendered to a PDF (or the given one), run through the production
+    extractor, canonical text assembly and segmentation, its labels mapped."""
+    import asyncio
+    return asyncio.run(pdf_document_async(doc, pdf))
+
+
+async def pdf_document_async(doc: Doc, pdf: bytes | None = None) -> tuple[Doc, Structure]:
+    from app.services.analyzer import segmentation_stage
+    text, pages, blocks = await _extract(pdf or render_pdf(doc.text))
+    _, sents, graph_rows, _, scan = segmentation_stage.structure(text, pages, blocks)
+    return map_gold(doc, text), Structure([segmentation_stage.sentence_row(s) for s in sents], scan.sentence_ids,
+                                          graph_rows, "pdf")
+
+
+def _hypothesis_results(doc: Doc, st: Structure) -> list[dict]:
+    from app.services.analyzer.hypotheses import scanner
+    return scanner.scan(text=doc.text, sentences=st.rows, graph_rows=st.graph_rows,
+                        document_type=doc.document_type, suspect=st.suspect)["results"]
+
+
+def _engine_send_ids(doc: Doc, st: Structure, engine: str) -> set[str]:
+    if engine == "hypothesis":
+        from app.services.analyzer.hypotheses import review
+        items, _ = review.select(_hypothesis_results(doc, st), st.suspect)
+        return {sid for i in items for sid in i["sentence_ids"]}
+    return pii_pipeline.send_ids(st.rows, st.suspect)
+
+
+def _messages_for(doc: Doc, st: Structure, engine: str):
+    """The engine's final request for a masking (used to place guard hits)."""
+    if engine != "hypothesis":
+        return lambda masking: ai_report.build_messages(doc.text, st.rows, st.suspect, masking.bodies)
+    results = _hypothesis_results(doc, st)
+
+    def build(masking):
+        from app.services.analyzer import ai_client
+        from app.services.analyzer.hypotheses import review
+        items, _ = review.select(results, st.suspect)
+        try:
+            return review.build_messages(items, pii_pipeline.hypothesis_questions(), doc.text,
+                                         {r["sentence_id"]: r for r in st.rows}, masking.bodies)
+        except ai_client.AIError:
+            return None
+    return build
 
 
 def consistent_tokens(tokens: dict[str, set[str]]) -> bool:
@@ -517,20 +671,26 @@ def _hygiene(request: str, doc: Doc) -> bool:
     return "PII_DETECTION_RUBRIC" not in request and "pii-eval" not in request
 
 
-def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None, pipeline: str | None = None) -> dict:
+def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None, pipeline: str | None = None,
+                   structure: Structure | None = None, engine: str = "report") -> dict:
     """`send(messages) -> str`: the captured provider request body (text).
     `extra`: spans a development locator proposes, as `[{start, end, decision}]`
     (personal_name / address) -- masked like confirmed spans. None = the masker alone.
     `pipeline`: `pii_pipeline.PIPELINE` scores exactly what production runs
     (no locator; decisions through the real API validation; the stage's
-    request path). None = the historical harness path."""
+    request path). None = the historical harness path.
+    `structure`: the document's sentences/scan/graph (a PDF through the
+    production extractor: `pdf_document`); None = the plain text, segmented.
+    `engine`: "report" (the AI report) or "hypothesis" (the drafting-question
+    review signal: only its selected, unflagged evidence is sent)."""
     if pipeline == pii_pipeline.PIPELINE and extra:
         raise ValueError("the production-rules-only pipeline has no locator")
-    rows = _rows(doc.text)
+    if engine == "hypothesis" and pipeline != pii_pipeline.PIPELINE:
+        raise ValueError("the hypothesis engine is scored on the production pipeline only")
+    st = structure or plain_structure(doc, engine)
+    rows, suspect = st.rows, st.suspect
     doc = _split_at_sentences(doc, rows)
-    scan = injection.scan(doc.text, rows)
-    suspect = scan.sentence_ids
-    send_ids = {r["sentence_id"] for r in rows if not r.get("empty_value") and r["sentence_id"] not in suspect}
+    send_ids = _engine_send_ids(doc, st, engine)
     in_request = [r for r in rows if r["sentence_id"] in send_ids]
     gold = [g for g in doc.spans if any(r["start"] <= g.start and g.end <= r["end"] for r in in_request)]
     personal = [g for g in gold if g.kind in PERSONAL]
@@ -550,7 +710,8 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
         # (marked details are masked, never sent, one token per person), not
         # whether a real lawyer would catch them -- `reviewer_marked` reports
         # how much was left to the lawyer.
-        masking, decisions, marked, converged, repairs = _simulate(doc, rows, send_ids, personal, first, mode, extra)
+        masking, decisions, marked, converged, repairs = _simulate(doc, rows, send_ids, personal, first, mode, extra,
+                                                                   _messages_for(doc, st, engine))
     reasons = sorted({r for u in masking.uncertain for r in u.get("reasons", [u["reason"]])})
     guard: list[str] = []
     request = None
@@ -563,7 +724,8 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
             pii_confirmation._validated(doc.text, rows, send_ids, decisions)
         except UploadRejected as exc:
             reasons = [f"api_rejected:{exc.code}"]
-        composed = pii_pipeline.compose(doc.text, rows, suspect, decisions)
+        composed = (pii_pipeline.compose_hypothesis(doc.text, rows, suspect, decisions, _hypothesis_results(doc, st))
+                    if engine == "hypothesis" else pii_pipeline.compose(doc.text, rows, suspect, decisions))
         if composed.masking.bodies != masking.bodies:
             raise AssertionError(f"{doc.id}: the production path masked differently from the simulation")
         if not reasons:
@@ -660,6 +822,10 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
                                       for c in decisions),
             "party_consistent_any_token": consistent_any if tokens_any and request is not None else None,
             "deadlines_preserved": preserved, "deadline_count": len(deadlines), "pipeline": pipeline,
+            "engine": engine, "layout": st.layout,
+            # The drafting-question engine sends only items the scanner selected:
+            # a document with none is outside that path, not a block.
+            "applicable": bool(send_ids) or engine == "report",
             "hygiene": _hygiene(request, doc) if request is not None else None}
 
 
@@ -793,5 +959,79 @@ def evaluate(dataset: Dataset, send, extra_by_doc: dict[str, list[dict]] | None 
         out[mode] = summarise(per[mode])
     rubric = rubric_number(dataset.name)
     out["gate"] = gate_3(out["review"]) if rubric == 3 else gate(out["auto"], out["manual"], rubric=rubric)
+    out["per_document"] = per
+    return out
+
+
+def evaluate_production(dataset: Dataset, send) -> dict:
+    """The production pipeline per input path and engine (pii-eval-8 on).
+
+    Every document is rendered to a PDF and run through the production
+    extractor, canonical text assembly and segmentation; its labels are MAPPED
+    onto the extracted text by occurrence (`map_gold`). A document whose labels
+    cannot be mapped is listed under `unmapped` and makes the gate NOT
+    APPLICABLE -- it is never scored on guessed offsets. Paths:
+      * pdf/report -- the AI report from the PDF (auto, flag-only, review);
+      * pdf/hypothesis -- the drafting-question review signal from the PDF
+        (review); only documents where the scanner selected evidence count;
+      * text/report -- the plain text, as earlier gates (review), reported.
+    The gate applies the UNCHANGED rubric-3 review thresholds to every
+    required path."""
+    from app.services.analyzer import pii_gate_status
+    out = {"eval_version": EVAL_VERSION, "dataset": dataset.name, "dataset_sha256": dataset.sha256,
+           "masking_version": pii_mask.MASKING_VERSION, "policy_sha256": pii_mask.POLICY_SHA256,
+           "rubric_sha256": hashlib.sha256(rubric_path(dataset.name).read_bytes().replace(b"\r\n", b"\n")).hexdigest(),
+           "coverage": coverage(dataset), "pins": pii_gate_status.current(), "paths": {}, "unmapped": [],
+           "label_mapping": ("labels written on plain text; each gold span placed on the extracted canonical text "
+                             "by its occurrence (whitespace-insensitive), never by reusing plain-text offsets; "
+                             "a count mismatch makes the document unmapped")}
+    pdf: dict[str, tuple[Doc, Structure]] = {}
+    out["text_fallback"] = []
+    for d in dataset.documents:
+        # Urdu/Arabic script cannot be rendered by the synthetic PDF writer (no
+        # Arabic glyphs or shaping), and production blocks it by POLICY whatever
+        # the layout (unsupported_script). Such a document is scored on its
+        # plain-text structure in the PDF paths -- still counted, still blocked
+        # -- and listed here. Any other mapping failure makes the gate not
+        # applicable.
+        from app.services.analyzer import pii_layers
+        if pii_layers.ARABIC_SCRIPT.search(d.text):
+            out["text_fallback"].append({"id": d.id, "reason": "unsupported_script"})
+            continue
+        try:
+            pdf[d.id] = pdf_document(d)
+        except MappingError as exc:
+            out["unmapped"].append({"id": d.id, "error": str(exc)})
+    fallback = {f["id"] for f in out["text_fallback"]}
+    per: dict[str, list[dict]] = {}
+    for layout, engine in PATHS_BY_DATASET.get(dataset.name, PRODUCTION_PATHS):
+        modes = ("auto", "manual", "review") if (layout, engine) == ("pdf", "report") else ("review",)
+        for mode in modes:
+            results = []
+            for d in dataset.documents:
+                if layout == "pdf" and d.id in fallback:
+                    results.append(score_document(d, send, mode=mode, pipeline=pii_pipeline.PIPELINE, engine=engine))
+                elif layout == "pdf":
+                    if d.id not in pdf:
+                        continue
+                    mapped, st = pdf[d.id]
+                    results.append(score_document(mapped, send, mode=mode, pipeline=pii_pipeline.PIPELINE,
+                                                  structure=st, engine=engine))
+                else:
+                    results.append(score_document(d, send, mode=mode, pipeline=pii_pipeline.PIPELINE, engine=engine))
+            applicable = [r for r in results if r["applicable"]]
+            key = f"{layout}/{engine}/{mode}"
+            per[key] = results
+            out["paths"][key] = {**summarise(applicable), "documents_outside_path": len(results) - len(applicable)}
+    checks = {f"{layout}/{engine}": gate_3(out["paths"][f"{layout}/{engine}/review"])
+              for layout, engine in REQUIRED_PATHS}
+    passed = all(c["status"] == "detection_passed" for c in checks.values())
+    out["gate"] = {"thresholds": THRESHOLDS_3, "required_paths": [f"{a}/{b}" for a, b in REQUIRED_PATHS],
+                   "checks": {k: c["checks"] for k, c in checks.items()},
+                   "applicable": not out["unmapped"],
+                   "report_only": ["pdf/report/auto", "pdf/report/manual", "text/report/review"],
+                   "text_fallback_documents": len(out["text_fallback"]),
+                   "status": ("detection_passed" if passed and not out["unmapped"] else
+                              "not_applicable" if out["unmapped"] else "not_passed")}
     out["per_document"] = per
     return out

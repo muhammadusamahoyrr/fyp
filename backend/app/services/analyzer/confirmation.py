@@ -426,6 +426,9 @@ async def get_report(*, owner_id: str, run_id: str) -> dict:
     return {"id": run_id, "packs": report.get("packs", []), "counts": report.get("counts", {}),
             "scope_notice": SCOPE_NOTICE, "legal_checks": findings,
             "ai": ai, "model_risks": by_kind["risk"], "obligations": by_kind["obligation"],
+            # Which masking evaluation applies to the RUNNING code (a historical
+            # pass for an earlier policy is shown as historical, never current).
+            "pii_evaluation": _pii_evaluation(),
             "summary_points": by_kind["summary_point"],
             # The SERVER's embedded-instruction notice, from the run's frozen scan:
             # clause and sentence ids and reason categories only, never the text.
@@ -439,6 +442,11 @@ _AI_ITEM_FIELDS = {
     "obligation": ("party", "action", "deadline_status", "deadline", "condition"),
     "summary_point": ("point",),
 }
+
+
+def _pii_evaluation() -> dict:
+    from app.services.analyzer import pii_confirmation
+    return pii_confirmation.evaluation_summary()
 
 
 async def _ai_layer(run: dict) -> tuple[dict, dict]:

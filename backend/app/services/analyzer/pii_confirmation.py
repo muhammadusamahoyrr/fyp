@@ -51,7 +51,7 @@ from app.db.collections import (
     get_analysis_sources_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import ai_client, blob_store, deletion, injection, pii_mask, pii_pipeline, receipts, states
+from app.services.analyzer import blob_store, deletion, injection, pii_mask, pii_pipeline, receipts, states
 from app.services.analyzer.errors import AnalyzerConflict, AnalyzerError, UploadRejected
 from app.services.analyzer.txn import run_in_transaction
 
@@ -137,23 +137,6 @@ async def send_ids_for(run: dict, sentences: list[dict], scan_ids: frozenset[str
         items, _ = review.select(await published_results(run), scan_ids)
         return {sid for i in items for sid in i["sentence_ids"]}
     return pii_pipeline.send_ids(sentences, scan_ids)
-
-
-async def build_request(run: dict, text: str, sentences: list[dict], scan_ids: frozenset[str],
-                        masking: pii_mask.Masking) -> list[dict]:
-    """The exact messages the run's AI stage builds from this masking."""
-    if (run.get("engine") or states.ENGINE_AI_REPORT) == states.ENGINE_HYPOTHESIS:
-        from app.services.analyzer.hypotheses import catalog, review
-        from app.services.analyzer.hypothesis_stage import published_results
-
-        items, _ = review.select(await published_results(run), scan_ids)
-        questions = {q.id: q.question for q in catalog.load().universal
-                     + tuple(q for qs in catalog.load().by_type.values() for q in qs)}
-        return review.build_messages(items, questions, text, {s["sentence_id"]: s for s in sentences},
-                                     masking.bodies)
-    from app.services.analyzer import ai_report
-
-    return ai_report.build_messages(text, sentences, scan_ids, masking.bodies)
 
 
 async def applicable(run: dict, text_sha256: str) -> dict | None:
@@ -313,6 +296,16 @@ def people_of(text: str, masking: pii_mask.Masking) -> list[dict]:
     return [{"start": a, "end": b, "token": token} for a, b, kind, token in masking.masked_spans if kind == "NAME"]
 
 
+def evaluation_summary() -> dict:
+    """Which masking evaluation applies to the code running now -- shown on the
+    review screen so a historical pass is never read as current. Codes only."""
+    from app.services.analyzer import pii_gate_status
+    st = pii_gate_status.status()
+    return {"state": st["state"], "masking_version": st["current"]["masking_version"],
+            "applicable": st["applicable"], "historical_passes": st["historical_passes"],
+            "authorizes_real_documents": st["authorizes_real_documents"]}
+
+
 def people_groups(masking: pii_mask.Masking) -> list[dict]:
     """One group per masked PERSON (token), with every mention as offsets, in
     the order the people first appear. `key` names the token AND its exact
@@ -341,12 +334,16 @@ def _origin(c: dict, flagged: set[tuple[int, int]]) -> str:
 
 
 async def _preview(run: dict, text: str, sentences: list[dict], scan_ids, send_ids, decisions: list[dict]) -> dict:
-    # The AI report's request comes from the one path the stage and the
-    # rules-only evaluation share (pii_pipeline); the drafting-question review
-    # builds its own messages from the same masking.
-    report = (run.get("engine") or states.ENGINE_AI_REPORT) == states.ENGINE_AI_REPORT
-    composed = pii_pipeline.compose(text, sentences, scan_ids, decisions) if report else None
-    masking = composed.masking if report else pii_mask.prepare(text, sentences, send_ids, decisions)
+    # Each engine's request comes from the one path its stage and the rules-only
+    # evaluation share (pii_pipeline): the AI report, or the drafting-question
+    # review signal (only its selected, unflagged evidence).
+    if (run.get("engine") or states.ENGINE_AI_REPORT) == states.ENGINE_HYPOTHESIS:
+        from app.services.analyzer.hypothesis_stage import published_results
+        composed = pii_pipeline.compose_hypothesis(text, sentences, scan_ids, decisions,
+                                                   await published_results(run))
+    else:
+        composed = pii_pipeline.compose(text, sentences, scan_ids, decisions)
+    masking = composed.masking
     order = [s for s in sentences if s["sentence_id"] in send_ids]
     names: dict[str, dict] = {}
     for a, b, kind, token in masking.masked_spans:
@@ -361,22 +358,15 @@ async def _preview(run: dict, text: str, sentences: list[dict], scan_ids, send_i
            "request_error": None}
     if masking.uncertain:
         return out
-    if report:
-        if composed.error:
-            out["request_error"] = composed.error
-            return out
-        messages = composed.messages
-    else:
-        try:
-            messages = await build_request(run, text, sentences, scan_ids, masking)
-        except ai_client.AIError as exc:
-            out["request_error"] = exc.code
-            return out
-    out["leak_guard"] = pii_mask.leak_check(messages)
-    out["guard_spans"] = guard_spans(text, sentences, masking, messages) if out["leak_guard"] else []
+    if composed.error:
+        out["request_error"] = composed.error
+        return out
+    messages = composed.messages
+    out["leak_guard"] = composed.guard
+    out["guard_spans"] = guard_spans(text, sentences, masking, messages) if composed.guard else []
     out["request"] = messages
-    out["request_sha256"] = receipts.request_digest(messages)
-    out["ready"] = not out["leak_guard"]
+    out["request_sha256"] = composed.digest
+    out["ready"] = not composed.guard
     return out
 
 
@@ -398,6 +388,7 @@ async def get_view(*, owner_id: str, run_id: str) -> dict:
             "masking_version": pii_mask.MASKING_VERSION, "decisions_made": decisions,
             "previous_confirmation_outdated": stale, "decisions": list(DECISIONS),
             "review_version": REVIEW_VERSION,
+            "evaluation": evaluation_summary(),
             "added_decisions": list(ADDED_DECISIONS), "notice": NOTICE, "attestation": ATTESTATION,
             **await _preview(run, text, sentences, scan_ids, send_ids, decisions)}
 

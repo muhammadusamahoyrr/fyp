@@ -35,7 +35,7 @@ import httpx  # noqa: E402
 import yaml  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
-from app.services.analyzer import ai_client, pii_confirmation, pii_mask, pii_pipeline  # noqa: E402
+from app.services.analyzer import ai_client, pii_confirmation, pii_gate_status, pii_mask, pii_pipeline  # noqa: E402
 from app.services.analyzer import pii_evaluation as ev  # noqa: E402
 
 #: The locator setup a rubric-2 set is scored with -- pinned by the freeze.
@@ -90,7 +90,8 @@ def harness_sha256() -> str:
 PIPELINE_FILES = ("app/services/analyzer/pii_mask.py", "app/services/analyzer/pii_layers.py",
                   "app/services/analyzer/pii_evaluation.py", "scripts/analyzer_pii_eval.py",
                   "scripts/pii_locator/gliner_locate.py", "analyzer_eval/pii/locator/gliner_multi-v2.1.manifest.json",
-                  *PRODUCTION_CODE)
+                  *PRODUCTION_CODE, *pii_gate_status.PROCESSING_FILES, *pii_gate_status.HARNESS_FILES,
+                  "app/services/analyzer/pii_gate_status.py")
 
 
 def _source_state() -> tuple[str, list[str]]:
@@ -168,6 +169,47 @@ def capturing_send():
     return send
 
 
+def _score_paths(args, dataset, pipeline) -> int:
+    """pii-eval-8 on: the production pipeline per input path and engine, the
+    gate on every required path (pii_evaluation.evaluate_production)."""
+    result = ev.evaluate_production(dataset, capturing_send())
+    result["pipeline"] = pipeline
+    result["frozen_before_run"] = True
+    for key, s in result["paths"].items():
+        print(f"{key:24s} docs={s['documents']} outside={s['documents_outside_path']} sent={s['sent']} "
+              f"blocked={s['blocked']} spans={s['personal_spans']} coverage={s['character_coverage']} "
+              f"leaks={s['leaks']} party={s['party_consistency']} person={s.get('person_consistency')} "
+              f"deadlines={s['deadline_preservation']} sent_rate={s.get('sent_rate')} "
+              f"address_cov={s.get('address_character_coverage')} marked={s.get('reviewer_marked')} "
+              f"by_reason={s.get('blocked_by_reason')}")
+    print("unmapped:", len(result["unmapped"]), "gate:", result["gate"]["status"],
+          {k: {c: v for c, v in checks.items() if not v} for k, checks in result["gate"]["checks"].items()})
+    results_dir = ev.ROOT / "results"
+    results_dir.mkdir(exist_ok=True)
+    out = results_dir / f"{date.today().isoformat()}_{args.dataset}_{dataset.sha256[:12]}.json"
+    out.write_text(json.dumps(result, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    print("results:", out)
+    if args.write_record:
+        record_path = ev.record_path(args.dataset)
+        if ev.DATASET_ROLES.get(args.dataset) == "development" or record_path.exists():
+            print("refused: development set, or a kept record exists (never overwritten)", file=sys.stderr)
+            return 2
+        record = {k: result[k] for k in ("eval_version", "dataset", "dataset_sha256", "masking_version",
+                                         "policy_sha256", "rubric_sha256", "coverage", "gate", "unmapped",
+                                         "label_mapping", "frozen_before_run", "pipeline", "pins")}
+        record["paths"] = result["paths"]
+        record["review"] = result["paths"]["pdf/report/review"]
+        record["label_review"] = "developer_only"
+        record["approval"] = ("Detection only, on synthetic developer-labelled documents. Not a real-document "
+                              "or model-quality approval.")
+        record["created"] = date.today().isoformat()
+        record_path.write_text(f"# Kept PII detection result ({ev.EVAL_VERSION}, {args.dataset}). Never overwritten.\n"
+                               + yaml.safe_dump(record, sort_keys=False, allow_unicode=True, width=1000),
+                               encoding="utf-8", newline="\n")
+        print("record:", record_path)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset", default="pii-eval-1")
@@ -204,6 +246,12 @@ def main() -> int:
                  *([f"production_code_sha256: {production_code_sha256()}",
                     f"settings_json: '{json.dumps(PRODUCTION_SETTINGS, sort_keys=True)}'"]
                    if _production(dataset.name) else []),
+                 *([f"processing_sha256: {pii_gate_status.processing_sha256()}",
+                    f"status_harness_sha256: {pii_gate_status.harness_sha256()}",
+                    f"review_version: {pii_confirmation.REVIEW_VERSION}",
+                    f"paths: '{json.dumps([f'{a}/{b}' for a, b in ev.PATHS_BY_DATASET[dataset.name]])}'",
+                    f"required_paths: '{json.dumps([f'{a}/{b}' for a, b in ev.REQUIRED_PATHS])}'"]
+                   if dataset.name in ev.PATHS_BY_DATASET else []),
                  f"author: independent fresh session, given only {ev.rubric_path(dataset.name).name}", "files:"]
         lines += [f"  {p.name}: {hashlib.sha256(p.read_bytes()).hexdigest()}"
                   for p in sorted((ev.ROOT / args.dataset).glob("*.yaml"))]
@@ -236,6 +284,13 @@ def main() -> int:
             if args.locator_home:
                 print("refused: the production-rules-only pipeline runs no locator", file=sys.stderr)
                 return 2
+            if dataset.name in ev.PATHS_BY_DATASET and (
+                    manifest.get("processing_sha256") != pii_gate_status.processing_sha256()
+                    or manifest.get("status_harness_sha256") != pii_gate_status.harness_sha256()
+                    or manifest.get("review_version") != pii_confirmation.REVIEW_VERSION):
+                print("refused: the processing code, harness or review contract changed since the freeze",
+                      file=sys.stderr)
+                return 2
         else:
             if not args.locator_home:
                 print("refused: a rubric-2 set is scored with the pinned locator (--locator-home)", file=sys.stderr)
@@ -250,6 +305,8 @@ def main() -> int:
     ai_records.POLICY_DIR = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "ai_policies"
     for name, value in PRODUCTION_SETTINGS.items() if _production(dataset.name) else ():
         setattr(settings, name, value)
+    if dataset.name in ev.PATHS_BY_DATASET:
+        return _score_paths(args, dataset, pipeline)
     result = ev.evaluate(dataset, capturing_send(), extra_by_doc=extra, modes=ev.modes_for(dataset.name),
                          pipeline=ev.pipeline_for(dataset.name))
     result["pipeline"] = pipeline

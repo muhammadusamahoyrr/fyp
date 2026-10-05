@@ -36,9 +36,10 @@ from app.db.collections import (
     get_analysis_text_versions_col,
 )
 from app.services.analyzer import (
-    ai_client, ai_config, ai_stage, blob_store, deletion, injection, pii_confirmation, pii_mask, receipts, worker,
+    ai_client, ai_config, ai_stage, blob_store, deletion, injection, pii_confirmation, pii_mask, pii_pipeline, receipts,
+    worker,
 )
-from app.services.analyzer.hypotheses import catalog, review
+from app.services.analyzer.hypotheses import review
 from app.services.analyzer.hypothesis_stage import published_results
 from app.services.analyzer.terms_stage import published_sentences
 from app.services.analyzer.worker import Lease, LostLease
@@ -138,32 +139,29 @@ async def run_hypothesis_review(lease: Lease) -> str:
     text = raw.decode("utf-8")
     sentences = await published_sentences(run)
     by_id = {s["sentence_id"]: s for s in sentences}
-    items, withheld = review.select(await published_results(run), scan.sentence_ids)
+    # The request comes from the one path the lawyer's preview and the
+    # rules-only evaluation share (pii_pipeline): only the selected, unflagged
+    # evidence sentences, each masked; an unrecognised name or address in them
+    # stops the request for a person to confirm.
+    review_record = await pii_confirmation.applicable(run, version["text_hash"])
+    composed = pii_pipeline.compose_hypothesis(text, sentences, scan.sentence_ids,
+                                               pii_confirmation.decisions_of(review_record),
+                                               await published_results(run))
+    items, withheld, masking = composed.items, composed.withheld, composed.masking
     if not items:
         return await _finish(lease, {**unavailable("nothing_to_review"), "withheld": withheld})
-    questions = {q.id: q.question for q in catalog.load().universal
-                 + tuple(q for qs in catalog.load().by_type.values() for q in qs)}
-
-    # PII masking at the AI boundary (ANALYZER_PII_MASKING.md): only the
-    # selected evidence sentences are sent, each masked; an unrecognised name
-    # or address in them stops the request for a person to confirm.
-    review_record = await pii_confirmation.applicable(run, version["text_hash"])
-    masking = pii_mask.prepare(text, sentences, {sid for i in items for sid in i["sentence_ids"]},
-                               pii_confirmation.decisions_of(review_record))
     if masking.uncertain:
         return await _finish(lease, {**unavailable(pii_confirmation.REQUIRED), "withheld": withheld,
                                      "pii": pii_mask.refused(masking)})
-
-    send_ids = sorted({sid for i in items for sid in i["sentence_ids"]})
-    try:
-        messages = review.build_messages(items, questions, text, by_id, masking.bodies)
-    except ai_client.AIError as exc:            # unprepared: nothing was sent
-        return await _finish(lease, {**unavailable(exc.code), "withheld": withheld, "pii": pii_mask.refused(masking)})
-    guard = pii_mask.leak_check(messages)          # L6 on the final request (see ai_stage)
+    send_ids = sorted(composed.send_ids)
+    if composed.error:                          # unprepared: nothing was sent
+        return await _finish(lease, {**unavailable(composed.error), "withheld": withheld,
+                                     "pii": pii_mask.refused(masking)})
+    messages, guard = composed.messages, composed.guard   # L6 on the final request (see ai_stage)
     if guard:
         return await _finish(lease, {**unavailable(pii_mask.LEAK_GUARD), "withheld": withheld,
                                      "pii": {**pii_mask.refused(masking), "leak_guard": guard}})
-    digest = receipts.request_digest(messages)
+    digest = composed.digest
     # Lawyer-confirm mode: only the EXACT request the lawyer attested is sent.
     waiting = pii_confirmation.send_check(review_record, digest)
     if waiting:

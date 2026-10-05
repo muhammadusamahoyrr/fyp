@@ -72,6 +72,14 @@ const LEAK_TEXT = {
     label_cnic: "an ID number after a field label",
     label_phone: "a phone number after a field label",
 };
+/* Which masking evaluation applies to the rules running NOW (server-decided). */
+const EVALUATION_TEXT = {
+    current_pass: "The masking rules used here passed their synthetic evaluation. That is an engineering result, not a legal approval.",
+    current_not_passed: "The masking rules used here did not pass their synthetic evaluation. Internal synthetic testing only.",
+    historical_pass_only: "No evaluation applies to the masking rules used here. An earlier version passed a synthetic evaluation; that result is historical. Internal synthetic testing only.",
+    no_applicable_evaluation: "The masking rules used here have not been evaluated. Internal synthetic testing only.",
+    records_unreadable: "The evaluation record could not be read. Internal synthetic testing only.",
+};
 const ERROR_TEXT = {
     confirmation_outdated: "The text or the masking rules changed. Review the document again.",
     state_changed: "This analysis changed. Reload and review again.",
@@ -383,6 +391,12 @@ export default function PiiConfirmation({ t, runId, onQueued }) {
                 Nothing is sent until you approve the exact request. Compare each original sentence with its masked
                 version, decide every highlighted detail, and select any name or address that was missed.
             </div>
+            {view.evaluation && (
+                <div data-pii-evaluation={view.evaluation.state} role="note" style={{ fontSize: 12.5, color: t.textMuted }}>
+                    {EVALUATION_TEXT[view.evaluation.state] || EVALUATION_TEXT.records_unreadable}
+                    {" "}(masking {view.evaluation.masking_version})
+                </div>
+            )}
             {view.previous_confirmation_outdated && (
                 <div data-pii-outdated role="note" style={{ fontSize: 13 }}>
                     An earlier review was made against a different text or masking rule, so it no longer applies.

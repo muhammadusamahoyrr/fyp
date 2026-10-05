@@ -36,6 +36,24 @@ from app.services.analyzer.worker import Lease, LostLease
 STAGE = "segment"
 
 
+def structure(text: str, pages: list[dict], blocks: list[dict]):
+    """Clauses, sentences, the document graph and the injection scan of a
+    confirmed text -- exactly what this stage publishes. Pure; shared with the
+    rules-only evaluation (pii_evaluation.pdf_document), so a PDF evaluated
+    is segmented as the app segments it. Raises ValueError when too large."""
+    clauses, sentences = segmentation.segment(text, pages, blocks)
+    graph_rows, graph_summary = doc_graph.build(text, clauses, sentences, blocks, pages) if sentences else ([], {})
+    scan = injection.scan(text, [{"sentence_id": s.sentence_id, "clause_id": s.clause_id,
+                                  "start": s.start, "end": s.end} for s in sentences])
+    return clauses, sentences, graph_rows, graph_summary, scan
+
+
+def sentence_row(s) -> dict:
+    """A sentence as this stage stores it (and the AI stages read it back)."""
+    return {"sentence_id": s.sentence_id, "clause_id": s.clause_id, "start": s.start, "end": s.end,
+            "page_spans": s.page_spans, "kind": s.kind, "label_end": s.label_end, "empty_value": s.empty_value}
+
+
 async def _published_pages(version: dict) -> list[dict]:
     stage, fence = next(iter(version.get("published", {}).items()), (None, None))
     if stage is None:
@@ -70,18 +88,14 @@ async def run_segment(lease: Lease) -> str:
 
     pages, blocks = await _published_pages(version), await _published_blocks(version)
     try:
-        clauses, sentences = segmentation.segment(text, pages, blocks)
+        clauses, sentences, graph_rows, graph_summary, scan = structure(text, pages, blocks)
     except ValueError as exc:                     # too_many_clauses / too_many_sentences
         await worker.finish_without_result(lease, status="failed", error_code=str(exc))
         return f"failed:{exc}"
     if not sentences:
         await worker.finish_without_result(lease, status="failed", error_code="no_sentences")
         return "failed:no_sentences"
-    graph_rows, graph_summary = doc_graph.build(text, clauses, sentences, blocks, pages)
-    security_scan = injection.record(
-        injection.scan(text, [{"sentence_id": s.sentence_id, "clause_id": s.clause_id,
-                               "start": s.start, "end": s.end} for s in sentences]),
-        document_hash=version["text_hash"], text_version_id=version["_id"])
+    security_scan = injection.record(scan, document_hash=version["text_hash"], text_version_id=version["_id"])
 
     now = datetime.now(timezone.utc)
     key = {"run_id": lease.run_id, "stage": STAGE, "fence": lease.fence}
