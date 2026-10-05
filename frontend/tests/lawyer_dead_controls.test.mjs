@@ -152,3 +152,14 @@ test("3.5 AI Assistant: the clock reopens history; inert globe, mic, Pro and Upg
     assert.equal(sidebar().style.width, "200px");
     await view.unmount();
 });
+
+/* ── 3.6 Draft Generator ──────────────────────────────────────────────── */
+
+test("3.6 Draft Generator: no Insert Link button wired to nothing", async () => {
+    // Its toolbar renders inside the editor, behind a template choice; the
+    // guard is on the source, which is where the no-op handler lived.
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/components/lawyer/DocAutomationPage.jsx", import.meta.url), "utf8");
+    assert.doesNotMatch(src, /label="Insert Link"/);
+    assert.doesNotMatch(src, /onClick=\{\(\) => \{ \}\}/, "a toolbar button with an empty handler remains");
+});

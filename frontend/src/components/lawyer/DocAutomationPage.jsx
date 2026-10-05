@@ -967,12 +967,6 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                             <path d="M0 0h5v5H3C3 7 4 8 6 8v2C2 10 0 8 0 5V0zm8 0h5v5h-2C11 7 12 8 14 8v2c-4 0-6-2-6-5V0z" />
                         </svg>
                     </ToolBtn>
-                    <ToolBtn label="Insert Link" onClick={() => { }}>
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                            <path d="M6.5 9.5a4 4 0 005.66 0l2-2a4 4 0 00-5.66-5.66l-1 1" />
-                            <path d="M9.5 6.5a4 4 0 00-5.66 0l-2 2a4 4 0 005.66 5.66l1-1" />
-                        </svg>
-                    </ToolBtn>
                     <ToolBtn label="Horizontal Rule" onClick={() => exec("insertHorizontalRule")}>
                         <svg width="14" height="10" viewBox="0 0 14 10" fill="currentColor">
                             <rect x="0" y="4" width="14" height="2" rx="1" />
