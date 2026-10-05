@@ -104,3 +104,25 @@ test("3.3 Documents review screen: no inert Request-changes toggle or unsent not
     assert.ok(buttonTexts(view.container).some(t => /Proceed to Decision/.test(t)));
     await view.unmount();
 });
+
+/* ── 3.4 Appointments ─────────────────────────────────────────────────── */
+
+test("3.4 Appointments: no View Details button that does nothing", async () => {
+    const when = new Date(Date.now() + 72 * 36e5);
+    when.setUTCMinutes(0, 0, 0);
+    const inPerson = { id: "a1", scheduled_at: when.toISOString(),
+        end_at: new Date(when.getTime() + 36e5).toISOString(), duration_minutes: 60,
+        status: "confirmed", mode: "in_person", client_name: "Client A", purpose: "Consultation",
+        notes: null, case_id: null, schedule_version: 1 };
+    api.__respond("listAppointments", { data: { items: [inPerson], total: 1, page: 1, page_size: 25, pages: 1 },
+                                        error: null, status: 200 });
+    api.__respond("listPendingOutcomes", { data: { items: [], next_cursor: null, cutoff: "2026-10-01T00:00:00Z" },
+                                           error: null, status: 200 });
+    api.__respond("getMyWorkingHours", { data: { lawyer_id: "l1", configured: false, enforced: false,
+        timezone: "Asia/Karachi", working_hours: [], exceptions: [], updated_at: null }, error: null, status: 200 });
+    const { AppointmentsPage } = await import("../src/components/lawyer/AppointmentsPage.jsx");
+    const view = await mountPage(AppointmentsPage);
+    assert.match(view.container.textContent, /Client A/, "the appointment did not render");
+    assert.ok(!buttonTexts(view.container).some(t => /View Details/.test(t)));
+    await view.unmount();
+});
