@@ -134,18 +134,9 @@ function SettingsPage() {
                     <SessionsPanel t={t} onSignedOut={logout} />
                 </Card>
 
-                <Card className="fade-up s2" style={{ padding: 18 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-                        <Icon d={I.bell} size={14} style={{ color: t.primary }} />
-                        <div className="serif" style={{ fontSize: 14, fontWeight: 600, color: t.text }}>Notifications</div>
-                    </div>
-                    {["Email for new appointments", "Case status change alerts", "Document review reminders", "Client message notifications", "Hearing date reminders"].map(item => (
-                        <label key={item} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 11px", borderRadius: 8, border: `1px solid ${t.border}`, marginBottom: 7, cursor: "pointer" }}>
-                            <span style={{ fontSize: 13, color: t.text }}>{item}</span>
-                            <input type="checkbox" defaultChecked style={{ accentColor: t.primary, width: 15, height: 15 }} />
-                        </label>
-                    ))}
-                </Card>
+                {/* Notification preferences used to sit here: five checkboxes with
+                    defaultChecked and nothing behind them — no state, no API, not even
+                    localStorage. Removed rather than shown as settings that do nothing. */}
 
                 <Card className="fade-up s3" style={{ padding: 18 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
