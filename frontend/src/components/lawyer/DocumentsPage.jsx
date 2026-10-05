@@ -333,28 +333,32 @@ function ScreenInbox({
             d.caseId.toLowerCase().includes(search.toLowerCase()))
     );
 
-    // Stat cards — each with a distinct, visible tinted background
+    // Stat cards — each with a distinct, visible tinted background.
+    // Values go through _tabCount, the same as the tab badges: `counts` is null
+    // until the first page answers (and always on the legacy queue), and its
+    // keys are server statuses ("submitted"…), not these display labels.
+    // Indexing it directly crashed the inbox on its first render.
     const statCards = [
         {
-            label: "Pending Review", value: counts["Pending Review"], icon: "📥",
+            label: "Pending Review", value: _tabCount(counts, "Pending Review", docs, serverFiltered), icon: "📥",
             numColor: "#e05565",
             bg: "linear-gradient(135deg, rgba(150,195,225,0.22) 0%, rgba(130,180,215,0.14) 100%)",
             border: "rgba(160,200,228,0.32)"
         },
         {
-            label: "Approved", value: counts["Approved"], icon: "✅",
+            label: "Approved", value: _tabCount(counts, "Approved", docs, serverFiltered), icon: "✅",
             numColor: "#2ec890",
             bg: "linear-gradient(135deg, rgba(55,175,125,0.22) 0%, rgba(40,155,108,0.13) 100%)",
             border: "rgba(55,180,128,0.32)"
         },
         {
-            label: "Returned", value: counts["Returned"], icon: "↩️",
+            label: "Returned", value: _tabCount(counts, "Returned", docs, serverFiltered), icon: "↩️",
             numColor: "#e8b84b",
             bg: "linear-gradient(135deg, rgba(232,184,75,0.16) 0%, rgba(200,155,60,0.10) 100%)",
             border: "rgba(232,184,75,0.30)"
         },
         {
-            label: "Rejected", value: counts["Rejected"], icon: "❌",
+            label: "Rejected", value: _tabCount(counts, "Rejected", docs, serverFiltered), icon: "❌",
             numColor: "#e8526a",
             bg: "linear-gradient(135deg, rgba(232,82,106,0.16) 0%, rgba(200,60,85,0.10) 100%)",
             border: "rgba(232,82,106,0.30)"
