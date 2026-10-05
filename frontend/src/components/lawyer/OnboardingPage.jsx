@@ -25,6 +25,20 @@ export function isLawyerOnboarded(me) {
   return Boolean(profile?.bar_number && profile?.specializations?.length);
 }
 
+// Mirrors LawyerProfileUpdate.bar_number (backend/app/schemas/user.py): 4–64
+// chars, alphanumeric at both ends. Checked here so Step 1 cannot be passed with
+// a value the server will 422 — or with a blank that it silently drops, which
+// finishes the wizard into a profile isLawyerOnboarded then rejects.
+const BAR_NUMBER_RE = /^[A-Za-z0-9][A-Za-z0-9\-/ .]*[A-Za-z0-9]$/;
+export function stepOneProblem({ license, specs }) {
+  const bar = (license || "").trim();
+  if (bar.length < 4 || bar.length > 64 || !BAR_NUMBER_RE.test(bar)) {
+    return "Enter your bar license number (at least 4 letters or digits, e.g. PBC/12345/2019).";
+  }
+  if (!specs?.length) return "Select at least one specialization.";
+  return null;
+}
+
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const T = {
   bg: DARK.bg,
@@ -286,6 +300,14 @@ function StepProfessional({ onNext }) {
   const [license, setLicense] = useState("");
   const [council, setCouncil] = useState("Punjab Bar Council");
   const [coreSpecs, setCoreSpecs] = useState([]);
+  const [problem, setProblem] = useState(null);
+
+  const cont = () => {
+    const specs = coreSpecs.map(s => SPEC_VALUE[s]).filter(Boolean);
+    const p = stepOneProblem({ license, specs });
+    setProblem(p);
+    if (!p) onNext({ name, exp, license: license.trim(), council, specs });
+  };
 
   useEffect(() => {
     getMe().then(({ data }) => {
@@ -495,7 +517,8 @@ function StepProfessional({ onNext }) {
               wizard with a profile the gate then rejects, dropping them straight
               back into onboarding: a loop, just a different one. Step 2 (photo and
               credential uploads) is genuinely optional and keeps its Skip. */}
-          <GlowBtn onClick={() => onNext({ name, exp, license, council, specs: coreSpecs.map(s => SPEC_VALUE[s]).filter(Boolean) })} style={{ padding: "7px 16px", fontSize: 12 }}>Continue {Ic.arrow("right")}</GlowBtn>
+          {problem && <span role="alert" style={{ fontSize: 12, color: "#e8526a", fontWeight: 600 }}>{problem}</span>}
+          <GlowBtn onClick={cont} style={{ padding: "7px 16px", fontSize: 12 }}>Continue {Ic.arrow("right")}</GlowBtn>
         </div>
       </div>
     </div>
@@ -1107,7 +1130,9 @@ export function OnboardingPage({ onComplete }) {
     setSaving(false);
     const err = r1.error || r2.error;
     if (err) {
-      setError(err?.detail || "Submission failed — check your connection and try again.");
+      // `message` is always a string (formatResponseError). `detail` is the raw
+      // body field — an ARRAY of objects on a 422 — and rendering it crashed React.
+      setError(err?.message || "Submission failed — please try again.");
       return;
     }
     setSubmitted(true);
