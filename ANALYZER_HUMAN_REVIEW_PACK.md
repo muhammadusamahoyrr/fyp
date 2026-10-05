@@ -17,12 +17,12 @@ It has three parts:
 
 ## Part 1 — People panel usability trial (synthetic documents only)
 
-**Why.** The production-pipeline gate (pii-eval-7) passed only because the SIMULATED
-reviewer:
+**Why.** The final production-pipeline gate (pii-eval-8, PDF path) passed only because the
+SIMULATED reviewer:
 
-- marked 186 of 404 details that masking missed;
-- made 248 identity decisions;
-- confirmed 115 people.
+- marked 204 of 472 details that masking missed;
+- made 310 identity decisions;
+- confirmed 123 people.
 
 Whether a real lawyer catches those is unknown, and it is the deciding question for safety.
 
@@ -31,7 +31,7 @@ Whether a real lawyer catches those is unknown, and it is the deciding question 
 - Run on a local or staging build in synthetic-only mode with a fake provider, or with AI
   off. The review screen works without sending anything.
 - 3–5 practising lawyers, one at a time. Use no real client material.
-- Load the five trial documents below as uploads. Do not tell the lawyer the traps.
+- Load the six trial documents below as uploads. Do not tell the lawyer the traps.
 - The facilitator records times and outcomes on the score sheet and does not help.
 
 **Instructions to read to the lawyer (verbatim):**
@@ -51,22 +51,37 @@ Whether a real lawyer catches those is unknown, and it is the deciding question 
 | T3 | Employment: "Employee: Sara Malik. Sara Malik, professionally known as Sara Noor, will deliver the designs." | **Split identity**: "Sara" is flagged as a short form and "Noor" as a possible continuation; deciding each as a plain name gives one person two tokens | Links both "Same person as" Sara Malik's token |
 | T4 | Tenancy: "Landlord: Kashif Raza. The rent is received by Muhammad\nKashif Raza every month." | **Half-masked name**: only "Kashif Raza" is masked; "Muhammad" is flagged `name_continues` | Decides the flag: same person as Kashif Raza's token |
 | T5 | Tenancy: "Quote reference 4455667788 when paying the rent of Rs. 40,000 within 30 days." | **Guard stop**: the final check stops the request and highlights the number | Uses "Select to mark" and marks it (account/number), then approves |
+| T6 | Tenancy: "Landlord: Bilal Malik. Signed by Bilal Malik House 12 Butt Road 3." | **Overlapping flags**: one highlighted region ("Butt Road 3") carries two reasons (an address? a signer's name?) | Decides the region as an address, or selects parts of it (e.g. "Butt" not personal, "Road 3" address). Any part left undecided stays highlighted; approval stays blocked until it is decided |
+
+**Per-person confirmations (every document).** After the decisions, the People panel asks
+the lawyer to confirm each person: "All N mentions are one person, and no other mention in
+this request is [NAME_k]". Record whether the lawyer:
+
+- reads the mentions before ticking, or ticks every box at once without looking;
+- catches T2 (two people under one token) and T3 (one person under two tokens) at this
+  step rather than earlier.
+
+Watch also whether they read the evaluation note at the top of the screen. It says no
+evaluation applies to the current masking rules, and that the earlier pass is historical.
 
 ### Score sheet (one row per lawyer per document)
 
-| Lawyer | Doc | Trap caught? (Y/N) | Wrong action? (e.g. linked two different people, marked a deadline) | Time to first approval attempt (min:s) | Time spent in the People panel (min:s) | People confirmations clicked | Approved a request that still held personal data? (Y/N) | Lawyer's comment |
-|---|---|---|---|---|---|---|---|---|
-| | | | | | | | | |
+| Lawyer | Doc | Trap caught? (Y/N) | Wrong action? (e.g. linked two different people, marked a deadline) | Time to first approval attempt (min:s) | Time spent in the People panel (min:s) | People confirmations clicked | Confirmations ticked without reading? (Y/N) | Approved a request that still held personal data? (Y/N) | Lawyer's comment |
+|---|---|---|---|---|---|---|---|---|---|
+| | | | | | | | | | |
 
 ### Pass criteria (to be agreed by the owner BEFORE the trial)
 
 The suggested starting point is below. These are not decided, and must not be adjusted
 after seeing results.
 
-- **Leaked details:** every lawyer approves no request holding a personal detail (T1–T5).
+- **Leaked details:** every lawyer approves no request holding a personal detail (T1–T6).
 - **Missed names (T1):** caught by ≥ 4 of 5 lawyers. Any miss is a release blocker unless
   the screen is changed and re-trialled.
 - **Merge and split (T2, T3):** fixed by ≥ 4 of 5 lawyers.
+- **Overlapping flags (T6):** resolved without help by ≥ 4 of 5 lawyers.
+- **Per-person confirmation:** ticking every box without reading is recorded; if it is the
+  norm, the confirmation step needs redesign before release.
 - **Time:** median under 5 minutes per document in the trial set. Report the actual
   distribution either way.
 
@@ -115,27 +130,31 @@ An approval binds to the hash. Any edit to a pack voids it.
 | validation-2 labels (gate, spent) | `4ce03c06c882fce39674090570d83f2e9bb657934bc7e947502c49e530764d8c` | `developer_only` |
 | validation-1 labels (development) | `f0246a6a37a43e8735fa40581e48dbdc27a959ca059faad7487be37384fd7b49` | `developer_only` |
 | calib-1 labels (development) | `51ec7731b7b8e38c891cfded0ee682d44aebbe2470c7255f21ee06b03a22cebe` | `developer_only` |
+| Scanner code (for reference; the gate pins it) | `b9a80445be31761a7543411c1140e1dfcc18253369ecf4df281d7255c8393e96` | `not_passed` (validation-2) |
 
 Disputed labels the lawyer should rule on before validation-3 is authored (see
 `ANALYZER_SCANNER_VALIDATION_3_PLAN.md`):
 
-- **`premises_description`.** Is "his flat in Clifton, Karachi" / "the shop in the Anwar
-  Market" identified (the catalogue says location counts) or ambiguous (the labels say so)?
-- **`undefined_terms`.** Must "the Effective Date" and "the Purpose" be defined? Are
-  "Gross Remuneration" and "the Company Rules" undefined terms?
-- **`conflicting_values`.**
-  - Is "dated 1 June … executed on 15 June" a conflict?
-  - Is "12 days annual leave; also 10 days annual leave" one sentence giving two
-    conflicting values?
+| Question | The rule it is judged by (catalogue / rubric v2) | Disputed labels | The conflict |
+|---|---|---|---|
+| `premises_description` | catalogue `ambiguous_when`: "The premises are referred to but not identified by number, location **or address**." | "his flat in Clifton, Karachi"; "the shop in the Anwar Market" -- labelled `ambiguous` | Both name a location, so by the catalogue's own rule they are identified (`present`). Either the labels or the rule must change. |
+| `undefined_terms` | catalogue question: "Are capitalised terms used without being defined?" | "the Effective Date", "the Purpose", "the Munshi" -- labelled not undefined; "Gross Remuneration", "the Company Rules" -- labelled undefined | The rule as written flags every capitalised undefined term. The labels treat some as self-explanatory, with no stated test for which. |
+| `conflicting_values` | catalogue question: "Do the same amount, date or period appear with different values?" | "dated 1 June ... executed on 15 June" -- labelled a conflict; "12 days annual leave; also 10 days annual leave" -- labelled a conflict | Is a deed's date distinct from its execution date (a legal question)? Does one sentence giving two values count (the scanner's design says usually not)? |
+
+The validation-3 plan (`ANALYZER_SCANNER_VALIDATION_3_PLAN.md`) is blocked until a
+qualified lawyer adjudicates these three rows. The ruling must be written into the rubric
+or the catalogue (a new version and hash) before any gate set is authored.
 
 ### PII masking evaluation
 
 | Item | Hash | State |
 |---|---|---|
 | `PII_DETECTION_RUBRIC_3.md` (owner-approved gate rubric) | `1ec2dd48162d50b987468f021729c21f56d81e8840c8e519cb688d10352a0a16` | owner-approved thresholds; labelling not lawyer-reviewed |
-| pii-eval-7 labels (gate, spent; detection_passed) | `66f4de019ed61577bb532e92f96e13e02dfe7477321a63fb899aa8cd9719a52c` | `developer_only` |
+| pii-eval-8 labels (FINAL gate, spent; detection_passed on pii-mask.10, CURRENT) | `74833f2b6b29b5af614bf2ac5b3ecdf3c6311aa13b5ead5366ceabaa6d7f794d` | `developer_only` |
+| pii-eval-7 labels (gate, spent; detection_passed on pii-mask.7, HISTORICAL) | `66f4de019ed61577bb532e92f96e13e02dfe7477321a63fb899aa8cd9719a52c` | `developer_only` |
 | pii-eval-1 labels (development) | `2cdd9ecbe939b02069bf85784dc87583949eaf3772ef710fa7ac86ffdefe44af` | `developer_only` |
 | identity-dev-2 labels (development) | `db346e4709fc1ad31c0b637dc6ae3c01cabd6a5bd47caf0ed72b5b38cb968acc` | `developer_only` |
+| `INPUT_FORMAT_PDF.md` (how gate documents become application input; adds to rubric 3) | `82f1138c7fc8f433cbb16aaba71e0154b59dc4e925f91a2e307629332e249f8f` | developer-written; a reviewer should confirm it adds no labelling rule |
 
 What a reviewer should check in the PII labels:
 
@@ -158,13 +177,18 @@ These were synthetic-demo choices. **None is a decision for real client document
 
 | # | Decision | Options | Recommendation | Consequences |
 |---|---|---|---|---|
-| D1 | Send real-client text to a cloud model at all? | (a) never — AI stays synthetic-only; (b) only after the gates below; (c) only a local model | **(b)**, and not before: a gate result for the CURRENT masking policy (pii-mask.8 has none), the Part 1 trial passed, Part 2 approvals recorded, and written provider evidence of zero data retention and processing region | (a) the AI report never reaches real use. (b) needs every listed item. (c) needs hardware this project does not have (no GPU; a 7B model runs at about 4 tokens/s on CPU) |
+| D1 | Send real-client text to a cloud model at all? | (a) never — AI stays synthetic-only; (b) only after the gates below; (c) only a local model | **(b)**, and not before: a CURRENT gate result (met today: pii-eval-8 on pii-mask.10, but any later processing change makes it historical), the Part 1 trial passed, Part 2 approvals recorded, and written provider evidence of zero data retention and processing region | (a) the AI report never reaches real use. (b) needs every listed item. (c) needs hardware this project does not have (no GPU; a 7B model runs at about 4 tokens/s on CPU) |
 | D2 | Client consent model | (a) lawyer attestation only; (b) per-engagement written consent; (c) per-document consent recorded in the app, revocable | **(c)** for any AI processing, plus the existing lawyer attestation | (c) needs a consent record (who, when, what, withdrawal), and the stage must refuse without it. (a) puts all responsibility on the lawyer with no client choice |
 | D3 | Retention of original upload, extracted text and analysis | a fixed maximum (e.g. 30 / 90 days), or for the life of the engagement; immediate delete on request in every case | **Owner to choose a fixed maximum**, with delete-on-request kept | The period must have a stated legal basis, which the owner and a lawyer confirm. The code supports expiry and purge already, so only the value changes |
 | D4 | Do processing receipts and PII review records outlive deletion? | (a) purge with the source (current); (b) keep a hash-only accountability record for N months | **(b), hash-only**: ids, fingerprints, decisions as offsets, no text | (b) keeps proof of what was sent and approved without keeping content. (a) loses the audit trail at deletion |
-| D5 | Re-gate pii-mask.8 | (a) commission a fresh independent gate set for pii-mask.8; (b) accept pii-mask.7's result | **(a)** before D1(b) | One more synthetic set, frozen and scored once, with no tuning against it |
+| D5 | What a code change after the gate means | Done for now: pii-eval-8 passed on the final pipeline (pii-mask.10, pii-review.2, processing `554429bb…`). Any later change to a processing file makes it historical (the app shows this) | **Re-gate before D1(b) after ANY processing change** | One more synthetic set, frozen and scored once, with no tuning against it |
 | D6 | The GLiNER locator in production | (a) no (current; the gate scored rules-only); (b) add it, which needs its own gate on that pipeline | **(a) for now** | Rules-only leaves more for the lawyer to mark (186 of 404 on pii-eval-7). (b) means model hosting and a new evaluation |
 | D7 | Conversation module retention period (P2.5) | a period | **Owner to choose** | Blocks the P2.5 slice |
+
+`pii_gate_status` reports `evaluation_requirement_met: true` today and
+`authorizes_real_documents: false`, listing what blocks real documents: the qualified-lawyer
+approvals and the owner's consent and retention decisions are not recorded, and the
+configuration is synthetic-only. No evaluation result can switch that.
 
 Until D1–D5 are decided and recorded, the app stays as it is:
 

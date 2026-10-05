@@ -13,10 +13,12 @@ gate records with their freeze pins, and says which state holds:
   * `no_applicable_evaluation` -- nothing evaluated this fingerprint;
   * `records_unreadable` -- a record could not be read: fail closed.
 
-Internal synthetic testing continues in every state. A historical pass never
-authorizes real-client processing (`authorizes_real_documents`); even a
-current pass is necessary, not sufficient -- real documents also stay blocked
-by the synthetic-only configuration and the per-source attestation.
+Internal synthetic testing continues in every state. No state authorizes
+real-client processing: `evaluation_requirement_met` is true only for a
+current pass, and that is ONE requirement; `authorizes_real_documents` stays
+False and `real_documents_blocked_by` lists what else must be decided outside
+this code (qualified-lawyer approvals, the owner's consent and retention
+decisions) besides the synthetic-only configuration and source attestation.
 Reads files only; never raises; codes and hashes only.
 """
 from __future__ import annotations
@@ -118,7 +120,7 @@ def status(root: Path | None = None, now: dict | None = None) -> dict:
         kept = records(root)
     except Exception:                                       # unreadable: fail closed
         return {"state": UNREADABLE, "applicable": None, "historical_passes": [], "current": now,
-                "authorizes_real_documents": False}
+                **_real_documents(UNREADABLE)}
     matching = [r for r in kept if r["pins"] == now]
     passes = [r for r in kept if r["status"] == PASSED]
     if any(r["status"] == PASSED for r in matching):
@@ -134,12 +136,23 @@ def status(root: Path | None = None, now: dict | None = None) -> dict:
             "applicable": {"dataset": applicable["dataset"], "status": applicable["status"]} if applicable else None,
             "historical_passes": [{"dataset": r["dataset"], "masking_version": r["pins"]["masking_version"]}
                                   for r in passes if r not in matching],
-            "current": now, "authorizes_real_documents": authorizes_real_documents(state)}
+            "current": now, **_real_documents(state)}
+
+
+#: What keeps real documents out regardless of any evaluation: decisions and
+#: approvals no code can supply (ANALYZER_HUMAN_REVIEW_PACK.md).
+HUMAN_BLOCKERS = ("qualified_lawyer_approvals_not_recorded", "owner_consent_and_retention_decisions_not_recorded",
+                  "synthetic_only_configuration")
+
+
+def _real_documents(state: str) -> dict:
+    met = state == CURRENT_PASS
+    return {"evaluation_requirement_met": met, "authorizes_real_documents": False,
+            "real_documents_blocked_by": ([] if met else ["no_current_evaluation"]) + list(HUMAN_BLOCKERS)}
 
 
 def authorizes_real_documents(state: str) -> bool:
-    """Only a pass for EXACTLY the running pipeline could ever count toward
-    real-client processing -- and it is necessary, not sufficient: the
-    synthetic-only configuration and the source attestation still apply, and
-    the human approvals are outside this code."""
-    return state == CURRENT_PASS
+    """Never, from this code: even a pass for exactly the running pipeline is
+    one requirement among several that only people can complete."""
+    del state
+    return False

@@ -16,11 +16,11 @@ def _record(tmp, name, status, pins):
         yaml.safe_dump({"dataset": name, "gate": {"status": status}, "pins": pins}), encoding="utf-8")
 
 
-def test_the_repository_today_has_only_a_historical_pass():
+def test_the_repository_today_has_a_current_pass_and_a_historical_one():
     s = gs.status()
-    assert s["state"] == gs.HISTORICAL_PASS_ONLY, s["state"]
+    assert s["state"] == gs.CURRENT_PASS, s["state"]                   # pii-eval-8, pinned to this code
+    assert s["applicable"] == {"dataset": "pii-eval-8", "status": gs.PASSED}
     assert {"dataset": "pii-eval-7", "masking_version": "pii-mask.7"} in s["historical_passes"]
-    assert s["current"]["masking_version"] != "pii-mask.7"
     assert s["authorizes_real_documents"] is False
 
 
@@ -29,7 +29,9 @@ def test_a_pass_pinned_to_exactly_the_running_code_is_current(tmp_path):
     _record(tmp_path, "gate-a", gs.PASSED, now)
     s = gs.status(tmp_path, now)
     assert s["state"] == gs.CURRENT_PASS and s["applicable"] == {"dataset": "gate-a", "status": gs.PASSED}
-    assert s["authorizes_real_documents"] is True          # necessary, not sufficient (see the module)
+    assert s["evaluation_requirement_met"] is True
+    assert s["authorizes_real_documents"] is False                     # one requirement; people decide the rest
+    assert "qualified_lawyer_approvals_not_recorded" in s["real_documents_blocked_by"]
 
 
 def test_a_policy_change_after_a_pass_makes_it_historical(tmp_path):
