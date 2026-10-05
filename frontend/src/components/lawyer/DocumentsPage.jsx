@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Btn, Input } from "./components.jsx";
-import { Icon, I } from "./icons.jsx";
 import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
 import {
     listReviewQueue, reviewDocument, downloadDocumentFile,
@@ -14,81 +13,6 @@ import {
 import { useAuth } from "@/context/AuthContext.jsx";
 import { createGeneration } from "@/lib/attempt.js";
 import { complianceSummary } from "@/lib/complianceSummary.js";
-
-function StatusBadge({ status }) {
-    const s = STATUS_STYLES[status] || STATUS_STYLES.Draft;
-    return (
-        <span style={{
-            background: s.bg, color: s.color, border: `1px solid ${s.border}`,
-            borderRadius: 20, padding: "3px 10px", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap"
-        }}>{status}</span>
-    );
-}
-
-function EditMenu({ doc, onClose, anchorRef }) {
-    const menuRef = useRef(null);
-    const [pos, setPos] = useState({ top: 0, left: 0 });
-
-    useEffect(() => {
-        if (anchorRef?.current && menuRef?.current) {
-            const rect = anchorRef.current.getBoundingClientRect();
-            const menu = menuRef.current;
-            const vw = window.innerWidth;
-            let left = rect.right + 8;
-            if (left + 220 > vw) left = rect.left - 228;
-            setPos({ top: rect.top + window.scrollY, left });
-        }
-    }, []);
-
-    useEffect(() => {
-        const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target) && !anchorRef?.current?.contains(e.target)) onClose(); };
-        setTimeout(() => document.addEventListener("mousedown", handler), 0);
-        return () => document.removeEventListener("mousedown", handler);
-    }, []);
-
-    return (
-        <>
-            <div style={{ position: "fixed", inset: 0, zIndex: 999 }} onClick={onClose} />
-            <div ref={menuRef} style={{
-                position: "fixed", top: pos.top, left: pos.left, zIndex: 1000,
-                background: "#fff", borderRadius: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08)",
-                border: "1px solid #e5e7eb", width: 220, overflow: "hidden",
-                animation: "menuPop 0.15s cubic-bezier(.34,1.56,.64,1)"
-            }}>
-                <div style={{ padding: "10px 14px 6px", borderBottom: "1px solid #f1f5f9" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>Editing</div>
-                    <div style={{ fontSize: 12, color: "#374151", fontWeight: 600, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.title}</div>
-                </div>
-                {EDIT_MENU.map((group, gi) => (
-                    <div key={gi}>
-                        <div style={{ padding: "6px 14px 2px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>{group.group}</div>
-                        {group.items.map((item, ii) => (
-                            <button key={ii} onClick={onClose} style={{
-                                display: "flex", alignItems: "center", gap: 9, width: "100%",
-                                padding: "6px 14px", border: "none", background: "none", cursor: "pointer",
-                                color: item.danger ? "#ef4444" : "#374151", fontSize: 12.5,
-                                fontWeight: item.bold ? 700 : item.italic ? 400 : 500,
-                                fontStyle: item.italic ? "italic" : "normal",
-                                textDecoration: item.underline ? "underline" : "none",
-                                textAlign: "left", transition: "background 0.1s",
-                            }}
-                                onMouseEnter={e => e.currentTarget.style.background = item.danger ? "#fef2f2" : "#f8fafc"}
-                                onMouseLeave={e => e.currentTarget.style.background = "none"}
-                            >
-                                <span style={{ width: 18, textAlign: "center", fontSize: 13 }}>{item.icon}</span>
-                                <span style={{ flex: 1 }}>{item.label}</span>
-                                {item.shortcut && <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "monospace" }}>{item.shortcut}</span>}
-                            </button>
-                        ))}
-                        {gi < EDIT_MENU.length - 1 && <div style={{ height: 1, background: "#f1f5f9", margin: "4px 0" }} />}
-                    </div>
-                ))}
-            </div>
-        </>
-    );
-}
-
-
 
 // ─── THEME ────────────────────────────────────────────────────
 
@@ -209,52 +133,6 @@ function Stepper({ step, t }) {
                     </div>
                 );
             })}
-        </div>
-    );
-}
-
-// ─── TOPBAR ───────────────────────────────────────────────────
-function DocTopbar({ title, step, onBack, onSave, onContinue, t, isDark, setIsDark, showContinue = true }) {
-    return (
-        <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "10px 24px", background: t.surface, borderBottom: `1px solid ${t.border}`
-        }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{
-                        width: 30, height: 30, borderRadius: 8,
-                        background: `linear-gradient(135deg,${t.primary},#2C606E)`,
-                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16
-                    }}>⚖️</div>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>
-                        Attorney<span style={{ color: t.primary }}>.AI</span>
-                        <span style={{ fontSize: 10, color: t.textFaint, marginLeft: 6, fontWeight: 400 }}>Lawyer</span>
-                    </span>
-                </div>
-                <div style={{ width: 1, height: 18, background: t.border }} />
-                <div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{title}</div>
-                    <div style={{ fontSize: 10, color: t.textFaint }}>Tuesday, March 10, 2026</div>
-                </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {onBack && <Btn variant="secondary" size="sm" onClick={onBack}>← Back</Btn>}
-                {onSave && <Btn variant="ghost" size="sm" onClick={onSave}>💾 Save Draft</Btn>}
-                {showContinue && onContinue && <Btn size="sm" onClick={onContinue}>Continue →</Btn>}
-                <button onClick={() => setIsDark(d => !d)}
-                    style={{
-                        padding: "4px 10px", borderRadius: 20, border: `1px solid ${t.border}`,
-                        background: t.cardHi, color: t.textMuted, fontSize: 10, cursor: "pointer", fontFamily: "inherit"
-                    }}>
-                    {isDark ? "☀️" : "🌙"}
-                </button>
-                <div style={{
-                    width: 30, height: 30, borderRadius: "50%", background: t.primaryGlow,
-                    border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center",
-                    justifyContent: "center", fontSize: 12, color: t.primary, cursor: "pointer"
-                }}>🔔</div>
-            </div>
         </div>
     );
 }

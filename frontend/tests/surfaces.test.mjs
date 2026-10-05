@@ -25,10 +25,12 @@ import { fileURLToPath } from "node:url";
 const src = (p) => readFileSync(
     fileURLToPath(new URL(`../src/${p}`, import.meta.url)), "utf8");
 
+// The case-workspace AI tab (CasesPage `WorkspaceAI`) was a third surface. It
+// was never rendered — no tab ever reached it — and was deleted as dead code
+// (LAWYER_DASHBOARD_FIX_PLAN 3.10). The lawyer's AI surface is the AI Legal page.
 const SURFACES = {
     "client chatbot": "components/client/ModChatbot.jsx",
     "lawyer AI Legal page": "components/lawyer/AILegalPage.jsx",
-    "case workspace AI tab": "components/lawyer/CasesPage.jsx",
 };
 
 for (const [name, path] of Object.entries(SURFACES)) {
@@ -74,15 +76,6 @@ for (const [name, path] of Object.entries(SURFACES)) {
             `${name} builds a source URL client-side`);
     });
 }
-
-test("the workspace AI tab renders the trust data it fetches", () => {
-    // It stored citations, claims and confidence on every message and displayed
-    // only the answer text.
-    const code = src("components/lawyer/CasesPage.jsx");
-    assert.match(code, /WorkspaceTrust/);
-    assert.match(code, /claimWarnings|citationSummary/,
-        "warnings must be computed, not just stored");
-});
 
 test("only the lawyer surfaces can open the audit view", () => {
     // The client is shown the FINDINGS. The audit view is the machinery behind

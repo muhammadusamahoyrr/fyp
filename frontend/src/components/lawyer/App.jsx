@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { DARK, LIGHT, ThemeCtx, ToggleCtx, CaseCtx, NotifCtx } from "./theme.js";
 import { ToastContainer } from "@/components/shared/Toast.jsx";
 import { injectGS } from "./globalStyles.js";
-import { Sidebar, Topbar, ActiveCaseBanner } from "./layout.jsx";
+import { Sidebar, ActiveCaseBanner } from "./layout.jsx";
 import { Icon, I } from "./icons.jsx";
 import { DashboardPage } from "./DashboardPage.jsx";
 import { CasesPage } from "./CasesPage.jsx";
@@ -25,8 +25,6 @@ import { DisputesInboxPage } from "./DisputesInboxPage.jsx";
 import { OnboardingPage, ONBOARDED_KEY, isLawyerOnboarded } from "./OnboardingPage.jsx";
 import { getMe, getNotifications, listReviewInbox, markNotificationRead, markAllNotificationsRead, openNotificationSocket } from "@/lib/api.js";
 
-// LoginPage not yet implemented
-const LoginPage = () => null;
 const DocumentsPage = DocWorkflowApp;
 const pageMap = { dashboard: DashboardPage, cases: CasesPage, documents: DocumentsPage, appointments: AppointmentsPage, agreements: AgreementsPage, causelist: CauselistPage, caselaw: CaseLawPage, payments: PaymentsPage, clients: ClientsPage, "ai-legal": AILegalPage, "doc-automation": DocAutomationPage, "doc-analyzer": DocAnalyzerPage, "review-queue": ReviewQueuePage, "overseas-disputes": DisputesInboxPage, profile: ProfilePage, settings: SettingsPage, onboarding: OnboardingPage };
 
@@ -154,21 +152,9 @@ export default function App({ initialPage = "dashboard" }) {
     const caseCtxVal = { activeCase, setActiveCase, openCaseId, setOpenCaseId, docs, setDocs, setPage };
     const notifCtxVal = { notifs, addNotif, clearNotif, clearAll };
 
-    if (page === "login") return (
-        <ToastContainer theme={t}>
-            <ThemeCtx.Provider value={t}><ToggleCtx.Provider value={toggle}>
-                <CaseCtx.Provider value={caseCtxVal}><NotifCtx.Provider value={notifCtxVal}>
-                    <LoginPage onLogin={() => {
-                        let onboarded = false;
-                        try { onboarded = localStorage.getItem(ONBOARDED_KEY) === "1"; } catch { }
-                        setPage(onboarded ? "dashboard" : "onboarding");
-                    }} />
-                </NotifCtx.Provider></CaseCtx.Provider>
-            </ToggleCtx.Provider></ThemeCtx.Provider>
-        </ToastContainer>
-    );
-
     const Page = pageMap[page] || DashboardPage;
+    // Gates only the active-case banner now (off by design). The Topbar it also
+    // gated was never shown and has been removed with its inert search box.
     const hideTopbar = true;
 
     return (
@@ -206,7 +192,6 @@ export default function App({ initialPage = "dashboard" }) {
                             </>
                         )}
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0, position: "relative", zIndex: 1 }}>
-                            {!hideTopbar && <Topbar page={page} collapsed={collapsed} setCollapsed={setCollapsed} toggleTheme={toggle} />}
                             {/* Active case banner — visible on all pages except ai-legal */}
                             {activeCase && !hideTopbar && page !== "ai-legal" && (
                                 <ActiveCaseBanner caseId={activeCase} onClear={() => { setActiveCaseState(null); setOpenCaseId(null); }} />

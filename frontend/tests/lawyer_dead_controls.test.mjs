@@ -268,3 +268,21 @@ test("3.9 Case workspace: no browser-only Documents/Timeline tabs or hearing edi
     assert.ok(!texts.some(t => /Edit|🗑/.test(t)), "local-only hearing edit/delete is still offered");
     await view.unmount();
 });
+
+/* ── 3.10 Dead code ───────────────────────────────────────────────────── */
+
+test("3.10 never-rendered components are gone, not just hidden", async () => {
+    const { readFileSync } = await import("node:fs");
+    const read = (f) => readFileSync(new URL(`../src/components/lawyer/${f}`, import.meta.url), "utf8");
+    const gone = {
+        "CasesPage.jsx": ["function WorkspaceAI(", "function WorkspaceTrust(", "function DocumentsTab(", "function TimelineTab("],
+        // EditMenu/StatusBadge referenced EDIT_MENU / STATUS_STYLES, which do not exist.
+        "DocumentsPage.jsx": ["function EditMenu(", "function StatusBadge(", "function DocTopbar("],
+        "App.jsx": ["const LoginPage", 'page === "login"'],
+        "layout.jsx": ["function Topbar("],
+    };
+    for (const [file, needles] of Object.entries(gone)) {
+        const src = read(file);
+        for (const n of needles) assert.ok(!src.includes(n), `${file} still contains ${n}`);
+    }
+});
