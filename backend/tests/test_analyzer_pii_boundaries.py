@@ -158,3 +158,28 @@ def test_the_simulated_reviewer_never_submits_two_decisions_on_one_span():
         assert len(spans) == len(set(spans)), mode
         r = ev.score_document(d, send_capture([]), mode=mode, pipeline="production-rules-only")
         assert not any(x.startswith("api_rejected") for x in r["block_reasons"]), (mode, r["block_reasons"])
+
+
+# ── found by the end-to-end lawyer flow (tests/test_analyzer_lawyer_flow.py) ──
+
+def test_people_from_a_two_column_label_row_are_masked_whole_where_they_repeat():
+    """The repeat search used the RAW label value ("Nargis Akhtar    Tenant:
+    Faisal Mehmood Khan"), so a later "Faisal Mehmood Khan pays Nargis
+    Akhtar" was masked word by word: seven tokens for two people."""
+    text = ("Landlord: Nargis Akhtar    Tenant: Faisal Mehmood Khan\n"
+            "Faisal Mehmood Khan pays Nargis Akhtar Rs. 40,000 within 7 days of each month.\n")
+    m, _ = masked(text)
+    names = {t for _, _, k, t in m.masked_spans if k == "NAME"}
+    assert len(names) == 2, [(text[a:b], t) for a, b, k, t in m.masked_spans]
+    from tests.test_analyzer_pii_identity import token_at
+    assert token_at(m, at(text, "Nargis Akhtar")) == token_at(m, at(text, "Nargis Akhtar", 1))
+    assert token_at(m, at(text, "Faisal Mehmood Khan")) == token_at(m, at(text, "Faisal Mehmood Khan", 1))
+    assert "within 7 days" in sent(m) and "Rs. 40,000" in sent(m)
+
+
+def test_a_currency_or_calendar_word_after_a_masked_name_is_not_its_continuation():
+    text = ("Landlord: Nargis Akhtar\nThe Tenant pays Nargis Akhtar Rs. 40,000 within 7 days.\n"
+            "Rent is paid to Nargis Akhtar PKR 5,000 extra, and to Nargis Akhtar January to March.\n")
+    m, _ = masked(text)
+    assert not [u for u in m.uncertain if u["reason"] == "name_continues"], \
+        [(u["reason"], text[u["start"]:u["end"]]) for u in m.uncertain]

@@ -603,7 +603,11 @@ _TITLE_SURNAME = re.compile(r"\b(?P<given>[A-Z][a-z'’-]+)[ ]+(?:Sheikh|Malik|S
 #: Urdu: never part of a person's name beside a masked one.
 _LEAD_WORDS = {"if", "when", "where", "while", "after", "before", "unless", "until", "once", "since", "so", "then",
                "also", "both", "either", "neither", "however", "thereafter", "agar", "jab", "magar", "lekin", "aur",
-               "ya", "phir", "surety", "sureties", "guarantor", "nominee", "heir", "heirs"}
+               "ya", "phir", "surety", "sureties", "guarantor", "nominee", "heir", "heirs",
+               # currency and calendar words follow a name ("pays Nargis Akhtar Rs. 40,000")
+               "rs", "pkr", "rupees", "rupee", "usd", "dollars", "january", "february", "march", "april", "may",
+               "june", "july", "august", "september", "october", "november", "december", "monday", "tuesday",
+               "wednesday", "thursday", "friday", "saturday", "sunday"}
 
 
 def _plain_word(word: str, skip) -> bool:

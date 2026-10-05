@@ -27,7 +27,7 @@ from pathlib import Path
 
 from app.services.analyzer import pii_layers
 
-MASKING_VERSION = "pii-mask.7"
+MASKING_VERSION = "pii-mask.8"
 
 
 def _policy_sha256() -> str:
@@ -198,6 +198,15 @@ def _repeats(text: str, x: int, y: int, kind: str) -> list[tuple[int, int]]:
     return sorted(out)
 
 
+def _name_pieces(text: str, start: int, end: int) -> set[str]:
+    """The people a rule's name value really holds, as their cleaned
+    spellings: "Nargis Akhtar    Tenant: Faisal Mehmood Khan" is two names.
+    Their repeats are then found whole (pii-mask.8: the raw value was looked
+    for, so a later "Faisal Mehmood Khan" was masked word by word)."""
+    return {text[a:b].strip() for a, b, k in pii_layers.clean_locator_name(text, start, end)
+            if k == "NAME" and len(pii_layers.name_parts(text[a:b])) >= 2 and not _is_firm(text[a:b])}
+
+
 def _spans(text: str, extra: list[tuple[int, int, str]] = (), keep: frozenset = frozenset(),
            repeat_flags: list | None = None) -> list[tuple[int, int, str]]:
     """(start, end, kind) for every confident value in the whole text, plus
@@ -224,6 +233,7 @@ def _spans(text: str, extra: list[tuple[int, int, str]] = (), keep: frozenset = 
                 continue
             found.append((m.start("name"), m.end("name"), "NAME"))
             names.add(name)
+            names.update(_name_pieces(text, m.start("name"), m.end("name")))
     for name in names:             # every other exact occurrence of a confident name
         for m in re.finditer(rf"(?<![\w]){re.escape(name)}(?![\w])", text):
             found.append((m.start(), m.end(), "NAME"))
@@ -250,6 +260,7 @@ def _spans(text: str, extra: list[tuple[int, int, str]] = (), keep: frozenset = 
         if kind == "NAME" and text[x:y].strip() and not _is_firm(text[x:y]):
             names.add(text[x:y].strip())
             names.add(re.sub(r"-\n", "", text[x:y].strip()))       # "Mah-\nnoor" is also written "Mahnoor"
+            names.update(_name_pieces(text, x, y))
     for name in names:
         for m in re.finditer(rf"(?<![\w]){re.escape(name)}(?![\w])", text):
             found.append((m.start(), m.end(), "NAME"))

@@ -602,3 +602,68 @@ the review is mandatory.
 
 A gate freeze refuses uncommitted pipeline files. Scoring refuses any change
 since the freeze, and refuses a locator.
+
+### The gate scored with the production pipeline: pii-eval-7 (2026-10-05)
+
+pii-eval-7 was the first gate scored with `production-rules-only` (`98a7e6d`). A fresh
+author wrote it from the unchanged rubric 3; it has 48 documents and 402 details. It was
+frozen on `582eac7` with these pins:
+
+- policy pii-mask.7 `339cc2f3…`;
+- production code `d1768c0b…`;
+- harness `583996cd…`;
+- the evaluated settings.
+
+It was scored once, offline, with a fake provider.
+
+**Result: `detection_passed`.** In review mode:
+
+| Measure | Result |
+|---|---|
+| leaks | 0 |
+| coverage | 1.0 |
+| address coverage | 1.0 |
+| party consistency | 1.0 |
+| person consistency | 1.0 |
+| deadlines | 1.0 |
+| sent | 0.75 (12 Urdu-script documents blocked by policy) |
+
+The report-only modes show why the review is mandatory:
+
+- **auto:** coverage 0.64, 31 leaks;
+- **flag-only:** 59 leaks.
+
+The flag-only report also had 2 documents with `api_rejected:overlapping_spans`. This may
+mean two partially overlapping flags exist that a lawyer could not both decide. Review mode
+was unaffected, and the sealed documents cannot be read to confirm it, so it is an OPEN
+risk.
+
+**Reviewer work.** The simulated reviewer:
+
+- marked 186 of 404 details itself, because masking missed them;
+- made 248 identity decisions;
+- confirmed 115 people.
+
+Before review, 1 masked span held two people.
+
+**What the result does and does not mean:**
+
+- It shows the review MECHANISM can reach zero leaks when the reviewer catches what
+  masking misses.
+- It does not show a real lawyer will catch 186 missed details; that needs the
+  usability trial.
+- It is a synthetic engineering result, not permission to process real documents.
+
+**Changed since the gate: pii-mask.8 (NOT gated).** The end-to-end lawyer-flow test found
+two defects after the gate. Both are fixed test-first:
+
+1. **Repeats masked word by word.** People from a two-column label row ("Landlord: A
+   Tenant: B") were masked word by word where they were repeated: 7 tokens for 2 people.
+   The repeat search used the raw label value; it now uses the cleaned names.
+2. **Currency and calendar words flagged.** "Rs" and month names after a name were
+   flagged as `name_continues`.
+
+The current policy is pii-mask.8 (`327d8e37…`). pii-eval-7 describes pii-mask.7, so
+pii-mask.8 has no gate result of its own. Per the evaluation rules, a further gate set
+was NOT generated after this pass. Re-gating pii-mask.8 needs a fresh independent set,
+and that is the owner's call.
