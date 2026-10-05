@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -99,6 +100,33 @@ def _port_holder(host: str, port: int) -> int | None:
     return None
 
 
+_OVERLAY_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+
+def read_env_overlay(path: Path) -> dict[str, str]:
+    """KEY=VALUE lines for THIS backend process only (`start --env-overlay`).
+
+    Process environment beats `.env` in the app's settings, so an overlay
+    changes this run without editing `.env`. It exists because PowerShell
+    cannot hand a child an EMPTY variable (`$env:REDIS_URL = ""` deletes it),
+    and blanking a hosted service is exactly what a local run needs. Blank
+    lines and `#` comments are ignored; values may be quoted; a malformed line
+    is an error, never silently skipped."""
+    out: dict[str, str] = {}
+    for n, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if not sep or not _OVERLAY_KEY.match(key):
+            raise ValueError(f"{path.name}:{n}: expected KEY=VALUE")
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        out[key] = value
+    return out
+
+
 def start(args) -> int:
     if (pid := _read_pid()):
         print(f"already running (pid {pid}). Use `stop` first.")
@@ -120,6 +148,16 @@ def start(args) -> int:
         return 1
 
     env = os.environ.copy()
+    if args.env_overlay:
+        try:
+            overlay = read_env_overlay(Path(args.env_overlay))
+        except (OSError, ValueError) as exc:
+            print(f"  REFUSING TO START: env overlay unreadable: {exc}")
+            return 1
+        env.update(overlay)
+        # Names only: values can be keys or connection strings.
+        print(f"  env overlay {Path(args.env_overlay).name}: {len(overlay)} setting(s) for this run "
+              f"({', '.join(sorted(overlay))}); .env is unchanged.")
     if args.local_only:
         env["LLM_LOCAL_ONLY"] = "true"
         print("  LLM_LOCAL_ONLY=true — the cloud chain is disabled; a local "
@@ -225,6 +263,8 @@ if __name__ == "__main__":
     s.add_argument("--port", type=int, default=8000)
     s.add_argument("--local-only", action="store_true",
                    help="disable the paid cloud chain entirely")
+    s.add_argument("--env-overlay", default=None, metavar="FILE",
+                   help="KEY=VALUE settings for this run only (e.g. .env.analyzer-demo.local); .env is not edited")
     s.add_argument("uvicorn_args", nargs="*")
     s.set_defaults(func=start)
 

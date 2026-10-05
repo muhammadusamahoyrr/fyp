@@ -89,7 +89,10 @@ async def refresh() -> list[str]:
             "503 until this is fixed and the server restarted.",
             len(problems), "; ".join(problems))
     else:
-        logger.info("doc_analyzer_ready")
+        from app.core.config import settings
+        ai = settings.analyzer_ai_provider if settings.analyzer_ai else "off"
+        # e.g. "doc_analyzer_ready ai=simulated" -- the simulated provider is visible at startup.
+        logger.info("doc_analyzer_ready ai=%s", ai)
     return problems
 
 

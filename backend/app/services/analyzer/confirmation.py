@@ -498,6 +498,12 @@ async def _ai_layer(run: dict) -> tuple[dict, dict]:
                                            summary.get("pii")),
           # The run's PII masking: version, policy hash, counts -- never values.
           "pii": summary.get("pii")}
+    if provenance.get("simulated"):
+        # The simulated provider (simulated_provider.py): no model produced these items, so no
+        # model evaluation applies -- say so instead of showing the live
+        # model's record.
+        ai.update(simulated=True, simulation_label=provenance.get("label"),
+                  evaluation={"status": "simulated_response"})
     return ai, by_kind
 
 

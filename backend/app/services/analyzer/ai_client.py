@@ -103,6 +103,18 @@ async def complete(messages: list[dict], *, max_tokens: int = 4096,
     if sum(len(str(m.get("content", ""))) for m in messages) > MAX_PROMPT_CHARS:
         raise AIError(PROMPT_TOO_LARGE)
     pinned = settings.analyzer_ai_model
+    from app.services.analyzer import simulated_provider
+    simulated = settings.analyzer_ai_provider == ai_config.PROVIDER_SIMULATED
+    if simulated:
+        # The simulated provider (chosen by configuration only): the in-process
+        # simulation answers, nothing reaches the network and no key is sent.
+        # Any other transport is refused, and so is a per-call model.
+        transport = transport if transport is not None else simulated_provider.transport()
+        if not isinstance(transport, simulated_provider.SimulatedTransport) or model is not None:
+            raise AIError(NOT_CONFIGURED)
+        pinned = simulated_provider.MODEL
+    elif isinstance(transport, simulated_provider.SimulatedTransport):
+        raise AIError(NOT_CONFIGURED)     # the simulation never answers for a real provider
     if model is not None:
         if model not in ai_config.allowlist(settings.analyzer_ai_model_allowlist):
             raise AIError(NOT_CONFIGURED)
@@ -117,13 +129,14 @@ async def complete(messages: list[dict], *, max_tokens: int = 4096,
         raise AIError(APPROVAL_CHANGED)
     body = {"model": pinned, "messages": messages, "temperature": 0,
             "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
-    headers = {"Authorization": f"Bearer {settings.groq_api_key}",
-               "Content-Type": "application/json"}
+    headers = ({"Content-Type": "application/json"} if simulated else
+               {"Authorization": f"Bearer {settings.groq_api_key}", "Content-Type": "application/json"})
     began = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=transport,
                                      follow_redirects=False) as client:
-            response = await client.post(GROQ_CHAT_URL, json=body, headers=headers)
+            response = await client.post(simulated_provider.URL if simulated else GROQ_CHAT_URL,
+                                         json=body, headers=headers)
     except httpx.TimeoutException:
         raise _fail(TIMEOUT, pinned, began) from None
     except httpx.HTTPError:

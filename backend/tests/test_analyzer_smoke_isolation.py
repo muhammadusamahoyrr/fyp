@@ -1,7 +1,9 @@
-"""The offline browser smoke tool (scripts/analyzer_browser_smoke.py) cannot be
-switched on in production: no route, setting or environment flag selects a
-fake provider; normal startup leaves the provider hooks unset; the tool
-refuses a non-loopback database."""
+"""Test-only AI hooks cannot reach the running application: the offline
+browser smoke tool (scripts/analyzer_browser_smoke.py) and the backup demo
+launcher are scripts, not routes or settings; normal startup leaves the
+provider hooks unset; no app code sets them; the smoke tool refuses a
+non-loopback database. The one configurable non-Groq provider is the
+explicit, opt-in ANALYZER_AI_PROVIDER=simulated (test_analyzer_simulated_provider.py)."""
 from __future__ import annotations
 
 import re
@@ -22,12 +24,13 @@ def test_no_setting_selects_a_fake_provider():
     from app.core.config import Settings
     names = set(Settings.model_fields)
     assert not [n for n in names if re.search(r"fake|mock|smoke|transport", n, re.I)]
+    assert Settings.model_fields["analyzer_ai_provider"].default == "groq"     # simulated: explicit opt-in
 
 
 def test_no_app_code_sets_the_hook_or_knows_the_smoke_tool():
     for path in (BACKEND / "app").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
-        assert "analyzer_browser_smoke" not in text, path
+        assert not re.search(r"analyzer_browser_smoke|analyzer_demo", text), path
         for m in re.finditer(r"^\s*(?:[\w.]+\.)?TRANSPORT\s*=\s*(.+)$", text, re.M):
             assert m.group(1).split("#")[0].strip().startswith("None"), (path, m.group(0))
 

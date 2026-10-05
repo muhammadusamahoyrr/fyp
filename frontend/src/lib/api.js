@@ -2069,6 +2069,11 @@ export async function getAnalysisReport(runId) {
   return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/report`);
 }
 
+/* The owner-only processing receipt: ids, hashes, versions and codes only. */
+export async function getProcessingReceipt(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/processing-receipt`);
+}
+
 export async function cancelAnalysisRun(runId) {
   return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
 }

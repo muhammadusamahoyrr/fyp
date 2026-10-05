@@ -24,6 +24,7 @@ import { Btn, Card, Label } from "@/components/client/documents/ui.jsx";
 import DraftingReview from "@/components/analyzer/DraftingReview.jsx";
 import MaskingNote from "@/components/analyzer/MaskingNote.jsx";
 import PiiConfirmation, { PII_REVIEW_REASONS } from "@/components/analyzer/PiiConfirmation.jsx";
+import ProcessingReceipt from "@/components/analyzer/ProcessingReceipt.jsx";
 import {
     cancelAnalysisRun, confirmAnalysisDocument, confirmAnalysisOcr, confirmAnalysisTerms,
     createAnalysis, deleteAnalysis, getAnalysisReport, getAnalysisRun, getAnalysisText,
@@ -236,6 +237,15 @@ function AiNotice({ t, ai }) {
     }
     return (
         <Card role="note" data-ai-status={ai.status} style={{ padding: 12, fontSize: 13 }}>
+            {ai.simulated && (
+                <div role="alert" data-ai-simulated style={{ fontWeight: 800, fontSize: 14, marginBottom: 6 }}>
+                    {ai.simulation_label || "Simulated AI response — demo mode"}
+                    <div style={{ fontWeight: 400, fontSize: 12.5 }}>
+                        No AI model produced these items: an offline simulation answered the exact request you
+                        approved, so the demo runs without any external service. They are placeholders, not analysis.
+                    </div>
+                </div>
+            )}
             <div data-ai-labels style={{ fontSize: 12, color: t.textMuted }}>{AI_LABELS.join(" · ")}</div>
             <div style={{ marginTop: 4 }}>{ai.notice}</div>
             {ai.status === "partial" && (
@@ -280,9 +290,10 @@ export function SecurityNotice({ t, security }) {
     );
 }
 
-function AiItem({ t, kind, item }) {
+function AiItem({ t, kind, item, simulated }) {
     return (
         <Card data-ai-item={kind} style={{ padding: 12, marginBottom: 8 }}>
+            {simulated && <div data-ai-item-simulated style={{ fontSize: 11.5, fontWeight: 700 }}>Simulated — demo mode</div>}
             {kind === "model_risks" && (
                 <>
                     <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -321,6 +332,7 @@ export function evaluationText(evaluation) {
         evaluated: `Evaluated on ${e.evaluated_at} with ${e.model}.`,
         not_in_evaluation_dataset: "Not evaluated: this kind of document is not in the evaluation set.",
         record_unavailable: "The evaluation record could not be read, so how well these notes work is unknown.",
+        simulated_response: "Not applicable: this is a simulated demo response. No AI model produced it, so no model evaluation applies.",
     }[e.status] || "How well these notes work is unknown.";
     const labels = {
         developer_only: "Evaluation labels were written by the developer and have not been reviewed by a lawyer.",
@@ -349,7 +361,7 @@ function AiTab({ t, report, kind }) {
                 {evaluationText(ai.evaluation)}
             </div>
             <AiNotice t={t} ai={ai} />
-            {usable && items.map(item => <AiItem key={item.fingerprint} t={t} kind={kind} item={item} />)}
+            {usable && items.map(item => <AiItem key={item.fingerprint} t={t} kind={kind} item={item} simulated={Boolean(ai.simulated)} />)}
             {usable && items.length === 0 && <div data-ai-empty style={{ fontSize: 13, color: t.textMuted }}>{TAB_EMPTY[kind]}</div>}
         </div>
     );
@@ -617,6 +629,7 @@ function RunView({ t, runId, onBack }) {
             {status === "done" && run.engine !== HYPOTHESIS_ENGINE && (
                 <>
                     <ReportView t={t} runId={runId} onChanged={reload} />
+                    <ProcessingReceipt t={t} runId={runId} />
                     <TextViewer t={t} runId={runId} />
                 </>
             )}

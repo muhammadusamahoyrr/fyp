@@ -554,3 +554,81 @@ test("the AI layer says plainly why it did not run on an unscanned document", ()
     assert.match(live.AI_UNAVAILABLE_TEXT.security_scan_not_recorded, /Start a new analysis/);
     assert.match(live.errorText("security_scan_mismatch"), /security check did not match/);
 });
+
+// ── offline demo mode: a simulated response is labelled everywhere ─────────
+
+const SIMULATED = { ...WITH_AI, ai: { ...WITH_AI.ai, provider: "simulated", model: "demo-simulated-1", simulated: true,
+    simulation_label: "Simulated AI response — demo mode", evaluation: { status: "simulated_response" } } };
+
+test("a simulated demo response is labelled as simulated, item by item, with no model evaluation claimed", async () => {
+    const p = await openReport(SIMULATED);
+    await click(tab(p.container, "obligations"));
+    const pane = p.container.querySelector('[data-ai-tab="obligations"]');
+    assert.match(pane.querySelector("[data-ai-simulated]").textContent, /Simulated AI response — demo mode/);
+    assert.match(pane.querySelector("[data-ai-simulated]").textContent, /No AI model produced these items/);
+    const items = pane.querySelectorAll('[data-ai-item="obligations"]');
+    assert.ok(items.length > 0 && [...items].every(i => i.querySelector("[data-ai-item-simulated]")));
+    assert.match(pane.querySelector("[data-ai-evaluation]").textContent, /Not applicable: this is a simulated demo response/);
+    assert.doesNotMatch(pane.textContent, /groq|gpt-oss/i);
+    await p.unmount();
+});
+
+test("a live response carries no simulation label", async () => {
+    const p = await openReport(WITH_AI);
+    await click(tab(p.container, "obligations"));
+    assert.equal(p.container.querySelector("[data-ai-simulated]"), null);
+    assert.equal(p.container.querySelector("[data-ai-item-simulated]"), null);
+    await p.unmount();
+});
+
+// ── the processing receipt view ────────────────────────────────────────────
+
+const SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+const receiptOf = (provider, status, extra = {}) => ({
+    receipt_version: "receipt.1", run_id: "r1", status: "done", engine: "ai-report.1",
+    attempts: [{ stage: "ai_report", fence: 1, attempt_seq: 1, outcome_seq: status === "delivery_or_outcome_unknown" ? null : 2,
+                 status, label: status === "delivery_or_outcome_unknown"
+                     ? "Delivery/outcome unknown: the request may have been sent, but no outcome was recorded." : null,
+                 request_sha256: SHA }],
+    entries: [{ seq: 0, kind: "not_sent", stage: "ai_report", reason: "pii_review_required" },
+              { seq: 1, kind: "ai_attempt", stage: "ai_report", provider, model: provider === "simulated" ? "demo-simulated-1" : "openai/gpt-oss-120b",
+                masking: { masking_version: "pii-mask.10", policy_sha256: "x", counts: { NAME: 2 } },
+                sent: { request_sha256: SHA, sentence_count: 4, sentence_ids: ["s0", "s1", "s2", "s3"] } }],
+    chain: { intact: true, entries: 3 }, notice: "Ids, hashes, versions and codes only.", ...extra });
+
+async function openReceipt(receipt) {
+    api.__respond("getProcessingReceipt", { data: receipt });
+    const p = await openReport(WITH_AI);
+    await click(p.container.querySelector("[data-receipt-open]"));
+    return { ...p, card: p.container.querySelector('[data-receipt="open"]') };
+}
+
+test("the receipt shows a simulated demo attempt: fingerprint, provider, masking, sentences and integrity", async () => {
+    const p = await openReceipt(receiptOf("simulated", "complete"));
+    assert.equal(p.card.dataset.receiptMode, "simulated");
+    assert.match(p.card.querySelector("[data-receipt-simulated]").textContent, /No external AI service was called/);
+    assert.match(p.card.querySelector("[data-receipt-fingerprint]").textContent, /a1b2c3d4e5f60718…/);
+    assert.match(p.card.querySelector("[data-receipt-provider]").textContent, /Simulated provider: simulated · model demo-simulated-1/);
+    assert.match(p.card.textContent, /Masking: pii-mask\.10 · sentences sent: 4/);
+    assert.match(p.card.querySelector('[data-receipt-chain="intact"]').textContent, /hash chain intact/);
+    assert.match(p.card.textContent, /not proof that a provider deleted anything/);
+    assert.match(p.card.querySelector("[data-receipt-not-sent]").textContent, /not sent \(pii_review_required\)/);
+    await p.unmount();
+});
+
+test("the receipt says when delivery or outcome is unknown, when the chain is broken, and when the provider is live", async () => {
+    let p = await openReceipt(receiptOf("groq", "delivery_or_outcome_unknown"));
+    assert.equal(p.card.dataset.receiptMode, "live");
+    assert.match(p.card.querySelector("[data-receipt-unknown]").textContent, /Delivery\/outcome unknown/);
+    assert.equal(p.card.querySelector("[data-receipt-simulated]"), null);
+    await p.unmount();
+    p = await openReceipt(receiptOf("simulated", "complete", { chain: { intact: false, entries: 3, reason: "chain_broken" } }));
+    assert.match(p.card.querySelector('[data-receipt-chain="broken"]').textContent, /Integrity check FAILED/);
+    await p.unmount();
+});
+
+test("the receipt view shows no raw values: no sentence ids list, policy hash or counts", async () => {
+    const p = await openReceipt(receiptOf("simulated", "complete"));
+    assert.doesNotMatch(p.card.textContent, /s0|policy_sha256|NAME/);
+    await p.unmount();
+});
