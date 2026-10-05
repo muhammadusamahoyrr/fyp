@@ -196,3 +196,14 @@ test("3.7 Dashboard: case rows carry no inert overflow button", async () => {
     assert.equal(row.querySelectorAll("button").length, 0);
     await view.unmount();
 });
+
+/* ── 3.8a Profile ─────────────────────────────────────────────────────── */
+
+test("3.8a Profile: no camera button for an avatar upload that does not exist", async () => {
+    const { ProfilePage } = await import("../src/components/lawyer/ProfilePage.jsx");
+    const view = await mountPage(ProfilePage);
+    // The only buttons are real actions (Save Changes); none is icon-only.
+    const iconOnly = [...view.container.querySelectorAll("button")].filter(b => !b.textContent.trim());
+    assert.equal(iconOnly.length, 0);
+    await view.unmount();
+});

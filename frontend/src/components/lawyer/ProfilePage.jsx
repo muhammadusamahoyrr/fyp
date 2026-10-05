@@ -87,9 +87,7 @@ function ProfilePage() {
                             <div style={{ width: 76, height: 76, borderRadius: "50%", background: t.grad1, display: "flex", alignItems: "center", justifyContent: "center" }}>
                                 <span className="serif" style={{ fontSize: 22, fontWeight: 700, color: t.mode === "dark" ? "#111B1F" : "#fff" }}>{initials || "?"}</span>
                             </div>
-                            <button style={{ position: "absolute", bottom: 0, right: 0, width: 24, height: 24, borderRadius: "50%", background: t.primary, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                                <Icon d={I.camera} size={11} style={{ color: t.mode === "dark" ? "#111B1F" : "#fff" }} />
-                            </button>
+                            {/* A camera button sat here with no handler; there is no avatar upload. */}
                         </div>
                         <div className="serif" style={{ fontSize: 16, fontWeight: 700, color: t.text }}>{[form.first_name, form.last_name].filter(Boolean).join(" ") || "—"}</div>
                         <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 9 }}>{form.specialization?.split(",")[0]?.trim() || "Lawyer"}</div>
