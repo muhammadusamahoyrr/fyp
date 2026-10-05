@@ -594,14 +594,29 @@ def _deposit_ids(inp: ScanInput) -> list[str]:
 _INCREASE = _rx(r"\bincreas\w*", r"\benhance\w*", r"\bescalat\w*", r"\braise[ds]?\b", r"\brise\b", r"\bgo up\b",
                 r"\bbarhe\w*", r"\bizafa\b")
 #: "let the flat to X at Rs. 45,000": the figure a letting is made at.
-_LET_AT = _rx(r"\b(?:let|lease[sd]?|rent(?:ed)?)\b[^.\n]{0,80}?\bat\s+(?:a\s+(?:monthly\s+)?rent\s+of\s+)?(?:rs\.?|pkr|rupees)\s*\d")
+#: A title's full stop ("to Mr. Kamran Ali at Rs. 45,000") does not end the phrase.
+_LET_AT = _rx(r"\b(?:let|lease[sd]?|rent(?:ed)?)\b(?:\b(?:mr|mrs|ms|dr|no|st)\.|[^.\n]){0,80}?\bat\s+"
+              r"(?:a\s+(?:monthly\s+)?rent\s+of\s+)?(?:rs\.?|pkr|rupees)\s*\d")
+
+
+def _rent_in_own_part(body: str) -> bool:
+    """A part of the sentence (split at a semicolon or a line break) that gives
+    the rent figure and is not itself about a deposit or a change of rent."""
+    for part in re.split(r"[;\n]", body):
+        if _RENT.search(part) and _AMOUNT.search(part) and not _INCREASE.search(part) \
+                and not _DEPOSIT.search(term_rules._IN_ADVANCE.sub(" ", part)):
+            return True
+    return False
 
 
 def tenancy_rent_amount(inp: ScanInput) -> Finding:
     """The rent figure. A deposit, or a change to the rent ("increased by Rs.
-    5,000"), is not the rent."""
+    5,000"), is not the rent -- judged per part of a sentence, so a deposit or
+    an increase elsewhere in the same sentence (or bullet list) does not hide it."""
     not_rent = set(_deposit_ids(inp)) | set(_hits(inp, _INCREASE))
-    stated = [i for i in _hits(inp, _RENT, also=_AMOUNT) + _hits(inp, _LET_AT) if i not in not_rent]
+    by_id = {s["sentence_id"]: s for s in inp.sentences}
+    stated = [i for i in _hits(inp, _RENT, also=_AMOUNT) if i not in not_rent or _rent_in_own_part(inp.body(by_id[i]))]
+    stated += [i for i in _hits(inp, _LET_AT) if i not in not_rent and i not in stated]
     terms_found = [i for i in _term_ids(inp, "rent_amount") if i not in not_rent]
     return _located(inp, list(dict.fromkeys(terms_found + stated)), _hits(inp, _RENT), "rent_without_amount")
 
@@ -635,7 +650,9 @@ def tenancy_term(inp: ScanInput) -> Finding:
 _PREMISES = _rx(r"\bpremises\b", r"\bproperty\b", r"\bhouse\b", r"\bshop\b", r"\bflat\b", r"\bapartment\b",
                 r"\bgodown\b", r"\bwarehouse\b", r"\boffice\b", r"\bbuilding\b", r"\bportion\b", r"\bbungalow\b",
                 r"\broom\b", r"\bplot\b", r"\bland\b")
-_ADDRESS = _rx(r"\b(?:no\.?|number)\s*[\w-]+", r"\bsituated\b", r"\blocated\b", r"\bblock\b", r"\bstreet\b",
+# A house/plot number holds a digit: "No. 12", "number 7-B" -- never "notice",
+# which `no\.?\s*[\w-]+` used to read as "no" + "tice".
+_ADDRESS = _rx(r"\b(?:no\.?|number)\s*[\w/-]*\d", r"\bsituated\b", r"\blocated\b", r"\bblock\b", r"\bstreet\b",
                r"\broad\b", r"\bsector\b", r"\bplot\s+(?:no\.?\s*)?\d", r"\bmarla\b", r"\bkanal\b",
                r"\bsq(?:uare)?\.?\s*f", r"\bphase\s+\w+", r"\b(?:flat|house|shop|apartment|office|unit)\s+[\w-]*\d")
 #: "at Saddar Bazaar, Peshawar": a named place followed by a town (case-sensitive).
@@ -685,7 +702,7 @@ def nda_confidential_definition(inp: ScanInput) -> Finding:
                if r.get("type") == doc_graph.ROW_DEFINITION and r.get("sentence_id")
                and "confidential information" in (r.get("normalized") or "")]
     defined += [i for i in _hits(inp, _rx(r"\bconfidential information\b\W{0,3}\s*(?:means|includes|shall mean)\b",
-                                          _DEFINED_SECRET, _SUCH_INFORMATION, r"^\W*(?:\d+[.)]\s*)?confidential "
+                                          _DEFINED_SECRET, _SUCH_INFORMATION, r"(?m:^)\W*(?:\d+[.)]\s*)?confidential "
                                           r"information\s*:\s*\S")) if i not in defined]
     # A name given to the secret material: (hereinafter called "the Secrets"), ("Protected Data").
     defined += [i for i in _hits(inp, _NAMED_MATERIAL, also=_SECRET_WORD) if i not in defined]
@@ -697,7 +714,9 @@ def nda_confidential_definition(inp: ScanInput) -> Finding:
 _DEFINED_SECRET = (r"[\"“][^\"”]{0,40}\b(?:confidential|proprietary|secret)\w*[^\"”]{0,40}[\"”]\s*"
                    r"(?:means|includes|shall mean|denotes|refers to|comprises|covers)\b")
 #: "All such information ... is protected": the listed material is the definition.
-_SUCH_INFORMATION = r"\b(?:all\s+)?such\s+information\b[^.]{0,80}\b(?:is|are|shall be)\s+(?:confidential|protected|secret)"
+#: Also when the listed material is given the defined name: 'All such information is the "Confidential Information".'
+_SUCH_INFORMATION = (r"\b(?:all\s+)?such\s+information\b[^.]{0,80}\b(?:is|are|shall be)\s+(?:the\s+)?[\"“]?"
+                     r"(?:confidential|protected|secret)")
 _NAMED_MATERIAL = _rx(r"\bhereinafter\s+(?:called|referred\s+to\s+as)\s+[\"“](?:the\s+)?[^\"”]{1,40}[\"”]",
                       r"\(\s*[\"“][^\"”]{1,40}[\"”]\s*\)")
 _SECRET_WORD = _rx(r"\bconfiden\w*", r"\bsecrets?\b", r"\bproprietar\w*", r"\bprotected\b")

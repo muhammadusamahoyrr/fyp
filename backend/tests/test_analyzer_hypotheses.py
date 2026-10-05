@@ -418,3 +418,51 @@ def test_an_address_part_after_a_capitalised_term_is_not_an_undefined_term():
     assert run(address, "employment")["by_id"]["undefined_terms"]["status"] == "not_located"
     term = "1. The Employee shall follow the Store Procedures now in force.\n"
     assert run(term, "employment")["by_id"]["undefined_terms"]["status"] == "present"
+
+
+# ── development fixes after validation-2 (validation-2 itself untouched) ───
+#
+# Found on the DEVELOPMENT set validation-1; each failed first. New synthetic
+# wording only; the scanner's status never comes from an AI signal.
+
+def test_the_word_notice_is_not_a_street_number():
+    """`(?:no\.?|number)\s*[\w-]+` read "notice" as "no" + "tice": premises
+    named only as "the flat" were reported identified."""
+    vague = ("1. The Landlord lets the flat to the Tenant at a rent of Rs. 40,000 per month.\n"
+             "2. The landlord may give reasonable notice if he needs the flat.\n")
+    assert run(vague, "tenancy")["by_id"]["premises_description"]["status"] == "ambiguous"
+    for named in ("House No. 12, Street 4, Lahore", "Flat number 7-B, Gulberg", "House No 4"):
+        text = f"1. The Landlord lets {named} to the Tenant at a rent of Rs. 40,000 per month.\n"
+        assert run(text, "tenancy")["by_id"]["premises_description"]["status"] == "present", named
+
+
+def test_a_rent_figure_beside_a_deposit_or_an_increase_in_one_sentence_is_the_rent():
+    """A sentence was judged whole: one that also mentioned the deposit or a
+    rent increase lost its rent figure."""
+    deposit = ("1. The Lessor lets Flat 4, Gulberg, Lahore at a rent of Rs. 90,000 per month payable on the "
+               "first day of each month; the Lessee has paid Rs. 180,000 as earnest money, refundable at the end.\n")
+    assert run(deposit, "tenancy")["by_id"]["rent_amount"]["status"] == "present"
+    listed = ("- Premises: Shop 3, Jinnah Road, Quetta\n- Rent is Rs. 35,000, payable each month\n"
+              "- Rent increases by Rs. 2,000 per year\n")
+    assert run(listed, "tenancy")["by_id"]["rent_amount"]["status"] == "present"
+    only_change = "1. The rent shall be increased by Rs. 2,000 every year. The rent is payable monthly.\n"
+    assert run(only_change, "tenancy")["by_id"]["rent_amount"]["status"] == "ambiguous"     # still not a rent figure
+
+
+def test_a_letting_at_a_figure_with_a_title_in_between_states_the_rent():
+    text = "1. Mr. Imran Butt will let the flat to Mr. Kamran Ali at Rs. 45,000, to be paid monthly.\n"
+    assert run(text, "tenancy")["by_id"]["rent_amount"]["status"] == "present"
+
+
+def test_a_confidential_information_label_line_inside_a_sentence_defines_it():
+    text = ("Party 2 (Recipient): Mr. Asad Khan\nConfidential information: any non-public pricing, plans and "
+            "client details given to Party 2.\nDuration: 24 months.\n")
+    assert run(text, "nda")["by_id"]["confidential_definition"]["status"] == "present"
+
+
+def test_naming_the_listed_material_confidential_information_defines_it():
+    text = ("1. The Discloser will share its supplier lists, pricing models and production plans.\n"
+            "2. All such information is the \"Confidential Information\".\n")
+    assert run(text, "nda")["by_id"]["confidential_definition"]["status"] == "present"
+    mention = "1. The Recipient shall protect the Confidential Information.\n"
+    assert run(mention, "nda")["by_id"]["confidential_definition"]["status"] == "ambiguous"   # a mention is not a definition
