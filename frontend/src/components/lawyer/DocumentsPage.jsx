@@ -319,6 +319,7 @@ function ScreenInbox({
     statusF, onStatusChange, counts, serverFiltered,
 }) {
     const [search, setSearch] = useState("");
+    const { setPage } = useCase();
 
     // The status filter is applied BY THE SERVER when V2 is live: `docs` already
     // contains only the selected tab, and re-filtering here would be a no-op at
@@ -382,18 +383,10 @@ function ScreenInbox({
                     </div>
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
-                    <button style={{
-                        display: "inline-flex", alignItems: "center", gap: 6,
-                        padding: "9px 18px", borderRadius: 10,
-                        border: `1.5px solid ${t.border}`, background: "transparent",
-                        color: t.text, fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
-                        transition: "border-color .15s",
-                    }}
-                        onMouseEnter={e => e.currentTarget.style.borderColor = t.primary}
-                        onMouseLeave={e => e.currentTarget.style.borderColor = t.border}
-                    >↑ Upload Document</button>
-
-                    <button style={{
+                    {/* Upload had no handler and there is no lawyer upload endpoint
+                        here, so it is gone. AI Generate opens the Draft Generator,
+                        which is where a lawyer's AI drafting actually lives. */}
+                    <button onClick={() => setPage?.("doc-automation")} style={{
                         display: "inline-flex", alignItems: "center", gap: 7,
                         padding: "9px 20px", borderRadius: 10, border: "none",
                         background: `linear-gradient(135deg, ${t.primary} 0%, #22a898 100%)`,
@@ -411,11 +404,7 @@ function ScreenInbox({
                         display: "flex", justifyContent: "space-between", alignItems: "center",
                         padding: "18px 20px", borderRadius: 14,
                         background: s.bg, border: `1px solid ${s.border}`,
-                        cursor: "pointer", transition: "transform .15s, box-shadow .15s",
-                    }}
-                        onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 20px ${s.border}`; }}
-                        onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
-                    >
+                    }}>
                         <div>
                             <div style={{
                                 fontSize: 10, fontWeight: 700, color: "rgba(200,220,230,0.75)",
@@ -593,12 +582,6 @@ function ScreenInbox({
                                 {ac.icon} {ac.label}
                             </button>
 
-                            {/* Checkbox */}
-                            <div style={{
-                                width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                                border: `1.5px solid rgba(160,210,225,0.35)`,
-                                background: "rgba(255,255,255,0.04)", cursor: "pointer",
-                            }} />
                         </div>
                     );
                 })}
@@ -671,7 +654,6 @@ function DownloadPdfButton({ doc, t, style }) {
 }
 
 function ScreenReview({ doc, t, onBack, onContinue }) {
-    const [mode, setMode] = useState("view");
     // The REAL generated PDF, rendered inline. This replaced DOC_CONTENT — a
     // hardcoded employment-dispute plaint the lawyer used to review and approve
     // regardless of the actual document.
@@ -749,23 +731,6 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <StatusPill status={doc.status} t={t} />
-                        <button onClick={() => setMode(m => m === "edit" ? "view" : "edit")}
-                            style={{
-                                padding: "5px 12px", borderRadius: 7, border: `1px solid ${t.border}`,
-                                background: mode === "edit" ? t.primaryGlow : "transparent", color: mode === "edit" ? t.primary : t.textMuted,
-                                fontSize: 11, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5
-                            }}>
-                            {/* "Request changes", not "Edit".
-                                A lawyer CANNOT modify a client's submitted
-                                artifact, and that is correct — the thing under
-                                review has a hash, and a reviewer who could
-                                change it is reviewing something nobody else
-                                saw. But the old label implied direct editing,
-                                so the honest word for what this panel does is
-                                the one the review action already uses: notes
-                                that go back with a return decision. */}
-                            {mode === "edit" ? "👁 Preview" : "✏️ Request changes"}
-                        </button>
                     </div>
                 </div>
 
@@ -975,20 +940,9 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                     ))}
                 </div>
 
-                {/* Lawyer note input */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "14px 16px" }}>
-                    <div style={{
-                        fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase",
-                        letterSpacing: "0.07em", marginBottom: 8
-                    }}>✏️ Lawyer Notes</div>
-                    <textarea placeholder="Add internal notes for this review..."
-                        rows={3} style={{
-                            width: "100%", border: `1px solid rgba(42,86,100,0.6)`,
-                            borderRadius: 8, background: "rgba(42,86,100,0.2)", color: t.text, fontSize: 12,
-                            padding: "8px 10px", outline: "none", resize: "vertical",
-                            fontFamily: "DM Sans,system-ui", lineHeight: 1.6, boxSizing: "border-box"
-                        }} />
-                </div>
+                {/* Notes for the client are written on the decision screen, where
+                    approve / return / reject send them. A notes box here was never
+                    read or sent, so it is gone. */}
 
                 {/* Continue to decision — only documents awaiting review can be decided */}
                 {doc.status === "Pending Review" ? (

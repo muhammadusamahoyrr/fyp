@@ -66,3 +66,41 @@ test("3.2 Settings shows no notification preferences it cannot store", async () 
     assert.doesNotMatch(view.container.textContent, /Email for new appointments|Hearing date reminders/);
     await view.unmount();
 });
+
+/* ── 3.3 Documents ────────────────────────────────────────────────────── */
+
+function serveQueue() {
+    api.__respond("reviewQueueV2", {
+        data: { items: [{ id: "d1", title: "Plaint", client_name: "Ayesha", case_id: "c1",
+                          review_status: "submitted", submitted_revision_id: "r1" }],
+                next_cursor: null, status: "all",
+                counts: { all: 1, submitted: 1, approved: 0, returned: 0, rejected: 0 } },
+        error: null, status: 200,
+    });
+}
+
+test("3.3 Documents: no Upload button; AI Generate opens the Draft Generator", async () => {
+    serveQueue();
+    const { DocWorkflowApp } = await import("../src/components/lawyer/DocumentsPage.jsx");
+    const pages = [];
+    const view = await mountPage(DocWorkflowApp, { caseCtx: { setPage: p => pages.push(p) } });
+    assert.ok(!buttonTexts(view.container).some(t => /Upload Document/.test(t)));
+    const gen = [...view.container.querySelectorAll("button")].find(b => b.textContent.includes("AI Generate"));
+    await act(async () => { gen.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    assert.deepEqual(pages, ["doc-automation"]);
+    await view.unmount();
+});
+
+test("3.3 Documents review screen: no inert Request-changes toggle or unsent notes box", async () => {
+    serveQueue();
+    const { DocWorkflowApp } = await import("../src/components/lawyer/DocumentsPage.jsx");
+    const view = await mountPage(DocWorkflowApp);
+    const open = [...view.container.querySelectorAll("button")].find(b => b.textContent.includes("Review Now"));
+    await act(async () => { open.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await settle();
+    assert.ok(!buttonTexts(view.container).some(t => /Request changes/.test(t)));
+    assert.equal(view.container.querySelector('textarea[placeholder="Add internal notes for this review..."]'), null);
+    // The decision screen's notes, which ARE sent, are still reachable.
+    assert.ok(buttonTexts(view.container).some(t => /Proceed to Decision/.test(t)));
+    await view.unmount();
+});
