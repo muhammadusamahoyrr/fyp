@@ -126,3 +126,29 @@ test("3.4 Appointments: no View Details button that does nothing", async () => {
     assert.ok(!buttonTexts(view.container).some(t => /View Details/.test(t)));
     await view.unmount();
 });
+
+/* ── 3.5 AI Assistant ─────────────────────────────────────────────────── */
+
+test("3.5 AI Assistant: the clock reopens history; inert globe, mic, Pro and Upgrade are gone", async () => {
+    api.__respond("listCases", { data: { items: [] }, error: null });
+    api.__respond("listResearchConversations", { data: { conversations: [], next_cursor: null }, error: null });
+    api.__respond("createResearchConversation", { data: { session_id: "s1" }, error: null });
+    const { AILegalPage } = await import("../src/components/lawyer/AILegalPage.jsx");
+    const view = await mountPage(AILegalPage, { caseCtx: { activeCase: null } });
+    const texts = buttonTexts(view.container);
+    assert.ok(!texts.includes("Upgrade Plan"));
+    assert.ok(!texts.includes("Search"), "the inert Search globe is still offered");
+    assert.doesNotMatch(view.container.textContent, /\bPro\b/);
+
+    const sidebar = () => view.container.querySelector('input[placeholder="Search research"]').closest('div[style*="width"]');
+    const collapse = [...view.container.querySelectorAll("button")].find(b => b.textContent.trim() === "Collapse");
+    await act(async () => { collapse.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await settle();
+    assert.equal(sidebar().style.width, "0px");
+    const clock = view.container.querySelector('button[aria-label="Conversation history"]');
+    assert.ok(clock, "no history button");
+    await act(async () => { clock.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await settle();
+    assert.equal(sidebar().style.width, "200px");
+    await view.unmount();
+});

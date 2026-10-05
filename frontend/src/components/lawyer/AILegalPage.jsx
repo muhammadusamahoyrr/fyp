@@ -1226,17 +1226,6 @@ function AILegalPage() {
                         )}
                         <span className="serif" style={{ fontSize: 17, fontWeight: 700, color: t.text }}>Chat</span>
                     </div>
-                    {/* Right: Upgrade Plan pill */}
-                    <button style={{
-                        background: t.primary, color: t.mode === "dark" ? "#111B1F" : "#fff",
-                        border: "none", borderRadius: 50, padding: "9px 20px", fontSize: 12, fontWeight: 700,
-                        cursor: "pointer", boxShadow: `0 4px 14px ${t.primaryGlow}`, transition: "opacity .2s",
-                        pointerEvents: "auto"
-                    }}
-                        onMouseEnter={e => e.currentTarget.style.opacity = ".85"}
-                        onMouseLeave={e => e.currentTarget.style.opacity = "1"}>
-                        Upgrade Plan
-                    </button>
                 </div>
 
                 {/* Messages / Welcome */}
@@ -1718,32 +1707,19 @@ function AILegalPage() {
                             }} />
 
                         {/* Toolbar row */}
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                            {/* Search globe button */}
-                            <button style={{
-                                display: "flex", alignItems: "center", gap: 6,
-                                background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 50,
-                                padding: "6px 14px", fontSize: 12, color: t.textMuted, cursor: "pointer", transition: "all .15s"
-                            }}
-                                onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}
-                                onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}>
-                                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><ellipse cx="12" cy="12" rx="4" ry="10" />
-                                </svg>
-                                Search
-                            </button>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                            {/* A "Search" globe button sat here with no handler. */}
 
                             {/* Right controls */}
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                {/* Clock / history */}
-                                <button style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, color: t.textMuted, display: "flex", transition: "all .15s" }}
+                                {/* Clock: opens the conversation history sidebar. */}
+                                <button title="Conversation history" aria-label="Conversation history" onClick={() => setSideOpen(true)}
+                                    style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, color: t.textMuted, display: "flex", transition: "all .15s" }}
                                     onMouseEnter={e => { e.currentTarget.style.background = t.cardHi; e.currentTarget.style.color = t.primary; }}
                                     onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = t.textMuted; }}>
                                     <Icon d={I.clock} size={16} />
                                 </button>
 
-                                {/* Pro badge */}
-                                <span style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 6, padding: "3px 9px" }}>Pro</span>
 
                                 {/* EN / UR language toggle */}
                                 <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${t.border}`, background: t.inputBg }}>
@@ -1760,14 +1736,6 @@ function AILegalPage() {
                                     ))}
                                 </div>
 
-                                {/* Mic */}
-                                <button style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, color: t.textMuted, display: "flex", transition: "all .15s" }}
-                                    onMouseEnter={e => { e.currentTarget.style.background = t.cardHi; e.currentTarget.style.color = t.primary; }}
-                                    onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = t.textMuted; }}>
-                                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="9" y="2" width="6" height="11" rx="3" /><path d="M19 10a7 7 0 01-14 0" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" />
-                                    </svg>
-                                </button>
 
                                 {/* Send button */}
                                 <button onClick={send} style={{
