@@ -80,7 +80,7 @@ function ProvenancePanel({ requestId, onClose, t }) {
             if (!live) return;
             if (error || !data) {
                 setState({ loading: false, view: null,
-                           error: error?.detail || "Audit record not available" });
+                           error: error?.message || "Audit record not available" });
             } else {
                 setState({ loading: false, error: "", view: data });
             }
@@ -268,6 +268,21 @@ function RequestIdChip({ requestId, open, onToggle, t }) {
 // ============================================================
 // AI LEGAL PAGE — Full chatbot UI with case context injection
 // ============================================================
+/* What to tell the lawyer when a research turn fails. Every failure used to
+   read "AI service unavailable", including the ones a lawyer can act on: a
+   question too long to send, a case they no longer have access to, or a
+   conversation tied to a different matter. */
+function researchErrorText(e) {
+    const server = e?.fromServer ? e.message : "";
+    switch (e?.status) {
+        case 403: return "You don't have access to that case any more, so this question was not sent.";
+        case 409: return server || "This conversation can't take that question. Start a new thread and try again.";
+        case 413: return "That question is too long to send. Please shorten it and try again.";
+        case 422: return server ? `The question couldn't be processed: ${server}` : "The question couldn't be processed.";
+        default: return "AI service unavailable. Please try again.";
+    }
+}
+
 function AILegalPage() {
     const { t } = useTheme();
     const { activeCase, setActiveCase } = useCase();
@@ -846,7 +861,15 @@ function AILegalPage() {
                 fill({ content: stopNoticeRef.current, notice: true });
                 return;
             }
-            if (error || !data) throw new Error(error?.detail || "request failed");
+            if (error || !data) {
+                // Carried to the catch below so the lawyer is told WHICH failure
+                // this was. `.message` is the formatted string; `.detail` is the
+                // raw body field and was never set on these errors.
+                const failure = new Error(error?.message || "request failed");
+                failure.status = status;
+                failure.fromServer = !!error;
+                throw failure;
+            }
 
             if (data.type === "clarification") {
                 // A clarifying question is an emitted output with its own
@@ -892,7 +915,7 @@ function AILegalPage() {
             // service failure and must not be reported as one.
             fill(cancelledRef.current || e?.name === "AbortError"
                 ? { content: stopNoticeRef.current, notice: true }
-                : { content: "AI service unavailable. Please try again." });
+                : { content: researchErrorText(e) });
         } finally {
             // Settled either way: answered, refused, timed out or stopped.
             // Leaving `attemptRef` set would keep the composer locked on a turn
@@ -1097,7 +1120,10 @@ function AILegalPage() {
                                             const next = window.prompt("Rename this research thread", item.title);
                                             if (next && next.trim()) {
                                                 renameResearchConversation(item.session_id, next.trim())
-                                                    .then(refreshHistory);
+                                                    .then(({ error }) => {
+                                                        if (error) setConversationError(error.message || "Could not rename the thread.");
+                                                        refreshHistory();
+                                                    });
                                             }
                                         }} style={{ border: "none", background: "transparent", cursor: "pointer", color: t.textFaint, fontSize: 11, padding: "0 1px" }}>✎</button>
                                         {/* Archive keeps the thread and its messages and
@@ -1106,14 +1132,21 @@ function AILegalPage() {
                                         <button title={item.archived ? "Unarchive" : "Archive"} onClick={(e) => {
                                             e.stopPropagation();
                                             archiveResearchConversation(item.session_id, !item.archived)
-                                                .then(refreshHistory);
+                                                .then(({ error }) => {
+                                                    if (error) setConversationError(error.message || "Could not update the thread.");
+                                                    refreshHistory();
+                                                });
                                         }} style={{ border: "none", background: "transparent", cursor: "pointer", color: t.textFaint, fontSize: 11, padding: "0 1px" }}>
                                             {item.archived ? "↩" : "🗄"}
                                         </button>
                                         <button title="Delete" onClick={(e) => {
                                             e.stopPropagation();
                                             if (!window.confirm("Delete this thread and its messages?")) return;
-                                            deleteResearchConversation(item.session_id).then(async () => {
+                                            deleteResearchConversation(item.session_id).then(async ({ error }) => {
+                                                if (error) {
+                                                    setConversationError(error.message || "Could not delete the thread.");
+                                                    return;
+                                                }
                                                 if (item.session_id === sessionIdRef.current) {
                                                     writeActiveSession("research", user?._id, null);
                                                     await startConversation(activeCaseObj ? (activeCaseObj._id || null) : null);
@@ -1516,18 +1549,23 @@ function AILegalPage() {
                                                 )}
                                                 {m.role === "assistant" && !m.streaming && !m.clarification && !m.notice && m.content && (
                                                     m.rated ? <span>feedback recorded ✓</span> : (
-                                                        <span style={{ display: "inline-flex", gap: 3 }}>
+                                                        <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
+                                                            {m.rateError && <span style={{ color: t.danger }}>feedback not saved</span>}
                                                             {["up", "down"].map(r => (
                                                                 <button key={r}
                                                                     onClick={() => {
-                                                                        setMsgs(prev => prev.map((x, xi) => xi === i ? { ...x, rated: r } : x));
+                                                                        // "Recorded" only once the server has it.
+                                                                        // apiFetch resolves with {error} rather than
+                                                                        // rejecting, so a .catch never saw a failure.
                                                                         rateAnswer({
                                                                             session_id: sessionIdRef.current,
                                                                             rating: r,
                                                                             answer_preview: (m.content || "").slice(0, 300),
                                                                             question_preview: (msgs[i - 1]?.content || "").slice(0, 300),
                                                                             source: "research",
-                                                                        }).catch(() => {});
+                                                                        }).then(({ error }) => setMsgs(prev => prev.map((x, xi) => xi === i
+                                                                            ? (error ? { ...x, rateError: true } : { ...x, rated: r, rateError: false })
+                                                                            : x)));
                                                                     }}
                                                                     style={{ border: `1px solid ${t.border}`, background: "transparent", borderRadius: 6, cursor: "pointer", fontSize: 10, padding: "1px 6px" }}
                                                                 >{r === "up" ? "👍" : "👎"}</button>
