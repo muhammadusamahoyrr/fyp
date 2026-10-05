@@ -41,7 +41,8 @@ from app.db.collections import (
     get_analysis_text_versions_col,
 )
 from app.services.analyzer import (
-    ai_client, ai_config, ai_report, blob_store, deletion, injection, pii_confirmation, pii_mask, receipts, worker,
+    ai_client, ai_config, ai_report, blob_store, deletion, injection, pii_confirmation, pii_mask, pii_pipeline, receipts,
+    worker,
 )
 from app.services.analyzer.terms_stage import published_sentences
 from app.services.analyzer.worker import Lease, LostLease
@@ -171,29 +172,25 @@ async def run_ai_report(lease: Lease) -> str:
     # PII masking at the AI boundary (ANALYZER_PII_MASKING.md): every sentence
     # that would be sent is masked; if a name or address could not be
     # recognised with confidence, NOTHING is sent and a person must confirm.
-    send_ids = {s["sentence_id"] for s in sentences
-                if not s.get("empty_value") and s["sentence_id"] not in scan.sentence_ids}
     # A lawyer's review counts only when made against THIS text and policy.
     review = await pii_confirmation.applicable(run, version["text_hash"])
-    masking = pii_mask.prepare(text, sentences, send_ids, pii_confirmation.decisions_of(review))
+    # The exact messages, built by the one path the preview and the rules-only
+    # evaluation share (pii_pipeline), so the receipt digests what is sent.
+    composed = pii_pipeline.compose(text, sentences, scan.sentence_ids, pii_confirmation.decisions_of(review))
+    send_ids, masking = composed.send_ids, composed.masking
     if masking.uncertain:
         return await _finish(lease, {**unavailable(pii_confirmation.REQUIRED), "pii": pii_mask.refused(masking)})
-
-    # The exact messages: built here so the receipt digests what is sent.
-    try:
-        messages = ai_report.build_messages(text, sentences, scan.sentence_ids, masking.bodies)
-    except ai_client.AIError as exc:            # too large / unprepared: nothing was sent
-        logger.warning("analyzer_ai_report_failed run_id=%s code=%s", lease.run_id, exc.code)
-        return await _finish(lease, {"status": FAILED, "error_code": exc.code,
+    if composed.error:                          # too large / unprepared: nothing was sent
+        logger.warning("analyzer_ai_report_failed run_id=%s code=%s", lease.run_id, composed.error)
+        return await _finish(lease, {"status": FAILED, "error_code": composed.error,
                                      "schema_version": ai_report.SCHEMA_VERSION,
                                      "prompt_version": ai_report.PROMPT_VERSION,
                                      "pii": pii_mask.refused(masking), "provenance": ai_config.contract()})
     # L6: an independent pattern and layout check of the FINAL request.
-    guard = pii_mask.leak_check(messages)
+    messages, guard, digest = composed.messages, composed.guard, composed.digest
     if guard:
         return await _finish(lease, {**unavailable(pii_mask.LEAK_GUARD),
                                      "pii": {**pii_mask.refused(masking), "leak_guard": guard}})
-    digest = receipts.request_digest(messages)
     # Lawyer-confirm mode: only the EXACT request the lawyer attested is sent.
     waiting = pii_confirmation.send_check(review, digest)
     if waiting:

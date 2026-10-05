@@ -27,7 +27,7 @@ from pathlib import Path
 
 from app.services.analyzer import pii_layers
 
-MASKING_VERSION = "pii-mask.6"
+MASKING_VERSION = "pii-mask.7"
 
 
 def _policy_sha256() -> str:
@@ -659,6 +659,9 @@ def prepare(text: str, sentences: list[dict], send_ids: set[str] | frozenset[str
         masking.uncertain += [c for c in found
                               if c["kind"] in UNRESOLVABLE
                               or not any(x <= c["start"] and c["end"] <= y for x, y in resolved)]
+    # One span flagged twice (two layers, one reason) is ONE thing to decide.
+    masking.uncertain = list({(c["sentence_id"], c["kind"], c["reason"], c["start"], c["end"]): c
+                              for c in masking.uncertain}.values())
     return masking
 
 

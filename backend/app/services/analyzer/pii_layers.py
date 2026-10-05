@@ -846,7 +846,7 @@ def leak_guard(request: str) -> list[str]:
         hits.append("email")
     if _IBAN.search(bare):
         hits.append("iban_shape")
-    scrubbed = _AMOUNT.sub(" ", _DATE.sub(" ", bare))
+    scrubbed = _CELL_BAR.sub("\n", _AMOUNT.sub(" ", _DATE.sub(" ", bare)))
     for m in _NUMBERISH.finditer(scrubbed):
         norm = re.sub(r"\D", "", m.group(0).translate(_CONFUSABLE))
         if len(norm) >= 7 and sum(ch.isdigit() for ch in m.group(0)) >= 6:
@@ -872,6 +872,10 @@ def leak_guard(request: str) -> list[str]:
     return sorted(set(hits))
 
 
+#: A table cell bar: `|` with whitespace (or nothing) on both sides. It ends a
+#: number-like run -- `|` stands for an OCR "1" only INSIDE a number -- so a row
+#: of masked cells ("101 |   |   |   102") is not read as one long number.
+_CELL_BAR = re.compile(r"(?<!\S)\|(?!\S)")
 #: An honorific after "son of" / "Mr." that stands BEFORE a masked name
 #: ("son of Late [NAME_1]") is not itself a name (pii-mask.6).
 _HONORIFIC = re.compile(r"(?:late|marhoom|marhum|mst|mr|mrs|ms|dr|haji|ch|syed|syeda|mian|begum|sheikh|malik|rana|hafiz|"
@@ -897,7 +901,7 @@ def leak_guard_spans(request: str) -> list[tuple[str, int, int]]:
     out += [("arabic_script", m.start(), m.end()) for m in ARABIC_SCRIPT.finditer(bare)]
     out += [("email", m.start(), m.end()) for m in _EMAIL.finditer(bare)]
     out += [("iban_shape", m.start(), m.end()) for m in _IBAN.finditer(bare)]
-    scrubbed = blank(_AMOUNT, blank(_DATE, bare))
+    scrubbed = _CELL_BAR.sub("\n", blank(_AMOUNT, blank(_DATE, bare)))
     for m in _NUMBERISH.finditer(scrubbed):
         norm = re.sub(r"\D", "", m.group(0).translate(_CONFUSABLE))
         if len(norm) >= 7 and sum(ch.isdigit() for ch in m.group(0)) >= 6:

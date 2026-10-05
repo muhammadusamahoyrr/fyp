@@ -51,7 +51,7 @@ from app.db.collections import (
     get_analysis_sources_col,
     get_analysis_text_versions_col,
 )
-from app.services.analyzer import ai_client, blob_store, deletion, injection, pii_mask, receipts, states
+from app.services.analyzer import ai_client, blob_store, deletion, injection, pii_mask, pii_pipeline, receipts, states
 from app.services.analyzer.errors import AnalyzerConflict, AnalyzerError, UploadRejected
 from app.services.analyzer.txn import run_in_transaction
 
@@ -136,7 +136,7 @@ async def send_ids_for(run: dict, sentences: list[dict], scan_ids: frozenset[str
 
         items, _ = review.select(await published_results(run), scan_ids)
         return {sid for i in items for sid in i["sentence_ids"]}
-    return {s["sentence_id"] for s in sentences if not s.get("empty_value") and s["sentence_id"] not in scan_ids}
+    return pii_pipeline.send_ids(sentences, scan_ids)
 
 
 async def build_request(run: dict, text: str, sentences: list[dict], scan_ids: frozenset[str],
@@ -338,7 +338,12 @@ def _origin(c: dict, flagged: set[tuple[int, int]]) -> str:
 
 
 async def _preview(run: dict, text: str, sentences: list[dict], scan_ids, send_ids, decisions: list[dict]) -> dict:
-    masking = pii_mask.prepare(text, sentences, send_ids, decisions)
+    # The AI report's request comes from the one path the stage and the
+    # rules-only evaluation share (pii_pipeline); the drafting-question review
+    # builds its own messages from the same masking.
+    report = (run.get("engine") or states.ENGINE_AI_REPORT) == states.ENGINE_AI_REPORT
+    composed = pii_pipeline.compose(text, sentences, scan_ids, decisions) if report else None
+    masking = composed.masking if report else pii_mask.prepare(text, sentences, send_ids, decisions)
     order = [s for s in sentences if s["sentence_id"] in send_ids]
     names: dict[str, dict] = {}
     for a, b, kind, token in masking.masked_spans:
@@ -353,11 +358,17 @@ async def _preview(run: dict, text: str, sentences: list[dict], scan_ids, send_i
            "request_error": None}
     if masking.uncertain:
         return out
-    try:
-        messages = await build_request(run, text, sentences, scan_ids, masking)
-    except ai_client.AIError as exc:
-        out["request_error"] = exc.code
-        return out
+    if report:
+        if composed.error:
+            out["request_error"] = composed.error
+            return out
+        messages = composed.messages
+    else:
+        try:
+            messages = await build_request(run, text, sentences, scan_ids, masking)
+        except ai_client.AIError as exc:
+            out["request_error"] = exc.code
+            return out
     out["leak_guard"] = pii_mask.leak_check(messages)
     out["guard_spans"] = guard_spans(text, sentences, masking, messages) if out["leak_guard"] else []
     out["request"] = messages

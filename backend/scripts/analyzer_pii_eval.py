@@ -3,10 +3,15 @@
     python scripts/analyzer_pii_eval.py --dataset pii-eval-1 --freeze        # BEFORE any scoring
     python scripts/analyzer_pii_eval.py --dataset pii-eval-1 --write-record  # the single scored run
 
-A rubric-2 set is scored as the PIPELINE the owner chose (2026-10-04): the
-rules plus the local entity locator (`LOCATOR` below), run OFFLINE in its
-isolated environment (`--locator-home <ML>`). The freeze pins that pipeline
-and the masking policy hash; scoring refuses if either changed since.
+Two pipelines, fixed per set (`pii_evaluation.pipeline_for`):
+  * `production-rules-only` (pii-eval-7 on): EXACTLY what the app runs -- no
+    locator, decisions through the real API validation, the request built by
+    the stage's own function (`pii_pipeline.compose`). The freeze pins the
+    masking policy, the production request code and the evaluated settings;
+  * rules + local locator (pii-eval-2..6, owner choice 2026-10-04): the
+    locator (`LOCATOR` below) run OFFLINE (`--locator-home <ML>`). This is
+    NOT the production pipeline; those records stay labelled as they are.
+Scoring refuses if anything pinned changed since the freeze.
 
 NEVER a live call: every request goes through the real provider client
 (ai_client.complete) with a FAKE transport that only captures the HTTP body,
@@ -30,7 +35,7 @@ import httpx  # noqa: E402
 import yaml  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
-from app.services.analyzer import ai_client, pii_mask  # noqa: E402
+from app.services.analyzer import ai_client, pii_confirmation, pii_mask, pii_pipeline  # noqa: E402
 from app.services.analyzer import pii_evaluation as ev  # noqa: E402
 
 #: The locator setup a rubric-2 set is scored with -- pinned by the freeze.
@@ -40,8 +45,32 @@ LOCATOR = {"model": "urchade/gliner_multi-v2.1", "revision": "443d26d654e0324125
 LOCATOR_MANIFEST = ev.ROOT / "locator" / "gliner_multi-v2.1.manifest.json"
 
 
+#: The production code that builds the request besides the masking policy
+#: (pii_mask + pii_layers, pinned by POLICY_SHA256).
+PRODUCTION_CODE = ("app/services/analyzer/pii_pipeline.py", "app/services/analyzer/pii_confirmation.py",
+                   "app/services/analyzer/ai_report.py", "app/services/analyzer/segmentation.py",
+                   "app/services/analyzer/injection.py")
+#: The settings the production pipeline is evaluated under (pinned by the freeze).
+PRODUCTION_SETTINGS = {"analyzer_pii_review_required": True, "analyzer_ai_synthetic_only": True}
+
+
+def production_code_sha256() -> str:
+    backend = Path(__file__).resolve().parents[1]
+    blob = b""
+    for rel in PRODUCTION_CODE:
+        blob += (backend / rel).read_bytes().replace(b"\r\n", b"\n") + b"\n--\n"
+    return hashlib.sha256(blob).hexdigest()
+
+
 def _pipeline(name: str) -> dict | None:
+    if ev.pipeline_for(name) == pii_pipeline.PIPELINE:
+        return {"pipeline": pii_pipeline.PIPELINE, "rules": pii_mask.MASKING_VERSION,
+                "review": pii_confirmation.REVIEW_VERSION, "locator": None}
     return {"rules": pii_mask.MASKING_VERSION, "locator": LOCATOR} if ev.rubric_path(name) != ev.RUBRIC_PATH else None
+
+
+def _production(name: str) -> bool:
+    return ev.pipeline_for(name) == pii_pipeline.PIPELINE
 
 
 def harness_sha256() -> str:
@@ -60,7 +89,8 @@ def harness_sha256() -> str:
 #: reproduced from the recorded commit (pii-eval-5's freeze could not be).
 PIPELINE_FILES = ("app/services/analyzer/pii_mask.py", "app/services/analyzer/pii_layers.py",
                   "app/services/analyzer/pii_evaluation.py", "scripts/analyzer_pii_eval.py",
-                  "scripts/pii_locator/gliner_locate.py", "analyzer_eval/pii/locator/gliner_multi-v2.1.manifest.json")
+                  "scripts/pii_locator/gliner_locate.py", "analyzer_eval/pii/locator/gliner_multi-v2.1.manifest.json",
+                  *PRODUCTION_CODE)
 
 
 def _source_state() -> tuple[str, list[str]]:
@@ -171,6 +201,9 @@ def main() -> int:
                  f"harness_sha256: {harness_sha256()}",
                  f"source_commit: {head}",
                  f"locator_manifest_sha256: {_sha(LOCATOR_MANIFEST)}",
+                 *([f"production_code_sha256: {production_code_sha256()}",
+                    f"settings_json: '{json.dumps(PRODUCTION_SETTINGS, sort_keys=True)}'"]
+                   if _production(dataset.name) else []),
                  f"author: independent fresh session, given only {ev.rubric_path(dataset.name).name}", "files:"]
         lines += [f"  {p.name}: {hashlib.sha256(p.read_bytes()).hexdigest()}"
                   for p in sorted((ev.ROOT / args.dataset).glob("*.yaml"))]
@@ -195,10 +228,19 @@ def main() -> int:
             if dirty or _sha(LOCATOR_MANIFEST) != manifest.get("locator_manifest_sha256"):
                 print(f"refused: pipeline files changed since the freeze: {dirty}", file=sys.stderr)
                 return 2
-        if not args.locator_home:
-            print("refused: a rubric-2 set is scored with the pinned locator (--locator-home)", file=sys.stderr)
-            return 2
-        extra = _locate(dataset, args.locator_home.resolve())
+        if _production(dataset.name):
+            pinned = (manifest.get("production_code_sha256"), manifest.get("settings_json"))
+            if pinned != (production_code_sha256(), json.dumps(PRODUCTION_SETTINGS, sort_keys=True)):
+                print("refused: the production request code or settings changed since the freeze", file=sys.stderr)
+                return 2
+            if args.locator_home:
+                print("refused: the production-rules-only pipeline runs no locator", file=sys.stderr)
+                return 2
+        else:
+            if not args.locator_home:
+                print("refused: a rubric-2 set is scored with the pinned locator (--locator-home)", file=sys.stderr)
+                return 2
+            extra = _locate(dataset, args.locator_home.resolve())
 
     for name, value in FAKE_PROVIDER.items():
         setattr(settings, name, value)
@@ -206,7 +248,10 @@ def main() -> int:
     # never be mistaken for a real verification, exactly as the test suite uses.
     from app.services.analyzer import ai_records
     ai_records.POLICY_DIR = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "ai_policies"
-    result = ev.evaluate(dataset, capturing_send(), extra_by_doc=extra, modes=ev.modes_for(dataset.name))
+    for name, value in PRODUCTION_SETTINGS.items() if _production(dataset.name) else ():
+        setattr(settings, name, value)
+    result = ev.evaluate(dataset, capturing_send(), extra_by_doc=extra, modes=ev.modes_for(dataset.name),
+                         pipeline=ev.pipeline_for(dataset.name))
     result["pipeline"] = pipeline
     result["frozen_before_run"] = True
     for mode in ev.modes_for(dataset.name):

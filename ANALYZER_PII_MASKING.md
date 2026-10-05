@@ -505,3 +505,100 @@ spent sets cannot be checked without opening them.
 
 pii-eval-5 is scored under the approved rubric 3 gate (`RUBRIC_BY_DATASET`);
 pii-eval-4 is marked spent.
+
+## Evaluating what production runs: `production-rules-only` (2026-10-05)
+
+**The gap.** pii-eval-2 through -6 were scored with the rules PLUS the local
+GLiNER locator. Production never runs the locator: `ai_stage` calls
+`pii_mask.prepare` with no detections. None of those scores validates the
+production pipeline. Their records stay as recorded, labelled as rules +
+locator.
+
+**One path.** `pii_pipeline.compose(text, sentences, scan_ids, decisions)`
+does all of the following:
+
+- selects the sent sentences;
+- masks them with the lawyer's decisions;
+- builds the exact messages;
+- runs the final leak check;
+- returns the digest.
+
+These callers all use it:
+
+- production `ai_stage` (the AI report);
+- the lawyer's preview in `pii_confirmation` (AI report engine);
+- the evaluation's `production-rules-only` pipeline.
+
+The drafting-question review builds its own messages from the same masking.
+It is not covered by this evaluation pipeline.
+
+**The evaluation pipeline** (`score_document(..., pipeline="production-rules-only")`,
+harness pii-eval.2.3):
+
+- No locator; locator spans are refused.
+- Every simulated decision passes the real API validation
+  (`pii_confirmation._validated`). A decision the API would refuse blocks the
+  document as `api_rejected:<code>` and is never sent.
+- The request comes from `compose`. A difference from the simulation's
+  masking is an error.
+
+**Parity tests** (`tests/test_analyzer_pii_production_parity.py`):
+
+- On both identity development sets, the evaluated request equals
+  `compose`'s, document for document.
+- The historical path and the production path agree on development data.
+- End to end, one synthetic document with one set of decisions goes through
+  the real upload -> text confirmation -> review -> stage path with a fake
+  provider. The captured wire request is byte for byte the evaluation's
+  request.
+
+**What parity does NOT cover:**
+
+- PDF layout blocks. Production segments with the extracted pages and blocks;
+  the evaluation segments plain text. Synthetic sets are plain text, which
+  matches production only when extraction adds no blocks.
+- The drafting-question engine.
+- A real lawyer's behaviour, which is simulated.
+
+**Development-only results** (masking pii-mask.7, harness pii-eval.2.3,
+review mode, production pipeline):
+
+| Set | Sent | Leaks | Coverage | Party / person consistency | Deadlines | Blocked |
+|---|---|---|---|---|---|---|
+| identity-dev | 12/12 | 0 | 1.0 | 1.0 / 1.0 | 1.0 | none |
+| identity-dev-2 | 28/28 | 0 | 1.0 | 1.0 / 1.0 | 1.0 | none |
+| pii-eval-1 | 37/48 | 0 | 1.0 | 1.0 / 1.0 | 1.0 | 11 Urdu-script (policy) |
+
+Reviewer work on these sets (review mode):
+
+| Set | Marked missed details | Identity decisions | People confirmed |
+|---|---|---|---|
+| identity-dev | 13 | 42 | 22 |
+| identity-dev-2 | 88 | 253 | 116 |
+| pii-eval-1 | 145 | 232 | 94 |
+
+Flag-only (manual) mode is report-only: it leaks (2 / 24 / 57), which is why
+the review is mandatory.
+
+**Failures this measurement reproduced, fixed test-first (pii-mask.7):**
+
+- **Duplicate flags.** One span flagged twice (two layers, one reason) made
+  the simulated reviewer submit two decisions, which the API refuses. Now it
+  is one candidate and one decision.
+- **Guard false positive on tables.** A table row of masked cells collapsed
+  onto one line ("101 |   |   |   102") read as a long number, because `|`
+  stands for an OCR "1". A bar with whitespace on both sides now ends a
+  number.
+
+**Pinned for the next gate** (`scripts/analyzer_pii_eval.py`, pipeline
+`production-rules-only` for pii-eval-7):
+
+- masking policy, from pii-mask.7 on;
+- production request code (`production_code_sha256` over `pii_pipeline`,
+  `pii_confirmation`, `ai_report`, `segmentation`, `injection`);
+- evaluated settings (`analyzer_pii_review_required` and
+  `analyzer_ai_synthetic_only` true);
+- harness hash and source commit.
+
+A gate freeze refuses uncommitted pipeline files. Scoring refuses any change
+since the freeze, and refuses a locator.

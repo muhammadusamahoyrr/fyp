@@ -56,7 +56,14 @@ records stay as recorded and are NOT directly comparable):
     confirms), `person_mentions`, and whether the review settled
     (`review_converged`).
 
-pii-eval.2.3 (2026-10-05): a final-guard stop is shown to the lawyer at its
+pii-eval.2.3 (2026-10-05) adds the `production-rules-only` pipeline
+(`pii_pipeline.PIPELINE`): no locator, every simulated decision through the
+real API validation (`pii_confirmation._validated`), and the request built
+by the stage's own function (`pii_pipeline.compose`). pii-eval-2..6 were
+scored with rules + the GLiNER locator -- a DIFFERENT pipeline from the one
+production runs; their records stay labelled as such.
+
+Also in pii-eval.2.3: a final-guard stop is shown to the lawyer at its
 place in the original (pii-mask.6); the simulated reviewer masks an unlabelled
 hit there, as the screen allows, and `guard_repairs` counts it as reviewer work.
 
@@ -73,7 +80,7 @@ from pathlib import Path
 
 import yaml
 
-from app.services.analyzer import ai_report, injection, pii_mask
+from app.services.analyzer import ai_report, injection, pii_mask, pii_pipeline
 from app.services.analyzer import segmentation as seg
 
 EVAL_VERSION = "pii-eval.2.3"
@@ -83,7 +90,15 @@ RUBRIC_2_PATH = ROOT / "PII_DETECTION_RUBRIC_2.md"
 RUBRIC_3_PATH = ROOT / "PII_DETECTION_RUBRIC_3.md"
 #: The rubric each set is scored under; pii-eval-2 and later use rubric 2.
 RUBRIC_BY_DATASET = {"pii-eval-1": RUBRIC_PATH, "pii-eval-3": RUBRIC_3_PATH, "pii-eval-4": RUBRIC_3_PATH,
-                     "pii-eval-5": RUBRIC_3_PATH, "pii-eval-6": RUBRIC_3_PATH}
+                     "pii-eval-5": RUBRIC_3_PATH, "pii-eval-6": RUBRIC_3_PATH, "pii-eval-7": RUBRIC_3_PATH}
+#: The pipeline a gate set is scored with. pii-eval-2..6 used rules + the
+#: GLiNER locator, which production does NOT run; from pii-eval-7 a gate scores
+#: exactly the production pipeline (rules only, `pii_pipeline.compose`).
+PIPELINE_BY_DATASET = {"pii-eval-7": pii_pipeline.PIPELINE}
+
+
+def pipeline_for(dataset_name: str) -> str | None:
+    return PIPELINE_BY_DATASET.get(dataset_name)
 
 
 def rubric_path(dataset_name: str) -> Path:
@@ -405,7 +420,14 @@ def _review(doc: Doc, flags: list[dict], marks: list[Span], masking, reconcile: 
     if reconcile:
         for c in _identity(doc, masking, marks, covered):
             decisions = [d for d in decisions if not (d["start"] < c["end"] and c["start"] < d["end"])] + [c]
-    return sorted(decisions, key=lambda c: (c["start"], c["end"]))
+    # One decision per span, as the screen makes it: two flags on one span (two
+    # reasons) are decided once -- two decisions would be refused as overlapping.
+    out, seen = [], set()
+    for c in sorted(decisions, key=lambda c: (c["start"], c["end"])):
+        if (c["start"], c["end"]) not in seen:
+            seen.add((c["start"], c["end"]))
+            out.append(c)
+    return out
 
 
 def _guard_decision(code: str) -> str | None:
@@ -489,10 +511,15 @@ def _hygiene(request: str, doc: Doc) -> bool:
     return "PII_DETECTION_RUBRIC" not in request and "pii-eval" not in request
 
 
-def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None) -> dict:
+def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None, pipeline: str | None = None) -> dict:
     """`send(messages) -> str`: the captured provider request body (text).
     `extra`: spans a development locator proposes, as `[{start, end, decision}]`
-    (personal_name / address) -- masked like confirmed spans. None = the masker alone."""
+    (personal_name / address) -- masked like confirmed spans. None = the masker alone.
+    `pipeline`: `pii_pipeline.PIPELINE` scores exactly what production runs
+    (no locator; decisions through the real API validation; the stage's
+    request path). None = the historical harness path."""
+    if pipeline == pii_pipeline.PIPELINE and extra:
+        raise ValueError("the production-rules-only pipeline has no locator")
     rows = _rows(doc.text)
     doc = _split_at_sentences(doc, rows)
     scan = injection.scan(doc.text, rows)
@@ -521,7 +548,26 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
     reasons = sorted({u["reason"] for u in masking.uncertain})
     guard: list[str] = []
     request = None
-    if not reasons:
+    if pipeline == pii_pipeline.PIPELINE:
+        # What the app runs (pii-eval.2.3): the reviewer's decisions must pass the
+        # real API validation, and the request comes from the stage's own path.
+        from app.services.analyzer import pii_confirmation
+        from app.services.analyzer.errors import UploadRejected
+        try:
+            pii_confirmation._validated(doc.text, rows, send_ids, decisions)
+        except UploadRejected as exc:
+            reasons = [f"api_rejected:{exc.code}"]
+        composed = pii_pipeline.compose(doc.text, rows, suspect, decisions)
+        if composed.masking.bodies != masking.bodies:
+            raise AssertionError(f"{doc.id}: the production path masked differently from the simulation")
+        if not reasons:
+            if composed.error:
+                reasons = [f"request_error:{composed.error}"]
+            elif composed.guard:
+                guard, reasons = composed.guard, [f"leak_guard:{c}" for c in composed.guard]
+            else:
+                request = send(composed.messages)
+    elif not reasons:
         messages = ai_report.build_messages(doc.text, rows, suspect, masking.bodies)
         guard = pii_mask.leak_check(messages)
         if guard:
@@ -607,7 +653,7 @@ def score_document(doc: Doc, send, *, mode: str, extra: list[dict] | None = None
             "identity_decisions": sum(c["decision"] in (pii_mask.SAME_PERSON, pii_mask.DIFFERENT_PERSON)
                                       for c in decisions),
             "party_consistent_any_token": consistent_any if tokens_any and request is not None else None,
-            "deadlines_preserved": preserved, "deadline_count": len(deadlines),
+            "deadlines_preserved": preserved, "deadline_count": len(deadlines), "pipeline": pipeline,
             "hygiene": _hygiene(request, doc) if request is not None else None}
 
 
@@ -729,14 +775,14 @@ def gate(auto: dict, manual: dict, rubric: int = 1) -> dict:
 
 
 def evaluate(dataset: Dataset, send, extra_by_doc: dict[str, list[dict]] | None = None,
-             modes: tuple[str, ...] = ("auto", "manual")) -> dict:
+             modes: tuple[str, ...] = ("auto", "manual"), pipeline: str | None = None) -> dict:
     out = {"eval_version": EVAL_VERSION, "dataset": dataset.name, "dataset_sha256": dataset.sha256,
            "masking_version": pii_mask.MASKING_VERSION, "policy_sha256": pii_mask.POLICY_SHA256,
            "rubric_sha256": hashlib.sha256(rubric_path(dataset.name).read_bytes().replace(b"\r\n", b"\n")).hexdigest(),
            "coverage": coverage(dataset)}
     extra_by_doc = extra_by_doc or {}
-    per = {mode: [score_document(d, send, mode=mode, extra=extra_by_doc.get(d.id)) for d in dataset.documents]
-           for mode in modes}
+    per = {mode: [score_document(d, send, mode=mode, extra=extra_by_doc.get(d.id), pipeline=pipeline)
+                  for d in dataset.documents] for mode in modes}
     for mode in modes:
         out[mode] = summarise(per[mode])
     rubric = rubric_number(dataset.name)

@@ -128,3 +128,33 @@ def test_the_simulated_reviewer_repairs_a_located_guard_hit_and_counts_it():
             "reference 4455667788.", parties=["p1"])
     r = ev.score_document(d, send_capture([]), mode="review")
     assert r["sent"] and r["guard_repairs"] == 1 and r["deadlines_preserved"] is True
+
+
+# ── found measuring the production pipeline on development data ────────────
+
+def test_a_table_of_masked_cells_is_not_a_long_number():
+    # A table row collapsed onto one request line: masked cells leave bars and
+    # short row numbers ("101 |   |   |   102"); `|` also reads as an OCR "1".
+    from app.services.analyzer import pii_layers
+    row = "Emp | Name | Bank account | Address 101 | [NAME_1] | [ACCOUNT_1] | [ADDRESS_1] 102 | [NAME_2] | [ACCOUNT_2] |"
+    assert pii_layers.leak_guard(row) == []
+    assert pii_layers.leak_guard("Emp | Name 101 | 4455667788 |") == ["long_number"]          # a real number still is
+    assert pii_layers.leak_guard("Mobile 03|2-1234567 for notices") == ["long_number"]       # a bar inside a number too
+
+
+def test_one_span_flagged_twice_is_one_candidate():
+    text = "I, Abdul Rehman, state.\nAbdu1 signs.\n"
+    m, _ = masked(text)
+    spans = [(u["start"], u["end"]) for u in m.uncertain]
+    assert spans == [at(text, "Abdu1")]
+
+
+def test_the_simulated_reviewer_never_submits_two_decisions_on_one_span():
+    d = doc("I, [[NAME:p1|Abdul Rehman]], state.\n[[NAME:p1|Abdu1]] signs [[DEADLINE:d1|within 7 days]].",
+            parties=["p1"])
+    for mode in ("manual", "review"):
+        decisions = ev.simulated_decisions(d, mode=mode)
+        spans = [(c["start"], c["end"]) for c in decisions]
+        assert len(spans) == len(set(spans)), mode
+        r = ev.score_document(d, send_capture([]), mode=mode, pipeline="production-rules-only")
+        assert not any(x.startswith("api_rejected") for x in r["block_reasons"]), (mode, r["block_reasons"])
