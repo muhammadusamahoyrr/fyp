@@ -6,7 +6,7 @@ import { Icon, I } from "./icons.jsx";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import SessionsPanel from "@/components/shared/SessionsPanel.jsx";
-import { changePassword, mySubscription, billingPlans, subscribePlan, cancelSubscription, mockPay } from "@/lib/api.js";
+import { changePassword, mySubscription, billingPlans, subscribePlan, cancelSubscription, mockPay, closeAccount } from "@/lib/api.js";
 
 function SettingsPage() {
     const { t } = useTheme();
@@ -67,6 +67,24 @@ function SettingsPage() {
             await logout();
             window.location.assign("/login");
         }
+    };
+
+    // Account closure. The server re-checks the password (closure is
+    // irreversible) and refuses while engagements or payments are live, naming
+    // them — that reason is shown verbatim. This button used to do nothing.
+    const [closing, setClosing] = useState(null);   // null | { password, busy, issue }
+    const handleClose = async () => {
+        if (!closing?.password) { setClosing(c => ({ ...c, issue: "Enter your password to confirm." })); return; }
+        setClosing(c => ({ ...c, busy: true, issue: null }));
+        const { data, error } = await closeAccount(closing.password);
+        if (error || !data?.closed) {
+            setClosing(c => ({ ...c, busy: false, password: "",
+                               issue: error?.message || data?.error || "Could not close the account." }));
+            return;
+        }
+        setClosing(c => ({ ...c, busy: true, issue: null, done: true }));
+        await logout();
+        window.location.assign("/login");
     };
 
     const handleSignOut = async () => {
@@ -193,7 +211,24 @@ function SettingsPage() {
                 <Card className="fade-up s4" style={{ padding: 18, borderColor: `${t.danger}40` }}>
                     <div className="serif" style={{ fontSize: 14, fontWeight: 600, color: t.danger, marginBottom: 8 }}>Danger Zone</div>
                     <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 14 }}>Permanently delete your account. This cannot be undone.</div>
-                    <Btn variant="danger">Delete Account</Btn>
+                    {!closing ? (
+                        <Btn variant="danger" onClick={() => setClosing({ password: "", busy: false, issue: null })}>Delete Account</Btn>
+                    ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                            <div style={{ fontSize: 12.5, color: t.textMuted }}>
+                                Your personal details are erased and you are signed out everywhere. Case, payment and audit records are kept where the law or a client's rights require it. Enter your password to confirm.
+                            </div>
+                            <Input type="password" placeholder="Current password" autoComplete="current-password"
+                                value={closing.password} onChange={e => setClosing(c => ({ ...c, password: e.target.value }))} />
+                            {closing.issue && <div role="alert" style={{ fontSize: 12, color: t.danger }}>{closing.issue}</div>}
+                            <div style={{ display: "flex", gap: 8 }}>
+                                <Btn variant="danger" onClick={handleClose} disabled={closing.busy}>
+                                    {closing.done ? "Account closed. Signing out…" : closing.busy ? "Closing…" : "Permanently close account"}
+                                </Btn>
+                                <Btn variant="outline" onClick={() => setClosing(null)} disabled={closing.busy}>Cancel</Btn>
+                            </div>
+                        </div>
+                    )}
                 </Card>
             </div>
         </div>
