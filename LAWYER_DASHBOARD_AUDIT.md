@@ -194,13 +194,14 @@ Every commit has a regression test that fails without the fix and passes with it
 | Finding | Commit | Change |
 |---|---|---|
 | 1. KYC erasure could fail silently after its record was removed | `fe82efd` | Tombstone-first: closure cuts the record to file ids and marks `kyc_erasure_pending`; files deleted with errors raised; record removed only after success; failure logged + recorded on the user; hourly `_kyc_erasure_retry` sweep. Failure-path test. |
+| 1b. Closure still claimed erasure when it was pending; retry not single-worker or failure-isolated | `127ea70` | Response carries `kyc_erasure_pending` and says the documents are scheduled for deletion; `erase()` never raises after a committed closure; retry behind the scheduler gate with a Redis period-lock; per-user isolation; least-recently-attempted first, paged. Tests for wording, secondary DB failure, isolation, rotation and lock/scheduling. |
 | 2. Admin KYC load failure shown as an empty queue (and onboarding read failure as "nothing uploaded") | `27d597b` | Distinct error state with a working Retry in both places |
 | 3. Opening KYC documents ignored blocked tabs and blob failures | `14365c7` | Shared `_openAuthenticatedInNewTab` (also used by citation sources). It no longer passes `noopener`, which makes `window.open` return null on success; it cuts `win.opener` itself. |
 | Onboarding claimed clients see KYC uploads | `16568ac` | Says only the reviewing admin sees them |
 | Agenda claimed "Nothing scheduled today" from a 50-row preview | `b134c7c` | "No appointments found in this preview" |
 | Toast ids from `Date.now()` | `d762b51` | Per-container counter; two-toast test |
 
-**Merge topology:** stacked branch. Review/merge `feat/doc-analyzer-p3` first, then retarget `fix/lawyer-dashboard` (44 dashboard commits after `7805f71`) to `master`. Merging it directly would also bring the 146 unmerged analyzer commits.
+**Merge topology:** stacked branch. Review/merge `feat/doc-analyzer-p3` first, then retarget `fix/lawyer-dashboard` to `master`. With this audit update the branch is **47 commits after `7805f71`** (the analyzer checkpoint) and **193 ahead of `master`**; merging it directly would also bring the 146 unmerged analyzer commits.
 
 **Frontend:** full suite **1,349 passed, 0 failed** (three consecutive runs); production build passes.
 
@@ -210,7 +211,7 @@ Every commit has a regression test that fails without the fix and passes with it
 |---|---|
 | New / changed tests: `test_cases_status_filter.py`, `test_kyc_documents.py`, `test_agreement_draft_delete_route.py` | All pass (5 + 8 + 1) against local MongoDB |
 | All case tests (`tests/test_case*.py`) | 142 passed |
-| Wider sweep of tests touching account closure, KYC and admin routes (62 files), rerun after the review fixes | 216 skipped, **44 failed** — the same 44 below; `test_account_closure.py` passes |
+| Wider sweep of tests touching account closure, KYC and admin routes (62 files), rerun after the final KYC fix | 1,872 passed, 216 skipped, **44 failed** — the same 44 below; `test_account_closure.py` and all 15 KYC tests pass |
 
 **The 44 failures are a reproducible baseline, not caused by this branch.** They fail identically with these changes stashed:
 
