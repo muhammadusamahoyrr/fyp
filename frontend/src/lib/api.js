@@ -1288,6 +1288,19 @@ export async function revokeAllSessions() {
 }
 
 // ─── Lawyer Profile ───────────────────────────────────────────────────────────
+// ─── Lawyer KYC documents (onboarding "Credentials & Photo") ────────────────
+// kind: "photo" | "bar_certificate" | "education" | "professional".
+export async function listMyKycDocuments() {
+  return apiFetch('/users/me/kyc/documents');
+}
+
+export async function uploadKycDocument(kind, file) {
+  const fd = new FormData();
+  fd.append('kind', kind);
+  fd.append('file', file);
+  return apiFetchMultipart('/users/me/kyc/documents', fd);
+}
+
 export async function updateLawyerProfile(updates) {
   return apiFetch('/users/me/lawyer-profile', {
     method: 'PATCH',
@@ -1900,6 +1913,20 @@ export async function adminGetAnalytics() {
 
 export async function adminListPendingKYC() {
   return apiFetch('/admin/kyc/pending');
+}
+
+/* Open a lawyer's uploaded KYC file for review. The route needs the bearer
+   token, so it cannot be a plain link: fetched as a blob and opened as an
+   object URL. Returns { error } on failure. */
+export async function adminOpenKycDocument(lawyerId, kind) {
+  const { data: res, error } = await apiFetch(
+    `/admin/kyc/${encodeURIComponent(lawyerId)}/documents/${encodeURIComponent(kind)}`,
+    { returnResponse: true });
+  if (error) return { error: error.message || 'Could not open the document.' };
+  const url = URL.createObjectURL(await res.blob());
+  window.open(url, '_blank', 'noopener,noreferrer');
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { error: null };
 }
 
 export async function adminProcessKYC(lawyerId, approved, rejectionReason = null) {
