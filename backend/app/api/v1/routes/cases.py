@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 
+from app.core.constants import CaseStatus
 from app.dependencies import get_current_user, require_lawyer
 from app.schemas.case import (
     CaseConfirm,
@@ -34,10 +35,14 @@ async def create_case(
 async def list_cases(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
+    # Optional, and validated against CaseStatus: an unknown value is a 422,
+    # not an empty list. Omitted, the listing is exactly what it was before.
+    status: CaseStatus | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     return await case_service.list_cases(
-        current_user["_id"], current_user["role"], page, page_size
+        current_user["_id"], current_user["role"], page, page_size,
+        status=status.value if status else None,
     )
 
 

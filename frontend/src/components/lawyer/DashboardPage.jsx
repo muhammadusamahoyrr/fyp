@@ -10,7 +10,7 @@ import { CSB, fmtDate } from "./data.js";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { listCases, listAppointments, reviewQueueV2, listReviewQueue, errorCode } from "@/lib/api.js";
-import { caseStatusLabel, activeCases } from "@/lib/caseStatus.js";
+import { caseStatusLabel } from "@/lib/caseStatus.js";
 
 function _mapCase(c) {
     return {
@@ -37,6 +37,8 @@ function DashboardPage() {
     // it exceeds the rows loaded (the API caps a page at 50), counts derived
     // from those rows are a floor, and are shown as one ("50+").
     const [casesTotal, setCasesTotal] = useState(null);
+    // Exact active total: the server's counts of `open` + `in_progress`; null = not known.
+    const [activeTotal, setActiveTotal] = useState(null);
     // Documents awaiting this lawyer's review; null = not known.
     const [pendingDocs, setPendingDocs] = useState(null);
     // `null` = not known (not yet read, or the read failed). Distinct from 0,
@@ -49,6 +51,17 @@ function DashboardPage() {
             if (!data?.items) return;
             setRawCases(data.items);
             setCasesTotal(Number.isInteger(data.total) ? data.total : data.items.length);
+        });
+
+        // ACTIVE = open + in_progress, counted by the server. One row of each
+        // status is enough: `total` is the count, whatever the list's length.
+        Promise.all([
+            listCases({ status: "open", page_size: 1 }),
+            listCases({ status: "in_progress", page_size: 1 }),
+        ]).then(([open, inProgress]) => {
+            const n = (r) => (!r.error && Number.isInteger(r.data?.total) ? r.data.total : null);
+            const a = n(open), b = n(inProgress);
+            setActiveTotal(a === null || b === null ? null : a + b);
         });
 
         // The review queue's own `submitted` total (first page carries counts);
@@ -106,8 +119,7 @@ function DashboardPage() {
     const greetName = user?.full_name?.split(" ")[0] || "Counselor";
     const hour = new Date().getHours();
     const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-    // Open, awaiting-lawyer and in-progress — not drafts, not ended matters.
-    const activeCnt = activeCases(rawCases).length;
+    const activeCnt = activeTotal === null ? "—" : String(activeTotal);
     const clientCnt = new Set(rawCases.map(c => c.client_id).filter(Boolean)).size;
     // "—" until known; a real 0 once the server has said so; "N+" when only
     // part of the case list was loaded.
@@ -115,7 +127,7 @@ function DashboardPage() {
     const fromCases = (n) => (casesTotal === null ? "—" : partial ? `${n}+` : String(n));
 
     const stats = [
-        { l: "Active Cases", v: fromCases(activeCnt), c: "#3EECD6", ic: "cases", ch: "Assigned to you", pg: "cases" },
+        { l: "Active Cases", v: activeCnt, c: "#3EECD6", ic: "cases", ch: "Open + in progress", pg: "cases" },
         { l: "Pending Docs", v: pendingDocs === null ? "—" : String(pendingDocs), c: "#FFBE45", ic: "fileText", ch: "Awaiting your review", pg: "documents" },
         { l: "Total Clients", v: fromCases(clientCnt), c: "#42D4A0", ic: "clients", ch: "Across all cases", pg: "clients" },
         { l: "Appointments", v: aptCount === null ? "—" : String(aptCount), c: "#4AAFFF", ic: "gavel", ch: "Pending + Confirmed", pg: "appointments" },
@@ -218,7 +230,7 @@ function DashboardPage() {
                             <div style={{ display: "flex", gap: 6 }}>{[
                                 { v: String(events.length), l: "Today", c: t.info, pg: "appointments" },
                                 { v: aptCount === null ? "—" : String(aptCount), l: "Upcoming", c: t.success, pg: "appointments" },
-                                { v: fromCases(activeCnt), l: "Active cases", c: t.warn, pg: "cases" },
+                                { v: activeCnt, l: "Active cases", c: t.warn, pg: "cases" },
                             ].map(s => (
                                 <div key={s.l} onClick={() => setPage(s.pg)} style={{ flex: 1, padding: "9px 6px", borderRadius: 9, background: t.primaryGlow2, border: `1px solid ${t.border}`, textAlign: "center", cursor: "pointer" }}>
                                     <div className="mono" style={{ fontSize: 17, fontWeight: 700, color: s.c }}>{s.v}</div>

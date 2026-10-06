@@ -434,8 +434,11 @@ export async function transcribeAudio(audioBlob) {
 }
 
 // ─── Cases ───────────────────────────────────────────────────────────────────
-export async function listCases({ page = 1, page_size = 10 } = {}) {
+// `status` (optional) narrows to one CaseStatus; with page_size 1 the
+// response's `total` is an exact count without downloading the list.
+export async function listCases({ page = 1, page_size = 10, status = null } = {}) {
   const p = new URLSearchParams({ page, page_size });
+  if (status) p.set('status', status);
   return apiFetch(`/cases?${p}`);
 }
 

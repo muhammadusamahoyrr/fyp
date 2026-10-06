@@ -36,11 +36,16 @@ const kase = (n, status, extra = {}) => ({ _id: `665f0000000000000000000${n}`, c
     title: `Matter ${n}`, client_id: `cl${n}`, client_name: `Client ${n}`, province: "punjab",
     case_type: "civil", status, hearing_dates: [], ...extra });
 
-function serve({ cases, total = cases.length, submitted }) {
+// `byStatus` is what the server would count per status (its `total` for
+// `?status=`); by default it is counted from `cases`.
+function serve({ cases, total = cases.length, submitted, byStatus = null }) {
     api.__reset();
     api.__respond("bootstrapAuth", true);
     api.__respond("getMe", { data: { _id: "l1", role: "lawyer", full_name: "Asad Ali" }, error: null });
-    api.__respond("listCases", { data: { items: cases, total }, error: null });
+    const counted = (st) => (byStatus ? (byStatus[st] ?? 0) : cases.filter(c => c.status === st).length);
+    api.__respond("listCases", (args = {}) => (args.status
+        ? { data: { items: [], total: counted(args.status), page: 1, page_size: 1, pages: 1 }, error: null }
+        : { data: { items: cases, total }, error: null }));
     api.__respond("listAppointments", { data: { items: [], total: 0, pages: 0 }, error: null });
     api.__respond("reviewQueueV2", { data: { items: [], next_cursor: null, status: "submitted",
         counts: { all: submitted, submitted, approved: 0, returned: 0, rejected: 0 } }, error: null, status: 200 });
@@ -68,13 +73,15 @@ function stat(container, label) {
     return head.nextElementSibling.textContent.trim();
 }
 
-test("active cases include in_progress; pending docs come from the review queue", async () => {
+test("active cases are the server's open + in_progress totals; pending docs come from the review queue", async () => {
     serve({ submitted: 4, cases: [
         kase(1, "in_progress", { hearing_dates: [{ date: "2026-11-20T00:00:00Z" }] }),
         kase(2, "pending_lawyer"), kase(3, "closed"),
-    ] });
+    ], byStatus: { open: 3, in_progress: 5 } });
     const view = await mount();
-    assert.equal(stat(view.container, "Active Cases"), "2");
+    assert.equal(stat(view.container, "Active Cases"), "8");
+    const asked = api.__calls("listCases").map(c => c.args[0]?.status).filter(Boolean).sort();
+    assert.deepEqual(asked, ["in_progress", "open"], "active must be counted by the server, per status");
     assert.equal(stat(view.container, "Pending Docs"), "4");
     assert.equal(stat(view.container, "Total Clients"), "3");
     assert.match(view.container.textContent, /20 Nov 2026/, "the next hearing date is not shown");
@@ -89,10 +96,12 @@ test("a real zero is shown as 0, not as unknown", async () => {
     await view.unmount();
 });
 
-test("counts from a partial case list are marked as a floor", async () => {
-    serve({ cases: [kase(1, "in_progress"), kase(2, "open")], total: 120, submitted: 0 });
+test("active is exact even past the first page; client counts from a partial list are a floor", async () => {
+    serve({ cases: [kase(1, "in_progress"), kase(2, "open")], total: 120, submitted: 0,
+            byStatus: { open: 40, in_progress: 61 } });
     const view = await mount();
-    assert.equal(stat(view.container, "Active Cases"), "2+");
+    assert.equal(stat(view.container, "Active Cases"), "101");
+    assert.equal(stat(view.container, "Total Clients"), "2+");
     await view.unmount();
 });
 
