@@ -139,4 +139,49 @@ Every commit has a regression test that fails without the fix and passes with it
 | 3.9 | `7978b08` | Case workspace: browser-only Documents/Timeline tabs and hearing edit/delete hidden |
 | 3.10 | `1ba40e7` | Never-rendered components deleted (WorkspaceAI, Documents/Timeline tabs, EditMenu, StatusBadge, DocTopbar, Topbar, LoginPage stub) |
 
-**Still open:** the demo smoke test (manual click-through, release gate); onboarding Step 2 (Credentials & Photo) is entirely inert — removing it makes the wizard 3 steps and needs approval; the deferred Phase 2 items (2.3, 2.5, 2.7–2.10) and Phase 4.
+### Follow-ups (approved after Phase 3)
+
+| Item | Commit | What changed |
+|---|---|---|
+| Client close-account | `5203b7f` | `ConfirmDialog` renders its children, so the password field appears; the refusal reason is read from `.message` (client module, own commit) |
+| Case-status filter | `c7e332e` | `GET /cases?status=` — optional, validated against `CaseStatus` (422 otherwise), applied inside the caller's scope; dashboard Active = server `open` + `in_progress` totals |
+| KYC uploads — backend | `56601fd` | `POST/GET /users/me/kyc/documents` (lawyer only, 5 MB, type from bytes, replace per kind), `GET /admin/kyc/{id}/documents/{kind}` (admin only, inline, no-store), new optional `lawyer_profile.kyc_documents`; files + record removed on account close |
+| KYC uploads — onboarding | `7f6bed5` | Step 2 uploads for real, shows what the server holds or why it refused; real initials; camera capture input; honest banner |
+| KYC uploads — admin | `c4f6804` | Admin KYC review lists each lawyer's real uploads and opens them (was hardcoded "Bar License, ID Proof") |
+| Smoke finding 1 | `0e1f4a7` | Saving a hearing kept the server's bare case, blanking the client name in the workspace header (and duplicating a React key) |
+| Smoke finding 2 | `c6a837a` | The AI history list's search debounce used a mount-time closure and reloaded unfiltered last, listing general threads under a selected case |
+
+---
+
+## 8. Demo smoke test (release gate) — 2026-10-06
+
+**Environment:** local only. Backend on `127.0.0.1:8000` via `serve.py start --env-overlay .env.analyzer-demo.local` (`doc_analyzer_ready ai=simulated`), Mongo replica set `127.0.0.1:27018` / `attorney_ai_local`, no Redis, blank SMTP, frontend dev server on `3001`. `.env` unchanged. No hosted provider was called: no AI question, AI drafting, translation, cause-list "Check Now" or payment was exercised, and onboarding was submitted with an empty address (no geocoding). Fictional `@example.com` accounts; synthetic upload files. The stack was stopped afterwards (ports 8000 / 3001 / 27018 free).
+
+| Path | Result |
+|---|---|
+| Dashboard numbers (2.1, 2.2, status filter) | ✅ Active 2 (open + in_progress, server totals), Pending Docs 0, Clients 1, real status labels |
+| Documents inbox (LD-01, 3.3) | ✅ Renders, cards 0/0/0/0, no Upload, AI Generate present |
+| Case status filter options (2.1) | ✅ Open / In Progress / Awaiting Lawyer / Closed / Dismissed |
+| Schedule hearing (LD-02) | ✅ Labels render; POST 200; hearing listed. **Found:** client name blanked after save → fixed `0e1f4a7` |
+| Record outcome with next date (2.4) | ✅ Add Outcome works on the just-scheduled hearing; auto-scheduled hearing appears with its own Add Outcome; no stuck "Saving…" |
+| Hearing edit/delete, Documents/Timeline tabs (3.9) | ✅ Not offered; Overview / Messages / Tasks only |
+| Clients → Message (LD-05, 3.7) | ✅ Opens the case workspace; hearings seeded when opened from outside the list (2.4); no Add Client |
+| Agreement draft → delete (LD-03) | ✅ Unverified lawyer correctly refused (403, message shown); after KYC approval: create 201, delete 200, no false error |
+| Onboarding Step 1 validation (LD-04) | ✅ Empty Continue blocked with reason; no Bar Council field |
+| Onboarding Step 2 uploads (KYC) | ✅ PDF uploaded and listed; text-as-PDF refused with the server's reason (422); photo uploaded with preview; real initials; files on local disk |
+| Onboarding Step 3/4 (3.8b) | ✅ No never-sent fields; submitted; no Admin Support link; returning lawyer lands on the dashboard |
+| Admin KYC review | ✅ Real uploads listed ("Bar Council Certificate ↗", "Photo ↗"; "No documents uploaded" for the other); file opened (200); approval works |
+| AI Assistant binding (LD-06 + follow-up) | ✅ One conversation created, bound to the selected case; no stray thread; clock reopens history; inert controls gone. **Found:** history list ended unfiltered → fixed `c6a837a` |
+| Appointments (3.4) | ✅ Loads; no View Details |
+| Settings (3.1, 3.2) | ✅ No notification toggles; Delete Account closed the account behind the password; user anonymised; KYC files and record removed |
+| Client close-account dialog (`5203b7f`) | ✅ Password field shown; request reaches the server (403 on a wrong password). ⚠️ The refusal toast is not visible — see below |
+
+**Not exercised (by design):** Review Queue (flag off), Document Analyzer, Cause List "Check Now" (fetches the LHC site), AI answers / Draft Generator AI / translation (hosted LLM), payments, the Documents review screen with a real submission (none in the local DB).
+
+**Open findings from the smoke test**
+
+- **Client app shows no toasts at all (pre-existing, client module).** `ClientApp` mounts no `ToastContainer`, so `useToast()` falls back to a no-op on every client screen. The close-account fix is correct but its message is invisible until a provider is mounted. Not fixed — outside this plan.
+- Console noise only: Next dev HMR websocket (dev server), the Review Queue probe's expected 404 (`feature_disabled`), and a pre-existing React style warning (a card mixing `border` and `borderLeft`).
+- Hearing form pre-fills Court with the province and Judge with "—" (D6, deferred).
+
+**Still open:** the client toast provider (above); the deferred Phase 2 items (2.3, 2.5, 2.7–2.10) and Phase 4; pre-existing backend failures in `test_v2_migration_matrix.py`, `test_engagement_two_step.py`, `test_analyzer_lawyer_only.py` (44 tests, identical with and without these changes).
