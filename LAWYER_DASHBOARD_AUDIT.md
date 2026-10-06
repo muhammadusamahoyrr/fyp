@@ -209,7 +209,7 @@ Every commit has a regression test that fails without the fix and passes with it
 
 | Run | Result |
 |---|---|
-| New / changed tests: `test_cases_status_filter.py`, `test_kyc_documents.py`, `test_agreement_draft_delete_route.py` | All pass (5 + 8 + 1) against local MongoDB |
+| New / changed tests: `test_cases_status_filter.py`, `test_kyc_documents.py`, `test_agreement_draft_delete_route.py` | All pass (5 + 15 + 1) against local MongoDB |
 | All case tests (`tests/test_case*.py`) | 142 passed |
 | Wider sweep of tests touching account closure, KYC and admin routes (62 files), rerun after the final KYC fix | 1,872 passed, 216 skipped, **44 failed** — the same 44 below; `test_account_closure.py` and all 15 KYC tests pass |
 
