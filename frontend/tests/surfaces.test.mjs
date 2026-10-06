@@ -784,12 +784,17 @@ test("search is debounced and restarts from the top", () => {
     // A request per keystroke has the same stale-response problem at several
     // times the cost, and a search continuing from an old cursor would page
     // through the wrong result set.
-    for (const path of ["components/client/ModChatbot.jsx",
-                        "components/lawyer/AILegalPage.jsx"]) {
-        const code = src(path);
-        assert.match(code, /setTimeout\(\s*\(\) => \{ loadHistory\(\{ term: search \|\| null \}\); \}, 250\)/,
-            `${path} does not debounce its search`);
-    }
+    const chatbot = src("components/client/ModChatbot.jsx");
+    assert.match(chatbot, /setTimeout\(\s*\(\) => \{ loadHistory\(\{ term: search \|\| null \}\); \}, 250\)/,
+        "components/client/ModChatbot.jsx does not debounce its search");
+    // The lawyer page debounces through a ref to the CURRENT refresh (a mount-time
+    // closure predates the case list and reloaded unfiltered); the refresh it
+    // calls still restarts from the top — no cursor.
+    const lawyer = src("components/lawyer/AILegalPage.jsx");
+    assert.match(lawyer, /setTimeout\(\s*\/\/[\s\S]*?\(\) => \{ refreshHistoryRef\.current\(\); \}, 250\)/,
+        "components/lawyer/AILegalPage.jsx does not debounce its search");
+    assert.match(lawyer, /const refreshHistory = useCallback\(\s*\(\) => loadHistory\(\{ term: search \|\| null \}\)/,
+        "the lawyer refresh no longer restarts from the top");
 });
 
 test("the list helpers send the cursor and the search term", () => {

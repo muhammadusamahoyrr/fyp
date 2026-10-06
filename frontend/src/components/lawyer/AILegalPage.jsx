@@ -492,6 +492,12 @@ function AILegalPage() {
 
     const refreshHistory = useCallback(
         () => loadHistory({ term: search || null }), [loadHistory, search]);
+    // The mount bootstrap is async and outlives the render it started in; it
+    // must refresh with the CURRENT filter. Its own closure held the first
+    // render's (case still unknown), and as the last list request it won —
+    // leaving general threads listed under a selected case (smoke test).
+    const refreshHistoryRef = useRef(refreshHistory);
+    refreshHistoryRef.current = refreshHistory;
 
     const loadMoreHistory = useCallback(
         () => loadHistory({ after: listCursor, term: search || null }),
@@ -499,7 +505,10 @@ function AILegalPage() {
 
     useEffect(() => {
         const timer = setTimeout(
-            () => { loadHistory({ term: search || null }); }, 250);
+            // Through the ref: this timer is set on mount, and the closure it
+            // captured predates the case list, so it reloaded the list
+            // unfiltered — and, firing last, it won.
+            () => { refreshHistoryRef.current(); }, 250);
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [search]);
@@ -705,7 +714,7 @@ function AILegalPage() {
                 && boundCaseRef.current !== wantedCaseRef.current) {
                 await startConversation(wantedCaseRef.current);
             }
-            if (live) refreshHistory();
+            if (live) refreshHistoryRef.current();
         })();
         return () => { live = false; };
         // Runs once per ACCOUNT (a new user must not inherit the previous one's

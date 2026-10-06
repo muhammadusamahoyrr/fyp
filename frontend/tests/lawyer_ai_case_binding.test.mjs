@@ -216,4 +216,3 @@ test("a search hit whose case is not loaded shows an explicit notice instead of 
     assert.match(notice.textContent, /new thread/);
     await view.unmount();
 });
-
