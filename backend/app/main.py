@@ -194,6 +194,25 @@ async def _vault_purge():
             logging.getLogger(__name__).exception("Vault purge failed")
 
 
+async def _kyc_erasure_retry():
+    """Retry KYC file erasures that failed at account closure
+    (services/kyc_documents.py). Hourly. The tombstone on the user record is
+    what is retried, so a crash or a locked file never strands identity
+    documents on disk with nothing pointing at them."""
+    import asyncio
+    import logging
+
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            from app.services.kyc_documents import retry_pending_erasures
+            await retry_pending_erasures()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("KYC erasure retry failed")
+
+
 async def _provenance_relay():
     """Deliver provenance records whose direct write failed.
 
@@ -471,6 +490,7 @@ async def lifespan(app: FastAPI):
     scheduler_tasks.append(_asyncio.create_task(_review_request_sweep()))
     scheduler_tasks.append(_asyncio.create_task(_review_request_notifier()))
     scheduler_tasks.append(_asyncio.create_task(_vault_purge()))
+    scheduler_tasks.append(_asyncio.create_task(_kyc_erasure_retry()))
 
     # EVENT OUTBOX relay: ungated, and NOT covered by the v2 relay above, which
     # returns immediately while DOCUMENTS_V2 is off. Agreement transitions park

@@ -133,3 +133,37 @@ async def test_closing_the_account_removes_the_files_and_the_record(world):
     assert not (world["root"] / world["lawyer"]).exists()
     user = await get_users_col().find_one({"_id": world["lawyer"]})
     assert "kyc_documents" not in (user.get("lawyer_profile") or {})
+
+
+async def test_a_failed_erasure_keeps_a_tombstone_and_the_sweep_finishes_it(world, monkeypatch):
+    """Deletion failure must be observable and retried: never files on disk
+    with no record pointing at them (branch review, finding 1)."""
+    from app.db.collections import get_users_col
+    from app.services import kyc_documents, user_service
+
+    await _upload(world["lawyer"], "lawyer", "bar_certificate", PDF, "Adv One bar.pdf")
+    folder = world["root"] / world["lawyer"]
+
+    real_rmtree = kyc_documents.shutil.rmtree
+
+    # A locked file, as shutil sees it: with ignore_errors the failure is
+    # swallowed silently (the old behaviour), otherwise it raises.
+    def locked(path, ignore_errors=False, **k):
+        if not ignore_errors:
+            raise PermissionError("file in use")
+    monkeypatch.setattr(kyc_documents.shutil, "rmtree", locked)
+    await user_service.close_account(world["lawyer"], "Passw0rd!x")
+
+    assert folder.exists(), "the files should still be on disk after a failed deletion"
+    lp = (await get_users_col().find_one({"_id": world["lawyer"]}))["lawyer_profile"]
+    assert lp.get("kyc_erasure_pending"), "no tombstone was kept for the pending erasure"
+    assert lp["kyc_documents"]["bar_certificate"]["file_id"], "the pointer to the files was lost"
+    assert "filename" not in lp["kyc_documents"]["bar_certificate"], "the filename (personal data) was kept"
+    assert "file in use" in lp.get("kyc_erasure_error", "")
+
+    # Only the delete is restored; the fixture's upload_root patch stays.
+    monkeypatch.setattr(kyc_documents.shutil, "rmtree", real_rmtree)
+    assert await kyc_documents.retry_pending_erasures() >= 1
+    assert not folder.exists()
+    lp = (await get_users_col().find_one({"_id": world["lawyer"]}))["lawyer_profile"]
+    assert "kyc_documents" not in lp and "kyc_erasure_pending" not in lp

@@ -13,7 +13,12 @@ storage behind both.
   never a static path.
 * The record (``lawyer_profile.kyc_documents.{kind}``) carries metadata only;
   the on-disk name is derived from it and contained under the lawyer's folder.
-* Closing the account removes the folder and the record (see user_service).
+* Closing the account erases the files TOMBSTONE-FIRST: the record is cut
+  down to file ids (no filenames) and marked ``kyc_erasure_pending`` in the
+  closure write, the files are deleted, and only then is the record removed.
+  A deletion that fails is logged, recorded on the user and retried by the
+  hourly sweep (``retry_pending_erasures``) — sensitive files are never left
+  on disk with nothing pointing at them.
 """
 from __future__ import annotations
 
@@ -160,10 +165,55 @@ async def file_for(user_id: str, kind: str) -> tuple[Path, str, str]:
     return path, meta.get("filename") or kind, meta.get("content_type") or "application/octet-stream"
 
 
-def delete_all(user_id: str) -> None:
-    """Remove every KYC file a lawyer uploaded (account closure). Best effort."""
+def closure_tombstone(lawyer_profile: dict) -> dict:
+    """$set fields for the closure write: keep only what erasure needs."""
+    docs = (lawyer_profile or {}).get("kyc_documents") or {}
+    if not docs:
+        return {}
+    return {
+        "lawyer_profile.kyc_documents": {
+            kind: {"file_id": meta.get("file_id"), "content_type": meta.get("content_type")}
+            for kind, meta in docs.items() if meta
+        },
+        "lawyer_profile.kyc_erasure_pending": datetime.now(timezone.utc),
+    }
+
+
+async def erase(user_id: str) -> bool:
+    """Delete a closed lawyer's KYC files, then clear the tombstone.
+
+    Returns True when nothing is left on disk. On failure the tombstone stays,
+    the error is recorded on the user and logged, and the sweep retries.
+    """
     try:
         folder = _folder(user_id)
     except NotFoundError:
-        return
-    shutil.rmtree(folder, ignore_errors=True)
+        return False
+    try:
+        if folder.exists():
+            shutil.rmtree(folder)
+    except OSError as exc:
+        logger.error("kyc_erasure_failed user=%s: %s", user_id, exc)
+        await user_repo.update_one(
+            {"_id": user_id},
+            {"$set": {"lawyer_profile.kyc_erasure_error": str(exc)[:300]},
+             "$inc": {"lawyer_profile.kyc_erasure_attempts": 1}})
+        return False
+    await user_repo.update_one(
+        {"_id": user_id},
+        {"$unset": {"lawyer_profile.kyc_documents": "",
+                    "lawyer_profile.kyc_erasure_pending": "",
+                    "lawyer_profile.kyc_erasure_error": "",
+                    "lawyer_profile.kyc_erasure_attempts": ""}})
+    return True
+
+
+async def retry_pending_erasures() -> int:
+    """Retry every erasure still pending. Returns how many completed."""
+    pending = await user_repo.find_many(
+        {"lawyer_profile.kyc_erasure_pending": {"$exists": True}}, limit=200)
+    done = 0
+    for user in pending:
+        if await erase(user["_id"]):
+            done += 1
+    return done

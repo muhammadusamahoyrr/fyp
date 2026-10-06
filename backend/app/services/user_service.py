@@ -302,6 +302,7 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
     # "E11000 duplicate key ... cnic_encrypted: null" and the whole write failed.
     # Unsetting is also the better erasure: the value is gone rather than blanked.
     unsets = {"cnic_encrypted": ""}
+    kyc_tombstone = {}
     # Only lawyers have this sub-document. On a client it is null, and Mongo
     # refuses to create a field inside null with
     # "Cannot create field 'availability' in element {lawyer_profile: null}" —
@@ -312,9 +313,13 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
             "lawyer_profile.kyc_verified": False,
             "lawyer_profile.availability": False,
         })
-        # Identity documents uploaded for verification: the record goes here,
-        # the files right after the write (kyc_documents.delete_all).
-        unsets["lawyer_profile.kyc_documents"] = ""
+        # Identity documents uploaded for verification: TOMBSTONE FIRST. The
+        # record is cut to file ids and marked pending here; the files are
+        # deleted after the write, and the record goes only once they are gone
+        # (kyc_documents.erase). A failed deletion stays visible and retried.
+        from app.services import kyc_documents
+        kyc_tombstone = kyc_documents.closure_tombstone(user["lawyer_profile"])
+        updates.update(kyc_tombstone)
 
     await user_repo.update_one({"_id": user_id}, {"$set": updates, "$unset": unsets})
     await auth_sessions.revoke_all_best_effort(
@@ -329,7 +334,8 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
         from app.ai.lawyer_embeddings import forget_lawyers
         from app.services import kyc_documents
         forget_lawyers([user_id])
-        kyc_documents.delete_all(user_id)
+        if kyc_tombstone:   # only a lawyer who uploaded something has files to erase
+            await kyc_documents.erase(user_id)
 
     logger.info("account closed: %s (role=%s, reason=%s)", user_id, user.get("role"), reason)
     return {
