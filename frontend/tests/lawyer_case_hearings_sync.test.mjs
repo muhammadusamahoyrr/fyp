@@ -134,3 +134,28 @@ test("the next hearing an outcome auto-schedules carries the server's id", async
     assert.ok(outcomeModalOpen(view.container), "Add Outcome was refused for the auto-scheduled hearing");
     await view.unmount();
 });
+
+test("saving a hearing keeps the client's name (the hearing route returns the bare case)", async () => {
+    // Found in the live smoke test: POST /cases/{id}/hearings returns CaseOut
+    // WITHOUT client_name (only the list route adds it), and replacing the case
+    // with it blanked the header to "👤 —" — colliding with "💰 —" as a key.
+    const { client_name, ...bare } = CASE;
+    api.__respond("addHearing", { data: { ...bare, hearing_dates: [
+        ...CASE.hearing_dates, hearing("h2", "2026-11-20", "Evidence")] }, error: null });
+    const errors = [];
+    const realError = console.error;
+    console.error = (...a) => { errors.push(String(a[0])); };
+    try {
+        const view = await mount();
+        await openFromList(view.container);
+        await click(buttons(view.container, "+ Schedule Hearing")[0]);
+        await type(fieldFor(view.container, "Date *"), "2026-11-20");
+        await type(fieldFor(view.container, "Purpose / Agenda *"), "Evidence");
+        await click(buttons(view.container, "Schedule Hearing").find(b => b.textContent.trim() === "Schedule Hearing"));
+        assert.match(view.container.textContent, /👤 Ayesha/, "the client's name was lost after saving");
+        assert.ok(!errors.some(e => /same key/.test(e)), "duplicate React keys in the workspace header");
+        await view.unmount();
+    } finally {
+        console.error = realError;
+    }
+});

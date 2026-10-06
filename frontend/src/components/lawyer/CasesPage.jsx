@@ -339,9 +339,13 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
     // Replace this case and its hearings with the server's returned CaseOut.
+    // The hearing routes return the bare case; only the case LIST adds
+    // client_name, so keep the name already shown rather than blanking it.
     const applyServerCase = (apiCase) => {
         const mapped = _mapApiCase(apiCase);
-        setCases(prev => prev.map(x => x._id === mapped._id ? mapped : x));
+        setCases(prev => prev.map(x => x._id === mapped._id
+            ? { ...mapped, client: apiCase.client_name ? mapped.client : x.client }
+            : x));
         setHearings(prev => ({ ...prev, [caseId]: mapped._apiHearings }));
     };
 
@@ -600,7 +604,7 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                         <div style={{ fontSize: 19, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>{c.title}</div>
                         <div style={{ display: "flex", gap: 14, marginTop: 5, flexWrap: "wrap" }}>
                             {[["👤", c.client], ["🏛", c.court], ["📁", c.type], ["💰", c.value]].map(([ic, val]) => (
-                                <span key={val} style={{ fontSize: 12, color: T.textMuted, display: "flex", alignItems: "center", gap: 5 }}>{ic} {val}</span>
+                                <span key={ic} style={{ fontSize: 12, color: T.textMuted, display: "flex", alignItems: "center", gap: 5 }}>{ic} {val}</span>
                             ))}
                         </div>
                     </div>
