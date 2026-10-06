@@ -182,8 +182,10 @@ def closure_tombstone(lawyer_profile: dict) -> dict:
 async def erase(user_id: str) -> bool:
     """Delete a closed lawyer's KYC files, then clear the tombstone.
 
-    Returns True when nothing is left on disk. On failure the tombstone stays,
-    the error is recorded on the user and logged, and the sweep retries.
+    Returns True only when the files are gone AND the tombstone is cleared.
+    Never raises: it runs after an account closure has already been committed,
+    so a disk, database or logging failure here must leave the tombstone for
+    the sweep — not turn a completed closure into a 500.
     """
     try:
         folder = _folder(user_id)
@@ -192,28 +194,53 @@ async def erase(user_id: str) -> bool:
     try:
         if folder.exists():
             shutil.rmtree(folder)
-    except OSError as exc:
-        logger.error("kyc_erasure_failed user=%s: %s", user_id, exc)
+    except Exception as exc:  # noqa: BLE001 -- recorded and retried, never raised
+        try:
+            logger.error("kyc_erasure_failed user=%s: %s", user_id, exc)
+            await user_repo.update_one(
+                {"_id": user_id},
+                {"$set": {"lawyer_profile.kyc_erasure_error": str(exc)[:300],
+                          "lawyer_profile.kyc_erasure_last_attempt": datetime.now(timezone.utc)},
+                 "$inc": {"lawyer_profile.kyc_erasure_attempts": 1}})
+        except Exception:  # noqa: BLE001 -- the tombstone itself is the record
+            pass
+        return False
+    try:
         await user_repo.update_one(
             {"_id": user_id},
-            {"$set": {"lawyer_profile.kyc_erasure_error": str(exc)[:300]},
-             "$inc": {"lawyer_profile.kyc_erasure_attempts": 1}})
+            {"$unset": {"lawyer_profile.kyc_documents": "",
+                        "lawyer_profile.kyc_erasure_pending": "",
+                        "lawyer_profile.kyc_erasure_error": "",
+                        "lawyer_profile.kyc_erasure_attempts": "",
+                        "lawyer_profile.kyc_erasure_last_attempt": ""}})
+    except Exception:  # noqa: BLE001 -- files are gone; the sweep clears the record
+        logger.exception("kyc_erasure_record_not_cleared user=%s", user_id)
         return False
-    await user_repo.update_one(
-        {"_id": user_id},
-        {"$unset": {"lawyer_profile.kyc_documents": "",
-                    "lawyer_profile.kyc_erasure_pending": "",
-                    "lawyer_profile.kyc_erasure_error": "",
-                    "lawyer_profile.kyc_erasure_attempts": ""}})
     return True
 
 
-async def retry_pending_erasures() -> int:
-    """Retry every erasure still pending. Returns how many completed."""
-    pending = await user_repo.find_many(
-        {"lawyer_profile.kyc_erasure_pending": {"$exists": True}}, limit=200)
+async def retry_pending_erasures(batch: int = 100, max_batches: int = 10) -> int:
+    """Retry erasures still pending. Returns how many completed.
+
+    Least-recently-attempted first (``kyc_erasure_last_attempt``, missing
+    first), so a user that keeps failing moves to the back instead of starving
+    the rest; paged, so a backlog larger than one batch is still reached; and
+    each user is isolated, so one unexpected error cannot abort the batch.
+    """
     done = 0
-    for user in pending:
-        if await erase(user["_id"]):
-            done += 1
+    seen: list = []
+    for _ in range(max_batches):
+        pending = await user_repo.find_many(
+            {"lawyer_profile.kyc_erasure_pending": {"$exists": True}, "_id": {"$nin": seen}},
+            sort=[("lawyer_profile.kyc_erasure_last_attempt", 1), ("_id", 1)],
+            limit=batch)
+        if not pending:
+            break
+        for user in pending:
+            seen.append(user["_id"])
+            try:
+                if await erase(user["_id"]):
+                    done += 1
+            except Exception:  # noqa: BLE001 -- isolate one user's failure
+                logger.exception("kyc_erasure_retry_failed user=%s", user["_id"])
     return done

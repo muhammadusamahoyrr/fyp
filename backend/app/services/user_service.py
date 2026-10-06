@@ -332,16 +332,31 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
     # (self-service and admin) come through here, so this is the one hook.
     if isinstance(user.get("lawyer_profile"), dict):
         from app.ai.lawyer_embeddings import forget_lawyers
-        from app.services import kyc_documents
         forget_lawyers([user_id])
-        if kyc_tombstone:   # only a lawyer who uploaded something has files to erase
-            await kyc_documents.erase(user_id)
+    # The closure above is committed. File erasure can fail (a locked file, a
+    # disk error); it never fails the request, and the response says what is
+    # actually true rather than claiming an erasure that has not happened.
+    kyc_erasure_pending = False
+    if kyc_tombstone:   # only a lawyer who uploaded something has files to erase
+        from app.services import kyc_documents
+        try:
+            kyc_erasure_pending = not await kyc_documents.erase(user_id)
+        except Exception:  # noqa: BLE001 -- erase() should not raise; belt and braces
+            logger.exception("kyc erasure raised during closure: %s", user_id)
+            kyc_erasure_pending = True
 
     logger.info("account closed: %s (role=%s, reason=%s)", user_id, user.get("role"), reason)
+    retained = ("Case, payment and audit records are retained where the law or "
+                "another party's rights require it.")
+    if kyc_erasure_pending:
+        detail = ("Your account is closed and your profile details have been erased. "
+                  "Your verification documents could not be deleted yet; they are "
+                  "scheduled for deletion and will be removed automatically. " + retained)
+    else:
+        detail = "Your account is closed and your personal details have been erased. " + retained
     return {
         "closed": True,
         "closed_at": now,
-        "detail": ("Your account is closed and your personal details have been "
-                   "erased. Case, payment and audit records are retained where "
-                   "the law or another party's rights require it."),
+        "kyc_erasure_pending": kyc_erasure_pending,
+        "detail": detail,
     }
