@@ -312,6 +312,9 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
             "lawyer_profile.kyc_verified": False,
             "lawyer_profile.availability": False,
         })
+        # Identity documents uploaded for verification: the record goes here,
+        # the files right after the write (kyc_documents.delete_all).
+        unsets["lawyer_profile.kyc_documents"] = ""
 
     await user_repo.update_one({"_id": user_id}, {"$set": updates, "$unset": unsets})
     await auth_sessions.revoke_all_best_effort(
@@ -324,7 +327,9 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
     # (self-service and admin) come through here, so this is the one hook.
     if isinstance(user.get("lawyer_profile"), dict):
         from app.ai.lawyer_embeddings import forget_lawyers
+        from app.services import kyc_documents
         forget_lawyers([user_id])
+        kyc_documents.delete_all(user_id)
 
     logger.info("account closed: %s (role=%s, reason=%s)", user_id, user.get("role"), reason)
     return {
