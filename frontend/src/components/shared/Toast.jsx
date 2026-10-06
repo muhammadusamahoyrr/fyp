@@ -22,6 +22,9 @@ export const ToastContainer = ({ theme, children }) => {
         warn: { bg: theme.badgeWarn.bg, border: theme.badgeWarn.border, color: theme.badgeWarn.color, icon: "check" },
         info: { bg: theme.badgeInfo.bg, border: theme.badgeInfo.border, color: theme.badgeInfo.color, icon: "msg" },
     };
+    // ~45 call sites pass "error"; it had no entry and fell back to the
+    // informational style, so failures looked like neutral notices.
+    colors.error = colors.danger;
 
     return (
         <ToastCtx.Provider value={{ show }}>
