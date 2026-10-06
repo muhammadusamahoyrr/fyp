@@ -113,3 +113,13 @@ test("no decorative progress bars pretend to measure anything", async () => {
     assert.equal(bars.length, 0);
     await view.unmount();
 });
+
+test("an empty agenda claims only what the preview shows, not 'nothing today'", async () => {
+    // The agenda reads the first 50 appointments only; it cannot know the day
+    // is empty (branch review). Until a date-range query exists, it says so.
+    serve({ cases: [], submitted: 0 });
+    const view = await mount();
+    assert.doesNotMatch(view.container.textContent, /Nothing scheduled today/);
+    assert.match(view.container.textContent, /No appointments found in this preview/);
+    await view.unmount();
+});

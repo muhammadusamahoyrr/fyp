@@ -211,7 +211,7 @@ function DashboardPage() {
                             </div>
                             {!events.length && (
                                 <div style={{ padding: "18px 4px", fontSize: 12.5, color: t.textMuted }}>
-                                    Nothing scheduled today.
+                                    No appointments found in this preview.
                                 </div>
                             )}
                             {events.map((ev, i) => (
