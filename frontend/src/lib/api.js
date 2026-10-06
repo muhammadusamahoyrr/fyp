@@ -1611,7 +1611,14 @@ export async function openSourceDocument(path, label = 'source document') {
   if (!path) return { error: 'No source document for this citation' };
   // `path` comes back with the /api/v1 prefix the server publishes; BASE
   // already carries it, so strip it rather than requesting /api/v1/api/v1/...
-  const rel = path.replace(/^\/api\/v1/, '');
+  return _openAuthenticatedInNewTab(path.replace(/^\/api\/v1/, ''), label);
+}
+
+/* Fetch a bearer-authenticated file and open it in a new tab. Shared by every
+   "open this document" action: a failed fetch, an unreadable body and a
+   blocked pop-up each come back as { error }, never as a button that silently
+   does nothing. Returns { data: true } on success. */
+async function _openAuthenticatedInNewTab(rel, label) {
   const { data: res, error } = await apiFetch(rel, { returnResponse: true });
   if (error) return { error: error.message || `Could not open ${label}` };
   let blob;
@@ -1624,11 +1631,17 @@ export async function openSourceDocument(path, label = 'source document') {
   // The fetch above means this window.open no longer happens inside the click's
   // own task, so a strict popup blocker can refuse it. Detected and reported
   // rather than left as a chip that appears to do nothing when pressed.
-  const win = window.open(url, '_blank', 'noopener,noreferrer');
+  //
+  // NOT with the "noopener" feature: per the HTML spec that makes window.open
+  // return null even when the tab DID open, so a successful open read as
+  // "blocked" and the URL was revoked under the new tab. The opener link is
+  // cut by hand instead, which is what noopener existed to do.
+  const win = window.open(url, '_blank');
   if (!win) {
     URL.revokeObjectURL(url);
     return { error: 'Your browser blocked the new tab — allow pop-ups for this site' };
   }
+  try { win.opener = null; } catch { /* cross-origin: already isolated */ }
   // Long enough for the tab to have read the object URL; revoking immediately
   // aborts the load in Firefox and Safari.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -1919,14 +1932,9 @@ export async function adminListPendingKYC() {
    token, so it cannot be a plain link: fetched as a blob and opened as an
    object URL. Returns { error } on failure. */
 export async function adminOpenKycDocument(lawyerId, kind) {
-  const { data: res, error } = await apiFetch(
+  return _openAuthenticatedInNewTab(
     `/admin/kyc/${encodeURIComponent(lawyerId)}/documents/${encodeURIComponent(kind)}`,
-    { returnResponse: true });
-  if (error) return { error: error.message || 'Could not open the document.' };
-  const url = URL.createObjectURL(await res.blob());
-  window.open(url, '_blank', 'noopener,noreferrer');
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-  return { error: null };
+    'the document');
 }
 
 export async function adminProcessKYC(lawyerId, approved, rejectionReason = null) {

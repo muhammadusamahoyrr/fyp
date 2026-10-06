@@ -131,7 +131,11 @@ test("the source opener strips the prefix the API base already carries", () => {
     assert.ok(fn, "openSourceDocument is not defined");
     assert.ok(fn[0].includes("/^\\/api\\/v1/"),
         "the helper would request /api/v1/api/v1/...");
-    assert.match(fn[0], /returnResponse: true/,
+    // The fetch-and-open lives in the shared helper (also used for KYC files).
+    assert.match(fn[0], /_openAuthenticatedInNewTab\(/);
+    const shared = src("lib/api.js").match(/async function _openAuthenticatedInNewTab[\s\S]*?\n\}/);
+    assert.ok(shared, "the shared opener is not defined");
+    assert.match(shared[0], /returnResponse: true/,
         "the helper parses a PDF as JSON");
 });
 
