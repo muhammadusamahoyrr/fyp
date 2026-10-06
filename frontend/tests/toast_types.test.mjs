@@ -55,3 +55,32 @@ test("the existing types keep their palettes", async () => {
     assert.equal(await colourOf("success"), rgb(DARK.badgeSuccess.color));
     assert.equal(await colourOf("info"), rgb(DARK.badgeInfo.color));
 });
+
+test("two toasts shown together are two toasts, and each one's timer removes only itself", async () => {
+    // With Date.now() ids, synchronous calls collided: one React key, and the
+    // first timer to fire removed both (branch review).
+    const realNow = Date.now;
+    Date.now = () => 1_700_000_000_000;   // the same millisecond for both calls
+    try {
+        function Fire() {
+            const toast = useToast();
+            useEffect(() => {
+                toast.show("short-lived", "info", 500);
+                toast.show("stays", "danger", 0);
+            }, []);
+            return null;
+        }
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        const root = createRoot(container);
+        await act(async () => { root.render(h(ToastContainer, { theme: DARK }, h(Fire))); });
+        const texts = () => [...container.querySelectorAll("span")].map(s => s.textContent);
+        assert.deepEqual(texts(), ["short-lived", "stays"]);
+        await act(async () => { await new Promise(r => setTimeout(r, 1200)); });
+        assert.deepEqual(texts(), ["stays"], "the first toast's timer removed the second one too");
+        await act(async () => root.unmount());
+        container.remove();
+    } finally {
+        Date.now = realNow;
+    }
+});

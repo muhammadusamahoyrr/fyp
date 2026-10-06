@@ -1,5 +1,5 @@
 'use client';
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useRef, useState } from "react";
 import Ic from "./Ic.jsx";
 
 export const ToastCtx = createContext(null);
@@ -10,8 +10,11 @@ export const useToast = () => {
 
 export const ToastContainer = ({ theme, children }) => {
     const [toasts, setToasts] = useState([]);
+    // A counter, not Date.now(): two toasts shown in the same millisecond got
+    // the same id, so they shared a React key and either timer removed both.
+    const nextId = useRef(0);
     const show = (msg, type = "info", duration = 3000) => {
-        const id = Date.now();
+        const id = ++nextId.current;
         setToasts(t => [...t, { id, msg, type }]);
         if (duration > 0) setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), duration);
     };
