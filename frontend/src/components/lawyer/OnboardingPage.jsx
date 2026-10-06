@@ -650,7 +650,7 @@ function StepCredentials({ onNext, onBack, name }) {
               </div>
             </div>
             <p style={{ fontSize: 12.5, color: T.textMuted, margin: 0, lineHeight: 1.5 }}>
-              Upload a professional photo and your credentials — clients see these before booking.
+              Upload a verification photo and your credentials. Only the admin reviewing your verification sees them; they are not shown to clients.
             </p>
           </div>
           <div style={{

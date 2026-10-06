@@ -132,3 +132,10 @@ test("a failed read of earlier uploads is not shown as 'nothing uploaded'", asyn
     assert.match(view.container.textContent, /Uploaded · llb\.pdf/);
     await view.unmount();
 });
+
+test("the step does not promise clients will see the uploads (only the admin does)", async () => {
+    const view = await toStepTwo();
+    assert.doesNotMatch(view.container.textContent, /clients see these/i);
+    assert.match(view.container.textContent, /Only the admin reviewing your verification sees them/);
+    await view.unmount();
+});
