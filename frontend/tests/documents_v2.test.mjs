@@ -53,11 +53,29 @@ test("every mutating V2 call takes an idempotency key", () => {
     // A key minted per transmission rather than per intent makes the whole
     // mechanism unreachable from the UI — the same bug the chat surfaces had.
     for (const fn of ["createDocumentV2", "generateRevisionV2", "submitDocumentV2",
-                      "reviewDocumentV2", "withdrawDocumentV2"]) {
+                      "reviewDocumentV2", "withdrawDocumentV2",
+                      "createDraftPlanV2", "generateDraftPlanV2",
+                      "saveDocumentWorkspaceV2"]) {
         const body = api.slice(api.indexOf(`export async function ${fn}`));
-        const head = body.slice(0, body.indexOf("\n}"));
+        const nextExport = body.indexOf("\nexport async function", 1);
+        const head = nextExport === -1 ? body : body.slice(0, nextExport);
         assert.match(head, /v2Headers\(key\)/, `${fn} sends no Idempotency-Key`);
     }
+});
+
+test("the client drafting workspace uses server plans and stored checks", () => {
+    const drafts = readFileSync(
+        new URL("../src/components/client/documents/DocsDrafts.jsx", import.meta.url), "utf8");
+    for (const call of ["createDraftPlanV2", "answerDraftPlanV2",
+                        "confirmDraftPlanV2", "generateDraftPlanV2",
+                        "getDocumentWorkspaceV2", "assistDocumentWorkspaceV2",
+                        "saveDocumentWorkspaceV2"]) {
+        assert.match(drafts, new RegExp(`${call}\\(`), `${call} is not connected`);
+    }
+    assert.match(drafts, /complianceSummary\(revision\?\.compliance\)/);
+    assert.match(drafts, /verificationView\(revision\?\.verification\)/);
+    assert.ok(!/Required clauses present|Citations verified|SAMPLE_GROUPS|SampleNda/.test(drafts),
+        "sample content or an invented green check remains in the real workspace");
 });
 
 test("no read-only V2 call sends an idempotency key", () => {
@@ -116,6 +134,22 @@ const client = readFileSync(
     new URL("../src/components/client/ModDocuments.jsx", import.meta.url), "utf8");
 const lawyer = readFileSync(
     new URL("../src/components/lawyer/DocumentsPage.jsx", import.meta.url), "utf8");
+const tools = readFileSync(
+    new URL("../src/components/client/ModTools.jsx", import.meta.url), "utf8");
+
+test("structured document cards open the matching deterministic tool", () => {
+    assert.match(client, /inheritance_settlement:\s*["']calc["']/);
+    assert.match(client, /wasiyyat_nama:\s*["']wasiyyat["']/);
+    assert.match(client, /labour_demand:\s*["']calculators["']/);
+    // The catalogue cards live in DocumentsHome; ModDocuments hands it the
+    // routing function, so both halves of the link are checked.
+    const home = readFileSync(
+        new URL("../src/components/client/DocumentsHome.jsx", import.meta.url), "utf8");
+    assert.match(client, /dedicatedToolHref=\{dedicatedToolHref\}/);
+    assert.match(home, /href=\{dedicatedToolHref\(spec\)\}/);
+    assert.match(tools, /new URLSearchParams\(window\.location\.search\)/);
+    assert.match(tools, /TABS\.some\(item => item\.id === requested\)/);
+});
 
 test("the client cannot pretend to format a PDF", () => {
     // The Edit toggle revealed bold/italic/underline buttons calling
@@ -276,9 +310,9 @@ test("one key per logical action, held across retries", () => {
     // state, so a re-render between failure and retry cannot lose them.
     assert.match(client, /const generateKeyRef = useRef\(null\)/);
     assert.match(client, /const submitKeyRef = useRef\(null\)/);
-    assert.match(client, /generateKeyRef\.current = retryKey \|\| idempotencyKey\(\)/);
+    assert.match(client, /generateKeyRef\.current = asKey\(retryKey\) \|\| idempotencyKey\(\)/);
     assert.match(client,
-        /submitKeyRef\.current = retryKey \|\| submitKeyRef\.current \|\| idempotencyKey\(\)/);
+        /submitKeyRef\.current = asKey\(retryKey\) \|\| submitKeyRef\.current \|\| idempotencyKey\(\)/);
 });
 
 test("an automatic retry never mints a new key", () => {
@@ -298,14 +332,17 @@ test("a new generation is a new intent", () => {
         "a stale submit intent survives a regeneration");
 });
 
-test("regenerating clears the revision being previewed", () => {
-    // Otherwise the preview pairs a new document id with an old revision id —
-    // a request that either 404s or renders the wrong draft under the new
-    // document's heading.
+test("regenerating keeps the identity and appends a revision", () => {
+    // The backend's revision history is real only if Regenerate calls generate
+    // on the existing identity. A changed case or instrument must still create
+    // a new identity.
     const fn = client.slice(client.indexOf("const handleGenerate"));
     const body = fn.slice(0, fn.indexOf("const _generateViaV2"));
-    assert.match(body,
-        /setDocRevisionId\(null\); setDocPdfSha256\(null\); setDocVersion\(null\)/);
+    assert.doesNotMatch(body, /setDocId\(null\)/);
+    assert.match(client, /const canAppend = Boolean\(docId/);
+    assert.match(client, /documentId = canAppend \? docId : null/);
+    assert.match(client, /documentTemplateType === backendType/);
+    assert.match(client, /documentIdentityTitle === requestedTitle/);
 });
 
 test("each V2 error class is handled and none is reported as success", () => {
@@ -425,7 +462,7 @@ test("withdrawal carries its own idempotency key", () => {
     // replay of the submission it undoes, and return the submission receipt —
     // a success response for the opposite of what was asked.
     const body = clientFn("withdrawFromReview");
-    assert.match(body, /withdrawKeyRef\.current = retryKey \|\| withdrawKeyRef\.current \|\| idempotencyKey\(\)/);
+    assert.match(body, /withdrawKeyRef\.current = asKey\(retryKey\) \|\| withdrawKeyRef\.current \|\| idempotencyKey\(\)/);
     assert.match(body, /withdrawDocumentV2\(docId, withdrawKeyRef\.current\)/);
     assert.ok(!/submitKeyRef\.current\)/.test(body.split("if (error)")[0]),
         "the withdrawal is sent under the submit key");
@@ -942,6 +979,19 @@ test("a saved document downloads by revision and hash", () => {
     assert.match(body, /expectedPdfSha256: row\.pdf_sha256/);
 });
 
+test("a lawyer can reopen, preview and inspect versions of an owned document", () => {
+    assert.match(myDocs, /getDocumentV2\(row\.id\)/);
+    assert.match(myDocs, /fetchRevisionPreview\(active\.id/);
+    assert.match(myDocs, /<RevisionHistory/);
+    assert.match(myDocs, /expectedPdfSha256: pdfSha256/);
+});
+
+test("a failed lawyer-owned download is visible", () => {
+    const fn = myDocs.slice(myDocs.indexOf("const download = async"));
+    const body = fn.slice(0, fn.indexOf("\n    };"));
+    assert.match(body, /if \(result\?\.error\) setActionIssue/);
+});
+
 test("a document with no bytes is not offered as a download", () => {
     // An unexplained failure reads as the file having been lost.
     assert.match(myDocs, /row\.downloadable \?/);
@@ -1036,4 +1086,15 @@ test("the lawyer is not told to reload when reloading cannot help", () => {
     // rather than with a regex that has to model the line break.
     assert.ok(body.includes("Ask the client to start a new document"));
     assert.ok(body.includes("will not change this"));
+});
+
+test("no V2 path ends in a slash the dev proxy would redirect away", () => {
+    // Next.js 308s `/api/v1/documents/v2/` to the slashless URL before
+    // proxying; the backend then matched only a legacy GET and answered 405.
+    // Every V2 create from the browser failed while direct API calls passed.
+    // A literal continued with `+` is only the first half of its URL.
+    const paths = [...api.matchAll(/apiFetch\(\s*[`'"](\/documents\/v2[^`'"?]*)[`'"?](?!\s*\+)/g)]
+        .map(m => m[1]);
+    assert.ok(paths.includes("/documents/v2"), "create no longer posts to the collection");
+    for (const p of paths) assert.ok(!p.endsWith("/"), `${p} ends in a slash`);
 });

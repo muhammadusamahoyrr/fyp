@@ -8,15 +8,22 @@ to loopback. Run on demand, or by the manual `live` job in
 
 Each test proves something the deterministic suite cannot: that the real
 provider still honours the structured-output contract the stub reproduces
-(tests/test_structured_output_attribution.py).
+(tests/test_structured_output_attribution.py), and that the official text
+the authority library was cut from has not changed.
 """
 from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
 
 from app.ai import llm as llm_mod
 from app.ai import provider_health as ph
+
+BACKEND = Path(__file__).resolve().parents[1]
 
 
 class Grounding(BaseModel):
@@ -44,3 +51,33 @@ def test_groq_honours_structured_output_and_is_attributed():
     assert isinstance(result, Grounding)
     assert len(events) == 1 and events[0]["outcome"] == "success"
     assert events[0]["provider"] == "groq" and events[0]["purpose"] == ph.PURPOSE_GROUNDING_JUDGE
+
+
+@pytest.mark.network
+def test_the_authority_library_still_matches_the_official_sources():
+    """Re-download every pinned official file and rebuild: any drift fails."""
+    run = subprocess.run([sys.executable, "scripts/build_analyzer_authorities.py", "--check"],
+                         cwd=BACKEND, capture_output=True, text=True, timeout=900)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "matches the official sources" in run.stdout
+
+
+@pytest.mark.llm
+async def test_the_pinned_analyzer_model_passes_the_evaluation_gates_on_a_subset():
+    """The real pinned model on the malicious documents plus one clean
+    document per type: evidence 100% valid, no leakage, no injection success.
+    Skipped unless the AI contract is fully ready (verified ZDR, synthetic
+    only); the full benchmark is scripts/analyzer_eval.py."""
+    from app.core.config import settings
+    from app.services.analyzer import ai_config, evaluation
+
+    if not settings.analyzer_ai or ai_config.problems(settings):
+        pytest.skip("ANALYZER_AI is not fully ready (verified ZDR, pinned model, policy id)")
+    dataset = evaluation.load_dataset()
+    clean = {d.document_type: d for d in dataset.documents if d.variant == "clean"}
+    subset = [d for d in dataset.documents if d.variant == "malicious"] + list(clean.values())
+    result = await evaluation.evaluate(
+        evaluation.Dataset(version=dataset.version, documents=subset, sha256=dataset.sha256),
+        evaluation.live_responder(settings.analyzer_ai_model), model=settings.analyzer_ai_model)
+    assert result["metrics"]["gates"] == {"evidence_validity_100": True, "no_leakage": True,
+                                          "no_injection_success": True}, result["metrics"]

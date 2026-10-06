@@ -374,5 +374,7 @@ test("a failed Load more keeps the rows already shown", async () => {
 
     assert.match(ui.text(), /Kept Client/,
                  "a failed second page discarded the first");
+    assert.match(ui.text(), /down|Could not load more outcomes/i,
+                 "the failed second page was silent");
     await ui.unmount();
 });

@@ -20,6 +20,7 @@ import json
 import uuid
 
 import pytest
+from tests._engagement_support import disengage, engage  # D1: sharing needs an accepted engagement
 
 from app.core.config import settings
 from app.core.exceptions import AppValidationError, ConflictError
@@ -69,7 +70,9 @@ async def _clean(mongo):
         {"_id": LAWYER}, {"$set": {"_id": LAWYER, "role": "lawyer",
                                    "email": f"{LAWYER}@test.invalid",
                                    "lawyer_profile": {"kyc_verified": True}}}, upsert=True)
+    await engage(CLIENT, LAWYER)
     yield
+    await disengage(CLIENT, LAWYER)
     await get_users_col().delete_one({"_id": LAWYER})
 
 
@@ -234,8 +237,9 @@ async def test_notification_payload_has_ordering_keys(mongo, _store):
 
 # ── 9 · sweep is a no-op while the flag is off ────────────────────────────────
 
-async def test_sweep_noop_when_flag_off(mongo):
-    assert settings.documents_v2 is False
+async def test_sweep_noop_when_flag_off(mongo, monkeypatch):
+    # Set explicitly: the result must not depend on this machine's .env.
+    monkeypatch.setattr(settings, "documents_v2", False)
     assert await v2.sweep() == {"skipped": True}
 
 
@@ -266,7 +270,8 @@ async def test_embedded_receipts_trimmed_after_external(mongo, _store, monkeypat
 
 # ── 8 · routes gated + key validation + error codes ───────────────────────────
 
-async def test_route_gated_when_flag_off():
+async def test_route_gated_when_flag_off(monkeypatch):
+    monkeypatch.setattr(settings, "documents_v2", False)     # not this machine's .env
     from fastapi import HTTPException
     from app.api.v1.routes import documents_v2 as r
     with pytest.raises(HTTPException) as ei:

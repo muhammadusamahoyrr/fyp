@@ -6,6 +6,7 @@ import { DARK, LIGHT, ThemeCtx, HeaderActionsCtx } from "./theme.js";
 import { CaseProvider, useCase } from "./CaseContext.jsx";
 import { LangProvider, useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
+import { requestDocumentsView, DOCUMENTS_SHOWN_EVENT } from "@/lib/documentsNav.js";
 import Ic from "./Ic.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import ModOverview from "./ModOverview.jsx";
@@ -47,6 +48,17 @@ const SIDE_ITEMS = [
     { id: "documents", icon: "file", label: "Documents", ur: "دستاویزات" },
     { id: "tracking", icon: "clock", label: "Tracking", ur: "کیس ٹریکنگ" },
 ];
+
+/* Sections under a nav item, shown while that item is open. Only views that
+ * exist: each one is a request the module itself carries out (see
+ * lib/documentsNav.js), not a separate page. */
+const SUB_ITEMS = {
+    documents: [
+        { view: "drafts", label: "AI drafting", ur: "اے آئی ڈرافٹنگ" },
+        { view: "new", label: "Templates", ur: "ٹیمپلیٹس" },
+        { view: "vault", label: "Vault", ur: "والٹ" },
+    ],
+};
 
 /* ─── Notification Drawer ───────────────────────────────────── */
 const NotifDrawer = ({ open, onClose, onGoTracking, t }) => {
@@ -216,6 +228,16 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
+    // The Documents section last opened from its sub-menu, for highlighting.
+    const [docSection, setDocSection] = useState("new");
+    // Whether the Documents sub-menu is open. Its own toggle (the ▲/▼ on the
+    // item), so opening the menu never navigates anywhere by itself.
+    const [docMenuOpen, setDocMenuOpen] = useState(initialTab === "documents");
+    useEffect(() => {
+        const onShown = e => { if (e?.detail?.view) setDocSection(e.detail.view); };
+        window.addEventListener(DOCUMENTS_SHOWN_EVENT, onShown);
+        return () => window.removeEventListener(DOCUMENTS_SHOWN_EVENT, onShown);
+    }, []);
     const contentRef = useRef(null);
 
     const displayName = user?.full_name || "Client";
@@ -267,8 +289,10 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
         disputes: <ModDisputes />,
     };
 
-    const noTopbar = tab === "agreements" || tab === "chatbot" || tab === "tracking";
-    const noPadding = tab === "agreements" || tab === "chatbot";
+    // Documents draws its own header and manages its own scrolling: its
+    // screens (drafting) are full-height workspaces.
+    const noTopbar = tab === "agreements" || tab === "chatbot" || tab === "tracking" || tab === "documents";
+    const noPadding = tab === "agreements" || tab === "chatbot" || tab === "documents";
 
     return (
         <ThemeCtx.Provider value={t}>
@@ -381,13 +405,23 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                         </div>
 
                         {/* ══ NAV ITEMS ══ */}
-                        <nav className="hide-scrollbar" style={{ flex: 1, overflowY: "auto", padding: "16px 10px" }}>
+                        {/* `minHeight: 0` is what makes this scroll. A flex child
+                            defaults to `min-height: auto` — its content height —
+                            so the list grew past the sidebar and was clipped by
+                            the sidebar's `overflow: hidden` instead of scrolling. */}
+                        {/* `data-lenis-prevent`: the app-wide Lenis smooth scroll
+                            takes every wheel event for the page, so without it the
+                            wheel did nothing here and only dragging the bar worked. */}
+                        <nav data-lenis-prevent className="thin-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 10px" }}>
                             {SIDE_ITEMS.map(item => {
                                 const active = tab === item.id;
                                 const showDot = item.id === "tracking" && unreadCount > 0 && !active;
+                                const hasMenu = Boolean(SUB_ITEMS[item.id]);
+                                const subItems = !isCollapsed && hasMenu && docMenuOpen ? SUB_ITEMS[item.id] : [];
                                 return (
+                                    <React.Fragment key={item.id}>
                                     <button
-                                        key={item.id}
+                                        aria-expanded={hasMenu ? docMenuOpen : undefined}
                                         onClick={() => {
                                             const TAB_PATH = {
                                                 overview: "/dashboard", intake: "/intake",
@@ -398,6 +432,18 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                                                 // `tools` deliberately absent — see SIDE_ITEMS.
                                             };
                                             const path = TAB_PATH[item.id];
+                                            if (item.id === "documents") {
+                                                // Already here: the item only opens or closes its menu.
+                                                if (tab === "documents") { setDocMenuOpen(o => !o); return; }
+                                                // Arriving: the Documents HOME, never straight into the
+                                                // last draft's review step. That draft is still one click
+                                                // away under "Continue where you left off".
+                                                requestDocumentsView("new");
+                                                setDocSection("new");
+                                                setDocMenuOpen(true);
+                                            } else {
+                                                setDocMenuOpen(false);
+                                            }
                                             if (path) navRouter.push(path);
                                             else setTab(item.id);
                                             setMobileNavOpen(false);
@@ -451,7 +497,21 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                                                         {unreadCount}
                                                     </span>
                                                 )}
-                                                {active && (
+                                                {hasMenu ? (
+                                                    <span aria-hidden="true" style={{
+                                                        width: 24, height: 24, borderRadius: 8,
+                                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                                        background: docMenuOpen ? t.primaryGlow : t.inputBg,
+                                                        color: docMenuOpen ? t.primary : t.textDim,
+                                                        border: `1px solid ${docMenuOpen ? t.primary : t.border}`,
+                                                        transition: "all 0.2s",
+                                                    }}>
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                                                            style={{ transform: docMenuOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
+                                                            <path d="M6 9l6 6 6-6" />
+                                                        </svg>
+                                                    </span>
+                                                ) : active && (
                                                     <div style={{
                                                         width: 7, height: 7, borderRadius: "50%",
                                                         background: t.primary,
@@ -468,6 +528,35 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                                             }} />
                                         )}
                                     </button>
+                                    {subItems.length > 0 && (
+                                        <div role="group" aria-label={`${item.label} sections`} style={{ margin: "-2px 0 6px", paddingLeft: 30 }}>
+                                            {subItems.map(sub => (
+                                                <button key={sub.view} type="button"
+                                                    aria-current={docSection === sub.view ? "page" : undefined}
+                                                    onClick={() => {
+                                                        requestDocumentsView(sub.view);
+                                                        setDocSection(sub.view);
+                                                        // From another tab the request waits until the
+                                                        // module mounts (lib/documentsNav.js).
+                                                        if (tab !== "documents") navRouter.push("/documents");
+                                                        setMobileNavOpen(false);
+                                                    }}
+                                                    style={{
+                                                        display: "block", width: "100%", textAlign: "left",
+                                                        padding: "9px 14px", marginBottom: 2, borderRadius: 10,
+                                                        border: "none", background: docSection === sub.view ? t.primaryGlow2 : "transparent",
+                                                        color: docSection === sub.view ? t.primary : t.textDim,
+                                                        fontSize: 13.5, fontWeight: docSection === sub.view ? 700 : 500,
+                                                        cursor: "pointer", fontFamily: "'Inter', sans-serif",
+                                                    }}
+                                                    onMouseEnter={e => { if (docSection !== sub.view) { e.currentTarget.style.background = t.inputBg; e.currentTarget.style.color = t.text; } }}
+                                                    onMouseLeave={e => { if (docSection !== sub.view) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = t.textDim; } }}>
+                                                    {T(sub.label, sub.ur)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    </React.Fragment>
                                 );
                             })}
                         </nav>

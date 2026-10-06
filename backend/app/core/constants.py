@@ -268,6 +268,11 @@ class NotificationType(str, Enum):
     DOCUMENT_RETURNED = "document_returned"
     DOCUMENT_REJECTED = "document_rejected"
     DOCUMENT_WITHDRAWN = "document_withdrawn"   # client pulled a submission back (DOCUMENTS_V2)
+    # Document review requests (DOCUMENT_REVIEW_REQUEST_PLAN.md §6)
+    REVIEW_REQUEST_SUBMITTED = "review_request_submitted"
+    REVIEW_REQUEST_ACCEPTED = "review_request_accepted"
+    REVIEW_REQUEST_DECLINED = "review_request_declined"
+    REVIEW_REQUEST_CANCELLED = "review_request_cancelled"
     AGREEMENT_CREATED = "agreement_created"
     AGREEMENT_SIGNED = "agreement_signed"
     AGREEMENT_EXECUTED = "agreement_executed"

@@ -1,0 +1,186 @@
+dataset: pii-eval-7
+label_review: developer_only
+documents:
+- id: p7-nda-01
+  document_type: nda
+  features: [lookalikes, aliases, repeated_names, deadlines, overlap]
+  parties: [p1, p2]
+  text: |
+    MUTUAL NON-DISCLOSURE AGREEMENT
+
+    This Agreement is entered into on 10 March 2026 by and between:
+
+    (1) [[NOT:n1|Ravi Solar Solutions (Private) Limited]], a company incorporated in Pakistan, represented by its Chief Executive Mr. [[NAME:p1|Hassan Raza Kazmi]] ("RSS"); and
+    (2) Mr. [[NAME:p2|Khurram Shehzad Lodhi]], CNIC [[CNIC:c1|35202-6618304-9]], sole proprietor of [[NOT:n2|Lodhi Engineering Works]], of [[ADDRESS:a1|Workshop of [[NAME:p2|Khurram Lodhi]], Plot 31, Sundar Industrial Estate, Lahore]] ("the Contractor").
+
+    1. Purpose. The parties wish to discuss the [[NOT:n3|Project Chenab Rooftop]] installation tender.
+    2. Confidentiality period. Each party shall keep the other's information confidential [[DEADLINE:d1|for three years from the date of disclosure]].
+    3. Return of materials. On request, all materials shall be returned or destroyed [[DEADLINE:d2|within 10 business days]].
+    4. Mr. [[NAME:p1|Kazmi]] and the said [[NAME:p2|Khurram]] shall each nominate one contact person.
+    5. Governing law: the laws of Pakistan; courts at [[NOT:n4|Lahore]].
+
+    Signed: [[NAME:p1|Hassan Raza Kazmi]]            Signed: [[NAME:p2|Khurram Shehzad Lodhi]]
+- id: p7-nda-02
+  document_type: nda
+  features: [table, lookalikes, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    NDA - KEY TERMS
+
+    | Term | Detail |
+    |---|---|
+    | Disclosing party | [[NOT:n1|Thar Data Labs Ltd]] |
+    | Signatory | [[NAME:p1|Fatima Zehra Rizvi]] |
+    | Receiving party | [[NAME:p2|Moiz Ahmed Paracha]] |
+    | Receiving party CNIC | [[CNIC:c1|17301-3304917-5]] |
+    | Receiving party email | [[EMAIL:e1|moiz.paracha@example.org]] |
+    | Receiving party address | [[ADDRESS:a1|House 88, Street 6, Hayatabad Phase 3, Peshawar]] |
+    | Subject | [[NOT:n2|Project Khyber Pass]] source code |
+    | Term | [[DEADLINE:d1|24 months from signature]] |
+    | Breach notice | to be cured [[DEADLINE:d2|within 15 days of written notice]] |
+
+    [[NAME:p2|Moiz Ahmed Paracha]] acknowledges receipt of the term sheet.
+- id: p7-nda-03
+  document_type: nda
+  features: [ocr_errors, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY UNDERTAKING (scanned)
+
+    I, [[NAME:p1|Nabeel Ashraf Choh-
+    an]], holder of CNIC No. [[CNIC:c1|3l104-2207746-3]], resident of [[ADDRESS:a1|House 5, Mohallah Shah Faisal, Bahawal
+    pur]], undertake to Ms. [[NAME:p2|Sobia]] as follows.
+
+    I, [[NAME:p1|Nabee1 Chohan]], will not disclose the customer list shared with me by [[NAME:p2|Sobia Akram]].
+    This undertaking lasts [[DEADLINE:d1|for two years after the end of my engagement]].
+    I will delete all copies [[DEADLINE:d2|within 7 days of a written request]].
+    My mobile: [[PHONE:t1|0301-77 2O 518]].
+
+    [[NAME:p1|N. A. Chohan]]
+- id: p7-nda-04
+  document_type: nda
+  features: [urdu_script, roman_urdu, untitled_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    Raazdari ka Muahida
+
+    Yeh muahida [[NAME:p1|Sardar Wajid Khan]] aur [[NAME:p2|Rubina Jabeen]] ([[NAME:p2|روبینہ جبیں]]) ke darmiyan hai.
+    [[NAME:p2|Rubina]] ki [[NOT:n1|Rubina Boutique]] ke design [[NAME:p1|Wajid]] kisi ko nahi dikhayega.
+    Yeh pabandi [[DEADLINE:d1|teen saal tak]] rahegi.
+    [[NAME:p1|سردار واجد خان]] ka pata: [[ADDRESS:a1|Makan No. 19, Gali No. 2, Mohallah Kakar Town, Quetta]]
+    Rabta: [[PHONE:t1|0333-7801462]]
+- id: p7-nda-05
+  document_type: nda
+  features: [repeated_names, aliases, overlap, untitled_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NON-DISCLOSURE AND NON-SOLICITATION AGREEMENT
+
+    BETWEEN [[NOT:n1|Margalla Ventures LLP]] (the "Firm"), acting through its partner [[NAME:p1|Yasir Nawaz Abbasi]], and [[NAME:p2|Erum Khalid]], residing at [[ADDRESS:a1|Guest Room, Bungalow of Brig. (R) [[NAME:p3|Khalid Mahmood]], Street 14, Sector E-7, Islamabad]] (the "Consultant").
+
+    1. The Consultant shall keep the Firm's investor list confidential.
+    2. The said [[NAME:p2|Erum]] shall not solicit any employee of the Firm.
+    3. [[NAME:p1|Yasir]] shall provide information only on a need-to-know basis.
+    4. Ms. [[NAME:p2|Khalid]] confirms that the [[NOT:n2|Investment Committee]] minutes are confidential.
+
+    [[NAME:p1|Y. N. Abbasi]]                              [[NAME:p2|Erum Khalid]]
+- id: p7-nda-06
+  document_type: nda
+  features: [table, ocr_errors, repeated_names, lookalikes]
+  parties: [p1, p2, p3]
+  text: |
+    ATTENDEES BOUND BY THE NDA - meeting of 14 May 2026 at [[NOT:n1|Pearl Continental]] Lahore
+
+    | No. | Name | Organisation | Mobile |
+    |---|---|---|---|
+    | 1 | [[NAME:p1|Asad Mehmood Tari q]] | [[NOT:n2|Haris Steel Industries]] | [[PHONE:t1|0300-84l1027]] |
+    | 2 | [[NAME:p2|Mahnoor Sajjad]] | [[NOT:n3|Sajjad & Sons Traders]] | [[PHONE:t2|0322-5519 806]] |
+    | 3 | [[NAME:p3|Talha Riaz]] | independent | [[PHONE:t3|0315-6612093]] |
+
+    [[NAME:p1|Asad Mehmood Tariq]] chaired the meeting; [[NAME:p3|Talha Riaz]] took notes.
+- id: p7-nda-07
+  document_type: nda
+  features: [deadlines, repeated_names, aliases, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Side letter to the NDA dated 1 April 2026
+
+    [[NAME:p1|Qasim Ali Shah]] and [[NAME:p2|Nida Fatima]] agree as follows:
+    - The confidentiality obligations end [[DEADLINE:d1|eighteen months from 1 April 2026]], not three years.
+    - [[NAME:p2|Nida]] may disclose information to her lawyer [[NAME:p3|Haroon Akbar]].
+    - [[NAME:p1|Qasim]] will confirm in writing [[DEADLINE:d2|within 5 working days]] that his copies are deleted.
+    - Payments of any agreed damages go to [[ACCOUNT:b1|PK90MUCB0291847733015506]].
+
+    [[NAME:p1|Shah]] / [[NAME:p2|Fatima]]
+- id: p7-nda-08
+  document_type: nda
+  features: [urdu_script, overlap, ocr_errors, aliases]
+  parties: [p1, p2]
+  text: |
+    رازداری کا معاہدہ
+
+    فریق اول: [[NAME:p1|ملک اسلم پرویز]]
+    فریق دوم: [[NAME:p2|ثمینہ کوثر]]
+    پتہ فریق دوم: [[ADDRESS:a1|مکان [[NAME:p2|ثمینہ کوثر]]، گلی نمبر 6، محلہ سرائے عالمگیر، ضلع گجرات]]
+
+    English annex: [[NAME:p1|Malik Aslam Pervez]] will not reveal the recipe of [[NAME:p2|Sameena Kausar]]. CNIC of [[NAME:p2|Sarneena]]: [[CNIC:c1|34202-66O1934-8]].
+- id: p7-nda-09
+  document_type: nda
+  features: [lookalikes, deadlines, roman_urdu, repeated_names]
+  parties: [p1, p2]
+  text: |
+    NDA COVER EMAIL
+
+    From: [[EMAIL:e1|legal@example.com]]
+    To: [[EMAIL:e2|aamir.butt@example.net]]
+
+    Dear [[NAME:p2|Aamir]],
+
+    Please find attached the NDA between [[NOT:n1|Faisalabad Fabrics Exporters]] and you in respect of the [[NOT:n2|Lyallpur Denim]] line. Kindly sign and return it [[DEADLINE:d1|by 30 June 2026]]; the draft offer lapses after that.
+    [[NAME:p1|Chaudhry]] Sahib ne kaha hai ke samples [[DEADLINE:d2|NDA sign hone ke 3 din baad]] bheje jayenge.
+
+    Regards,
+    [[NAME:p3|Sumbal Iftikhar]]
+    on behalf of [[NAME:p1|Chaudhry Zulfiqar Ali]]
+- id: p7-nda-10
+  document_type: nda
+  features: [table, untitled_names, ocr_errors, deadlines]
+  parties: [p1, p2]
+  text: |
+    DISCLOSURE LOG
+
+    Date	Disclosed by	Received by	Item
+    2 Mar 2026	[[NAME:p1|Rehan Saeed]]	[[NAME:p2|Uzma Gill]]	pricing sheet
+    9 Mar 2026	[[NAME:p1|Rehan Sa eed]]	[[NAME:p2|Uzrna Gill]]	vendor list
+    16 Mar 2026	[[NAME:p1|Rehan]]	[[NAME:p2|Uzma]]	draft contract
+
+    All logged items must be returned [[DEADLINE:d1|within 30 days of the end of discussions]].
+- id: p7-nda-11
+  document_type: nda
+  features: [aliases, repeated_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    EMPLOYEE CONFIDENTIALITY CLAUSE (extract)
+
+    Employee: Engr. [[NAME:p1|Wasif Mumtaz Gilani]]
+    Address: [[ADDRESS:a1|Flat 2, Gilani House, Street 3, Shah Rukn-e-Alam Colony, Multan]]
+    Employer: [[NOT:n1|Multan Electric Supply Contractors]]
+
+    12.1 [[NAME:p1|Wasif]] shall not use confidential information for any purpose other than his duties.
+    12.2 This obligation survives [[DEADLINE:d1|for five years after termination]].
+    12.3 Mr. [[NAME:p1|Gilani]] shall report any unauthorised disclosure to [[NAME:p2|Rizwana Asghar]] [[DEADLINE:d2|within 24 hours of becoming aware of it]].
+    12.4 The said [[NAME:p1|Wasif Mumtaz]] acknowledges the [[NOT:n2|Information Security Policy]].
+- id: p7-nda-12
+  document_type: nda
+  features: [roman_urdu, urdu_script, untitled_names, table, repeated_names]
+  parties: [p1, p2]
+  text: |
+    Muahida - Khulasa
+
+    | Fareeq | Naam | Shanakhti card |
+    |---|---|---|
+    | Awwal | Haji [[NAME:p1|Muhammad Yaqoob]] | [[CNIC:c1|38403-1182096-1]] |
+    | Doam | [[NAME:p2|Shabana Bibi]] bint [[NAME:p3|Fazal Din]] | [[CNIC:c2|38403-7704512-4]] |
+
+    [[NAME:p2|شبانہ بی بی]] ka mobile: [[PHONE:t1|0340-6625103]].
+    [[NAME:p1|Yaqoob]] aur [[NAME:p2|Shabana]] dono raazdari ke paband hain.

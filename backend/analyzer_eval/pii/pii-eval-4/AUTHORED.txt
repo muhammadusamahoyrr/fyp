@@ -1,0 +1,16 @@
+# pii-eval-4 — AUTHORED and SEALED, NOT YET FROZEN (2026-10-04)
+# Not scored, and not to be read for tuning. Frozen and scored once under rubric 3 (owner-approved gate)
+# after the fix b72f123. Any change to these files before the freeze must be reported, not silently made.
+author: fresh independent agent session, given only PII_DETECTION_RUBRIC_3.md
+author_declared_reads: PII_DETECTION_RUBRIC_3.md only (plus its own output folder: wrote, listed, grepped and checked its own four files)
+author_limitation: a subagent cannot be technically prevented from seeing project context; independence rests on its instructions and its declaration
+rubric_3_sha256_when_authored: 1ec2dd48162d50b987468f021729c21f56d81e8840c8e519cb688d10352a0a16 (the approved rubric, unchanged)
+developer_view: loaded by the loader for counts and hashes only; no document text was displayed to the developer
+dataset_sha256: 50013540c0a493a8eed6f779faab2b940d44be19658be8f99728aa653dae3524
+documents: 52
+personal_spans: 530
+files:
+  employment.yaml: 3e5e5df5e5c861648294597ff5491995daeca3e24adfbe6f48a13893592f7495
+  letter.yaml: 2f4c5661d69aebc7f184f73977ab627c431ac5a959f9f34166073c8301dc21d2
+  nda.yaml: 9c2f79a83ab0e6a259162f85e64c1624ef6756897784e689b237a9cc0a60701b
+  tenancy.yaml: fc3a500f0831f484dad3b1f93d47d30a3a3f9e82b8118c2c9444585fecbffa5c

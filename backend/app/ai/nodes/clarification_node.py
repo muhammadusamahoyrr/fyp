@@ -7,6 +7,7 @@ from app.ai.llm import get_fast_llm
 from app.ai.provider_health import PURPOSE_CLARIFICATION
 from app.ai.nodes._history import format_history
 from app.ai.nodes._resume import merge_user_reply
+from app.ai.nodes._language import question_language_instruction
 
 SYSTEM_PROMPT = """\
 You are a Pakistani legal assistant. The retrieval system could not find relevant laws for this query.
@@ -17,7 +18,7 @@ Analyze what the user has already told you, then ask ONE specific question about
 
 Do NOT ask about province or case type if already detected.
 Reference what the user said to show you understood their situation.
-Ask in the same language the user used. No explanations — just the question."""
+{language_instruction} No explanations — just the question."""
 
 
 async def clarification_node(state: AgentState) -> dict:
@@ -26,7 +27,9 @@ async def clarification_node(state: AgentState) -> dict:
     history_section = f"\nConversation history:\n{history}\n" if history else ""
 
     response = await asyncio.to_thread(llm.invoke, [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPT.format(
+            language_instruction=question_language_instruction(state.get("language")),
+        )},
         {"role": "user", "content": (
             f"User query: {state['query']}\n"
             f"Case type detected: {state['case_type']}\n"

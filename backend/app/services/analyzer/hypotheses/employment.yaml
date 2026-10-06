@@ -1,0 +1,57 @@
+# Employment drafting questions (ANALYZER_HYPOTHESES_PLAN.md §3.2).
+# Drafting completeness only. No law is cited; nothing is said to be required.
+catalogue: drafting-hypotheses.v1
+scope: employment
+questions:
+  - id: position_role
+    question: Is the position or role stated?
+    detector: employment_position
+    polarity: attention_if_absent
+    explain: false
+
+  - id: start_date
+    question: Is a start date stated?
+    detector: employment_start_date
+    polarity: attention_if_absent
+    ambiguous_when: Starting work is mentioned without a date.
+    explain: true
+
+  - id: salary_amount
+    question: Is the salary amount stated?
+    detector: employment_salary_amount
+    polarity: attention_if_absent
+    ambiguous_when: Salary is mentioned but no figure is given.
+    explain: true
+
+  - id: pay_date
+    question: Is it stated when the salary is paid?
+    detector: employment_pay_date
+    polarity: attention_if_absent
+    ambiguous_when: A salary is given but not when it is paid.
+    explain: true
+
+  - id: working_hours
+    question: Are working hours stated?
+    detector: employment_working_hours
+    polarity: attention_if_absent
+    explain: false
+
+  - id: probation
+    question: Is a probation period addressed?
+    detector: employment_probation
+    polarity: attention_if_absent
+    ambiguous_when: Probation is mentioned without a length.
+    explain: true
+
+  - id: notice_period
+    question: Is a notice period for ending employment stated?
+    detector: employment_notice_period
+    polarity: attention_if_absent
+    ambiguous_when: Ending employment is mentioned without a notice period.
+    explain: true
+
+  - id: leave
+    question: Is leave addressed?
+    detector: employment_leave
+    polarity: attention_if_absent
+    explain: false

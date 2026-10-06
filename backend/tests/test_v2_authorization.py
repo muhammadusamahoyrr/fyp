@@ -26,6 +26,7 @@ from __future__ import annotations
 import secrets
 
 import pytest
+from tests._engagement_support import disengage, engage
 
 import app.api.v1.routes.documents_v2 as v2api
 from app.core.config import settings
@@ -89,7 +90,11 @@ async def _fixtures(mongo):
                       "email": f"{lawyer_id}@example.test",
                       "lawyer_profile": {"kyc_verified": True}}},
             upsert=True)
+    # D1: the owner's accepted engagement with the case's lawyer, on that case.
+    await disengage(OWNER["_id"], ENGAGED_LAWYER, OTHER_LAWYER)
+    await engage(OWNER["_id"], ENGAGED_LAWYER, case_id=OWNER_CASE)
     yield
+    await disengage(OWNER["_id"], ENGAGED_LAWYER, OTHER_LAWYER)
     await wipe()
 
 
@@ -224,14 +229,7 @@ async def test_a_case_document_cannot_go_to_an_unengaged_lawyer(
     assert d.get("submitted_to") != OTHER_LAWYER
 
 
-async def test_a_caseless_document_may_go_to_any_verified_lawyer(
-        enabled, monkeypatch):
-    """No case means no engagement to contradict.
-
-    The rule is "the case's lawyer reviews the case's documents". With no case
-    there is nothing to enforce, and refusing here would break standalone
-    drafting for no benefit.
-    """
+async def _caseless_generated(monkeypatch):
     async def _render(*, revision_id, document_id, version, template_type,
                       fields, fence, worker_id):
         payload = b"%PDF-1.4 caseless"
@@ -252,42 +250,87 @@ async def test_a_caseless_document_may_go_to_any_verified_lawyer(
     rev = await v2api.generate_revision_v2(
         doc["id"], v2api.GenerateBody(fields={"notice_body": "Pay the sum owed."}), idempotency_key=key(),
         current_user=OWNER)
-
-    out = await tx.submit(
-        document_id=doc["id"], actor_id=OWNER["_id"],
-        expected_version=rev["version"], expected_pdf_sha256=rev["pdf_sha256"],
-        lawyer_id=OTHER_LAWYER, idempotency_key=key())
-    assert out["review_status"] == "submitted"
+    return doc["id"], rev
 
 
-async def test_a_case_with_no_engaged_lawyer_accepts_a_choice(
-        enabled, monkeypatch):
-    """Before engagement, the client picks. That is the whole point of picking."""
-    await get_cases_col().update_one(
-        {"_id": OWNER_CASE}, {"$unset": {"lawyer_id": ""}})
-
-    doc_id, rev = await _submitted_document(monkeypatch)
-    out = await tx.submit(
+async def _submit(doc_id, rev, lawyer_id):
+    return await tx.submit(
         document_id=doc_id, actor_id=OWNER["_id"],
         expected_version=rev["version"], expected_pdf_sha256=rev["pdf_sha256"],
-        lawyer_id=OTHER_LAWYER, idempotency_key=key())
+        lawyer_id=lawyer_id, idempotency_key=key())
+
+
+async def test_a_caseless_document_goes_only_to_a_lawyer_the_client_has_engaged(
+        enabled, monkeypatch):
+    """D1 (2026-10-03). No case used to mean a free choice of ANY KYC-flagged
+    lawyer, with no relationship at all. A document without a case may now go
+    only to the lawyer of one of the client's ACCEPTED engagements -- choosing
+    that engagement is the act of sharing."""
+    doc_id, rev = await _caseless_generated(monkeypatch)
+
+    with pytest.raises(ForbiddenError, match="accepted engagement"):
+        await _submit(doc_id, rev, OTHER_LAWYER)
+    d = await get_documents_col().find_one({"_id": doc_id})
+    assert d["review_status"] != "submitted" and d.get("submitted_to") != OTHER_LAWYER
+
+    # The engaged lawyer (an accepted engagement on another matter) may receive it.
+    out = await _submit(doc_id, rev, ENGAGED_LAWYER)
     assert out["review_status"] == "submitted"
 
 
-async def test_the_kyc_gate_is_still_in_force(enabled, monkeypatch):
-    """The new rule is added to the old one, not substituted for it."""
+@pytest.mark.parametrize("status", ["requested", "terms_proposed", "completed", "terminated",
+                                    "declined", "cancelled"])
+async def test_only_an_accepted_engagement_authorises_sharing(enabled, monkeypatch, status):
+    """Negotiating, ended and never-begun engagements authorise nothing new."""
+    await engage(OWNER["_id"], OTHER_LAWYER, status=status)
+    doc_id, rev = await _caseless_generated(monkeypatch)
+    with pytest.raises(ForbiddenError, match="accepted engagement"):
+        await _submit(doc_id, rev, OTHER_LAWYER)
+
+
+async def test_a_case_document_needs_the_engagement_on_that_same_case(enabled, monkeypatch):
+    """An accepted engagement with the lawyer on ANOTHER matter is not enough for
+    a case's document: it goes through an engagement on its own case."""
+    await disengage(OWNER["_id"], ENGAGED_LAWYER)
+    await engage(OWNER["_id"], ENGAGED_LAWYER, case_id="another-matter")
+    doc_id, rev = await _submitted_document(monkeypatch)
+    with pytest.raises(ForbiddenError, match="on that case"):
+        await _submit(doc_id, rev, ENGAGED_LAWYER)
+
+
+async def test_a_case_with_no_engaged_lawyer_refuses_every_choice(
+        enabled, monkeypatch):
+    """Before D1 the client picked any lawyer while a case had none engaged. Now
+    there is no accepted engagement on the case, so nobody may receive it."""
+    await get_cases_col().update_one(
+        {"_id": OWNER_CASE}, {"$unset": {"lawyer_id": ""}})
+    await disengage(OWNER["_id"], ENGAGED_LAWYER)
+
+    doc_id, rev = await _submitted_document(monkeypatch)
+    with pytest.raises(ForbiddenError, match="on that case"):
+        await _submit(doc_id, rev, OTHER_LAWYER)
+    d = await get_documents_col().find_one({"_id": doc_id})
+    assert d["review_status"] != "submitted"
+
+
+async def test_an_engaged_lawyer_without_a_kyc_flag_may_receive_it(enabled, monkeypatch):
+    """D2 (2026-10-03): no KYC gate. No KYC process exists, so the flag proves
+    nothing; the accepted engagement is the authorisation."""
     await get_users_col().update_one(
         {"_id": ENGAGED_LAWYER},
         {"$set": {"lawyer_profile": {"kyc_verified": False}}})
 
     doc_id, rev = await _submitted_document(monkeypatch)
-    with pytest.raises(Exception) as exc:
-        await tx.submit(
-            document_id=doc_id, actor_id=OWNER["_id"],
-            expected_version=rev["version"],
-            expected_pdf_sha256=rev["pdf_sha256"],
-            lawyer_id=ENGAGED_LAWYER, idempotency_key=key())
-    assert "kyc" in str(exc.value).lower()
+    out = await _submit(doc_id, rev, ENGAGED_LAWYER)
+    assert out["review_status"] == "submitted"
+
+
+async def test_the_recipient_must_still_be_a_registered_lawyer(enabled, monkeypatch):
+    """Removing the KYC gate does not open the recipient up to other roles."""
+    await get_users_col().update_one({"_id": ENGAGED_LAWYER}, {"$set": {"role": "client"}})
+    doc_id, rev = await _submitted_document(monkeypatch)
+    with pytest.raises(NotFoundError):
+        await _submit(doc_id, rev, ENGAGED_LAWYER)
 
 
 async def test_a_dangling_case_reference_fails_closed(enabled, monkeypatch):

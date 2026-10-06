@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import datetime, timezone
 
@@ -7,6 +8,7 @@ from pymongo.errors import DuplicateKeyError
 from app.core.constants import NotificationType
 from app.repositories.notification_repo import NotificationRepository
 
+logger = logging.getLogger(__name__)
 notification_repo = NotificationRepository()
 
 # set by websocket manager at startup — avoids circular import
@@ -59,15 +61,23 @@ async def create_notification(
     else:
         await notification_repo.insert(doc)
 
-    # Push to WebSocket if user is connected
+    # Push to WebSocket if user is connected. The row above IS the
+    # notification; the push is a courtesy. A socket or Redis failure must not
+    # turn a stored notification into an error -- an outbox would then retry a
+    # delivery that already happened.
     if _ws_manager:
-        await _ws_manager.send_to_user(
-            user_id,
-            {
-                "type": "notification",
-                "notification": jsonable_encoder(doc),
-            },
-        )
+        try:
+            await _ws_manager.send_to_user(
+                user_id,
+                {
+                    "type": "notification",
+                    "notification": jsonable_encoder(doc),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            # `exc.__class__`, not `type(exc)`: the parameter `type` shadows the builtin here.
+            logger.warning("notification %s stored; websocket push failed (%s)",
+                           doc["_id"], exc.__class__.__name__)
 
     return doc
 

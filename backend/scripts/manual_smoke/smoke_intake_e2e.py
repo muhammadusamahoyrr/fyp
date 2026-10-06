@@ -5,8 +5,13 @@ import json
 import random
 import secrets
 import string
+import sys
+from pathlib import Path
 
-BASE = "http://127.0.0.1:8000/api/v1"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _smoke_env import smoke_origins  # noqa: E402
+
+BASE, _ = smoke_origins()
 
 def rand_email():
     suffix = "".join(random.choices(string.ascii_lowercase, k=6))

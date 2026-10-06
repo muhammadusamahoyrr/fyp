@@ -1,0 +1,216 @@
+dataset: pii-eval-2
+label_review: developer_only
+documents:
+- id: p2-nda-01
+  document_type: nda
+  features: [lookalikes, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    MUTUAL NON-DISCLOSURE AGREEMENT
+
+    This Mutual Non-Disclosure Agreement ("Agreement") is entered into on 9 January 2026 between:
+
+    [[NOT:n1|Tessellate Software House (Pvt.) Ltd.]], having its registered office at [[NOT:n2|Arfa Software Technology Park]], Ferozepur Road, Lahore, acting through its Chief Executive Officer, Mr. [[NAME:p1|Hamza Iftikhar]] (the "First Party"); and
+
+    Mr. [[NAME:p2|Zeeshan Ali Haider]], an independent consultant, holder of CNIC No. [[CNIC:c1|35201-2290815-3]], residing at [[ADDRESS:a1|House 6, Street 11, Sabzazar Scheme, Lahore]], email [[EMAIL:e1|zeeshan.haider.dev@example.com]] (the "Second Party").
+
+    1. Purpose. The parties wish to evaluate a possible collaboration on [[NOT:n3|Project Falcon]], a payroll platform for the textile sector (the "Purpose").
+    2. Confidential Information includes source code, client lists, pricing and the [[NOT:n4|Falcon Technical Specification v2]].
+    3. Each party shall return or destroy Confidential Information [[DEADLINE:d1|within ten (10) business days of a written request]].
+    4. The obligations of confidentiality shall survive for [[DEADLINE:d2|three (3) years from the date of termination]] of this Agreement.
+    5. Mr. [[NAME:p2|Haider]] shall not approach any client of the First Party introduced to him [[DEADLINE:d3|during the term and for twelve months thereafter]].
+    6. Notices to the First Party shall be addressed to the attention of [[NAME:p1|Hamza Iftikhar]]; notices to [[NAME:p2|Zeeshan]] shall be sent to the address above.
+
+    Signed for the First Party: [[NAME:p1|Hamza Iftikhar]], CEO
+    Signed by the Second Party: [[NAME:p2|Zeeshan Ali Haider]]
+    Witness: [[NAME:p3|Mahnoor Tariq]]
+
+- id: p2-nda-02
+  document_type: nda
+  features: [table, lookalikes, deadlines, untitled_names]
+  parties: [p1, p2, p3]
+  text: |
+    CONFIDENTIALITY UNDERTAKING — ACCESS LOG
+
+    The following persons were given access to the [[NOT:n1|Riverbend Merger Data Room]] and have each signed the undertaking. Access ends [[DEADLINE:d1|on 31 July 2026]] or on completion of the transaction, whichever is earlier.
+
+    | # | Name | Organisation | Email | Access granted |
+    |---|---|---|---|---|
+    | 1 | [[NAME:p1|Sana Mumtaz]] | [[NOT:n2|Orbit Advisory]] | [[EMAIL:e1|sana.mumtaz@example.net]] | 02-03-2026 |
+    | 2 | [[NAME:p2|Owais Jamil]] | [[NOT:n3|Kinara Foods Limited]] | [[EMAIL:e2|owais.j@example.org]] | 02-03-2026 |
+    | 3 | [[NAME:p3|Muhammad Talha Sheikh]] | [[NOT:n4|Legal Department]] | [[EMAIL:e3|talha.sheikh84@example.com]] | 05-03-2026 |
+
+    Each person shall destroy downloaded copies [[DEADLINE:d2|within 48 hours of access ending]].
+
+    Data room administrator: [[NAME:p4|Nida Rauf]], ext. 214, mobile [[PHONE:t1|0322-4018875]]
+
+- id: p2-nda-03
+  document_type: nda
+  features: [urdu_script, repeated_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    رازداری کا معاہدہ
+
+    یہ معاہدہ [[NAME:p1|احمد رضا]] (مالک، [[NOT:n1|رضا ٹیکسٹائل]]) اور [[NAME:p2|فیصل جاوید]] (ڈیزائنر) کے درمیان طے پایا۔
+
+    [[NAME:p2|فیصل جاوید]] کپڑے کے نئے ڈیزائن کسی اور فیکٹری کو نہیں دکھائیں گے۔
+    یہ پابندی [[DEADLINE:d1|دو سال]] تک رہے گی۔
+    خلاف ورزی کی صورت میں [[NAME:p1|احمد رضا]] قانونی کارروائی کر سکیں گے۔
+
+    English note: [[NAME:p1|Ahmed Raza]] (CNIC [[CNIC:c1|33100-6612093-1]]) and [[NAME:p2|Faisal Javed]] (CNIC [[CNIC:c2|33100-4470915-5]]), [[NOT:n2|Faisalabad]].
+    پتہ: [[ADDRESS:a1|فیکٹری ایریا، پلاٹ نمبر 23، سمن آباد، فیصل آباد]]
+
+- id: p2-nda-04
+  document_type: nda
+  features: [ocr_errors, aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NON DISCLOSURE AGREEMENT (OCR text from fax)
+
+    Between M/s [[NOT:n1|Crescent Pharma Distributors]] through its partner Mr. [[NAME:p1|Waqas Ahmed Malik]]
+    and Mr. [[NAME:p2|Nouman Sh-
+    ahid]] s/o [[NAME:p3|Shahid Pervaiz]], CNIC [[CNIC:c1|6110l-5590213-9]], R/o [[ADDRESS:a1|House 4, Street 70, I-8/3, lslamabad]].
+
+    1. Mr. [[NAME:p2|Noum an]] will receive distributor price lists and shall keep them secret.
+    2. The said [[NAME:p2|Nouman]] shall not share them with [[NOT:n2|Sitara Medical Store]] or any competitor.
+    3. This Agreement continues for [[DEADLINE:d1|2 (two) yaers]] from signing.
+    4. Penalty Rs. 500,000 payable [[DEADLINE:d2|with in 30 days of breach being notified]].
+
+    Sig: [[NAME:p1|W. A. Ma1ik]]          Sig: [[NAME:p2|N0uman Shahid]]
+    Mob: [[PHONE:t1|0333-55O 2118]]
+
+- id: p2-nda-05
+  document_type: nda
+  features: [untitled_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    Short form confidentiality letter
+
+    [[NAME:p1|Rabia Anwar]] and [[NAME:p2|Hassan Mirza]] agree that everything discussed about the [[NOT:n1|Green Valley Housing]] project on 14 April 2026 is confidential.
+    Neither will disclose it to anyone except their lawyers and accountants.
+    This lasts [[DEADLINE:d1|until 31 December 2027]].
+
+    [[NAME:p1|Rabia Anwar]]
+    [[NAME:p2|Hassan Mirza]]
+
+- id: p2-nda-06
+  document_type: nda
+  features: [roman_urdu, untitled_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    Raazdari ka wada (handwritten, transcribed)
+
+    Main [[NAME:p2|Adnan]] wada karta hoon ke [[NAME:p1|Asghar]] bhai ki dukaan ki supplier list aur rates kisi ko nahi bataunga.
+    Agar maine kisi ko bataya to [[NAME:p1|Asghar Ali]] mujh se nuqsan ka harjana le sakte hain.
+    Ye wada [[DEADLINE:d1|naukri chhorne ke baad bhi ek saal]] tak rahega.
+
+    [[NAME:p2|Adnan Saleem]] walad [[NAME:p3|Muhammad Saleem]]
+    Shanakhti card: [[CNIC:c1|36302-9981204-1]]
+    Pata: [[ADDRESS:a1|Basti Malook, Mouza Khanpur, Tehsil Shujabad, Multan]]
+
+- id: p2-nda-07
+  document_type: nda
+  features: [overlap, lookalikes, repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY AGREEMENT
+
+    Disclosing Party: Mr. [[NAME:p1|Junaid Akram Bhatti]], sole proprietor of [[NOT:n1|Bhatti Engineering Works]], [[ADDRESS:a1|Bhatti House, near [[NAME:p1|Junaid Akram Bhatti]]'s workshop, G.T. Road, Gujrat]].
+    Receiving Party: Ms. [[NAME:p2|Kiran Zahoor]], [[ADDRESS:a2|Flat 5, Zahoor Arcade, Ramtalai Chowk, Gujrat]].
+
+    1. [[NAME:p2|Kiran Zahoor]] will review the design of the [[NOT:n2|BEW-400 Rice Husker]] for a possible investment.
+    2. [[NAME:p2|Kiran Zahoor]] will not reverse engineer the husker or disclose drawings.
+    3. Drawings must be returned [[DEADLINE:d1|within 7 days]] of the end of discussions.
+    4. [[NAME:p1|Junaid Akram Bhatti]] makes no warranty as to accuracy.
+
+    Telephone [[PHONE:t1|053-3521906]] (workshop)
+
+- id: p2-nda-08
+  document_type: nda
+  features: [table, ocr_errors, repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    NDA KEY TERMS (from scanned schedule)
+
+    | Item | Detail |
+    |---|---|
+    | Discloser | [[NAME:p1|Shab-
+    nam Iqbal]] |
+    | Recipient | [[NAME:p2|Taimoor Hassan Khan]] |
+    | Recipient CNIC | [[CNIC:c1|42101-77O3l92-1]] |
+    | Recipient address | [[ADDRESS:a1|A-14, Block l3-D, Gulshan-e-lqbal, Karachi]] |
+    | Term | [[DEADLINE:d1|5 years]] |
+    | Return of materials | [[DEADLINE:d2|15 days after termination]] |
+    | Governing law | Laws of Pakistan |
+
+    [[NAME:p1|Shabnam Iqbal]] confirms she has disclosed only the customer list to [[NAME:p2|Taimoor]].
+
+- id: p2-nda-09
+  document_type: nda
+  features: [urdu_script, roman_urdu, aliases, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    Confidentiality clause in partnership MoU (copied by clerk)
+
+    Partners: [[NAME:p1|Malik Rashid Mehmood]] ([[NAME:p1|ملک راشد محمود]]) and [[NAME:p2|Sohail Akhtar]] ([[NAME:p2|سہیل اختر]]).
+    Business: [[NOT:n1|Al-Madina Rice Traders]], [[NOT:n2|Kamoke]] mandi.
+
+    Dono partners ka business ka hisaab kitaab aur grahakon ki list raaz rahegi.
+    [[NAME:p1|Rashid]] sahab ya [[NAME:p2|Sohail]] partnership chhorne ke [[DEADLINE:d1|teen saal]] tak yahi kaam alag se nahi karenge.
+    [[NAME:p1|راشد]] صاحب کا موبائل [[PHONE:t1|0300-7461823]]
+
+- id: p2-nda-10
+  document_type: nda
+  features: [deadlines, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    From: [[EMAIL:e1|anum.kh.legal@example.com]]
+    To: [[EMAIL:e2|faraz.ahmed.photo@example.net]]
+    Subject: Confidentiality — wedding shoot for client family
+
+    [[NAME:p2|Faraz]],
+
+    As discussed, the photographs from the 18 March event are confidential. Please do not post any image on Instagram or the studio page of [[NOT:n1|Frame & Light Studio]] [[DEADLINE:d1|before 1 June 2026]], and none showing the bride's face at any time. Please delete the raw files from your phone [[DEADLINE:d2|within 30 days of delivery]].
+
+    Regards,
+    [[NAME:p1|Anum Khalid]]
+    [[NOT:n2|Associate, Legal]]
+
+    Reply:
+    Noted and agreed. [[NAME:p2|Faraz Ahmed]]
+
+- id: p2-nda-11
+  document_type: nda
+  features: [overlap, aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NON-DISCLOSURE AND NON-SOLICITATION UNDERTAKING
+
+    I, [[NAME:p2|Mariam Nasir]], daughter of [[NAME:p3|Nasir Mehmood]], resident of [[ADDRESS:a1|Flat 12, Block 3, Askari 11, Lahore]], undertake to [[NAME:p1|Fahad Saeed]], proprietor of [[NOT:n1|Saeed Tutors Academy]], as follows:
+
+    (a) I shall not disclose the student records or fee data of the Academy.
+    (b) I shall not solicit any student of the Academy [[DEADLINE:d1|for eighteen months after leaving]].
+    (c) All notes are to be handed back to Mr. [[NAME:p1|Saeed]] at [[ADDRESS:a2|the residence of [[NAME:p1|Fahad Saeed]], 33-B, Askari 10, Lahore]] [[DEADLINE:d2|on my last working day]].
+
+    [[NAME:p2|Mariam]] also confirms that she has no copies on her personal email [[EMAIL:e1|mariam.nasir.95@example.com]].
+
+    Signature: [[NAME:p2|Mariam Nasir]]
+
+- id: p2-nda-12
+  document_type: nda
+  features: [ocr_errors, untitled_names, lookalikes, roman_urdu, deadlines]
+  parties: [p1, p2]
+  text: |
+    NDA - SIGNATURE PAGE (poor scan)
+
+    For and on behalf of [[NOT:n1|Zarqa Solar Solutions]]
+    Name: [[NAME:p1|Mo hsin Ra2a]]
+    Designation: Director
+
+    Counterparty
+    Name: [[NAME:p2|Farrukh Sh-
+    ehzad]]
+    CNIC: [[CNIC:c1|38403-55l2O98-7]]
+    Cell: [[PHONE:t1|0345 66 21 307]]
+
+    Note (in pencil): "[[NAME:p2|Farrukh]] ne kaha copy kal tak bhej dega" — signed copy to be returned [[DEADLINE:d1|within 3 days]].

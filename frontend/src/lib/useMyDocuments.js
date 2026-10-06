@@ -37,7 +37,14 @@ export function useMyDocuments({ fetchPage, pageSize = 20, enabled = true }) {
     // after a refresh has already replaced the list.
     const token = useRef(0);
     const mounted = useRef(true);
-    useEffect(() => () => { mounted.current = false; token.current++; }, []);
+    // Set true IN the effect, not only at creation: React StrictMode (dev)
+    // mounts, unmounts and re-mounts, and a ref that only the cleanup touches
+    // stays false after the re-mount -- every response was then discarded and
+    // the list sat on "Loading…" forever.
+    useEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; token.current++; };
+    }, []);
 
     // THE FETCHER LIVES IN A REF, and that is not a style choice.
     //

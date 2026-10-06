@@ -10,6 +10,7 @@ import { EMPTY, UNUSED } from "@/lib/fieldReview.js";
 
 export default function FieldReview({
     t, rows, missing, edited, busy, onEdit, onGenerate, onBack,
+    source = "ai",
 }) {
     const unused = rows.filter(r => r.status === UNUSED);
     const used = rows.filter(r => r.status !== UNUSED);
@@ -21,9 +22,9 @@ export default function FieldReview({
                     Check these details before we draft
                 </div>
                 <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.6 }}>
-                    These were read from your case description automatically.
-                    Correct anything that is wrong — it is much easier to fix
-                    here than in the finished document.
+                    {source === "ai"
+                        ? "These were read from your case description automatically. Correct anything that is wrong — it is much easier to fix here than in the finished document."
+                        : "This document has no safe automatic extractor. Enter only details you know are correct; blank details will be left out rather than invented."}
                 </div>
             </div>
 
@@ -31,8 +32,8 @@ export default function FieldReview({
                 <div style={{ padding: "11px 13px", borderRadius: 11, background: `${t.warn}10`, border: `1px solid ${t.warn}30`, marginBottom: 12 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: t.warn, marginBottom: 3 }}>
                         {missing.length === 1
-                            ? "1 detail was not found"
-                            : `${missing.length} details were not found`}
+                            ? (source === "ai" ? "1 detail was not found" : "1 detail is blank")
+                            : (source === "ai" ? `${missing.length} details were not found` : `${missing.length} details are blank`)}
                     </div>
                     {/* WARNED, NEVER BLOCKED. Whether a field is legally
                         required is a question `pleading_rules` answers on the

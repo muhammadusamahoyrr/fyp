@@ -277,6 +277,51 @@ def test_a_vertically_merged_cell_is_not_duplicated(tmp_path):
     assert text.count("SPANS THREE ROWS") == 1
 
 
+def test_every_cell_of_a_table_is_extracted(tmp_path):
+    """Regression: cells were de-duplicated by `id(cell._tc)`. lxml frees a
+    proxy nobody references and reuses its id for a DIFFERENT cell, so
+    unrelated cells looked "already rendered" and vanished -- 22 of the 30
+    cells of this table, every time."""
+    def build(d):
+        t = d.add_table(rows=10, cols=3)
+        for r in range(10):
+            for c in range(3):
+                t.cell(r, c).text = f"R{r}C{c}"
+
+    text = E.extract_file(str(_docx(tmp_path / "grid.docx", build))).text
+
+    assert text.split("\n") == [f"R{r}C0 | R{r}C1 | R{r}C2" for r in range(10)]
+
+
+def test_merged_cells_stay_single_without_losing_their_neighbours(tmp_path):
+    def build(d):
+        t = d.add_table(rows=6, cols=3)
+        t.cell(0, 0).merge(t.cell(0, 2)).text = "HEADER"
+        t.cell(1, 0).merge(t.cell(5, 0)).text = "SIDE"
+        for r in range(1, 6):
+            for c in (1, 2):
+                t.cell(r, c).text = f"V{r}{c}"
+
+    text = E.extract_file(str(_docx(tmp_path / "merged.docx", build))).text
+
+    assert text.count("HEADER") == 1 and text.count("SIDE") == 1
+    assert all(f"V{r}{c}" in text for r in range(1, 6) for c in (1, 2))
+
+
+def test_a_document_without_tables_reads_exactly_as_before(tmp_path):
+    """The fix touches table rendering only; plain paragraphs are unchanged."""
+    def build(d):
+        d.add_paragraph("  Agreement of service  ")
+        d.add_paragraph("")
+        run = d.add_paragraph("Line one").add_run()
+        run.add_break()
+        run.add_text("line two\tafter a tab")
+
+    text = E.extract_file(str(_docx(tmp_path / "plain.docx", build))).text
+
+    assert text == "Agreement of service\nLine one\nline two\tafter a tab"
+
+
 def test_unread_docx_parts_downgrade_completeness(tmp_path):
     """A clause in a header is still a clause. Not reading it is disclosed."""
     def build(d):

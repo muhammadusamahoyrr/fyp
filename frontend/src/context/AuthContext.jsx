@@ -1,6 +1,9 @@
 'use client';
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { setToken, clearToken, authLogout, bootstrapAuth, broadcastLogout, getMe } from '@/lib/api';
+import {
+  AUTH_BOOTSTRAP_UNAVAILABLE,
+  setToken, clearToken, authLogout, bootstrapAuth, broadcastLogout, getMe,
+} from '@/lib/api';
 import { clearActiveSessions } from '@/lib/conversations.js';
 import { clearAllIntakeValues } from '@/lib/intakeStorage.js';
 
@@ -15,27 +18,39 @@ export function useAuth() {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authUnavailable, setAuthUnavailable] = useState(false);
+
+  const hydrateAuth = useCallback(async () => {
+    setLoading(true);
+    setAuthUnavailable(false);
+    try {
+      const result = await bootstrapAuth();
+      if (result === AUTH_BOOTSTRAP_UNAVAILABLE) {
+        setAuthUnavailable(true);
+        return;
+      }
+      if (!result) return;
+      // getMe goes through apiFetch — one endpoint definition, and a stale
+      // access token is refreshed and retried instead of dropping the session.
+      const { data, status } = await getMe();
+      if (data) setUser(data);
+      else if (status === 401) clearToken();
+      else if (status === 0) setAuthUnavailable(true);
+    } catch {
+      // A transient backend/proxy failure is not evidence that the session
+      // expired. ProtectedRoute shows a retry state without clearing tokens.
+      setAuthUnavailable(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // Hydrate auth state on mount (audit #5): the access token is in-memory only,
   // so on a cold load we adopt a sibling tab's token or silently re-mint one from
   // the HttpOnly refresh cookie (bootstrapAuth), then load the profile.
   useEffect(() => {
-    (async () => {
-      try {
-        const ok = await bootstrapAuth();
-        if (!ok) { setLoading(false); return; }
-        // getMe goes through apiFetch — one endpoint definition, and a stale
-        // access token is refreshed and retried instead of dropping the session.
-        const { data, status } = await getMe();
-        if (data) setUser(data);
-        else if (status === 401) clearToken();
-      } catch {
-        // Network error — stay unauthenticated (isAuthenticated false) until a
-        // real /users/me succeeds; the in-memory token is left for retry.
-      }
-      setLoading(false);
-    })();
-  }, []);
+    hydrateAuth();
+  }, [hydrateAuth]);
 
   // Call after successful login — tokenData = { access_token, role, user_id }
   const login = useCallback((tokenData) => {
@@ -77,6 +92,8 @@ export function AuthProvider({ children }) {
       role: user?.role ?? null,
       isAuthenticated: !!user,
       loading,
+      authUnavailable,
+      retryAuth: hydrateAuth,
       login,
       logout,
       updateUser,

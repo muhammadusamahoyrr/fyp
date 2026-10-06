@@ -27,11 +27,10 @@ export { NO_CASE };
  * @param {Array}  input.cases           the case list
  * @param {boolean} input.casesReady     the list has been answered for
  * @param {boolean} input.allowStandaloneCreation
- *        whether THIS screen can create a document with no case. False on the
- *        client document screen: every path there is case-driven — extraction
- *        reads the case description — and with DOCUMENTS_V2 off the legacy
- *        generator requires a case id too. Offering it would be a control that
- *        cannot complete for anybody.
+ *        whether THIS screen can create a document with no case. The V2 client
+ *        screen permits this and uses manual field entry because there is no
+ *        case description to extract; the legacy fallback reports that it
+ *        cannot complete the standalone request.
  */
 export function caseSelection({
     selectedCaseId, cases, casesReady, allowStandaloneCreation = false,

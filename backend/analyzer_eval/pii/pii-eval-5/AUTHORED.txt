@@ -1,0 +1,18 @@
+# pii-eval-5 — AUTHORED and SEALED, NOT YET FROZEN (2026-10-04)
+# Not scored, and not to be read for tuning. Frozen and scored ONCE under rubric 3 (owner-approved gate)
+# on the pii-mask.4 code, which is UNCOMMITTED (no commit was authorised): the freeze pins the
+# masking-policy hash (pii_mask.py + pii_layers.py) and the scoring-harness hash.
+author: fresh independent agent session, given only PII_DETECTION_RUBRIC_3.md and the document categories in it
+author_declared_reads: PII_DETECTION_RUBRIC_3.md only, in the repository
+author_declared_slip: it first wrote its own check script one level above its output folder (scratchpad\p5check.py), then moved it into the output folder and deleted it; it declares it listed or opened no other scratchpad content (developer confirmed the file no longer exists)
+author_limitation: a subagent cannot be technically prevented from seeing project context; independence rests on its instructions and its declaration
+rubric_3_sha256_when_authored: 1ec2dd48162d50b987468f021729c21f56d81e8840c8e519cb688d10352a0a16 (the approved rubric, unchanged)
+developer_view: loaded by the loader for counts and hashes only; no document text was displayed to the developer
+dataset_sha256: 9f90faf1c25ee1097deec85d3f0769861893493ab862cb2784c942e569935443
+documents: 54
+personal_spans: 577
+files:
+  employment.yaml: 60ee01ac48e058477d850d2a183db58ce6253767cf06737b15579af398a63fe4
+  letter.yaml: c304e48ddd8573a402c65ba9b09fda569ab397ca9ad6e56737e303b0647a38fd
+  nda.yaml: e25ecfd1463acc926f6522e184bd3e62af39d989d08d29e47d1a3ee9bab1f024
+  tenancy.yaml: dfdc474b1002bcf89595b835137af45c24317b9ba7c6d42702852a42233c2306

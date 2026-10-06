@@ -33,6 +33,8 @@ from app.services import document_migration as migration
 from app.services import artifact_store
 from app.services import document_transitions as tx
 from app.services import document_v2_service as v2
+from app.services import document_workspace_assist
+from app.services.document_service import _clean_draft_html
 
 router = APIRouter(prefix="/documents/v2", tags=["documents-v2"])
 
@@ -294,6 +296,7 @@ def _public(doc: dict) -> dict:
         "current_version": doc.get("current_version", 0),
         "current_revision_id": doc.get("current_revision_id"),
         "rev_seq": doc.get("rev_seq", 0),
+        "content_epoch": doc.get("content_epoch", 0),
         "submitted_to": doc.get("submitted_to"),
         "submitted_at": doc.get("submitted_at"),
         "submitted_version": doc.get("submitted_version"),
@@ -316,6 +319,7 @@ def _revision_public(rev: dict) -> dict:
         "revision_id": rev["_id"],
         "version": rev.get("version"),
         "status": rev.get("status"),
+        "template_type": rev.get("template_type"),
         "pdf_sha256": rev.get("pdf_sha256"),
         "text_sha256": rev.get("text_sha256"),
         "extraction_status": rev.get("extraction_status"),
@@ -338,7 +342,12 @@ class CreateBody(BaseModel):
     case_id: str | None = None
 
 
-@router.post("/", status_code=201)
+# "" like every other router's root. "/" alone was unreachable from the browser:
+# Next.js redirects `/api/v1/documents/v2/` to the slashless URL (308), which
+# matched only the legacy `GET /documents/{doc_id}` and came back 405, so every
+# V2 create through the frontend failed. "/" stays for existing direct callers.
+@router.post("", status_code=201)
+@router.post("/", status_code=201, include_in_schema=False)
 async def create_document_v2(
     body: CreateBody,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -398,9 +407,9 @@ async def generate_revision_v2(
     an un-idempotent retry is not merely untidy — it is a second bill and a
     second version number for one intent.
 
-    The template type defaults to the document's own. It can be overridden for a
-    client changing template mid-draft, but never inferred from the request
-    body alone, or a caller could render a template the document is not for.
+    The template type is pinned to the document identity. Changing a document's
+    legal type is a new drafting intent and therefore requires a new document;
+    otherwise list/detail metadata and the revision's actual bytes disagree.
     """
     _require_enabled()
     key = _require_key(idempotency_key)
@@ -413,11 +422,238 @@ async def generate_revision_v2(
         raise HTTPException(status_code=404, detail={
             "code": "not_found", "message": "Document not found."})
 
+    template_type = doc.get("template_type")
+    if body.template_type is not None and body.template_type != template_type:
+        # Keep the existing validation contract for an unknown or system-issued
+        # override. A valid but different composable template is a document
+        # identity conflict; an invalid template remains a 422.
+        try:
+            v2._require_composable_template(body.template_type)
+        except AppValidationError as exc:
+            raise HTTPException(status_code=422, detail={
+                "code": "validation_error", "message": exc.detail,
+            })
+        raise HTTPException(status_code=409, detail={
+            "code": "template_type_mismatch",
+            "message": (
+                "This document cannot change template type. Start a new draft "
+                "for the selected document type."
+            ),
+        })
+
     rev = await _run(v2.generate_revision(
         document_id=doc_id,
-        template_type=body.template_type or doc.get("template_type"),
+        template_type=template_type,
         fields=body.fields, idempotency_key=key))
+    if rev.get("status") != "generated":
+        raise HTTPException(status_code=503, detail={
+            "code": "generation_failed",
+            "message": "The revision could not be generated. Try again with a new request key.",
+        })
     return _revision_public(rev)
+
+
+# â”€â”€ editable workspace â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+MAX_WORKSPACE_HTML = 200_000
+
+
+async def _owner_document(doc_id: str, current_user: dict) -> dict:
+    doc = await _readable(doc_id, current_user)
+    if str(doc.get("client_id")) != str(current_user["_id"]):
+        # Match generate: a reviewer may read the frozen submission but never
+        # obtain or replace the owner's private editing source.
+        raise _not_found()
+    return doc
+
+
+@router.get("/{doc_id}/workspace")
+async def get_document_workspace_v2(
+    doc_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return only the current owner's editable source and concurrency token."""
+    _require_enabled()
+    doc = await _owner_document(doc_id, current_user)
+    revision_id = doc.get("current_revision_id")
+    rev = await revision_repo.find_by_id(revision_id) if revision_id else None
+    if not rev or rev.get("document_id") != doc_id or rev.get("status") != "generated":
+        raise HTTPException(status_code=409, detail={
+            "code": "no_editable_revision",
+            "message": "Generate the first revision before opening the editor.",
+        })
+
+    if rev.get("template_type") == "lawyer_draft":
+        # Read-clean covers revisions created before workspace sanitisation was
+        # introduced.  This value is inserted into a rich editor by the UI.
+        body_html = _clean_draft_html(
+            str((rev.get("fields") or {}).get("body_html") or ""))
+        source = "freeform_html"
+        fields = None
+    else:
+        # A generated PDF is not a reversible editor format.  Flattening it to
+        # paragraphs discards the builder's structure and later turns a named
+        # instrument into a generic draft.  Named templates therefore reopen
+        # as their canonical fields and regenerate through the same builder.
+        body_html = None
+        fields = dict(rev.get("fields") or {})
+        source = "structured_fields"
+
+    if source == "freeform_html" and not body_html:
+        raise HTTPException(status_code=409, detail={
+            "code": "editor_source_unavailable",
+            "message": (
+                "This revision has no safe editable text. Download the PDF or "
+                "change its structured answers instead."
+            ),
+        })
+
+    return {
+        "document_id": doc_id,
+        "title": doc.get("title"),
+        "body_html": body_html,
+        "fields": fields,
+        "template_type": rev.get("template_type") or doc.get("template_type"),
+        "source": source,
+        "base_revision_id": revision_id,
+        "base_version": doc.get("current_version", 0),
+        "content_epoch": doc.get("content_epoch", 0),
+        "review_status": doc.get("review_status", "none"),
+    }
+
+
+class WorkspaceSaveBody(BaseModel):
+    body_html: str | None = Field(default=None, min_length=1,
+                                  max_length=MAX_WORKSPACE_HTML)
+    fields: dict | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    expected_revision_id: str = Field(min_length=1, max_length=200)
+    expected_version: int = Field(ge=1)
+    expected_content_epoch: int = Field(ge=0)
+
+
+class WorkspaceAssistBody(BaseModel):
+    body_html: str | None = Field(default=None, min_length=1,
+                                  max_length=MAX_WORKSPACE_HTML)
+    fields: dict | None = None
+    instruction: str = Field(min_length=1, max_length=2_000)
+    expected_revision_id: str = Field(min_length=1, max_length=200)
+    expected_version: int = Field(ge=1)
+    expected_content_epoch: int = Field(ge=0)
+
+
+@router.post("/{doc_id}/workspace/assist")
+async def assist_document_workspace_v2(
+    doc_id: str,
+    body: WorkspaceAssistBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return a reviewable proposal; never persist or apply it."""
+    _require_enabled()
+    doc = await _owner_document(doc_id, current_user)
+    if doc.get("review_status") == "submitted":
+        raise HTTPException(status_code=409, detail={
+            "code": "revision_under_review",
+            "message": "Withdraw the submitted revision before editing it.",
+        })
+    base = await revision_repo.find_by_id(body.expected_revision_id)
+    if not base or base.get("document_id") != doc_id:
+        raise HTTPException(status_code=409, detail={
+            "code": "stale_workspace",
+            "message": "This editor is no longer based on the current revision.",
+        })
+    template_type = base.get("template_type") or doc.get("template_type")
+    common = {
+        "document_id": doc_id,
+        "owner_id": str(current_user["_id"]),
+        "instruction": body.instruction,
+        "expected_revision_id": body.expected_revision_id,
+        "expected_version": body.expected_version,
+        "expected_content_epoch": body.expected_content_epoch,
+    }
+    if template_type == "lawyer_draft":
+        if body.body_html is None or body.fields is not None:
+            raise HTTPException(status_code=422, detail={
+                "code": "invalid_workspace_content",
+                "message": "AI Assist needs this freeform draft's editor HTML.",
+            })
+        return await _run(document_workspace_assist.propose(
+            body_html=body.body_html, **common))
+    if body.fields is None or body.body_html is not None:
+        raise HTTPException(status_code=422, detail={
+            "code": "invalid_workspace_content",
+            "message": "AI Assist needs this template's structured fields.",
+        })
+    return await _run(document_workspace_assist.propose_fields(
+        template_type=template_type, fields=body.fields, **common))
+
+
+@router.post("/{doc_id}/workspace/revisions")
+async def save_document_workspace_v2(
+    doc_id: str,
+    body: WorkspaceSaveBody,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Publish editor content as a new immutable, hash-bound V2 revision.
+
+    Freeform drafts remain freeform. Named templates remain structured and are
+    regenerated through their canonical builder, so editing never silently
+    changes the legal document type or disconnects checks from the content.
+    """
+    _require_enabled()
+    doc = await _owner_document(doc_id, current_user)
+    if doc.get("review_status") == "submitted":
+        raise HTTPException(status_code=409, detail={
+            "code": "revision_under_review",
+            "message": "Withdraw the submitted revision before saving changes.",
+        })
+    base = await revision_repo.find_by_id(body.expected_revision_id)
+    if not base or base.get("document_id") != doc_id:
+        raise HTTPException(status_code=409, detail={
+            "code": "stale_workspace",
+            "message": "This editor is no longer based on the current revision.",
+        })
+    template_type = base.get("template_type") or doc.get("template_type")
+    if template_type == "lawyer_draft":
+        if body.body_html is None or body.fields is not None:
+            raise HTTPException(status_code=422, detail={
+                "code": "invalid_workspace_content",
+                "message": "This freeform draft must be saved as editor HTML.",
+            })
+        fields = {
+            "title": (body.title or doc.get("title") or "Legal Document").strip(),
+            "author_name": str(current_user.get("full_name") or "").strip(),
+            "body_html": _clean_draft_html(body.body_html),
+        }
+    else:
+        if body.fields is None or body.body_html is not None:
+            raise HTTPException(status_code=422, detail={
+                "code": "invalid_workspace_content",
+                "message": "This template must be saved through its structured fields.",
+            })
+        fields = body.fields
+    rev = await _run(v2.generate_revision(
+        document_id=doc_id,
+        template_type=template_type,
+        fields=fields,
+        idempotency_key=_require_key(idempotency_key),
+        expected_revision_id=body.expected_revision_id,
+        expected_version=body.expected_version,
+        expected_content_epoch=body.expected_content_epoch,
+    ))
+    if rev.get("status") != "generated":
+        raise HTTPException(status_code=503, detail={
+            "code": "generation_failed",
+            "message": "The revision could not be generated. Reload and try again.",
+        })
+    result = _revision_public(rev)
+    # This endpoint is owner-only, so returning the base lets the editor close
+    # its local save operation.  The general revision projection deliberately
+    # omits it: a past reviewer may list only their submitted revision and must
+    # not learn identifiers for the owner's private revision chain.
+    result["based_on_revision_id"] = rev.get("based_on_revision_id")
+    return result
 
 
 # ── the owner listing, built once ────────────────────────────────────────────

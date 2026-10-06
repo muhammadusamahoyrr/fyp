@@ -1,0 +1,22 @@
+# pii-eval-7 freeze manifest -- written BEFORE the first scored run.
+# Scored once; the masking is not tuned against this set.
+frozen_at: 2026-10-05T02:37:19+00:00
+dataset_sha256: 66f4de019ed61577bb532e92f96e13e02dfe7477321a63fb899aa8cd9719a52c
+documents: 48
+personal_spans: 402
+rubric_sha256: 1ec2dd48162d50b987468f021729c21f56d81e8840c8e519cb688d10352a0a16
+eval_version: pii-eval.2.3
+masking_version: pii-mask.7
+policy_sha256_at_freeze: 339cc2f302228638ed8a96423ca756eb5b5f6c60e68d268ee2430e60a863e379
+pipeline_json: '{"locator": null, "pipeline": "production-rules-only", "review": "pii-review.2", "rules": "pii-mask.7"}'
+harness_sha256: 583996cd124b3365d5e631ad9ec4f9159b28e54a47d315a481a4664cfc803f4b
+source_commit: 582eac7364b1850bc12d6752697b7d6456c18c30
+locator_manifest_sha256: 34dba2965b285a48311b2b2bc4cd24a7b247b7cee5e379ef1fbb35fb56bcc026
+production_code_sha256: d1768c0b085df86add1a918d4f7800e919a44799ff2d80872f90cde0eabd59c4
+settings_json: '{"analyzer_ai_synthetic_only": true, "analyzer_pii_review_required": true}'
+author: independent fresh session, given only PII_DETECTION_RUBRIC_3.md
+files:
+  pii-eval-7_employment.yaml: 8440c0643fd60fb96a1392b56f17a6f0dde55741e5dcf866a0563387a4a0bbdd
+  pii-eval-7_letter.yaml: daf47f1c705ec1186f7b2238000d74efd4c349544595495c4899accde30eaa89
+  pii-eval-7_nda.yaml: 21d20fe9eb1d12e6f87b9ab0899a61be3d5c9c80b82dc3b73f234df3ef076486
+  pii-eval-7_tenancy.yaml: 2b162ca4970ae53ed22c0f702b41b38873577211e1d26e3560aa0d1c264a4cff

@@ -33,6 +33,7 @@ from __future__ import annotations
 import secrets
 
 import pytest
+from tests._engagement_support import disengage, engage  # D1: sharing needs an accepted engagement
 from fastapi import HTTPException
 
 import app.api.v1.routes.documents_v2 as v2api
@@ -73,7 +74,11 @@ async def _lawyers(mongo):
                       "full_name": f"Adv. {lawyer['_id']}",
                       "lawyer_profile": {"kyc_verified": True}}},
             upsert=True)
+    for _client in [CLIENT]:
+        for _lawyer in [LAWYER_A, LAWYER_B]:
+            await engage(_client['_id'], _lawyer['_id'])
     yield
+    await disengage(*[u['_id'] for u in [CLIENT] + [LAWYER_A, LAWYER_B]])
     await get_users_col().delete_many(
         {"_id": {"$in": [LAWYER_A["_id"], LAWYER_B["_id"]]}})
 

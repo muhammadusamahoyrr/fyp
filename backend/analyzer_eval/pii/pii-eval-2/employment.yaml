@@ -1,0 +1,253 @@
+dataset: pii-eval-2
+label_review: developer_only
+documents:
+- id: p2-emp-01
+  document_type: employment
+  features: [lookalikes, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    OFFER OF EMPLOYMENT
+
+    Ref: HR/OFF/2026/117
+    Date: 6 February 2026
+
+    Ms. [[NAME:p2|Ayesha Siddiqa Malik]]
+    [[ADDRESS:a1|House 41, Lane 5, Phase 2, Bahria Town, Rawalpindi]]
+
+    Dear Ms. [[NAME:p2|Malik]],
+
+    [[NOT:n1|Northline Telecom Services (Pvt.) Limited]] is pleased to offer you the position of [[NOT:n2|Assistant Manager Finance]] at our [[NOT:n3|Blue Area]] office, on the following terms:
+
+    1. Gross salary: Rs. 285,000 per month.
+    2. Probation: [[DEADLINE:d1|three (3) months from the date of joining]].
+    3. Notice period after confirmation: [[DEADLINE:d2|one month or one month's salary in lieu]].
+    4. Your salary will be credited to account [[ACCOUNT:b1|PK05NRTB0000123009871164]].
+    5. Please confirm acceptance [[DEADLINE:d3|by 13 February 2026]] and join [[DEADLINE:d4|not later than 2 March 2026]].
+
+    We look forward to welcoming you, [[NAME:p2|Ayesha]].
+
+    Yours sincerely,
+    [[NAME:p1|Kamran Latif]]
+    Head of [[NOT:n4|Human Resources]]
+
+- id: p2-emp-02
+  document_type: employment
+  features: [table, untitled_names, lookalikes]
+  parties: [p1, p2, p3, p4]
+  text: |
+    SALARY SHEET — MARCH 2026 — [[NOT:n1|Shalimar Garments Unit 2]]
+
+    | Emp No | Name | Father's name | CNIC | Account | Net pay |
+    |---|---|---|---|---|---|
+    | 1021 | [[NAME:p1|Muhammad Arshad]] | [[NAME:p5|Abdul Ghafoor]] | [[CNIC:c1|35401-2287109-5]] | [[ACCOUNT:b1|0044-7891023-6]] | 42,500 |
+    | 1022 | [[NAME:p2|Shamim Akhtar]] | [[NAME:p6|Muhammad Yaqoob]] | [[CNIC:c2|35401-6612034-8]] | [[ACCOUNT:b2|0044-7891560-2]] | 38,000 |
+    | 1030 | [[NAME:p3|Zulfiqar Ali]] | [[NAME:p7|Noor Muhammad]] | [[CNIC:c3|35402-1109823-1]] | cash | 36,750 |
+    | 1047 | [[NAME:p4|Parveen Kausar]] | [[NAME:p8|Ghulam Rasool]] | [[CNIC:c4|35401-9900127-4]] | [[ACCOUNT:b3|0044-7893311-9]] | 40,200 |
+
+    Prepared by: [[NOT:n2|Accounts Section]]
+    Approved: [[NAME:p9|Tahir Mehmood]]
+
+- id: p2-emp-03
+  document_type: employment
+  features: [urdu_script, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    تقرری نامہ
+
+    محترم [[NAME:p2|عبدالقادر]] صاحب،
+    آپ کو [[NOT:n1|الفلاح پبلک اسکول]] میں بطور استاد (ریاضی) مقرر کیا جاتا ہے۔
+    تنخواہ: 45,000 روپے ماہانہ۔
+    آپ [[DEADLINE:d1|یکم ستمبر 2026 تک]] ڈیوٹی پر حاضر ہوں۔
+    آزمائشی مدت [[DEADLINE:d2|چھ ماہ]] ہوگی۔
+
+    [[NAME:p2|عبدالقادر]] صاحب کا پتہ: [[ADDRESS:a1|مکان نمبر 7، گلی نمبر 12، محلہ رحمان پورہ، سیالکوٹ]]
+    فون: [[PHONE:t1|0332-8817265]]
+
+    پرنسپل: [[NAME:p1|شازیہ نورین]]
+    (English: Principal [[NAME:p1|Shazia Noreen]]; appointee [[NAME:p2|Abdul Qadir]])
+
+- id: p2-emp-04
+  document_type: employment
+  features: [ocr_errors, repeated_names, aliases, overlap, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT AGREEMENT (scanned, OCR)
+
+    This Agreement is made between [[NOT:n1|Indus Valley Cargo Services]] ("Employer") through its proprietor Mr. [[NAME:p1|Shahid Iqba1 Gondal]] and Mr. [[NAME:p2|Ali Raza Kh-
+    an]] s/o [[NAME:p3|Raza Khan]] CNIC [[CNIC:c1|6l101-4492O13-5]] r/o [[ADDRESS:a1|c/o [[NAME:p3|Raza Khan]], Mohalla Jamal Abad, Mianwali]] ("Employee").
+
+    1. [[NAME:p2|Ali Raza]] is employed as a driver (LTV) from 1-3-2026.
+    2. Salary Rs. 40,O00 + Rs. 200 per trip.
+    3. Mr. [[NAME:p1|Gondal]] may terminate on [[DEADLINE:d1|7 days notice]] for misconduct.
+    4. The said [[NAME:p2|AIi]] shall return the vehicle keys [[DEADLINE:d2|same day on termination]].
+
+    Employer: [[NAME:p1|S.I. Gondal]]   Employee: [[NAME:p2|AIi Raza Khan]]
+    Ph [[PHONE:t1|0459-23l8810]]
+
+- id: p2-emp-05
+  document_type: employment
+  features: [roman_urdu, untitled_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    Ghar ke mulazim ka agreement
+
+    [[NAME:p1|Nadia Imtiaz]] ne [[NAME:p2|Sakina]] ko ghar ke kaam (safai, kapre) ke liye rakha hai.
+    Tankhwah 25,000 mahana, [[DEADLINE:d1|har mahine ki pehli tareekh ko]] cash.
+    Chhutti: hafte mein ek din (Jumma).
+    Agar [[NAME:p2|Sakina]] kaam chhorna chahe to [[DEADLINE:d2|15 din pehle]] bataye.
+    [[NAME:p2|Sakina Bibi]] ka shanakhti card: [[CNIC:c1|35202-8812093-2]]
+    Ghar ka pata: [[ADDRESS:a1|25-E, Model Town Extension, Lahore]]
+    Waris: [[NAME:p2|Sakina]] ka shohar [[NAME:p3|Bashir]], phone [[PHONE:t1|0304-5512986]]
+
+- id: p2-emp-06
+  document_type: employment
+  features: [lookalikes, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    TERMINATION OF EMPLOYMENT
+
+    To: [[NAME:p2|Danish Rafique]]
+    Employee No. 4471
+    [[NOT:n1|Customer Support Department]]
+
+    Your employment with [[NOT:n2|Zenith Call Solutions]] is terminated with effect from 15 May 2026 under clause 12 of your contract.
+
+    Your final settlement, including leave encashment, will be paid [[DEADLINE:d1|within 30 days of the last working day]]. Return your access card and laptop [[DEADLINE:d2|by 5 p.m. on 15 May 2026]].
+
+    You may appeal to the [[NOT:n3|Grievance Committee]] [[DEADLINE:d3|within 10 working days]].
+
+    [[NAME:p1|Sobia Arshad]]
+    [[NOT:n4|Manager People Operations]]
+
+- id: p2-emp-07
+  document_type: employment
+  features: [table, ocr_errors, deadlines]
+  parties: [p1, p2, p3]
+  text: |
+    ATTENDANCE & OVERTIME — WEEK 14 (thermal printout)
+
+    Name	CNIC	Hours	OT
+    [[NAME:p1|Rashid Ma-
+    sih]]	[[CNIC:c1|35202-77l9013-1]]	48	6
+    [[NAME:p2|Yousaf Gill]]	[[CNIC:c2|3S202-4419O28-3]]	44	2
+    [[NAME:p3|Nasreen Bibi]]	[[CNIC:c3|35202-1029384-6]]	40	0
+
+    OT to be paid with salary [[DEADLINE:d1|on 1st of next month]].
+    Supervisor: [[NAME:p4|Javed Masih]] [[PHONE:t1|03O1 4498 217]]
+
+- id: p2-emp-08
+  document_type: employment
+  features: [overlap, aliases, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    EXPERIENCE CERTIFICATE
+
+    This is to certify that Mr. [[NAME:p2|Umer Farooq Awan]] son of [[NAME:p3|Farooq Ahmed Awan]], resident of [[ADDRESS:a1|Awan House, Street of [[NAME:p3|Farooq Ahmed Awan]], Mohalla Awanabad, Chakwal]], worked with [[NOT:n1|Awan Brothers Construction]] as [[NOT:n2|Site Engineer]] from 1 January 2022 to 31 December 2025.
+
+    During this period [[NAME:p2|Umer]] supervised the [[NOT:n3|Chakwal Bypass Package-II]] works. Mr. [[NAME:p2|Awan]] was found hardworking and honest.
+
+    We wish [[NAME:p2|Umer Farooq]] success in future.
+
+    Engr. [[NAME:p1|Nasir Abbas]]
+    Project Director
+
+- id: p2-emp-09
+  document_type: employment
+  features: [urdu_script, roman_urdu, aliases, untitled_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    Chowkidar ki naukri ka parcha
+
+    Naam: [[NAME:p2|Gul Muhammad]] ([[NAME:p2|گل محمد]]) urf [[NAME:p2|Gullu]]
+    Walad: [[NAME:p3|Sher Muhammad]]
+    Gaon: [[ADDRESS:a1|Mauza Kot Isa Shah, Tehsil Kabirwala, District Khanewal]]
+
+    [[NAME:p2|Gullu]] raat ki duty karega 8 baje se subah 6 baje tak.
+    Tankhwah 28,000. Naukri chhorne se [[DEADLINE:d1|ek mahina pehle]] batana hoga.
+    [[NAME:p2|گل محمد]] کا انگوٹھا لگا ہوا ہے۔
+
+    Rakhne wale: [[NAME:p1|Khurram Shehzad]], phone [[PHONE:t1|0300-9918274]]
+
+- id: p2-emp-10
+  document_type: employment
+  features: [deadlines, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    SHOW CAUSE NOTICE
+
+    Mr. [[NAME:p2|Sameer Abid]]
+    Sales Officer, [[NOT:n1|Multan Region]]
+
+    It has been reported by the [[NOT:n2|Internal Audit Team]] that cash collections of Rs. 312,000 from [[NOT:n3|Al-Rehman General Store]] and [[NOT:n4|Pak Super Mart]] were deposited late.
+
+    [[NAME:p2|Sameer Abid]] is directed to submit a written explanation [[DEADLINE:d1|within seven (7) days of receipt of this notice]], failing which disciplinary action may follow without further notice. [[NAME:p2|Sameer Abid]] shall remain on duty during this period.
+
+    [[NAME:p1|Rehan Qamar]]
+    Regional Manager
+
+- id: p2-emp-11
+  document_type: employment
+  features: [table, lookalikes, untitled_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    CONSULTANCY AGREEMENT — KEY TERMS
+
+    | Term | Detail |
+    |---|---|
+    | Client | [[NOT:n1|Hanif Textile Mills Limited]] |
+    | Consultant | [[NAME:p2|Lubna Haroon]] |
+    | Consultant address | [[ADDRESS:a1|Flat 702, Creek Vista Apartments, Phase 8, DHA, Karachi]] |
+    | Consultant email | [[EMAIL:e1|lubna.haroon.cpa@example.com]] |
+    | Scope | Tax advisory for the [[NOT:n2|Kotri Unit]] |
+    | Fee | Rs. 400,000 per quarter |
+    | Invoices payable | [[DEADLINE:d1|within 30 days of the invoice]] |
+    | Term | [[DEADLINE:d2|twelve months from 1 July 2026]] |
+    | Termination | [[DEADLINE:d3|60 days' written notice]] |
+    | Client signatory | [[NAME:p1|Hanif Ahmed Shaikh]] |
+
+- id: p2-emp-12
+  document_type: employment
+  features: [ocr_errors, overlap, roman_urdu, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Naukri ki darkhwast (photocopy, handwriting)
+
+    Bakhidmat janab Manager sahab, [[NOT:n1|Shan Petroleum Service]]
+
+    Arz hai ke main [[NAME:p2|Mu-
+    hammad Saqib]] walad [[NAME:p3|Muhammad Nazir]] petrol pump par attendant ki naukri chahta hoon.
+    Mera pata: [[ADDRESS:a1|ghar [[NAME:p3|Muhammad Nazir]] wala, gali nanbar 4, Chak 1O9 GB, Jaranwala]]
+    Shanakhti card [[CNIC:c1|33l03-8812O93-1]]
+    Mobile [[PHONE:t1|0306-77 812 45]]
+
+    Sifarish: [[NAME:p1|Rana Tanveer]] (manager ne approve kiya, joining [[DEADLINE:d1|agle somwar se]])
+
+- id: p2-emp-13
+  document_type: employment
+  features: [aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    SETTLEMENT AND RELEASE AGREEMENT
+
+    This Agreement is between [[NOT:n1|Medline Diagnostics (Pvt.) Ltd.]] ("Company") and Dr. [[NAME:p2|Saadia Kamal Hashmi]] ("Employee").
+
+    1. The Company shall pay Dr. [[NAME:p2|Hashmi]] Rs. 1,450,000 in full and final settlement [[DEADLINE:d1|within fifteen days of signature]].
+    2. [[NAME:p2|Saadia]] releases the Company from all claims arising from her employment as [[NOT:n2|Consultant Pathologist]].
+    3. The Employee shall not, [[DEADLINE:d2|for a period of six months]], join any laboratory within the [[NOT:n3|Islamabad Capital Territory]].
+    4. Payment will be made to her account [[ACCOUNT:b1|PK22MDLN0019920018827401]].
+
+    For the Company: [[NAME:p1|Imtiaz Hussain Gilani]], Director
+    Employee: [[NAME:p2|Saadia K. Hashmi]]
+
+- id: p2-emp-14
+  document_type: employment
+  features: [untitled_names, urdu_script, lookalikes, overlap]
+  parties: [p1, p2]
+  text: |
+    حلف نامہ برائے ملازمت
+
+    میں [[NAME:p2|ثمینہ کوثر]] دختر [[NAME:p3|محمد اسلم]] حلفاً بیان کرتی ہوں کہ میں [[NOT:n1|نور میڈیکل کمپلیکس]] میں نرس کے طور پر کام کروں گی۔
+    میرا پتہ: [[ADDRESS:a1|بمکان [[NAME:p3|محمد اسلم]]، نزد جامع مسجد، محلہ قاضیاں، جہلم]]
+    میرا شناختی کارڈ نمبر [[CNIC:c1|37301-4419920-8]] ہے۔
+
+    Countersigned: [[NAME:p1|Fozia Rehman]], Nursing Superintendent

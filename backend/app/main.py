@@ -28,6 +28,9 @@ from app.api.v1.routes import (
     disputes,
     documents,
     documents_v2,
+    documents_v2_trash,
+    document_analyses,
+    document_draft_plans,
     engagements,
     inheritance,
     intake,
@@ -37,6 +40,7 @@ from app.api.v1.routes import (
     payments,
     conversations,
     provenance,
+    review_requests,
     users,
     voice,
 )
@@ -56,6 +60,7 @@ from app.db.appointment_slot_preflight import assert_appointment_booking_ready
 from app.db.chroma import close_chroma, connect_chroma
 from app.db.indexes import (
     create_all_indexes,
+    enforce_review_request_indexes,
     enforce_v2_correctness_indexes,
 )
 from app.db.mongodb import close_db, connect_db
@@ -118,6 +123,75 @@ async def _lawyer_index_reconciler():
         except Exception:
             logging.getLogger(__name__).exception(
                 "Lawyer index reconciliation sweep failed")
+
+
+async def _review_request_sweep():
+    """Backstop for the review-request lifecycle hooks (DOCUMENT_REVIEW_REQUEST_PLAN.md §7.3).
+
+    The hooks run inside the engagement transition's own transaction; this
+    catches anything they did not reach (a crash, an older transition path,
+    rows from before the hook existed). Ungated like the relays: every step is
+    a conditional write in its own transaction and a re-run writes nothing, so
+    every worker may run it. A no-op while DOCUMENT_REVIEW_REQUESTS is off.
+    Sleeps first.
+    """
+    import asyncio
+    import logging
+
+    interval = max(1, settings.review_request_sweep_minutes) * 60
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            from app.services.review_request_lifecycle import enabled, sweep
+            if enabled():
+                await sweep()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("Review request lifecycle sweep failed")
+
+
+async def _review_request_notifier():
+    """Deliver document review request notification intents (plan §6).
+
+    Ungated like the relays: delivery is deduplicated by a unique key and an
+    intent is removed by id, so every worker may run it at once. A no-op
+    while DOCUMENT_REVIEW_REQUESTS is off.
+    """
+    import asyncio
+    import logging
+
+    interval = getattr(settings, "provenance_relay_seconds", 30)
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            from app.services.review_request_notifications import reconcile
+            await reconcile()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("Review request notification reconcile failed")
+
+
+async def _vault_purge():
+    """Purge Vault documents whose recovery period has ended
+    (services/vault_deletion.py). Hourly; inert while DOCUMENTS_V2 is off, and
+    report-only unless DOCUMENTS_V2_DELETION_ENABLED is on. Every step is a
+    conditional write or the tombstone-first `delete_revision`, so it is safe
+    on every worker."""
+    import asyncio
+    import logging
+
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            if settings.documents_v2:
+                from app.services.vault_deletion import purge_due
+                await purge_due()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("Vault purge failed")
 
 
 async def _provenance_relay():
@@ -211,6 +285,43 @@ async def _documents_v2_relay():
             logging.getLogger(__name__).exception("DOCUMENTS_V2 relay sweep failed")
 
 
+async def _analyzer_housekeeping():
+    """Document Analyzer: expire (7 days), purge tombstoned sources, sweep
+    unreferenced encrypted files. Every step is idempotent and claim/CAS
+    guarded, so it runs on every worker without a lock. Inert unless
+    DOC_ANALYZER is on AND readiness passed; re-checked each tick."""
+    import asyncio
+    import logging
+    from app.services.analyzer.deletion import housekeeping_tick
+
+    while True:
+        try:
+            await asyncio.sleep(60)
+            await housekeeping_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("analyzer housekeeping failed")
+
+
+async def _analyzer_worker():
+    """Document Analyzer stages (extraction, ...). Lease/fence guarded, so it
+    runs on every worker without a lock; inert unless DOC_ANALYZER is on and
+    readiness passed. Polls every 5 s; each tick drains up to 5 runs."""
+    import asyncio
+    import logging
+    from app.services.analyzer.runner import tick
+
+    while True:
+        try:
+            await asyncio.sleep(5)
+            await tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("analyzer worker tick failed")
+
+
 async def _warmup_models():
     """Heavy AI warmups (Whisper STT + intent embeddings). Runs in the background
     so startup and health checks aren't blocked and a model failure can't take
@@ -253,6 +364,20 @@ async def lifespan(app: FastAPI):
     # because from that point the missing index is not a slow query, it is a
     # guarantee that silently is not held.
     await enforce_v2_correctness_indexes()
+    # Same rule for document review requests: warn while the flag is off,
+    # refuse to start once it is on and an index is missing.
+    await enforce_review_request_indexes()
+    # DOCUMENT_REVIEW_REQUESTS on: refuse a standalone Mongo now, rather than
+    # fail a client's first submit or an engagement completion later.
+    from app.services.review_request_lifecycle import assert_ready as _review_requests_ready
+    await _review_requests_ready()
+
+    # The Document Analyzer checks its own prerequisites (transactions, its
+    # indexes) and FAILS CLOSED ON ITS OWN: a failure closes the analyzer's
+    # routes with 503 and leaves the rest of the app running. Off: no check.
+    if settings.doc_analyzer:
+        from app.services.analyzer import readiness as analyzer_readiness
+        await analyzer_readiness.refresh()
 
     # Appointments have no feature flag, so this is fail-closed and
     # unconditional.
@@ -341,6 +466,11 @@ async def lifespan(app: FastAPI):
     # default cannot silently leave the outbox undrained. It no-ops while the
     # feature flag is off.
     scheduler_tasks.append(_asyncio.create_task(_documents_v2_relay()))
+    scheduler_tasks.append(_asyncio.create_task(_analyzer_housekeeping()))
+    scheduler_tasks.append(_asyncio.create_task(_analyzer_worker()))
+    scheduler_tasks.append(_asyncio.create_task(_review_request_sweep()))
+    scheduler_tasks.append(_asyncio.create_task(_review_request_notifier()))
+    scheduler_tasks.append(_asyncio.create_task(_vault_purge()))
 
     # EVENT OUTBOX relay: ungated, and NOT covered by the v2 relay above, which
     # returns immediately while DOCUMENTS_V2 is off. Agreement transitions park
@@ -459,7 +589,13 @@ app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(cases.router, prefix=API_PREFIX)
 app.include_router(intake.router, prefix=API_PREFIX)
 app.include_router(lawyers.router, prefix=API_PREFIX)
+# BEFORE `documents.router`: that router's GET /documents/{doc_id} would
+# otherwise answer GET /documents/analyses with doc_id="analyses".
+app.include_router(document_analyses.router, prefix=API_PREFIX)  # 404 while DOC_ANALYZER is off
 app.include_router(documents.router, prefix=API_PREFIX)
+app.include_router(document_draft_plans.router, prefix=API_PREFIX)
+# BEFORE documents_v2: `/documents/v2/trash` must not be read as a document id.
+app.include_router(documents_v2_trash.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(documents_v2.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(inheritance.router, prefix=API_PREFIX)
 app.include_router(agreements.router, prefix=API_PREFIX)
@@ -479,6 +615,7 @@ app.include_router(bail.router, prefix=API_PREFIX)
 app.include_router(provenance.router, prefix=API_PREFIX)
 app.include_router(conversations.router, prefix=API_PREFIX)
 app.include_router(labeling.router, prefix=API_PREFIX)
+app.include_router(review_requests.router, prefix=API_PREFIX)   # inert unless DOCUMENT_REVIEW_REQUESTS
 
 app.include_router(chat_socket.router)
 app.include_router(notification_socket.router)

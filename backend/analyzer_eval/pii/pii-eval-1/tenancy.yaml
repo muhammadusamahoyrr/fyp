@@ -1,0 +1,171 @@
+# pii-eval-1 (tenancy). Synthetic, developer-labelled, written independently from PII_DETECTION_RUBRIC.md only.
+dataset: pii-eval-1
+label_review: developer_only
+documents:
+- id: pe-001
+  document_type: tenancy
+  features: [repeated_names, aliases, overlap, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    TENANCY AGREEMENT
+
+    This deed of tenancy is made at [[NOT:n1|Lahore]] between [[NAME:p1|Kashif Raza]] son of Abdul Majeed, holder of CNIC [[CNIC:c1|35202-1234567-1]], resident of [[ADDRESS:a1|House of [[NAME:p1|Kashif Raza]], Street 4, Mohalla Islampura, Lahore]] (the Landlord) and [[NAME:p2|Imran Siddiqui]], CNIC [[CNIC:c2|35201-7654321-9]] (the Tenant).
+
+    1. Mr. [[NAME:p1|Raza]] lets the ground floor to the Tenant for a term of [[DEADLINE:d1|eleven months from 1 July 2026]].
+    2. The said [[NAME:p2|Imran]] shall pay rent of Rs. 45,000 on or before the [[DEADLINE:d2|7th day of each month]].
+    3. [[NAME:p1|Kashif]] has received an advance of Rs. 90,000 which Mr. [[NAME:p2|Siddiqui]] may recover at the end of the term.
+    4. Disputes shall be referred to the courts at [[NOT:n2|Lahore]] only.
+
+- id: pe-002
+  document_type: tenancy
+  features: [aliases, untitled_names, ocr_errors, repeated_names]
+  parties: [p1, p2]
+  text: |
+    RENT AGREEMENT (scanned copy)
+
+    Landlord: [[NAME:p1|Kash1f Raza]]
+    CNlC: [[CNIC:c1|35202-l234567-1]]
+    Phone: [[PHONE:ph1|0300-12345 67]]
+
+    Tenant: [[NAME:p2|Zubair Ahmed]]
+    CNIC: [[CNIC:c2|35202 - 9876543 - 5]]
+
+    The property is let by [[NAME:p1|Kashif]] to [[NAME:p2|Zubair]] from the first of the month. [[NAME:p1|Kash1f Raza]] will not enter the premises without notice. [[NAME:p2|Zubair Ahmed]] agrees to pay the utility bills.
+
+    The tenant shall vacate within [[DEADLINE:d1|15 days of written notice]].
+- id: pe-003
+  document_type: tenancy
+  features: [table, repeated_names, untitled_names]
+  parties: [p1, p2]
+  text: |
+    TENANCY TERM SHEET
+
+    | Item | Particulars |
+    |---|---|
+    | Landlord | [[NAME:p1|Nadia Kamran]] |
+    | Landlord CNIC | [[CNIC:c1|42101-5567890-2]] |
+    | Landlord mobile | [[PHONE:ph1|+92 321 5550142]] |
+    | Tenant | [[NAME:p2|Farhan Tariq]] |
+    | Tenant email | [[EMAIL:e1|farhan.tariq@mailbox-test.pk]] |
+    | Premises | [[ADDRESS:a1|Flat 12-B, Block 3, Clifton, Karachi]] |
+    | Monthly rent | Rs. 80,000 |
+    | Security | Rs. 160,000 held by [[NAME:p1|Nadia]] |
+
+    Rent is due by the 5th of every month.
+- id: pe-004
+  document_type: tenancy
+  features: [urdu_script, aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    کرایہ نامہ
+
+    یہ معاہدہ [[NAME:p1|محمد کاشف رضا]] (مالک مکان) اور [[NAME:p2|عمران صدیقی]] (کرایہ دار) کے درمیان طے پایا۔ شناختی کارڈ نمبر [[CNIC:c1|35202-1234567-1]]۔
+
+    مالک مکان [[NAME:p1|کاشف]] صاحب نے مکان کرایہ دار کو [[DEADLINE:d1|گیارہ ماہ]] کے لیے دیا۔ [[NAME:p2|عمران]] ہر ماہ کی پانچ تاریخ تک کرایہ ادا کرے گا۔
+
+    Property: [[ADDRESS:a1|مکان نمبر 18، گلی نمبر 4، اسلام پورہ، لاہور]]
+
+    English note: [[NAME:p1|Kashif Raza]] (landlord) and [[NAME:p2|Imran Siddiqui]] (tenant) signed in presence of two witnesses.
+- id: pe-005
+  document_type: tenancy
+  features: [roman_urdu, aliases, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Kirayanama (Roman Urdu draft)
+
+    Main, [[NAME:p1|Shahid Mehmood]] wald Mehmood Hussain, apna makan [[ADDRESS:a1|Plot 77, Sector G-9/2, Islamabad]] [[NAME:p2|Rubina Bibi]] ko kiraye par deta hun. [[NAME:p1|Shahid]] sahib ne Rs. 60,000 peshgi li hai.
+
+    Kiraya har mahine ki 10 tareekh se pehle dena hoga. Agar [[NAME:p2|Rubina]] ne [[DEADLINE:d1|do mahine ka kiraya nahi diya]] to makan khali karna hoga.
+
+    Rabta: [[PHONE:ph1|0333-1112233]]
+    Gawah: [[NAME:p3|Tahir Naseem]]
+- id: pe-006
+  document_type: tenancy
+  features: [overlap, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Tenancy of Shop
+
+    The shop known as [[NOT:n1|Bismillah General Store]] situated at [[ADDRESS:a1|Shop 5, Plaza of [[NAME:p1|Haji Anwar]], Mall Road, Rawalpindi]] is let to [[NAME:p2|Sajid Butt]] for the business of [[NOT:n2|Al-Madina Mobile Zone]].
+
+    The landlord, [[NAME:p1|Anwar]], lives at [[ADDRESS:a2|Bungalow of [[NAME:p1|Haji Anwar]], Satellite Town, Rawalpindi]].
+
+    The area is near [[NOT:n3|Saddar]], close to [[NOT:n4|Jinnah Park]]. Rent shall be paid [[DEADLINE:d1|within 7 days of the invoice]].
+- id: pe-007
+  document_type: tenancy
+  features: [ocr_errors, overlap, repeated_names]
+  parties: [p1, p2]
+  text: |
+    TENANCY - scanned page 1
+
+    Landlord [[NAME:p1|Mu hammad Tahir]] of [[ADDRESS:a1|Haveli of [[NAME:p1|Muhammad Tahir]], Gali No. 9, Bhatti Gate,
+    Lahore]]
+    Tenant [[NAME:p2|Saira Jabeen]], CNIC [[CNIC:c1|3520l-4455667-8]], mobile [[PHONE:ph1|03 21-4455 667]]
+
+    The landlord [[NAME:p1|Tahir]] lets one room set to [[NAME:p2|Saira]] from [[DEADLINE:d1|1 January 2027 until 31 October 2027]].
+- id: pe-008
+  document_type: tenancy
+  features: [table, ocr_errors, aliases]
+  parties: [p1, p2]
+  text: |
+    Schedule of Parties
+
+    Role | Name | CNIC | Contact
+    Owner | [[NAME:p1|Bilal Hameed]] | [[CNIC:c1|37405-8899001-3]] | [[EMAIL:e1|bilal.hameed@proton-demo.pk]]
+    Occupier | [[NAME:p2|Mariam Aslam]] | [[CNIC:c2|37405-l122334-6]] | [[PHONE:ph1|0345 6677 889]]
+    Surety | [[NAME:p3|Ghulam Rasool]] | [[CNIC:c3|37405-2233445-1]] | n/a
+
+    Mr. [[NAME:p1|Hameed]] confirms Ms. [[NAME:p2|Aslam]] has paid the deposit. Surety [[NAME:p3|Rasool]] signs below.
+- id: pe-009
+  document_type: tenancy
+  features: [deadlines, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Notice to Tenant
+
+    [[NAME:p1|Fatima Zahra]] gives notice to [[NAME:p2|Owais Qureshi]] that the lease of the apartment in [[NOT:n1|Gulberg Heights]] ends on [[DEADLINE:d1|30 April 2027]].
+
+    Arrears must be cleared [[DEADLINE:d2|within 30 days of the invoice]] failing which the matter goes to the Rent Controller, [[NOT:n2|Faisalabad]].
+
+    The landlord of record is [[NOT:n3|Zahra Builders (Pvt) Ltd]].
+- id: pe-010
+  document_type: tenancy
+  features: [roman_urdu, urdu_script, aliases]
+  parties: [p1, p2]
+  text: |
+    Mixed-language lease note
+
+    Malik [[NAME:p1|Rana Sarfraz]] aur [[NAME:p2|مسز نسرین اختر]] ke darmiyan kirayanama hua. [[NAME:p1|Rana]] sahib ka CNIC [[CNIC:c1|34603-1100223-7]] hai.
+
+    [[NAME:p2|نسرین]] ne kaha ke woh [[DEADLINE:d1|teen mahine pehle notice]] dengi. Address: [[ADDRESS:a1|House 3, Street 11, Satellite Town, Gujranwala]].
+
+    Faisla: [[NAME:p1|Sarfraz]] sahib ko Rs. 35,000 har mahine milenge.
+- id: pe-011
+  document_type: tenancy
+  features: [repeated_names, aliases, deadlines, overlap]
+  parties: [p1, p2, p3]
+  text: |
+    SUB-LEASE DEED
+
+    Between (1) [[NAME:p1|Asad Mehmood Khan]], (2) [[NAME:p2|Hina Rafique]] and (3) [[NAME:p3|Usman Ghani]].
+
+    (1) [[NAME:p1|Asad Mehmood Khan]], [[ADDRESS:a1|Khan Villa, behind the house of [[NAME:p3|Usman Ghani]], Phase 5, DHA, Lahore]], contact [[PHONE:ph1|042-35761234]].
+    The said [[NAME:p1|Asad]] sub-leases the first floor to [[NAME:p2|Hina]] for [[DEADLINE:d1|twenty-four months from 1 March 2026]]. Mr. [[NAME:p3|Ghani]] consents as head landlord.
+    [[NAME:p2|Hina Rafique]] shall pay by [[DEADLINE:d2|5 June 2026]] the first instalment.
+- id: pe-012
+  document_type: tenancy
+  features: [table, urdu_script, overlap, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Tenancy particulars | تفصیلات
+
+    | Field | Value |
+    |---|---|
+    | Landlord | [[NAME:p1|Tariq Mehmood]] / [[NAME:p1|طارق محمود]] |
+    | Tenant | [[NAME:p2|Shazia Parveen]] |
+    | Premises | [[ADDRESS:a1|Flat 4, [[NAME:p1|Tariq Mehmood]] Tower, Model Town, Lahore]] |
+    | Account for rent | [[ACCOUNT:ac1|PK36MEZN0001230101234567]] |
+    | Brand on premises | [[NOT:n1|Sunrise Bakers]] |
+    | Registry | [[NOT:n2|Sub-Registrar Office Model Town]] |
+
+    Rent is payable [[DEADLINE:d1|within 5 working days of month end]].

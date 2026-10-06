@@ -1,0 +1,186 @@
+dataset: pii-eval-7
+label_review: developer_only
+documents:
+- id: p7-let-01
+  document_type: letter
+  features: [repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    LEGAL NOTICE
+
+    Through Registered Post A.D.
+
+    To,
+    Mr. [[NAME:p2|Sohail Anjum Warraich]]
+    Proprietor, [[NOT:n1|Warraich Builders]]
+    [[ADDRESS:a1|Office 3, First Floor, Pak Tower, Main Boulevard, Gulberg III, Lahore]]
+
+    Sir,
+
+    Under instructions from my client Mr. [[NAME:p1|Junaid Iqbal Toor]], resident of [[ADDRESS:a2|House 210, Block J, Model Town Extension, Lahore]], I serve you with this notice.
+
+    1. My client paid you Rs. 2,500,000 for a plot in [[NOT:n2|Paragon City]] on 4 January 2025.
+    2. You promised possession by 31 December 2025 but have failed to deliver it.
+    3. You are called upon to refund the amount [[DEADLINE:d1|within 15 days of receipt of this notice]], failing which my client will sue you for recovery and damages.
+
+    Mr. [[NAME:p2|Warraich]] may contact me on [[PHONE:t1|0300-8423106]]. The said [[NAME:p1|Junaid]] reserves all his rights.
+
+    [[NAME:p3|Aqeel Ahmad Sial]]
+    Advocate High Court
+    [[EMAIL:e1|aqeel.sial@example.org]]
+- id: p7-let-02
+  document_type: letter
+  features: [ocr_errors, overlap, repeated_names, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Application for duplicate electricity bill
+
+    The Sub-Divisional Officer,
+    Model Town Sub-Division
+
+    I, [[NAME:p1|Tahir Mehmood Ans ari]], CNIC [[CNIC:c1|35202-l190467-3]], am the occupant of [[ADDRESS:a1|House of Late Mian [[NAME:p2|Abdul Ghafoor]], Street No. 1 7, Faisal Town, Lahore]].
+    The bill for May 2026 was not delivered. The reference is in the name of [[NAME:p2|Abdul Ghafoor]], my late father-in-law.
+    Please issue a duplicate. My number is [[PHONE:t1|0321-44O7 819]].
+
+    [[NAME:p1|Tahir Mehrnood]]
+- id: p7-let-03
+  document_type: letter
+  features: [urdu_script, roman_urdu, untitled_names, aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    بخدمت جناب ایس ایچ او صاحب، تھانہ سٹی، جہلم
+
+    گزارش ہے کہ سائل [[NAME:p1|راجہ عامر شہزاد]] ولد [[NAME:p3|راجہ فیروز خان]] ساکن [[ADDRESS:a1|محلہ شمس آباد، گلی نمبر 4، جہلم]] کا موبائل فون گم ہو گیا ہے۔
+
+    Roman: Sail [[NAME:p1|Raja Amir Shahzad]] ka phone 3 June ko gum hua. Number [[PHONE:t1|0313-5520781]] tha. [[NAME:p1|Amir]] ne pehle [[NAME:p2|Kaleem]] ko bataya, jo uska hamsaya hai.
+
+    سائل: [[NAME:p1|عامر شہزاد]]
+    شناختی کارڈ: [[CNIC:c1|37301-4408195-1]]
+- id: p7-let-04
+  document_type: letter
+  features: [table, deadlines, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    PAYMENT REMINDER
+
+    [[NOT:n1|Shan Electronics]]
+    Invoice summary for [[NAME:p2|Kashmala Rafi]]
+
+    | Invoice | Date | Amount | Due |
+    |---|---|---|---|
+    | SE-1102 | 2 Apr 2026 | 54,000 | [[DEADLINE:d1|within 30 days of the invoice]] |
+    | SE-1131 | 20 Apr 2026 | 18,500 | [[DEADLINE:d2|within 30 days of the invoice]] |
+
+    Please pay into [[ACCOUNT:b1|PK52SONE0012320011087455]] [[DEADLINE:d3|by 5 June 2026]].
+    Delivery was made to [[ADDRESS:a1|House 33, Street 19, Shah Shams Colony, Multan]].
+    Contact: [[NAME:p1|Rizwan Shan]], [[PHONE:t1|0345-6041127]].
+- id: p7-let-05
+  document_type: letter
+  features: [aliases, repeated_names, overlap, deadlines, ocr_errors]
+  parties: [p1, p2]
+  text: |
+    Dear [[NAME:p1|Saad]],
+
+    I write about the boundary wall between your house and mine at [[ADDRESS:a1|Plot 6, Lane of Mrs. [[NAME:p3|Zarina Hayat]], Cantt Area, Abbottabad]].
+
+    Mr. [[NAME:p1|Saad Ullah Jadoon]], the wall is leaning towards my side. I request that you repair it [[DEADLINE:d1|within two weeks of this letter]]. If it falls before then, the said [[NAME:p1|Saad Ullah]] will be responsible for any damage.
+
+    Please reply to [[EMAIL:e1|nighat.awan@example.com]] or call [[PHONE:t1|0992-33 l 0457]].
+
+    Yours,
+    [[NAME:p2|Nighat Awan]]
+    [[NAME:p2|N1ghat]]
+- id: p7-let-06
+  document_type: letter
+  features: [lookalikes, untitled_names, deadlines, repeated_names]
+  parties: [p1]
+  text: |
+    Reference letter
+
+    To whom it may concern,
+
+    [[NAME:p1|Areeba Shakoor]] volunteered at [[NOT:n1|Edhi Welfare Centre]] in [[NOT:n2|Hyderabad]] from 2024 to 2026 and coordinated the [[NOT:n3|Clean Water Drive]].
+    [[NAME:p1|Areeba Shakoor]] was punctual and kind to patients.
+    Any verification request should reach us [[DEADLINE:d1|before 31 July 2026]].
+
+    [[NAME:p2|Faraz Siddiqui]]
+    Coordinator, [[PHONE:t1|0222-781 4430]]
+- id: p7-let-07
+  document_type: letter
+  features: [table, urdu_script, roman_urdu, repeated_names]
+  parties: [p1, p2]
+  text: |
+    Gharelu bijli ke istemaal ka hisaab (khat ke sath)
+
+    | Mahina | Naam | Units |
+    |---|---|---|
+    | April | [[NAME:p1|Sughran Bibi]] | 210 |
+    | May | [[NAME:p1|سغراں بی بی]] | 245 |
+    | June | [[NAME:p2|Mumtaz Ali]] | 260 |
+
+    [[NAME:p2|Mumtaz]] kehta hai ke June ka meter us ke naam par hai. [[NAME:p1|Sughran]] ka pata [[ADDRESS:a1|Basti Mallanwala, Mauza Khanpur, Tehsil Rahim Yar Khan]] hai.
+- id: p7-let-08
+  document_type: letter
+  features: [ocr_errors, lookalikes, overlap, aliases]
+  parties: [p1, p2]
+  text: |
+    Complaint regarding defective goods
+
+    The Manager,
+    [[NOT:n1|Al-Fatah Home Appliances]], [[ADDRESS:a1|Shop 12, Hafeez Centre, Gulberg, Lahore]]
+
+    I bought a washing machine on 2 May 2026. It stopped working after a week.
+    Please send a technician to [[ADDRESS:a2|House of [[NAME:p1|Sabeen Ar shad]], Street 3,
+    Garden Town, Lahore]].
+    I can be reached at [[PHONE:t1|03O0-4217 586]] or [[EMAIL:e1|sabeen.arshad@exarnple.net]].
+
+    [[NAME:p1|Sabeen]]
+    (sales officer: [[NAME:p2|Ijaz]])
+- id: p7-let-09
+  document_type: letter
+  features: [roman_urdu, deadlines, repeated_names, aliases, untitled_names]
+  parties: [p1, p2]
+  text: |
+    WhatsApp message (printed for record)
+
+    [[NAME:p1|Bashir]] bhai, aap ka qarz Rs. 150,000 [[DEADLINE:d1|agle mahine ki 10 tareekh tak]] wapas karna hai.
+    [[NAME:p1|Bashir Ahmed Dogar]] ne yeh raqam [[NAME:p2|Shaukat Ali]] se 1 March 2026 ko li thi.
+    [[NAME:p2|Shaukat]] ne kaha: paisay [[ACCOUNT:b1|PK73JSBL9999903002816610]] mein bhej dein.
+    Agar [[DEADLINE:d2|15 din ke andar]] jawab na aya to [[NAME:p2|Shaukat Ali]] panchayat bulayega.
+- id: p7-let-10
+  document_type: letter
+  features: [table, ocr_errors, lookalikes, deadlines]
+  parties: [p1, p2, p3]
+  text: |
+    VISITOR LOG EXTRACT - [[NOT:n1|Gulberg Police Station]]
+
+    Date	Visitor	CNIC	Purpose
+    8 Jun	[[NAME:p1|Sh ahid Nadeem]]	[[CNIC:c1|35202-881O274-9]]	FIR copy
+    8 Jun	[[NAME:p2|Uzair Latif]]	[[CNIC:c2|35201-3307721-5]]	character certificate
+    9 Jun	[[NAME:p3|Saira Bano]]	[[CNIC:c3|3520l-6619043-2]]	complaint
+
+    Certified copies must be collected [[DEADLINE:d1|within 7 days of the application]].
+- id: p7-let-11
+  document_type: letter
+  features: [urdu_script, overlap, untitled_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    محترم [[NAME:p2|صدف]]،
+
+    آپ کا خط ملا۔ [[NAME:p1|نعمان اکرم]] کی طرف سے سلام۔ دکان [[NOT:n1|اکرم کلاتھ ہاؤس]] اب بند ہو گئی ہے۔
+    نیا پتہ: [[ADDRESS:a1|بیٹھک [[NAME:p1|نعمان اکرم]]، مکان 27، محلہ گوالمنڈی، راولپنڈی]]
+    English: [[NAME:p1|Nouman Akram]] has moved; write to him at the new address. [[NAME:p2|Sadaf Imran]] can call [[PHONE:t1|0336-2209184]].
+- id: p7-let-12
+  document_type: letter
+  features: [repeated_names, aliases, deadlines, untitled_names, overlap]
+  parties: [p1, p2]
+  text: |
+    Re: Your request for a no-objection letter
+
+    [[NAME:p2|Javeria]],
+
+    [[NAME:p1|Obaid Ur Rehman]] has no objection to your sub-letting the shop at [[ADDRESS:a1|Shop 4, Rehman Market, near House of [[NAME:p1|Obaid Ur Rehman]], Saddar, Peshawar]] for [[DEADLINE:d1|six months from 1 September 2026]].
+    [[NAME:p1|Obaid]] asks that the sub-tenant's CNIC copy be sent to him [[DEADLINE:d2|at least 10 days before possession]].
+    Ms. [[NAME:p2|Javeria Gul]] remains liable for the rent. Mr. [[NAME:p1|Rehman]] can be reached at [[PHONE:t1|091-5277403]].
+
+    [[NAME:p1|O. U. Rehman]]

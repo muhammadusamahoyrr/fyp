@@ -50,6 +50,18 @@ class EngagementRepository(BaseRepository):
             "status": EngagementStatus.ACCEPTED.value,
         })
 
+    async def find_accepted_between(self, client_id: str, lawyer_id: str,
+                                    case_id: str | None = None) -> dict | None:
+        """An ACCEPTED engagement between this client and this lawyer -- on
+        `case_id` when one is given. The document-sharing gate
+        (document_sharing.py): only `accepted`, never the wider retained set,
+        because an ended relationship authorises no NEW sharing."""
+        query = {"client_id": client_id, "lawyer_id": lawyer_id,
+                 "status": EngagementStatus.ACCEPTED.value}
+        if case_id is not None:
+            query["case_id"] = case_id
+        return await self.find_one(query)
+
     async def exists_retained_relationship(self, client_id: str, lawyer_id: str) -> bool:
         """True if this client retained this lawyer: an engagement in
         `ENGAGEMENT_RETAINED_STATUSES` (accepted, completed or terminated).

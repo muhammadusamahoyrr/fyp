@@ -50,6 +50,7 @@ async def _public_engagement(engagement_id: str) -> dict:
         raise NotFoundError("Engagement request")
     eng = dict(eng)
     eng["id"] = eng.pop("_id")
+    eng.pop("review_request_guard", None)       # review_request_service machinery
     return eng
 
 
@@ -210,6 +211,7 @@ async def list_engagements(user_id: str, role: str, status: str | None = None) -
     for e in items:
         e = dict(e)
         e["id"] = e.pop("_id")
+        e.pop("review_request_guard", None)     # review_request_service machinery
         e["client_name"] = user_map.get(e["client_id"], {}).get("full_name", "")
         e["lawyer_name"] = user_map.get(e["lawyer_id"], {}).get("full_name", "")
         case = case_map.get(e["case_id"], {})
@@ -648,16 +650,21 @@ async def complete_engagement(
         )
 
     mutual = proposed_by is not None and proposed_by != party
-    await engagement_repo.set_status(
-        engagement_id,
-        EngagementStatus.COMPLETED.value,
-        {
-            "completed_at":    now,
-            "completed_by":    party,
-            "completion_kind": "mutual" if mutual else "one_sided",
-            "completion_note": note or eng.get("completion_note"),
-        },
-    )
+    completion = {
+        "completed_at":    now,
+        "completed_by":    party,
+        "completion_kind": "mutual" if mutual else "one_sided",
+        "completion_note": note or eng.get("completion_note"),
+    }
+
+    from app.services import review_request_lifecycle
+    if not review_request_lifecycle.enabled():
+        # DOCUMENT_REVIEW_REQUESTS off: the original path, unchanged -- no
+        # transaction, so a standalone Mongo completes engagements as before.
+        await engagement_repo.set_status(
+            engagement_id, EngagementStatus.COMPLETED.value, completion)
+    else:
+        await _complete_with_review_requests(engagement_id, now, completion)
 
     # The lawyer KEEPS the case. They did the work; the history is theirs, and
     # the case closes with them on it rather than being handed back unowned.
@@ -693,6 +700,43 @@ async def complete_engagement(
         {"engagement_id": engagement_id, "case_id": eng["case_id"]},
     )
     return await _public_engagement(engagement_id)
+
+
+async def _complete_with_review_requests(engagement_id: str, now, completion: dict) -> None:
+    """DOCUMENT_REVIEW_REQUESTS on: ONE TRANSACTION. The status leaves
+    `accepted` together with the engagement's document review requests (open
+    ones cancelled, accepted ones retained); if either fails, neither happens.
+    Conditional on `accepted`, so a concurrent completion or termination makes
+    this one lose cleanly. Needs a replica set, which startup guarantees while
+    the flag is on (`review_request_lifecycle.assert_ready`)."""
+
+    async def _complete_txn(session):
+        from app.db.collections import get_engagements_col
+        from app.services import review_request_lifecycle
+        from app.services.agreement_service import _TransitionConflict
+
+        moved = await get_engagements_col().update_one(
+            {"_id": engagement_id, "status": EngagementStatus.ACCEPTED.value},
+            {"$set": {
+                "status":       EngagementStatus.COMPLETED.value,
+                "responded_at": now,
+                "updated_at":   now,
+                **completion,
+            }},
+            session=session,
+        )
+        if moved.modified_count == 0:
+            raise _TransitionConflict(
+                "This engagement is no longer active, so it cannot be completed. "
+                "Reload it to see its current state.")
+        await review_request_lifecycle.end_for_engagement(
+            session, engagement_id=engagement_id, now=now)
+
+    from app.services.agreement_service import _run_in_transaction, _TransitionConflict
+    try:
+        await _run_in_transaction(_complete_txn)
+    except _TransitionConflict as conflict:
+        raise AppValidationError(conflict.message) from conflict
 
 
 async def terminate_engagement(engagement_id: str, user_id: str, reason: str) -> dict:
@@ -800,6 +844,13 @@ async def _terminate_in_transaction(session, *, engagement_id: str, expected: di
             "This engagement is no longer active, so it cannot be terminated. "
             "Reload it to see its current state."
         )
+
+    # 1b. Its document review requests, in THIS transaction: open ones are
+    #     cancelled, accepted ones start their read-only retention. A failure
+    #     here rolls the termination back (DOCUMENT_REVIEW_REQUEST_PLAN.md §7.3).
+    from app.services import review_request_lifecycle
+    await review_request_lifecycle.end_for_engagement(
+        session, engagement_id=engagement_id, now=now)
 
     # 2. The case. Read the disposition under this session rather than inferring
     #    it from a zero match, which cannot tell "somebody else holds it" from

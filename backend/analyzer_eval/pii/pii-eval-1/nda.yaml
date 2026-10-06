@@ -1,0 +1,160 @@
+# pii-eval-1 (nda). Synthetic, developer-labelled, written independently from PII_DETECTION_RUBRIC.md only.
+dataset: pii-eval-1
+label_review: developer_only
+documents:
+- id: pe-013
+  document_type: nda
+  features: [repeated_names, aliases, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    MUTUAL NON-DISCLOSURE AGREEMENT
+
+    This Agreement is entered into on [[DEADLINE:d1|12 March 2026]] between [[NOT:n1|Nexa Software Solutions (Pvt) Ltd]], a company incorporated in [[NOT:n2|Pakistan]], through its director [[NAME:p1|Omar Farooq]] (the Disclosing Party) and [[NAME:p2|Sana Javed]] of [[NOT:n3|Project Falcon]] (the Recipient).
+
+    1. Mr. [[NAME:p1|Farooq]] may share the technical specification with Ms. [[NAME:p2|Javed]].
+    2. The Recipient, [[NAME:p2|Sana]], shall keep all information confidential for [[DEADLINE:d2|three years from the date of signing]].
+    3. On request [[NAME:p2|Sana Javed]] shall return all materials [[DEADLINE:d3|within 10 days of the request]].
+    4. [[NAME:p1|Omar]] may seek an injunction without proof of loss.
+- id: pe-014
+  document_type: nda
+  features: [table, untitled_names, repeated_names]
+  parties: [p1, p2]
+  text: |
+    NDA - PARTY SCHEDULE
+
+    | Party | Representative | Email | Phone |
+    |---|---|---|---|
+    | Disclosing | [[NAME:p1|Hamza Yousaf]] | [[EMAIL:e1|hamza.yousaf@vertex-demo.com.pk]] | [[PHONE:ph1|0300-4412345]] |
+    | Receiving | [[NAME:p2|Laiba Noor]] | [[EMAIL:e2|laiba.noor@inbox-test.pk]] | [[PHONE:ph2|0321-7788990]] |
+
+    [[NAME:p1|Hamza Yousaf]] and [[NAME:p2|Laiba Noor]] agree that notices shall be sent to the emails above. [[NAME:p1|Hamza Yousaf]] shall respond to [[NAME:p2|Laiba Noor]] within [[DEADLINE:d1|48 hours]].
+- id: pe-015
+  document_type: nda
+  features: [urdu_script, roman_urdu, aliases]
+  parties: [p1, p2]
+  text: |
+    رازداری کا معاہدہ
+
+    یہ معاہدہ [[NAME:p1|احمد علی]] اور [[NAME:p2|زینب فاطمہ]] کے مابین ہے۔ [[NAME:p1|احمد]] صاحب اپنی کمپنی کی معلومات [[NAME:p2|زینب]] کو دیں گے۔
+
+    Roman Urdu: [[NAME:p1|Ahmad Ali]] apni maloomat [[NAME:p2|Zainab Fatima]] ko dega. [[NAME:p2|Zainab]] ko yeh maloomat kisi aur ko nahi batani. [[DEADLINE:d1|Paanch saal tak]] yeh pabandi rahegi.
+
+    CNIC (Ahmad): [[CNIC:c1|61101-3344556-7]]
+    Phone: [[PHONE:ph1|0312-9988776]]
+- id: pe-016
+  document_type: nda
+  features: [ocr_errors, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    NON DISCL0SURE AGREEMENT (OCR text)
+
+    Party A: [[NAME:p1|Rehan Akhtar]], CNlC [[CNIC:c1|35201-O123456-3]], phone [[PHONE:ph1|0301-23456 78]].
+    Party B: [[NAME:p2|Mah-
+    noor Sheikh]], CNIC [[CNIC:c2|35201-65432l0-8]].
+
+    Mr. [[NAME:p1|Rehan Akhtar]] discloses designs to [[NAME:p2|Mahnoor Sheikh]]. [[NAME:p1|Rehan]] retains all rights. [[NAME:p2|Mahnoor]] must not copy.
+
+    Obligations survive [[DEADLINE:d1|2 years after termination]].
+- id: pe-017
+  document_type: nda
+  features: [overlap, untitled_names, lookalikes]
+  parties: [p1, p3]
+  text: |
+    CONFIDENTIALITY UNDERTAKING
+
+    I, [[NAME:p1|Danish Khalid]], resident of [[ADDRESS:a1|House 21, Street of Maulvi [[NAME:p2|Ismail]], Mohalla Sadiqabad, Multan]], undertake to [[NAME:p3|Tabassum Riaz]] that I will not disclose the pricing model of [[NOT:n1|Khalid Brothers Trading Co.]].
+
+    The [[NOT:n2|Multan Chamber of Commerce]] has been informed of the undertaking. The place of arbitration is [[NOT:n3|Multan]].
+
+    Signed: [[NAME:p1|Danish Khalid]]
+    Witness: Maulvi [[NAME:p2|Ismail]]'s grandson is not a party.
+- id: pe-018
+  document_type: nda
+  features: [deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    SHORT-FORM NDA
+
+    Between [[NAME:p1|Irfan Baig]] ("[[NAME:p1|Irfan]]") and [[NAME:p2|Ayesha Siddiqa]] ("[[NAME:p2|Ayesha]]").
+
+    - Information disclosed by [[NAME:p1|Irfan]] is confidential.
+    - [[NAME:p2|Ayesha]] shall not use it for any other purpose.
+    - Return of material: [[DEADLINE:d1|by 5 June 2026]].
+    - Interim review: [[DEADLINE:d2|within 30 days of the invoice]].
+    - Term: [[DEADLINE:d3|eleven months from 1 July 2026]].
+    - The said [[NAME:p2|Ayesha]] acknowledges the terms.
+
+    Signed [[NAME:p1|Irfan Baig]] / [[NAME:p2|Ayesha Siddiqa]]
+- id: pe-019
+  document_type: nda
+  features: [table, ocr_errors, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Disclosure log
+
+    Date | Disclosed by | Received by | Item
+    2 Feb 2026 | [[NAME:p1|Junaid Iqbal]] | [[NAME:p2|Kinza Arshad]] | pricing sheet
+    9 Feb 2026 | [[NAME:p1|Junaid lqbal]] | [[NAME:p2|Kinza Arshad]] | source code index
+    16 Feb 2026 | [[NAME:p2|Kinza]] | [[NAME:p1|Junaid]] | feedback
+
+    Contact for queries: [[PHONE:ph1|+92-300-1234 567]], bank for fees [[ACCOUNT:ac1|PK24HABB0000112233445566]]
+- id: pe-020
+  document_type: nda
+  features: [roman_urdu, untitled_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Raazdari ka muahida
+
+    Hum, [[NAME:p1|Waqas Ullah]] aur [[NAME:p2|Shumaila Kausar]], is baat par mutafiq hain ke company [[NOT:n1|Taj Mahal Restaurant]] ka menu aur supplier list kisi ko nahi batayenge.
+
+    [[NAME:p1|Waqas]] ne [[DEADLINE:d1|paanch din ke andar]] documents wapis karne hain. [[NAME:p2|Shumaila]] ka rabta: [[EMAIL:e1|shumaila.kausar@mail-test.pk]].
+
+    Naam jo name nahi hain: [[NOT:n2|Bahria Town]], [[NOT:n3|Director Finance]], [[NOT:n4|Ali Baba Traders]].
+- id: pe-021
+  document_type: nda
+  features: [urdu_script, overlap, repeated_names]
+  parties: [p1, p2]
+  text: |
+    Non-Disclosure Deed
+
+    First Party: ڈاکٹر [[NAME:p1|سلمان نذیر]] — address [[ADDRESS:a1|کوٹھی [[NAME:p1|سلمان نذیر]]، بلاک سی، گلشن اقبال، کراچی]].
+    Second Party: [[NAME:p2|Faisal Mansoor]] — address [[ADDRESS:a2|Flat 6, [[NAME:p2|Mansoor]] Heights, PECHS, Karachi]].
+
+    [[NAME:p1|سلمان نذیر]] will share formulae with [[NAME:p2|Faisal Mansoor]]. [[NAME:p2|Faisal]] shall keep them secret.
+- id: pe-022
+  document_type: nda
+  features: [aliases, overlap, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    NDA for Contractor
+
+    [[NAME:p1|Tahira Mushtaq]] of [[ADDRESS:a1|[[NAME:p1|Mushtaq]] Lodge, 14-A, Canal View, Faisalabad]] engages [[NAME:p2|Adnan Pervaiz]] as consultant. Mrs. [[NAME:p1|Mushtaq]] shall pay fees to account [[ACCOUNT:ac1|PK71UNIL0109000123456789]] ... no, to [[NAME:p2|Adnan]]'s account [[ACCOUNT:ac2|0123-4567890-01]].
+
+    [[NAME:p2|Adnan]] must destroy all notes [[DEADLINE:d1|within 14 days of completion]]. [[NAME:p1|Tahira]] may audit at any time.
+- id: pe-023
+  document_type: nda
+  features: [ocr_errors, overlap, repeated_names]
+  parties: [p1, p2]
+  text: |
+    NDA (faxed, poor quality)
+
+    [[NAME:p1|Saad Bin Tahir]] r/o [[ADDRESS:a1|Plot 9, Colony Road,
+    Peshawar Road, Rawal-
+    pindi]] and [[NAME:p2|Nimra Hayat]], CNIC [[CNIC:c1|37l01-5566778-9]].
+
+    [[NAME:p1|Saad]] will provide the Project [[NOT:n1|Zephyr]] plans. [[NAME:p2|Nimra Hayat]] shall not disclose. [[NAME:p1|Saad Bin Tahir]] reserves ownership.
+- id: pe-024
+  document_type: nda
+  features: [table, urdu_script, roman_urdu, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    NDA summary table
+
+    | Fareeq | Naam | Name (Urdu) |
+    |---|---|---|
+    | Pehla | [[NAME:p1|Sheikh Rashid]] | [[NAME:p1|شیخ راشد]] |
+    | Doosra | [[NAME:p2|Bushra Anwar]] | [[NAME:p2|بشریٰ انور]] |
+    | Company | [[NOT:n1|Rashid Sons Engineering]] | [[NOT:n2|راشد سنز انجینئرنگ]] |
+    | Muddat | [[DEADLINE:d1|do saal]] | |
+
+    Rabta: [[PHONE:ph1|0300-5551212]]

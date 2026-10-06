@@ -1,0 +1,290 @@
+dataset: pii-eval-5
+label_review: developer_only
+documents:
+- id: p5-let-01
+  document_type: letter
+  features: [overlap, aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    LEGAL NOTICE
+    (Under Section 12 of the Punjab Rented Premises Act, 2009)
+
+    Through Registered Post A.D. / Courier
+
+    To,
+    [[NAME:p2|Shakeel Ahmed Rana]]
+    [[ADDRESS:a1|Portion of [[NAME:p1|Fozia Nasir]], House 66-E, Street 10, Model Town Extension, Lahore]]
+
+    Sir,
+
+    Under instructions from and on behalf of my client Mrs. [[NAME:p1|Fozia Nasir]] wife of [[NAME:p3|Nasir Mehmood]], I serve you with this notice:
+
+    1. That my client let out the ground floor portion of her house to you, Mr. [[NAME:p2|Rana]], at a monthly rent of Rs. 55,000.
+    2. That you have failed to pay the rent for the last four months, amounting to Rs. 220,000.
+    3. That the said [[NAME:p2|Shakeel]] has also damaged the kitchen fittings.
+
+    You are therefore called upon to pay the arrears [[DEADLINE:d1|within fifteen (15) days of receipt of this notice]] and to vacate the premises [[DEADLINE:d2|by 30 April 2026]], failing which my client shall file an ejectment petition and a suit for recovery, at your risk as to costs.
+
+    Copy kept in office for record.
+
+    [[NAME:p4|Ahmad Bilal Warraich]]
+    Advocate High Court
+    [[NOT:n1|Warraich & Warraich Advocates]], [[ADDRESS:a2|Room 8, Al-Rehman Chambers, Fane Road, Lahore]]
+    [[PHONE:t1|042-5557-3301]], [[EMAIL:e1|abwarraich.law@example.pk]]
+- id: p5-let-02
+  document_type: letter
+  features: [deadlines, repeated_names, untitled_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Dated: 4 March 2026
+
+    [[NAME:p2|Rizwan Elahi]]
+    Proprietor, [[NOT:n1|Elahi Paints & Hardware]]
+    [[ADDRESS:a1|Shop 41, Shah Alam Market, Lahore]]
+
+    Subject: DISHONOURED CHEQUE No. 00481237
+
+    [[NAME:p2|Rizwan Elahi]] issued cheque No. 00481237 dated 15 February 2026 for Rs. 780,000, drawn on his account [[ACCOUNT:b1|0457-5550-1122-03]], in favour of my client [[NAME:p1|Tanvir Akhtar Sheikh]] towards the price of paint supplied by [[NOT:n2|Sheikh Chemicals]].
+
+    The cheque was returned unpaid with the remark "insufficient funds" on 27 February 2026.
+
+    [[NAME:p1|Tanvir Akhtar Sheikh]] calls upon [[NAME:p2|Rizwan Elahi]] to pay the said amount [[DEADLINE:d1|within seven (7) days of this letter]], failing which proceedings under Section 489-F PPC and a suit under Order XXXVII CPC will be initiated without further notice.
+
+    [[NAME:p3|Huma Shafqat]]
+    Advocate
+    [[PHONE:t1|0322-5550618]]
+- id: p5-let-03
+  document_type: letter
+  features: [roman_urdu, aliases, repeated_names, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Pyare bhai [[NAME:p2|Tariq]],
+
+    Assalam o Alaikum. Ummeed hai aap aur bhabhi [[NAME:p3|Nabila]] khairiyat se honge. Ammi ki tabiyat ab behtar hai.
+
+    Bhai, Abbu wale ghar [[ADDRESS:a1|Makan No. 7, Gali No. 14, Mohallah Shah Faisal Colony, Jhang]] ka masla ab hal karna hai. Chacha [[NAME:p4|Aslam]] keh rahe hain ke inteqal [[DEADLINE:d1|agle maheene ki 10 tareekh tak]] karwa lo warna patwari phir paise maange ga.
+
+    Aap ka shanakhti card number mere paas purana hai, [[CNIC:c1|33202-5551174-3]], agar naya ban gaya hai to WhatsApp kar dena. Mera number wohi hai [[PHONE:t1|0300-5557719]].
+
+    Aur [[NAME:p2|Tariq Mahmood]] bhai, Dubai se aane ka program bata dena, kam az kam [[DEADLINE:d2|do hafte pehle]] taake hum tareekh pakki kar sakein.
+
+    Aap ki behan,
+    [[NAME:p1|Shazia]]
+- id: p5-let-04
+  document_type: letter
+  features: [urdu_script, repeated_names, deadlines, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    بخدمت جناب ایس ایچ او صاحب
+    [[NOT:n1|تھانہ سٹی]]، [[NOT:n2|ساہیوال]]
+
+    عنوان: درخواست برائے اندراج مقدمہ
+
+    جناب عالی!
+    گزارش ہے کہ سائل [[NAME:p1|غلام مصطفیٰ]] ولد [[NAME:p3|نور احمد]] ساکن [[ADDRESS:a1|مکان نمبر 23، بلاک بی، فرید ٹاؤن، ساہیوال]] کا ہے۔ مورخہ 2 مارچ 2026 کو [[NAME:p2|ساجد علی]] نے میری دکان [[NOT:n3|مصطفیٰ کریانہ اسٹور]] سے ادھار سامان لیا اور رقم مانگنے پر دھمکیاں دیں۔
+
+    استدعا ہے کہ [[NAME:p2|ساجد علی]] کے خلاف قانونی کارروائی کی جائے۔ سائل [[DEADLINE:d1|سات دن کے اندر]] گواہ پیش کر دے گا۔
+
+    العارض
+    [[NAME:p1|غلام مصطفیٰ]]
+    شناختی کارڈ: [[CNIC:c1|36502-5558027-1]]
+    موبائل: [[PHONE:t1|0301-5552765]]
+- id: p5-let-05
+  document_type: letter
+  features: [untitled_names, aliases, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    CHARACTER REFERENCE
+
+    I have known [[NAME:p1|Saad Bin Tariq]] for over ten years, first as a student at [[NOT:n1|Iqbal Public School]] and later as a volunteer at the [[NOT:n2|Al-Khidmat Ration Drive]] which I coordinate in [[NOT:n3|Gulshan-e-Ravi]].
+
+    [[NAME:p1|Saad]] is punctual, honest and kind. When my father fell ill in 2023, [[NAME:p1|Saad Bin Tariq]] drove him to hospital every week without being asked. I have no hesitation in recommending Mr. [[NAME:p1|Saad]] for the tenancy he has applied for at the property of Mrs. [[NAME:p2|Gulnaz Akhtar]].
+
+    Mrs. [[NAME:p2|Akhtar]] may contact me at any time.
+
+    [[NAME:p3|Asghar Ali Shah]]
+    [[ADDRESS:a1|House 9, Street 2, Block C, Gulshan-e-Ravi, Lahore]]
+    [[PHONE:t1|0300-5553624]]
+- id: p5-let-06
+  document_type: letter
+  features: [ocr_errors, repeated_names, deadlines, lookalikes, untitled_names, aliases]
+  parties: [p1]
+  text: |
+    The Branch Manager
+    [[NOT:n1|Frontier Commercial Bank]], [[NOT:n2|University Road Branch]], [[NOT:n3|Peshawar]]
+
+    Subject: Update of CNlC and mob1le number in account
+
+    Respected Sir,
+
+    I, [[NAME:p1|Gul Rahman Afridi]], ho1d savings account No. [[ACCOUNT:b1|0O19-555O-4471-0l]] (IBAN [[ACCOUNT:b2|PK00 FCBK 0019 5550 4471 0100]]) at your branch. My o1d CNIC [[CNIC:c1|17301-5556l28-5]] expired on 3l-12-2025. My new CNIC is [[CNIC:c2|173Ol-5556128-5]] and my new mobi1e number is [[PHONE:t1|0333-555 9O42]].
+
+    Kindly update the record [[DEADLINE:d1|before 15 March 2026]] as my pension from [[NOT:n4|WAPDA]] is credited to this account [[DEADLINE:d2|on the 1st of every month]].
+
+    My address is unchanged: [[ADDRESS:a1|H. No. 302, Mohallah Ta1aband, Dalazak
+    Road, Peshawar]].
+
+    Yours faithfully,
+    [[NAME:p1|Gul Rahman]]
+- id: p5-let-07
+  document_type: letter
+  features: [aliases, repeated_names, deadlines, overlap]
+  parties: [p1, p2]
+  text: |
+    REPLY TO LEGAL NOTICE DATED 10 FEBRUARY 2026
+
+    To: [[NAME:p3|Mubashir Hassan]], Advocate, counsel for Dr. [[NAME:p2|Naila Saeed Khan]]
+
+    Sir,
+
+    My client [[NAME:p1|Imtiaz Hussain Kiyani]], resident of [[ADDRESS:a1|House of Late [[NAME:p4|Fazal Hussain Kiyani]], Dhok Ratta, Westridge, Rawalpindi]], has handed me your notice and instructs me to reply as follows:
+
+    1. It is denied that Mr. [[NAME:p1|Kiyani]] agreed to sell the plot to your client. No agreement to sell was ever signed by [[NAME:p1|Imtiaz]].
+    2. The sum of Rs. 500,000 was received by my client as a loan from Dr. [[NAME:p2|Khan]], and it will be repaid [[DEADLINE:d1|within ninety (90) days from 1 March 2026]] as already offered.
+    3. Your client, Dr. [[NAME:p2|Naila]], is advised to withdraw the notice [[DEADLINE:d2|within ten days]], failing which my client will seek damages for defamation.
+
+    [[NAME:p5|Sohail Abbasi]]
+    Advocate, counsel for [[NAME:p1|Imtiaz Hussain Kiyani]]
+- id: p5-let-08
+  document_type: letter
+  features: [untitled_names, deadlines, repeated_names]
+  parties: [p1, p2]
+  text: |
+    AUTHORITY LETTER
+
+    I, [[NAME:p1|Kulsoom Bibi]], CNIC [[CNIC:c1|36103-5552248-0]], authorise my nephew [[NAME:p2|Adnan Yousaf]], CNIC [[CNIC:c2|36103-5559513-7]], to collect my registered parcels and to receive the rent of my shop at [[ADDRESS:a1|Shop 3, Ghalla Mandi, Khanewal]] on my behalf.
+
+    This authority is valid [[DEADLINE:d1|for six months from 1 March 2026]] unless I withdraw it earlier.
+
+    [[NAME:p2|Adnan Yousaf]] can be reached at [[PHONE:t1|0310-5550481]].
+
+    Signature / thumb impression:
+    [[NAME:p1|Kulsoom Bibi]]
+
+    Attested: [[NAME:p3|Muhammad Hanif]], Oath Commissioner
+- id: p5-let-09
+  document_type: letter
+  features: [lookalikes, overlap, deadlines, repeated_names, aliases]
+  parties: [p1]
+  text: |
+    The Secretary
+    [[NOT:n1|Shalimar Garden Housing Society]]
+    [[NOT:n2|Site Office]], [[NOT:n3|GT Road]], [[NOT:n4|Gujranwala]]
+
+    Subject: Complaint about blocked drain outside my house
+
+    Sir,
+
+    I, [[NAME:p1|Rizwan ul Haq]], live at [[ADDRESS:a1|House 112, Street 5, Block Jinnah, Shalimar Garden, Gujranwala]]. Since January the drain between my house and [[ADDRESS:a2|the house of Mrs. [[NAME:p2|Bushra Kanwal]], House 113, Street 5, Block Jinnah, Shalimar Garden, Gujranwala]] has been blocked, and sewage is entering my garage.
+
+    The society's contractor, [[NOT:n5|Bhatti Construction Company]], was informed twice and Mrs. [[NAME:p2|Kanwal]] has also complained, but nothing has been done.
+
+    I request that the drain be cleared [[DEADLINE:d1|within seven (7) days of this letter]]. If not, I will withhold my maintenance charges and approach the [[NOT:n6|Gujranwala Development Authority]].
+
+    [[NAME:p1|Rizwan]]
+    ([[NAME:p1|Rizwan ul Haq]])
+    [[PHONE:t1|0300-5550295]]
+- id: p5-let-10
+  document_type: letter
+  features: [table, deadlines, repeated_names, untitled_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Settlement letter - repayment of loan by instalments
+
+    From: [[NAME:p1|Shaista Naz]], [[ADDRESS:a1|Flat 4, Block 9, Gulistan-e-Jauhar, Karachi]]
+    To: [[NAME:p2|Kamil Qureshi]], [[ADDRESS:a2|House R-55, Sector 11-A, North Karachi]]
+
+    As agreed in the presence of [[NAME:p3|Arif Jamal]], [[NAME:p2|Kamil Qureshi]] will repay the loan of Rs. 600,000 as follows:
+
+    | Instalment | Amount (Rs.) | Due by | Paid into |
+    |---|---|---|---|
+    | 1 | 200,000 | [[DEADLINE:d1|31 March 2026]] | [[ACCOUNT:b1|PK00 MBNK 0000 5550 3344 1200]] |
+    | 2 | 200,000 | [[DEADLINE:d2|30 June 2026]] | same |
+    | 3 | 200,000 | [[DEADLINE:d3|30 September 2026]] | same |
+
+    If any instalment is late by more than [[DEADLINE:d4|fifteen days]], the whole balance becomes payable at once. [[NAME:p1|Shaista Naz]] will issue a receipt for each payment.
+
+    Payments through [[NOT:n1|JazzCash]] are not accepted.
+
+    [[NAME:p1|Shaista Naz]]          [[NAME:p2|Kamil Qureshi]]          [[NAME:p3|Arif Jamal]]
+- id: p5-let-11
+  document_type: letter
+  features: [ocr_errors, aliases, repeated_names, untitled_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    [scanned letter - OCR text]
+
+    To,
+    Mrs. [[NAME:p2|Rukhsana Ba1och]]
+    [[ADDRESS:a1|Flat 2O3, Block l4, Gu1shan-e-Iqbal,
+    Karachi]]
+
+    Subject: Return of gold jewe1lery kept as amanat
+
+    Dear Mrs. [[NAME:p2|Ba1och]],
+
+    My mother [[NAME:p3|Zubaida Khatoon]] handed over 6 tola gold jewellery to you as amanat in 2O22. Before her death she to1d me, [[NAME:p1|Kashan Ahrned]], to collect it from Baji [[NAME:p2|Rukhsana]].
+
+    Please return the jewellery [[DEADLINE:d1|with in 2l days of this 1etter]], other wise I wi1l be forced to take legal action.
+
+    You may ca1l me on [[PHONE:t1|0345-55520 77]] or my cousin [[NAME:p4|Shoaib Ak htar]] on [[PHONE:t2|03OO-5558261]].
+
+    [[NAME:p1|Kashan Ahmed]]
+    CNIC [[CNIC:c1|422Ol-5557315-9]]
+- id: p5-let-12
+  document_type: letter
+  features: [roman_urdu, urdu_script, deadlines, repeated_names, aliases, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Pyari beti [[NAME:p2|Aiman]],
+
+    Salaam. Tumhara khat mil gaya. Tumhare chachu [[NAME:p3|Naveed]] ne bataya ke [[NAME:p2|Aiman Javed]] ka Germany ka visa lag gaya hai, bohat mubarak ho.
+
+    University ki fees [[DEADLINE:d1|15 August se pehle]] jama karwani hai, main ne apne account [[ACCOUNT:b1|0201-5550-6612-09]] se paise nikalwa liye hain. Baqi rakam [[DEADLINE:d2|agle teen maheene mein]] bhej doon gi.
+
+    Nani amma ne Urdu mein dua likh kar bheji hai:
+    "اللہ میری [[NAME:p2|ایمن]] کو کامیاب کرے۔ — [[NAME:p4|سکینہ بیگم]]"
+
+    Ghar ka pata yaad rakhna agar parcel bhejna ho: [[ADDRESS:a1|Makan 14, Gali 3, Mohallah Islamabad, Mandi Bahauddin]].
+
+    Tumhari Ammi,
+    [[NAME:p1|Rehana Javed]]
+    [[PHONE:t1|0346-5551803]]
+- id: p5-let-13
+  document_type: letter
+  features: [table, untitled_names, lookalikes, overlap, deadlines]
+  parties: [p1]
+  text: |
+    To the Manager, [[NOT:n1|Pak Courier Express]], [[NOT:n2|Saddar]], [[NOT:n3|Hyderabad]]
+
+    Subject: Parcels not delivered
+
+    I, [[NAME:p1|Noman Ali Memon]], booked the parcels below from my shop [[NOT:n4|Memon Book Depot]]. None has been delivered.
+
+    | CN number | Consignee | Delivery address | Phone |
+    |---|---|---|---|
+    | 7781-201 | [[NAME:p2|Sana Ullah Jatoi]] | [[ADDRESS:a1|House 8, Ward 4, Near Jatoi Masjid, Dadu]] | [[PHONE:t1|0300-5551047]] |
+    | 7781-209 | [[NAME:p3|Parveen Shaikh]] | [[ADDRESS:a2|Shop of [[NAME:p3|Parveen Shaikh]], Resham Gali, Hyderabad]] | [[PHONE:t2|0333-5556621]] |
+    | 7781-214 | [[NAME:p4|Abdul Jabbar]] | [[ADDRESS:a3|Quarter 12, Railway Colony, Nawabshah]] | [[PHONE:t3|0301-5552390]] |
+
+    Please deliver or refund the charges [[DEADLINE:d1|within 7 days]]. My number is [[PHONE:t4|022-5553780]].
+
+    [[NAME:p1|Noman Ali Memon]]
+- id: p5-let-14
+  document_type: letter
+  features: [overlap, ocr_errors, urdu_script, aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NOTICE TO VACATE ENCROACHMENT
+
+    To: [[NAME:p2|Aslam Pervez]] ([[NAME:p2|اسلم پرویز]])
+    Occupier of [[ADDRESS:a1|Plot 27, Khasra No. 412, Mauza Kot Lakhpat, Lahore]]
+
+    You, [[NAME:p2|Aslam Pervez]], have built a boundary wall on part of Plot 27, which belongs to my client [[NAME:p1|Bushra Imtiaz]] ([[NAME:p1|بشریٰ امتیاز]]), whose residence is [[ADDRESS:a2|House of [[NAME:p1|Bushra Imtiaz]], 5-B, Shadman 11, Lahore]].
+
+    Mr. [[NAME:p2|Pervez]] is required to demolish the wall [[DEADLINE:d1|within twenty (20) days]] and to hand over vacant possession [[DEADLINE:d2|by 31 May 2026]].
+
+    The patwari report of the [[NOT:n1|Kot Lakhpat Halqa]] (copy annexed; partly i11egible: "owner [[NAME:p1|B ushra Imtiaz]]") confirms my client's title.
+
+    [[NAME:p3|Waseem Anjum Bhatti]]
+    Advocate, [[NOT:n2|Bhatti Law Chambers]]

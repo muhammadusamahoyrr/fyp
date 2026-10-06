@@ -19,6 +19,22 @@
 
 export const DRAFT_KEY_PREFIX = "attorneyai.draft.";
 
+/** True only for a hard browser refresh, never for ordinary in-app navigation. */
+export function isReloadNavigation(given) {
+    const perf = given === undefined
+        ? (typeof performance === "undefined" ? null : performance)
+        : given;
+    if (!perf) return false;
+    try {
+        const entry = perf.getEntriesByType?.("navigation")?.[0];
+        if (entry?.type) return entry.type === "reload";
+        // Older browsers expose the same information through this legacy API.
+        return perf.navigation?.type === 1;
+    } catch {
+        return false;
+    }
+}
+
 /* localStorage is passed in rather than reached for. Three of the four states
  * this has to survive — absent (server render), throwing (private windows,
  * blocked site data), and empty (cleared storage) — are otherwise only
@@ -121,6 +137,7 @@ export function restoreStateFromDocument(detail) {
         // `null` rather than undefined for a caseless document, so a caller can
         // tell "no case" from "the field was not returned".
         caseId: detail.case_id ?? null,
+        templateType: detail.template_type || revision?.template_type || null,
         docTitle: detail.title || "",
         docRevisionId: revisionId,
         docPdfSha256: pdfSha256,

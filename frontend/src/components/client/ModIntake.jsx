@@ -138,7 +138,7 @@ const ModIntake = () => {
     const t      = useT();
     const toast  = useToast();
     const router = useRouter();
-    const { T }  = useLang();
+    const { T, lang } = useLang();
     const isMobile = useIsMobile();
     const { completeIntake, addNotification } = useCase();
     const { user } = useAuth();
@@ -689,7 +689,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
     useEffect(() => {
         if (step !== 3 || clarifyDone || clarifyRound !== 0 || clarifyLoading || !intakeToken) return;
         setClarifyLoading(true);
-        intakeClarify(intakeToken, null).then(({ data, error }) => {
+        intakeClarify(intakeToken, null, lang).then(({ data, error }) => {
             if (error || !data) { setClarifyDone(true); setClarifyRound(5); }
             else if (data.done)  { setClarifyDone(true); setClarifyRound(5); }
             else if (data.question) { setClarifyQ1(data.question); setClarifyRound(1); }
@@ -755,7 +755,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
         if (intakeToken) {
             setClarifyLoading(true);
             setClarifyRound(0);
-            const { data, error } = await intakeClarify(intakeToken, null);
+            const { data, error } = await intakeClarify(intakeToken, null, lang);
             if (error || !data) {
                 // API failure — skip clarification so user can still proceed
                 setClarifyDone(true);
@@ -787,7 +787,7 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
         }
         if (!intakeToken) { setClarifyRound(5); setClarifyDone(true); return; }
         setClarifyLoading(true);
-        const { data, error } = await intakeClarify(intakeToken, getCurrentAnswer());
+        const { data, error } = await intakeClarify(intakeToken, getCurrentAnswer(), lang);
         if (error || !data || data.done || !data.question) {
             setClarifyDone(true);
             setClarifyRound(5);
@@ -817,13 +817,22 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
         // Save final answer to clarification_qa BEFORE convert.
         // convert_to_case reads clarification_qa and appends Q&A to the description itself.
         const lastAnswer = clarifyA4.trim() || clarifyA3.trim() || clarifyA2.trim();
+        // 409 = the server has already started or finished converting, i.e. an
+        // earlier click got through and only its response was lost (the dev
+        // proxy gives up long before a conversion ends). Both writes below are
+        // refused in that state, and stopping here left the button dead for
+        // good. /convert is idempotent: it replays the finished case, or says
+        // the conversion is still running.
+        let alreadyConverting = false;
         if (intakeToken && lastAnswer) {
             // The result was discarded. `convert_to_case` folds the stored Q&A
             // into the text it analyses, so a failure here meant the analysis
             // ran without the client's final answer — and nothing said so. They
             // had just typed it, so its absence is invisible to them.
-            const { error: clarifyErr } = await intakeClarify(intakeToken, lastAnswer);
-            if (clarifyErr) {
+            const { error: clarifyErr, status: clarifyStatus } =
+                await intakeClarify(intakeToken, lastAnswer, lang);
+            alreadyConverting = clarifyStatus === 409;
+            if (clarifyErr && !alreadyConverting) {
                 toast.show(
                     "Could not save your last answer — check your connection and try again.",
                     "error", 4000,
@@ -832,19 +841,21 @@ ${aiStructured?.risk_level ? `<h2>Risk Assessment</h2><span class="risk risk-${e
                 return;   // do NOT analyse without it
             }
         }
-        const r4 = await intakeSaveStep(intakeToken, 4, {
-            has_evidence: hasEvidence,
-            evidence_description: evidenceDesc.trim() || null,
-            opposing_party: null,
-        });
-        const r5 = await intakeSaveStep(intakeToken, 5, {
-            desired_outcome: desiredOutcome.trim() || "Legal assistance and representation",
-            additional_notes: null,
-        });
-        if (r4.error || r5.error) {
-            toast.show("Could not save case details — check your connection and try again.", "error", 3000);
-            setConverting(false);
-            return;
+        if (!alreadyConverting) {
+            const r4 = await intakeSaveStep(intakeToken, 4, {
+                has_evidence: hasEvidence,
+                evidence_description: evidenceDesc.trim() || null,
+                opposing_party: null,
+            });
+            const r5 = await intakeSaveStep(intakeToken, 5, {
+                desired_outcome: desiredOutcome.trim() || "Legal assistance and representation",
+                additional_notes: null,
+            });
+            if (r4.error || r5.error) {
+                toast.show("Could not save case details — check your connection and try again.", "error", 3000);
+                setConverting(false);
+                return;
+            }
         }
 
         const savedToken = intakeToken;

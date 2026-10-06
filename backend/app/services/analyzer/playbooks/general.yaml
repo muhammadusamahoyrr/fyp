@@ -1,0 +1,76 @@
+# General document review -- every document, every type.
+#
+# DRAFTING-COMPLETENESS CHECKS ONLY. None of these is a legal requirement and
+# none is worded as one: each asks whether the document appears to SAY
+# something most written agreements say. A "not located" result means the
+# reader did not find it automatically -- not that the document lacks it, and
+# not that the law requires it. This pack makes no legal claim, cites no law,
+# and therefore needs no lawyer approval (DOC_ANALYZER_PLAN.md §4.5a).
+id: general
+version: 1
+scope: general_review
+requires_approval: false
+title: General document review
+checks:
+  - id: parties_named
+    kind: general_check
+    title: The parties are named
+    why: Most agreements say who is bound by them.
+    locate:
+      any_of: ['between', 'part(?:y|ies)', 'landlord', 'tenant', 'lessor', 'lessee',
+               'employer', 'employee', 'disclosing party', 'receiving party', 'buyer', 'seller']
+
+  - id: date_stated
+    kind: general_check
+    title: A date is stated
+    why: A date shows when the document was made or takes effect.
+    locate:
+      any_of:
+        - '\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*,?\s+\d{4}'
+        - '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}'
+        - '\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}'
+        - 'dated'
+
+  - id: signature_block
+    kind: general_check
+    title: There is a place to sign
+    why: Signatures (and witnesses, where used) show who agreed.
+    locate:
+      any_of: ['signed', 'signature', 'witness(?:es)?', 'executed']
+
+  - id: duration_stated
+    kind: general_check
+    title: A duration or start is stated
+    why: Most agreements say when they start and how long they last.
+    locate:
+      any_of: ['term', 'period', 'commenc\w*', 'expir\w*', '\d+\s*(?:months?|years?)',
+               '(?:one|two|three|six|eleven|twelve)\s*(?:\(\d+\)\s*)?(?:months?|years?)']
+
+  - id: payment_terms
+    kind: general_check
+    title: Payment is addressed
+    why: Most agreements say what is paid, how much and when -- or that nothing is.
+    locate:
+      any_of: ['rent', 'fee(?:s)?', 'salary', 'payment', 'consideration', 'price',
+               '(?:rs\.?|pkr|rupees)\s*\d[\d,]*']
+
+  - id: termination
+    kind: general_check
+    title: Ending the agreement is addressed
+    why: Most agreements say how, and on what notice, they can be ended.
+    locate:
+      any_of: ['terminat\w*', 'cancel\w*', 'notice period', 'vacate']
+
+  - id: disputes
+    kind: general_check
+    title: Disputes are addressed
+    why: Many agreements say how disagreements will be settled.
+    locate:
+      any_of: ['arbitrat\w*', 'disputes?', 'courts? (?:at|of|in)', 'jurisdiction']
+
+  - id: governing_law
+    kind: general_check
+    title: The governing law is named
+    why: Many agreements name the law they are made under.
+    locate:
+      any_of: ['governing law', 'governed by', 'laws? of pakistan', 'laws? of the islamic republic']

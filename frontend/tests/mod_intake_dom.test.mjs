@@ -883,3 +883,77 @@ test("a readable file is still shown as read in full", async () => {
 
     await unmount();
 });
+
+// ── a lost /convert response must not strand the intake ────────────────────
+//
+// The dev proxy gives up on /convert long before the server does, so the
+// server completes the case while the browser shows a failure. The retry then
+// re-sent the last answer to /clarify, which the finished intake refuses (409),
+// and the handler stopped there: the button did nothing, forever, because the
+// one call that would have answered — an idempotent /convert — was never made.
+
+function answeredOnStep3() {
+    return convertedIntake({
+        completed: false, case_id: null, case_status: null,
+        ai_structured_case: null, current_step: 3,
+        clarification_qa: [1, 2, 3, 4].map(n => ({ q: `Question ${n}?`, a: `Answer ${n}` })),
+    });
+}
+
+test("a 409 from /clarify on retry goes straight to /convert", async () => {
+    reset();
+    seedToken();
+    api.__respond("intakeGet", { data: answeredOnStep3() });
+    api.__respond("intakeClarify", {
+        data: null, status: 409,
+        error: { message: "This intake changed or started converting. Reload before answering." },
+    });
+    api.__respond("intakeConvert", { data: {
+        case_id: CASE_ID, completed: true, ai_case_type: "civil",
+    } });
+    const { container, unmount } = await mountIntake();
+
+    const before = api.__calls("intakeSaveStep").length;
+    const complete = findButton(container, "Complete & Continue");
+    assert.ok(complete, "the step-3 button did not render");
+    await click(complete);
+
+    assert.equal(api.__calls("intakeConvert").length, 1,
+        "the retry never reached the idempotent /convert");
+    assert.equal(api.__calls("intakeSaveStep").length, before,
+        "step writes were sent to an intake the server says is converting");
+    await unmount();
+});
+
+test("any other /clarify failure still stops before analysis", async () => {
+    reset();
+    seedToken();
+    api.__respond("intakeGet", { data: answeredOnStep3() });
+    api.__respond("intakeClarify", {
+        data: null, status: 0, error: { message: "Network error." },
+    });
+    const { container, unmount } = await mountIntake();
+
+    await click(findButton(container, "Complete & Continue"));
+
+    assert.equal(api.__calls("intakeConvert").length, 0,
+        "analysis ran without the client's final answer");
+    await unmount();
+});
+
+test("every clarify call carries the app language, so the server can pin it", async () => {
+    // The server used to leave the language to the model, which mixed English
+    // and Urdu questions within one intake. It now decides — from this value
+    // and the description — and needs the value on every call.
+    reset();
+    seedToken();
+    api.__respond("intakeGet", { data: answeredOnStep3() });
+    const { container, unmount } = await mountIntake();
+
+    await click(findButton(container, "Complete & Continue"));
+
+    const calls = api.__calls("intakeClarify");
+    assert.ok(calls.length >= 1);
+    for (const c of calls) assert.equal(c.args[2], "en", "a clarify call omitted the language");
+    await unmount();
+});

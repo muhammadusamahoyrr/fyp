@@ -56,10 +56,11 @@ def test_extraction_fences_untrusted_description():
 
 
 def test_extraction_description_is_length_bounded():
-    huge = "Q" * 10_000                    # Q does not appear in the fence header
+    # Still bounded -- at _EXTRACT_MAX_CHARS, raised from 3,000 because an intake
+    # alone accepts 20,000 characters and the facts past 3,000 were never read.
+    huge = "Q" * (ds._EXTRACT_MAX_CHARS + 5_000)   # Q is not in the fence header
     msg = ds._fenced_description(huge, "SPEC")
-    # only the first 3000 chars of the untrusted text are included
-    assert msg.count("Q") == 3000
+    assert msg.count("Q") == ds._EXTRACT_MAX_CHARS
 
 
 # ── save_draft server-side verification (integration) ─────────────────────────

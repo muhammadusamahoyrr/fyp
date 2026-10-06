@@ -201,9 +201,26 @@ def get_retrieval_labels_col() -> AsyncIOMotorCollection:
 # outbox, the crash-consistent transition receipts and the deletion tombstones.
 # See the drafting remediation plan (v5 §2, v5.1) for the schemas.
 
+def get_deleted_documents_col() -> AsyncIOMotorCollection:
+    """The Vault trash: a deleted DOCUMENTS_V2 document's row, moved here with
+    `deleted_at` / `purge_after` so every read of `documents` stops finding it,
+    and restorable until `purge_after` (services/vault_deletion.py)."""
+    return get_database()["deleted_documents"]
+
+
 def get_document_revisions_col() -> AsyncIOMotorCollection:
     """Append-only, immutable-once-terminal revisions of a document."""
     return get_database()["document_revisions"]
+
+
+def get_document_draft_plans_col() -> AsyncIOMotorCollection:
+    """Owner-scoped prompt plans that lead into the V2 revision engine.
+
+    A plan is mutable only until it is confirmed.  The generated document and
+    its immutable revisions remain the source of truth for the legal artifact;
+    this collection holds intake/planning state, never an alternative document.
+    """
+    return get_database()["document_draft_plans"]
 
 
 def get_review_events_col() -> AsyncIOMotorCollection:
@@ -248,3 +265,172 @@ def get_ocr_revisions_col() -> AsyncIOMotorCollection:
     engine build, config) — inserted, never updated, so what was read and what
     produced it stay answerable after the fact."""
     return get_database()["ocr_revisions"]
+
+
+# ── Document Analyzer (DOC_ANALYZER_PLAN.md) ─────────────────────────────────
+# Dormant unless DOC_ANALYZER is on. Indexes: app/db/analyzer_index_spec.py.
+
+def get_analysis_sources_col() -> AsyncIOMotorCollection:
+    """One uploaded document: owner, encrypted file, attestation, tombstone.
+
+    `deleted_at` is the tombstone every read checks first, and `generation`
+    is bumped by deletion so a worker's commit can no longer match (plan §6.3).
+    """
+    return get_database()["analysis_sources"]
+
+
+def get_analysis_runs_col() -> AsyncIOMotorCollection:
+    """One analysis of a source, walked through the state machine in
+    `services/analyzer/states.py` under a lease and a fence (plan §5)."""
+    return get_database()["analysis_runs"]
+
+
+def get_analysis_blobs_col() -> AsyncIOMotorCollection:
+    """Envelope headers of encrypted files (nonces, wrapped data key, key id).
+    The ciphertext itself is on disk; nothing here is decryptable alone."""
+    return get_database()["analysis_blobs"]
+
+
+def get_analysis_deletion_outbox_col() -> AsyncIOMotorCollection:
+    """Purge jobs, written in the SAME transaction as the source tombstone so a
+    crash can never leave a deleted source whose files are never removed."""
+    return get_database()["analysis_deletion_outbox"]
+
+
+def get_analysis_text_versions_col() -> AsyncIOMotorCollection:
+    """Immutable canonical texts of a source (the text itself is an encrypted
+    blob). OCR proposals are versions with confirmed=False until a person
+    confirms them; a correction is a NEW version, never an edit."""
+    return get_database()["analysis_text_versions"]
+
+
+def get_analysis_text_pages_col() -> AsyncIOMotorCollection:
+    """Page map of a text version: (page, start, end, coverage, origin) rows,
+    keyed by (text_version_id, stage, fence, ordinal)."""
+    return get_database()["analysis_text_pages"]
+
+
+def get_analysis_text_blocks_col() -> AsyncIOMotorCollection:
+    """Structure of a DOCX text version (app.ai.docx_structure): one row per
+    block -- type, style, outline/list level, rendered label, table
+    coordinates and offsets into the canonical text, never the text itself.
+    Keyed (text_version_id, stage, fence, ordinal), like the page map."""
+    return get_database()["analysis_text_blocks"]
+
+
+def get_analysis_clauses_col() -> AsyncIOMotorCollection:
+    """Clauses of a run's text version: offsets into the canonical text,
+    keyed by (run_id, stage, fence, ordinal)."""
+    return get_database()["analysis_clauses"]
+
+
+def get_analysis_sentences_col() -> AsyncIOMotorCollection:
+    """Sentences with page_spans. Every later finding cites these ids; the
+    quote shown is cut from the text at their offsets, never model output."""
+    return get_database()["analysis_sentences"]
+
+
+def get_analysis_doc_graph_col() -> AsyncIOMotorCollection:
+    """Definitions and cross-reference graph of a run's text version
+    (analyzer/doc_graph.py): definition, term_use, reference and
+    possible_undefined_term rows -- offsets and stable sentence / clause /
+    block ids, never text. Keyed (run_id, stage, fence, ordinal) with the
+    segmentation it was built from."""
+    return get_database()["analysis_doc_graph"]
+
+
+def get_analysis_ai_items_col() -> AsyncIOMotorCollection:
+    """The AI report layer's VALIDATED items (analyzer/ai_report.py): risks,
+    obligations and summary points with sentence ids and evidence offsets +
+    hashes -- never the provider's raw response, never document text. Keyed
+    (run_id, stage, fence, ordinal); visible only once the run publishes
+    that fence."""
+    return get_database()["analysis_ai_items"]
+
+
+def get_analysis_context_versions_col() -> AsyncIOMotorCollection:
+    """What a person confirmed about a text version: document type, province
+    and decisive key terms with their evidence. Immutable; a change is a new
+    version. Runs point at the context version they analyse."""
+    return get_database()["analysis_context_versions"]
+
+
+def get_analysis_hypothesis_results_col() -> AsyncIOMotorCollection:
+    """Drafting-question scanner results (ANALYZER_HYPOTHESES_PLAN.md §5):
+    one row per (run, stage, fence, question), written once and never
+    updated; visible only under the run's published fence."""
+    return get_database()["analysis_hypothesis_results"]
+
+
+def get_analysis_hypothesis_reviews_col() -> AsyncIOMotorCollection:
+    """AI review signals beside the scanner results (ANALYZER_HYPOTHESES_PLAN.md
+    §4.1): one row per (run, stage, fence, question), insert-only; ids, hashes
+    and versions -- never evidence text or the raw provider response."""
+    return get_database()["analysis_hypothesis_reviews"]
+
+
+def get_analysis_pii_confirmations_col() -> AsyncIOMotorCollection:
+    """A reviewer's decisions on spans PII masking could not recognise
+    (services/analyzer/pii_confirmation.py): offsets, decisions and the text and
+    masking-policy hashes they were made against -- never the words. APPEND-ONLY;
+    removed only by the source's purge."""
+    return get_database()["analysis_pii_confirmations"]
+
+
+def get_analysis_processing_receipts_col() -> AsyncIOMotorCollection:
+    """The processing receipt (services/analyzer/receipts.py): one entry per
+    AI-stage outcome -- what left the server, or why nothing did. Ids,
+    hashes, versions and codes only. APPEND-ONLY and hash-chained per run;
+    removed only by the source's purge."""
+    return get_database()["analysis_processing_receipts"]
+
+
+def get_analysis_hypothesis_decisions_col() -> AsyncIOMotorCollection:
+    """A reviewer's decisions (a registered lawyer account -- qualification
+    not verified) on drafting-question results in the INTERNAL review
+    (services/analyzer/drafting_review.py): confirm, dismiss with a reason,
+    or point to evidence. They grant no approval or label status.
+    APPEND-ONLY -- one insert per decision, never updated or deleted, except
+    by the source's purge."""
+    return get_database()["analysis_hypothesis_decisions"]
+
+
+def get_analysis_findings_col() -> AsyncIOMotorCollection:
+    """Playbook results of a run (general and approved legal packs), keyed
+    (run_id, stage, fence, ordinal). Sentence ids only -- quotes are cut from
+    the canonical text when read."""
+    return get_database()["analysis_findings"]
+
+
+def get_analysis_playbook_approvals_col() -> AsyncIOMotorCollection:
+    """A qualified reviewer's approval of ONE exact playbook text (by hash).
+    A legal pack runs only if its current hash is approved here."""
+    return get_database()["analysis_playbook_approvals"]
+
+
+def get_analysis_reviewer_qualifications_col() -> AsyncIOMotorCollection:
+    """Which reviewer may approve which kind of legal playbook (e.g.
+    pk.punjab.tenancy), granted and revoked by an admin, with the basis."""
+    return get_database()["analysis_reviewer_qualifications"]
+
+
+def get_analysis_approval_audit_col() -> AsyncIOMotorCollection:
+    """Append-only: every grant, revocation and approval, written in the same
+    transaction as the change it records."""
+    return get_database()["analysis_approval_audit"]
+
+
+# ── Document review requests (DOCUMENT_REVIEW_REQUEST_PLAN.md) ───────────────
+# Dormant unless DOCUMENT_REVIEW_REQUESTS is on. Model: app/models/review_request.py.
+# Indexes: app/db/review_request_index_spec.py.
+
+def get_document_review_requests_col() -> AsyncIOMotorCollection:
+    """One client-to-lawyer request for ONE frozen Vault version. No file
+    bytes and no copy of the PDF: it references the revision's artifact."""
+    return get_database()["document_review_requests"]
+
+
+def get_document_review_request_events_col() -> AsyncIOMotorCollection:
+    """Append-only audit: every change to a request and every download of its
+    document, ids and hashes only. Never updated or deleted."""
+    return get_database()["document_review_request_events"]

@@ -28,26 +28,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 TEST_DB_SUFFIX = "_test"
 
-#: A throwaway AES-256 key for the suite. NOT a secret and not a fallback: the
-#: application refuses to store a signature when `SIGNATURE_ENCRYPTION_KEY` is
-#: unset, which is the behaviour we want in production and an obstacle in a test
-#: run that signs hundreds of agreements. Fixed rather than random so a failure
-#: is reproducible, and obviously disposable so nobody mistakes it for a real
-#: one. Set here, session-wide, because a per-test key would make a ciphertext
-#: written by one test undecryptable in the next.
-TEST_SIGNATURE_KEY = base64.b64encode(b"attorney-ai test signature key!!").decode()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _signature_encryption_key():
-    """Give the suite a signature key without touching the developer's `.env`."""
-    from app.core.config import settings
-
-    previous = getattr(settings, "signature_encryption_key", "")
-    settings.signature_encryption_key = TEST_SIGNATURE_KEY
-    yield
-    settings.signature_encryption_key = previous
-
 
 # ── live tiers are opt-in; the default run never leaves the machine ──────────
 #
@@ -152,6 +132,25 @@ def pytest_terminal_summary(terminalreporter):
         for host, n in Counter(BLOCKED_LOOKUPS).most_common():
             terminalreporter.write_line(f"{n:6d}  {host}")
 
+#: A throwaway AES-256 key for the suite. NOT a secret and not a fallback: the
+#: application refuses to store a signature when `SIGNATURE_ENCRYPTION_KEY` is
+#: unset, which is the behaviour we want in production and an obstacle in a test
+#: run that signs hundreds of agreements. Fixed rather than random so a failure
+#: is reproducible, and obviously disposable so nobody mistakes it for a real
+#: one. Set here, session-wide, because a per-test key would make a ciphertext
+#: written by one test undecryptable in the next.
+TEST_SIGNATURE_KEY = base64.b64encode(b"attorney-ai test signature key!!").decode()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _signature_encryption_key():
+    """Give the suite a signature key without touching the developer's `.env`."""
+    from app.core.config import settings
+
+    previous = getattr(settings, "signature_encryption_key", "")
+    settings.signature_encryption_key = TEST_SIGNATURE_KEY
+    yield
+    settings.signature_encryption_key = previous
 
 
 @pytest.fixture(autouse=True)
@@ -168,6 +167,22 @@ def _empty_corpus_index():
     set_index(CorpusIndex({}))
     yield
     set_index(None)
+
+
+@pytest.fixture(autouse=True)
+def _test_ai_policy_records(monkeypatch):
+    """Analyzer AI checklist records come from tests/fixtures/ai_policies.
+
+    Readiness needs a VERIFIED checklist record for the policy id; the real
+    one (app/services/analyzer/ai_policies/AAI-AI-DP-001.yaml) is pending
+    until a person verifies the deployment, so tests use a fixture id
+    (AAI-AI-TEST-001) that can never be mistaken for a real verification.
+    A test that reads the production records passes `directory=`.
+    """
+    from app.services.analyzer import ai_records
+
+    monkeypatch.setattr(ai_records, "POLICY_DIR",
+                        Path(__file__).resolve().parent / "fixtures" / "ai_policies")
 
 
 @pytest.fixture(autouse=True)

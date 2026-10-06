@@ -1,4 +1,12 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+// Keep the browser on one origin. Next proxies this relative path to the fixed
+// backend target, so changing the local frontend port cannot silently point the
+// browser at a different API process.
+const BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
+
+export const AUTH_BOOTSTRAP_UNAVAILABLE = 'backend_unavailable';
+const REFRESHED = 'refreshed';
+const REFRESH_INVALID = 'invalid';
+const REFRESH_UNAVAILABLE = 'unavailable';
 
 // ─── Token store (in-memory, audit #5) ────────────────────────────────────────
 // The access token lives ONLY in memory — never localStorage — so an XSS payload
@@ -69,10 +77,12 @@ export async function bootstrapAuth() {
   if (accessToken) return true;                       // already have one this tab
   const sibling = await _requestSiblingToken();       // election: another tab holds one?
   if (sibling) { accessToken = sibling; return true; }
-  if (await _tryRefresh()) return true;               // single-flight /auth/refresh
+  const refreshStatus = await _tryRefresh();          // single-flight /auth/refresh
+  if (refreshStatus === REFRESHED) return true;
   // Simultaneous cold-load rotation race: give a sibling's broadcast a beat, retry once.
   const late = await _requestSiblingToken(250);
   if (late) { accessToken = late; return true; }
+  if (refreshStatus === REFRESH_UNAVAILABLE) return AUTH_BOOTSTRAP_UNAVAILABLE;
   return !!accessToken;
 }
 
@@ -165,14 +175,20 @@ async function apiFetch(path, options = {}) {
 
   // Auto-refresh on 401
   if (res.status === 401 && token) {
-    const refreshed = await _tryRefresh();
-    if (refreshed) {
+    const refreshStatus = await _tryRefresh();
+    if (refreshStatus === REFRESHED) {
       headers['Authorization'] = `Bearer ${getToken()}`;
       try {
         res = await fetch(`${BASE}${path}`, { ...fetchOptions, headers, credentials: 'include' });
       } catch {
         return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
       }
+    } else if (refreshStatus === REFRESH_UNAVAILABLE) {
+      return {
+        data: null,
+        error: formatResponseError({ detail: 'The server is restarting or unavailable. Please retry in a moment.' }),
+        status: 0,
+      };
     } else {
       clearToken();
       return { data: null, error: formatResponseError({ detail: 'Session expired. Please sign in again.' }), status: 401 };
@@ -241,7 +257,7 @@ async function _tryRefresh() {
       if (res.ok) {
         const body = await res.json();
         setToken(body.access_token);   // sets in-memory + broadcasts to siblings
-        return true;
+        return REFRESHED;
       }
       // Another tab may have won the server's atomic refresh claim. Accept only
       // a different token; the stale token would only trigger another 401.
@@ -249,12 +265,16 @@ async function _tryRefresh() {
         const sibling = await _requestSiblingToken(250);
         if (sibling && sibling !== tokenBeingReplaced) {
           accessToken = sibling;
-          return true;
+          return REFRESHED;
         }
       }
-      return false;
+      // Only an authentication response proves that the refresh credential is
+      // invalid. A proxy/backend 5xx is an outage and must not log the user out.
+      return (res.status === 401 || res.status === 403)
+        ? REFRESH_INVALID
+        : REFRESH_UNAVAILABLE;
     } catch {
-      return false;
+      return REFRESH_UNAVAILABLE;
     } finally {
       _refreshPromise = null;
     }
@@ -357,19 +377,21 @@ export async function confirmIntakeOcrPage(
 }
 
 // answer = null on first call (get Q1); answer = string on second call (get Q2 or done)
-export async function intakeClarify(sessionToken, answer = null) {
+// `language` is the app's display language ('en' | 'ur'). The server pins the
+// questions to one language; without it the model chose per round and mixed.
+export async function intakeClarify(sessionToken, answer = null, language = null) {
   return apiFetch(`/intake/${sessionToken}/clarify`, {
     method: 'POST',
-    body: JSON.stringify({ answer }),
+    body: JSON.stringify(language ? { answer, language } : { answer }),
   });
 }
 
 // ─── Multipart fetch wrapper ──────────────────────────────────────────────────
 // Mirrors apiFetch for FormData uploads: attaches Bearer token + retries on 401.
 // Never sets Content-Type — browser must set it to inject the multipart boundary.
-async function apiFetchMultipart(path, formData) {
+async function apiFetchMultipart(path, formData, extraHeaders = {}) {
   const token = getToken();
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const headers = { ...extraHeaders, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 
   let res;
   try {
@@ -379,14 +401,20 @@ async function apiFetchMultipart(path, formData) {
   }
 
   if (res.status === 401 && token) {
-    const refreshed = await _tryRefresh();
-    if (refreshed) {
+    const refreshStatus = await _tryRefresh();
+    if (refreshStatus === REFRESHED) {
       headers['Authorization'] = `Bearer ${getToken()}`;
       try {
         res = await fetch(`${BASE}${path}`, { method: 'POST', headers, credentials: 'include', body: formData });
       } catch {
         return { data: null, error: formatResponseError({ detail: 'Network error. Please check your connection.' }), status: 0 };
       }
+    } else if (refreshStatus === REFRESH_UNAVAILABLE) {
+      return {
+        data: null,
+        error: formatResponseError({ detail: 'The server is restarting or unavailable. Please retry in a moment.' }),
+        status: 0,
+      };
     } else {
       clearToken();
       return { data: null, error: formatResponseError({ detail: 'Session expired. Please sign in again.' }), status: 401 };
@@ -707,13 +735,36 @@ export async function getWsTicket() {
   return data?.ticket ?? null;
 }
 
+// Keep sockets on the same public origin as the page unless an explicit
+// WebSocket origin is configured.  A relative HTTP API base (`/api/v1`) must
+// not be treated as a socket base: doing so sends `/ws` to Next without a
+// usable absolute URL and breaks tunnels/HTTPS.  The matching Next rewrite
+// forwards this same-origin path to the backend.
+export function websocketUrl(path) {
+  const configured = process.env.NEXT_PUBLIC_WS_URL?.replace(/\/$/, '');
+  const cleanPath = `/${String(path || '').replace(/^\/+/, '')}`;
+  if (configured) return `${configured}${cleanPath}`;
+
+  if (typeof window !== 'undefined' && window.location) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${cleanPath}`;
+  }
+
+  // Used only outside a browser (mainly tests/SSR); sockets are never opened
+  // during SSR, but returning a deterministic URL keeps the helper total.
+  if (/^https?:\/\//i.test(BASE)) {
+    return `${BASE.replace(/\/api\/v1\/?$/, '').replace(/^http/i, 'ws')}${cleanPath}`;
+  }
+  return cleanPath;
+}
+
 // Opens the notification socket. Returns the WebSocket or null.
 export async function openNotificationSocket(onMessage) {
   const ticket = await getWsTicket();
   if (!ticket) return null;
 
-  const wsBase = BASE.replace(/\/api\/v1$/, '').replace(/^http/, 'ws');
-  const ws = new WebSocket(`${wsBase}/ws/notifications?ticket=${encodeURIComponent(ticket)}`);
+  const ws = new WebSocket(
+    `${websocketUrl('/ws/notifications')}?ticket=${encodeURIComponent(ticket)}`);
   ws.onmessage = (ev) => {
     try { onMessage(JSON.parse(ev.data)); } catch { }
   };
@@ -1952,6 +2003,130 @@ export async function searchResearchConversations(q, { limit = 25 } = {}) {
 // same intent must reuse it, or the whole mechanism is unreachable from the UI
 // in exactly the way it was on the chat surfaces.
 
+/* ── Document Analyzer (DOC_ANALYZER_PLAN.md) ───────────────────────────────
+ *
+ * Every call answers 404 `feature_disabled` while DOC_ANALYZER is off and 503
+ * `analyzer_unavailable` when the server cannot run it safely; the screen
+ * falls back to the fictional demonstration in both cases.
+ *
+ * The synthetic-data confirmation and the Idempotency-Key travel as HEADERS:
+ * the server checks them before it parses (or receives) the uploaded file. */
+
+export async function analyzerAttestation() {
+  return apiFetch('/documents/analyses/attestation');
+}
+
+export async function createAnalysis(file, { side = 'tenant', depth = 'medium' } = {},
+                                     attestationVersion, key) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('side', side);
+  form.append('depth', depth);
+  return apiFetchMultipart('/documents/analyses', form, {
+    'X-Synthetic-Data-Attested': 'true',
+    'X-Synthetic-Attestation-Version': attestationVersion,
+    'Idempotency-Key': key,
+  });
+}
+
+export async function listAnalyses({ before = null, limit = 20 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before) params.set('before', before);
+  return apiFetch(`/documents/analyses?${params.toString()}`);
+}
+
+export async function getAnalysisRun(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function getAnalysisText(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/text`);
+}
+
+export async function confirmAnalysisOcr(runId, expectedStateVersion, text = null) {
+  const body = { expected_state_version: expectedStateVersion };
+  if (text !== null) body.text = text;
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/ocr-text`,
+                  { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function confirmAnalysisDocument(runId, expectedStateVersion, documentType, jurisdiction) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/document`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_state_version: expectedStateVersion,
+                           document_type: documentType, jurisdiction }),
+  });
+}
+
+export async function confirmAnalysisTerms(runId, expectedStateVersion, terms) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/terms`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_state_version: expectedStateVersion, terms }),
+  });
+}
+
+export async function getAnalysisReport(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/report`);
+}
+
+/* The owner-only processing receipt: ids, hashes, versions and codes only. */
+export async function getProcessingReceipt(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/processing-receipt`);
+}
+
+export async function cancelAnalysisRun(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+}
+
+export async function deleteAnalysis(sourceId) {
+  return apiFetch(`/documents/analyses/${encodeURIComponent(sourceId)}`, { method: 'DELETE' });
+}
+
+/* The lawyer's review before anything is sent to the AI (lawyer-confirm
+ * mode): the original text beside the masked request, flagged spans, and the
+ * exact final request. Bound to the text and masking-policy hashes the screen
+ * received; the submit attests the previewed request hash. */
+export async function getPiiConfirmation(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/pii-confirmation`);
+}
+
+export async function previewPii(runId, { textSha256, policySha256, decisions }) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/pii-confirmation/preview`, {
+    method: 'POST',
+    body: JSON.stringify({ text_sha256: textSha256, policy_sha256: policySha256, decisions }),
+  });
+}
+
+export async function confirmPii(runId, { textSha256, policySha256, expectedStateVersion, decisions,
+                                          previewSha256, attested, peopleConfirmed = [] }, key) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/pii-confirmation`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+    body: JSON.stringify({ text_sha256: textSha256, policy_sha256: policySha256,
+                           expected_state_version: expectedStateVersion, decisions,
+                           preview_sha256: previewSha256, attested,
+                           people_confirmed: peopleConfirmed }),
+  });
+}
+
+/* The INTERNAL drafting-question review (synthetic documents only). Every
+ * response carries the server's evaluation status; a decision must echo it
+ * back (`evaluationAck`), so the screen cannot act without showing it.
+ * Decisions are append-only: there is no edit or delete call. */
+export async function getDraftingReview(runId) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/drafting-review`);
+}
+
+export async function recordDraftingDecision(runId, { questionId, decision, reasonCode = null,
+                                                      sentenceIds = [], evaluationAck }, key) {
+  return apiFetch(`/documents/analyses/runs/${encodeURIComponent(runId)}/drafting-review/decisions`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+    body: JSON.stringify({ question_id: questionId, decision, reason_code: reasonCode,
+                           sentence_ids: sentenceIds, evaluation_ack: evaluationAck }),
+  });
+}
+
 /* A key for one intent. Mint it where the user acts, not where the request is
    sent, and pass the SAME one to every retry of that action. */
 export function idempotencyKey() {
@@ -1984,7 +2159,9 @@ export function isRetryable(status, error) {
   // are treated must not quietly make either of these retryable. An
   // idempotency mismatch is a client bug that retrying hides; a review limit is
   // permanent for that document, and retrying it loops forever.
-  if (['idempotency_mismatch', 'review_limit_reached'].includes(errorCode(error))) {
+  // `generation_failed` is a FINISHED failure bound to its key: the same key
+  // replays it forever. Callers retry it only with a fresh key.
+  if (['idempotency_mismatch', 'review_limit_reached', 'generation_failed'].includes(errorCode(error))) {
     return false;
   }
   return !status || status === 0 || status === 503 || status === 504;
@@ -1997,7 +2174,8 @@ function v2Headers(key) {
 export async function createDocumentV2(
   { templateType, title, caseId = null }, key,
 ) {
-  return apiFetch('/documents/v2/', {
+  // No trailing slash: Next.js 308-redirects one away before proxying.
+  return apiFetch('/documents/v2', {
     method: 'POST',
     headers: v2Headers(key),
     body: JSON.stringify({ template_type: templateType, title, case_id: caseId }),
@@ -2009,6 +2187,86 @@ export async function generateRevisionV2(docId, { fields = {}, templateType = nu
     method: 'POST',
     headers: v2Headers(key),
     body: JSON.stringify({ fields, template_type: templateType }),
+  });
+}
+
+// Client prompt -> reviewed plan -> immutable V2 document.  The planner is an
+// intake layer only; generation still ends in the same revision engine used by
+// every other V2 document flow.
+export async function createDraftPlanV2(
+  { prompt, templateType = null, title = null, caseId = null }, key,
+) {
+  return apiFetch('/documents/v2/plans', {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      prompt, template_type: templateType, title, case_id: caseId,
+    }),
+  });
+}
+
+export async function getDraftPlanV2(planId) {
+  return apiFetch(`/documents/v2/plans/${encodeURIComponent(planId)}`);
+}
+
+export async function answerDraftPlanV2(planId, { expectedVersion, answers }) {
+  return apiFetch(`/documents/v2/plans/${encodeURIComponent(planId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ expected_version: expectedVersion, answers }),
+  });
+}
+
+export async function confirmDraftPlanV2(
+  planId, { expectedVersion, skipMissing = false },
+) {
+  return apiFetch(`/documents/v2/plans/${encodeURIComponent(planId)}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({
+      expected_version: expectedVersion, skip_missing: skipMissing,
+    }),
+  });
+}
+
+export async function generateDraftPlanV2(planId, { expectedVersion }, key) {
+  return apiFetch(`/documents/v2/plans/${encodeURIComponent(planId)}/generate`, {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({ expected_version: expectedVersion }),
+  });
+}
+
+export async function getDocumentWorkspaceV2(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/workspace`);
+}
+
+export async function assistDocumentWorkspaceV2(docId, {
+  bodyHtml = null, fields = null, instruction,
+  expectedRevisionId, expectedVersion, expectedContentEpoch,
+}) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/workspace/assist`, {
+    method: 'POST',
+    body: JSON.stringify({
+      body_html: bodyHtml, fields, instruction,
+      expected_revision_id: expectedRevisionId,
+      expected_version: expectedVersion,
+      expected_content_epoch: expectedContentEpoch,
+    }),
+  });
+}
+
+export async function saveDocumentWorkspaceV2(docId, {
+  bodyHtml = null, fields = null, title = null,
+  expectedRevisionId, expectedVersion, expectedContentEpoch,
+}, key) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/workspace/revisions`, {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      body_html: bodyHtml, fields, title,
+      expected_revision_id: expectedRevisionId,
+      expected_version: expectedVersion,
+      expected_content_epoch: expectedContentEpoch,
+    }),
   });
 }
 
@@ -2026,6 +2284,12 @@ export async function getDocumentV2(docId) {
  *
  * Every entry names its builder's real fields, so a form built from this cannot
  * ask for a key the renderer ignores. */
+/* What the Code requires of an instrument, as a checklist to confirm. For
+ * prose drafts: every item comes back `to_confirm`, never "satisfied". */
+export async function pleadingRequirements(templateType) {
+  return apiFetch(`/documents/requirements/${encodeURIComponent(templateType)}`);
+}
+
 export async function listTemplates(
   { includeSystem = false, includeLawyerAuthored = false } = {},
 ) {
@@ -2232,4 +2496,132 @@ export async function fetchRevisionPreview(
   }
   return { data: null, error: { message: legacy?.error || 'Preview failed' },
            code: null };
+}
+
+/* ── Document review requests (DOCUMENT_REVIEW_REQUEST_PLAN.md §5) ─────────
+ *
+ * A client shares ONE exact version of a Vault document with the lawyer of an
+ * accepted engagement. Every route answers 404 `feature_disabled` while
+ * DOCUMENT_REVIEW_REQUESTS is off, which is how the Vault knows to hide the
+ * feature. Mutations take an Idempotency-Key (reuse it on a retry) and, for an
+ * existing request, the `expected_state_version` the caller read. */
+export async function reviewRequestEligibleEngagements(documentId) {
+  const params = new URLSearchParams({ document_id: documentId });
+  return apiFetch(`/review-requests/eligible-engagements?${params}`);
+}
+
+export async function listReviewRequests({ status = null, cursor = null, limit = 20 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (status) params.set('status', status);
+  if (cursor) params.set('cursor', cursor);
+  return apiFetch(`/review-requests?${params}`);
+}
+
+export async function getReviewRequest(requestId) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}`);
+}
+
+export async function createReviewRequest(
+  { documentId, revisionId, expectedPdfSha256, engagementId, note = null, focus = [] }, key,
+) {
+  return apiFetch('/review-requests', {
+    method: 'POST',
+    headers: v2Headers(key),
+    body: JSON.stringify({
+      document_id: documentId, revision_id: revisionId, expected_pdf_sha256: expectedPdfSha256,
+      engagement_id: engagementId, note, focus,
+    }),
+  });
+}
+
+/* Only the fields passed are sent: `note: null` clears the note, an absent
+ * `note` leaves it. */
+export async function editReviewRequest(requestId, { expectedStateVersion, ...changes }, key) {
+  const body = { expected_state_version: expectedStateVersion };
+  if ('note' in changes) body.note = changes.note;
+  if ('focus' in changes) body.focus = changes.focus;
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}`, {
+    method: 'PATCH', headers: v2Headers(key), body: JSON.stringify(body),
+  });
+}
+
+export async function deleteReviewRequest(requestId, { expectedStateVersion }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}`, {
+    method: 'DELETE',
+    headers: { ...v2Headers(key), 'Expected-State-Version': String(expectedStateVersion) },
+  });
+}
+
+export async function submitReviewRequest(requestId, { expectedStateVersion, expectedPdfSha256 = null }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/submit`, {
+    method: 'POST', headers: v2Headers(key),
+    body: JSON.stringify({ expected_state_version: expectedStateVersion,
+                           expected_pdf_sha256: expectedPdfSha256 }),
+  });
+}
+
+export async function cancelReviewRequest(requestId, { expectedStateVersion }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/cancel`, {
+    method: 'POST', headers: v2Headers(key),
+    body: JSON.stringify({ expected_state_version: expectedStateVersion }),
+  });
+}
+
+/* ── Document review requests: the lawyer's side (plan §5, Phase 2 queue) ──
+ * The request's frozen lawyer only; anyone else gets the same 404 as a
+ * missing id. Every GET here is read-only: opening a request is an explicit
+ * `markReviewRequestViewed`. Nothing here starts an analysis. */
+export async function listReviewInbox({ status = null, cursor = null, limit = 20 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (status) params.set('status', status);
+  if (cursor) params.set('cursor', cursor);
+  return apiFetch(`/review-requests/inbox?${params}`);
+}
+
+export async function markReviewRequestViewed(requestId) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/view`, { method: 'POST' });
+}
+
+export async function acceptReviewRequest(requestId, { expectedStateVersion }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/accept`, {
+    method: 'POST', headers: v2Headers(key),
+    body: JSON.stringify({ expected_state_version: expectedStateVersion }),
+  });
+}
+
+export async function declineReviewRequest(requestId, { expectedStateVersion, reason = null }, key) {
+  return apiFetch(`/review-requests/${encodeURIComponent(requestId)}/decline`, {
+    method: 'POST', headers: v2Headers(key),
+    body: JSON.stringify({ expected_state_version: expectedStateVersion, reason }),
+  });
+}
+
+/* The FROZEN PDF the client sent. The server re-hashes the bytes before
+ * sending; a mismatch is a 409 and no file. Returns { data: true } or
+ * { error, code, status }. */
+export async function downloadReviewRequestDocument(requestId, filename = 'document.pdf') {
+  const { data: res, error, status } = await apiFetch(
+    `/review-requests/${encodeURIComponent(requestId)}/document`, { returnResponse: true });
+  if (res) return _saveBlob(res, filename);
+  return { error: error?.message || 'Download failed', code: errorCode(error), status };
+}
+
+/* ── Vault: recoverable deletion (services/vault_deletion.py) ──────────────
+ * Delete MOVES a document to "Recently deleted"; it can be restored until
+ * `purge_after`. Ask for the preview first: it carries the warnings the client
+ * must see (open review requests, a lawyer's read-only access). */
+export async function getDocumentDeletionPreview(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/deletion-preview`);
+}
+
+export async function deleteDocumentV2(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}`, { method: 'DELETE' });
+}
+
+export async function listDeletedDocumentsV2() {
+  return apiFetch('/documents/v2/trash');
+}
+
+export async function restoreDocumentV2(docId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/restore`, { method: 'POST' });
 }

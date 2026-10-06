@@ -1,0 +1,43 @@
+# Non-disclosure agreement drafting questions (ANALYZER_HYPOTHESES_PLAN.md §3.2).
+# Drafting completeness only. No law is cited; nothing is said to be required.
+catalogue: drafting-hypotheses.v1
+scope: nda
+questions:
+  - id: confidential_definition
+    question: Is confidential information defined?
+    detector: nda_confidential_definition
+    polarity: attention_if_absent
+    ambiguous_when: Confidential information is mentioned but not defined.
+    explain: true
+
+  - id: mutual_or_one_way
+    question: Does it say whether the obligations are mutual or one-way?
+    detector: nda_mutual_or_one_way
+    polarity: attention_if_absent
+    ambiguous_when: It reads as both mutual and one-way.
+    explain: true
+
+  - id: confidentiality_duration
+    question: Is it stated how long confidentiality lasts?
+    detector: nda_confidentiality_duration
+    polarity: attention_if_absent
+    ambiguous_when: The obligations are said to survive without a length.
+    explain: true
+
+  - id: standard_exclusions
+    question: Are exclusions from confidential information stated?
+    detector: nda_exclusions
+    polarity: attention_if_absent
+    explain: false
+
+  - id: return_or_destruction
+    question: Is the return or destruction of information addressed?
+    detector: nda_return_destruction
+    polarity: attention_if_absent
+    explain: false
+
+  - id: compelled_disclosure
+    question: Is disclosure when compelled by a court or authority addressed?
+    detector: nda_compelled_disclosure
+    polarity: attention_if_absent
+    explain: false

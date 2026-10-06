@@ -1,0 +1,11 @@
+# Groq prices used ONLY to estimate evaluation cost (scripts/analyzer_eval.py).
+# USD per 1M tokens. Provided by the project owner from
+# https://console.groq.com/docs/models on 2026-10-02. A model without a
+# published rate has null prices, and its cost is reported as null -- never
+# estimated. Check current prices before quoting any cost.
+as_of: '2026-10-02'
+source: https://console.groq.com/docs/models
+models:
+  openai/gpt-oss-120b: {input: 0.15, output: 0.60}
+  openai/gpt-oss-20b: {input: 0.075, output: 0.30}
+  llama-3.3-70b-versatile: {input: null, output: null}   # "Contact Sales" on the official page

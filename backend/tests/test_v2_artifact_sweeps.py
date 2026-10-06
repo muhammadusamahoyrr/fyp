@@ -87,7 +87,8 @@ async def test_the_sweep_spares_a_file_still_being_written(mongo, monkeypatch):
     assert fresh.exists(), "deleted a file a live writer was filling"
 
 
-async def test_the_sweep_does_nothing_while_the_flag_is_off(mongo):
+async def test_the_sweep_does_nothing_while_the_flag_is_off(mongo, monkeypatch):
+    monkeypatch.setattr(settings, "documents_v2", False)     # not this machine's .env
     (_tmp() / "rev-x.0.deadbeef.staging.pdf").write_bytes(A[:5])
     out = await v2.sweep()
     assert out == {"skipped": True}

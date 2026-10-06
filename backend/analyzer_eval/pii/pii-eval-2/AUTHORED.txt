@@ -1,0 +1,18 @@
+# pii-eval-2 — AUTHORED and SEALED, NOT YET FROZEN (2026-10-04)
+# Not scored, and not to be read for tuning. FROZEN.txt is written by
+# `scripts/analyzer_pii_eval.py --dataset pii-eval-2 --freeze` only after the owner
+# sets the two pending thresholds in PII_DETECTION_RUBRIC_2.md; scoring refuses until then.
+# Any change to these files before the freeze must be reported, not silently made.
+author: fresh independent agent session, given only PII_DETECTION_RUBRIC_2.md
+author_declared_reads: PII_DETECTION_RUBRIC_2.md only (plus its own output files; one listing of the scratchpad folder, no files opened)
+author_limitation: a subagent cannot be technically prevented from seeing project context; independence rests on its instructions and its declaration
+developer_view: loaded by the loader for counts and hashes only; no document text was displayed to the developer
+dataset_sha256: ffbb14dbc7837c427d9065dd6a892daaf33eec2ab19b7494bed398cb68d841a9
+documents: 53
+personal_spans: 449
+rubric_2_sha256_when_authored: df10a43540445615cd6ffc03240c6c9630e42ac10192433aa9a504a7ce591e0f
+files:
+  employment.yaml: df77d98aaf87fb6db10a8beb9c7f615c1b3ebe2d5fc715b5a3ac56918e9c0383
+  letter.yaml: 23dd23bbe6010a9607c439f75f873db1dcccedeeeca931dcacdaf000e96b6e6e
+  nda.yaml: c8089cbe1d2bdf82fc5e512e7cd3084b07cd967e6acaf9ee1db30df8e5179e68
+  tenancy.yaml: c40c049eb4fd6499b1b0180a5cfd3c87f4efdd6da3b4bf35020bbf3286a75e3d

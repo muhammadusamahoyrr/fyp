@@ -102,7 +102,8 @@ async def clarify_intake(
     Idempotent: calling with no answer while a question is outstanding returns
     that same question rather than generating another one.
     """
-    return await intake_service.get_clarification(token, current_user["_id"], body.answer)
+    return await intake_service.get_clarification(
+        token, current_user["_id"], body.answer, language=body.language)
 
 
 @router.post("/{token}/evidence")

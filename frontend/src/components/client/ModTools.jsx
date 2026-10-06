@@ -3,7 +3,7 @@
 //   1. Islamic Inheritance (Faraid) Calculator + settlement PDF + demand letter
 //   2. NADRA Succession Certificate Navigator (eligibility triage + checklist)
 //   3. Instant Documents (one description → legal notice / FIR pack / FIA complaint)
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { keyForIntent } from "@/lib/intentKey.js";
 import { useT } from "./theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
@@ -953,6 +953,14 @@ const TABS = [
 const ModTools = () => {
     const t = useT();
     const [tab, setTab] = useState("calc");
+
+    // Dedicated document links include the exact tool tab. Read it after
+    // hydration so static rendering keeps the same initial markup on server and
+    // client, and ignore unknown values instead of creating a blank tools page.
+    useEffect(() => {
+        const requested = new URLSearchParams(window.location.search).get("tab");
+        if (TABS.some(item => item.id === requested)) setTab(requested);
+    }, []);
 
     return (
         <div>

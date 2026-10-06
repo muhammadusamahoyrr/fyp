@@ -168,7 +168,7 @@ test("listAgreements asks for a page and defaults to a bounded size", async () =
     await api.listAgreements();
     const c = only();
     assert.match(c.url, /\/agreements\?/);
-    const q = new URL(c.url).searchParams;
+    const q = new URL(c.url, "http://local.test").searchParams;
     assert.equal(q.get("page"), "1");
     assert.ok(Number(q.get("page_size")) > 0);
     assert.equal(q.get("status"), null, "no status filter unless asked for");
@@ -176,7 +176,7 @@ test("listAgreements asks for a page and defaults to a bounded size", async () =
 
 test("a status filter is passed through, and nothing else is", async () => {
     await api.listAgreements({ page: 3, page_size: 10, status: "pending" });
-    const q = new URL(only().url).searchParams;
+    const q = new URL(only().url, "http://local.test").searchParams;
     assert.equal(q.get("page"), "3");
     assert.equal(q.get("page_size"), "10");
     assert.equal(q.get("status"), "pending");
@@ -189,7 +189,7 @@ test("a null status is omitted rather than sent as the string 'null'", async () 
     // would reach the server as a real filter value and be refused as an
     // unknown status -- turning "show me everything" into an error.
     await api.listAgreements({ status: null });
-    assert.equal(new URL(only().url).searchParams.get("status"), null);
+    assert.equal(new URL(only().url, "http://local.test").searchParams.get("status"), null);
 });
 
 // ── Gate 3E: downloading the executed agreement ─────────────────────────────

@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from tests._engagement_support import disengage, engage  # D1: sharing needs an accepted engagement
 
 from app.core.config import settings
 from app.dependencies import get_current_user
@@ -73,8 +74,10 @@ async def _clean(mongo):
         {"_id": LAWYER}, {"$set": {"_id": LAWYER, "role": "lawyer", "is_active": True,
                                    "email": f"{LAWYER}@test.invalid",
                                    "lawyer_profile": {"kyc_verified": True}}}, upsert=True)
+    await engage(CLIENT, LAWYER)
     yield
     app.dependency_overrides.clear()
+    await disengage(CLIENT, LAWYER)
     await get_users_col().delete_one({"_id": LAWYER})
 
 
@@ -95,8 +98,10 @@ async def _doc_rev():
 
 # ═══════════════ A · HTTP round-trip ═══════════════
 
-async def test_http_route_404_when_flag_off(mongo, _store):
-    # flag off (default) → the route is indistinguishable from missing
+async def test_http_route_404_when_flag_off(mongo, _store, monkeypatch):
+    # flag off -- set explicitly, not read from this machine's .env -- the
+    # route is indistinguishable from missing
+    monkeypatch.setattr(settings, "documents_v2", False)
     async with _client(CLIENT_USER) as c:
         r = await c.post(f"{API}/documents/v2/whatever/submit",
                          json={"expected_version": 1, "expected_pdf_sha256": "x",

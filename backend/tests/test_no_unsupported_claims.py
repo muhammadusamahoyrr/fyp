@@ -293,7 +293,14 @@ IMPLEMENTATION_EXEMPT: dict[str, frozenset[str]] = {
     # The cipher module names its own algorithm in its docstring, its
     # ALGORITHM constant and its "key must be 32 bytes" error. Every one of
     # those is true, and none is a string a user reads.
-    "aes_cipher_claim": frozenset({"backend/app/core/signature_crypto.py"}),
+    #
+    # The Document Analyzer's blob store is the same kind of file: it IS the
+    # envelope cipher for analyzer uploads, and its docstring states the
+    # algorithm. No string it raises or returns names AES (checked), so no
+    # user reads it; any user-facing encryption wording still needs an
+    # APPROVED_CLAIMS entry that says what is encrypted.
+    "aes_cipher_claim": frozenset({"backend/app/core/signature_crypto.py",
+                                   "backend/app/services/analyzer/blob_store.py"}),
 }
 
 

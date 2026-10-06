@@ -146,8 +146,8 @@ jobs:
             "${{ runner.temp }}/txn-integration.json"
 
   live:
-    # The LIVE tier (markers `llm` and `network`): real provider calls and
-    # anything that needs the public internet. Never on push or PR -- it
+    # The LIVE tier (markers `llm` and `network`): one real Groq call and a
+    # re-download of the official law sources. Never on push or PR -- it
     # spends tokens and depends on third parties -- only when started by hand.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

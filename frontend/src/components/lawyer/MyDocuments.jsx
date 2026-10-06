@@ -1,7 +1,11 @@
 'use client';
 import { useCallback, useEffect, useState } from "react";
-import { myDocumentsV2, downloadDocumentFile, errorCode } from "@/lib/api.js";
+import {
+    myDocumentsV2, downloadDocumentFile, errorCode, getDocumentV2,
+    fetchRevisionPreview,
+} from "@/lib/api.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
+import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
 
 /* Documents this lawyer owns, and can come back to.
  *
@@ -25,6 +29,10 @@ export default function MyDocuments({ t }) {
     const [loading, setLoading] = useState(false);
     const [issue, setIssue] = useState(null);
     const [busyId, setBusyId] = useState(null);
+    const [active, setActive] = useState(null);
+    const [viewRev, setViewRev] = useState(null);
+    const [previewUrl, setPreviewUrl] = useState(null);
+    const [actionIssue, setActionIssue] = useState(null);
 
     const load = useCallback(async (after = null) => {
         setLoading(true);
@@ -52,11 +60,52 @@ export default function MyDocuments({ t }) {
         setBusyId(row.id);
         // By revision and hash, not by file path: a V2 document has no
         // file_path, and the legacy download route 404s on every one of them.
-        await downloadDocumentFile(
+        const result = await downloadDocumentFile(
             row.id, `${(row.title || "document").replace(/[^\w\s-]/g, "").trim() || "document"}.pdf`,
             { revisionId: row.revision_id, expectedPdfSha256: row.pdf_sha256 });
         setBusyId(null);
+        if (result?.error) setActionIssue(result.error.message || "Could not download that document.");
     };
+
+    const open = async (row) => {
+        setBusyId(row.id);
+        setActionIssue(null);
+        const { data, error } = await getDocumentV2(row.id);
+        setBusyId(null);
+        if (error || !data) {
+            setActionIssue(error?.message || "Could not open that document.");
+            return;
+        }
+        setActive(data);
+        setViewRev(null);
+    };
+
+    useEffect(() => {
+        let live = true;
+        let url = null;
+        const current = active?.current_revision;
+        const revisionId = viewRev?.revision_id || current?.revision_id;
+        const pdfSha256 = viewRev?.pdf_sha256 || current?.pdf_sha256;
+        if (!active?.id || !revisionId) { setPreviewUrl(null); return; }
+
+        fetchRevisionPreview(active.id, {
+            revisionId, expectedPdfSha256: pdfSha256,
+        }).then(result => {
+            if (!live) {
+                if (result?.data?.url) URL.revokeObjectURL(result.data.url);
+                return;
+            }
+            if (result?.data?.url) {
+                url = result.data.url;
+                setPreviewUrl(url);
+                setActionIssue(null);
+            } else {
+                setPreviewUrl(null);
+                setActionIssue(result?.error?.message || "Could not preview that document.");
+            }
+        });
+        return () => { live = false; if (url) URL.revokeObjectURL(url); };
+    }, [active, viewRev]);
 
     // Nothing saved yet, and the feature is on: say nothing rather than show an
     // empty box. A lawyer who has never used it does not need to be told.
@@ -95,9 +144,15 @@ export default function MyDocuments({ t }) {
                     {issue}
                 </div>
             )}
+            {actionIssue && (
+                <div role="alert" style={{ fontSize: 11.5, color: t.danger || "#e5484d", marginBottom: 10 }}>
+                    {actionIssue}
+                </div>
+            )}
 
             {items.map(row => (
-                <div key={row.id} style={{
+                <div key={row.id}>
+                <div style={{
                     display: "flex", alignItems: "center", gap: 10,
                     padding: "9px 0", borderTop: `1px solid ${t.border}`,
                 }}>
@@ -127,6 +182,10 @@ export default function MyDocuments({ t }) {
                         )}
                     </div>
 
+                    <button onClick={() => open(row)} disabled={busyId === row.id}
+                        style={{ padding: "5px 12px", borderRadius: 8, border: `1px solid ${t.border}`, background: "transparent", color: t.text, fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: busyId === row.id ? "default" : "pointer", flexShrink: 0 }}>
+                        {busyId === row.id ? "…" : active?.id === row.id ? "Reload" : "Open"}
+                    </button>
                     {row.downloadable ? (
                         <button onClick={() => download(row)} disabled={busyId === row.id}
                             style={{
@@ -147,6 +206,28 @@ export default function MyDocuments({ t }) {
                             No file
                         </span>
                     )}
+                </div>
+                {active?.id === row.id && (
+                    <div style={{ padding: "12px", marginBottom: 10, borderRadius: 10, background: t.inputBg, border: `1px solid ${t.border}` }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                            <div style={{ fontSize: 11.5, fontWeight: 700, color: t.text }}>
+                                {viewRev ? `Previewing version ${viewRev.version}` : `Current version ${active.current_version || row.version}`}
+                            </div>
+                            <button onClick={() => { setActive(null); setViewRev(null); }} style={{ border: 0, background: "transparent", color: t.textMuted, cursor: "pointer", fontSize: 11 }}>Close</button>
+                        </div>
+                        {previewUrl ? (
+                            <iframe title={`${row.title || "Document"} preview`} src={previewUrl} style={{ width: "100%", height: 420, border: `1px solid ${t.border}`, borderRadius: 8, background: "#fff" }} />
+                        ) : (
+                            <div style={{ padding: 24, textAlign: "center", color: t.textMuted, fontSize: 11.5 }}>Loading preview…</div>
+                        )}
+                        <RevisionHistory
+                            docId={row.id} t={t}
+                            reloadKey={active.current_revision?.revision_id}
+                            currentRevisionId={viewRev?.revision_id || active.current_revision?.revision_id}
+                            onPreview={rev => setViewRev(
+                                rev.revision_id === active.current_revision?.revision_id ? null : rev)} />
+                    </div>
+                )}
                 </div>
             ))}
 

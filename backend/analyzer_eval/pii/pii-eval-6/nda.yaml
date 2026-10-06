@@ -1,0 +1,250 @@
+dataset: pii-eval-6
+label_review: developer_only
+documents:
+- id: p6-n01
+  document_type: nda
+  features: [lookalikes, deadlines, untitled_names, repeated_names]
+  parties: [p1, p2]
+  text: |
+    MUTUAL NON-DISCLOSURE AGREEMENT
+
+    This Mutual Non-Disclosure Agreement (the "Agreement") is made on 9 September 2026 between:
+
+    (1) [[NOT:n1|Indus Loom Textiles (Private) Limited]], a company incorporated under the Companies Act, 2017, represented by [[NAME:p1|Asad Mehmood Butt]], [[NOT:n2|Chief Executive Officer]]; and
+    (2) [[NOT:n3|Margalla Analytics (SMC-Private) Limited]], represented by [[NAME:p2|Nida Fatima Rizvi]], [[NOT:n4|Director]].
+
+    Purpose: evaluating a possible engagement for [[NOT:n5|Project Sutlej]], an automated yarn-grading system.
+
+    1. Confidential Information means all information disclosed by either party in connection with the Purpose, whether oral, written or electronic.
+    2. The receiving party shall use Confidential Information only for the Purpose and shall disclose it only to employees who need to know it.
+    3. The obligations in this Agreement continue [[DEADLINE:d1|for three (3) years from the date of each disclosure]].
+    4. On written request, the receiving party shall return or destroy all Confidential Information [[DEADLINE:d2|within ten (10) business days]].
+    5. This Agreement terminates automatically if no definitive agreement is signed [[DEADLINE:d3|by 31 December 2026]], but clause 3 shall survive.
+    6. Contact persons: [[NAME:p1|Asad Mehmood Butt]] for the first party and [[NAME:p2|Nida Fatima Rizvi]] for the second party.
+
+    For [[NOT:n6|Indus Loom Textiles]]: [[NAME:p1|Asad Mehmood Butt]]
+    For [[NOT:n7|Margalla Analytics]]: [[NAME:p2|Nida Fatima Rizvi]]
+- id: p6-n02
+  document_type: nda
+  features: [aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY AND NON-DISCLOSURE UNDERTAKING
+
+    I, [[NAME:p2|Kashan Ali Mirza]], son of [[NAME:p3|Mirza Abbas Baig]], CNIC No. [[CNIC:c1|35202-4019926-1]], residing at [[ADDRESS:a1|House No. 61, Street 3, Officers Colony, Wapda Town, Lahore]], email [[EMAIL:e1|kashan.mirza91@example.com]], am engaged as a freelance software consultant by Dr. [[NAME:p1|Rubina Shaheen]]'s clinic, [[NOT:n1|Shaheen Family Dental Care]].
+
+    I undertake that:
+
+    (a) I shall keep confidential all patient records, appointment data and financial information of the clinic to which I get access while working on the clinic's billing software.
+    (b) I shall not copy any patient data to my personal devices, and Dr. [[NAME:p1|Shaheen]] may inspect my work laptop at any time.
+    (c) Upon completion of the assignment, or earlier if Dr. [[NAME:p1|Rubina]] so requires, I shall delete all clinic data [[DEADLINE:d1|within forty-eight (48) hours]] and confirm the deletion in writing.
+    (d) This undertaking remains binding [[DEADLINE:d2|for five (5) years after my engagement ends]].
+    (e) Any breach by me shall entitle Dr. [[NAME:p1|Rubina Shaheen]] to seek damages and an injunction.
+
+    Signed: [[NAME:p2|Kashan A. Mirza]]
+    Accepted: [[NAME:p1|Rubina Shaheen]]
+    Date: 18 August 2026
+- id: p6-n03
+  document_type: nda
+  features: [table, untitled_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NDA - KEY TERMS (for signature)
+
+    | Term | Detail |
+    |---|---|
+    | Disclosing Party | [[NOT:n1|Thar Solar Works (Pvt.) Ltd.]] |
+    | Signatory (Disclosing) | [[NAME:p1|Sohail Anwar Memon]] |
+    | Signatory email | [[EMAIL:e1|sohail.memon@example.pk]] |
+    | Receiving Party | [[NAME:p2|Ammar Yasir Jatoi]] (individual investor) |
+    | Receiving Party CNIC | [[CNIC:c1|41303-7728105-3]] |
+    | Receiving Party address | [[ADDRESS:a1|Bungalow 14, Qasimabad Phase 2, Hyderabad]] |
+    | Receiving Party mobile | [[PHONE:ph1|0300-3019472]] |
+    | Purpose | Due diligence on [[NOT:n2|Project Kirthar]] (50 MW solar park) |
+    | Term | [[DEADLINE:d1|2 years from signing]] |
+    | Return of materials | [[DEADLINE:d2|within 7 days of written demand]] |
+    | Non-solicit | [[DEADLINE:d3|12 months after the Term]] |
+    | Governing law | Pakistan; courts at [[NOT:n3|Karachi]] |
+
+    Prepared by: [[NAME:p3|Areeba Khalid]], [[NOT:n4|Legal Associate]]
+- id: p6-n04
+  document_type: nda
+  features: [ocr_errors, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    NON - DISCL0SURE AGREEMENT
+    [page 1 of 2 - scanned, some text unclear]
+
+    This Agreernent is made on l2-O6-2026 between [[NAME:p1|Faisa1 Nawaz Cheerna]] (the "Discloser") holding CNIC [[CNIC:c1|3460l-8812O47-5]], resident of [[ADDRESS:a1|H # 22, Bl0ck F, Model T0wn Ext
+    ension, Gujrat]], and [[NAME:p2|Mus
+    tafa Kamal Bhatti]] (the "Recipient"), CN1C [[CNIC:c2|34603-22l9087-l]], mob: [[PHONE:ph1|03OO 62l 4419]].
+
+    1. The Recipient shall not disclose the Discloser's recipe and supplier list for the bakery business run by Mr. [[NAME:p1|Cheema]].
+    2. The obligation lasts [[DEADLINE:d1|f0r three years]] from the date hereof.
+    3. If Mr. [[NAME:p2|Bhatti]] breaches this, he shall pay liquidated damages of Rs. 2,000,000 [[DEADLINE:d2|within 30 days of demand]].
+    4. [[NAME:p1|Faisal]] and [[NAME:p2|Mustafa]] agree that this is the entire agreement.
+
+    [page 2]
+    Signed ......... [[NAME:p1|F. N. Cheema]]          Signed ......... [[NAME:p2|M. K. Bhatti]]
+- id: p6-n05
+  document_type: nda
+  features: [urdu_script, repeated_names, deadlines, aliases]
+  parties: [p1, p2]
+  text: |
+    رازداری کا معاہدہ (NON-DISCLOSURE AGREEMENT)
+
+    یہ معاہدہ [[NAME:p1|عمران الٰہی]] ([[NAME:p1|Imran Elahi]])، شناختی کارڈ نمبر [[CNIC:c1|36302-1184720-9]]، ساکن [[ADDRESS:a1|مکان نمبر 7، بلاک B، شاہ رکن عالم کالونی، ملتان]] اور [[NAME:p2|فوزیہ سلطانہ]] ([[NAME:p2|Fouzia Sultana]])، شناختی کارڈ نمبر [[CNIC:c2|36302-9910432-6]] کے درمیان طے پایا۔
+
+    1۔ [[NAME:p2|فوزیہ سلطانہ]] کو [[NAME:p1|عمران الٰہی]] کے کڑھائی کے ڈیزائن دکھائے جائیں گے۔
+    2۔ فریق دوم یہ ڈیزائن کسی اور کو نہیں دکھائے گی اور [[DEADLINE:d1|دو سال]] تک ان کی نقل تیار نہیں کرے گی۔
+    3۔ معاہدہ ختم ہونے پر تمام نمونے [[DEADLINE:d2|سات دن کے اندر]] واپس کیے جائیں گے۔
+
+    In case of dispute, [[NAME:p1|Imran]] and [[NAME:p2|Fouzia]] shall first meet at the office of their common friend [[NAME:p3|Waseem Akram Sial]].
+
+    دستخط: [[NAME:p1|عمران]]          دستخط: [[NAME:p2|فوزیہ]]
+    رابطہ: [[PHONE:ph1|0301-7346215]]
+- id: p6-n06
+  document_type: nda
+  features: [roman_urdu, untitled_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Raazdari ka Iqrarnama
+
+    Main [[NAME:p2|Sobia Aslam]] dukhtar [[NAME:p3|Muhammad Aslam]], CNIC [[CNIC:c1|35401-6602198-4]], iqrar karti hoon ke [[NOT:n1|Noor Bridal Boutique]] mein kaam ke dauraan mujhe jo bhi design, customer ki list ya rate list mili hai, woh main kisi doosri dukaan ya shakhs ko nahi doongi.
+
+    Boutique ki malik [[NAME:p1|Noreen Akhtar]] ne mujhe bataya hai ke yeh iqrar naukri chhorne ke baad bhi [[DEADLINE:d1|do saal tak]] laagu rahega.
+
+    Agar main ne is ki khilaf warzi ki to [[NAME:p1|Noreen Akhtar]] mere khilaf qanooni karwai kar sakti hain aur main nuqsan ki raqam [[DEADLINE:d2|ek mahine ke andar]] ada karoongi.
+
+    Mera pata: [[ADDRESS:a1|Makan 112, Gali 8, Sanda Kalan, Lahore]]
+    Mobile: [[PHONE:ph1|0323 4419087]]
+
+    Dastakhat: [[NAME:p2|Sobia]]
+    Gawah: [[NAME:p4|Rehana Kausar]], [[NOT:n2|Manager]] [[NOT:n3|Noor Bridal]]
+- id: p6-n07
+  document_type: nda
+  features: [untitled_names, deadlines, repeated_names]
+  parties: [p1, p2]
+  text: |
+    From: [[NAME:p1|Hassan Raza Gillani]] <[[EMAIL:e1|hr.gillani@example.net]]>
+    To: [[NAME:p2|Sadia Mumtaz]] <[[EMAIL:e2|sadia.mumtaz.law@example.com]]>
+    Cc: [[NAME:p3|Bilal Hayat]] <[[EMAIL:e3|bilal.hayat@example.org]]>
+    Subject: NDA for the warehouse software discussion
+
+    [[NAME:p2|Sadia]],
+
+    Attached is the NDA we spoke about. Please note the main points:
+
+    * Both sides keep the pricing model confidential [[DEADLINE:d1|until 30 June 2028]].
+    * Any copies must be returned [[DEADLINE:d2|within 5 working days]] if the talks end.
+    * [[NAME:p3|Bilal]] will be the only person on our side who sees the source code.
+
+    If you could send it back signed [[DEADLINE:d3|by Friday]], that would help. You can also call me at [[PHONE:ph1|0333-4120876]].
+
+    Thanks,
+    [[NAME:p1|Hassan]]
+- id: p6-n08
+  document_type: nda
+  features: [overlap, lookalikes, deadlines, aliases]
+  parties: [p1, p2]
+  text: |
+    NON-DISCLOSURE AGREEMENT
+
+    THIS AGREEMENT is made at [[NOT:n1|Quetta]] on 1 October 2026.
+
+    BETWEEN [[NAME:p1|Sardar Jahanzeb Khan Kakar]], son of [[NAME:p3|Sardar Gul Muhammad Kakar]], of [[ADDRESS:a1|Kakar House, Bungalow No. 3, Zarghoon Road, Quetta]] ("the Owner");
+
+    AND [[NAME:p2|Javeria Noor]], an architect practising as [[NOT:n2|Chiltan Design Studio]], whose notices shall be delivered at [[ADDRESS:a2|c/o Dr. [[NAME:p4|Ehsan ul Haq]] Clinic, Shop 9, Jinnah Road, Quetta]] ("the Architect").
+
+    1. The Owner will share the site plans of his family property with the Architect for preparing a renovation proposal.
+    2. The Architect shall not share the plans with anyone other than her draughtsman, [[NAME:p5|Owais Ahmed]], who shall sign a similar undertaking.
+    3. The confidentiality obligation continues [[DEADLINE:d1|for a period of four years]] even if no renovation work is awarded.
+    4. If [[NAME:p1|Jahanzeb]] does not award the work [[DEADLINE:d2|by 15 January 2027]], Ms. [[NAME:p2|Noor]] shall return all plans [[DEADLINE:d3|within fourteen days]].
+    5. [[NOT:n3|Jinnah Road]] traders' association or any neighbour shall not be given any information about the property.
+
+    Signed: [[NAME:p1|J. K. Kakar]]          Signed: [[NAME:p2|Javeria Noor]]
+- id: p6-n09
+  document_type: nda
+  features: [table, repeated_names, untitled_names, ocr_errors]
+  parties: [p1]
+  text: |
+    ANNEX A - AUTHORISED RECIPIENTS UNDER THE NDA DATED 5 AUGUST 2026
+    Company representative: [[NAME:p1|Tariq Jamil Sheikh]]
+
+    | # | Name | Designation | CNIC | Email |
+    |---|---|---|---|---|
+    | 1 | [[NAME:p2|Mariam Javed]] | Finance Manager | [[CNIC:c1|35202-3384011-2]] | [[EMAIL:e1|mariam.javed@example.pk]] |
+    | 2 | [[NAME:p3|Usman Tariq]] | Analyst | [[CNIC:c2|35202-77O1923-5]] | [[EMAIL:e2|usman.t@example.pk]] |
+    | 3 | [[NAME:p4|Kiran Shahid]] | External auditor | [[CNIC:c3|35201 1092847 4]] | [[EMAIL:e3|kiran.shahid@example.com]] |
+    | 4 | [[NAME:p5|Abdul Wahab Lone]] | IT Head | [[CNIC:c4|3520l-5520819-9]] | [[EMAIL:e4|wahab.lone@example.pk]] |
+
+    Changes to this list need prior approval of [[NAME:p1|Tariq Jamil Sheikh]]. [[NAME:p3|Usman Tariq]] is not related to [[NAME:p1|Tariq Jamil Sheikh]].
+- id: p6-n10
+  document_type: nda
+  features: [lookalikes, untitled_names, deadlines, repeated_names]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY AGREEMENT - SEED ROUND DISCUSSIONS
+
+    Parties:
+    - [[NOT:n1|Rickshaw Ride Technologies]], a startup registered in [[NOT:n2|Islamabad]], through its co-founder [[NAME:p1|Zainab Qadir]]
+    - [[NOT:n3|Saddar Angels Network]], through its partner [[NAME:p2|Omar Shafiq Paracha]]
+
+    Background: [[NOT:n4|Rickshaw Ride]] is developing "[[NOT:n5|Project Chingchi]]", a booking platform for three-wheelers in [[NOT:n6|Rawalpindi]] and [[NOT:n7|Peshawar]]. [[NOT:n8|Saddar Angels]] wishes to review its financial model before investing.
+
+    Terms:
+    1. Information shared in the data room is confidential [[DEADLINE:d1|for 24 months from the date of first access]].
+    2. The partner shall not approach any employee of the startup for employment [[DEADLINE:d2|for one year]].
+    3. Term sheet, if any, to be issued [[DEADLINE:d3|no later than 45 days after the data room opens]].
+    4. [[NAME:p1|Zainab Qadir]] will give data room access to [[NAME:p2|Omar Shafiq Paracha]] and one analyst nominated by him.
+
+    [[NAME:p1|Zainab Qadir]]                       [[NAME:p2|Omar Shafiq Paracha]]
+    Co-founder                         Partner
+- id: p6-n11
+  document_type: nda
+  features: [ocr_errors, roman_urdu, untitled_names, overlap]
+  parties: [p1, p2]
+  text: |
+    raazdari muahida (photo se type kiya gaya)
+
+    fareeq awwal: [[NAME:p1|Shafqat Rasool Khokhar]] s/o [[NAME:p3|Ghulam Rasool Khokhar]]
+    shanakhti card: [[CNIC:c1|3520Z-6l90284-3]]
+    pata: [[ADDRESS:a1|ghar [[NAME:p1|Shafqat Khokhar]], gali n0 4, mohalla Krishan Nagar, Lah
+    ore]]
+
+    fareeq doam: [[NAME:p2|Adeela Yousaf]]
+    mobile: [[PHONE:ph1|O321-44l9 803]]
+    email: [[EMAIL:e1|adeela.yousaf@exarnple.com]]
+
+    [[NAME:p2|adeela]] baji ko [[NAME:p1|shafqat]] sahab ke catering business ke recipes aur clients ki list di ja rahi hai. woh yeh cheezein kisi aur ko nahi batayengi.
+
+    agar khilaf warzi hui to [[NAME:p1|Khokhar]] sahab adalat ja sakte hain.
+- id: p6-n12
+  document_type: nda
+  features: [deadlines, aliases, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NOTICE OF BREACH OF CONFIDENTIALITY AGREEMENT
+
+    Date: 22 September 2026
+
+    To: [[NAME:p2|Shehryar Afzal Khan]]
+    [[ADDRESS:a1|Apartment 1104, Tower B, Bahria Heights 3, Phase 7, Bahria Town, Rawalpindi]]
+    Email: [[EMAIL:e1|shehryar.afzal@example.com]]
+
+    Dear Mr. [[NAME:p2|Afzal]],
+
+    We act for [[NAME:p1|Maheen Siddiqui]], proprietor of [[NOT:n1|Rang-e-Haya Couture]]. You signed a Confidentiality Agreement with our client on 3 March 2026 before being shown her autumn collection.
+
+    Our client has learned that designs from that collection have appeared on the social media page of [[NOT:n2|Lawn Lounge Pakistan]], which you co-own. This is a clear breach of clause 4 of the Agreement.
+
+    You, [[NAME:p2|Shehryar]], are hereby required to:
+    (a) remove all such designs from every platform [[DEADLINE:d1|within 72 hours of this notice]];
+    (b) confirm in writing [[DEADLINE:d2|by 30 September 2026]] that no further copies are held; and
+    (c) pay compensation of Rs. 1,500,000 [[DEADLINE:d3|within 21 days]].
+
+    If Mr. [[NAME:p2|Khan]] fails to comply, Ms. [[NAME:p1|Siddiqui]] has instructed us to file a suit for damages and permanent injunction without further notice.
+
+    Yours faithfully,
+    [[NAME:p3|Ahsan Iqbal Chaudhry]]
+    for [[NOT:n3|Chaudhry & Associates]], Advocates

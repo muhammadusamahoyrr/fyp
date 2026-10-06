@@ -118,6 +118,12 @@ test.beforeEach(() => {
     // Signed in through the stub, so the REAL CaseProvider actually fetches.
     api.__respond("bootstrapAuth", true);
     api.__respond("getMe", { data: { _id: "u1", role: "client" } });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "legal_notice", label: "Legal Notice",
+                 category: "Civil", description: "A formal legal notice.",
+                 fields: ["sender_name", "demand"], structured_fields: [],
+                 drafting_mode: "ai" }],
+    });
 });
 
 test.after(() => {
@@ -127,6 +133,35 @@ test.after(() => {
 });
 
 /* ── the defect: restoration never ran ────────────────────────────────────── */
+
+test("a browser reload stays on Documents home instead of reopening review", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "doc-remembered", dom.window.localStorage);
+    api.__respond("getDocumentV2", { data: {
+        id: "doc-remembered", case_id: "case-1", title: "Do not auto-open me",
+        review_status: "none", current_version: 1,
+        current_revision: { revision_id: "rev-1", pdf_sha256: "a".repeat(64) },
+    } });
+
+    const originalGetEntriesByType = globalThis.performance.getEntriesByType;
+    Object.defineProperty(globalThis.performance, "getEntriesByType", {
+        value: () => [{ type: "reload" }], configurable: true,
+    });
+    let p;
+    try {
+        p = await mountDocuments();
+        assert.equal(api.__calls("getDocumentV2").length, 0,
+                     "reload fetched and reopened the remembered document");
+        assert.match(p.text(), /Start from a template/);
+        assert.doesNotMatch(p.text(), /Do not auto-open me/);
+    } finally {
+        if (p) await p.unmount();
+        Object.defineProperty(globalThis.performance, "getEntriesByType", {
+            value: originalGetEntriesByType, configurable: true,
+        });
+    }
+});
 
 test("a remembered document is fetched on mount", async () => {
     // THE BUG. Restoration keyed off `genCaseId`, which only a generation ever
@@ -622,17 +657,11 @@ test("a failed case load says so rather than 'no case linked'", async () => {
 /* ── visible recovery from a failed case load ─────────────────────────────── */
 
 async function _gotoDraftStep(p) {
-    // Step 0 lists templates; "Select" then "Use Template" reaches the form
-    // where the readiness strip and its retry live.
-    const select = [...p.container.querySelectorAll("button")]
-        .find(b => b.textContent.trim() === "Select");
-    assert.ok(select, "no template Select control");
-    await act(async () => {
-        select.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-    });
+    // Step 0 lists templates; one "Use template" reaches the form where the
+    // readiness strip and its retry live.
     const use = [...p.container.querySelectorAll("button")]
-        .find(b => b.textContent.includes("Use Template"));
-    assert.ok(use, "no Use Template control");
+        .find(b => b.textContent.trim() === "Use template");
+    assert.ok(use, "no Use template control");
     await act(async () => {
         use.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
         await new Promise(r => setTimeout(r, 30));
@@ -768,5 +797,365 @@ test("cases arriving late do not destroy the document already open", async () =>
 
     assert.match(p.text(), /An open notice/,
                  "the open document was cleared when the case list arrived");
+    await p.unmount();
+});
+
+/* ── a refused generate must be visible where it was refused ────────────────
+ *
+ * The V2 failure banner lived on step 2 only, and generation runs on step 1.
+ * A refused create (every browser create, while the proxy turned it into a
+ * 405) cleared the spinner and showed nothing: the button looked dead. */
+
+function findButton(container, text) {
+    return [...container.querySelectorAll("button")]
+        .find(b => (b.textContent || "").includes(text));
+}
+
+async function press(p, el) {
+    await act(async () => {
+        el.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    });
+    await p.settle();
+}
+
+test("a refused V2 generate is shown on the field review, not swallowed", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "legal_notice", label: "Legal Notice",
+                 category: "Civil", fields: ["sender_name", "demand"] }],
+    });
+    api.__respond("extractDocumentFields", {
+        data: { fields: { sender_name: "Ayesha Khan", demand: "500000" } },
+    });
+    api.__respond("createDocumentV2", {
+        data: null, status: 405, error: { message: "Method Not Allowed" },
+    });
+
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Use template"));
+
+    const picker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "legal_notice"));
+    assert.ok(picker, "the document-type picker did not render");
+    await act(async () => {
+        picker.value = "legal_notice";
+        picker.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await p.settle();
+
+    await press(p, findButton(p.container, "Generate Draft"));
+    const generate = findButton(p.container, "generate →");
+    assert.ok(generate, "the field review did not open");
+    await press(p, generate);
+
+    assert.equal(api.__calls("createDocumentV2").length, 1);
+    // The button used to pass its click EVENT as the retry key, which reached
+    // the server as "[object Object]" and was refused (422).
+    // (`idempotencyKey` is itself stubbed here, so only "not the event" is
+    // checkable; the real key's format is covered in documents_v2.test.mjs.)
+    const key = api.__calls("createDocumentV2")[0].args[1];
+    assert.ok(!(key && typeof key === "object" && "nativeEvent" in key),
+        "the click event was sent as the idempotency key");
+    assert.match(p.text(), /Method Not Allowed/,
+        "the refusal reached nobody: step 1 rendered no error");
+    await p.unmount();
+});
+
+test("no handler that takes a retry key is wired straight to onClick", async () => {
+    // `onClick={submitToLawyer}` passes the click event as `retryKey`; it became
+    // the Idempotency-Key and every Submit to Lawyer was refused.
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/components/client/ModDocuments.jsx",
+                                      import.meta.url), "utf8");
+    const keyed = [...src.matchAll(/const (\w+) = async \(retryKey/g)].map(m => m[1]);
+    assert.ok(keyed.includes("submitToLawyer") && keyed.includes("handleGenerate"));
+    for (const fn of keyed) {
+        assert.ok(!src.includes(`onClick={${fn}}`), `${fn} receives the click event as its key`);
+    }
+});
+
+test("a scalar template without an extractor opens an honest manual form", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "bail_application", label: "Bail Application",
+                 category: "Criminal", description: "Application for bail.",
+                 fields: ["accused_name", "grounds"], structured_fields: [],
+                 drafting_mode: "manual" }],
+    });
+
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Use template"));
+    await press(p, findButton(p.container, "Generate Draft"));
+
+    assert.equal(api.__calls("extractDocumentFields").length, 0,
+        "a missing backend prompt was called anyway");
+    assert.match(p.text(), /no safe automatic extractor/i);
+    assert.match(p.text(), /Accused name/);
+    await p.unmount();
+});
+
+test("standalone V2 drafting creates a caseless document without extraction", async () => {
+    api.__respond("listCases", { data: [] });
+    api.__respond("getCases", { data: [] });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "bail_application", label: "Bail Application",
+                 category: "Criminal", description: "Application for bail.",
+                 fields: ["accused_name"], structured_fields: [],
+                 drafting_mode: "manual" }],
+    });
+    api.__respond("createDocumentV2", { data: { id: "standalone-1" } });
+    api.__respond("generateRevisionV2", {
+        data: { revision_id: "standalone-rev-1", pdf_sha256: "a".repeat(64), version: 1 },
+    });
+
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Use template"));
+
+    const casePicker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "__no_case__"));
+    assert.ok(casePicker, "standalone choice is missing");
+    await act(async () => {
+        casePicker.value = "__no_case__";
+        casePicker.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate Draft"));
+
+    const accusedLabel = [...p.container.querySelectorAll("label")]
+        .find(label => label.textContent.includes("Accused name"));
+    const accused = accusedLabel?.querySelector("input");
+    assert.ok(accused, "manual field was not rendered");
+    await act(async () => {
+        Object.getOwnPropertyDescriptor(
+            dom.window.HTMLInputElement.prototype, "value").set.call(accused, "Ali Khan");
+        accused.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate with my corrections"));
+
+    assert.equal(api.__calls("extractDocumentFields").length, 0);
+    assert.equal(api.__calls("createDocumentV2")[0].args[0].caseId, null);
+    assert.equal(api.__calls("generateRevisionV2")[0].args[0], "standalone-1");
+    await p.unmount();
+});
+
+test("Regenerate appends to the same V2 document", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("extractDocumentFields", {
+        data: { fields: { sender_name: "Ayesha", demand: "500000" } },
+    });
+    api.__respond("createDocumentV2", { data: { id: "doc-1" } });
+    let version = 0;
+    api.__respond("generateRevisionV2", () => {
+        version += 1;
+        return { data: { revision_id: `rev-${version}`,
+                         pdf_sha256: String(version).repeat(64), version } };
+    });
+
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Use template"));
+    await press(p, findButton(p.container, "Generate Draft"));
+    await press(p, findButton(p.container, "generate →"));
+    await p.settle(350);
+
+    await press(p, findButton(p.container, "Regenerate"));
+    await press(p, findButton(p.container, "generate →"));
+    await p.settle(350);
+
+    assert.equal(api.__calls("createDocumentV2").length, 1,
+        "Regenerate created a second document identity");
+    assert.deepEqual(api.__calls("generateRevisionV2").map(c => c.args[0]),
+                     ["doc-1", "doc-1"]);
+    await p.unmount();
+});
+
+/* ── the AI's reading of the case is reported, not disguised ───────────────
+ *
+ * A failed extraction used to reach the client as blank fields — the same form
+ * as a case that simply does not mention them. */
+
+test("extractionNotice tells a failed read from an empty one", async () => {
+    const { extractionNotice } = await import("../src/components/client/ModDocuments.jsx");
+    assert.equal(extractionNotice({ extraction_status: "ok", truncated: false }), null);
+    assert.match(extractionNotice({ extraction_status: "failed" }).message, /could not read your case/);
+    assert.match(extractionNotice({ extraction_status: "empty" }).message, /found none of these details/);
+    assert.match(extractionNotice({ extraction_status: "ok", truncated: true }).message, /only its first part/);
+    assert.equal(extractionNotice(undefined), null);   // an older server: no status, no claim
+});
+
+test("a failed AI read is announced above the field review", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "legal_notice", label: "Legal Notice", category: "Civil",
+                 fields: ["sender_name", "demand"], drafting_mode: "ai" }],
+    });
+    api.__respond("extractDocumentFields", {
+        data: { fields: {}, extraction_status: "failed", truncated: false },
+    });
+    const p = await mountDocuments();
+    await press(p, findButton(p.container, "Use template"));
+    const picker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "legal_notice"));
+    await act(async () => {
+        picker.value = "legal_notice";
+        picker.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate Draft"));
+
+    const notice = p.container.querySelector('[data-extraction="failed"]');
+    assert.ok(notice, "a failed read produced a silent blank form");
+    assert.match(notice.textContent, /could not read your case/);
+    await p.unmount();
+});
+
+/* ── the template preview starts drafting in one action ──────────────────────
+ *
+ * "Use this template" in the preview selects and proceeds in the same click.
+ * The parent must use the spec it is handed: its own `selectedType` is still
+ * the previous value during that click, and reading it bounced the user back
+ * with "Select a template first". */
+function findByLabel(container, label) {
+    return [...container.querySelectorAll("button")]
+        .find(b => (b.getAttribute("aria-label") || "") === label);
+}
+
+test("starting from the template preview opens drafting with that template", async () => {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+
+    const p = await mountDocuments();
+    await press(p, findByLabel(p.container, "Preview Legal Notice"));
+    // The preview is portalled to <body> (see documents/ui.jsx ModalPortal).
+    const start = findButton(document.body, "Use this template");
+    assert.ok(start, "the template preview did not open");
+    await press(p, start);
+
+    const picker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "legal_notice"));
+    assert.ok(picker, "did not reach the drafting step");
+    assert.equal(picker.value, "legal_notice", "the chosen template was not carried over");
+    await p.unmount();
+});
+
+/* ── the sidebar's "New document" wins over the refresh-resume ───────────────
+ *
+ * With a remembered draft, opening Documents jumps to that draft's step. That
+ * is right after a refresh and wrong when the user just chose "New document"
+ * in the sidebar: they landed on the old draft's review with no way back to
+ * the catalogue. The request is made before the module mounts. */
+function rememberedReturnedDraft() {
+    api.__respond("listCases", { data: CASES });
+    api.__respond("getCases", { data: CASES });
+    rememberDraft("case-1", "doc-remembered", dom.window.localStorage);
+    api.__respond("getDocumentV2", {
+        data: {
+            id: "doc-remembered", title: "A restored notice",
+            review_status: "returned", current_version: 2,
+            current_revision: { revision_id: "rev-2", pdf_sha256: "a".repeat(64) },
+        },
+    });
+}
+
+test("without a sidebar request, a remembered draft still resumes", async () => {
+    rememberedReturnedDraft();
+    const p = await mountDocuments();
+    assert.equal(p.container.querySelector("#tpl-search"), null,
+        "the refresh-resume no longer opens the remembered draft");
+    await p.unmount();
+});
+
+test("a sidebar 'New document' request keeps the catalogue on screen", async () => {
+    rememberedReturnedDraft();
+    const nav = await import("../src/lib/documentsNav.js");
+    nav.requestDocumentsView("new");
+
+    const p = await mountDocuments();
+    assert.ok(p.container.querySelector("#tpl-search"),
+        "the remembered draft replaced the catalogue the user asked for");
+    assert.equal(nav.peekPendingDocumentsView(), null,
+        "the request outlived the restore it held back");
+    await p.unmount();
+
+    // One-shot: the next visit resumes the draft again.
+    const again = await mountDocuments();
+    assert.equal(again.container.querySelector("#tpl-search"), null);
+    await again.unmount();
+});
+
+/* ── M2: a finished generation failure is not replayed forever ─────────────
+ *
+ * The server stores a failed revision under its key; the same key returns the
+ * same 503 generation_failed on every retry. Only an UNKNOWN outcome (503
+ * generation_incomplete / network) is retried under the same key. */
+
+async function reachManualGenerate(p) {
+    await press(p, findButton(p.container, "Use template"));
+    const casePicker = [...p.container.querySelectorAll("select")]
+        .find(s => [...s.options].some(o => o.value === "__no_case__"));
+    await act(async () => {
+        casePicker.value = "__no_case__";
+        casePicker.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate Draft"));
+    const accused = [...p.container.querySelectorAll("label")]
+        .find(label => label.textContent.includes("Accused name"))?.querySelector("input");
+    await act(async () => {
+        Object.getOwnPropertyDescriptor(
+            dom.window.HTMLInputElement.prototype, "value").set.call(accused, "Ali Khan");
+        accused.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    await p.settle();
+    await press(p, findButton(p.container, "Generate with my corrections"));
+}
+
+function manualTemplateResponses(firstRevision) {
+    api.__respond("listCases", { data: [] });
+    api.__respond("getCases", { data: [] });
+    api.__respond("listTemplates", {
+        data: [{ template_type: "bail_application", label: "Bail Application",
+                 category: "Criminal", description: "Application for bail.",
+                 fields: ["accused_name"], structured_fields: [],
+                 drafting_mode: "manual" }],
+    });
+    api.__respond("createDocumentV2", { data: { id: "standalone-1" } });
+    let n = 0;
+    api.__respond("generateRevisionV2", () => {
+        n += 1;
+        return n === 1 ? firstRevision
+            : { data: { revision_id: "rev-ok", pdf_sha256: "b".repeat(64), version: 1 } };
+    });
+}
+
+test("Retry after generation_failed is a new attempt under a new key", async () => {
+    manualTemplateResponses({ data: null, status: 503,
+        error: { code: "generation_failed", message: "Document generation failed." } });
+    const p = await mountDocuments();
+    await reachManualGenerate(p);
+    assert.match(p.text(), /Document generation failed/);
+    await press(p, findButton(p.container, "Retry"));
+
+    const keys = api.__calls("generateRevisionV2").map(c => c.args[2]);
+    assert.equal(keys.length, 2, "Retry did not reach the server");
+    assert.ok(keys[0] && keys[1]);
+    assert.notEqual(keys[0], keys[1], "a final failure was replayed under the same key");
+    await p.unmount();
+});
+
+test("Retry after an unknown outcome still reuses the same key", async () => {
+    manualTemplateResponses({ data: null, status: 503,
+        error: { code: "generation_incomplete", message: "Still working; retry." } });
+    const p = await mountDocuments();
+    await reachManualGenerate(p);
+    await press(p, findButton(p.container, "Retry"));
+
+    const keys = api.__calls("generateRevisionV2").map(c => c.args[2]);
+    assert.equal(keys.length, 2);
+    assert.equal(keys[0], keys[1], "an in-flight render was duplicated under a new key");
     await p.unmount();
 });

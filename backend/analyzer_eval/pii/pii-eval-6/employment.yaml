@@ -1,0 +1,303 @@
+dataset: pii-eval-6
+label_review: developer_only
+documents:
+- id: p6-e01
+  document_type: employment
+  features: [deadlines, aliases, lookalikes, repeated_names]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|RAVI PHARMACEUTICALS (PVT.) LIMITED]]
+    Human Resources Department
+
+    Ref: RPL/HR/2026/0417
+    Date: 11 August 2026
+
+    Mr. [[NAME:p2|Danish Saleem Awan]]
+    [[ADDRESS:a1|House No. 8, Street 21, Chaklala Scheme III, Rawalpindi]]
+
+    Subject: OFFER OF EMPLOYMENT - [[NOT:n2|ASSISTANT MANAGER QUALITY CONTROL]]
+
+    Dear Mr. [[NAME:p2|Awan]],
+
+    Further to your interview held on 4 August 2026, we are pleased to offer you the position of Assistant Manager Quality Control at our plant on [[NOT:n3|Kahuta Road]], on the following terms:
+
+    1. Gross salary: Rs. 285,000 per month.
+    2. Probation: [[DEADLINE:d1|six (6) months from the date of joining]], extendable once by [[DEADLINE:d2|three months]].
+    3. Joining date: on or before [[DEADLINE:d3|1 September 2026]].
+    4. Notice period after confirmation: [[DEADLINE:d4|one (1) month]] or salary in lieu thereof.
+    5. You will report to Dr. [[NAME:p3|Fahad Mansoor]], [[NOT:n4|Plant Manager]].
+
+    Please sign and return the duplicate copy of this letter [[DEADLINE:d5|within seven (7) days]] as a token of your acceptance, failing which this offer shall lapse. [[NAME:p2|Danish]], we look forward to welcoming you to the team.
+
+    Yours sincerely,
+
+    [[NAME:p1|Lubna Farooqi]]
+    [[NOT:n5|Head of Human Resources]]
+    [[EMAIL:e1|lubna.farooqi@example.pk]]
+- id: p6-e02
+  document_type: employment
+  features: [table, untitled_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT CONTRACT - SUMMARY OF PARTICULARS
+
+    Employer: [[NOT:n1|Sindh Coastal Logistics (Pvt.) Ltd.]]
+    Signed for the Employer by: [[NAME:p1|Rashid Ali Soomro]], [[NOT:n2|General Manager]]
+    Employee: [[NAME:p2|Kainat Bano]]
+    Father's name: [[NAME:p3|Abdul Sattar]]
+    CNIC: [[CNIC:c1|42301-5562017-8]]
+    Address: [[ADDRESS:a1|Flat A-12, Shahnaz Arcade, Block 7, Federal B Area, Karachi]]
+    Mobile: [[PHONE:ph1|0331-2290184]]
+
+    | Component | Monthly (Rs.) |
+    |---|---|
+    | Basic | 95,000 |
+    | House rent | 42,750 |
+    | Utilities | 9,500 |
+    | Conveyance | 12,000 |
+    | Total | 159,250 |
+
+    Salary account: [[ACCOUNT:ac1|PK07HABB0012347900218803]] (title: [[NAME:p2|Kainat Bano]])
+    Salary paid: [[DEADLINE:d1|by the last working day of each month]]
+    Contract period: [[DEADLINE:d2|two years from 15 September 2026]]
+    Termination: [[DEADLINE:d3|30 days' written notice]] by either side
+    Place of work: [[NOT:n3|Port Qasim]] terminal office
+- id: p6-e03
+  document_type: employment
+  features: [urdu_script, repeated_names, deadlines, aliases]
+  parties: [p1, p2]
+  text: |
+    تقرری نامہ
+
+    بنام: محترمہ [[NAME:p2|شمیم اختر]] دختر [[NAME:p3|محمد صادق]]
+    پتہ: [[ADDRESS:a1|مکان نمبر 230، گلی نمبر 11، محلہ گلزار مدینہ، بہاولپور]]
+    شناختی کارڈ نمبر: [[CNIC:c1|31202-6648103-2]]
+
+    محترمہ [[NAME:p2|شمیم]] صاحبہ،
+    آپ کو [[NOT:n1|الفلاح پبلک سکول]] میں بطور [[NOT:n2|اردو ٹیچر]] تعینات کیا جاتا ہے۔ آپ کی تنخواہ 42,000 روپے ماہانہ ہوگی۔
+
+    1۔ آپ [[DEADLINE:d1|15 ستمبر 2026 تک]] ڈیوٹی جوائن کریں گی۔
+    2۔ آزمائشی مدت [[DEADLINE:d2|تین ماہ]] ہوگی۔
+    3۔ ملازمت چھوڑنے کی صورت میں [[DEADLINE:d3|ایک ماہ کا نوٹس]] دینا ہوگا۔
+
+    Principal: [[NAME:p1|Zahida Parveen]] ([[NAME:p1|زاہدہ پروین]])
+    رابطہ: [[PHONE:ph1|062-2884610]]
+    Copy: [[NAME:p2|Shamim Akhtar]] personal file
+- id: p6-e04
+  document_type: employment
+  features: [roman_urdu, untitled_names, deadlines, overlap]
+  parties: [p1, p2]
+  text: |
+    Driver ki naukri ka muahida
+
+    Aaj 1 July 2026 ko Brig. (R) [[NAME:p1|Arshad Javed Minhas]] ke ghar par yeh tay paaya ke [[NAME:p2|Gul Zaman]] walad [[NAME:p3|Sher Zaman]], card number [[CNIC:c1|15602-4471093-7]], gaari chalane ki naukri karega.
+
+    - Tankhwah: 45,000 rupay mahana, [[DEADLINE:d1|har mahine ki 1 se 3 tareekh ke darmiyan]] di jayegi.
+    - Duty ka waqt subah 7 se shaam 7, Itwaar chutti.
+    - [[NAME:p2|Gul Zaman]] ko servant quarter diya jayega jo [[ADDRESS:a1|kothi [[NAME:p1|Arshad Minhas]], 14-A, Askari 10, Sector F, Lahore Cantt]] ke peechay hai.
+    - Agar naukri chhorni ho to [[DEADLINE:d2|15 din pehle]] batana hoga, warna ek hafte ki tankhwah kati jayegi.
+    - Pehle [[DEADLINE:d3|teen mahine]] trial par honge.
+
+    [[NAME:p2|Gul Zaman]] ka gaon ka pata: [[ADDRESS:a2|Mauza Shahdara, Tehsil Matta, District Swat]]
+    Rishtedar ka number (bhai [[NAME:p4|Noor Zaman]]): [[PHONE:ph1|0342-9081736]]
+
+    Dastakhat malik: ________   Angootha mulazim: ________
+- id: p6-e05
+  document_type: employment
+  features: [ocr_errors, lookalikes, repeated_names]
+  parties: [p2]
+  text: |
+    EXPERlENCE CERTIFICATE
+    [[NOT:n1|Ghazi Engineering W0rks]]
+    (scanned from letterhead - stamp partly covers text)
+
+    This is to certify that Mr. [[NAME:p2|Naveed]]
+    ...
+    [[NAME:p2|Naveed Ul1ah Khattak]] s/o [[NAME:p3|Hayat Ullah Khatt
+    ak]], CNIC No. [[CNIC:c1|l7301-9934Ol2-5]], worked with us as [[NOT:n2|Workshop Superv1sor]] from 0l-03-2019 to 3l-07-2026.
+
+    During this period Mr. [[NAME:p2|Kh4ttak]] remained honest, hard working and punctual. He leaves the company of his own accord and we have no objection to his joining any other organisation.
+
+    For any verification please contact the undersigned.
+
+    [[NAME:p1|Ijaz Ahrned Durrani]]
+    Proprietor
+    [[PHONE:ph1|091-58l 2207]]
+- id: p6-e06
+  document_type: employment
+  features: [deadlines, aliases, repeated_names]
+  parties: [p1, p2]
+  text: |
+    PRIVATE & CONFIDENTIAL
+
+    Date: 28 September 2026
+
+    Ms. [[NAME:p2|Sidra Mubeen Chughtai]]
+    Employee No. 2291
+    [[ADDRESS:a1|House 4-C, Lane 3, Rehman Villas, Phase 2, Bahria Town, Islamabad]]
+
+    TERMINATION OF EMPLOYMENT
+
+    Dear Ms. [[NAME:p2|Chughtai]],
+
+    This refers to the inquiry conducted under the chairmanship of [[NAME:p3|Kamal Haider Zaidi]] into the complaint dated 2 August 2026. Having considered the inquiry report and your reply, the management has decided to terminate your employment with effect from [[DEADLINE:d1|30 September 2026]].
+
+    1. You will be paid one month's salary in lieu of notice.
+    2. Your final settlement, including leave encashment and provident fund, will be processed [[DEADLINE:d2|within 30 days of the date of this letter]] after clearance from all departments.
+    3. You are required to return your laptop, access card and company SIM ([[PHONE:ph1|0300-8559210]]) [[DEADLINE:d3|by 5:00 pm on 30 September 2026]].
+    4. You may file an appeal to the Managing Director [[DEADLINE:d4|within 15 days]] of receipt of this letter.
+
+    [[NAME:p2|Sidra]], we wish you well in your future endeavours.
+
+    [[NAME:p1|Asim Rauf]]
+    Manager Human Resources
+- id: p6-e07
+  document_type: employment
+  features: [untitled_names, repeated_names, lookalikes, deadlines, aliases]
+  parties: [p1, p2]
+  text: |
+    Acceptance of resignation
+
+    [[NAME:p2|Haris Wajid Butt]]'s resignation dated 1 September 2026 has been accepted.
+
+    His last working day will be [[DEADLINE:d1|30 September 2026]]. [[NAME:p3|Ayesha Kamran]] from Accounts will prepare the final settlement [[DEADLINE:d2|within 15 days]] and [[NAME:p2|Haris]] will hand over the [[NOT:n1|Project Indus Bloom]] files to [[NAME:p4|Taimoor Ashraf]].
+
+    Approved: [[NAME:p1|Nasreen Malik]]
+    cc: [[NAME:p2|Haris Wajid Butt]], [[EMAIL:e1|haris.butt@example.com]]
+- id: p6-e08
+  document_type: employment
+  features: [table, ocr_errors, untitled_names, lookalikes]
+  parties: [p2, p3, p4, p5, p6]
+  text: |
+    SALARY TRANSFER SHEET - SEPTEMBER 2026
+    Branch: [[NOT:n1|Gulberg Main Branch]]   Payroll officer: [[NAME:p1|Mudassar Hanif]]
+
+    | S.No | Employee | Account / IBAN | Net (Rs.) |
+    |---|---|---|---|
+    | 1 | [[NAME:p2|Rabia Saeed]] | [[ACCOUNT:ac1|PK51ALFH0219001004877132]] | 118,400 |
+    | 2 | [[NAME:p3|Junaid Khalil]] | [[ACCOUNT:ac2|PK2O MUCB 1440 5519 0003 2287]] | 96,250 |
+    | 3 | [[NAME:p4|Shumaila Yaqub]] | [[ACCOUNT:ac3|0201 6638 1009 47]] | 74,000 |
+    | 4 | [[NAME:p5|Atif Rehrnan]] | [[ACCOUNT:ac4|PK88BAHL00l2O9810066345l]] | 131,900 |
+    | 5 | [[NAME:p6|Mehboob Elahi]] | [[ACCOUNT:ac5|PK19UNIL0109000227814460]] | 58,700 |
+
+    Total: 479,250
+    Checked by: [[NAME:p7|Sana Ullah Khan]]
+    Remarks: [[NAME:p5|Atif Rehman]] account changed this month, old account closed.
+- id: p6-e09
+  document_type: employment
+  features: [overlap, deadlines, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT AGREEMENT
+
+    This Employment Agreement is made on 2 October 2026 between [[NOT:n1|Kohsar Health Foundation]], a trust registered in [[NOT:n2|Abbottabad]], acting through its Executive Director Dr. [[NAME:p1|Samina Jadoon]] (the "Employer"), and [[NAME:p2|Muhammad Bilal Tanoli]], son of [[NAME:p3|Muhammad Riaz Tanoli]], residing at [[ADDRESS:a1|Upper storey, house of Haji [[NAME:p4|Akbar Khan Jadoon]], Mohallah Kehal, Abbottabad]] (the "Employee").
+
+    1. Position. The Employee is appointed as Field Coordinator for the [[NOT:n3|Galiyat Mother and Child Health Programme]].
+    2. Term. [[DEADLINE:d1|Eighteen (18) months from 15 October 2026]], subject to continued donor funding.
+    3. Reporting. The Employee shall report weekly to the Executive Director.
+    4. Leave. Twenty days of annual leave, to be applied for [[DEADLINE:d2|at least seven days in advance]].
+    5. Termination. Either party may end this Agreement on [[DEADLINE:d3|one month's written notice]].
+    6. Note. [[NAME:p4|Akbar Khan Jadoon]] is the Employee's landlord and is not related to Dr. [[NAME:p1|Samina Jadoon]].
+
+    For the Employer: [[NAME:p1|Samina Jadoon]]
+    Employee: [[NAME:p2|M. Bilal Tanoli]]
+    Mobile: [[PHONE:ph1|0313-9927405]]
+- id: p6-e10
+  document_type: employment
+  features: [aliases, deadlines, repeated_names, urdu_script]
+  parties: [p1, p2]
+  text: |
+    SHOW CAUSE NOTICE
+
+    To: [[NAME:p2|Rafique Ahmed Laghari]] ([[NAME:p2|رفیق احمد لغاری]]), Store Keeper, Ticket No. 0773
+
+    It has been reported by the Section In-charge, [[NAME:p3|Ghulam Mustafa Shar]], that on 19 September 2026 you were found absent from duty during the night shift, and that 14 bags of urea were missing from the store under your charge.
+
+    You, [[NAME:p2|Rafique]], are hereby directed to explain in writing [[DEADLINE:d1|within three (3) days of receipt of this notice]] why disciplinary action should not be taken against you under the standing orders.
+
+    If no reply is received from Mr. [[NAME:p2|Laghari]] [[DEADLINE:d2|by 3 October 2026]], it will be presumed that he has no defence to offer and the matter will be decided ex parte.
+
+    [[NAME:p1|Imtiaz Hussain Bhutto]]
+    Factory Manager
+
+    رسید: نوٹس وصول کیا۔ دستخط [[NAME:p2|رفیق]]
+- id: p6-e11
+  document_type: employment
+  features: [roman_urdu, untitled_names, ocr_errors, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    > On Mon, 14 Sep 2026, [[NAME:p1|Fariha Anjum]] <[[EMAIL:e1|fariha.hr@example.pk]]> wrote:
+    > [[NAME:p2|Saqib]] ka joining letter bhej dein please, CEO sahab ne approve kar diya hai
+
+    [[NAME:p1|Fariha]] ji, letter attach hai. [[NAME:p2|Saqib Mehmood]] ka CNIC [[CNIC:c1|36103-882 1045-9]] hai, scan clear nahi tha to dobara check kar lein. Unka number [[PHONE:ph1|0300 69l 2283]] hai aur ghar ka pata [[ADDRESS:a1|Chak No. 115/9-L, Tehsil & District Sahiwal]].
+
+    Salary 80k fix hui hai, aur probation [[DEADLINE:d1|3 maheene]]. [[NAME:p2|saqib]] bhai ne kaha hai ke woh [[DEADLINE:d2|1 tareekh]] ko join kar lenge.
+
+    regards
+    [[NAME:p3|Waleed]]
+    (sent from mobile)
+- id: p6-e12
+  document_type: employment
+  features: [lookalikes, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    INTERNSHIP LETTER
+
+    [[NOT:n1|Jhelum Valley Software House]]
+    [[NOT:n2|Mirpur]], Azad Jammu & Kashmir
+
+    6 July 2026
+
+    [[NAME:p2|Hamna Zubair]]
+    BS Computer Science, [[NOT:n3|Mirpur University of Science and Technology]]
+    [[ADDRESS:a1|House 72, Sector F-2, Mirpur, AJK]]
+
+    We are happy to confirm your summer internship with our mobile apps team.
+
+    - Duration: [[DEADLINE:d1|eight weeks, from 13 July to 4 September 2026]]
+    - Stipend: Rs. 25,000 per month
+    - Supervisor: [[NAME:p3|Shoaib Akhtar Raja]], [[NOT:n4|Team Lead]]
+    - Assigned project: [[NOT:n5|Project Mangla]] (dam-tourism booking app)
+    - Completion report due [[DEADLINE:d2|within one week after the internship ends]]
+
+    Please bring your CNIC and a copy of your university card on the first day. Contact the office at [[PHONE:ph1|05827-448913]] if you have questions.
+
+    [[NAME:p1|Rizwana Kayani]]
+    Operations Manager
+- id: p6-e13
+  document_type: employment
+  features: [deadlines, repeated_names, aliases, lookalikes]
+  parties: [p1, p2]
+  text: |
+    SCHEDULE 3 - RESTRICTIVE COVENANTS
+    (forming part of the employment agreement of [[NAME:p2|Taha Nadeem Qureshi]])
+
+    3.1 During employment and [[DEADLINE:d1|for a period of twelve (12) months after the Termination Date]], [[NAME:p2|Taha Nadeem Qureshi]] shall not, within [[NOT:n1|Lahore]], [[NOT:n2|Karachi]] or [[NOT:n3|Islamabad]], be engaged in any business competing with [[NOT:n4|Paisa Pul Fintech (Pvt.) Ltd.]]
+
+    3.2 For [[DEADLINE:d2|eighteen (18) months after the Termination Date]], Mr. [[NAME:p2|Qureshi]] shall not solicit any client with whom he dealt [[DEADLINE:d3|in the last 12 months of his employment]].
+
+    3.3 [[NAME:p2|Taha]] shall notify the Company in writing [[DEADLINE:d4|within seven (7) days]] of accepting any new employment during the restricted period.
+
+    3.4 The Company's Chief People Officer, [[NAME:p1|Mahnoor Effendi]], may waive any of these restrictions in writing.
+
+    Initialled: [[NAME:p2|TNQ]] / [[NAME:p1|M.E.]]
+- id: p6-e14
+  document_type: employment
+  features: [table, untitled_names, overlap, urdu_script]
+  parties: [p1]
+  text: |
+    NEW JOINER CHECKLIST
+
+    | Field | Entry |
+    |---|---|
+    | Full name | [[NAME:p1|Areesha Noman]] |
+    | Name in Urdu | [[NAME:p1|اریشہ نعمان]] |
+    | CNIC | [[CNIC:c1|37101-4402871-0]] |
+    | Personal email | [[EMAIL:e1|areesha.noman@example.com]] |
+    | Mobile | [[PHONE:ph1|+92 334 5509127]] |
+    | Present address | [[ADDRESS:a1|c/o [[NAME:p2|Noman Saeed Abbasi]], House 19, Street 7, Dhok Kashmirian, Rawalpindi]] |
+    | Permanent address | [[ADDRESS:a2|Village Kotli Sattian, District Rawalpindi]] |
+    | Emergency contact | [[NAME:p2|Noman Saeed Abbasi]] (father), [[PHONE:ph2|0300-5127764]] |
+    | Bank | [[ACCOUNT:ac1|PK40BKIP0210000311298875]] |
+    | Line manager | [[NAME:p3|Faizan Hashmi]] |
+    | Laptop issued | Yes |

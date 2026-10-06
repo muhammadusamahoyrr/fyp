@@ -1,0 +1,22 @@
+# pii-eval-7 — AUTHORED and SEALED (2026-10-05)
+# Not to be read for tuning. Frozen and scored ONCE under rubric 3 (review-mode gate) with the
+# PRODUCTION pipeline (`production-rules-only`: rules only, no locator, decisions through the real
+# API validation, request from pii_pipeline.compose). Earlier gates (pii-eval-2..6) used rules +
+# GLiNER, a different pipeline.
+author: fresh agent session that had not seen pii-eval-1..6, the identity sets, the masking code or the harness
+author_given: only PII_DETECTION_RUBRIC_3.md (unchanged), the dataset name and the rubric's document types
+author_declared_reads: PII_DETECTION_RUBRIC_3.md only; no other repository file, dataset, code, note, git history or folder listing
+author_declared_actions: wrote four YAML files and a stdlib-only checker (deleted) in a scratch folder outside the repository; checked PyYAML was not importable; used grep/sed/rm on its own files only; no installs, no network
+author_labelling_choices_declared: titles (Mr, Mrs, Dr, Engr, Brig, Haji, Late, Mian, Sahib, bhai) outside NAME marks; clan names used as surnames (Chaudhry, Rana, Raja, Malik, Sardar, Khawaja, Syed, Sheikh) inside NAME marks; kin (wald/zoja/bint/son of) are separate persons; aliases, initials, nicknames, Urdu-script and OCR-damaged forms share the person's id; place names inside an address are not marked separately; business names built from personal names are NOT
+enforced: the brief named only the rubric; the author wrote outside the repository; its output was installed by copy and the scratch copy deleted
+not_enforced: a subagent cannot be technically prevented from reading repository files; independence rests on its instructions and declaration. Same model family as the engineer, not a human annotator
+rubric_3_sha256_when_authored: 1ec2dd48162d50b987468f021729c21f56d81e8840c8e519cb688d10352a0a16 (the approved rubric, unchanged)
+developer_view: loaded for counts, coverage and hashes only; no document text was displayed to the engineer
+dataset_sha256: 66f4de019ed61577bb532e92f96e13e02dfe7477321a63fb899aa8cd9719a52c
+documents: 48
+personal_spans: 402
+files:
+  pii-eval-7_employment.yaml: 8440c0643fd60fb96a1392b56f17a6f0dde55741e5dcf866a0563387a4a0bbdd
+  pii-eval-7_letter.yaml: daf47f1c705ec1186f7b2238000d74efd4c349544595495c4899accde30eaa89
+  pii-eval-7_nda.yaml: 21d20fe9eb1d12e6f87b9ab0899a61be3d5c9c80b82dc3b73f234df3ef076486
+  pii-eval-7_tenancy.yaml: 2b162ca4970ae53ed22c0f702b41b38873577211e1d26e3560aa0d1c264a4cff

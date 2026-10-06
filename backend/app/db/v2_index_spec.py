@@ -149,6 +149,16 @@ V2_INDEX_REQUIREMENTS: tuple[IndexSpec, ...] = (
              "races — every attempt reads 'no revision yet' — and this index is "
              "what makes all but one insert fail so the losers read the winner."),
     ),
+    # 2b â€” one prompt plan per client intent.
+    IndexSpec(
+        collection="document_draft_plans",
+        name="uniq_draft_plan_owner_key",
+        keys=(("owner_id", ASCENDING), ("create_idempotency_key", ASCENDING)),
+        kind=CORRECTNESS, unique=True,
+        why=("A retried prompt creates one plan. The plan is the mutable intake "
+             "state that precedes V2 generation, so duplicating it can later "
+             "produce two legal documents for one click."),
+    ),
     # 3 — one ledger row per document event.
     IndexSpec(
         collection="review_events",

@@ -460,6 +460,77 @@ def _check(rule: dict, draft: dict, context: dict) -> dict:
     }
 
 
+def _rules_for(template_type: str) -> tuple[list, str] | None:
+    """(rules, statutory basis) for a covered document type, or None.
+
+    The ONE place the rule set of an instrument is chosen, so the compliance
+    check (field drafts) and the requirements checklist (prose drafts) cannot
+    drift apart.
+    """
+    if template_type == PLAINT:
+        return (list(_PLAINT_RULES + _GENERAL_RULES),
+                "Order VII Rule 1 and Order VI, Code of Civil Procedure 1908")
+    if template_type == WRITTEN_STATEMENT:
+        return list(_GENERAL_RULES), "Order VI, Code of Civil Procedure 1908"
+    if template_type == WAKALATNAMA:
+        # Order III Rule 4 only. The Order VI pleading rules are NOT added:
+        # this is not a pleading, and r.4 does not incorporate them the way
+        # s.10 of the Guardians and Wards Act incorporates CPC verification.
+        return list(_WAKALATNAMA_RULES), "Order III Rule 4, Code of Civil Procedure 1908"
+    if template_type == GUARDIANSHIP:
+        # The Order VI rules are not bolted on by analogy: s.10(1) itself
+        # requires signing and verification "in manner prescribed by the Code of
+        # Civil Procedure, 1908 ... for a plaint".
+        return (list(_GUARDIANSHIP_RULES + _GENERAL_RULES),
+                "Section 10, Guardians and Wards Act 1890, read with Order VI, "
+                "Code of Civil Procedure 1908")
+    return None
+
+
+def _note_for(template_type: str) -> str:
+    return (_GUARDIANSHIP_NOTE if template_type == GUARDIANSHIP else
+            _WAKALATNAMA_NOTE if template_type == WAKALATNAMA else _CPC_NOTE)
+
+
+def requirements_for(template_type: str) -> dict:
+    """The particulars an instrument must contain, as a checklist to confirm.
+
+    For a lawyer's PROSE draft. `check_pleading` judges a field dict; a prose
+    draft has no fields, and deciding from free text that "the cause of action
+    is stated" would be a guess reported as a verdict -- a false pass in a
+    court document. So nothing here is marked satisfied or missing: every item
+    is `to_confirm`, and `checked` is False, stating exactly that.
+    """
+    found = _rules_for(template_type)
+    if found is None:
+        return {
+            "covered": False,
+            "checked": False,
+            "template_type": template_type,
+            "reason": "No statutory particulars are encoded for this document type.",
+            "items": [],
+            "effective_as_of": _EFFECTIVE,
+        }
+    rules, basis = found
+    return {
+        "covered": True,
+        "checked": False,
+        "template_type": template_type,
+        "basis": basis,
+        "source_note": _note_for(template_type),
+        "items": [{
+            "clause": r["clause"],
+            "requirement": r["text"],
+            "hint": r["hint"],
+            "status": "to_confirm",
+            **({"conditional_on": r["conditional_on"]} if r.get("conditional_on") else {}),
+        } for r in rules],
+        "advisory": ("A checklist of what the Code requires, for you to confirm against "
+                     "your draft. It has NOT been checked automatically."),
+        "effective_as_of": _EFFECTIVE,
+    }
+
+
 def check_pleading(template_type: str, draft: dict, context: dict | None = None) -> dict:
     """Compliance report for a drafted pleading.
 
@@ -472,26 +543,8 @@ def check_pleading(template_type: str, draft: dict, context: dict | None = None)
     """
     context = context or {}
 
-    if template_type == PLAINT:
-        rules = _PLAINT_RULES + _GENERAL_RULES
-        basis = "Order VII Rule 1 and Order VI, Code of Civil Procedure 1908"
-    elif template_type == WRITTEN_STATEMENT:
-        rules = _GENERAL_RULES
-        basis = "Order VI, Code of Civil Procedure 1908"
-    elif template_type == WAKALATNAMA:
-        # Order III Rule 4 only. The Order VI pleading rules are NOT added:
-        # this is not a pleading, and r.4 does not incorporate them the way
-        # s.10 of the Guardians and Wards Act incorporates CPC verification.
-        rules = _WAKALATNAMA_RULES
-        basis = "Order III Rule 4, Code of Civil Procedure 1908"
-    elif template_type == GUARDIANSHIP:
-        # The Order VI rules are not bolted on by analogy: s.10(1) itself
-        # requires signing and verification "in manner prescribed by the Code of
-        # Civil Procedure, 1908 ... for a plaint".
-        rules = _GUARDIANSHIP_RULES + _GENERAL_RULES
-        basis = ("Section 10, Guardians and Wards Act 1890, read with Order VI, "
-                 "Code of Civil Procedure 1908")
-    else:
+    found = _rules_for(template_type)
+    if found is None:
         return {
             "checked": False,
             "template_type": template_type,
@@ -500,9 +553,9 @@ def check_pleading(template_type: str, draft: dict, context: dict | None = None)
             "items": [],
             "effective_as_of": _EFFECTIVE,
         }
+    rules, basis = found
 
-    note = (_GUARDIANSHIP_NOTE if template_type == GUARDIANSHIP else
-            _WAKALATNAMA_NOTE if template_type == WAKALATNAMA else _CPC_NOTE)
+    note = _note_for(template_type)
     items = [_check(r, draft, context) for r in rules]
     missing = [i for i in items if i["status"] == Status.MISSING.value]
 

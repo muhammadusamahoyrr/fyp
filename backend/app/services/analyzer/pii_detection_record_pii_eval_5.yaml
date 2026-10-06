@@ -1,0 +1,252 @@
+# Kept PII detection result (pii-eval.2, pii-eval-5). Never overwritten.
+eval_version: pii-eval.2
+dataset: pii-eval-5
+dataset_sha256: 9f90faf1c25ee1097deec85d3f0769861893493ab862cb2784c942e569935443
+masking_version: pii-mask.4
+policy_sha256: c01ffa5065b55135a8708dde97565e61d29d0348c373bce01f9a5aae98e70e8c
+rubric_sha256: 1ec2dd48162d50b987468f021729c21f56d81e8840c8e519cb688d10352a0a16
+coverage:
+  documents: 54
+  per_feature:
+    repeated_names: 52
+    aliases: 34
+    urdu_script: 7
+    roman_urdu: 8
+    ocr_errors: 9
+    table: 8
+    overlap: 15
+    untitled_names: 38
+    lookalikes: 39
+    deadlines: 52
+  personal_spans: 577
+  features_short: []
+  met: true
+auto:
+  documents: 54
+  sent: 6
+  blocked: 48
+  sent_rate: 0.1111
+  blocked_by_reason:
+    address_not_delimited: 1
+    alias_unlinked: 47
+    name_variant: 4
+    ocr_unmasked: 4
+    unsupported_script: 7
+  blocked_only_by_policy: 0
+  party_scored_documents: 6
+  personal_spans: 574
+  character_coverage: 0.954
+  detected_rate: 0.9094
+  miss_rate: 0.0575
+  flagged_spans: 151
+  leaks: 1
+  unnecessary_blocks: 2
+  reviewer_marked: 0
+  unnecessary_block_rate: 0.037
+  uncertain_spans: 199
+  false_candidate_rate: 0.2111
+  party_consistency: 1.0
+  party_consistency_any_token: 1.0
+  address_character_coverage: 0.9322
+  deadline_preservation: 1.0
+  request_hygiene: 1.0
+  by_kind:
+    NAME:
+      spans: 382
+      detected: 364
+      missed: 7
+      leaked: 0
+      character_coverage: 0.9663
+    CNIC:
+      spans: 42
+      detected: 42
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    PHONE:
+      spans: 57
+      detected: 51
+      missed: 6
+      leaked: 0
+      character_coverage: 0.899
+    EMAIL:
+      spans: 19
+      detected: 19
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ACCOUNT:
+      spans: 9
+      detected: 9
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ADDRESS:
+      spans: 65
+      detected: 37
+      missed: 20
+      leaked: 1
+      character_coverage: 0.9322
+manual:
+  documents: 54
+  sent: 33
+  blocked: 21
+  sent_rate: 0.6111
+  blocked_by_reason:
+    leak_guard:long_number: 12
+    link_invalid: 2
+    unsupported_script: 7
+  blocked_only_by_policy: 7
+  party_scored_documents: 33
+  personal_spans: 574
+  character_coverage: 0.9572
+  detected_rate: 0.9111
+  miss_rate: 0.0575
+  flagged_spans: 151
+  leaks: 7
+  unnecessary_blocks: 0
+  reviewer_marked: 0
+  unnecessary_block_rate: 0.0
+  uncertain_spans: 199
+  false_candidate_rate: 0.2111
+  party_consistency: 0.8485
+  party_consistency_any_token: 0.8485
+  address_character_coverage: 0.9376
+  deadline_preservation: 1.0
+  request_hygiene: 1.0
+  by_kind:
+    NAME:
+      spans: 382
+      detected: 365
+      missed: 7
+      leaked: 1
+      character_coverage: 0.9693
+    CNIC:
+      spans: 42
+      detected: 42
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    PHONE:
+      spans: 57
+      detected: 51
+      missed: 6
+      leaked: 0
+      character_coverage: 0.899
+    EMAIL:
+      spans: 19
+      detected: 19
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ACCOUNT:
+      spans: 9
+      detected: 9
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ADDRESS:
+      spans: 65
+      detected: 37
+      missed: 20
+      leaked: 6
+      character_coverage: 0.9376
+gate:
+  thresholds:
+    review_leaks: 0
+    review_character_coverage: 0.99
+    review_address_character_coverage: 0.95
+    review_party_consistency: 1.0
+    review_deadline_preservation: 1.0
+    review_sent_rate: 0.6
+  checks:
+    review_leaks: true
+    review_character_coverage: true
+    review_address_character_coverage: true
+    review_party_consistency: false
+    review_deadline_preservation: true
+    review_sent_rate: true
+  report_only:
+  - auto
+  - manual
+  - request_hygiene
+  status: not_passed
+frozen_before_run: true
+pipeline:
+  rules: pii-mask.4
+  locator:
+    model: urchade/gliner_multi-v2.1
+    revision: 443d26d654e0324125a96bebd8e796c14ff2efe6
+    tokenizer_variant: as_loaded
+    cut_off: 0.3
+    labels:
+      person: personal_name
+      address: address
+      location: address
+review:
+  documents: 54
+  sent: 38
+  blocked: 16
+  sent_rate: 0.7037
+  blocked_by_reason:
+    leak_guard:long_number: 7
+    link_invalid: 2
+    unsupported_script: 7
+  blocked_only_by_policy: 7
+  party_scored_documents: 38
+  personal_spans: 574
+  character_coverage: 1.0
+  detected_rate: 1.0
+  miss_rate: 0.0
+  flagged_spans: 151
+  leaks: 0
+  unnecessary_blocks: 0
+  reviewer_marked: 53
+  unnecessary_block_rate: 0.0
+  uncertain_spans: 199
+  false_candidate_rate: 0.2111
+  party_consistency: 0.8421
+  party_consistency_any_token: 0.7632
+  address_character_coverage: 1.0
+  deadline_preservation: 1.0
+  request_hygiene: 1.0
+  by_kind:
+    NAME:
+      spans: 382
+      detected: 382
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    CNIC:
+      spans: 42
+      detected: 42
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    PHONE:
+      spans: 57
+      detected: 57
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    EMAIL:
+      spans: 19
+      detected: 19
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ACCOUNT:
+      spans: 9
+      detected: 9
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+    ADDRESS:
+      spans: 65
+      detected: 65
+      missed: 0
+      leaked: 0
+      character_coverage: 1.0
+label_review: developer_only
+approval: Detection only, on synthetic developer-labelled documents. Not a real-document or model-quality approval.
+created: '2026-10-04'

@@ -29,6 +29,7 @@ import asyncio
 import secrets
 
 import pytest
+from tests._engagement_support import disengage, engage  # D1: sharing needs an accepted engagement
 from fastapi import HTTPException
 
 import app.api.v1.routes.documents_v2 as v2api
@@ -243,7 +244,9 @@ async def kyc_lawyer(monkeypatch):
 
     monkeypatch.setattr(UserRepository, "find_by_id",
                         lambda self, uid: find_by_id(uid))
-    return LAWYER_ID
+    await engage(CLIENT["_id"], LAWYER_ID)
+    yield LAWYER_ID
+    await disengage(CLIENT["_id"], LAWYER_ID)
 
 
 async def _generated_doc(monkeypatch):
@@ -408,9 +411,11 @@ async def test_a_service_failure_is_503_with_a_code(enabled, monkeypatch,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def test_the_flag_is_off_by_default():
-    """Asserted directly. Every test above turns it on for itself; none of them
-    may leave it on, and shipping it on would expose an unmigrated path."""
-    assert settings.documents_v2 is False
+    """Asserted directly on the SHIPPED default -- the field's declared default,
+    not this machine's .env, which a developer may set either way. Shipping it
+    on would expose an unmigrated path."""
+    from app.core.config import Settings
+    assert Settings.model_fields["documents_v2"].default is False
 
 
 async def test_generate_and_submit_are_invisible_while_the_flag_is_off(

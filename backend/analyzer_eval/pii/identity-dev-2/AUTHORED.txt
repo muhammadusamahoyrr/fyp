@@ -1,0 +1,14 @@
+# identity-dev-2 -- DEVELOPMENT set (2026-10-05). NOT a release gate; never frozen or scored as one.
+# Written for the party-identity diagnosis after pii-eval-6 (ANALYZER_PII_IDENTITY.md, "Identity path audit").
+# Inspectable: the engineer reads it, traces it (scripts/analyzer_pii_identity_trace.py) and fixes against it.
+role: development (pii_evaluation.DATASET_ROLES)
+author: fresh agent session that had not seen pii-eval-1..6, the masking code, the harness or the earlier identity fixtures
+author_given: the identity contract (mention, person identity; equal spelling, surname, title or role alone never prove identity; one person may have several names), broad document types, the mark format, and a list of identity patterns to cover. It was NOT told about pii-eval-6's documents or the suspected one-document failure.
+author_declared_reads: no file outside its own scratch folder
+author_declared_actions: located a Python interpreter with `which`; installed PyYAML into a temporary folder inside its scratch folder with `py -m pip install --target _lib pyyaml` (a package download from the public index -- no document text was sent), used it to validate the file, then deleted the folder
+not_enforced: a subagent can technically read repository files; independence rests on its instructions and its declaration. Same model family as the engineer, not a human annotator -- shared blind spots are possible
+labelling_choices: AUTHOR_NOTES.md (the author's own notes, copied unchanged). Notably: honorifics outside NAME marks; initials inside; a name inside an address always a NEW id even when spelled like a party; firm/shop names containing a name marked NOT; several same-spelling pairs disambiguated only by wording ("not related", "Late")
+documents: 28
+name_marks: 257
+dataset_sha256: db346e4709fc1ad31c0b637dc6ae3c01cabd6a5bd47caf0ed72b5b38cb968acc
+gold_person_ids: stay in this file only; production masking never receives them (test_gold_labels_never_reach_production_masking)

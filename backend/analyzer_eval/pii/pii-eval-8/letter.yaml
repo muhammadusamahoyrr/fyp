@@ -1,0 +1,295 @@
+dataset: pii-eval-8
+label_review: developer_only
+documents:
+- id: p8-let-01
+  document_type: letter
+  features: [repeated_names, aliases, overlap, deadlines, lookalikes, untitled_names]
+  parties: [p1, p2]
+  text: |
+    LEGAL NOTICE
+
+    [[NOT:n1|Mirza and Haq Advocates]]
+
+    Date: 28 September 2026
+
+    To:
+    [[NAME:p2|Javed Akbar Sipra]]
+    [[ADDRESS:a1|House 70, Street 3, Officers Colony, Multan]]
+
+    Subject: Recovery of Rs. 1,450,000 owed to our client
+
+    Dear Sir,
+
+    We act for our client [[NAME:p1|Nabeel Hassan Gardezi]], resident of
+    [[ADDRESS:a2|Haveli of [[NAME:p3|Hassan Raza Gardezi]], Mohalla Pak Gate, Multan]].
+
+    1. On 2 January 2026 you borrowed Rs. 1,450,000 from our client and promised to repay it by
+       30 June 2026. A cheque issued by you was dishonoured on 3 July 2026.
+
+    2. Our client has repeatedly asked Mr. [[NAME:p2|Sipra]] to pay. Despite this, you have not paid a
+       single rupee.
+
+    3. You are hereby called upon to pay the full amount [[DEADLINE:d1|within 15 days of receipt of this notice]],
+       failing which our client will file a suit for recovery and a criminal complaint without further
+       notice.
+
+    4. Any settlement offer may be sent to the undersigned at [[EMAIL:e1|notices@mirzahaq-law.example.com]].
+       [[NAME:p1|Nabeel]] is willing to accept payment in two instalments if the first is paid
+       [[DEADLINE:d2|by 20 October 2026]].
+
+    5. The said [[NAME:p2|Javed]] is also liable for the costs of this notice, fixed at Rs. 25,000.
+
+    Copy to: [[NAME:p1|Nabeel Hassan Gardezi]] (client)
+
+    Advocate
+    [[NAME:p4|Saba Mirza]]
+- id: p8-let-02
+  document_type: letter
+  features: [urdu_script, roman_urdu, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    Bakhidmat Janab [[NAME:p2|Muhammad Anwar Khan]] sahib ([[NAME:p2|محمد انور خان]]),
+
+    Assalam-o-Alaikum. Main [[NAME:p1|Rubina Yasmeen]] ([[NAME:p1|روبینہ یاسمین]]) aap ki purani kirayedar hoon.
+    Guzarish hai ke meri security [[DEADLINE:d1|agle 10 din mein]] wapas kar dein. [[NAME:p2|Anwar]] sahib,
+    maine makan [[DEADLINE:d2|31 August 2026]] ko khali kar diya tha.
+
+    Mera number [[PHONE:t1|0334-6617092]] hai.
+
+    Shukriya,
+    [[NAME:p1|روبینہ یاسمین]]
+- id: p8-let-03
+  document_type: letter
+  features: [ocr_errors, overlap, repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    AUTHORITY LETTER (OCR scan)
+
+    I, [[NAME:p1|Zahida Perveen Cheema]], CNlC No. [[CNIC:c1|34101-5528l03-6]], resident of [[ADDRESS:a1|House
+    No. 9-A, Street 14, Peoples Colony No. 1, Gujranwala]], authorise my nephew [[NAME:p2|Umair
+    Shahzad]], CNIC No. [[CNIC:c2|34101-91O4472-5]], to collect my pension book from the
+    [[NOT:n1|District Accounts Office]].
+
+    [[NAME:p2|Umalr]] may also sign the receipt on my behalf. This authority is valid
+    [[DEADLINE:d1|until 31 December 2026]]. For confirmation please call Mrs. [[NAME:p1|Cheema]] on
+    [[PHONE:t1|0321-74 41980]].
+
+    The said [[NAME:p2|Umair]] lives at [[ADDRESS:a2|Portion of [[NAME:p1|Zahida Perveen Cheema]], House No. 9-A,
+    Street 14, Peoples Colony No. 1, Gujranwala]].
+
+    [[NAME:p1|Zahida Perveen Cheema]]
+- id: p8-let-04
+  document_type: letter
+  features: [table, untitled_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Quaid Model School]], Admissions Office
+
+    Dear Parent,
+
+    Please find below the fee schedule for your children for the 2026-27 session. Fees must be paid
+    [[DEADLINE:d1|by the 10th of each month]]; a late fee applies after that date.
+
+    | Student | Class | Guardian | Guardian mobile |
+    | [[NAME:p3|Ayaan Tariq]] | Grade 4 | [[NAME:p1|Tariq Nadeem Lone]] | [[PHONE:t1|0300-5541208]] |
+    | [[NAME:p4|Zoya Tariq]] | Grade 2 | [[NAME:p1|Tariq Nadeem Lone]] | [[PHONE:t1|0300-5541208]] |
+
+    The admission of [[NAME:p3|Ayaan Tariq]] and [[NAME:p4|Zoya Tariq]] will be confirmed once the first fee is received
+    [[DEADLINE:d2|within 7 days of this letter]].
+
+    Accounts Officer: [[NAME:p2|Shumaila Arshad]]
+- id: p8-let-05
+  document_type: letter
+  features: [lookalikes, untitled_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Habib Sweets and Bakers]]
+    [[NOT:n2|Anarkali Bazaar]] Branch
+
+    5 October 2026
+
+    Dear [[NAME:p1|Rashid Fareed Gondal]],
+
+    Thank you for your order of 40 kg of mithai for the wedding at [[NOT:n3|Shalimar Marquee]]. The order
+    will be ready [[DEADLINE:d1|by 4 pm on 17 October 2026]]. The balance of Rs. 64,000 is payable
+    [[DEADLINE:d2|before delivery]].
+
+    Regards,
+    [[NAME:p2|Hira Batool]]
+    Branch Manager, [[PHONE:t1|042-37 228 410]]
+- id: p8-let-06
+  document_type: letter
+  features: [roman_urdu, overlap, untitled_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    Wakalatnama ke baare mein khat
+
+    Mohtarma [[NAME:p2|Shagufta Parveen]] sahiba,
+
+    Aap ke bhai [[NAME:p3|Mumtaz Ali Shah]] ne bataya hai ke aap apne shohar [[NAME:p4|Ghazanfar Abbas]] se
+    khula lena chahti hain. Hum aap ka case lene ko tayyar hain.
+
+    Kaghzat [[DEADLINE:d1|agle hafte ke andar]] daftar mein jama karwa dein:
+    - nikahnama ki copy;
+    - [[NAME:p2|Shagufta]] ka CNIC, [[CNIC:c1|35401-6620913-0]];
+    - mojooda pata, jo hamare record mein [[ADDRESS:a1|Ghar [[NAME:p3|Mumtaz Ali Shah]] ka, Gali 7, Mohalla Sadiqabad,
+      Kasur]] likha hai.
+
+    Pehli peshi [[DEADLINE:d2|12 November 2026]] ko hai.
+
+    Wassalam,
+    [[NAME:p1|Rizwana Kokab]], Advocate
+- id: p8-let-07
+  document_type: letter
+  features: [ocr_errors, table, repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    COMPLAINT TO THE BRANCH MANAGER (scanned)
+
+    To: The Branch Manager, [[NOT:n1|Faisal Town Branch]], [[NOT:n2|Pak Crescent Bank Ltd.]]
+
+    Sir,
+
+    I, [[NAME:p1|Tayyaba Rafiq Hashmi]], hold the account below. Two debits that I did not make were
+    posted to it:
+
+    | Field | Detail |
+    | Account title | [[NAME:p1|Tayyaba Rafiq Hashmi]] |
+    | Account No. | [[ACCOUNT:b1|0072-0O45l89-01]] |
+    | IBAN | [[ACCOUNT:b2|PK52ZXQB00720O45l8901O04]] |
+    | Disputed debit 1 | Rs. 38,500 on 14 September 2026 |
+    | Disputed debit 2 | Rs. 61,200 on 16 September 2026 |
+
+    Please reverse these debits [[DEADLINE:d1|within 10 working days]], as required by your own complaint
+    policy. Ms. [[NAME:p1|Hashml]] can be reached on [[PHONE:t1|0300-84 21577]] or at
+    [[EMAIL:e1|tayyaba.hashmi@example.net]].
+
+    The relationship officer, [[NAME:p2|Kamran Saeed]], already has copies of my statements. If
+    [[NAME:p2|Kamran]] needs anything else, the said [[NAME:p1|Tayyaba]] will visit the branch.
+
+    [[NAME:p1|Tayyaba Rafiq Hashmi]]
+- id: p8-let-08
+  document_type: letter
+  features: [urdu_script, overlap, untitled_names, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    LETTER OF NO OBJECTION
+
+    I, [[NAME:p1|Shahnaz Begum Awan]] ([[NAME:p1|شہناز بیگم اعوان]]), owner of
+    [[ADDRESS:a1|Flat 5, Building of [[NAME:p3|Gul Zaman Awan]], Peshawar Road, Rawalpindi]], have no objection to
+    [[NAME:p2|Adnan Gul]] ([[NAME:p2|عدنان گل]]) using the flat as his postal address for his passport application.
+
+    This letter is valid [[DEADLINE:d1|for six months from the date below]].
+
+    [[NAME:p2|Adnan Gul]] is my nephew and has lived in the flat since 2024.
+
+    [[NAME:p1|شہناز بیگم اعوان]]
+    1 October 2026
+- id: p8-let-09
+  document_type: letter
+  features: [repeated_names, aliases, untitled_names, lookalikes, deadlines, overlap]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Tabassum and Co. Chartered Accountants]]
+
+    3 October 2026
+
+    The Visa Section
+    [[NOT:n2|Embassy of the Republic of Ostravia]]
+    [[NOT:n3|Diplomatic Enclave]], Islamabad
+
+    Subject: Employment and salary confirmation for Mr. [[NAME:p2|Ehtisham Ul Haq Paracha]]
+
+    Dear Sir or Madam,
+
+    We confirm that [[NAME:p2|Ehtisham Ul Haq Paracha]], holder of CNIC [[CNIC:c1|37405-2210984-7]], has
+    been employed by our firm since 1 February 2019. He currently holds the position of
+    [[NOT:n4|Audit Manager]] in our Rawalpindi office.
+
+    Mr. [[NAME:p2|Paracha]] draws a gross monthly salary of Rs. 465,000. His salary is credited each
+    month to his account [[ACCOUNT:b1|PK90QWRT0000117730294415]].
+
+    [[NAME:p2|Ehtisham]] has been granted leave from 1 December 2026 to 21 December 2026 to visit
+    his sister [[NAME:p3|Mahnoor Paracha]], who lives in Ostravia. He is required to resume duty
+    [[DEADLINE:d1|on 22 December 2026]], and his post will be kept for him until then.
+
+    The said [[NAME:p2|Ehtisham]] has been a reliable member of our staff. During his employment he
+    has led the audits of several clients, including [[NOT:n5|Potohar Cement Ltd.]] and
+    [[NOT:n6|Kohsar Mineral Water]].
+
+    His residential address on our records is
+    [[ADDRESS:a1|House of [[NAME:p4|Inam Ul Haq Paracha]], Street 11, Lalazar, Rawalpindi]].
+
+    Should you require any further information, please contact the undersigned on
+    [[PHONE:t1|051-55 60 412]] or [[EMAIL:e1|hr@tabassum-ca.example.com]]. We would be grateful if
+    any query could be raised [[DEADLINE:d2|within 14 days of this letter]], as the undersigned will be
+    on leave after that.
+
+    We also confirm that:
+    - [[NAME:p2|Ehtisham Ul Haq Paracha]] is a permanent employee and is not under notice;
+    - no disciplinary proceedings are pending against him;
+    - his annual increment is due on 1 February 2027.
+
+    Yours faithfully,
+
+    [[NAME:p1|Shireen Tabassum Malik]]
+    Partner
+- id: p8-let-10
+  document_type: letter
+  features: [roman_urdu, ocr_errors, repeated_names, aliases, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Darkhwast bara-e-qist (photocopy, OCR)
+
+    Bakhidmat Manager Sahib,
+
+    Main [[NAME:p1|Muhammad Arshad
+    Bhatt1]] walad [[NAME:p3|Muhammad Sharif Bhatti]], CNIC [[CNIC:c1|35501-88l3027-3]], aap ke idare se motorcycle
+    ki qiston par kharidari ki thi. Meri do qist reh gayi hain.
+
+    Guzarish hai ke mujhe [[DEADLINE:d1|30 November 2026 tak]] mohlat di jaye. [[NAME:p1|Arshad]] ka
+    mobile [[PHONE:t1|0306-41 9O 552]] hai. Guarantor [[NAME:p2|Liaquat Ali Kharal]] bhi is darkhwast se
+    muttafiq hain, aur [[NAME:p2|Kharal]] sahib zaroorat par khud aa jayen ge.
+
+    Aap ka mukhlis,
+    [[NAME:p1|Muhammad Arshad Bhatt1]]
+- id: p8-let-11
+  document_type: letter
+  features: [table, untitled_names, deadlines, lookalikes, ocr_errors]
+  parties: [p1, p2, p3]
+  text: |
+    [[NOT:n1|Society Office, Sukh Chayn Gardens]]
+    Notice to plot owners: outstanding maintenance charges
+
+    | Plot | Owner | Contact | Amount due (Rs.) |
+    | 14-A | [[NAME:p1|Nighat Sultana]] | [[PHONE:t1|0301-8442091]] | 42,000 |
+    | 27-C | [[NAME:p2|Abid Hussain Tarar]] | [[PHONE:t2|0322-61 07734]] | 18,500 |
+    | 31-B | [[NAME:p3|Fakhar Mahmood Gill]] | [[EMAIL:e1|fakhar.gill@example.org]] | 27,750 |
+
+    [[NAME:p1|Nighat Sultana]], [[NAME:p2|Abid Hussain Tarar]] and [[NAME:p3|Fakhar Mahmood Gill]] are requested to clear the dues
+    [[DEADLINE:d1|within 21 days of this notice]]. After that, the [[NOT:n2|Managing Committee]] may
+    disconnect the society water supply [[DEADLINE:d2|from 1 December 2026]].
+
+    Plot addresses for reference:
+    [[ADDRESS:a1|Plot 14-A, Street 2, Sukh Chayn Gardens, Lahore]]
+    [[ADDRESS:a2|Plot 27-C, Street 5, Sukh Chayn Gardens, Lahore]]
+    [[ADDRESS:a3|Plot 31-B, Street 6, Sukh Chayn Gardens, Lahore]]
+- id: p8-let-12
+  document_type: letter
+  features: [lookalikes, aliases, repeated_names, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    From: [[NAME:p1|Owais Qamar]] <[[EMAIL:e1|owais.qamar@example.com]]>
+    To: [[NAME:p2|Maheen Akhlaq]] <[[EMAIL:e2|maheen.akhlaq@example.net]]>
+    Subject: [[NOT:n1|Project Chandni Raat]] - venue contract
+
+    [[NAME:p2|Maheen]],
+
+    The venue contract from [[NOT:n2|Noor Mahal Banquets]] needs your signature
+    [[DEADLINE:d1|by Friday 9 October 2026]], otherwise the booking lapses. Ms. [[NAME:p2|Akhlaq]], please also
+    send the guest list to [[NOT:n3|Saleem Caterers]] [[DEADLINE:d2|at least ten days before the event]].
+
+    [[NAME:p3|Ali]] from the decor team will call you.
+
+    Thanks,
+    [[NAME:p1|Owais]]

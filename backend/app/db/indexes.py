@@ -20,6 +20,7 @@ from app.db.collections import (
     get_appointments_col,
     get_cases_col,
     get_deletion_tombstones_col,
+    get_document_draft_plans_col,
     get_document_revisions_col,
     get_event_outbox_col,
     get_review_events_col,
@@ -45,6 +46,8 @@ from app.db.collections import (
     get_ws_tickets_col,
 )
 
+from app.db.analyzer_index_spec import ANALYZER_INDEX_REQUIREMENTS, OBSOLETE_ANALYZER_INDEXES
+from app.db.review_request_index_spec import REVIEW_REQUEST_INDEX_REQUIREMENTS
 from app.db.v2_index_spec import (
     CODE_UNREADABLE,
     CORRECTNESS,
@@ -85,6 +88,32 @@ async def _create_from_spec(col, collection_name: str) -> None:
                 "index_create_failed collection=%s index=%s error_class=%s. "
                 "Dedupe the collection and recreate the index; it must be "
                 "valid before DOCUMENTS_V2 is enabled.",
+                spec.collection, spec.name, type(exc).__name__)
+
+
+async def _analyzer_indexes() -> None:
+    """The Document Analyzer's indexes, from its manifest.
+
+    Created whether or not DOC_ANALYZER is on -- the collections are empty
+    until it is, so this costs nothing -- so that turning the flag on meets
+    indexes that already exist. Failures log (class only) and continue, like
+    `_create_from_spec`; readiness is what refuses.
+    """
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    for collection, name in OBSOLETE_ANALYZER_INDEXES:
+        try:
+            await db[collection].drop_index(name)
+        except Exception:  # noqa: BLE001 -- absent is the goal
+            pass
+    for spec in ANALYZER_INDEX_REQUIREMENTS:
+        try:
+            await db[spec.collection].create_indexes([spec.model()])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "index_create_failed collection=%s index=%s error_class=%s. "
+                "It must be valid before DOC_ANALYZER is enabled.",
                 spec.collection, spec.name, type(exc).__name__)
 
 
@@ -185,12 +214,21 @@ async def validate_v2_indexes() -> list[IndexProblem]:
     that throws on a transient read failure reports "unhealthy" for a reason
     that has nothing to do with the indexes.
     """
+    return await _validate_specs(V2_INDEX_REQUIREMENTS)
+
+
+async def _validate_specs(requirements) -> list[IndexProblem]:
+    """Every spec in `requirements` that the live database does not satisfy.
+
+    Shared by the V2 and analyzer manifests so both are judged by one
+    comparison (`evaluate`) and one unreadable-collection rule.
+    """
     from app.db.mongodb import get_database
 
     db = get_database()
     problems: list[IndexProblem] = []
 
-    collections = sorted({spec.collection for spec in V2_INDEX_REQUIREMENTS})
+    collections = sorted({spec.collection for spec in requirements})
     info_by_collection: dict[str, dict] = {}
     for collection in collections:
         try:
@@ -204,7 +242,7 @@ async def validate_v2_indexes() -> list[IndexProblem]:
                          f"(error_class={type(exc).__name__}); check database "
                          "connectivity and the application's read permissions")))
 
-    for spec in V2_INDEX_REQUIREMENTS:
+    for spec in requirements:
         info = info_by_collection.get(spec.collection)
         if info is None:
             continue   # already reported as unreadable
@@ -213,6 +251,72 @@ async def validate_v2_indexes() -> list[IndexProblem]:
             problems.append(problem)
 
     return problems
+
+
+async def validate_analyzer_indexes() -> list[IndexProblem]:
+    """Every requirement in `ANALYZER_INDEX_REQUIREMENTS` that is not satisfied.
+
+    Reads only. Refusal is not decided here: `services.analyzer.readiness`
+    turns a non-empty result into a closed analyzer when DOC_ANALYZER is on.
+    """
+    return await _validate_specs(ANALYZER_INDEX_REQUIREMENTS)
+
+
+# ── DOCUMENT REVIEW REQUEST INDEXES ──────────────────────────────────────────
+
+
+class MissingReviewRequestIndexes(RuntimeError):
+    """DOCUMENT_REVIEW_REQUESTS is on and an index it depends on is not valid."""
+
+
+async def _review_request_indexes() -> None:
+    """Review-request indexes, from their manifest. Created whether or not the
+    flag is on -- the collections are empty until it is -- so turning it on
+    meets indexes that already exist. Failures log (class only) and continue;
+    `enforce_review_request_indexes` is what refuses."""
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    for spec in REVIEW_REQUEST_INDEX_REQUIREMENTS:
+        try:
+            await db[spec.collection].create_indexes([spec.model()])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "index_create_failed collection=%s index=%s error_class=%s. "
+                "It must be valid before DOCUMENT_REVIEW_REQUESTS is enabled.",
+                spec.collection, spec.name, type(exc).__name__)
+
+
+async def validate_review_request_indexes() -> list[IndexProblem]:
+    """Every requirement in `REVIEW_REQUEST_INDEX_REQUIREMENTS` not satisfied.
+    Reads only; an empty list means every guarantee is enforced."""
+    return await _validate_specs(REVIEW_REQUEST_INDEX_REQUIREMENTS)
+
+
+async def enforce_review_request_indexes() -> list[IndexProblem]:
+    """At startup. OFF: report and return -- nothing writes these collections,
+    so a missing index cannot corrupt anything. ON: refuse to start, for a
+    query index as well as a correctness one: the one-open-request and
+    create-key indexes ARE the race guards, and the inbox index keeps a
+    lawyer's queue from becoming a collection scan."""
+    from app.core.config import settings
+
+    problems = await validate_review_request_indexes()
+    if not problems:
+        return []
+    correctness = [p for p in problems if p.kind == CORRECTNESS]
+    detail = "; ".join(str(p) for p in problems)
+    if not settings.document_review_requests:
+        logger.warning(
+            "review_request_indexes_invalid count=%d correctness=%d detail=%s. "
+            "DOCUMENT_REVIEW_REQUESTS is off, so nothing depends on them yet -- "
+            "they must be correct before it is enabled.",
+            len(problems), len(correctness), detail)
+        return problems
+    raise MissingReviewRequestIndexes(
+        "DOCUMENT_REVIEW_REQUESTS is enabled but its indexes are not in place: " + detail
+        + f". ({len(correctness)} of {len(problems)} are correctness guarantees.) "
+        "Fix them or disable DOCUMENT_REVIEW_REQUESTS.")
 
 
 async def check_v2_correctness_indexes() -> list[str]:
@@ -406,7 +510,22 @@ async def create_all_indexes() -> None:
     await _checkpoint_indexes()
     await _provenance_indexes()
     await _documents_v2_indexes()
+    await _analyzer_indexes()
     await _ocr_revision_indexes()
+    await _review_request_indexes()
+    await _vault_trash_indexes()
+
+
+async def _vault_trash_indexes() -> None:
+    """The Vault trash (services/vault_deletion.py): a client's "Recently
+    deleted" newest first, and the purge's due-date scan."""
+    from app.db.collections import get_deleted_documents_col
+
+    col = get_deleted_documents_col()
+    await col.create_indexes([
+        IndexModel([("client_id", ASCENDING), ("deleted_at", DESCENDING)], name="vault_trash_client_recent"),
+        IndexModel([("purge_after", ASCENDING)], name="vault_trash_purge_due"),
+    ])
 
 
 async def _provenance_indexes() -> None:
@@ -463,6 +582,17 @@ async def _documents_v2_indexes() -> None:
     await revisions.create_indexes([
         IndexModel([("document_id", ASCENDING), ("created_at", DESCENDING)]),
         IndexModel([("status", ASCENDING), ("lease_expires_at", ASCENDING)]),
+    ])
+
+    # Prompt plans are short-lived workflow state, not legal artifacts.  The
+    # unique owner/key pair makes a lost create response replay the same plan;
+    # expiry removes abandoned prompts without touching generated documents.
+    await _create_from_spec(get_document_draft_plans_col(),
+                            "document_draft_plans")
+    await get_document_draft_plans_col().create_indexes([
+        IndexModel([("owner_id", ASCENDING), ("updated_at", DESCENDING)]),
+        IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0,
+                   name="ttl_document_draft_plans"),
     ])
 
     # _id IS the logical_event_id, so the ledger row is idempotent on upsert.

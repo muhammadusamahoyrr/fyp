@@ -28,7 +28,7 @@ export const BLANK_TEMPLATE = {
 
 export const TEMPLATES = [
     { id: 1, name: "Dissolution of Marriage Application", cat: "Family", desc: "Starter petition under the Dissolution of Muslim Marriages Act, 1939 and MFLO 1961 — parties, marriage, grounds and prayer, with placeholders to complete.", icon: "⚖️", popular: true },
-    { id: 2, name: "Plaint — Civil Suit", cat: "Litigation", desc: "Starter plaint under Order VII Rule 1 CPC — parties, facts, cause of action, jurisdiction and prayer, with placeholders to complete.", icon: "🏛️", popular: true },
+    { id: 2, name: "Plaint — Civil Suit", template_type: "plaint_civil", cat: "Litigation", desc: "Starter plaint under Order VII Rule 1 CPC — parties, facts, cause of action, jurisdiction and prayer, with placeholders to complete.", icon: "🏛️", popular: true },
     BLANK_TEMPLATE,
 ];
 

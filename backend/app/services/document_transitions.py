@@ -269,17 +269,18 @@ async def submit(
             or rev.get("pdf_sha256") != expected_pdf_sha256):
         raise ConflictError("This document changed since you loaded it — reload and try again.")
 
-    # KYC gate: only a KYC-verified lawyer may receive a submission.
+    # The recipient must be a registered lawyer. NO KYC gate (decision D2,
+    # 2026-10-03): no KYC process exists, so a `kyc_verified` flag proves
+    # nothing; the client's ACCEPTED engagement with this lawyer (checked
+    # below) is what authorises the submission.
     from app.repositories.user_repo import UserRepository
     lawyer = await UserRepository().find_by_id(lawyer_id)
     if not lawyer or lawyer.get("role") != "lawyer":
         raise NotFoundError("Lawyer")
-    if not (lawyer.get("lawyer_profile") or {}).get("kyc_verified"):
-        raise AppValidationError("Lawyer is not yet KYC-verified")
 
     # ENGAGEMENT GATE. A case's documents go to that case's lawyer.
     #
-    # Only KYC was checked here, so the API accepted ANY verified lawyer in the
+    # Only KYC was once checked here, so the API accepted ANY flagged lawyer in the
     # system while the client UI quietly locked the choice to the engaged one. A
     # rule that lives in the interface and not the server is a rule that holds
     # for everyone using the product and for nobody using `curl` — and a client's
@@ -293,9 +294,11 @@ async def submit(
     # a client submitted to a lawyer they never named is a false record of
     # intent in an audit trail. A caller who names the wrong lawyer is told so.
     #
-    # No case, or a case with no lawyer engaged yet, means there is no
-    # engagement to contradict — the client picks, which is the point of
-    # picking.
+    # No case no longer means a free choice (decision D1, 2026-10-03): it let a
+    # client send a document to ANY KYC-flagged lawyer with no relationship at
+    # all. Every submission now needs an ACCEPTED engagement with the named
+    # lawyer -- on the document's case when it has one (document_sharing.py,
+    # checked below, after the case's own consistency checks).
     if doc.get("case_id"):
         case = await case_repo.find_by_id(doc["case_id"])
         # A DANGLING REFERENCE IS NOT AN ABSENCE OF CONSTRAINT.
@@ -320,6 +323,11 @@ async def submit(
             raise ForbiddenError(
                 "This case is engaged with another lawyer. Documents on a case "
                 "go to the lawyer engaged on it.")
+
+    # D1: the relationship authorises the submission, case or no case.
+    from app.services.document_sharing import require_accepted_engagement
+    await require_accepted_engagement(client_id=actor_id, lawyer_id=lawyer_id,
+                                      case_id=doc.get("case_id"))
 
     now = _now()
     # If resubmitting after an approval, preserve the old approval in history.

@@ -75,3 +75,14 @@ def test_start_refuses_when_the_port_is_held():
     assert "_port_holder" in src
     # the refusal must come before the process is spawned
     assert src.index("_port_holder") < src.index("subprocess.Popen")
+
+
+def test_platform_start_scripts_use_the_single_instance_launcher():
+    backend = pathlib.Path(__file__).resolve().parents[1]
+    powershell = (backend / "start.ps1").read_text(encoding="utf-8")
+    batch = (backend / "start.bat").read_text(encoding="utf-8")
+
+    for source in (powershell, batch):
+        assert "scripts\\serve.py" in source
+        assert "uvicorn" not in source
+        assert "--reload" not in source

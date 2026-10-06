@@ -331,11 +331,13 @@ async def _finish_cleanup(task: asyncio.Task):
 
 
 async def _run_file(item: dict, timeout: float, *,
-                    ocr: dict | None = None) -> tuple[ExtractionResult, str]:
+                    ocr: dict | None = None,
+                    memory_limit_mb: int | None = None) -> tuple[ExtractionResult, str]:
     fid = str(item.get("file_id") or "")
     job = json.dumps({
         "files": [{"file_id": fid, "path": str(item.get("path") or ""),
-                   "content_type": str(item.get("content_type") or "")}],
+                   "content_type": str(item.get("content_type") or ""),
+                   "structure": bool(item.get("structure"))}],
         "budget_seconds": timeout,
         # Absent unless the caller asked. The child does no OCR work, and
         # imports no OCR module, when this is missing.
@@ -347,6 +349,9 @@ async def _run_file(item: dict, timeout: float, *,
     # OpenMP fan out would multiply this child's CPU footprint against the very
     # pool pressure the child exists to relieve.
     env.setdefault("OMP_NUM_THREADS", "1")
+    if memory_limit_mb:
+        from app.ai.process_limits import ENV_VAR
+        env[ENV_VAR] = str(int(memory_limit_mb))
 
     proc = None
     spawn = None
@@ -402,6 +407,11 @@ async def _run_file(item: dict, timeout: float, *,
             return _failure(ERR_INTERNAL), ""
         result = _result_from_payload(entry["result"])
         result.ocr_pages = _ocr_results_from_payload(entry.get("ocr"))
+        if item.get("structure"):
+            blocks = entry.get("blocks")
+            if not isinstance(blocks, list) or not all(isinstance(b, dict) for b in blocks):
+                return _failure(ERR_INTERNAL), ""
+            result.blocks = blocks
         return result, entry["text"]
     except (ValueError, TypeError, KeyError, AttributeError):
         logger.warning("extraction: malformed child response")
@@ -516,6 +526,23 @@ def _refuse_stale(
             checked[claim.file_id] = (_failure(ERR_STALE_INPUT), "")
 
     return checked
+
+
+async def extract_isolated(path: str, *, content_type: str = "", timeout: float,
+                           ocr: dict | None = None,
+                           memory_limit_mb: int | None = None,
+                           structure: bool = False) -> tuple[ExtractionResult, str]:
+    """One file in its own killable child, with optional hard memory cap.
+
+    For callers that need neither batching nor de-duplication (the Document
+    Analyzer runs one file per run under its own lease). Shares the same
+    concurrency semaphore and the same `_run_file`, so the timeout, the
+    process-tree kill and the response validation are exactly intake's.
+    """
+    async with _get_semaphore():
+        return await _run_file({"file_id": "f", "path": path, "content_type": content_type,
+                                "structure": structure},
+                               timeout, ocr=ocr, memory_limit_mb=memory_limit_mb)
 
 
 async def extract_one(path: str, file_id: str = "f",

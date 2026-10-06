@@ -88,7 +88,7 @@ async def test_the_obsolete_reviewer_index_is_gone(mongo):
         "the obsolete reviewer-keyed queue index is still created")
 
 
-async def test_the_manifest_is_exactly_these_seven(mongo):
+async def test_the_manifest_is_exactly_these_nine(mongo):
     """Pinned definitions.
 
     Every one of these decides either a guarantee or which queries are fast in
@@ -106,7 +106,10 @@ async def test_the_manifest_is_exactly_these_seven(mongo):
          (("document_id", 1), ("version", 1)), True, False, None, CORRECTNESS),
         ("document_revisions", "uniq_revision_document_idempotency",
          (("document_id", 1), ("idempotency_key", 1)), True, False, None,
-         CORRECTNESS),
+             CORRECTNESS),
+        ("document_draft_plans", "uniq_draft_plan_owner_key",
+         (("owner_id", 1), ("create_idempotency_key", 1)), True, False,
+         None, CORRECTNESS),
         # Mongo's generated name, not one we chose — production creates this
         # IndexModel without `name=`, and renaming it would make production try
         # to create a second index over the same keys, which Mongo refuses.

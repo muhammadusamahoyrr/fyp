@@ -24,6 +24,7 @@ import secrets
 
 import httpx
 import pytest
+from tests._engagement_support import disengage, engage  # D1: sharing needs an accepted engagement
 from fastapi import HTTPException
 from httpx import ASGITransport
 
@@ -86,8 +87,10 @@ async def clean(mongo):
         # Inside the try: a setup that fails half-way must still be cleaned up,
         # or its orphan rows collide with other tests' unique indexes.
         await get_users_col().insert_many([dict(CLIENT), dict(LAWYER)])
+        await engage(CLIENT["_id"], LAWYER["_id"])
         yield
     finally:
+        await disengage(CLIENT["_id"], LAWYER["_id"])
         await wipe()
 
 

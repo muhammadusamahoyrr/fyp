@@ -1,0 +1,267 @@
+dataset: pii-eval-8
+label_review: developer_only
+documents:
+- id: p8-nda-01
+  document_type: nda
+  features: [lookalikes, untitled_names, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|MUTUAL NON-DISCLOSURE AGREEMENT]]
+
+    This Agreement is entered into on 12 August 2026 between:
+
+    [[NOT:n2|Karakoram Agritech (Private) Limited]], a company incorporated in Pakistan, acting through its
+    [[NOT:n3|Chief Executive Officer]], [[NAME:p1|Haroon Saleem Abbasi]] ("Company A"); and
+
+    [[NOT:n4|Chenab Solar Works (Pvt.) Ltd.]], acting through its director, [[NAME:p2|Lubna Shaheen Akhtar]]
+    ("Company B").
+
+    1. PURPOSE
+       The parties wish to discuss a joint bid for [[NOT:n5|Project Sabz Tubewell]] (the "Purpose").
+
+    2. CONFIDENTIAL INFORMATION
+       Confidential Information means all technical, commercial and financial information disclosed
+       by one party to the other in connection with the Purpose, whether oral or written.
+
+    3. OBLIGATIONS
+       Each party shall keep the other's Confidential Information secret and use it only for the
+       Purpose. Disclosure to employees is allowed only on a need-to-know basis.
+
+    4. RETURN OF INFORMATION
+       Each party shall return or destroy the other's Confidential Information
+       [[DEADLINE:d1|within 14 days of a written request]].
+
+    5. TERM
+       This Agreement remains in force for [[DEADLINE:d2|three years from the date of signing]], and the
+       obligations of confidentiality survive for [[DEADLINE:d3|two years after termination]].
+
+    6. NOTICES
+       Notices to Company A go to Mr. [[NAME:p1|Abbasi]] at [[EMAIL:e1|h.abbasi@karakoram-agri.example.com]].
+       Notices to Company B go to Ms. [[NAME:p2|Akhtar]] at [[EMAIL:e2|lubna.akhtar@chenabsolar.example.org]].
+
+    7. NO LICENCE
+       Nothing in this Agreement grants a licence under any patent, trade mark or copyright.
+
+    8. REMEDIES
+       A breach may cause irreparable harm, and the injured party may seek an injunction in
+       addition to damages.
+
+    9. GOVERNING LAW
+       This Agreement is governed by the laws of Pakistan. The courts at [[NOT:n6|Islamabad]] have
+       exclusive jurisdiction.
+
+    10. ENTIRE AGREEMENT
+       This is the entire agreement on its subject and may be changed only in writing.
+
+    For Company A                              For Company B
+    [[NAME:p1|Haroon Saleem Abbasi]]                  [[NAME:p2|Lubna Shaheen Akhtar]]
+
+    Witnessed by [[NAME:p3|Kiran Zafar]] and [[NAME:p4|Danish Mukhtar]].
+- id: p8-nda-02
+  document_type: nda
+  features: [table, ocr_errors, untitled_names, deadlines, lookalikes]
+  parties: [p1, p2, p3]
+  text: |
+    CONFIDENTIALITY UNDERTAKING - SIGNATORY SHEET (scanned)
+
+    The persons below received the pricing file of [[NOT:n1|Mehran Ceramics Ltd.]] and undertake to keep it
+    confidential [[DEADLINE:d1|until 31 December 2028]].
+
+    | Name | CNIC | Mobile | Signed |
+    | [[NAME:p1|Shoaib Anwar Lodhi]] | [[CNIC:c1|42201-77l0934-5]] | [[PHONE:t1|0300-21 48877]] | yes |
+    | [[NAME:p2|Mariam Nasee1]] | [[CNIC:c2|42101-3O92187-6]] | [[PHONE:t2|0312-2O56419]] | yes |
+    | [[NAME:p3|Fahad Zia]] | [[CNIC:c3|42301-8820165-1]] | [[PHONE:t3|0345-2204716]] | yes |
+
+    Any copy must be returned [[DEADLINE:d2|within 7 days of the end of the tender]].
+- id: p8-nda-03
+  document_type: nda
+  features: [urdu_script, repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NON-DISCLOSURE AGREEMENT
+
+    Disclosing party: [[NAME:p1|Rizwan Saleem Chattha]] ([[NAME:p1|رضوان سلیم چٹھہ]]), proprietor of
+    [[NOT:n1|Chattha Spice House]]
+    Receiving party: [[NAME:p2|Nadia Farooq]] ([[NAME:p2|نادیہ فاروق]])
+
+    1. Mr. [[NAME:p1|Chattha]] will share his masala recipes with [[NAME:p2|Nadia]] so that she can
+       advise on packaging.
+    2. [[NAME:p2|Nadia]] shall not disclose the recipes to anyone [[DEADLINE:d1|for five years from today]].
+    3. All recipe cards shall be returned [[DEADLINE:d2|within 3 days of the end of the consultancy]].
+
+    Signed: [[NAME:p1|رضوان سلیم چٹھہ]]       [[NAME:p2|نادیہ فاروق]]
+- id: p8-nda-04
+  document_type: nda
+  features: [overlap, aliases, repeated_names, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    Letter Agreement on Confidentiality
+
+    To: [[NAME:p2|Salman Tariq Dar]]
+    [[ADDRESS:a1|c/o [[NAME:p3|Tariq Mahmood Dar]], House 5, Street 21, F-8/1, Islamabad]]
+
+    Dear [[NAME:p2|Salman]],
+
+    As discussed with you and [[NAME:p4|Ammara Khalid]] last week, you will review the draft business plan of my
+    bakery before it goes to the bank. By signing below you agree that:
+
+    (a) you will not share the plan or its figures with anyone, including your father;
+    (b) you will delete your copy [[DEADLINE:d1|within 10 days of sending your comments]]; and
+    (c) this undertaking lasts [[DEADLINE:d2|until 30 June 2028]].
+
+    If Mr. [[NAME:p2|Dar]] needs to show the plan to an accountant, he must first ask me in writing.
+
+    Yours sincerely,
+    [[NAME:p1|Fozia Naz Mirza]]
+    [[PHONE:t1|0331-5562094]]
+
+    Agreed: [[NAME:p2|Salman Tariq Dar]]
+- id: p8-nda-05
+  document_type: nda
+  features: [roman_urdu, lookalikes, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    NDA TERM SHEET
+
+    Disclosing Party ......... [[NOT:n1|Sohni Dharti Handicrafts]]
+    Represented by ........... Janab [[NAME:p1|Malik Allah Yar Khokhar]] sahib
+    Receiving Party .......... [[NAME:p2|Rana Abdul Ghafoor]]
+    Receiving Party CNIC ..... [[CNIC:c1|36302-4481077-9]]
+    Subject .................. Designs of the [[NOT:n2|Rang-e-Multan]] rug collection
+    Confidential period ...... [[DEADLINE:d1|four years from the effective date]]
+    Effective date ........... [[DEADLINE:d2|1 November 2026]]
+    Return of samples ........ [[DEADLINE:d3|within 15 days of the last meeting]]
+
+    Remarks: [[NAME:p1|Malik Allah Yar Khokhar]] sahib ne kaha ke designs ki photo bhi na li jaye.
+    [[NAME:p2|Rana Abdul Ghafoor]] ne iqrar kiya. [[NAME:p1|Malik Allah Yar Khokhar]] ki taraf se
+    copy [[NAME:p2|Rana]] sahib ko de di gayi.
+- id: p8-nda-06
+  document_type: nda
+  features: [ocr_errors, repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NON-DISCLOSURE AGREEMENT (OCR text from photocopy)
+
+    This NDA is between [[NOT:n1|Gandhara Pharma Distributors]] (the "Company") and
+    [[NAME:p1|Asif
+    Nadeem Gil1]], CNlC No. [[CNIC:c1|17301-9O45128-7]], resident of [[ADDRESS:a1|Flat 3, Khyber Towers,
+    University Town, Peshawar]] (the "Recipient").
+
+    1. The Recipient will see the Company's distributor price lists while auditing stock.
+    2. Mr. [[NAME:p1|Gi11]] shall not copy, photograph or forward any price list.
+    3. The said [[NAME:p1|Asif]] shall return all audit papers [[DEADLINE:d1|within 5 working days of the audit]].
+    4. These duties continue [[DEADLINE:d2|for three years after the audit ends]].
+
+    Company contact: [[NAME:p2|Shazia Rehman]], [[PHONE:t1|091-58 40213]],
+    [[EMAIL:e1|shazia.rehman@gandhara-pharma.example.com]]
+
+    Recipient: [[NAME:p1|Asif Nadeem Gil1]]
+- id: p8-nda-07
+  document_type: nda
+  features: [aliases, repeated_names, untitled_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    CONSULTANT CONFIDENTIALITY AGREEMENT
+
+    Between [[NOT:n1|Thar Coal Analytics Ltd.]] (the "Client") and [[NAME:p1|Zainab Hamid Laghari]]
+    (the "Consultant"), [[ADDRESS:a1|Bungalow 14, Qasimabad Phase 2, Hyderabad]].
+
+    Background. The Client is preparing [[NOT:n2|Annual Mine Safety Report 2026]]. [[NAME:p1|Zainab]] will review
+    the incident data. The Client's liaison is [[NAME:p2|Sikandar Memon]].
+
+    1. Ms. [[NAME:p1|Laghari]] shall treat all incident data as confidential.
+    2. [[NAME:p1|Zainab]] may discuss the data only with [[NAME:p2|Sikandar Memon]] and the [[NOT:n3|Safety Committee]].
+    3. Drafts shall be deleted [[DEADLINE:d1|within 30 days after the report is published]].
+    4. The duty of confidence lasts [[DEADLINE:d2|for five years from 1 October 2026]].
+
+    Signed for the Client: [[NAME:p2|Sikandar Memon]]
+    Signed by the Consultant: [[NAME:p1|Zainab Hamid Laghari]]
+- id: p8-nda-08
+  document_type: nda
+  features: [table, untitled_names, lookalikes, deadlines]
+  parties: [p1, p2, p3, p4]
+  text: |
+    SCHEDULE 2 - AUTHORISED RECIPIENTS UNDER THE NDA WITH [[NOT:n1|BOLAN MINERALS CORPORATION]]
+
+    | Recipient | Role | Email | Access ends |
+    | [[NAME:p1|Yasir Mengal]] | Geologist | [[EMAIL:e1|yasir.mengal@example.net]] | [[DEADLINE:d1|31 January 2027]] |
+    | [[NAME:p2|Quratulain Marri]] | Lawyer | [[EMAIL:e2|qmarri@example.org]] | [[DEADLINE:d2|30 April 2027]] |
+    | [[NAME:p3|Hamza Nasir Kakar]] | Surveyor | [[EMAIL:e3|hamza.kakar@example.com]] | [[DEADLINE:d3|31 March 2027]] |
+    | [[NAME:p4|Erum Saeed]] | Accountant | [[EMAIL:e4|erum.saeed77@example.com]] | [[DEADLINE:d4|28 February 2027]] |
+
+    A recipient whose access has ended shall destroy all copies [[DEADLINE:d5|within 48 hours]].
+    The [[NOT:n2|Quetta Field Office]] keeps the signed originals.
+- id: p8-nda-09
+  document_type: nda
+  features: [repeated_names, aliases, deadlines, lookalikes, overlap]
+  parties: [p1, p2]
+  text: |
+    ONE-WAY NON-DISCLOSURE AGREEMENT
+
+    Discloser: [[NAME:p1|Omer Farooq Sheikh]], trading as [[NOT:n1|Sheikh Brothers Electronics]],
+    [[ADDRESS:a1|Shop 17, Hall Road, Lahore]]
+
+    Recipient: [[NAME:p2|Danyal Ahsan]], [[ADDRESS:a2|Flat 2, Building of [[NAME:p3|Ahsan Rafi Butt]], Nisbat Road,
+    Lahore]], mobile [[PHONE:t1|0302-4417765]]
+
+    1. [[NAME:p1|Omer]] will show [[NAME:p2|Danyal]] his supplier list so that [[NAME:p2|Danyal]] can quote for
+       an inventory software system.
+    2. Mr. [[NAME:p2|Ahsan]] will not contact any supplier on the list directly
+       [[DEADLINE:d1|for 24 months from the date of this agreement]].
+    3. The supplier list shall be returned [[DEADLINE:d2|by 15 December 2026]].
+    4. The said [[NAME:p1|Omer]] may end discussions at any time by email to
+       [[EMAIL:e1|danyal.ahsan@example.com]].
+
+    [[NAME:p1|Omer Farooq Sheikh]]                [[NAME:p2|Danyal Ahsan]]
+- id: p8-nda-10
+  document_type: nda
+  features: [urdu_script, overlap, untitled_names, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY AGREEMENT - FAMILY BUSINESS VALUATION
+
+    Parties: [[NAME:p1|Tanveer Akhtar Rana]] ([[NAME:p1|تنویر اختر رانا]]) and [[NAME:p2|Samina Kausar]]
+    ([[NAME:p2|ثمینہ کوثر]]).
+
+    [[NAME:p2|Samina]]'s address for notices: [[ADDRESS:a1|House of [[NAME:p3|Kausar Parveen]], Street 8, Satellite Town,
+    Bahawalpur]].
+
+    [[NAME:p1|Tanveer Akhtar Rana]] will share the accounts of the family flour mill with [[NAME:p2|Samina Kausar]] for a
+    valuation. The accounts shall not be shown to any other family member
+    [[DEADLINE:d1|until the valuation report is delivered]], and copies shall be returned
+    [[DEADLINE:d2|within 7 days of delivery]].
+
+    Signatures: [[NAME:p1|تنویر اختر رانا]]      [[NAME:p2|ثمینہ کوثر]]
+- id: p8-nda-11
+  document_type: nda
+  features: [ocr_errors, table, overlap, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    NDA - KEY DATA (scanned annex, OCR)
+
+    | Field | Detail |
+    | Discloser | [[NOT:n1|Pak-Gulf Seafoods Exporters]] |
+    | Discloser signatory | [[NAME:p1|Muhammad Shakee1 Baig]] |
+    | Recipient | [[NAME:p2|Noor-ul-Ain Hashmi]] |
+    | Recipient CNIC | [[CNIC:c1|42201-55O3986-2]] |
+    | Recipient address | [[ADDRESS:a1|Apartment 7, Residence of [[NAME:p3|Rukhsana Hashmi]], Block 13-D, Gulshan-e-Iqbal, Karachi]] |
+    | Recipient phone | [[PHONE:t1|0321-2O9 8846]] |
+    | Confidential period | [[DEADLINE:d1|three years from 1 September 2026]] |
+    | Return of samples | [[DEADLINE:d2|within 10 days of request]] |
+
+    Signed: [[NAME:p1|Muhammad Shakee1 Baig]]          [[NAME:p2|Noor-ul-Ain Hashmi]]
+- id: p8-nda-12
+  document_type: nda
+  features: [roman_urdu, untitled_names, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    Raazdari ka Muahida (Confidentiality Agreement)
+
+    Yeh muahida [[NAME:p1|Pervaiz Iqbal Sandhu]] aur [[NAME:p2|Gulnaz Bibi]] ke darmiyan hai.
+
+    1. [[NAME:p1|Pervaiz Iqbal Sandhu]] apni zameen ke kaghzat [[NAME:p2|Gulnaz Bibi]] ko dikhaye ga.
+    2. [[NAME:p2|Gulnaz]] yeh kaghzat kisi ko nahin dikhaye gi, [[DEADLINE:d1|teen saal tak]].
+    3. Kaghzat [[DEADLINE:d2|15 din ke andar]] wapas kiye jayen ge.
+    4. [[NAME:p1|Sandhu]] sahib ka number [[PHONE:t1|0306-7734190]] hai.
+
+    Gawah: [[NAME:p3|Akbar Ali Wattoo]], [[NAME:p4|Nusrat Jabeen]]

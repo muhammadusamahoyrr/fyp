@@ -1,0 +1,66 @@
+# Non-disclosure agreement checklist -- DRAFT FOR LAWYER REVIEW. NOT APPROVED.
+#
+# Runs only after a reviewer holding pk.contract.nda approves this exact text
+# AND the official text it cites (DOC_ANALYZER_PLAN.md §4.5a). Every authority
+# resolves to the authority library (authority_library.yaml), cut from the
+# official Pakistan Code publication. Kept deliberately small: only points
+# that rest on a provision whose text was read.
+id: nda
+version: 1
+scope: legal_playbook
+requires_approval: true
+required_qualification: pk.contract.nda
+title: Non-disclosure agreement checklist
+applies_if: {eq: [{field: document_type}, {value: nda}]}
+checks:
+  - id: non_compete_restraint
+    kind: legal_check
+    severity: medium
+    title: A restraint on carrying on a profession, trade or business
+    why: >-
+      You confirmed the agreement contains a non-compete. Section 27 of the
+      Contract Act: "Every agreement by which any one is restrained from
+      exercising a lawful profession, trade or business of any kind, is to that
+      extent void." Its exception saves an agreement by one who sells the
+      goodwill of a business not to carry on a similar business within
+      specified local limits that appear to the Court reasonable. Whether this
+      clause is affected depends on its terms and requires lawyer review.
+    applies_if: {eq: [{field: terms.non_compete}, {value: true}]}
+    locate:
+      # Only wording that restrains carrying on a trade or business. A bare
+      # "competitor" (e.g. "not disclose ... to any competitor") is
+      # confidentiality, and non-solicitation is a question for the reviewer.
+      any_of: ['non[\s-]?compet\w*', 'not (?:to )?compete', 'compet(?:e|es|ing) with',
+               'competing (?:business|trade|profession|company|venture|concern)',
+               '(?:carry on|engage in|be engaged in|undertake|set up|start|join)\s+(?:any |a )?(?:similar|competing|rival|like) (?:business|trade|profession|venture|company|concern)']
+    authority: {statute: Contract Act 1872, section: "27"}
+
+  - id: limits_on_legal_proceedings
+    kind: legal_check
+    severity: medium
+    title: A limit on bringing legal proceedings
+    why: >-
+      Section 28 of the Contract Act makes an agreement void to the extent a
+      party is restricted absolutely from enforcing his rights under or in
+      respect of any contract by the usual legal proceedings in the ordinary
+      tribunals, or to the extent it limits the time within which he may thus
+      enforce his rights. Its exceptions concern certain agreements to refer
+      disputes to arbitration. "Found" means wording of this kind appears;
+      whether it is affected requires lawyer review.
+    locate:
+      any_of: ['waive\w* (?:all |any )?(?:the |its |his |her |their )?rights? to (?:sue|bring|institute)',
+               'no (?:suit|claim|action|(?:legal )?proceedings?)(?: or (?:other )?(?:legal )?proceedings?)? shall (?:be )?(?:brought|instituted|filed|lie)',
+               'shall not (?:be entitled to )?(?:sue|institute|bring (?:any )?(?:suit|claim|action|(?:legal )?proceedings?))',
+               '(?:suit|claim|action|proceedings?) (?:must|shall) be (?:brought|instituted|filed) within',
+               'time[\s-]barred', 'barred unless']
+    authority: {statute: Contract Act 1872, section: "28"}
+
+  - id: duration_of_confidentiality
+    kind: reminder
+    title: No length was recorded for the confidentiality obligation
+    why: >-
+      No length for the confidentiality obligation was recorded for this
+      agreement (it may not be stated, or may not have been confirmed). A
+      lawyer can advise whether an open-ended obligation suits this agreement.
+      (This is a drafting point, not a statutory requirement.)
+    applies_if: {not: [{exists: [{field: terms.confidentiality_years}]}]}

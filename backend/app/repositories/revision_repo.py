@@ -37,10 +37,48 @@ async def reserve_version(document_id: str) -> int:
     """
     doc = await get_documents_col().find_one_and_update(
         {"_id": document_id},
-        {"$inc": {"rev_seq": 1}, "$set": {"updated_at": _now()}},
+        {"$inc": {"rev_seq": 1, "content_epoch": 1},
+         "$set": {"updated_at": _now()}},
         return_document=ReturnDocument.AFTER,
     )
     return int(doc["rev_seq"])
+
+
+async def reserve_version_if_current(
+    document_id: str, *, expected_revision_id: str,
+    expected_version: int, expected_content_epoch: int,
+) -> int | None:
+    """Reserve a version only if an editor still has the current document.
+
+    ``current_version`` cannot be used as the concurrency token on its own: it
+    advances only after a render finishes, so two slow renders can both observe
+    the same current revision.  ``content_epoch`` advances at reservation time
+    for *every* generation path.  Consequently only one editor can publish
+    from a given workspace snapshot, even while its PDF is still rendering.
+
+    Old documents have no epoch.  They are treated as epoch zero so the first
+    edit after deployment does not require a migration.
+    """
+    query: dict = {
+        "_id": document_id,
+        "current_revision_id": expected_revision_id,
+        "current_version": expected_version,
+    }
+    if expected_content_epoch == 0:
+        query["$or"] = [
+            {"content_epoch": 0},
+            {"content_epoch": {"$exists": False}},
+        ]
+    else:
+        query["content_epoch"] = expected_content_epoch
+
+    doc = await get_documents_col().find_one_and_update(
+        query,
+        {"$inc": {"rev_seq": 1, "content_epoch": 1},
+         "$set": {"updated_at": _now()}},
+        return_document=ReturnDocument.AFTER,
+    )
+    return int(doc["rev_seq"]) if doc else None
 
 
 async def find_by_idempotency(document_id: str, idempotency_key: str) -> dict | None:
@@ -118,8 +156,46 @@ async def repoint_document(document_id: str, revision_id: str, version: int) -> 
     """
     res = await get_documents_col().update_one(
         {"_id": document_id, "current_version": {"$lt": version}},
-        {"$set": {"current_revision_id": revision_id, "current_version": version,
-                  "updated_at": _now()}},
+        [{"$set": {
+            "current_revision_id": revision_id,
+            "current_version": version,
+            "updated_at": _now(),
+            # An approval is bound to exact immutable bytes.  A newer working
+            # revision cannot inherit that approval merely because it belongs
+            # to the same document identity.
+            "review_status": {
+                "$cond": [
+                    {"$eq": ["$review_status", "approved"]},
+                    "needs_reapproval",
+                    "$review_status",
+                ]
+            },
+            # The old submit path archived an approval only when the next
+            # submit still observed status=approved.  Repointing now correctly
+            # invalidates that status immediately, so preserve its exact-byte
+            # evidence here in the same atomic update instead of losing it.
+            "approval_history": {
+                "$cond": [
+                    # Archive only an approval that names its bytes. A legacy
+                    # row approved before those fields existed must not gain a
+                    # history entry of nulls that claims evidence it lacks.
+                    {"$and": [
+                        {"$eq": ["$review_status", "approved"]},
+                        {"$ne": [{"$ifNull": ["$approved_revision_id", None]}, None]},
+                    ]},
+                    {"$concatArrays": [
+                        {"$ifNull": ["$approval_history", []]},
+                        [{
+                            "revision_id": "$approved_revision_id",
+                            "pdf_sha256": "$approved_pdf_sha256",
+                            "reviewer_id": "$approved_by",
+                            "reviewed_at": "$reviewed_at",
+                        }],
+                    ]},
+                    {"$ifNull": ["$approval_history", []]},
+                ]
+            },
+        }}],
     )
     return res.modified_count == 1
 

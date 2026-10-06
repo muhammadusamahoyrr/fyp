@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import FileResponse
@@ -217,6 +218,10 @@ class TemplateSpec(BaseModel):
     # from the template picker: listing it among twenty named documents would
     # imply the system knows what it produces, and it does not.
     lawyer_authored: bool
+    # How the generic client drafting screen can collect this builder's input.
+    # "ai" has a case extractor, "manual" uses the declared scalar fields, and
+    # "dedicated" requires a calculator/form that can safely build nested data.
+    drafting_mode: Literal["ai", "manual", "dedicated"]
 
 
 @router.get("/templates", response_model=list[TemplateSpec])
@@ -236,9 +241,33 @@ async def list_templates(
     instruments this product builds, which is not something to hand to anyone
     who asks. Nothing in it is user-specific, so no per-user filtering applies.
     """
-    return template_registry.listing(
+    items = template_registry.listing(
         include_system=include_system,
         include_lawyer_authored=include_lawyer_authored)
+    for item in items:
+        if item["structured_fields"]:
+            item["drafting_mode"] = "dedicated"
+        elif document_service.supports_field_extraction(item["template_type"]):
+            item["drafting_mode"] = "ai"
+        else:
+            item["drafting_mode"] = "manual"
+    return items
+
+
+@router.get("/requirements/{template_type}")
+async def pleading_requirements(
+    template_type: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """What the Code requires of an instrument, as a checklist to confirm.
+
+    For the lawyer's prose drafts, which the field-based compliance check
+    cannot judge. Every item is `to_confirm`; nothing is marked satisfied.
+    Uncovered types answer `covered: false` rather than 404 — "no rules encoded"
+    is a normal answer, not a missing resource.
+    """
+    from app.services import pleading_rules
+    return pleading_rules.requirements_for(template_type[:64])
 
 
 # Registered LAST on purpose. FastAPI matches in registration order, so this

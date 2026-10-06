@@ -1,0 +1,368 @@
+dataset: identity-dev-2
+label_review: developer_only
+documents:
+- id: d2-01-tenancy-usman-alias
+  document_type: tenancy
+  features: [aliases, repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    TENANCY AGREEMENT
+    This agreement is made at Lahore on 3rd March 2025 between Mr. [[NAME:p1|Muhammad Usman Tariq]], also known as [[NAME:p1|Usman Butt]], s/o [[NAME:p3|Tariq Mehmood]], CNIC [[CNIC:c1|35202-4418273-5]] (the "Landlord") and Ms. [[NAME:p2|Saima Naz]], CNIC [[CNIC:c2|35201-7730914-2]] (the "Tenant").
+    1. The Tenant shall pay a monthly rent of Rs. 45,000 to [[NAME:p1|M. Usman Tariq]] [[DEADLINE:d1|on or before the 5th of each month]].
+    2. The security deposit of Rs. 135,000 shall be refunded by [[NAME:p1|Usman Butt]] [[DEADLINE:d2|within 30 days]] of the Tenant vacating the premises.
+    3. The tenancy is for [[DEADLINE:d3|a period of eleven months]] commencing 1st April 2025.
+    LANDLORD: [[NAME:p1|M. U. Tariq]]
+    TENANT: [[NAME:p2|Saima Naz]]
+- id: d2-02-tenancy-two-ahmed-raza
+  document_type: tenancy
+  features: [repeated_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    RENT AGREEMENT
+    This rent agreement is executed on 1st July 2025 between [[NAME:p1|Ahmed Raza]] s/o [[NAME:p3|Ghulam Rasool]], CNIC [[CNIC:c1|33100-2284716-9]], resident of [[ADDRESS:a1|House 44, Block C, Satellite Town, Rawalpindi]] (hereinafter the "Owner") and [[NAME:p2|Faisal Iqbal]] s/o [[NAME:p4|Muhammad Iqbal]] (hereinafter the "Tenant").
+    The Tenant shall pay Rs. 38,000 per month to the Owner in advance and shall give the Owner [[DEADLINE:d1|two months' notice]] before vacating.
+    Witness No. 1: [[NAME:p5|Ahmed Raza]] s/o [[NAME:p6|Bashir Ahmed]], CNIC [[CNIC:c2|37405-9917362-1]]
+    Witness No. 2: [[NAME:p7|Nadeem Akhtar]], CNIC [[CNIC:c3|37405-1146025-7]]
+    Note: Witness No. 1 is not related to the Owner; the two only share a name.
+    OWNER: [[NAME:p1|Ahmed Raza]]
+    TENANT: [[NAME:p2|Faisal Iqbal]]
+- id: d2-03-affidavit-akhtar-family
+  document_type: affidavit
+  features: [repeated_names, deadlines]
+  parties: [p1]
+  text: |
+    AFFIDAVIT
+    I, Mst. [[NAME:p1|Shazia Bibi]] w/o [[NAME:p2|Imran Akhtar]], CNIC [[CNIC:c1|34101-5528194-6]], resident of [[ADDRESS:a1|Mohallah Islamabad, Gujranwala]], do hereby solemnly affirm as under:
+    1. That my husband [[NAME:p2|Imran Akhtar]] has been working in Dubai since 2019.
+    2. That my brother-in-law [[NAME:p3|Kamran Akhtar]] has no right in the plot owned by my husband.
+    3. That I undertake to deposit Rs. 20,000 with the Union Council [[DEADLINE:d1|within 15 days]] of this affidavit.
+    DEPONENT: [[NAME:p1|Shazia Bibi]]
+    Witness 1: [[NAME:p4|Rehana Akhtar]] d/o [[NAME:p5|Akhtar Hussain]]
+    Witness 2: [[NAME:p3|Kamran Akhtar]] s/o [[NAME:p5|Akhtar Hussain]] (real brother of Witness 1)
+- id: d2-04-letter-recovery-bilal-traders
+  document_type: letter
+  features: [aliases, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    LEGAL NOTICE
+    To,
+    Mr. [[NAME:p1|Bilal Ahmed Qureshi]],
+    Proprietor, [[NOT:n1|Bilal Traders]],
+    [[ADDRESS:a1|Shop No. 7, [[NAME:p3|Rahim Bakhsh]] Market, Anarkali, Lahore]]
+    Sir,
+    Under instructions from my client [[NAME:p2|Tahir Mehmood]], proprietor of [[NOT:n2|Haji Bashir & Sons]], I serve you this notice. You purchased fabric worth Rs. 312,500 from my client on credit and have failed to pay.
+    You are called upon to pay the said amount [[DEADLINE:d1|within 14 days]] of receipt of this notice, failing which my client shall file a suit for recovery against [[NAME:p1|Bilal Qureshi]] without further notice.
+    [[NAME:p4|Hina Sajjad]]
+    Advocate High Court
+    [[ADDRESS:a2|Office 12, Second Floor, Lower Mall, Lahore]]
+    Cell: [[PHONE:ph1|0321-4419087]]
+- id: d2-05-employment-ocr-kashif
+  document_type: employment
+  features: [ocr_errors, deadlines]
+  parties: [p1]
+  text: |
+    APPOINTMENT LETTER
+    Ref: HR/2025/118                         Date: 12-08-2025
+    Mr. [[NAME:p1|Kash1f Raza]]
+    [[ADDRESS:a1|Flat 3, Street 9, G-10/2, Islamabad]]
+    Dear Mr. [[NAME:p1|Kashif  Raza]],
+    We are pleased to offer you the position of Accounts Officer at a monthly salary of Rs. 95,000. You will report to Mr. [[NAME:p2|Zubair Anjum]], Finance Manager.
+    Please return a signed copy of this letter [[DEADLINE:d1|within 7 days]]. Your probation period shall be [[DEADLINE:d2|three months]].
+    For and on behalf of the Company
+    [[NAME:p3|Sana
+    Malik]]
+    Head of Human Resources
+    Accepted: [[NAME:p1|KASHIF RAZA]]
+- id: d2-06-nda-bright-loom
+  document_type: nda
+  features: [repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    NON-DISCLOSURE AGREEMENT
+    This Agreement is made on 2nd January 2026 between Bright Loom (Pvt.) Ltd, acting through its director [[NAME:p1|Farhan Siddiqui]] (the "Disclosing Party"), and [[NAME:p2|Nauman Ali Shah]] (the "Recipient").
+    1. [[NAME:p1|Farhan Siddiqui]] will share the supplier list with the Recipient. [[NAME:p2|Nauman]] shall not disclose it to any person, including [[NAME:p3|Asad Mirza]] or [[NAME:p4|Rabia Khalid]], former consultants of the company.
+    2. [[NAME:p2|Shah]] shall return all papers to [[NAME:p1|Siddiqui]] [[DEADLINE:d1|within 10 days]] of termination of the engagement.
+    3. The obligations of [[NAME:p2|Nauman Ali Shah]] survive for [[DEADLINE:d2|a period of three years]].
+    4. If Mr. [[NAME:p2|Shah]] breaches this Agreement he shall pay Rs. 1,000,000 as liquidated damages [[DEADLINE:d3|within 30 days]] of demand.
+    5. [[NAME:p3|Asad Mirza]] and [[NAME:p4|Rabia Khalid]] are not parties to this Agreement.
+    For the Company: [[NAME:p1|Farhan Siddiqui]]
+    Recipient: [[NAME:p2|N. A. Shah]]
+    Witness: [[NAME:p5|Zainab Farooq]]
+- id: d2-07-employment-artist-ayesha
+  document_type: employment
+  features: [aliases, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    CONTRACT FOR SERVICES
+    This contract is made at Karachi between Studio Rang Mahal, through its partner Mr. [[NAME:p2|Junaid Hassan]] (the "Studio"), and Syeda [[NAME:p1|Ayesha Noor]], professionally known as [[NAME:p1|Ayesha Rang]] (the "Artist").
+    1. [[NAME:p1|Ayesha Rang]] shall deliver twelve illustrations by 30th November 2025.
+    2. The Studio shall pay a fee of Rs. 250,000, half on signing and half [[DEADLINE:d1|within 45 days]] of delivery.
+    3. All credits shall read "[[NAME:p1|Ayesha Rang]]" and not the Artist's legal name.
+    Studio: [[NAME:p2|Junaid Hassan]]
+    Artist: [[NAME:p1|A. Noor]]
+    Witness: [[NAME:p3|Ayesha Khan]], CNIC [[CNIC:c1|42201-6639015-8]]
+- id: d2-08-letter-two-muhammad-aslam
+  document_type: letter
+  features: [repeated_names, lookalikes, deadlines]
+  parties: [p2]
+  text: |
+    APPLICATION FOR TRANSFER OF SHOP TENANCY
+    To the Administrator, Auqaf Property Office, Sheikhupura.
+    Sir,
+    Ch. [[NAME:p1|Muhammad Aslam]] s/o [[NAME:p3|Noor Muhammad]], the original tenant of [[ADDRESS:a1|Shop 14, Main Bazaar, Sheikhupura]], expired on 9th May 2025.
+    The applicant, [[NAME:p2|Muhammad Aslam]] s/o [[NAME:p4|Javed Aslam]], is the grandson of the deceased and is named after him. [[NAME:p4|Javed Aslam]] was the only son of Late [[NAME:p1|Muhammad Aslam]].
+    The applicant [[NAME:p2|Muhammad Aslam]] undertakes to clear the rent arrears of Rs. 18,000 [[DEADLINE:d1|within 30 days]] of the transfer.
+    Applicant: [[NAME:p2|Muhammad Aslam]], CNIC [[CNIC:c1|35401-2209183-3]]
+- id: d2-09-employment-surety-yousaf
+  document_type: employment
+  features: [repeated_names, deadlines]
+  parties: [p1, p3]
+  text: |
+    SURETY BOND FOR EMPLOYMENT
+    I, [[NAME:p3|Tariq Yousaf]] s/o [[NAME:p4|Ghulam Yousaf]], CNIC [[CNIC:c1|38403-5520917-1]], paternal uncle of [[NAME:p1|Hamza Yousaf]] s/o [[NAME:p2|Muhammad Yousaf]], stand surety for [[NAME:p1|Hamza]] on his appointment as Store Keeper.
+    1. [[NAME:p1|Hamza Yousaf]] shall serve the Employer for [[DEADLINE:d1|a minimum of two years]].
+    2. If [[NAME:p1|Hamza]] causes any loss to the Employer, I shall pay up to Rs. 500,000 [[DEADLINE:d2|within 21 days]] of written demand.
+    SURETY: [[NAME:p3|Tariq Yousaf]]
+    Witness 1: [[NAME:p5|Sadia Yousaf]] w/o [[NAME:p3|Tariq Yousaf]]
+    Witness 2: [[NAME:p2|Muhammad Yousaf]] (father of the employee)
+- id: d2-10-tenancy-zaman-khan-street
+  document_type: tenancy
+  features: [lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    TENANCY DEED
+    Landlord: Mrs. [[NAME:p1|Rukhsana Parveen]], resident of [[ADDRESS:a1|House 21, [[NAME:p3|Zaman Khan]] Street, Mohallah Qasimabad, Peshawar]].
+    Tenant: [[NAME:p2|Zaman Khan Afridi]], CNIC [[CNIC:c1|17301-4482916-5]], Mobile [[PHONE:ph1|0333-9017284]].
+    Premises: [[ADDRESS:a2|Ground Floor, Plot 6, [[NAME:p4|Gul Rehman]] Colony, Peshawar]].
+    1. [[NAME:p2|Zaman Khan Afridi]] shall run his business [[NOT:n1|Afridi Mobile Centre]] from the premises.
+    2. Rent is Rs. 28,000 per month; Rs. 84,000 is paid in advance to [[NAME:p1|Rukhsana Parveen]].
+    3. Rent shall increase by 10% [[DEADLINE:d1|after eleven months]].
+    Landlord: [[NAME:p1|Rukhsana Parveen]]    Tenant: [[NAME:p2|Zaman Khan Afridi]]
+- id: d2-11-affidavit-ocr-nasreen
+  document_type: affidavit
+  features: [ocr_errors, deadlines]
+  parties: [p1]
+  text: |
+    UNDERTAKING
+    I, [[NAME:p1|Nasreen Akhtar]], d/o [[NAME:p2|Abdul
+    Majeed]], CNIC [[CNIC:c1|36302-8814402-4]], hereby undertake that I shall vacate the quarter allotted to my late father [[NAME:p2|Abdu1 Majeed]] [[DEADLINE:d1|within 60 days]] from today.
+    I further undertake that [[NAME:p1|N4sreen Akhtar]] shall pay the outstanding utility dues of Rs. 75,000 [[DEADLINE:d2|before 31st December 2025]].
+    DEPONENT: [[NAME:p1|NASREEN AKHTAR]]
+    Attested before me: Oath Commissioner [[NAME:p3|Shoaib Ahmed
+    Malik]]
+- id: d2-12-tenancy-mehmood-brothers
+  document_type: tenancy
+  features: [repeated_names, deadlines]
+  parties: [p1, p2, p3]
+  text: |
+    TENANCY AGREEMENT
+    This agreement is between [[NAME:p1|Sajid Mehmood]] and [[NAME:p2|Wajid Mehmood]], both sons of [[NAME:p5|Mehmood Ahmed]] (together the "Owners"), and Dr. [[NAME:p3|Ambreen Fatima]] (the "Tenant"), with [[NAME:p4|Kaleem Ullah]] as guarantor.
+    1. Dr. [[NAME:p3|Ambreen]] shall pay Rs. 120,000 per month into the account of [[NAME:p1|Sajid Mehmood]], IBAN [[ACCOUNT:ac1|PK36MEZN0001230104567891]], [[DEADLINE:d1|by the 10th of each month]].
+    2. [[NAME:p2|Wajid Mehmood]] shall carry out all structural repairs [[DEADLINE:d2|within 15 days]] of being informed by [[NAME:p3|Ambreen Fatima]].
+    3. If the Tenant defaults, [[NAME:p4|Kaleem Ullah]] shall pay up to Rs. 360,000.
+    4. [[NAME:p1|Sajid]] and [[NAME:p2|Wajid]] shall not sell the house during the term without first offering it to Dr. [[NAME:p3|Fatima]].
+    Owners: [[NAME:p1|Sajid Mehmood]], [[NAME:p2|Wajid Mehmood]]
+    Tenant: [[NAME:p3|Ambreen Fatima]]
+    Guarantor: [[NAME:p4|Kaleem Ullah]]
+    Witnesses: [[NAME:p6|Arif Mehmood]] (cousin of the Owners), [[NAME:p7|Shumaila Kanwal]]
+- id: d2-13-letter-consultant-chaudhry
+  document_type: letter
+  features: [aliases, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    NOTICE OF TERMINATION OF RETAINER
+    To: Mr. [[NAME:p1|Ghulam Mustafa Chaudhry]], Chartered Accountant, [[NOT:n1|G. M. Chaudhry & Co.]], [[ADDRESS:a1|7-B, Commercial Area, Cavalry Ground, Lahore]]
+    Dear Sir,
+    My client Mrs. [[NAME:p2|Shabana Riaz]] retained you in March 2024. [[NAME:p1|Ghulam Mustafa Chaudhry]], known in the market as [[NAME:p1|Pappu Chaudhry]], has not filed her returns for tax year 2025.
+    [[NAME:p2|Shabana Riaz]] hereby terminates the retainer and demands refund of Rs. 60,000 [[DEADLINE:d1|within 21 days]].
+    Please hand over all records to Mrs. [[NAME:p2|Riaz]] or her son [[NAME:p3|Usman Riaz]].
+    cc: [[NAME:p1|G. M. Chaudhry]]
+    [[NAME:p4|Waseem Abbas]], Advocate
+- id: d2-14-employment-termination-kashif
+  document_type: employment
+  features: [repeated_names, deadlines]
+  parties: [p1]
+  text: |
+    TERMINATION OF EMPLOYMENT
+    Date: 4th September 2025
+    Mr. [[NAME:p1|Kashif Raza]], Sales Executive
+    Dear [[NAME:p1|Kashif]],
+    This letter confirms that the employment of [[NAME:p1|Kashif Raza]] ends on 30th September 2025 after the [[DEADLINE:d1|one month notice period]].
+    Mr. [[NAME:p1|Raza]] shall hand over the company laptop and vehicle to Mr. [[NAME:p2|Imtiaz Hussain]] [[DEADLINE:d2|within 3 working days]] of his last working day.
+    The final settlement of Rs. 142,300 shall be paid to [[NAME:p1|K. Raza]] [[DEADLINE:d3|within 30 days]] after clearance.
+    [[NAME:p2|Imtiaz Hussain]]
+    Regional Sales Manager
+    Received by: [[NAME:p1|Kashif Raza]]
+- id: d2-15-affidavit-two-muhammad-ali
+  document_type: affidavit
+  features: [repeated_names, lookalikes]
+  parties: [p1]
+  text: |
+    AFFIDAVIT OF NON-IDENTITY
+    I, [[NAME:p1|Muhammad Ali]] s/o [[NAME:p3|Sher Ali]], CNIC [[CNIC:c1|31202-6617730-1]], resident of [[ADDRESS:a1|Chak No. 88/6-R, Sahiwal]], do solemnly affirm:
+    1. That I am not the same person as [[NAME:p2|Muhammad Ali]] s/o [[NAME:p4|Liaquat Ali]], CNIC [[CNIC:c2|31202-1190524-7]], whose name appears in FIR No. 214/2025 of Police Station Sahiwal City.
+    2. That the said [[NAME:p2|Muhammad Ali]] resides at [[ADDRESS:a2|Mohallah Farid Town, Sahiwal]] and I have never met him.
+    3. That my father [[NAME:p3|Sher Ali]] and his father [[NAME:p4|Liaquat Ali]] are not related.
+    DEPONENT: [[NAME:p1|Muhammad Ali]]
+    Identified by: [[NAME:p5|Asghar Ali]], Lambardar
+- id: d2-16-tenancy-butt-family
+  document_type: tenancy
+  features: [repeated_names, lookalikes, deadlines]
+  parties: [p1, p3]
+  text: |
+    RENT DEED
+    Landlady: Mrs. [[NAME:p1|Naila Butt]] w/o [[NAME:p2|Arshad Butt]], [[ADDRESS:a1|House 9, Street 4, Ghazi Abad, Sialkot]].
+    Tenant: [[NAME:p3|Owais Butt]] s/o [[NAME:p5|Yaqoob Butt]] (no relation to the Landlady).
+    1. Rent of Rs. 32,000 is payable to [[NAME:p1|Naila Butt]] or her husband [[NAME:p2|Arshad Butt]] [[DEADLINE:d1|by the 7th of every month]].
+    2. [[NAME:p3|Owais]] shall not sublet the premises.
+    Landlady: [[NAME:p1|Naila Butt]]   Tenant: [[NAME:p3|Owais Butt]]
+    Witness 1: [[NAME:p4|Arshad Mehmood Butt]] s/o [[NAME:p6|Rafique Butt]] (not the Landlady's husband)
+    Witness 2: [[NAME:p7|Sobia Butt]] d/o [[NAME:p5|Yaqoob Butt]] (sister of the Tenant)
+- id: d2-17-letter-encroachment-shops
+  document_type: letter
+  features: [lookalikes, deadlines, roman_urdu]
+  parties: [p1, p2]
+  text: |
+    NOTICE FOR REMOVAL OF ENCROACHMENT
+    To: [[NAME:p1|Muhammad Nadeem]], Proprietor, [[NOT:n1|Hafiz Nadeem Sweets]], [[ADDRESS:a1|Shop 3, [[NAME:p3|Barkat Ali]] Road, Faisalabad]]
+    The complainant [[NAME:p2|Rashida Perveen]], who runs [[NOT:n2|Babu Electronics]] next door, reports that your thara and counters block the footpath.
+    [[NAME:p1|Nadeem]] sahib, you are directed to remove the encroachment [[DEADLINE:d1|within 7 days]], failing which a fine of Rs. 10,000 shall be imposed.
+    Copy to: [[NAME:p2|Rashida Perveen]]; Inspector [[NAME:p4|Javed Iqbal Sial]]
+- id: d2-18-nda-ocr-rizwan
+  document_type: nda
+  features: [ocr_errors, deadlines]
+  parties: [p1, p2]
+  text: |
+    MUTUAL NON-DISCLOSURE AGREEMENT (scanned copy)
+    Parties: [[NAME:p1|RIZWAN ULLAH KHAN]] of [[ADDRESS:a1|Plot 22, Hayatabad Phase 3, Peshawar]] and [[NAME:p2|Mehwish Tahir]] of [[ADDRESS:a2|Flat 5B, Clifton Block 2, Karachi]].
+    1. [[NAME:p1|Rizwan U1lah Khan]] and [[NAME:p2|Mehw1sh Tahir]] shall keep each other's business plans confidential for [[DEADLINE:d1|a period of two years]].
+    2. Any confidential material shall be returned [[DEADLINE:d2|within 5 days]] of a written request by [[NAME:p1|Rizwan Ullah
+    Khan]] or by [[NAME:p2|Mehwish  Tahir]].
+    Signed: [[NAME:p1|Rizwan Ullah Khan]]     Signed: [[NAME:p2|MEHWISH TAHIR]]
+- id: d2-19-letter-partnership-dissolution
+  document_type: letter
+  features: [repeated_names, deadlines]
+  parties: [p1, p2, p3, p4]
+  text: |
+    NOTICE OF DISSOLUTION OF PARTNERSHIP
+    The partnership between [[NAME:p1|Adnan Sheikh]], [[NAME:p2|Fahad Jamil]], [[NAME:p3|Mariam Aziz]] and [[NAME:p4|Taimoor Ashraf]] stands dissolved with effect from 30th June 2025.
+    1. [[NAME:p1|Adnan]] shall take over the Johar Town outlet and pay Rs. 2,400,000 to the other partners [[DEADLINE:d1|within 90 days]].
+    2. [[NAME:p2|Fahad Jamil]] and [[NAME:p3|Mariam Aziz]] shall each receive Rs. 800,000 from [[NAME:p1|Sheikh]].
+    3. [[NAME:p4|Taimoor]] shall receive his share after [[NAME:p5|Asim Raza]], the firm's accountant, finalises the accounts [[DEADLINE:d2|by 15th August 2025]].
+    4. Any claim against [[NAME:p1|Adnan Sheikh]] must be raised [[DEADLINE:d3|within 30 days]] of this notice.
+    5. [[NAME:p3|Mariam]] retains the trade name.
+    [[NAME:p1|Adnan Sheikh]]   [[NAME:p2|Fahad Jamil]]   [[NAME:p3|Mariam Aziz]]   [[NAME:p4|Taimoor Ashraf]]
+- id: d2-20-affidavit-shamim-alias
+  document_type: affidavit
+  features: [aliases, deadlines]
+  parties: [p1]
+  text: |
+    AFFIDAVIT OF ONE AND THE SAME PERSON
+    I, Mst. [[NAME:p1|Shamim Akhtar]] w/o [[NAME:p2|Sabir Hussain]], CNIC [[CNIC:c1|37101-3328850-2]], do hereby state:
+    1. That I am also known as [[NAME:p1|Shamim Bibi]] in my school certificate and as [[NAME:p1|S. Akhtar]] in my bank record.
+    2. That [[NAME:p1|Shamim Akhtar]], [[NAME:p1|Shamim Bibi]] and [[NAME:p1|S. Akhtar]] are one and the same person, namely myself.
+    3. That the bank may update its records [[DEADLINE:d1|within 10 working days]] of receiving this affidavit.
+    DEPONENT: [[NAME:p1|Shamim Akhtar]]
+    Identified by my husband [[NAME:p2|Sabir Hussain]]
+- id: d2-21-tenancy-haji-ghaffar
+  document_type: tenancy
+  features: [repeated_names, roman_urdu, deadlines]
+  parties: [p1, p2]
+  text: |
+    KIRAYA NAMA (TENANCY AGREEMENT)
+    Haji [[NAME:p1|Abdul Ghaffar]] (the "Landlord") lets the upper portion of [[ADDRESS:a1|House 112, Block F, Hayatabad, Peshawar]] to [[NAME:p2|Naveed Anwar]] (the "Tenant").
+    1. The Tenant shall pay Rs. 40,000 per month to the Landlord [[DEADLINE:d1|before the 5th of each month]]. [[NAME:p1|Abdul Ghaffar]] shall issue a receipt every month.
+    2. [[NAME:p1|Ghaffar]] sahib shall bear the cost of major repairs; [[NAME:p2|Naveed]] shall bear minor repairs.
+    3. Either the Landlord or the Tenant may end this agreement on [[DEADLINE:d2|one month's notice]].
+    4. On termination, Haji [[NAME:p1|Ghaffar]] shall return the advance of Rs. 80,000 [[DEADLINE:d3|within 15 days]].
+    LANDLORD: [[NAME:p1|Abdul Ghaffar]]
+    TENANT: [[NAME:p2|Naveed Anwar]]
+    Gawah (witness): [[NAME:p3|Zahoor Elahi]]
+- id: d2-22-employment-two-ayesha-siddiqa
+  document_type: employment
+  features: [repeated_names, lookalikes]
+  parties: [p1]
+  text: |
+    EXPERIENCE CERTIFICATE
+    This is to certify that Ms. [[NAME:p1|Ayesha Siddiqa]] (Employee No. 4471, Lahore office) worked with us as Assistant Manager Audit from 1st February 2021 to 31st July 2025.
+    Please note that another employee, Ms. [[NAME:p2|Ayesha Siddiqa]] (Employee No. 5102, Multan office), shares the same name. This certificate does not relate to her.
+    [[NAME:p1|Ayesha Siddiqa]] of the Lahore office was diligent and honest. We wish [[NAME:p1|Ayesha]] success.
+    [[NAME:p3|Noman Akram]]
+    Manager Human Resources
+- id: d2-23-nda-malik-family
+  document_type: nda
+  features: [repeated_names, lookalikes, deadlines]
+  parties: [p1, p2]
+  text: |
+    CONFIDENTIALITY UNDERTAKING
+    Between: [[NAME:p1|Omar Farooq Malik]], CNIC [[CNIC:c1|61101-7752038-9]] (the "Owner") and [[NAME:p2|Hassan Malik]], CNIC [[CNIC:c2|61101-4400917-3]] (the "Consultant"). The Owner and the Consultant are not related.
+    1. [[NAME:p2|Hassan Malik]] shall keep the recipes of the Owner confidential for [[DEADLINE:d1|five years]].
+    2. [[NAME:p2|Hassan]] shall pay Rs. 300,000 to [[NAME:p1|Omar Farooq Malik]] for any breach [[DEADLINE:d2|within 30 days]] of notice.
+    Owner: [[NAME:p1|O. F. Malik]]
+    Consultant: [[NAME:p2|Hassan Malik]]
+    Witness: [[NAME:p3|Iqra Malik]] d/o [[NAME:p1|Omar Farooq Malik]]
+- id: d2-24-employment-bashir-ahmed-town
+  document_type: employment
+  features: [lookalikes, deadlines]
+  parties: [p1]
+  text: |
+    OFFER OF EMPLOYMENT
+    [[NOT:n1|Iqbal & Brothers Engineering]]
+    To: Mr. [[NAME:p1|Bashir Ahmed]], [[ADDRESS:a1|House 5, Street 2, [[NAME:p3|Bashir Ahmed]] Town, Sargodha]], Phone [[PHONE:ph1|0346-2217095]]
+    Dear [[NAME:p1|Bashir Ahmed]],
+    We offer you the post of Site Supervisor at a salary of Rs. 70,000 per month. Please join [[DEADLINE:d1|within 14 days]] of this letter.
+    Please send your documents to [[EMAIL:e1|hr.desk@iqbalbrosengg.example.pk]].
+    Engr. [[NAME:p2|Tanveer Iqbal]], Director
+- id: d2-25-tenancy-ocr-table
+  document_type: tenancy
+  features: [table, ocr_errors, deadlines]
+  parties: [p1, p2]
+  text: |
+    LEASE OF SHOP (scanned)
+    | Role     | Name                              | CNIC                              |
+    | Lessor   | [[NAME:p1|SHAHID IQBAL]]          | [[CNIC:c1|35202-9910446-1]]        |
+    | Lessee   | [[NAME:p2|Tahira Yasmeen]]        | [[CNIC:c2|35202-3378120-8]]        |
+    | Witness  | [[NAME:p3|Shahid Iqbal Bhatti]]   | [[CNIC:c3|35202-5560913-5]]        |
+    1. The Lessee shall pay Rs. 55,000 per month to [[NAME:p1|Shahid lqbal]] [[DEADLINE:d1|within the first week of each month]].
+    2. [[NAME:p1|Shah1d Iqbal]] shall not raise the rent [[DEADLINE:d2|for the first two years]].
+    3. [[NAME:p2|Tahira Yasmeen]] may terminate on [[DEADLINE:d3|three months' notice]].
+    Lessor: [[NAME:p1|Shahid Iqbal]]   Lessee: [[NAME:p2|Tahira Yasrneen]]
+- id: d2-26-affidavit-heirs-rafiq
+  document_type: affidavit
+  features: [repeated_names, lookalikes, deadlines]
+  parties: [p2, p3, p4, p5]
+  text: |
+    AFFIDAVIT OF LEGAL HEIRS
+    We, the legal heirs of Late [[NAME:p1|Rafiq Ahmed]], who died on 2nd February 2025, state:
+    1. That the legal heirs of [[NAME:p1|Rafiq Ahmed]] are his widow Mst. [[NAME:p2|Zubaida Begum]], his sons [[NAME:p3|Adeel Rafiq]] and [[NAME:p4|Shakeel Rafiq]], and his daughter [[NAME:p5|Sumbal Rafiq]].
+    2. That [[NAME:p3|Adeel]] and [[NAME:p4|Shakeel]] will each receive a double share, and [[NAME:p5|Sumbal]] a single share, after the widow's one-eighth.
+    3. That any person having a claim against the estate of [[NAME:p1|Rafiq Ahmed]] may raise it [[DEADLINE:d1|within 30 days]] of publication.
+    DEPONENTS: [[NAME:p2|Zubaida Begum]], [[NAME:p3|Adeel Rafiq]], [[NAME:p4|Shakeel Rafiq]], [[NAME:p5|Sumbal Rafiq]]
+    Witness 1: [[NAME:p6|Tauqeer Ahmed]] s/o [[NAME:p7|Rafiq Ahmed]] (a neighbour; his father is a different person from the deceased)
+    Witness 2: [[NAME:p8|Parveen Akhtar]]
+- id: d2-27-letter-honorifics
+  document_type: letter
+  features: [repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    LETTER OF COMPLAINT
+    To: Prof. Dr. [[NAME:p1|Saeed Akhtar]], Medical Superintendent, [[ADDRESS:a1|Civil Hospital, Bahawalpur]]
+    From: Engr. [[NAME:p2|Waqas Hameed]], [[ADDRESS:a2|House 31, Model Town A, Bahawalpur]], [[EMAIL:e1|waqas.hameed.fake@example.com]]
+    Respected Dr. [[NAME:p1|Saeed]],
+    My father Mian [[NAME:p3|Abdul Qadir]] was admitted on 14th June 2025. [[NAME:p3|Abdul Qadir]] was not seen by any doctor for six hours.
+    I request [[NAME:p1|Saeed Akhtar]] to hold an inquiry and inform me [[DEADLINE:d1|within 15 days]]. A copy has been sent to my counsel Advocate [[NAME:p4|Nighat Jabeen]].
+    [[NAME:p2|Waqas Hameed]]
+- id: d2-28-employment-contract-rehan
+  document_type: employment
+  features: [repeated_names, deadlines]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT CONTRACT
+    This contract is between Crescent Packaging (Pvt.) Ltd (the "Employer"), represented by [[NAME:p1|Rehan Akbar]] (the "Managing Director"), and [[NAME:p2|Saba Nawaz]], CNIC [[CNIC:c1|42101-8829014-6]] (the "Employee").
+    1. The Employee shall work as Quality Analyst for a salary of Rs. 110,000 per month, payable [[DEADLINE:d1|by the 1st of each month]].
+    2. Either party may terminate on [[DEADLINE:d2|30 days' written notice]].
+    3. The Managing Director, [[NAME:p1|Rehan Akbar]], may extend the probation of [[NAME:p2|Saba Nawaz]] by [[DEADLINE:d3|up to three months]].
+    For the Employer: [[NAME:p1|Rehan Akbar]], Managing Director
+    Employee: [[NAME:p2|Saba Nawaz]]
+    Witness 1: [[NAME:p3|Huma Nawaz]] (sister of the Employee)
+    Witness 2: [[NAME:p4|Danish Akbar]] (no relation to the Managing Director)

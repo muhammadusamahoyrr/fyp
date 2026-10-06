@@ -1,0 +1,279 @@
+dataset: pii-eval-4
+label_review: developer_only
+documents:
+- id: p4-emp-01
+  document_type: employment
+  features: [lookalikes, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Shalimar Textile Processing (Pvt.) Ltd]]
+    [[ADDRESS:a1|26-Km, Sheikhupura Road, Lahore]]
+
+    Ref: STP/HR/2026/114
+    Date: 6 March 2026
+
+    Mr. [[NAME:p1|Danyal Arshad Malik]]
+    [[ADDRESS:a2|House No. 302, Block E, Wapda Town, Lahore]]
+
+    Subject: Offer of Employment - Assistant Manager, Dyeing
+
+    Dear Mr. [[NAME:p1|Danyal]],
+
+    We are pleased to offer you the position of Assistant Manager, Dyeing, at our [[NOT:n2|Kala Shah Kaku Unit]] on the following terms:
+
+    1. Gross salary Rs. 245,000 per month, paid into your account [[ACCOUNT:b1|PK18ALFH0067001004218839]] [[DEADLINE:d1|by the 7th of the following month]].
+    2. Probation of [[DEADLINE:d2|three (3) months]] from your date of joining, during which either side may end employment with [[DEADLINE:d3|seven days' notice]].
+    3. After confirmation, notice period of [[DEADLINE:d4|one (1) month]] or salary in lieu.
+    4. You will report to Ms. [[NAME:p3|Sana Tariq Bajwa]], General Manager Production.
+
+    Please confirm your acceptance [[DEADLINE:d5|by 13 March 2026]] and join [[DEADLINE:d6|no later than 1 April 2026]]. Bring your original CNIC and degree. Mr. [[NAME:p1|Malik]] may call [[PHONE:t1|042-37950611]] ext. 302 with any questions.
+
+    Yours sincerely,
+    [[NAME:p2|Asif Rehman Lodhi]]
+    Head of Human Resources
+
+    Accepted: [[NAME:p1|Danyal Arshad Malik]]   CNIC: [[CNIC:c1|35202-6630184-9]]
+- id: p4-emp-02
+  document_type: employment
+  features: [table, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    EMPLOYMENT AGREEMENT - SCHEDULE 1 (PARTICULARS)
+
+    Employer: [[NOT:n1|Kohsar Health Diagnostics]]
+    Employer's representative: Dr. [[NAME:p2|Farzana Yasmin Kiyani]]
+    Employee: [[NAME:p1|Rameez Hussain Shah]]
+    Employee CNIC: [[CNIC:c1|37405-9014472-3]]
+    Employee address: [[ADDRESS:a1|House 77, Lane 5, Gulraiz Housing Scheme Phase 2, Rawalpindi]]
+    Employee mobile: [[PHONE:t1|0300-5146028]]
+    Designation: Senior Lab Technologist, [[NOT:n2|Saddar Collection Centre]]
+
+    | Component | Monthly (Rs.) |
+    |---|---|
+    | Basic | 95,000 |
+    | House rent | 42,750 |
+    | Medical | 9,500 |
+    | Night shift allowance | 12,000 |
+    | Total | 159,250 |
+
+    Start date: 1 May 2026. Contract period: [[DEADLINE:d1|two (2) years, ending on 30 April 2028]].
+    Annual leave: 20 days, to be applied for [[DEADLINE:d2|at least 7 days in advance]].
+    Resignation notice: [[DEADLINE:d3|thirty (30) days]].
+
+    Signed for the Employer: [[NAME:p2|Farzana Yasmin Kiyani]]
+    Signed by the Employee: [[NAME:p1|Rameez Hussain Shah]]
+- id: p4-emp-03
+  document_type: employment
+  features: [roman_urdu, deadlines, aliases, repeated_names, untitled_names]
+  parties: [p1, p2]
+  text: |
+    DRIVER KI NAUKRI KA MUAHIDA
+
+    Malik: [[NAME:p1|Sajjad Hussain Bokhari]], [[ADDRESS:a1|Kothi No. 18, Officers Colony, Sargodha]]
+    Driver: [[NAME:p2|Ghulam Qadir]] walad [[NAME:p3|Allah Ditta]], shanakhti card [[CNIC:c1|38403-5520917-1]], mobile [[PHONE:t1|0347 6021 588]]
+
+    1. [[NAME:p2|Ghulam Qadir]] subah 8 baje se shaam 6 baje tak gaari chalaye ga.
+    2. Tankhwah 40,000 rupay mahana, [[DEADLINE:d1|har mahine ki pehli tareekh ko]] naqad milegi.
+    3. Pehle [[DEADLINE:d2|teen mahine]] aazmaishi muddat hogi.
+    4. Naukri chhorne se [[DEADLINE:d3|pandrah din pehle]] batana hoga, warna aadhi tankhwah kaat li jaye gi.
+    5. [[NAME:p1|Bokhari]] sahib ki ijazat ke baghair gaari ghar nahi le ja sakta.
+    6. Agar [[NAME:p2|Qadir]] chhutti pe ho to us ka bhai [[NAME:p4|Ghulam Rasool]] kaam karega.
+
+    Dastakhat: [[NAME:p1|Sajjad Hussain]] / Angotha: [[NAME:p2|Ghulam Qadir]]
+    Gawah: [[NAME:p5|Muhammad Boota]]
+- id: p4-emp-04
+  document_type: employment
+  features: [urdu_script, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|الفلاح گرامر سکول]]
+    [[ADDRESS:a1|پلاٹ نمبر 12، سیکٹر بی، بحریہ ٹاؤن، راولپنڈی]]
+
+    تقرری نامہ
+
+    محترمہ [[NAME:p1|سمیرا ناز]]
+    [[ADDRESS:a2|مکان نمبر 7، گلی نمبر 3، ڈھوک کالا خان، راولپنڈی]]
+
+    آپ کو بطور معلمہ (ریاضی) تقرر کیا جاتا ہے۔ تنخواہ 55,000 روپے ماہانہ ہو گی۔ آپ کی ملازمت [[DEADLINE:d1|یکم اگست 2026 سے]] شروع ہو گی اور پہلے [[DEADLINE:d2|چھ ماہ]] آزمائشی ہوں گے۔
+
+    [[NAME:p1|سمیرا ناز]] صاحبہ سے گزارش ہے کہ [[DEADLINE:d3|20 جولائی 2026 تک]] اپنی رضامندی سے آگاہ کریں۔
+
+    پرنسپل
+    [[NAME:p2|طاہرہ بیگم]]
+    فون: [[PHONE:t1|051-5762318]]
+- id: p4-emp-05
+  document_type: employment
+  features: [ocr_errors, repeated_names, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    APP0INTMENT LETTER
+
+    [[NOT:n1|Sukkur Rice Mi1ls]]
+    Date: O3-O2-2026
+
+    Mr. [[NAME:p1|Abdu1 Wahab Soomro]]
+    S/o [[NAME:p3|Muhammad Hashim Soornro]]
+    [[ADDRESS:a1|Vi1lage Ali Wahan, Taluka Rohri, Dist-
+    rict Sukkur]]
+    CNlC: [[CNIC:c1|45504-21O9873-l]]
+
+    Dear [[NAME:p1|Wahab]],
+    You are appointed as Store Keeper on a monthly salary of Rs. 48,OOO. Your appointment is on contract [[DEADLINE:d1|for one year from 15-O2-2026]]. Mr. [[NAME:p1|Soornro]] will be on probation [[DEADLINE:d2|for the first 9O days]].
+
+    Report to [[NAME:p2|Ghu1am Murtaza Shaikh]], Mill Manager, [[DEADLINE:d3|on or before l5 February 2026]].
+
+    ([[NAME:p2|G. M. Shaikh]])
+    Mill Manager   Ph: [[PHONE:t1|07l-56l 2290]]
+- id: p4-emp-06
+  document_type: employment
+  features: [aliases, repeated_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    RELIEVING LETTER
+
+    [[NOT:n1|Nexa Byte Solutions]], [[ADDRESS:a1|Floor 6, Arfa Software Technology Park, Ferozepur Road, Lahore]]
+
+    15 September 2026
+
+    To whom it may concern
+
+    This is to confirm that [[NAME:p1|Muhammad Hamza Iqbal]] (Employee ID NBS-0442) was employed with us as a Software Engineer from 3 January 2023 to 31 August 2026. Mr. [[NAME:p1|Iqbal]] resigned and served his full notice period. [[NAME:p1|Hamza]] has handed over all company assets.
+
+    His final settlement will be paid [[DEADLINE:d1|within forty-five (45) days of his last working day]]. Under his contract, the said [[NAME:p1|M. Hamza Iqbal]] remains bound by confidentiality obligations [[DEADLINE:d2|for two years from 31 August 2026]].
+
+    For verification, contact [[NAME:p2|Rida Ashfaq]], HR Business Partner, at [[EMAIL:e1|rida.ashfaq@nexabyte.com.pk]].
+
+    [[NAME:p2|Rida Ashfaq]]
+- id: p4-emp-07
+  document_type: employment
+  features: [untitled_names, repeated_names, lookalikes]
+  parties: [p1, p2]
+  text: |
+    EXPERIENCE CERTIFICATE
+
+    Certified that [[NAME:p1|Shehla Nasreen]] worked at [[NOT:n1|Baba Farid Public School]], [[NOT:n2|Pakpattan]], as an English teacher from April 2019 to March 2026. During this time [[NAME:p1|Shehla Nasreen]] taught classes 6 to 8 and organised the annual debate competition.
+
+    [[NAME:p1|Shehla Nasreen]] is honest and hardworking. We wish her success.
+
+    [[NAME:p2|Muhammad Ilyas Wattoo]]
+    Principal
+    Copy: [[NAME:p3|Zubaida Khanum]], Vice Principal
+- id: p4-emp-08
+  document_type: employment
+  features: [overlap, repeated_names, deadlines, lookalikes, aliases]
+  parties: [p1, p2]
+  text: |
+    CONTRACT OF EMPLOYMENT (FACTORY WORKER)
+
+    This contract is between [[NOT:n1|Sialkot Sports Goods Manufacturing Co.]], [[ADDRESS:a1|Small Industrial Estate, Shahab Pura Road, Sialkot]] (the "Employer"), represented by [[NAME:p2|Naeem Akbar Ghumman]], and [[NAME:p1|Asif Ali]] s/o [[NAME:p3|Barkat Ali]], CNIC [[CNIC:c1|34603-8810276-5]], whose address is [[ADDRESS:a2|c/o [[NAME:p3|Barkat Ali]], near the Jamia Masjid, Village Ugoki, Tehsil and District Sialkot]] (the "Worker").
+
+    1. The Worker is engaged as a football stitcher on piece rate of Rs. 210 per panel set.
+    2. Wages shall be paid weekly [[DEADLINE:d1|every Saturday]].
+    3. The said [[NAME:p1|Asif]] may terminate by giving [[DEADLINE:d2|one week's notice]].
+    4. If [[NAME:p1|Asif Ali]] is absent [[DEADLINE:d3|for more than ten consecutive days]] without leave, this contract shall stand terminated.
+    5. The Employer shall register the Worker with the social security institution [[DEADLINE:d4|within 30 days of joining]].
+
+    Employer: [[NAME:p2|Naeem A. Ghumman]]
+    Worker (thumb impression): [[NAME:p1|Asif Ali]]
+- id: p4-emp-09
+  document_type: employment
+  features: [table, untitled_names, overlap]
+  parties: [p1]
+  text: |
+    NEW JOINER FORM - CONFIDENTIAL
+
+    Full name: [[NAME:p1|Areeba Khalid Chughtai]]
+    Personal email: [[EMAIL:e1|areeba.k.chughtai@zmailbox.pk]]
+    Mobile: [[PHONE:t1|0334-1187420]]
+    Current address: [[ADDRESS:a1|Flat 11, Al-Noor Heights, Block 7, Gulistan-e-Jauhar, Karachi]]
+    Permanent address: [[ADDRESS:a2|House of [[NAME:p2|Khalid Mehmood Chughtai]], Mohallah Sharifpura, Gujrat]]
+    Salary account: [[ACCOUNT:b1|0010-0417-7720-0301]]
+
+    Emergency contacts
+
+    | Name | Relation | Phone |
+    |---|---|---|
+    | [[NAME:p2|Khalid Mehmood Chughtai]] | father | [[PHONE:t2|0300-6224019]] |
+    | [[NAME:p3|Nighat Parveen]] | mother | [[PHONE:t3|053-3521170]] |
+    | [[NAME:p4|Usama Khalid]] | brother | [[PHONE:t4|+971 50 418 2276]] |
+
+    Declaration: I, [[NAME:p1|Areeba Khalid Chughtai]], confirm the details above are correct.
+- id: p4-emp-10
+  document_type: employment
+  features: [deadlines, repeated_names, aliases, lookalikes]
+  parties: [p1, p2]
+  text: |
+    SHOW CAUSE NOTICE
+
+    To: Mr. [[NAME:p1|Faisal Mehmood Tiwana]], Branch Operations Manager, [[NOT:n1|Satellite Town Branch]], [[NOT:n2|Haveli Microfinance Bank]]
+
+    From: [[NAME:p2|Huma Shaheen]], Regional Head (North)
+
+    Date: 22 July 2026
+
+    It has been reported that cash of Rs. 1,250,000 remained unrecorded in the vault register for [[DEADLINE:d1|three days]] in June 2026. You are hereby asked to show cause in writing why disciplinary action should not be taken against you.
+
+    Mr. [[NAME:p1|Tiwana]] must submit his reply [[DEADLINE:d2|within seven (7) days of receipt of this notice]]. If no reply is received [[DEADLINE:d3|by 29 July 2026]], the matter will be decided ex parte. The inquiry officer is [[NAME:p3|Kamal Uddin Jatoi]].
+
+    Pending the inquiry, [[NAME:p1|Faisal]] shall not have access to the vault keys.
+
+    [[NAME:p2|Huma Shaheen]]
+- id: p4-emp-11
+  document_type: employment
+  features: [urdu_script, roman_urdu, repeated_names, deadlines, lookalikes, aliases]
+  parties: [p1, p2]
+  text: |
+    SECURITY GUARD SERVICE AGREEMENT
+
+    Agency: [[NOT:n1|Shaheen Guarding Services]]
+    Guard: [[NAME:p1|Muhammad Nawaz]] ([[NAME:p1|محمد نواز]]), ex-army, CNIC [[CNIC:c1|37101-4433901-7]]
+    Client: [[NAME:p2|Mehreen Aftab]], [[ADDRESS:a1|House 51, Street 23, Bahria Town Phase 4, Rawalpindi]]
+
+    Guard ki duty raat 8 se subah 8 baje tak hogi. Tankhwah 38,000 rupay [[DEADLINE:d1|har mahine ki 10 tareekh tak]] agency degi. [[NAME:p1|Nawaz]] chhutti se [[DEADLINE:d2|do din pehle]] agency ko batayega.
+
+    کلائنٹ کا نمبر: [[PHONE:t1|0333-5021984]]
+    گارڈ کا نمبر: [[PHONE:t2|0349-7712035]]
+
+    Agreement period: [[DEADLINE:d3|six months from 1 September 2026]].
+
+    For the agency: [[NAME:p3|Zulfiqar Ahmad Satti]]
+    Client: [[NAME:p2|Mehreen Aftab]]
+- id: p4-emp-12
+  document_type: employment
+  features: [untitled_names, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    Remote contractor engagement - summary of terms
+
+    - Contractor: [[NAME:p1|Hira Batool]], [[EMAIL:e1|hira.batool.dev@qmail.pk]], based in [[NOT:n1|Abbottabad]]
+    - Client: [[NOT:n2|Kaghan Cloud Ltd]], via [[NAME:p2|Shayan Raza Kazmi]] ([[EMAIL:e2|shayan@kaghancloud.io]])
+    - Role: backend developer for the [[NOT:n3|Saiful Muluk]] booking API
+    - Rate: USD 22 per hour, invoiced monthly; invoices payable [[DEADLINE:d1|within 15 days of the invoice date]]
+    - Weekly sync every Monday with [[NAME:p2|Shayan Raza Kazmi]] and [[NAME:p3|Bushra Ehsan]] (QA)
+    - First milestone due [[DEADLINE:d2|by 30 November 2026]]
+    - Either side may end the engagement with [[DEADLINE:d3|two weeks' notice]]
+    - [[NAME:p1|Hira Batool]] will keep client data confidential and delete local copies [[DEADLINE:d4|within 5 days of termination]]
+- id: p4-emp-13
+  document_type: employment
+  features: [table, ocr_errors, repeated_names, deadlines, aliases]
+  parties: [p1, p2]
+  text: |
+    FULL AND FINAL SETTLEMENT (scanned)
+
+    Employee: [[NAME:p1|Noman Sadiq Bhutta]]      Emp. Code 2O71
+    CNlC: [[CNIC:c1|33100-7745l20-3]]
+    Last working day: 3l-08-2026
+    Approved by: [[NAME:p2|Rabia Aslarn]], Finance
+
+    | Head | Amount (Rs.) |
+    |---|---|
+    | Salary August 2026 | 182,OOO |
+    | Leave encashment (9 days) | 54,6O0 |
+    | Gratuity | 3l0,500 |
+    | Less: loan recovery | (40,000) |
+    | Net payable | 507,1OO |
+
+    Net amount to be credited to [[NAME:p1|N0man Sadiq Bhutta]] in IBAN [[ACCOUNT:b1|PK5l MUCB 0123 4567 8901 2345]] [[DEADLINE:d1|within 3O days]]. Any objection by Mr [[NAME:p1|Bhutta]] to be raised [[DEADLINE:d2|within 7 days of receiving this statement]].
+
+    Received: [[NAME:p1|Noman S.
+    Bhutta]]          Checked: [[NAME:p2|R. Aslam]]

@@ -1,0 +1,68 @@
+# Universal drafting questions -- every document, including an unknown type.
+#
+# DRAFTING COMPLETENESS ONLY (ANALYZER_HYPOTHESES_PLAN.md §3.1). Not a legal
+# playbook: no law is cited, no legal conclusion is drawn, nothing here is said
+# to be required by law. The local scanner answers every question from the
+# whole document; a model may only attach a separate review signal.
+#
+# polarity: attention_if_absent  -- "Not located automatically" is the item to review
+#           attention_if_present -- finding it is the item to review (a blank, a conflict)
+catalogue: drafting-hypotheses.v1
+scope: universal
+questions:
+  - id: parties_identified
+    question: Are the parties identified?
+    detector: parties_identified
+    polarity: attention_if_absent
+    ambiguous_when: Only one party is identified.
+    explain: true
+
+  - id: execution_date
+    question: Is a date of making or effect stated?
+    detector: execution_date
+    polarity: attention_if_absent
+    ambiguous_when: The document says dated but no date follows.
+    explain: false
+
+  - id: signature_block
+    question: Is there a signature or execution block?
+    detector: signature_block
+    polarity: attention_if_absent
+    explain: false
+
+  - id: blank_placeholders
+    question: Are there blanks or placeholders left to fill?
+    detector: blank_placeholders
+    polarity: attention_if_present
+    explain: false
+
+  - id: conflicting_values
+    question: Do the same amount, date or period appear with different values?
+    detector: conflicting_values
+    polarity: attention_if_present
+    explain: true
+
+  - id: unresolved_references
+    question: Do references to other clauses or schedules point somewhere?
+    detector: unresolved_references
+    polarity: attention_if_present
+    ambiguous_when: A reference could point to more than one place.
+    explain: false
+
+  - id: undefined_terms
+    question: Are capitalised terms used without being defined?
+    detector: undefined_terms
+    polarity: attention_if_present
+    explain: false
+
+  - id: dispute_resolution
+    question: Does the document say how disagreements will be settled?
+    detector: dispute_resolution
+    polarity: attention_if_absent
+    explain: true
+
+  - id: governing_law_stated
+    question: Does the document name the law it is made under?
+    detector: governing_law_stated
+    polarity: attention_if_absent
+    explain: false

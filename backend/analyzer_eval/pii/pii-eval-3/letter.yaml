@@ -1,0 +1,318 @@
+dataset: pii-eval-3
+label_review: developer_only
+documents:
+- id: p3-let-01
+  document_type: letter
+  features: [overlap, aliases, deadlines, lookalikes]
+  parties: [p1, p2]
+  text: |
+    LEGAL NOTICE
+
+    Through Registered A.D. and Courier
+
+    To,
+    Mr. [[NAME:p2|Shafqat Ali Jutt]]
+    [[ADDRESS:a1|Upper Portion, House of [[NAME:p3|Sardar Begum]], 19-C, Street 7, Samanabad, Lahore]]
+
+    Subject: Notice for payment of arrears of rent and vacation of premises
+
+    Sir,
+
+    Under instructions from my client [[NAME:p1|Nighat Sultana]] widow of [[NAME:p4|Muhammad Saleem]],
+    resident of [[ADDRESS:a2|House 4, Street 2, Poonch Road, Samanabad, Lahore]], I serve upon you the following notice:
+
+    1. That my client let out the above premises to you under a tenancy agreement dated 1 March 2025.
+    2. That you, the said [[NAME:p2|Shafqat]], have not paid the rent for June, July and August 2026, amounting to Rs. 156,000.
+    3. That my client's mother-in-law, [[NAME:p3|Sardar Begum]], who lives on the ground floor, has also complained
+       of your conduct.
+
+    You are hereby called upon to pay the arrears [[DEADLINE:d1|within fifteen (15) days of receipt of this notice]]
+    and to vacate the premises [[DEADLINE:d2|by 31 October 2026]], failing which my client shall file an ejectment
+    petition before the [[NOT:n1|Rent Tribunal, Lahore]] at your risk as to costs.
+
+    A copy of this notice is retained in my office for record.
+
+    [[NAME:p5|Asif Mehmood Chattha]]
+    Advocate High Court
+    [[NOT:n2|Chattha Law Associates]], [[NOT:n3|Lahore]]
+    Cell: [[PHONE:t1|0300-4019287]]
+
+    cc: Mrs. [[NAME:p1|Nighat Sultana]]
+
+- id: p3-let-02
+  document_type: letter
+  features: [roman_urdu, untitled_names, repeated_names, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    Assalam o Alaikum [[NAME:p1|Iftikhar]] bhai,
+
+    Main [[NAME:p2|Noman]] bol raha hoon, flat 5 wala. Is maheene ka kiraya thora late ho jayega, salary
+    abhi nahi aayi. [[DEADLINE:d1|15 tareekh tak]] pakka de doonga, InshaAllah.
+
+    Doosri baat, kitchen ki chhat se pani tapak raha hai. [[NAME:p3|Rafaqat]] plumber ko bulaya tha, us ne kaha
+    malik se poochh lo. Aap [[DEADLINE:d2|is hafte]] dekh lein to meharbani.
+
+    [[NAME:p2|Noman Akhtar]]
+    [[ADDRESS:a1|Flat 5, Third Floor, Madina Heights, Satellite Town, Rawalpindi]]
+    [[PHONE:t1|0333-5208714]]
+
+    ---
+    Jawab: [[NAME:p2|Noman]] sahib, theek hai 15 tak de dein. Plumber kal bhejta hoon. - [[NAME:p1|Iftikhar Hussain Janjua]]
+
+- id: p3-let-03
+  document_type: letter
+  features: [urdu_script, lookalikes, deadlines, aliases]
+  parties: [p1]
+  text: |
+    بخدمت جناب ایس ایچ او صاحب، [[NOT:n1|تھانہ شالیمار]]، [[NOT:n2|لاہور]]
+
+    عنوان: کرایہ دار کی اطلاع
+
+    جناب عالی!
+    گزارش ہے کہ سائل [[NAME:p1|طارق عزیز چوہدری]] ولد [[NAME:p3|عزیز احمد]]، شناختی کارڈ نمبر [[CNIC:c1|35202-5502891-7]]،
+    سکنہ [[ADDRESS:a1|مکان نمبر 61، گلی نمبر 12، باغبانپورہ، لاہور]] ہے۔ سائل نے اپنا مکان
+    [[NAME:p2|شاہد اقبال]] ولد [[NAME:p4|محمد اقبال]]، شناختی کارڈ نمبر [[CNIC:c2|34603-2219904-5]]، موبائل [[PHONE:t1|0307-4472918]] کو
+    [[DEADLINE:d1|یکم ستمبر 2026 سے ایک سال کے لیے]] کرایہ پر دیا ہے۔
+
+    قانون کے مطابق یہ اطلاع [[DEADLINE:d2|سات دن کے اندر]] جمع کرائی جا رہی ہے۔ [[NAME:p2|شاہد اقبال]] کے شناختی کارڈ کی نقل لف ہے۔
+
+    العارض
+    [[NAME:p1|طارق عزیز]]
+    موبائل: [[PHONE:t2|0300-8441027]]
+
+- id: p3-let-04
+  document_type: letter
+  features: [ocr_errors, untitled_names, repeated_names, aliases, lookalikes]
+  parties: [p1, p2]
+  text: |
+    TO WHOM lT MAY CONCERN
+
+    l have known [[NAME:p2|Hum4ira Batoo1]] for the last six years as a tenant in my building at
+    [[ADDRESS:a1|Plot 2l-C, Lane 4, Bukhari Commercial, Phase Vl,
+    DHA, Karach1]]. [[NAME:p2|Humaira]] always paid her rent on time and left the flat in good condition.
+
+    l recommend [[NAME:p2|Huma1ra Batool]] as a reliable tenant to any landlord.
+
+    [[NAME:p1|Nasreen Mirza]]
+    0wner, [[NOT:n1|Mirza Heights]]
+    Ce11: [[PHONE:t1|0300-2l9 4475]]   Email: [[EMAIL:e1|nasreen.m1rza@example.com]]
+
+- id: p3-let-05
+  document_type: letter
+  features: [table, lookalikes, deadlines, repeated_names, aliases]
+  parties: [p1, p2]
+  text: |
+    [[NOT:n1|Siddiqui & Raza Advocates]]
+    Office 14, Second Floor, [[NOT:n2|Fatima Jinnah Market]], [[NOT:n3|Lahore]]
+
+    Dated: 22 September 2026
+
+    [[NAME:p2|Ahmed Bilal Siddiqui]]
+    [[ADDRESS:a1|House 9-B, Lane 3, Askari 10, Lahore Cantt]]
+
+    Dear Mr. [[NAME:p2|Siddiqui]],
+
+    Re: Documents received for your tenancy dispute
+
+    We acknowledge receipt of the following documents:
+
+    | No. | Document | Relating to |
+    |---|---|---|
+    | 1 | Tenancy agreement dated 1-1-2024 | [[NAME:p2|Ahmed Bilal Siddiqui]] and [[NAME:p3|Kanwal Shoukat]] |
+    | 2 | Copy of CNIC | [[NAME:p3|Kanwal Shoukat]], [[CNIC:c1|35201-7718842-0]] |
+    | 3 | Rent receipts (14) | paid into [[ACCOUNT:b1|PK05 RVBK 0060 0471 1928 5501]] |
+    | 4 | Legal notice dated 1 August 2026 | giving [[DEADLINE:d1|fifteen days' time]] to pay |
+
+    Please note that the limitation for filing the ejectment petition is short; kindly send the original
+    agreement to our office [[DEADLINE:d2|before 30 September 2026]]. Our fee is payable
+    [[DEADLINE:d3|within 10 days of this letter]].
+
+    Yours faithfully,
+    [[NAME:p1|Rida Raza]]
+    Associate
+    (no relation to the client of the same surname)
+
+- id: p3-let-06
+  document_type: letter
+  features: [lookalikes, untitled_names, deadlines, aliases]
+  parties: [p1]
+  text: |
+    The Branch Manager
+    [[NOT:n1|Sutlej Commercial Bank Ltd.]]
+    [[NOT:n2|Allama Iqbal Town Branch]], [[NOT:n3|Lahore]]
+
+    Subject: Request to update salary account and mobile number
+
+    Sir,
+
+    I, [[NAME:p1|Khadija Anjum]], hold savings account no. [[ACCOUNT:b1|1047-0062218-01]] (IBAN
+    [[ACCOUNT:b2|PK64 SUTL 0001 0470 0622 1801]]). My employer [[NOT:n4|Anjum Packaging Industries]] (not
+    related to me) will now credit my salary to this account. Kindly link my new mobile number
+    [[PHONE:t1|0322-4189075]] for SMS alerts and update my address to
+    [[ADDRESS:a1|House 118, Block Kamran, Mustafa Town, Lahore]].
+
+    My old number (SIM lost) should be removed [[DEADLINE:d1|immediately]]. I need the updated
+    statement [[DEADLINE:d2|before 10 October 2026]] for a visa application.
+
+    Regards,
+    [[NAME:p1|Khadija]]
+    CNIC [[CNIC:c1|35202-9910327-8]]
+
+- id: p3-let-07
+  document_type: letter
+  features: [deadlines, repeated_names, aliases, lookalikes, overlap]
+  parties: [p1, p2]
+  text: |
+    NOTICE OF BREACH OF CONFIDENTIALITY
+
+    Date: 28 August 2026
+
+    To: [[NAME:p2|Yasir Hameed]]
+    [[ADDRESS:a1|c/o [[NAME:p3|Hameed Akhtar]], House 230, Block D, Wapda Town Phase 1, Multan]]
+    Email: [[EMAIL:e1|yasir.hameed.dev@example.com]]
+
+    Dear [[NAME:p2|Yasir]],
+
+    It has come to our notice that screenshots of the [[NOT:n1|Kisan Dost]] app dashboard, which you
+    accessed under the non-disclosure agreement signed on 2 February 2026, were posted in a public group.
+    This is a breach of clause 3 of that agreement.
+
+    You are required to:
+    (a) remove all posted material [[DEADLINE:d1|within 24 hours of this notice]];
+    (b) confirm in writing [[DEADLINE:d2|by 2 September 2026]] that you hold no other copies; and
+    (c) attend a meeting at our [[NOT:n2|Multan]] office [[DEADLINE:d3|within the next seven days]].
+
+    If Mr. [[NAME:p2|Hameed]] fails to comply, we will claim the liquidated damages of Rs. 500,000 under clause 7.
+
+    [[NAME:p1|Samina Gilani]]
+    Director, [[NOT:n3|Gilani Agro Solutions]]
+    [[PHONE:t1|061-6512288]]
+
+- id: p3-let-08
+  document_type: letter
+  features: [roman_urdu, urdu_script, repeated_names, aliases, untitled_names, overlap]
+  parties: [p1, p2]
+  text: |
+    Pyare beta [[NAME:p2|Fahad]],
+
+    Dua hai tum khairiyat se ho. Ammi bhi theek hain. Tumhari phupho [[NAME:p4|Zubaida]] ne pucha tha ke
+    gaon wali zameen ke kaghzaat kab tak aa jayenge. Patwari [[NAME:p5|Allah Bakhsh]] keh raha hai ke fard
+    tumhare naam pe hi niklegi kyunke intiqal [[NAME:p2|Fahad Riaz]] ke naam hua tha.
+
+    Kaghzaat is pate pe bhejna: [[ADDRESS:a1|Ghar [[NAME:p1|Riaz Ahmed]] ka, Mohallah Pir Wala, Kamalia, Zila Toba Tek Singh]].
+    Mera number badal gaya hai, naya [[PHONE:t1|0346-7701562]] hai.
+
+    [[NAME:p4|زبیدہ]] phupho ne apna salam bheja hai.
+
+    Tumhara abbu,
+    [[NAME:p1|ریاض احمد]] ([[NAME:p1|Riaz]])
+
+- id: p3-let-09
+  document_type: letter
+  features: [untitled_names, deadlines, repeated_names, lookalikes, aliases]
+  parties: [p1, p2]
+  text: |
+    Subject: Reminder - signed offer letter still pending
+
+    Hi [[NAME:p2|Saad]],
+
+    Just a reminder that we have not yet received your signed offer letter. Please send the scan to
+    [[EMAIL:e1|careers@tamirlabs.example.pk]] [[DEADLINE:d1|by 5 pm on Friday, 9 October 2026]], otherwise
+    the offer will lapse. Joining is planned for [[DEADLINE:d2|the first Monday of November]].
+
+    If anything in the contract needs clarification, call me directly on [[PHONE:t1|0321-4407713]] or speak to
+    [[NAME:p3|Hira]] in [[NOT:n1|People Operations]].
+
+    Thanks,
+    [[NAME:p1|Moiz Farooqui]]
+    [[NOT:n2|Tamir Labs]], [[NOT:n3|Karachi]]
+
+    > On 1 Oct 2026, [[NAME:p2|Saad Zafar]] <[[EMAIL:e2|saad.zafar.k@example.com]]> wrote:
+    > Thanks [[NAME:p1|Moiz]], I will go through it this weekend and revert. [[NAME:p2|Saad]]
+
+- id: p3-let-10
+  document_type: letter
+  features: [ocr_errors, overlap, deadlines, aliases, lookalikes]
+  parties: [p1, p2]
+  text: |
+    LEGAL N0TICE FOR RECOVERY OF UNPAID WAGES
+
+    To: The Proprietor, [[NOT:n1|Butt Marble Factory]], [[NOT:n2|G.T. Road]], [[NOT:n3|Gujranwala]]
+    Attention: Mr. [[NAME:p2|Kh4lid Mahmood Butt]]
+
+    My client [[NAME:p1|Shahid Nazir]] s/o [[NAME:p3|Nazir Ahmad]], CNlC [[CNIC:c1|34l01-5508l27-3]], r/o
+    [[ADDRESS:a1|Mohallah Rasool Pura, near house of Chaudhry [[NAME:p4|Ilyas]], Gali No. 9, Gujran-
+    wala]], worked in your factory as machine operator from March 2O23 to July 2O26.
+
+    You have failed to pay his wages for May, June and July 2O26 totalling Rs. 1O8,OOO. You, Mr. [[NAME:p2|Butt]],
+    are called upon to pay the said amount [[DEADLINE:d1|within ten (1O) days]] of this notice, failing which
+    my client [[NAME:p1|Shah1d]] shall approach the [[NOT:n4|Punjab Labour Court]] [[DEADLINE:d2|without further notice]].
+
+    [[NAME:p5|Mehwish Arshad]], Advocate
+    [[PHONE:t1|O3OO-64l9902]]
+
+- id: p3-let-11
+  document_type: letter
+  features: [table, deadlines, lookalikes, untitled_names]
+  parties: [p1]
+  text: |
+    [[NOT:n1|Gulberg Greens Residents Welfare Society]]
+
+    Circular No. 07/2026                                      Date: 15 September 2026
+
+    To all owners and tenants,
+
+    The annual verification of tenants will be held this month. The following tenants have not yet
+    submitted their documents:
+
+    | Unit | Tenant | Phone | Documents due |
+    |---|---|---|---|
+    | Villa 12 | [[NAME:p2|Kamil Rauf]] | [[PHONE:t1|0300-5410298]] | CNIC copy |
+    | Villa 31 | [[NAME:p3|Saba Gul]] | [[PHONE:t2|0312-9902617]] | tenancy agreement |
+    | Flat F-4 | [[NAME:p4|Ali Hamza Tiwana]] | [[PHONE:t3|0345-5502774]] | police verification |
+
+    All pending documents must reach the society office [[DEADLINE:d1|by 30 September 2026]]. Units whose
+    documents are not received [[DEADLINE:d2|within 15 days after that date]] will be reported to the
+    [[NOT:n2|Islamabad Capital Territory Police]].
+
+    [[NAME:p1|Sheharyar Abbasi]]
+    General Secretary
+    [[EMAIL:e1|gs.gulberggreens@example.org.pk]]
+
+- id: p3-let-12
+  document_type: letter
+  features: [roman_urdu, ocr_errors, aliases, deadlines]
+  parties: [p1, p2]
+  text: |
+    Bakhidmat janab [[NAME:p2|Mushtaq Ahmed]] sahib,
+
+    Guzarish hai ke main [[NAME:p1|Ruqayya Bano]] aap ki dukaan [[ADDRESS:a1|Shop No. l7, Anarka1i
+    Bazar, Bahawalpur]] mein pichhle teen saal se kirayedar hoon. Aap ne pichhle maheene kaha tha ke
+    kiraya Rs. 3O,OOO se baRha kar Rs. 45,OOO kar denge. [[NAME:p2|Mushtaq]] sahib, muahide ke mutabiq
+    izafa sirf 1O% ho sakta hai.
+
+    Meri darkhwast hai ke naya kiraya [[DEADLINE:d1|agle saal yakam January se]] lagu kiya jaye. Agar aap
+    raazi na hon to mujhe [[DEADLINE:d2|kam az kam teen maheene]] ka waqt dein taake main nayi jagah dhoond
+    sakoon.
+
+    Aap ki kirayedar,
+    [[NAME:p1|Ruqayya Ban0]]
+    Fon: [[PHONE:t1|0300-68l 4402]]
+    CNlC: [[CNIC:c1|3l202-66O9218-4]]
+
+- id: p3-let-13
+  document_type: letter
+  features: [urdu_script, overlap, aliases, deadlines, untitled_names]
+  parties: [p1, p2]
+  text: |
+    محترمہ [[NAME:p2|فرحت جبین]] صاحبہ،
+    السلام علیکم!
+
+    آپ کو مطلع کیا جاتا ہے کہ آپ کا ملازمت کا معاہدہ [[DEADLINE:d1|31 دسمبر 2026]] کو ختم ہو رہا ہے۔ اگر آپ معاہدہ کی تجدید چاہتی ہیں
+    تو [[DEADLINE:d2|30 نومبر 2026 تک]] تحریری درخواست جمع کرائیں۔
+
+    آپ کا موجودہ پتہ ہمارے ریکارڈ میں یہ ہے: [[ADDRESS:a1|معرفت [[NAME:p3|نذیر حسین]]، مکان نمبر 18، محلہ قاضیاں، جہلم]]
+    اگر پتہ تبدیل ہو چکا ہے تو [[NAME:p2|فرحت]] اس کی اطلاع بھی دیں۔
+
+    [[NAME:p1|کامران یوسف]]
+    منیجر انتظامیہ

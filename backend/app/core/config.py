@@ -157,7 +157,7 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
-    frontend_url: str = "http://localhost:3000"
+    frontend_url: str = "http://localhost:3001"
     cors_origins: str = ""            # extra allowed origins, comma-separated
     run_schedulers: bool = True       # in-process schedulers; disable on all but one worker
     # How often each worker checks the provenance outbox. Cheap when idle:
@@ -178,6 +178,78 @@ class Settings(BaseSettings):
     # nothing is destroyed until this is explicitly turned on. Deletion is
     # tombstone-first and crash-safe (services/document_deletion.py).
     documents_v2_deletion_enabled: bool = False
+    # Days a client can restore a deleted Vault document before it is purged
+    # (services/vault_deletion.py). Purging itself still needs the switch above.
+    vault_recovery_days: int = 30
+
+    # ── DOCUMENT REVIEW REQUESTS — client→lawyer sharing ─────────────────────
+    # DOCUMENT_REVIEW_REQUEST_PLAN.md. A client sends one exact, frozen Vault
+    # version to the lawyer of an ACCEPTED engagement. OFF by default, and it
+    # stays off until BOTH the client flow and the lawyer Review Queue (Phase 2)
+    # are ready -- no client may send what no lawyer can open. Requires
+    # DOCUMENTS_V2 (the Vault is V2). Off: the routes answer 404.
+    document_review_requests: bool = False
+    # D3: after an ACCEPTED request's engagement ends or its document is
+    # deleted, the lawyer keeps READ-ONLY access for this many days. The
+    # deadline is computed once, at that event, and frozen on the request
+    # (`retention_until`); changing this later affects only future events.
+    review_request_retention_days: int = 30
+    # How often the review-request lifecycle sweep runs (backstop for the
+    # engagement-end and document-deletion hooks). Only while the flag is on.
+    review_request_sweep_minutes: int = 15
+
+    # ── DOC_ANALYZER — real document analysis (DOC_ANALYZER_PLAN.md) ──────────
+    # OFF by default. When off, the analyzer routes answer 404 and nothing is
+    # written. When ON it additionally requires a transactional database
+    # (replica set / Atlas) and valid analyzer indexes; if either is missing
+    # the analyzer FAILS CLOSED (its routes answer 503) rather than run the
+    # multi-document steps non-atomically. The rest of the app is unaffected.
+    doc_analyzer: bool = False
+    # Master keys for the analyzer's encrypted files (plan §6.4):
+    # "id:base64,id:base64", each decoding to exactly 32 bytes, and the id
+    # used for new files. Required when DOC_ANALYZER is on; readiness refuses
+    # otherwise. Never logged. Old ids stay listed until nothing uses them.
+    analyzer_keks: str = ""
+    analyzer_kek_active: str = ""
+    # The analyzer's AI report layer (summary, risks, obligations). OFF by
+    # default and separate from DOC_ANALYZER: the deterministic analyzer runs
+    # without it. When ON, analyzer readiness (analyzer/ai_config.py) refuses
+    # the analyzer unless all of this is consistent: ONE provider, ONE pinned
+    # model from the allowlist, the data-protection checklist it was reviewed
+    # against, and an honest zero-data-retention record. No fallback model,
+    # key or provider is ever tried.
+    analyzer_ai: bool = False
+    analyzer_ai_provider: str = "groq"           # the only supported provider
+    analyzer_ai_model: str = ""                  # the exact Groq model id, pinned
+    # Models that may be pinned (comma-separated). Changing the pin is a
+    # reviewed configuration change, never a runtime fallback.
+    analyzer_ai_model_allowlist: str = "openai/gpt-oss-120b,openai/gpt-oss-20b,llama-3.3-70b-versatile"
+    # The data-protection checklist this deployment was reviewed against,
+    # e.g. "AAI-AI-DP-001"; recorded with every AI output.
+    analyzer_ai_policy_id: str = ""
+    # Zero data retention at the provider: "unverified" unless a person
+    # verified it, and then the date and where the evidence is kept.
+    # ANALYZER_AI requires a verified record; anything less keeps the
+    # analyzer closed. SYNTHETIC_ONLY must stay true (demo policy): real
+    # documents are not permitted, whatever the ZDR record says.
+    analyzer_ai_zdr_status: str = "unverified"   # unverified | verified
+    analyzer_ai_zdr_verified_on: str = ""        # YYYY-MM-DD
+    analyzer_ai_zdr_evidence: str = ""           # where the proof is kept
+    analyzer_ai_synthetic_only: bool = True
+    # Lawyer-confirm mode (owner decision 2026-10-04): NO analyzer AI request
+    # leaves the server until the owner lawyer has reviewed and attested the
+    # EXACT final request (services/analyzer/pii_confirmation.py). On by
+    # default; switching it off is for tests of unrelated AI behaviour only.
+    analyzer_pii_review_required: bool = True
+    # ANALYZER_HYPOTHESES_PLAN.md: new runs use the fixed drafting-question
+    # engine (`ai-hypothesis.1`) instead of the open AI report (`ai-report.1`).
+    # Read when a run is CREATED; existing runs keep their engine. Off by default.
+    analyzer_engine_hypotheses: bool = False
+    # The INTERNAL drafting-question review screen (services/analyzer/
+    # drafting_review.py): synthetic documents only, always carrying the
+    # evaluation status. Off by default; it never makes the scanner a
+    # production, client or real-document feature.
+    analyzer_hypothesis_review_ui: bool = False
 
     # Retention DELETION for intakes and their uploaded evidence — its own
     # switch, deliberately not shared with the V2 one above. The two stores hold
@@ -359,6 +431,20 @@ class Settings(BaseSettings):
                 "instant the first run would decide for itself how much of "
                 "the backlog to notify")
         return self
+
+    @field_validator("vault_recovery_days")
+    @classmethod
+    def _recovery_is_sane(cls, value: int) -> int:
+        if not 1 <= value <= 365:
+            raise ValueError("vault_recovery_days must be between 1 and 365")
+        return value
+
+    @field_validator("review_request_retention_days")
+    @classmethod
+    def _retention_is_sane(cls, value: int) -> int:
+        if not 1 <= value <= 3650:
+            raise ValueError("review_request_retention_days must be between 1 and 3650")
+        return value
 
     @field_validator("appointment_scheduler_interval_minutes")
     @classmethod
