@@ -563,10 +563,17 @@ function StepCredentials({ onNext, onBack, name }) {
   const [busy, setBusy] = useState(null);         // kind being uploaded
   const [issues, setIssues] = useState({});       // kind -> server's reason
   const [photoUrl, setPhotoUrl] = useState(null); // local preview of the uploaded photo
+  // A failed read of what was uploaded is not "nothing uploaded".
+  const [docsError, setDocsError] = useState(null);
 
-  useEffect(() => {
-    listMyKycDocuments().then(({ data }) => { if (data) setDocs(data); });
-  }, []);
+  const loadDocs = () => {
+    setDocsError(null);
+    listMyKycDocuments().then(({ data, error }) => {
+      if (error) { setDocsError(error.message || "Could not load your uploads."); return; }
+      setDocs(data || {});
+    });
+  };
+  useEffect(loadDocs, []);
   useEffect(() => () => { if (photoUrl) URL.revokeObjectURL(photoUrl); }, [photoUrl]);
 
   const pick = async (kind, file) => {
@@ -725,9 +732,16 @@ function StepCredentials({ onNext, onBack, name }) {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.warning} strokeWidth="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
               </div>
               <div>
-                <p style={{ fontSize: 12, fontWeight: 700, color: T.warning, margin: 0 }}>
-                  {credCount === 0 ? "No credentials uploaded yet" : `${credCount} of 3 credentials uploaded`}
-                </p>
+                {docsError ? (
+                  <p role="alert" style={{ fontSize: 12, fontWeight: 700, color: T.warning, margin: 0 }}>
+                    Couldn't load your uploads: {docsError}{" "}
+                    <button onClick={loadDocs} style={{ background: "none", border: "none", color: T.primaryLight, fontWeight: 700, cursor: "pointer", padding: 0 }}>Retry</button>
+                  </p>
+                ) : (
+                  <p style={{ fontSize: 12, fontWeight: 700, color: T.warning, margin: 0 }}>
+                    {credCount === 0 ? "No credentials uploaded yet" : `${credCount} of 3 credentials uploaded`}
+                  </p>
+                )}
                 <p style={{ fontSize: 10.5, color: T.textFaint, margin: "2px 0 0" }}>Uploaded files are reviewed by an admin as part of verification.</p>
               </div>
             </div>

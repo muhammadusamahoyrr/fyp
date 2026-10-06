@@ -67,3 +67,30 @@ test("pending lawyers show their real uploads, and each one opens the file", asy
     await act(async () => root.unmount());
     container.remove();
 });
+
+test("a failed queue load is an error with a working retry, not an empty queue", async () => {
+    api.__reset();
+    let attempt = 0;
+    api.__respond("adminListPendingKYC", () => (++attempt === 1
+        ? { data: null, status: 503, error: { message: "Service temporarily unavailable" } }
+        : { data: [lawyer("l3", "Adv Retried", {})], error: null }));
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(h(KYCVerification, { T: DARK })); });
+    await settle();
+
+    assert.doesNotMatch(container.textContent, /No pending KYC submissions/, "an outage was shown as an empty queue");
+    const alert = container.querySelector('[role="alert"]');
+    assert.ok(alert && /Could not load KYC submissions/.test(alert.textContent));
+    assert.match(alert.textContent, /Service temporarily unavailable/);
+
+    const retry = [...alert.querySelectorAll("button")].find(b => b.textContent.trim() === "Retry");
+    await act(async () => { retry.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await settle();
+    assert.match(container.textContent, /Adv Retried/, "retry did not reload the queue");
+    assert.equal(container.querySelector('[role="alert"]'), null);
+    await act(async () => root.unmount());
+    container.remove();
+});

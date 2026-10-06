@@ -26,28 +26,36 @@ function fmtDate(iso) {
 export const KYCVerification = ({ T }) => {
   const [lawyers, setLawyers] = useState([]);
   const [loading, setLoading] = useState(true);
+  // A failed read is NOT an empty queue: shown as an error with a retry, so an
+  // outage can never tell an admin that no reviews are waiting.
+  const [loadError, setLoadError] = useState(null);
   const [modal, setModal]             = useState(null);
   const [notif, setNotif]             = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch]           = useState("");
 
-  useEffect(() => {
-    adminListPendingKYC().then(({ data }) => {
-      if (data) {
-        const mapped = data.map(u => ({
-          id: u._id,
-          name: u.full_name,
-          email: u.email,
-          bar: u.lawyer_profile?.bar_number || "N/A",
-          docs: kycDocs(u),
-          status: "pending",
-          submitted: fmtDate(u.created_at),
-        }));
-        setLawyers(mapped);
+  const load = () => {
+    setLoading(true);
+    setLoadError(null);
+    adminListPendingKYC().then(({ data, error }) => {
+      if (error || !Array.isArray(data)) {
+        setLoadError(error?.message || "The server did not return the queue.");
+        setLoading(false);
+        return;
       }
+      setLawyers(data.map(u => ({
+        id: u._id,
+        name: u.full_name,
+        email: u.email,
+        bar: u.lawyer_profile?.bar_number || "N/A",
+        docs: kycDocs(u),
+        status: "pending",
+        submitted: fmtDate(u.created_at),
+      })));
       setLoading(false);
     });
-  }, []);
+  };
+  useEffect(load, []);
 
   const pending  = lawyers.filter(l => l.status === "pending").length;
   const approved = lawyers.filter(l => l.status === "approved").length;
@@ -170,6 +178,8 @@ export const KYCVerification = ({ T }) => {
 
       {loading
         ? <div style={{ textAlign: "center", padding: 48, color: T.textMuted, fontSize: 14 }}>Loading pending KYC submissions…</div>
+        : loadError
+        ? <div role="alert"><EmptyState T={T} icon={IC.verify} title="Could not load KYC submissions" sub={loadError} actionLabel="Retry" onAction={load} /></div>
         : filtered.length === 0
         ? <EmptyState T={T} icon={IC.verify} title={lawyers.length === 0 ? "No pending KYC submissions" : "No lawyers match"} sub={lawyers.length === 0 ? "All submitted applications have been reviewed." : "Try a different filter or search term."} actionLabel="Clear filters" onAction={() => { setStatusFilter("all"); setSearch(""); }} />
         : (

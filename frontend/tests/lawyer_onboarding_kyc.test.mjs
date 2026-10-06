@@ -116,3 +116,19 @@ test("documents uploaded earlier are shown when the step opens", async () => {
     assert.match(view.container.textContent, /1 of 3 credentials uploaded/);
     await view.unmount();
 });
+
+test("a failed read of earlier uploads is not shown as 'nothing uploaded'", async () => {
+    let attempt = 0;
+    api.__respond("listMyKycDocuments", () => (++attempt === 1
+        ? { data: null, status: 503, error: { message: "Service temporarily unavailable" } }
+        : { data: { education: meta("llb.pdf") }, error: null }));
+    const view = await toStepTwo();
+    assert.doesNotMatch(view.container.textContent, /No credentials uploaded yet/);
+    const alert = [...view.container.querySelectorAll('[role="alert"]')].find(a => /Couldn't load your uploads/.test(a.textContent));
+    assert.ok(alert, "the failed read was not reported");
+    const retry = [...alert.querySelectorAll("button")].find(b => b.textContent.trim() === "Retry");
+    await act(async () => { retry.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await settle();
+    assert.match(view.container.textContent, /Uploaded · llb\.pdf/);
+    await view.unmount();
+});
