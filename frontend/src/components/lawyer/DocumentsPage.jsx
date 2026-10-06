@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Btn, Input } from "./components.jsx";
-import { Icon, I } from "./icons.jsx";
 import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
 import {
     listReviewQueue, reviewDocument, downloadDocumentFile,
@@ -14,81 +13,6 @@ import {
 import { useAuth } from "@/context/AuthContext.jsx";
 import { createGeneration } from "@/lib/attempt.js";
 import { complianceSummary } from "@/lib/complianceSummary.js";
-
-function StatusBadge({ status }) {
-    const s = STATUS_STYLES[status] || STATUS_STYLES.Draft;
-    return (
-        <span style={{
-            background: s.bg, color: s.color, border: `1px solid ${s.border}`,
-            borderRadius: 20, padding: "3px 10px", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap"
-        }}>{status}</span>
-    );
-}
-
-function EditMenu({ doc, onClose, anchorRef }) {
-    const menuRef = useRef(null);
-    const [pos, setPos] = useState({ top: 0, left: 0 });
-
-    useEffect(() => {
-        if (anchorRef?.current && menuRef?.current) {
-            const rect = anchorRef.current.getBoundingClientRect();
-            const menu = menuRef.current;
-            const vw = window.innerWidth;
-            let left = rect.right + 8;
-            if (left + 220 > vw) left = rect.left - 228;
-            setPos({ top: rect.top + window.scrollY, left });
-        }
-    }, []);
-
-    useEffect(() => {
-        const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target) && !anchorRef?.current?.contains(e.target)) onClose(); };
-        setTimeout(() => document.addEventListener("mousedown", handler), 0);
-        return () => document.removeEventListener("mousedown", handler);
-    }, []);
-
-    return (
-        <>
-            <div style={{ position: "fixed", inset: 0, zIndex: 999 }} onClick={onClose} />
-            <div ref={menuRef} style={{
-                position: "fixed", top: pos.top, left: pos.left, zIndex: 1000,
-                background: "#fff", borderRadius: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08)",
-                border: "1px solid #e5e7eb", width: 220, overflow: "hidden",
-                animation: "menuPop 0.15s cubic-bezier(.34,1.56,.64,1)"
-            }}>
-                <div style={{ padding: "10px 14px 6px", borderBottom: "1px solid #f1f5f9" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>Editing</div>
-                    <div style={{ fontSize: 12, color: "#374151", fontWeight: 600, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.title}</div>
-                </div>
-                {EDIT_MENU.map((group, gi) => (
-                    <div key={gi}>
-                        <div style={{ padding: "6px 14px 2px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5 }}>{group.group}</div>
-                        {group.items.map((item, ii) => (
-                            <button key={ii} onClick={onClose} style={{
-                                display: "flex", alignItems: "center", gap: 9, width: "100%",
-                                padding: "6px 14px", border: "none", background: "none", cursor: "pointer",
-                                color: item.danger ? "#ef4444" : "#374151", fontSize: 12.5,
-                                fontWeight: item.bold ? 700 : item.italic ? 400 : 500,
-                                fontStyle: item.italic ? "italic" : "normal",
-                                textDecoration: item.underline ? "underline" : "none",
-                                textAlign: "left", transition: "background 0.1s",
-                            }}
-                                onMouseEnter={e => e.currentTarget.style.background = item.danger ? "#fef2f2" : "#f8fafc"}
-                                onMouseLeave={e => e.currentTarget.style.background = "none"}
-                            >
-                                <span style={{ width: 18, textAlign: "center", fontSize: 13 }}>{item.icon}</span>
-                                <span style={{ flex: 1 }}>{item.label}</span>
-                                {item.shortcut && <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "monospace" }}>{item.shortcut}</span>}
-                            </button>
-                        ))}
-                        {gi < EDIT_MENU.length - 1 && <div style={{ height: 1, background: "#f1f5f9", margin: "4px 0" }} />}
-                    </div>
-                ))}
-            </div>
-        </>
-    );
-}
-
-
 
 // ─── THEME ────────────────────────────────────────────────────
 
@@ -213,52 +137,6 @@ function Stepper({ step, t }) {
     );
 }
 
-// ─── TOPBAR ───────────────────────────────────────────────────
-function DocTopbar({ title, step, onBack, onSave, onContinue, t, isDark, setIsDark, showContinue = true }) {
-    return (
-        <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "10px 24px", background: t.surface, borderBottom: `1px solid ${t.border}`
-        }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{
-                        width: 30, height: 30, borderRadius: 8,
-                        background: `linear-gradient(135deg,${t.primary},#2C606E)`,
-                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16
-                    }}>⚖️</div>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>
-                        Attorney<span style={{ color: t.primary }}>.AI</span>
-                        <span style={{ fontSize: 10, color: t.textFaint, marginLeft: 6, fontWeight: 400 }}>Lawyer</span>
-                    </span>
-                </div>
-                <div style={{ width: 1, height: 18, background: t.border }} />
-                <div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{title}</div>
-                    <div style={{ fontSize: 10, color: t.textFaint }}>Tuesday, March 10, 2026</div>
-                </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {onBack && <Btn variant="secondary" size="sm" onClick={onBack}>← Back</Btn>}
-                {onSave && <Btn variant="ghost" size="sm" onClick={onSave}>💾 Save Draft</Btn>}
-                {showContinue && onContinue && <Btn size="sm" onClick={onContinue}>Continue →</Btn>}
-                <button onClick={() => setIsDark(d => !d)}
-                    style={{
-                        padding: "4px 10px", borderRadius: 20, border: `1px solid ${t.border}`,
-                        background: t.cardHi, color: t.textMuted, fontSize: 10, cursor: "pointer", fontFamily: "inherit"
-                    }}>
-                    {isDark ? "☀️" : "🌙"}
-                </button>
-                <div style={{
-                    width: 30, height: 30, borderRadius: "50%", background: t.primaryGlow,
-                    border: `1.5px solid ${t.primary}40`, display: "flex", alignItems: "center",
-                    justifyContent: "center", fontSize: 12, color: t.primary, cursor: "pointer"
-                }}>🔔</div>
-            </div>
-        </div>
-    );
-}
-
 // ═══════════════════════════════════════════════════════════════
 // SCREEN 1 — DOCUMENT INBOX
 // Lawyer receives submitted documents, sees urgency, client notes
@@ -319,6 +197,7 @@ function ScreenInbox({
     statusF, onStatusChange, counts, serverFiltered,
 }) {
     const [search, setSearch] = useState("");
+    const { setPage } = useCase();
 
     // The status filter is applied BY THE SERVER when V2 is live: `docs` already
     // contains only the selected tab, and re-filtering here would be a no-op at
@@ -333,28 +212,32 @@ function ScreenInbox({
             d.caseId.toLowerCase().includes(search.toLowerCase()))
     );
 
-    // Stat cards — each with a distinct, visible tinted background
+    // Stat cards — each with a distinct, visible tinted background.
+    // Values go through _tabCount, the same as the tab badges: `counts` is null
+    // until the first page answers (and always on the legacy queue), and its
+    // keys are server statuses ("submitted"…), not these display labels.
+    // Indexing it directly crashed the inbox on its first render.
     const statCards = [
         {
-            label: "Pending Review", value: counts["Pending Review"], icon: "📥",
+            label: "Pending Review", value: _tabCount(counts, "Pending Review", docs, serverFiltered), icon: "📥",
             numColor: "#e05565",
             bg: "linear-gradient(135deg, rgba(150,195,225,0.22) 0%, rgba(130,180,215,0.14) 100%)",
             border: "rgba(160,200,228,0.32)"
         },
         {
-            label: "Approved", value: counts["Approved"], icon: "✅",
+            label: "Approved", value: _tabCount(counts, "Approved", docs, serverFiltered), icon: "✅",
             numColor: "#2ec890",
             bg: "linear-gradient(135deg, rgba(55,175,125,0.22) 0%, rgba(40,155,108,0.13) 100%)",
             border: "rgba(55,180,128,0.32)"
         },
         {
-            label: "Returned", value: counts["Returned"], icon: "↩️",
+            label: "Returned", value: _tabCount(counts, "Returned", docs, serverFiltered), icon: "↩️",
             numColor: "#e8b84b",
             bg: "linear-gradient(135deg, rgba(232,184,75,0.16) 0%, rgba(200,155,60,0.10) 100%)",
             border: "rgba(232,184,75,0.30)"
         },
         {
-            label: "Rejected", value: counts["Rejected"], icon: "❌",
+            label: "Rejected", value: _tabCount(counts, "Rejected", docs, serverFiltered), icon: "❌",
             numColor: "#e8526a",
             bg: "linear-gradient(135deg, rgba(232,82,106,0.16) 0%, rgba(200,60,85,0.10) 100%)",
             border: "rgba(232,82,106,0.30)"
@@ -378,18 +261,10 @@ function ScreenInbox({
                     </div>
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
-                    <button style={{
-                        display: "inline-flex", alignItems: "center", gap: 6,
-                        padding: "9px 18px", borderRadius: 10,
-                        border: `1.5px solid ${t.border}`, background: "transparent",
-                        color: t.text, fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
-                        transition: "border-color .15s",
-                    }}
-                        onMouseEnter={e => e.currentTarget.style.borderColor = t.primary}
-                        onMouseLeave={e => e.currentTarget.style.borderColor = t.border}
-                    >↑ Upload Document</button>
-
-                    <button style={{
+                    {/* Upload had no handler and there is no lawyer upload endpoint
+                        here, so it is gone. AI Generate opens the Draft Generator,
+                        which is where a lawyer's AI drafting actually lives. */}
+                    <button onClick={() => setPage?.("doc-automation")} style={{
                         display: "inline-flex", alignItems: "center", gap: 7,
                         padding: "9px 20px", borderRadius: 10, border: "none",
                         background: `linear-gradient(135deg, ${t.primary} 0%, #22a898 100%)`,
@@ -407,11 +282,7 @@ function ScreenInbox({
                         display: "flex", justifyContent: "space-between", alignItems: "center",
                         padding: "18px 20px", borderRadius: 14,
                         background: s.bg, border: `1px solid ${s.border}`,
-                        cursor: "pointer", transition: "transform .15s, box-shadow .15s",
-                    }}
-                        onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 20px ${s.border}`; }}
-                        onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
-                    >
+                    }}>
                         <div>
                             <div style={{
                                 fontSize: 10, fontWeight: 700, color: "rgba(200,220,230,0.75)",
@@ -589,12 +460,6 @@ function ScreenInbox({
                                 {ac.icon} {ac.label}
                             </button>
 
-                            {/* Checkbox */}
-                            <div style={{
-                                width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                                border: `1.5px solid rgba(160,210,225,0.35)`,
-                                background: "rgba(255,255,255,0.04)", cursor: "pointer",
-                            }} />
                         </div>
                     );
                 })}
@@ -642,8 +507,31 @@ function ScreenInbox({
 // Lawyer reads the full document, runs compliance checks
 // Mirrors client Screen 2 (Review & Edit) — but lawyer perspective
 // ═══════════════════════════════════════════════════════════════
+/* The revision-bound PDF download, with its failure said out loud.
+   downloadDocumentFile resolves with { error: <string> } instead of throwing,
+   and both screens ignored it: a failed download did nothing at all. */
+function DownloadPdfButton({ doc, t, style }) {
+    const [issue, setIssue] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const download = async () => {
+        setIssue(null);
+        setBusy(true);
+        const result = await downloadDocumentFile(doc.id, `${doc.title || "document"}.pdf`, {
+            revisionId: doc.viewRevisionId,
+            expectedPdfSha256: doc.viewPdfSha256,
+        });
+        setBusy(false);
+        if (result?.error) setIssue(typeof result.error === "string" ? result.error : (result.error.message || "Download failed"));
+    };
+    return (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+            <button onClick={download} disabled={busy} style={style}>{busy ? "Downloading…" : "⬇ Download PDF"}</button>
+            {issue && <div role="alert" style={{ fontSize: 11, color: t.danger }}>{issue}</div>}
+        </div>
+    );
+}
+
 function ScreenReview({ doc, t, onBack, onContinue }) {
-    const [mode, setMode] = useState("view");
     // The REAL generated PDF, rendered inline. This replaced DOC_CONTENT — a
     // hardcoded employment-dispute plaint the lawyer used to review and approve
     // regardless of the actual document.
@@ -721,23 +609,6 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <StatusPill status={doc.status} t={t} />
-                        <button onClick={() => setMode(m => m === "edit" ? "view" : "edit")}
-                            style={{
-                                padding: "5px 12px", borderRadius: 7, border: `1px solid ${t.border}`,
-                                background: mode === "edit" ? t.primaryGlow : "transparent", color: mode === "edit" ? t.primary : t.textMuted,
-                                fontSize: 11, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5
-                            }}>
-                            {/* "Request changes", not "Edit".
-                                A lawyer CANNOT modify a client's submitted
-                                artifact, and that is correct — the thing under
-                                review has a hash, and a reviewer who could
-                                change it is reviewing something nobody else
-                                saw. But the old label implied direct editing,
-                                so the honest word for what this panel does is
-                                the one the review action already uses: notes
-                                that go back with a return decision. */}
-                            {mode === "edit" ? "👁 Preview" : "✏️ Request changes"}
-                        </button>
                     </div>
                 </div>
 
@@ -771,14 +642,11 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
 
                 {/* Export bar */}
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                    <button onClick={() => downloadDocumentFile(doc.id, `${doc.title || "document"}.pdf`, {
-                        revisionId: doc.viewRevisionId,
-                        expectedPdfSha256: doc.viewPdfSha256,
-                    })} style={{
-                        flex: 1, padding: "9px 0", borderRadius: 9,
+                    <DownloadPdfButton doc={doc} t={t} style={{
+                        padding: "9px 0", borderRadius: 9,
                         border: `1px solid ${t.primary}50`, background: t.card, color: t.primary,
                         fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
-                    }}>⬇ Download PDF</button>
+                    }} />
                 </div>
             </div>
 
@@ -950,20 +818,9 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                     ))}
                 </div>
 
-                {/* Lawyer note input */}
-                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: "14px 16px" }}>
-                    <div style={{
-                        fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase",
-                        letterSpacing: "0.07em", marginBottom: 8
-                    }}>✏️ Lawyer Notes</div>
-                    <textarea placeholder="Add internal notes for this review..."
-                        rows={3} style={{
-                            width: "100%", border: `1px solid rgba(42,86,100,0.6)`,
-                            borderRadius: 8, background: "rgba(42,86,100,0.2)", color: t.text, fontSize: 12,
-                            padding: "8px 10px", outline: "none", resize: "vertical",
-                            fontFamily: "DM Sans,system-ui", lineHeight: 1.6, boxSizing: "border-box"
-                        }} />
-                </div>
+                {/* Notes for the client are written on the decision screen, where
+                    approve / return / reject send them. A notes box here was never
+                    read or sent, so it is gone. */}
 
                 {/* Continue to decision — only documents awaiting review can be decided */}
                 {doc.status === "Pending Review" ? (
@@ -1245,14 +1102,11 @@ function ScreenFinal({ doc, t, onBack }) {
                 {/* Export. PDF / Email / Print had no handlers and did nothing;
                     only the revision-bound download is real, so only it is shown. */}
                 <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => downloadDocumentFile(doc.id, `${doc.title || "document"}.pdf`, {
-                        revisionId: doc.viewRevisionId,
-                        expectedPdfSha256: doc.viewPdfSha256,
-                    })} style={{
-                        flex: 1, padding: "10px 0", borderRadius: 10,
+                    <DownloadPdfButton doc={doc} t={t} style={{
+                        padding: "10px 0", borderRadius: 10,
                         border: `1px solid ${t.primary}50`, background: t.card, color: t.primary,
                         fontSize: 11, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
-                    }}>⬇ Download PDF</button>
+                    }} />
                 </div>
             </div>
 

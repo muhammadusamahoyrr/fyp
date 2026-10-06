@@ -11,17 +11,19 @@ class CaseRepository(BaseRepository):
     def __init__(self):
         super().__init__(get_cases_col)  # pass accessor, not result
 
-    async def find_by_client(self, client_id: str, page: int = 1, page_size: int = 10):
+    async def find_by_client(self, client_id: str, page: int = 1, page_size: int = 10,
+                             status: str | None = None):
         return await self.paginate(
-            {"client_id": client_id},
+            {"client_id": client_id, **({"status": status} if status else {})},
             page=page,
             page_size=page_size,
             sort=[("created_at", DESCENDING)],
         )
 
-    async def find_by_lawyer(self, lawyer_id: str, page: int = 1, page_size: int = 10):
+    async def find_by_lawyer(self, lawyer_id: str, page: int = 1, page_size: int = 10,
+                             status: str | None = None):
         return await self.paginate(
-            {"lawyer_id": lawyer_id},
+            {"lawyer_id": lawyer_id, **({"status": status} if status else {})},
             page=page,
             page_size=page_size,
             sort=[("created_at", DESCENDING)],

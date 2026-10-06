@@ -3,7 +3,20 @@ import { useState, useEffect, useMemo } from "react";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { StatCard, IconBox, Badge, DocTag, Avatar, Btn, Modal, EmptyState, Ic } from "./components.jsx";
 import { IC } from "./icons.js";
-import { adminListPendingKYC, adminProcessKYC } from "@/lib/api.js";
+import { adminListPendingKYC, adminProcessKYC, adminOpenKycDocument } from "@/lib/api.js";
+
+// What the lawyer actually uploaded (lawyer_profile.kyc_documents). This list
+// used to be hardcoded as ["Bar License", "ID Proof"] for every lawyer,
+// whatever they had sent — which was nothing, because nothing could be sent.
+const KYC_LABELS = {
+  photo: "Photo",
+  bar_certificate: "Bar Council Certificate",
+  education: "Educational Credentials",
+  professional: "Professional Certificates",
+};
+const kycDocs = (u) => Object.keys(u.lawyer_profile?.kyc_documents || {})
+  .filter(kind => KYC_LABELS[kind])
+  .map(kind => ({ kind, label: KYC_LABELS[kind] }));
 
 function fmtDate(iso) {
   if (!iso) return "Unknown";
@@ -13,32 +26,57 @@ function fmtDate(iso) {
 export const KYCVerification = ({ T }) => {
   const [lawyers, setLawyers] = useState([]);
   const [loading, setLoading] = useState(true);
+  // A failed read is NOT an empty queue: shown as an error with a retry, so an
+  // outage can never tell an admin that no reviews are waiting.
+  const [loadError, setLoadError] = useState(null);
   const [modal, setModal]             = useState(null);
   const [notif, setNotif]             = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch]           = useState("");
 
-  useEffect(() => {
-    adminListPendingKYC().then(({ data }) => {
-      if (data) {
-        const mapped = data.map(u => ({
-          id: u._id,
-          name: u.full_name,
-          email: u.email,
-          bar: u.lawyer_profile?.bar_number || "N/A",
-          docs: ["Bar License", "ID Proof"],
-          status: "pending",
-          submitted: fmtDate(u.created_at),
-        }));
-        setLawyers(mapped);
+  const load = () => {
+    setLoading(true);
+    setLoadError(null);
+    adminListPendingKYC().then(({ data, error }) => {
+      if (error || !Array.isArray(data)) {
+        setLoadError(error?.message || "The server did not return the queue.");
+        setLoading(false);
+        return;
       }
+      setLawyers(data.map(u => ({
+        id: u._id,
+        name: u.full_name,
+        email: u.email,
+        bar: u.lawyer_profile?.bar_number || "N/A",
+        docs: kycDocs(u),
+        status: "pending",
+        submitted: fmtDate(u.created_at),
+      })));
       setLoading(false);
     });
-  }, []);
+  };
+  useEffect(load, []);
 
   const pending  = lawyers.filter(l => l.status === "pending").length;
   const approved = lawyers.filter(l => l.status === "approved").length;
   const rejected = lawyers.filter(l => l.status === "rejected").length;
+
+  // Opens the file the lawyer uploaded (authorised fetch, shown in a new tab).
+  const openDoc = async (lawyer, kind) => {
+    const { error } = await adminOpenKycDocument(lawyer.id, kind);
+    if (error) {
+      setNotif({ name: lawyer.name, email: lawyer.email, action: "error", reason: error });
+      setTimeout(() => setNotif(null), 9000);
+    }
+  };
+  const DocLinks = ({ lawyer }) => (lawyer.docs.length
+    ? lawyer.docs.map(d => (
+        <button key={d.kind} onClick={() => openDoc(lawyer, d.kind)} title={`Open ${d.label}`}
+          style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+          <DocTag label={`${d.label} ↗`} T={T} />
+        </button>
+      ))
+    : <DocTag label="No documents uploaded" T={T} />);
 
   const setStatus = async (id, st) => {
     const lawyer = lawyers.find(l => l.id === id);
@@ -140,6 +178,8 @@ export const KYCVerification = ({ T }) => {
 
       {loading
         ? <div style={{ textAlign: "center", padding: 48, color: T.textMuted, fontSize: 14 }}>Loading pending KYC submissions…</div>
+        : loadError
+        ? <div role="alert"><EmptyState T={T} icon={IC.verify} title="Could not load KYC submissions" sub={loadError} actionLabel="Retry" onAction={load} /></div>
         : filtered.length === 0
         ? <EmptyState T={T} icon={IC.verify} title={lawyers.length === 0 ? "No pending KYC submissions" : "No lawyers match"} sub={lawyers.length === 0 ? "All submitted applications have been reviewed." : "Try a different filter or search term."} actionLabel="Clear filters" onAction={() => { setStatusFilter("all"); setSearch(""); }} />
         : (
@@ -153,7 +193,7 @@ export const KYCVerification = ({ T }) => {
                   <div style={{ color: T.textFaint, fontSize: 11.5, marginTop: 2 }}>Submitted {l.submitted}</div>
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  {l.docs.map(d => <DocTag key={d} label={d} T={T} />)}
+                  <DocLinks lawyer={l} />
                   <Badge label={sb(l.status).label} type={sb(l.status).type} T={T} />
                 </div>
                 <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
@@ -182,7 +222,7 @@ export const KYCVerification = ({ T }) => {
                 <div style={{ marginTop: 6 }}><Badge label={sb(modal.status).label} type={sb(modal.status).type} T={T} /></div>
               </div>
             </div>
-            {[["Bar License No.", `#${modal.bar}`], ["Documents", modal.docs.join(", ")], ["Submitted", modal.submitted], ["Status", sb(modal.status).label]].map(([k, v]) => (
+            {[["Bar License No.", `#${modal.bar}`], ["Documents", <span key="d" style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}><DocLinks lawyer={modal} /></span>], ["Submitted", modal.submitted], ["Status", sb(modal.status).label]].map(([k, v]) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px solid ${T.border}40` }}>
                 <span style={{ color: T.textMuted, fontSize: 13 }}>{k}</span>
                 <span style={{ color: T.text, fontWeight: 600, fontSize: 13 }}>{v}</span>

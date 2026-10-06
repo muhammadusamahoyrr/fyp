@@ -25,6 +25,23 @@ from app.services import appointment_disputes
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+@router.get("/kyc/{lawyer_id}/documents/{kind}")
+async def view_kyc_document(
+    lawyer_id: str,
+    kind: str,
+    _: dict = Depends(require_admin),
+):
+    """A lawyer's uploaded KYC file, for the admin reviewing it. Shown inline,
+    never cached: these are identity documents."""
+    from fastapi.responses import FileResponse
+    from app.services import kyc_documents
+
+    path, filename, mime = await kyc_documents.file_for(lawyer_id, kind)
+    return FileResponse(path, media_type=mime, filename=filename,
+                        content_disposition_type="inline",
+                        headers={"Cache-Control": "private, no-store"})
+
+
 @router.get("/kyc/pending", response_model=list[UserProfileResponse])
 async def list_pending_kyc(current_user: dict = Depends(require_admin)):
     return await admin_service.list_pending_kyc()

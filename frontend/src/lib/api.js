@@ -434,8 +434,11 @@ export async function transcribeAudio(audioBlob) {
 }
 
 // ─── Cases ───────────────────────────────────────────────────────────────────
-export async function listCases({ page = 1, page_size = 10 } = {}) {
+// `status` (optional) narrows to one CaseStatus; with page_size 1 the
+// response's `total` is an exact count without downloading the list.
+export async function listCases({ page = 1, page_size = 10, status = null } = {}) {
   const p = new URLSearchParams({ page, page_size });
+  if (status) p.set('status', status);
   return apiFetch(`/cases?${p}`);
 }
 
@@ -1285,6 +1288,19 @@ export async function revokeAllSessions() {
 }
 
 // ─── Lawyer Profile ───────────────────────────────────────────────────────────
+// ─── Lawyer KYC documents (onboarding "Credentials & Photo") ────────────────
+// kind: "photo" | "bar_certificate" | "education" | "professional".
+export async function listMyKycDocuments() {
+  return apiFetch('/users/me/kyc/documents');
+}
+
+export async function uploadKycDocument(kind, file) {
+  const fd = new FormData();
+  fd.append('kind', kind);
+  fd.append('file', file);
+  return apiFetchMultipart('/users/me/kyc/documents', fd);
+}
+
 export async function updateLawyerProfile(updates) {
   return apiFetch('/users/me/lawyer-profile', {
     method: 'PATCH',
@@ -1595,7 +1611,14 @@ export async function openSourceDocument(path, label = 'source document') {
   if (!path) return { error: 'No source document for this citation' };
   // `path` comes back with the /api/v1 prefix the server publishes; BASE
   // already carries it, so strip it rather than requesting /api/v1/api/v1/...
-  const rel = path.replace(/^\/api\/v1/, '');
+  return _openAuthenticatedInNewTab(path.replace(/^\/api\/v1/, ''), label);
+}
+
+/* Fetch a bearer-authenticated file and open it in a new tab. Shared by every
+   "open this document" action: a failed fetch, an unreadable body and a
+   blocked pop-up each come back as { error }, never as a button that silently
+   does nothing. Returns { data: true } on success. */
+async function _openAuthenticatedInNewTab(rel, label) {
   const { data: res, error } = await apiFetch(rel, { returnResponse: true });
   if (error) return { error: error.message || `Could not open ${label}` };
   let blob;
@@ -1608,11 +1631,17 @@ export async function openSourceDocument(path, label = 'source document') {
   // The fetch above means this window.open no longer happens inside the click's
   // own task, so a strict popup blocker can refuse it. Detected and reported
   // rather than left as a chip that appears to do nothing when pressed.
-  const win = window.open(url, '_blank', 'noopener,noreferrer');
+  //
+  // NOT with the "noopener" feature: per the HTML spec that makes window.open
+  // return null even when the tab DID open, so a successful open read as
+  // "blocked" and the URL was revoked under the new tab. The opener link is
+  // cut by hand instead, which is what noopener existed to do.
+  const win = window.open(url, '_blank');
   if (!win) {
     URL.revokeObjectURL(url);
     return { error: 'Your browser blocked the new tab — allow pop-ups for this site' };
   }
+  try { win.opener = null; } catch { /* cross-origin: already isolated */ }
   // Long enough for the tab to have read the object URL; revoking immediately
   // aborts the load in Firefox and Safari.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -1897,6 +1926,15 @@ export async function adminGetAnalytics() {
 
 export async function adminListPendingKYC() {
   return apiFetch('/admin/kyc/pending');
+}
+
+/* Open a lawyer's uploaded KYC file for review. The route needs the bearer
+   token, so it cannot be a plain link: fetched as a blob and opened as an
+   object URL. Returns { error } on failure. */
+export async function adminOpenKycDocument(lawyerId, kind) {
+  return _openAuthenticatedInNewTab(
+    `/admin/kyc/${encodeURIComponent(lawyerId)}/documents/${encodeURIComponent(kind)}`,
+    'the document');
 }
 
 export async function adminProcessKYC(lawyerId, approved, rejectionReason = null) {

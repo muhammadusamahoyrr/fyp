@@ -194,6 +194,32 @@ async def _vault_purge():
             logging.getLogger(__name__).exception("Vault purge failed")
 
 
+async def _kyc_erasure_retry():
+    """Retry KYC file erasures that failed at account closure
+    (services/kyc_documents.py). Hourly. The tombstone on the user record is
+    what is retried, so a crash or a locked file never strands identity
+    documents on disk with nothing pointing at them.
+
+    Gated and locked like the cause-list sweep: the work is not lease-guarded,
+    so a Redis period-lock makes each hourly sweep single-fire across workers
+    (TTL under the interval, so a dead winner's claim frees itself)."""
+    import asyncio
+    import logging
+    from app.core.redis_client import acquire_period_lock
+
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            if not await acquire_period_lock("lock:scheduler:kyc_erasure", ttl_seconds=55 * 60):
+                continue
+            from app.services.kyc_documents import retry_pending_erasures
+            await retry_pending_erasures()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger(__name__).exception("KYC erasure retry failed")
+
+
 async def _provenance_relay():
     """Deliver provenance records whose direct write failed.
 
@@ -450,6 +476,8 @@ async def lifespan(app: FastAPI):
             # period-lock, and unlike the outbox relays its work is not
             # lease-guarded, so it must not run on every worker at once.
             _asyncio.create_task(_lawyer_index_reconciler()),
+            # Same reason: KYC erasure retry is not lease-guarded.
+            _asyncio.create_task(_kyc_erasure_retry()),
         ]
 
     # The provenance relay is NOT behind that gate.

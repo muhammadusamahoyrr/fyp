@@ -2,7 +2,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext.jsx';
-import Dashboard from './Dashboard';
+import Dashboard from './Dashboard.jsx';
+import { DARK, LIGHT } from '@/components/admin/themes.js';
+import { ToastContainer } from '@/components/shared/Toast.jsx';
 
 export default function ClientApp({ initialTab = 'overview' }) {
   const router = useRouter();
@@ -22,16 +24,21 @@ export default function ClientApp({ initialTab = 'overview' }) {
 
   const toggleTheme = () => setIsDark(d => !d);
 
+  // The ONE toast provider for every live client screen. Without it useToast()
+  // fell back to a no-op and every client toast — successes and refusals alike —
+  // was silently dropped; the only container lived in the unused legacy App.jsx.
   return (
-    <Dashboard
-      initialTab={initialTab}
-      isDark={isDark}
-      toggleTheme={toggleTheme}
-      go={async (target) => {
-        if (target === 'signout') { await logout(); router.push('/'); }
-        else if (target === 'landing') router.push('/');
-        else if (target === 'login') router.push('/login');
-      }}
-    />
+    <ToastContainer theme={isDark ? DARK : LIGHT}>
+      <Dashboard
+        initialTab={initialTab}
+        isDark={isDark}
+        toggleTheme={toggleTheme}
+        go={async (target) => {
+          if (target === 'signout') { await logout(); router.push('/'); }
+          else if (target === 'landing') router.push('/');
+          else if (target === 'login') router.push('/login');
+        }}
+      />
+    </ToastContainer>
   );
 }

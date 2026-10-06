@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from pydantic import BaseModel
+
+from app.core.rate_limit import limiter
 
 from app.dependencies import get_current_user, require_admin, require_lawyer
 from app.schemas.user import (
@@ -9,7 +11,7 @@ from app.schemas.user import (
     UserProfileResponse,
     UserUpdate,
 )
-from app.services import user_service
+from app.services import kyc_documents, user_service
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -83,6 +85,25 @@ async def resubmit_kyc(
     deliberate action rather than a side effect of editing the profile.
     """
     return await user_service.resubmit_kyc(current_user["_id"])
+
+
+@router.get("/me/kyc/documents")
+async def list_my_kyc_documents(current_user: dict = Depends(require_lawyer)):
+    """What this lawyer has uploaded for verification, by kind (metadata only)."""
+    return await kyc_documents.list_documents(current_user["_id"])
+
+
+@router.post("/me/kyc/documents")
+@limiter.limit("20/minute")
+async def upload_my_kyc_document(
+    request: Request,
+    kind: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_lawyer),  # lawyers only
+):
+    """Upload (or replace) one KYC file: `photo`, `bar_certificate`,
+    `education` or `professional`. Type is checked from the bytes; 5 MB max."""
+    return await kyc_documents.upload(current_user["_id"], kind, file)
 
 
 # Registered after the /me/* routes so the bare path parameter cannot swallow

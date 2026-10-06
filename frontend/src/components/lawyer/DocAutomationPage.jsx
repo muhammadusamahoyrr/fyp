@@ -552,10 +552,11 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
         const v2 = await pleadingUrduDocumentV2(payload, urduKeyRef.current);
 
         if (!v2.error) {
-            await downloadDocumentFile(v2.docId, filename, {
+            const saved = await downloadDocumentFile(v2.docId, filename, {
                 revisionId: v2.revisionId, expectedPdfSha256: v2.pdfSha256,
             });
             setUrduPdfBusy(false);
+            if (saved?.error) setUrduIssue(saved.error);
             return;
         }
 
@@ -576,8 +577,9 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
             setUrduIssue(error?.message || "Could not produce the PDF.");
             return;
         }
-        await downloadDocumentFile(data.doc_id, filename, {
+        const saved = await downloadDocumentFile(data.doc_id, filename, {
             revisionId: data.revision_id, expectedPdfSha256: data.pdf_sha256 });
+        if (saved?.error) setUrduIssue(saved.error);
     };
 
     const FONT_OPTIONS = ["Default Font", "Georgia", "Times New Roman", "Courier New", "Arial"];
@@ -766,11 +768,15 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
 
                     {published && (
                         <button
-                            onClick={() => downloadDocumentFile(
-                                published.docId,
-                                `${(draft?.title || tmpl.name).replace(/[^\w\s-]/g, "").trim() || "document"}.pdf`,
-                                { revisionId: published.revisionId,
-                                  expectedPdfSha256: published.pdfSha256 })}
+                            onClick={async () => {
+                                setPublishIssue("");
+                                const saved = await downloadDocumentFile(
+                                    published.docId,
+                                    `${(draft?.title || tmpl.name).replace(/[^\w\s-]/g, "").trim() || "document"}.pdf`,
+                                    { revisionId: published.revisionId,
+                                      expectedPdfSha256: published.pdfSha256 });
+                                if (saved?.error) setPublishIssue(saved.error);
+                            }}
                             style={{
                                 padding: "5px 13px", borderRadius: 8,
                                 border: `1px solid ${t.border}`, background: t.card,
@@ -959,12 +965,6 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                     <ToolBtn label="Block Quote" onClick={() => exec("formatBlock", "blockquote")}>
                         <svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor" opacity="0.9">
                             <path d="M0 0h5v5H3C3 7 4 8 6 8v2C2 10 0 8 0 5V0zm8 0h5v5h-2C11 7 12 8 14 8v2c-4 0-6-2-6-5V0z" />
-                        </svg>
-                    </ToolBtn>
-                    <ToolBtn label="Insert Link" onClick={() => { }}>
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                            <path d="M6.5 9.5a4 4 0 005.66 0l2-2a4 4 0 00-5.66-5.66l-1 1" />
-                            <path d="M9.5 6.5a4 4 0 00-5.66 0l-2 2a4 4 0 005.66 5.66l1-1" />
                         </svg>
                     </ToolBtn>
                     <ToolBtn label="Horizontal Rule" onClick={() => exec("insertHorizontalRule")}>

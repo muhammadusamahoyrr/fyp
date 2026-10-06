@@ -80,7 +80,7 @@ function ProvenancePanel({ requestId, onClose, t }) {
             if (!live) return;
             if (error || !data) {
                 setState({ loading: false, view: null,
-                           error: error?.detail || "Audit record not available" });
+                           error: error?.message || "Audit record not available" });
             } else {
                 setState({ loading: false, error: "", view: data });
             }
@@ -268,17 +268,40 @@ function RequestIdChip({ requestId, open, onToggle, t }) {
 // ============================================================
 // AI LEGAL PAGE — Full chatbot UI with case context injection
 // ============================================================
+/* What to tell the lawyer when a research turn fails. Every failure used to
+   read "AI service unavailable", including the ones a lawyer can act on: a
+   question too long to send, a case they no longer have access to, or a
+   conversation tied to a different matter. */
+function researchErrorText(e) {
+    const server = e?.fromServer ? e.message : "";
+    switch (e?.status) {
+        case 403: return "You don't have access to that case any more, so this question was not sent.";
+        case 409: return server || "This conversation can't take that question. Start a new thread and try again.";
+        case 413: return "That question is too long to send. Please shorten it and try again.";
+        case 422: return server ? `The question couldn't be processed: ${server}` : "The question couldn't be processed.";
+        default: return "AI service unavailable. Please try again.";
+    }
+}
+
 function AILegalPage() {
     const { t } = useTheme();
-    const { activeCase } = useCase();
+    const { activeCase, setActiveCase } = useCase();
     const { user } = useAuth();
     const firstName = user?.full_name?.split(" ")[0] || "Counselor";
     const [apiCases, setApiCases] = useState([]);
     const [msgs, setMsgs] = useState([]);
     const [conversationError, setConversationError] = useState(null);
+    // Shown when an opened conversation belongs to a case this page cannot
+    // select (not among the loaded cases), so the switch is never silent.
+    const [caseNotice, setCaseNotice] = useState(null);
+    // Has the case list answered (either way)? The mount bootstrap waits for it
+    // when a case is selected, so it can start the thread bound to that case
+    // instead of an unbound one that is immediately replaced and left empty.
+    const [casesLoaded, setCasesLoaded] = useState(false);
 
     useEffect(() => {
         listCases({ page_size: 50 }).then(({ data }) => {
+            setCasesLoaded(true);
             if (!data?.items) return;
             setApiCases(data.items.map(c => ({
                 id: c.case_number || c._id,
@@ -295,10 +318,12 @@ function AILegalPage() {
                 province: c.province || null,
                 nextHearing: c.hearing_dates?.find(h => !h.outcome)?.date?.split("T")[0] || "TBD",
             })));
-        });
+        }).catch(() => setCasesLoaded(true));
     }, []);
 
     const activeCaseObj = apiCases.find(c => c.id === activeCase) || null;
+    const apiCasesRef = useRef(apiCases);
+    apiCasesRef.current = apiCases;
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(false);
     const [sideOpen, setSideOpen] = useState(true);
@@ -337,6 +362,10 @@ function AILegalPage() {
     // created. A browser-minted id meant a refresh silently started a new
     // conversation and orphaned the previous one.
     const sessionIdRef = useRef(null);
+    // The case the open conversation is BOUND to (its _id, or null for general
+    // research); undefined while none is open. The server refuses (409) a turn
+    // whose case_id differs from the binding, so every send checks it.
+    const boundCaseRef = useRef(undefined);
     const [sessionId, setSessionId] = useState(null);
     // "Is this response still wanted?" Selecting thread A then B used to let
     // A's slower page loop call setMsgs last, so B was the active thread with
@@ -381,13 +410,24 @@ function AILegalPage() {
     // A conversation belongs to one matter, so switching case starts a new one
     // BOUND to that case — the server verifies the binding before storing it,
     // so what the conversation records is a checked fact rather than a claim.
-    const firstCaseRender = useRef(true);
+    //
+    // Keyed on the RESOLVED case id, not `activeCase`: the case list loads after
+    // mount, so `activeCaseObj` is null on the first render even when a case is
+    // selected. The old effect skipped its first run and fired on `activeCase`,
+    // leaving the mount-time thread unbound while sends carried a case_id — a
+    // 409 on the lawyer's first question. Only a thread whose binding differs
+    // is replaced; one already bound to this case is kept.
+    const wantedCaseId = activeCaseObj?._id || null;
+    // Read by the mount bootstrap, whose closure would see the first render's null.
+    const wantedCaseRef = useRef(null);
+    wantedCaseRef.current = wantedCaseId;
     useEffect(() => {
-        if (firstCaseRender.current) { firstCaseRender.current = false; return; }
+        if (boundCaseRef.current === undefined) return;   // the mount bootstrap decides
+        if (boundCaseRef.current === wantedCaseId) return;
         setQuery("");
-        startConversation(activeCaseObj ? (activeCaseObj._id || null) : null);
+        startConversation(wantedCaseId);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeCase]);
+    }, [wantedCaseId]);
 
     /* ── Conversations ────────────────────────────────────────────────── */
 
@@ -452,6 +492,12 @@ function AILegalPage() {
 
     const refreshHistory = useCallback(
         () => loadHistory({ term: search || null }), [loadHistory, search]);
+    // The mount bootstrap is async and outlives the render it started in; it
+    // must refresh with the CURRENT filter. Its own closure held the first
+    // render's (case still unknown), and as the last list request it won —
+    // leaving general threads listed under a selected case (smoke test).
+    const refreshHistoryRef = useRef(refreshHistory);
+    refreshHistoryRef.current = refreshHistory;
 
     const loadMoreHistory = useCallback(
         () => loadHistory({ after: listCursor, term: search || null }),
@@ -459,7 +505,10 @@ function AILegalPage() {
 
     useEffect(() => {
         const timer = setTimeout(
-            () => { loadHistory({ term: search || null }); }, 250);
+            // Through the ref: this timer is set on mount, and the closure it
+            // captured predates the case list, so it reloaded the list
+            // unfiltered — and, firing last, it won.
+            () => { refreshHistoryRef.current(); }, 250);
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [search]);
@@ -578,7 +627,12 @@ function AILegalPage() {
         }]);
     }, [openGeneration, loadThread]);
 
-    const openConversation = useCallback(async (id) => {
+    // `adopt`: the lawyer picked this conversation (history or search), so the
+    // page follows it to its case rather than keeping a selection the thread
+    // does not belong to — which would make the next question start a different
+    // thread without saying so. The mount restore does not adopt: a case chosen
+    // elsewhere (e.g. from the Cases page) wins over a remembered thread.
+    const openConversation = useCallback(async (id, { adopt = false } = {}) => {
         if (!id) return;
         setConversationError(null);
         const ticket = openGeneration.next();
@@ -592,6 +646,16 @@ function AILegalPage() {
         setOlderCursor(thread.olderCursor);
         setHasOlder(thread.hasOlder);
         sessionIdRef.current = id;
+        boundCaseRef.current = header?.case_id || null;
+        setCaseNotice(null);
+        if (adopt && boundCaseRef.current !== wantedCaseRef.current) {
+            const bound = boundCaseRef.current;
+            const match = bound ? apiCasesRef.current.find(c => c._id === bound) : null;
+            if (!bound) setActiveCase?.(null);
+            else if (match) setActiveCase?.(match.id);
+            else setCaseNotice("This conversation belongs to a case that isn't in your loaded case list. "
+                + "Your next question will start a new thread for the case selected here.");
+        }
         setSessionId(id);
         writeActiveSession("research", user?._id, id);
         setMsgs(restored);
@@ -606,7 +670,7 @@ function AILegalPage() {
         clearTimeout(recoverRef.current);
         setRecovering(!!header?.pending_turn);
         if (header?.pending_turn) recoverPending(id, ticket);
-    }, [user?._id, recoverPending, loadThread, openGeneration]);
+    }, [user?._id, recoverPending, loadThread, openGeneration, setActiveCase]);
 
 
     const startConversation = useCallback(async (caseId) => {
@@ -617,6 +681,8 @@ function AILegalPage() {
             return null;
         }
         sessionIdRef.current = data.session_id;
+        boundCaseRef.current = caseId || null;
+        setCaseNotice(null);
         setSessionId(data.session_id);
         writeActiveSession("research", user?._id, data.session_id);
         setMsgs([]);
@@ -628,25 +694,33 @@ function AILegalPage() {
     }, [user?._id]);
 
     // Restore on mount: the conversation this tab was last in, or a new one.
+    // With a case selected it waits for the case list, which is what turns the
+    // selection into a case id the new thread can be bound to.
+    const casesReady = !activeCase || casesLoaded;
+    const bootedFor = useRef(null);
     useEffect(() => {
         let live = true;
         (async () => {
             // No user yet: the bootstrap re-runs when the account resolves.
-            if (!user?._id) return;
+            if (!user?._id || !casesReady) return;
+            if (bootedFor.current === user._id) return;
+            bootedFor.current = user._id;
             const remembered = readActiveSession("research", user._id);
-            if (remembered) {
-                await openConversation(remembered);
-                if (live) refreshHistory();
-                return;
+            if (remembered) await openConversation(remembered);
+            else await startConversation(wantedCaseRef.current);
+            // The case list may have resolved while this ran; the case-change
+            // effect skipped it (nothing was open yet), so reconcile here.
+            if (live && boundCaseRef.current !== undefined
+                && boundCaseRef.current !== wantedCaseRef.current) {
+                await startConversation(wantedCaseRef.current);
             }
-            await startConversation(null);
-            if (live) refreshHistory();
+            if (live) refreshHistoryRef.current();
         })();
         return () => { live = false; };
-        // Re-runs on an ACCOUNT CHANGE only: a new user must not inherit the
-        // previous one's open thread.
+        // Runs once per ACCOUNT (a new user must not inherit the previous one's
+        // open thread); `casesReady` only delays that one run.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?._id]);
+    }, [user?._id, casesReady]);
 
     useEffect(() => { refreshHistory(); }, [refreshHistory]);
 
@@ -699,8 +773,10 @@ function AILegalPage() {
         // The conversation is the unit of storage AND the LangGraph thread key,
         // so a turn cannot run before one exists.
         let sid = sessionIdRef.current;
-        if (!sid) {
-            sid = await startConversation(activeCaseObj ? (activeCaseObj._id || null) : null);
+        // A thread bound to a different case (a remembered one, or one opened
+        // from search) would be refused with a 409: start one for this case.
+        if (!sid || boundCaseRef.current !== wantedCaseId) {
+            sid = await startConversation(wantedCaseId);
             if (!sid) { setMsgs(p => [...p, { role: "assistant", content: "Could not start a conversation. Please try again." }]); return; }
         }
         const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -794,7 +870,15 @@ function AILegalPage() {
                 fill({ content: stopNoticeRef.current, notice: true });
                 return;
             }
-            if (error || !data) throw new Error(error?.detail || "request failed");
+            if (error || !data) {
+                // Carried to the catch below so the lawyer is told WHICH failure
+                // this was. `.message` is the formatted string; `.detail` is the
+                // raw body field and was never set on these errors.
+                const failure = new Error(error?.message || "request failed");
+                failure.status = status;
+                failure.fromServer = !!error;
+                throw failure;
+            }
 
             if (data.type === "clarification") {
                 // A clarifying question is an emitted output with its own
@@ -840,7 +924,7 @@ function AILegalPage() {
             // service failure and must not be reported as one.
             fill(cancelledRef.current || e?.name === "AbortError"
                 ? { content: stopNoticeRef.current, notice: true }
-                : { content: "AI service unavailable. Please try again." });
+                : { content: researchErrorText(e) });
         } finally {
             // Settled either way: answered, refused, timed out or stopped.
             // Leaving `attemptRef` set would keep the composer locked on a turn
@@ -970,7 +1054,7 @@ function AILegalPage() {
                         </div>
                         {messageHits.map(hit => (
                             <div key={`hit-${hit.session_id}`}
-                                 onClick={() => openConversation(hit.session_id)}
+                                 onClick={() => openConversation(hit.session_id, { adopt: true })}
                                  style={{
                                      padding: "7px 8px", borderRadius: 8,
                                      cursor: "pointer", marginBottom: 2,
@@ -1022,7 +1106,7 @@ function AILegalPage() {
                                 const active = item.session_id === sessionId;
                                 return (
                                     <div key={item.session_id}
-                                        onClick={() => openConversation(item.session_id)}
+                                        onClick={() => openConversation(item.session_id, { adopt: true })}
                                         title={item.title}
                                         style={{
                                             padding: "7px 9px", borderRadius: 9, fontSize: 12,
@@ -1045,7 +1129,10 @@ function AILegalPage() {
                                             const next = window.prompt("Rename this research thread", item.title);
                                             if (next && next.trim()) {
                                                 renameResearchConversation(item.session_id, next.trim())
-                                                    .then(refreshHistory);
+                                                    .then(({ error }) => {
+                                                        if (error) setConversationError(error.message || "Could not rename the thread.");
+                                                        refreshHistory();
+                                                    });
                                             }
                                         }} style={{ border: "none", background: "transparent", cursor: "pointer", color: t.textFaint, fontSize: 11, padding: "0 1px" }}>✎</button>
                                         {/* Archive keeps the thread and its messages and
@@ -1054,14 +1141,21 @@ function AILegalPage() {
                                         <button title={item.archived ? "Unarchive" : "Archive"} onClick={(e) => {
                                             e.stopPropagation();
                                             archiveResearchConversation(item.session_id, !item.archived)
-                                                .then(refreshHistory);
+                                                .then(({ error }) => {
+                                                    if (error) setConversationError(error.message || "Could not update the thread.");
+                                                    refreshHistory();
+                                                });
                                         }} style={{ border: "none", background: "transparent", cursor: "pointer", color: t.textFaint, fontSize: 11, padding: "0 1px" }}>
                                             {item.archived ? "↩" : "🗄"}
                                         </button>
                                         <button title="Delete" onClick={(e) => {
                                             e.stopPropagation();
                                             if (!window.confirm("Delete this thread and its messages?")) return;
-                                            deleteResearchConversation(item.session_id).then(async () => {
+                                            deleteResearchConversation(item.session_id).then(async ({ error }) => {
+                                                if (error) {
+                                                    setConversationError(error.message || "Could not delete the thread.");
+                                                    return;
+                                                }
                                                 if (item.session_id === sessionIdRef.current) {
                                                     writeActiveSession("research", user?._id, null);
                                                     await startConversation(activeCaseObj ? (activeCaseObj._id || null) : null);
@@ -1141,17 +1235,6 @@ function AILegalPage() {
                         )}
                         <span className="serif" style={{ fontSize: 17, fontWeight: 700, color: t.text }}>Chat</span>
                     </div>
-                    {/* Right: Upgrade Plan pill */}
-                    <button style={{
-                        background: t.primary, color: t.mode === "dark" ? "#111B1F" : "#fff",
-                        border: "none", borderRadius: 50, padding: "9px 20px", fontSize: 12, fontWeight: 700,
-                        cursor: "pointer", boxShadow: `0 4px 14px ${t.primaryGlow}`, transition: "opacity .2s",
-                        pointerEvents: "auto"
-                    }}
-                        onMouseEnter={e => e.currentTarget.style.opacity = ".85"}
-                        onMouseLeave={e => e.currentTarget.style.opacity = "1"}>
-                        Upgrade Plan
-                    </button>
                 </div>
 
                 {/* Messages / Welcome */}
@@ -1170,6 +1253,16 @@ function AILegalPage() {
                             border: "1px solid rgba(232,82,106,0.35)", fontSize: 12,
                         }}>
                             {conversationError}
+                        </div>
+                    )}
+                    {caseNotice && (
+                        <div role="status" style={{
+                            width: "100%", maxWidth: 800, marginBottom: 12,
+                            padding: "10px 13px", borderRadius: 10,
+                            color: t.warn, background: `${t.warn}14`,
+                            border: `1px solid ${t.warn}55`, fontSize: 12,
+                        }}>
+                            {caseNotice}
                         </div>
                     )}
 
@@ -1454,18 +1547,23 @@ function AILegalPage() {
                                                 )}
                                                 {m.role === "assistant" && !m.streaming && !m.clarification && !m.notice && m.content && (
                                                     m.rated ? <span>feedback recorded ✓</span> : (
-                                                        <span style={{ display: "inline-flex", gap: 3 }}>
+                                                        <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
+                                                            {m.rateError && <span style={{ color: t.danger }}>feedback not saved</span>}
                                                             {["up", "down"].map(r => (
                                                                 <button key={r}
                                                                     onClick={() => {
-                                                                        setMsgs(prev => prev.map((x, xi) => xi === i ? { ...x, rated: r } : x));
+                                                                        // "Recorded" only once the server has it.
+                                                                        // apiFetch resolves with {error} rather than
+                                                                        // rejecting, so a .catch never saw a failure.
                                                                         rateAnswer({
                                                                             session_id: sessionIdRef.current,
                                                                             rating: r,
                                                                             answer_preview: (m.content || "").slice(0, 300),
                                                                             question_preview: (msgs[i - 1]?.content || "").slice(0, 300),
                                                                             source: "research",
-                                                                        }).catch(() => {});
+                                                                        }).then(({ error }) => setMsgs(prev => prev.map((x, xi) => xi === i
+                                                                            ? (error ? { ...x, rateError: true } : { ...x, rated: r, rateError: false })
+                                                                            : x)));
                                                                     }}
                                                                     style={{ border: `1px solid ${t.border}`, background: "transparent", borderRadius: 6, cursor: "pointer", fontSize: 10, padding: "1px 6px" }}
                                                                 >{r === "up" ? "👍" : "👎"}</button>
@@ -1618,32 +1716,19 @@ function AILegalPage() {
                             }} />
 
                         {/* Toolbar row */}
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                            {/* Search globe button */}
-                            <button style={{
-                                display: "flex", alignItems: "center", gap: 6,
-                                background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 50,
-                                padding: "6px 14px", fontSize: 12, color: t.textMuted, cursor: "pointer", transition: "all .15s"
-                            }}
-                                onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}
-                                onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}>
-                                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><ellipse cx="12" cy="12" rx="4" ry="10" />
-                                </svg>
-                                Search
-                            </button>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                            {/* A "Search" globe button sat here with no handler. */}
 
                             {/* Right controls */}
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                {/* Clock / history */}
-                                <button style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, color: t.textMuted, display: "flex", transition: "all .15s" }}
+                                {/* Clock: opens the conversation history sidebar. */}
+                                <button title="Conversation history" aria-label="Conversation history" onClick={() => setSideOpen(true)}
+                                    style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, color: t.textMuted, display: "flex", transition: "all .15s" }}
                                     onMouseEnter={e => { e.currentTarget.style.background = t.cardHi; e.currentTarget.style.color = t.primary; }}
                                     onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = t.textMuted; }}>
                                     <Icon d={I.clock} size={16} />
                                 </button>
 
-                                {/* Pro badge */}
-                                <span style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 6, padding: "3px 9px" }}>Pro</span>
 
                                 {/* EN / UR language toggle */}
                                 <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${t.border}`, background: t.inputBg }}>
@@ -1660,14 +1745,6 @@ function AILegalPage() {
                                     ))}
                                 </div>
 
-                                {/* Mic */}
-                                <button style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, color: t.textMuted, display: "flex", transition: "all .15s" }}
-                                    onMouseEnter={e => { e.currentTarget.style.background = t.cardHi; e.currentTarget.style.color = t.primary; }}
-                                    onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = t.textMuted; }}>
-                                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="9" y="2" width="6" height="11" rx="3" /><path d="M19 10a7 7 0 01-14 0" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" />
-                                    </svg>
-                                </button>
 
                                 {/* Send button */}
                                 <button onClick={send} style={{

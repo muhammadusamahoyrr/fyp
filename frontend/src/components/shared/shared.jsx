@@ -4,7 +4,10 @@ import React, { useState } from "react";
 import { useT } from "./theme.js";
 import Ic from "./Ic.jsx";
 
-export const ConfirmDialog = ({ isOpen, title, message, onConfirm, onCancel, isDanger = false }) => {
+// `children` render between the message and the buttons. They were accepted
+// by callers but never rendered, so the close-account password field was
+// invisible and the client could never confirm.
+export const ConfirmDialog = ({ isOpen, title, message, onConfirm, onCancel, isDanger = false, children }) => {
     const t = useT();
     if (!isOpen) return null;
 
@@ -15,6 +18,7 @@ export const ConfirmDialog = ({ isOpen, title, message, onConfirm, onCancel, isD
                     <h3 style={{ fontSize: 18, fontWeight: 800, color: t.text, fontFamily: "'Playfair Display',serif" }}>{title}</h3>
                     <p style={{ fontSize: 13, color: t.textMuted, marginTop: 8, lineHeight: 1.6 }}>{message}</p>
                 </div>
+                {children && <div style={{ marginBottom: 18 }}>{children}</div>}
                 <div style={{ display: "flex", gap: 10 }}>
                     <BtnOutline onClick={onCancel} style={{ flex: 1, fontSize: 13, padding: "12px" }}>Cancel</BtnOutline>
                     <button onClick={onConfirm} style={{

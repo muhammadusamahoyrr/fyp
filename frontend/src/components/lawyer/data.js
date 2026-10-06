@@ -1,7 +1,8 @@
 // Shared display constants for the lawyer dashboard.
 // All case/appointment/document data comes from the backend API (lib/api.js).
 
-const CSB = { "Under Hearing": "info", Filed: "success", Adjourned: "warn", Closed: "gray" };
+// Badge type per caseStatusLabel (lib/caseStatus.js).
+const CSB = { Draft: "gray", Open: "info", "Awaiting Lawyer": "warn", "In Progress": "success", Closed: "gray", Dismissed: "danger", Unknown: "gray" };
 const DSB = { Draft: "gray", "Under Review": "warn", Approved: "success", Final: "primary" };
 const APSB = { Upcoming: "info", Completed: "success", Cancelled: "danger", Pending: "warn" };
 const PRIO = { high: "danger", medium: "warn", low: "success" };

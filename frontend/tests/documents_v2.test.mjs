@@ -173,7 +173,11 @@ test("the client offers the edit the format actually supports", () => {
 test("the lawyer asks for changes rather than implying they can make them", () => {
     // A reviewer who could alter the artifact would be reviewing something
     // nobody else saw — the submitted bytes have a hash.
-    assert.match(lawyer, /Request changes/);
+    // Changes are requested by RETURNING the document with notes (decision
+    // screen). The review screen's "Request changes" toggle only flipped its
+    // own label and was removed as an inert control (Phase 3.3).
+    assert.match(lawyer, /Required Changes/);
+    assert.match(lawyer, /onDecide\("return", returnNote/);
     assert.ok(!/\? "👁 Preview" : "✏️ Edit"/.test(lawyer),
         "the toggle still says Edit");
 });

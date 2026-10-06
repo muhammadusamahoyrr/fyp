@@ -75,9 +75,14 @@ function screenFinal() {
 test("the lawyer final screen offers only the export that works", () => {
     const body = screenFinal();
     assert.doesNotMatch(body, /"Email"|"Print"|"PDF"\]/);
-    assert.match(body, /downloadDocumentFile\(doc\.id/);
-    assert.match(body, /revisionId: doc\.viewRevisionId/);
-    assert.match(body, /expectedPdfSha256: doc\.viewPdfSha256/);
+    // The revision-bound download lives in the shared DownloadPdfButton (which
+    // also reports a failed download); the final screen must use it.
+    assert.match(body, /<DownloadPdfButton doc=\{doc\}/);
+    const start = lawyerPage.indexOf("function DownloadPdfButton(");
+    const button = lawyerPage.slice(start, lawyerPage.indexOf("\nfunction ", start + 10));
+    assert.match(button, /downloadDocumentFile\(doc\.id/);
+    assert.match(button, /revisionId: doc\.viewRevisionId/);
+    assert.match(button, /expectedPdfSha256: doc\.viewPdfSha256/);
     // Every button on the screen does something.
     const buttons = body.match(/<button\b[^>]*>/g) || [];
     for (const b of buttons) assert.match(b, /onClick=/, `inert button: ${b}`);

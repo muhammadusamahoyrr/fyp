@@ -25,10 +25,12 @@ import { fileURLToPath } from "node:url";
 const src = (p) => readFileSync(
     fileURLToPath(new URL(`../src/${p}`, import.meta.url)), "utf8");
 
+// The case-workspace AI tab (CasesPage `WorkspaceAI`) was a third surface. It
+// was never rendered — no tab ever reached it — and was deleted as dead code
+// (LAWYER_DASHBOARD_FIX_PLAN 3.10). The lawyer's AI surface is the AI Legal page.
 const SURFACES = {
     "client chatbot": "components/client/ModChatbot.jsx",
     "lawyer AI Legal page": "components/lawyer/AILegalPage.jsx",
-    "case workspace AI tab": "components/lawyer/CasesPage.jsx",
 };
 
 for (const [name, path] of Object.entries(SURFACES)) {
@@ -74,15 +76,6 @@ for (const [name, path] of Object.entries(SURFACES)) {
             `${name} builds a source URL client-side`);
     });
 }
-
-test("the workspace AI tab renders the trust data it fetches", () => {
-    // It stored citations, claims and confidence on every message and displayed
-    // only the answer text.
-    const code = src("components/lawyer/CasesPage.jsx");
-    assert.match(code, /WorkspaceTrust/);
-    assert.match(code, /claimWarnings|citationSummary/,
-        "warnings must be computed, not just stored");
-});
 
 test("only the lawyer surfaces can open the audit view", () => {
     // The client is shown the FINDINGS. The audit view is the machinery behind
@@ -138,7 +131,11 @@ test("the source opener strips the prefix the API base already carries", () => {
     assert.ok(fn, "openSourceDocument is not defined");
     assert.ok(fn[0].includes("/^\\/api\\/v1/"),
         "the helper would request /api/v1/api/v1/...");
-    assert.match(fn[0], /returnResponse: true/,
+    // The fetch-and-open lives in the shared helper (also used for KYC files).
+    assert.match(fn[0], /_openAuthenticatedInNewTab\(/);
+    const shared = src("lib/api.js").match(/async function _openAuthenticatedInNewTab[\s\S]*?\n\}/);
+    assert.ok(shared, "the shared opener is not defined");
+    assert.match(shared[0], /returnResponse: true/,
         "the helper parses a PDF as JSON");
 });
 
@@ -791,12 +788,17 @@ test("search is debounced and restarts from the top", () => {
     // A request per keystroke has the same stale-response problem at several
     // times the cost, and a search continuing from an old cursor would page
     // through the wrong result set.
-    for (const path of ["components/client/ModChatbot.jsx",
-                        "components/lawyer/AILegalPage.jsx"]) {
-        const code = src(path);
-        assert.match(code, /setTimeout\(\s*\(\) => \{ loadHistory\(\{ term: search \|\| null \}\); \}, 250\)/,
-            `${path} does not debounce its search`);
-    }
+    const chatbot = src("components/client/ModChatbot.jsx");
+    assert.match(chatbot, /setTimeout\(\s*\(\) => \{ loadHistory\(\{ term: search \|\| null \}\); \}, 250\)/,
+        "components/client/ModChatbot.jsx does not debounce its search");
+    // The lawyer page debounces through a ref to the CURRENT refresh (a mount-time
+    // closure predates the case list and reloaded unfiltered); the refresh it
+    // calls still restarts from the top — no cursor.
+    const lawyer = src("components/lawyer/AILegalPage.jsx");
+    assert.match(lawyer, /setTimeout\(\s*\/\/[\s\S]*?\(\) => \{ refreshHistoryRef\.current\(\); \}, 250\)/,
+        "components/lawyer/AILegalPage.jsx does not debounce its search");
+    assert.match(lawyer, /const refreshHistory = useCallback\(\s*\(\) => loadHistory\(\{ term: search \|\| null \}\)/,
+        "the lawyer refresh no longer restarts from the top");
 });
 
 test("the list helpers send the cursor and the search term", () => {

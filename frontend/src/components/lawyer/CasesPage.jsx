@@ -3,21 +3,12 @@
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
-import { useNotif } from "./theme.js";
-import { Card, Btn, Input, Sel, Label, Badge, Divider, Pills } from "./components.jsx";
+import { Card, Btn, Input, Label, Badge } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
-import { fmtDate, fmtTime, CSB, typeColor, typeIcon, DSB, PRIO } from "./data.js";
-import { listCases, addHearing as apiAddHearing, recordHearingOutcome as apiRecordOutcome, aiResearch, cancelResearchTurn, openSourceDocument, listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask, toggleTask as apiToggleTask, listEngagements, proposeEngagementTerms, declineEngagement, completeEngagement, terminateEngagement } from "@/lib/api.js";
+import { fmtDate, fmtTime, CSB, PRIO } from "./data.js";
+import { listCases, addHearing as apiAddHearing, recordHearingOutcome as apiRecordOutcome, listMessages, sendMessage as apiSendMessage, listTasks, addTask as apiAddTask, toggleTask as apiToggleTask, listEngagements, proposeEngagementTerms, declineEngagement, completeEngagement, terminateEngagement } from "@/lib/api.js";
 import { avatarBg } from "./utils.js";
-import { newAttempt, retryAttempt, isAmbiguousFailure } from "@/lib/attempt.js";
-/* Shared with the AI Legal page and the client chatbot. This surface is why the
-   module exists: it mapped `citations` itself and dropped `url` and `source`,
-   so a judgment that linked to a court PDF on the AI Legal page was an
-   unclickable label here. */
-import {
-    CITATION_GROUPS, REPEALED, normaliseCitations, citationsInGroup,
-    citationSummary, claimWarnings, shortRequestId, copyText,
-} from "@/lib/trust.js";
+import { caseStatusLabel } from "@/lib/caseStatus.js";
 
 
 // ── Messages Tab ─────────────────────────────────────────────
@@ -104,400 +95,6 @@ function WorkspaceMessages({ caseId, c }) {
                     style={{ width: 38, height: 38, borderRadius: "50%", border: "none", background: reply.trim() ? t.primary : t.cardHi, cursor: reply.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <Icon d={I.send} size={14} style={{ color: reply.trim() ? (t.mode === "dark" ? "#0D1E24" : "#fff") : t.textMuted }} />
                 </button>
-            </div>
-        </div>
-    );
-}
-
-/* A citation whose source document we hold. Owns its own failure state: one
-   source failing to open is about that chip, not about the answer. */
-function WorkspaceSourceChip({ citation, label, style }) {
-    const [failed, setFailed] = useState("");
-    return (
-        <button
-            style={{ ...style, cursor: "pointer", fontFamily: "inherit" }}
-            title={failed || "Open the source document"}
-            onClick={async () => {
-                setFailed("");
-                const res = await openSourceDocument(citation.sourceUrl, citation.label);
-                if (res.error) {
-                    setFailed(res.error);
-                    setTimeout(() => setFailed(""), 4000);
-                }
-            }}>
-            {label} {failed ? "⚠" : "↗"}
-        </button>
-    );
-}
-
-/* Compact trust footer for the workspace AI tab.
-   Deliberately the same vocabulary as the AI Legal page and the client chatbot
-   (lib/trust.js), and deliberately smaller: this panel sits inside a case file
-   next to hearings and tasks, so the findings that change what a lawyer does —
-   a repealed source, an unsupported statement, a citation we could not place —
-   are always visible, and the rest is one click away. */
-function WorkspaceTrust({ m, t }) {
-    const [open, setOpen] = useState(false);
-    const [copied, setCopied] = useState(false);
-    const citations = m.citations || [];
-    const claims = m.claims || [];
-    if (!citations.length && !claims.length && !m.requestId) return null;
-
-    const w = claimWarnings(claims);
-    const summary = citationSummary(citations);
-    const alerts = [
-        w.repealed && `${w.repealed} statement${w.repealed === 1 ? "" : "s"} rest${w.repealed === 1 ? "s" : ""} on a repealed section — do not file on this`,
-        w.unsupported && `${w.unsupported} statement${w.unsupported === 1 ? " is" : "s are"} not established by the source cited`,
-        summary.unresolved && `${summary.unresolved} citation${summary.unresolved === 1 ? "" : "s"} could not be located in the retrieved sources`,
-    ].filter(Boolean);
-
-    return (
-        <div style={{ marginTop: 6 }}>
-            {alerts.map((text, i) => (
-                <div key={i} style={{
-                    fontSize: 10.5, color: i === 0 && w.repealed ? "#ef4444" : "#f59e0b",
-                    background: i === 0 && w.repealed ? "#ef444410" : "transparent",
-                    borderRadius: 6, padding: i === 0 && w.repealed ? "4px 8px" : "1px 0",
-                    marginBottom: 3, fontWeight: 600,
-                }}>
-                    {i === 0 && w.repealed ? "⛔ " : "⚠ "}{text}
-                </div>
-            ))}
-            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
-                {/* The calibrated figure, or an honest gap. Some turns never
-                    reach the Decision Engine, and there is no confidence for
-                    those — inventing one is how the old hardcoded 1.0 got in. */}
-                <span style={{ fontSize: 10, color: m.confidenceBand ? (CONF_TONE[m.confidenceBand] || t.textFaint) : t.textFaint }}>
-                    {m.confidenceBand
-                        ? `⬤ ${m.confidenceBand} confidence · ${Math.round((m.confidence || 0) * 100)}%`
-                        : "Confidence not calibrated"}
-                </span>
-                {citations.length > 0 && (
-                    <button onClick={() => setOpen(o => !o)} style={{
-                        border: `1px solid ${t.border}`, background: open ? t.primaryGlow : "transparent",
-                        color: t.primary, borderRadius: 6, cursor: "pointer", fontSize: 10, padding: "1px 7px",
-                    }}>{summary.label} {open ? "▴" : "▾"}</button>
-                )}
-                {m.requestId && (
-                    <button
-                        onClick={async () => {
-                            const ok = await copyText(m.requestId);
-                            setCopied(ok);
-                            setTimeout(() => setCopied(false), 1600);
-                        }}
-                        title={`Copy request id ${m.requestId}`}
-                        className="mono"
-                        style={{
-                            border: `1px solid ${t.border}`, background: "transparent",
-                            color: t.textFaint, borderRadius: 6, cursor: "pointer",
-                            fontSize: 10, padding: "1px 7px", fontFamily: "inherit",
-                        }}>{copied ? "copied ✓" : `id ${shortRequestId(m.requestId)}`}</button>
-                )}
-            </div>
-            {open && (
-                <div style={{ marginTop: 5, padding: "8px 10px", borderRadius: 8, background: t.cardHi, border: `1px solid ${t.border}` }}>
-                    {CITATION_GROUPS.map(({ key, lawyer: caption }) => {
-                        const group = citationsInGroup(citations, key);
-                        if (!group.length) return null;
-                        return (
-                            <div key={key} style={{ marginBottom: 6 }}>
-                                <div style={{ fontSize: 9.5, color: key === "unresolved" ? "#f59e0b" : t.textFaint, marginBottom: 3 }}>{caption}</div>
-                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                                    {group.map((x, xi) => {
-                                        const dead = x.currency === REPEALED;
-                                        const style = {
-                                            fontSize: 10, padding: "2px 7px", borderRadius: 6,
-                                            border: `1px solid ${dead ? "#ef444466" : t.border}`,
-                                            background: dead ? "#ef444414" : t.card,
-                                            color: dead ? "#ef4444" : ((x.href || x.sourceUrl) ? t.primary : t.textMuted),
-                                            textDecoration: "none",
-                                        };
-                                        const label = `${dead ? "⛔ " : ""}${x.label}${dead ? " — repealed" : ""}`;
-                                        // Openable exactly when the server said the document is
-                                        // held; never a URL guessed from a filename. A judgment
-                                        // is an external anchor; a corpus document goes through
-                                        // the authenticated fetch, because our API route wants a
-                                        // header a new tab cannot send.
-                                        if (x.href) {
-                                            return <a key={xi} href={x.href} target="_blank" rel="noopener noreferrer" style={style} title="Open the judgment">{label} ↗</a>;
-                                        }
-                                        if (x.sourceUrl) {
-                                            return <WorkspaceSourceChip key={xi} citation={x} label={label} style={style} />;
-                                        }
-                                        return <span key={xi} style={style} title={x.source || ""}>{label}</span>;
-                                    })}
-                                </div>
-                            </div>
-                        );
-                    })}
-                    <div style={{ fontSize: 9.5, color: t.textFaint, lineHeight: 1.5, marginTop: 4 }}>
-                        Where a section is not marked repealed its current status is NOT
-                        verified — repeal data covers 4 of 43 statutes and is a lower bound.
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
-const CONF_TONE = { high: "#22c55e", moderate: "#f59e0b", low: "#ef4444" };
-
-// ── AI Assistant Tab ─────────────────────────────────────────
-function WorkspaceAI({ c, addNotif }) {
-    const { t } = useTheme();
-    const [msgs, setMsgs] = useState([]);
-    const [query, setQuery] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
-    const [lastQuery, setLastQuery] = useState("");
-    const bottomRef = useRef(null);
-    // Stable per-case graph thread, so a follow-up continues the same
-    // conversation and a clarification can be resumed.
-    const sessionIdRef = useRef(`case-${c.id}-${Date.now()}`);
-    // The attempt in flight, so a retry can reuse its id and a Stop can name
-    // the turn it is stopping. See lib/attempt.
-    const attemptRef = useRef(null);
-    // Set by Stop, so the request that returns afterwards knows its answer is
-    // no longer wanted and does not paint it over the notice.
-    const cancelledRef = useRef(false);
-    useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
-
-    // No browser-built case context. The server fetches the case from `case_id`
-    // after checking this lawyer is assigned to it, then whitelists the fields
-    // that reach the model — so the browser can no longer decide what the model
-    // believes about a matter it may not even have access to.
-
-    /* Longer than the server's own turn timeout, so its honest explanation
-       wins whenever it can produce one. */
-    const AI_TAB_TIMEOUT_MS = 150000;
-
-    /* Stop a question this workspace no longer wants an answer to.
-
-       Two things, and both are needed: aborting the fetch ends the WAIT, while
-       the server-side cancel discards the ANSWER by clearing the turn's lease,
-       so the worker still running it loses its fenced completion and files
-       nothing. Without the second, the answer would reappear on the next load
-       of this thread — which is not what "stop" means. */
-    const stopAsk = async () => {
-        const waiting = attemptRef.current;
-        const sid = sessionIdRef.current;
-        if (!waiting || !sid) return;
-        cancelledRef.current = true;
-        try { waiting.controller?.abort(); } catch { /* already settled */ }
-        await cancelResearchTurn(sid, waiting.id);
-    };
-
-    const send = async (override) => {
-        const q = (override || query).trim();
-        if (!q || loading) return;
-        cancelledRef.current = false;
-        setQuery(""); setError(null); setLastQuery(q);
-        const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        if (!override) setMsgs(p => [...p, { role: "user", content: q, time: now }]);
-        setLoading(true);
-        const history = msgs.map(m => ({ role: m.role, content: m.content }));
-        const aiTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        setMsgs(p => [...p, { role: "assistant", content: "", time: aiTime, _streaming: true }]);
-        try {
-            // Grounded RAG path, NOT the raw /ai/query/stream one this used to call.
-            // The suggested prompts here ask for "key legal sections" and "recent
-            // precedents", and the streaming endpoint performs no retrieval, no
-            // citation matching, no grounding and no currency check — so it
-            // answered statute questions from parametric memory with nothing to
-            // check them against. /ai/research runs the same LangGraph pipeline
-            // as the client chatbot and returns resolvable citations.
-            // This surface used to send NO turn id at all, so every retry
-            // here was a brand-new question to the server: the graph ran again
-            // and a provider was paid again for one asking. One id per ATTEMPT,
-            // reused across transmissions of it, is what makes the retry below
-            // a replay rather than a second bill.
-            let attempt = newAttempt();
-            attemptRef.current = attempt;
-
-            const ask = async (a) => {
-                const timer = setTimeout(
-                    () => a.controller?.abort(), AI_TAB_TIMEOUT_MS);
-                try {
-                    return await aiResearch(q, sessionIdRef.current, {
-                        client_message_id: a.id,
-                        province: c.province || null,
-                        history,
-                        // The DATABASE id, not the display case number. `c.id`
-                        // is the human-facing reference shown in the UI; the
-                        // server looks the case up by `_id`.
-                        case_id: c._id || null,
-                        signal: a.controller?.signal || null,
-                    });
-                } finally {
-                    clearTimeout(timer);
-                }
-            };
-
-            let { data, error: err, status } = await ask(attempt);
-
-            // Ambiguous means the server may or may not have run it. Those are
-            // the failures worth retrying and exactly the ones a fresh id would
-            // turn into a duplicate charge; a 4xx is a decision repeating
-            // cannot change.
-            if ((err || !data) && isAmbiguousFailure(status)
-                    && !cancelledRef.current) {
-                attempt = retryAttempt(attempt);
-                attemptRef.current = attempt;
-                ({ data, error: err, status } = await ask(attempt));
-            }
-
-            if (cancelledRef.current) {
-                setMsgs(p => p.map((m, i) => i === p.length - 1
-                    ? { ...m, content: "Stopped.", _notice: true, _streaming: false }
-                    : m));
-                return;
-            }
-            if (err || !data) throw new Error(err?.detail || "request failed");
-
-            if (data.type === "clarification") {
-                setMsgs(p => p.map((m, i) => i === p.length - 1
-                    ? { ...m, content: data.question, clarification: true, _streaming: false } : m));
-            } else {
-                // matched | unresolved | retrieved — a real section is not
-                // support; see ai/answer_citations.py. Keeps the source link and
-                // the repeal fields this surface used to discard.
-                const citations = normaliseCitations(data.citations);
-                setMsgs(p => p.map((m, i) => i === p.length - 1 ? {
-                    ...m,
-                    content: data.answer || "No response received.",
-                    citations,
-                    claims: data.claims || [],
-                    confidence: data.confidence,
-                    confidenceBand: data.confidence_band,
-                    // Names this turn's audit record, so an answer given inside
-                    // a case workspace can be quoted and opened like one given
-                    // on the AI Legal page.
-                    requestId: data.request_id || "",
-                    _streaming: false,
-                } : m));
-            }
-        } catch (err) {
-            // A deliberate Stop aborts the fetch and lands here. It is not a
-            // connection failure and must not be reported as one.
-            if (cancelledRef.current || err?.name === "AbortError") {
-                setMsgs(p => p.map((m, i) => i === p.length - 1
-                    ? { ...m, content: "Stopped.", _notice: true, _streaming: false }
-                    : m));
-            } else {
-                setError(err.message || "Connection error");
-                setMsgs(p => p.filter(m => !m._streaming));
-            }
-        }
-        finally {
-            // Settled either way: answered, refused, timed out or stopped.
-            attemptRef.current = null;
-            setLoading(false);
-        }
-    };
-
-    const hasMessages = msgs.length > 0;
-    const prompts = [
-        `Key legal sections for ${c.type.toLowerCase()} case`,
-        `What to argue in the next hearing for ${c.id}`,
-        `Recent precedents relevant to this case`,
-        `Draft an argument outline for ${c.title}`,
-    ];
-
-    return (
-        <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 320px)", minHeight: 340, background: t.card, borderRadius: 12, border: `1px solid ${t.border}`, overflow: "hidden" }} className="fade-up">
-            {/* Context banner */}
-            <div style={{ padding: "8px 16px", background: t.primaryGlow2, borderBottom: `1px solid ${t.primary}30`, display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                <div style={{ width: 20, height: 20, borderRadius: 6, background: t.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon d={I.ai} size={11} style={{ color: t.primary }} /></div>
-                <span style={{ fontSize: 11, color: t.primary, fontWeight: 600 }}>AI context loaded:</span>
-                <span className="mono" style={{ fontSize: 11, color: t.primary }}>{c.id}</span>
-                <span style={{ fontSize: 11, color: t.textMuted }}>— {c.title} · {c.type} · {c.court}</span>
-            </div>
-            {/* Messages */}
-            <div style={{ flex: 1, overflowY: "auto", padding: hasMessages ? "16px 20px" : "0 20px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: hasMessages ? "flex-start" : "center" }}>
-                {!hasMessages ? (
-                    <div style={{ textAlign: "center", maxWidth: 520, width: "100%" }}>
-                        <div className="serif" style={{ fontSize: 18, fontWeight: 700, color: t.text, marginBottom: 6 }}>AI Legal Assistant</div>
-                        <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>Ask anything about <strong style={{ color: t.primary }}>{c.title}</strong></div>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                            {prompts.map((p, i) => (
-                                <button key={i} onClick={() => setQuery(p)}
-                                    style={{ padding: "8px 14px", borderRadius: 50, border: `1px solid ${t.border}`, background: t.cardHi, color: t.textMuted, cursor: "pointer", fontSize: 12, transition: "all .15s" }}
-                                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; e.currentTarget.style.background = t.primaryGlow2; }}
-                                    onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; e.currentTarget.style.background = t.cardHi; }}>
-                                    {p}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                ) : (
-                    <div style={{ width: "100%", maxWidth: 700, display: "flex", flexDirection: "column", gap: 14 }}>
-                        {msgs.map((m, i) => (
-                            <div key={i} style={{ display: "flex", flexDirection: m.role === "user" ? "row-reverse" : "row", gap: 10, alignItems: "flex-start" }} className="fade-in">
-                                {m.role === "assistant" && <div style={{ width: 30, height: 30, borderRadius: 8, background: t.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon d={I.ai} size={14} style={{ color: t.primary }} /></div>}
-                                <div style={{ maxWidth: "80%" }}>
-                                    <div style={{
-                                        background: m.role === "user" ? t.grad1 : t.surface, border: m.role === "assistant" ? `1px solid ${t.border}` : "none",
-                                        borderRadius: m.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px", padding: "10px 14px",
-                                        fontSize: 13, lineHeight: 1.7, color: m.role === "user" ? (t.mode === "dark" ? "#111B1F" : "#fff") : t.text, whiteSpace: "pre-wrap"
-                                    }}>{m.content}</div>
-                                    {/* Trust footer. This tab ran the full pipeline and then
-                                        rendered the answer alone — citation status, claim
-                                        support and repeal warnings were all fetched, stored on
-                                        the message, and shown to nobody. An answer presented
-                                        with no provenance inside a case file is the one place
-                                        it is most likely to be acted on. */}
-                                    {m.role === "assistant" && !m._streaming && !m.clarification && !m._notice && (
-                                        <WorkspaceTrust m={m} t={t} />
-                                    )}
-                                    {/* A way out of a long wait. Stops the
-                                        waiting AND discards the answer server-
-                                        side, so it does not reappear the next
-                                        time this thread is opened. */}
-                                    {m._streaming && (
-                                        <button onClick={stopAsk} title="Stop generating"
-                                                style={{
-                                                    marginTop: 6, background: "none",
-                                                    border: `1px solid ${t.border}`,
-                                                    borderRadius: 8, padding: "2px 9px",
-                                                    fontSize: 11, cursor: "pointer",
-                                                    color: t.textMuted,
-                                                }}>
-                                            Stop
-                                        </button>
-                                    )}
-                                    {m.time && <div style={{ fontSize: 10, color: t.textFaint, marginTop: 3, textAlign: m.role === "user" ? "right" : "left" }}>{m.time}</div>}
-                                </div>
-                            </div>
-                        ))}
-                        {loading && <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                            <div style={{ width: 30, height: 30, borderRadius: 8, background: t.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon d={I.ai} size={14} style={{ color: t.primary }} /></div>
-                            <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: "14px 14px 14px 4px", padding: "12px 16px", display: "flex", gap: 5 }}>
-                                {[0, 1, 2].map(d => <div key={d} style={{ width: 6, height: 6, borderRadius: "50%", background: t.primary, animation: `pulse 1.2s ease ${d * .2}s infinite` }} />)}
-                            </div>
-                        </div>}
-                        {error && !loading && (
-                            <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 14px", borderRadius: 10, background: `${t.danger}12`, border: `1px solid ${t.danger}30` }}>
-                                <Icon d={I.alert} size={13} style={{ color: t.danger }} />
-                                <span style={{ fontSize: 12, color: t.danger, flex: 1 }}>Connection error</span>
-                                <button onClick={() => send(lastQuery)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${t.danger}`, background: "transparent", color: t.danger, cursor: "pointer", fontSize: 11 }}>
-                                    <Icon d={I.refresh} size={11} /> Retry
-                                </button>
-                            </div>
-                        )}
-                        <div ref={bottomRef} />
-                    </div>
-                )}
-            </div>
-            {/* Input */}
-            <div style={{ padding: "10px 16px", borderTop: `1px solid ${t.border}`, flexShrink: 0 }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
-                        placeholder={`Ask about ${c.title}...`}
-                        style={{ flex: 1, height: 38, border: `1px solid ${t.border}`, borderRadius: 10, background: t.inputBg, color: t.text, fontSize: 13, padding: "0 14px", outline: "none" }} />
-                    <button onClick={() => send()} style={{ width: 38, height: 38, borderRadius: 10, border: "none", background: query.trim() ? t.primary : t.cardHi, cursor: query.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .2s" }}>
-                        <Icon d={I.send} size={14} style={{ color: query.trim() ? (t.mode === "dark" ? "#111B1F" : "#fff") : t.textMuted }} />
-                    </button>
-                </div>
             </div>
         </div>
     );
@@ -631,10 +228,11 @@ function WorkspaceTasks({ caseId, c }) {
     );
 }
 
+// Documents and Timeline tabs were removed for the demo: everything they held
+// lived in browser state and was lost on reload (LAWYER_DASHBOARD_FIX_PLAN,
+// Phase 4 skipped). Messages and Tasks are server-backed.
 const CASE_TABS = [
     { id: "overview", label: "Overview", emoji: "🏠" },
-    { id: "documents", label: "Documents", emoji: "📄" },
-    { id: "timeline", label: "Timeline", emoji: "🕐" },
     { id: "messages", label: "Messages", emoji: "💬" },
     { id: "tasks", label: "Tasks", emoji: "✅" },
 ];
@@ -661,6 +259,8 @@ function Modal({ title, subtitle, onClose, children, width = 560 }) {
     );
 }
 
+// Value-based: onChange receives the string. The shared components.jsx `Input`
+// passes the DOM event and has no label, so labelled forms here must use this.
 function FieldInput({ label, value, onChange, type = "text", placeholder }) {
     const { t } = useTheme();
     return (
@@ -672,8 +272,6 @@ function FieldInput({ label, value, onChange, type = "text", placeholder }) {
     );
 }
 
-// Alias used inside tab components
-const Input2 = FieldInput;
 
 function Select({ label, value, onChange, options = [] }) {
     const { t } = useTheme();
@@ -740,8 +338,20 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
 
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
+    // Replace this case and its hearings with the server's returned CaseOut.
+    // The hearing routes return the bare case; only the case LIST adds
+    // client_name, so keep the name already shown rather than blanking it.
+    const applyServerCase = (apiCase) => {
+        const mapped = _mapApiCase(apiCase);
+        setCases(prev => prev.map(x => x._id === mapped._id
+            ? { ...mapped, client: apiCase.client_name ? mapped.client : x.client }
+            : x));
+        setHearings(prev => ({ ...prev, [caseId]: mapped._apiHearings }));
+    };
+
+    // Scheduling only: hearing edit and delete were local-only (no backend
+    // endpoint) and were removed rather than shown as if they saved.
     const openAdd = () => { setForm(emptyForm); setModal("add"); };
-    const openEdit = (h) => { setForm({ ...h }); setModal(h.id); };
 
     const save = async () => {
         if (!form.date || !form.purpose || !form.court) { showToast("⚠️ Date, court and purpose are required"); return; }
@@ -749,10 +359,11 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
         const updated = { ...form, id: isEdit ? modal : "H-" + Date.now(), status: form.outcome ? "past" : "upcoming" };
 
         // Persist new hearings to backend; edits are local-only (no backend edit endpoint)
+        let fromServer = false;
         if (!isEdit) {
             // Find the real _id of the case (case items have both id=case_number and _id=mongo_id)
             const realCaseId = cases.find(x => x.id === caseId)?._id || caseId;
-            const { error } = await apiAddHearing(realCaseId, {
+            const { data, error } = await apiAddHearing(realCaseId, {
                 date: new Date(form.date).toISOString(),
                 court: form.court,
                 judge: form.judge || null,
@@ -761,15 +372,16 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                 outcome: form.outcome || null,
             });
             if (error) { showToast("❌ " + (error.message || "Failed to save hearing")); return; }
+            // The server's copy, so the new hearing carries its `_id` and
+            // "Add Outcome" works on it without a reload.
+            if (data) { applyServerCase(data); fromServer = true; }
+            else setHearings(prev => ({ ...prev, [caseId]: [...(prev[caseId] || []), updated] }));
+        } else {
+            setHearings(prev => ({ ...prev, [caseId]: (prev[caseId] || []).map(h => h.id === modal ? updated : h) }));
         }
 
-        setHearings(prev => {
-            const list = prev[caseId] || [];
-            return { ...prev, [caseId]: isEdit ? list.map(h => h.id === modal ? updated : h) : [...list, updated] };
-        });
-
-        // Update case next hearing date
-        if (!form.outcome) {
+        // Update case next hearing date (the server's copy already has it)
+        if (!form.outcome && !fromServer) {
             setCases(prev => prev.map(x => x.id === caseId ? { ...x, nextHearing: form.date } : x));
         }
 
@@ -783,10 +395,6 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
         setModal(null);
     };
 
-    const remove = (id) => {
-        setHearings(prev => ({ ...prev, [caseId]: (prev[caseId] || []).filter(h => h.id !== id) }));
-        showToast("🗑 Hearing removed");
-    };
 
     const markOutcome = (h) => {
         if (!h._id) { showToast("⚠️ This hearing predates outcome tracking — schedule hearings through the app to enable it"); return; }
@@ -798,28 +406,22 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
         const h = outcomeModal;
         const realCaseId = cases.find(x => x.id === caseId)?._id || caseId;
         setOBusy(true);
-        const { error } = await apiRecordOutcome(realCaseId, h._id, {
+        const { data, error } = await apiRecordOutcome(realCaseId, h._id, {
             outcome: oForm.outcome,
             note: oForm.note || null,
             next_date: oForm.next_date ? new Date(oForm.next_date).toISOString() : null,
             next_time: oForm.next_date ? oForm.next_time : null,
         });
         setOBusy(false);
-        if (error) { showToast("❌ " + (error.detail || error.message || "Failed to record outcome")); return; }
+        if (error) { showToast("❌ " + (error.message || "Failed to record outcome")); return; }
 
         const label = OUTCOME_OPTIONS.find(([k]) => k === oForm.outcome)?.[1] || oForm.outcome;
-        setHearings(prev => {
-            let list = (prev[caseId] || []).map(x => x.id === h.id
-                ? { ...x, outcome: oForm.outcome, outcomeLabel: label, outcomeNote: oForm.note, status: "past" }
-                : x);
-            if (oForm.next_date) {
-                list = [...list, { id: "H-" + Date.now(), _id: null, date: oForm.next_date, time: oForm.next_time, court: h.court, judge: h.judge, purpose: "Next hearing", outcome: "", status: "upcoming" }];
-            }
-            return { ...prev, [caseId]: list };
-        });
-        if (oForm.next_date) {
-            setCases(prev => prev.map(x => x.id === caseId ? { ...x, nextHearing: oForm.next_date } : x));
-        }
+        // The server's copy carries the auto-scheduled next hearing WITH its
+        // `_id`; a locally built one had `_id: null` and refused "Add Outcome".
+        if (data) applyServerCase(data);
+        else setHearings(prev => ({ ...prev, [caseId]: (prev[caseId] || []).map(x => x.id === h.id
+            ? { ...x, outcome: oForm.outcome, outcomeLabel: label, outcomeNote: oForm.note, status: "past" }
+            : x) }));
         const tlEntry = { id: "TL-" + Date.now(), date: h.date, type: "hearing", text: `Hearing outcome — ${label}${oForm.note ? ": " + oForm.note : ""}`, icon: "⚖️" };
         setTimeline(prev => ({ ...prev, [caseId]: [tlEntry, ...(prev[caseId] || [])] }));
         setOutcomeModal(null);
@@ -857,9 +459,7 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                                         </div>
                                     </div>
                                     <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                                        <Btn variant="secondary" size="sm" onClick={() => openEdit(h)}>✏️ Edit</Btn>
                                         <Btn variant="success" size="sm" onClick={() => markOutcome(h)}>📋 Add Outcome</Btn>
-                                        <Btn variant="danger" size="sm" onClick={() => remove(h.id)}>🗑</Btn>
                                     </div>
                                 </div>
                             </Card>
@@ -893,7 +493,6 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                                             </div>
                                         )}
                                     </div>
-                                    <Btn variant="ghost" size="sm" onClick={() => openEdit(h)}>✏️</Btn>
                                 </div>
                             </Card>
                         ))}
@@ -914,12 +513,12 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                 <Modal title={modal === "add" ? "Schedule New Hearing" : "Edit Hearing"} subtitle={`Case: ${caseId}`} onClose={() => setModal(null)}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            <Input label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
-                            <Input label="Time" type="time" value={form.time} onChange={v => setForm(p => ({ ...p, time: v }))} />
+                            <FieldInput label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
+                            <FieldInput label="Time" type="time" value={form.time} onChange={v => setForm(p => ({ ...p, time: v }))} />
                         </div>
-                        <Input label="Court *" value={form.court} onChange={v => setForm(p => ({ ...p, court: v }))} placeholder="e.g. Lahore High Court" />
-                        <Input label="Judge / Presiding Officer" value={form.judge} onChange={v => setForm(p => ({ ...p, judge: v }))} placeholder="e.g. Hon. Justice Mehta" />
-                        <Input label="Purpose / Agenda *" value={form.purpose} onChange={v => setForm(p => ({ ...p, purpose: v }))} placeholder="e.g. Evidence hearing — witness examination" />
+                        <FieldInput label="Court *" value={form.court} onChange={v => setForm(p => ({ ...p, court: v }))} placeholder="e.g. Lahore High Court" />
+                        <FieldInput label="Judge / Presiding Officer" value={form.judge} onChange={v => setForm(p => ({ ...p, judge: v }))} placeholder="e.g. Hon. Justice Mehta" />
+                        <FieldInput label="Purpose / Agenda *" value={form.purpose} onChange={v => setForm(p => ({ ...p, purpose: v }))} placeholder="e.g. Evidence hearing — witness examination" />
                         <div style={{ borderTop: `1px dashed ${T.border}`, paddingTop: 14, marginTop: 2 }}>
                             <Textarea label="Outcome / Order (fill after hearing)" value={form.outcome} onChange={v => setForm(p => ({ ...p, outcome: v }))} rows={3} placeholder="Leave blank if hearing hasn't occurred yet..." />
                         </div>
@@ -949,8 +548,8 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
                         </div>
                         <Textarea label="Note for the client (optional)" value={oForm.note} onChange={v => setOForm(p => ({ ...p, note: v }))} rows={2} placeholder="e.g. Opposing counsel sought time to file reply" />
                         <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            <Input label="Next hearing date (auto-schedules)" type="date" value={oForm.next_date} onChange={v => setOForm(p => ({ ...p, next_date: v }))} />
-                            <Input label="Time" type="time" value={oForm.next_time} onChange={v => setOForm(p => ({ ...p, next_time: v }))} />
+                            <FieldInput label="Next hearing date (auto-schedules)" type="date" value={oForm.next_date} onChange={v => setOForm(p => ({ ...p, next_date: v }))} />
+                            <FieldInput label="Time" type="time" value={oForm.next_time} onChange={v => setOForm(p => ({ ...p, next_time: v }))} />
                         </div>
                         <div style={{ fontSize: 11.5, color: T.textMuted }}>
                             The client is notified instantly with a plain-language explanation of what this outcome means — in English and Urdu.
@@ -968,292 +567,17 @@ function HearingsTab({ caseId, cases, setCases, hearings, setHearings, timeline,
 }
 
 // ─────────────────────────────────────────────
-// DOCUMENTS TAB
-// ─────────────────────────────────────────────
-function DocumentsTab({ caseId, docs, setDocs, timeline, setTimeline }) {
-    const { t: T } = useTheme();
-    const { setPage, setActiveCase } = useCase();
-    const cDocs = docs[caseId] || [];
-    const [modal, setModal] = useState(null); // null | "add" | "view:{id}" | "edit:{id}"
-    const [editDoc, setEditDoc] = useState(null);
-    const [toast, setToast] = useState(null);
-    const emptyForm = { title: "", type: "Plaint", status: "Draft", content: "" };
-    const [form, setForm] = useState(emptyForm);
-
-    const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
-
-    const docTypes = ["Plaint", "Written Statement", "Vakalatnama", "Affidavit", "Agreement", "Legal Notice", "Application", "Order", "Judgement", "Other"].map(v => ({ value: v, label: v }));
-    const docStatuses = ["Draft", "Under Review", "Approved", "Final"].map(v => ({ value: v, label: v }));
-    const DSB = { Draft: "gray", "Under Review": "warn", Approved: "success", Final: "primary" };
-
-    const openAdd = () => { setForm(emptyForm); setModal("add"); };
-    const openEdit = (d) => { setForm({ ...d }); setEditDoc(d); setModal("edit"); };
-    const openView = (d) => { setEditDoc(d); setModal("view"); };
-
-    const save = () => {
-        if (!form.title.trim() || !form.content.trim()) { showToast("⚠️ Title and content are required"); return; }
-        const today = new Date().toISOString().split("T")[0];
-        if (modal === "add") {
-            const newDoc = { ...form, id: "DOC-" + Date.now(), modified: today };
-            setDocs(prev => ({ ...prev, [caseId]: [...(prev[caseId] || []), newDoc] }));
-            const tlEntry = { id: "TL-" + Date.now(), date: today, type: "document", text: `Document added — ${form.title}`, icon: "📄" };
-            setTimeline(prev => ({ ...prev, [caseId]: [tlEntry, ...(prev[caseId] || [])] }));
-            showToast("✅ Document added");
-        } else {
-            setDocs(prev => ({ ...prev, [caseId]: (prev[caseId] || []).map(d => d.id === editDoc.id ? { ...form, id: editDoc.id, modified: today } : d) }));
-            showToast("✅ Document saved");
-        }
-        setModal(null);
-    };
-
-    const remove = (id) => {
-        setDocs(prev => ({ ...prev, [caseId]: (prev[caseId] || []).filter(d => d.id !== id) }));
-        showToast("🗑 Document removed");
-    };
-
-    return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Documents</div>
-                    <div style={{ fontSize: 12, color: T.textMuted, marginTop: 2 }}>{cDocs.length} document{cDocs.length !== 1 ? "s" : ""}</div>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                    <Btn variant="accent" onClick={openAdd}>+ Add Document</Btn>
-                </div>
-            </div>
-
-            {cDocs.length === 0 ? (
-                <Card style={{ padding: 48, textAlign: "center" }}>
-                    <div style={{ fontSize: 36, marginBottom: 10 }}>📄</div>
-                    <div style={{ fontSize: 14, color: T.textMuted, marginBottom: 14 }}>No documents yet</div>
-                    <Btn onClick={openAdd}>Add First Document</Btn>
-                </Card>
-            ) : (
-                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-                    {cDocs.map(doc => (
-                        <Card key={doc.id} style={{ padding: 18 }}>
-                            <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 12 }}>
-                                <div style={{ width: 42, height: 42, borderRadius: 10, background: T.primaryGlow2, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>📄</div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.title}</div>
-                                    <div style={{ fontSize: 11, color: T.textFaint }}>Modified {fmtDate(doc.modified)}</div>
-                                    <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                                        <Badge type={DSB[doc.status]} style={{ fontSize: 10, padding: "2px 8px" }}>{doc.status}</Badge>
-                                        <Badge type="gray" style={{ fontSize: 10, padding: "2px 8px" }}>{doc.type}</Badge>
-                                    </div>
-                                </div>
-                            </div>
-                            {/* Content preview */}
-                            <div style={{ fontSize: 11, color: T.textFaint, background: T.bg, borderRadius: 8, padding: "8px 10px", marginBottom: 12, lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", fontFamily: "monospace" }}>
-                                {doc.content.slice(0, 120)}…
-                            </div>
-                            <div style={{ display: "flex", gap: 8 }}>
-                                <Btn variant="secondary" size="sm" style={{ flex: 1 }} onClick={() => openView(doc)}>👁 View</Btn>
-                                <Btn variant="accent" size="sm" style={{ flex: 1 }} onClick={() => openEdit(doc)}>✏️ Edit</Btn>
-                                <Btn variant="danger" size="sm" onClick={() => remove(doc.id)}>🗑</Btn>
-                            </div>
-                        </Card>
-                    ))}
-                </div>
-            )}
-
-            {/* View Modal */}
-            {modal === "view" && editDoc && (
-                <Modal title={editDoc.title} subtitle={`${editDoc.type} · Last modified ${fmtDate(editDoc.modified)}`} onClose={() => setModal(null)} width={680}>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-                        <Badge type={DSB[editDoc.status]}>{editDoc.status}</Badge>
-                        <Badge type="gray">{editDoc.type}</Badge>
-                    </div>
-                    <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: 10, padding: 20, fontSize: 13, color: T.textDim, lineHeight: 1.8, whiteSpace: "pre-wrap", fontFamily: "Georgia, serif", minHeight: 200 }}>
-                        {editDoc.content}
-                    </div>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-                        <Btn variant="secondary" onClick={() => setModal(null)}>Close</Btn>
-                        <Btn onClick={() => openEdit(editDoc)}>✏️ Edit Document</Btn>
-                    </div>
-                </Modal>
-            )}
-
-            {/* Add / Edit Modal */}
-            {(modal === "add" || modal === "edit") && (
-                <Modal title={modal === "add" ? "Add Document" : "Edit Document"} subtitle={`Case: ${caseId}`} onClose={() => setModal(null)} width={700}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                        <Input label="Document Title *" value={form.title} onChange={v => setForm(p => ({ ...p, title: v }))} placeholder="e.g. Plaint — Singh vs. Municipal Corp." />
-                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            <Select label="Document Type" value={form.type} onChange={v => setForm(p => ({ ...p, type: v }))} options={docTypes} />
-                            <Select label="Status" value={form.status} onChange={v => setForm(p => ({ ...p, status: v }))} options={docStatuses} />
-                        </div>
-                        <Textarea label="Document Content *" value={form.content} onChange={v => setForm(p => ({ ...p, content: v }))} rows={12} placeholder="Enter the full text of the document here..." />
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                            <Btn
-                                variant="accent"
-                                onClick={() => {
-                                    setActiveCase(caseId);
-                                    setModal(null);
-                                    setPage("doc-automation");
-                                }}>
-                                <Icon d={I.wand} size={13} /> Generate with AI
-                            </Btn>
-                            <div style={{ display: "flex", gap: 10 }}>
-                                <Btn variant="secondary" onClick={() => setModal(null)}>Cancel</Btn>
-                                <Btn onClick={save}>{modal === "add" ? "Add Document" : "Save Changes"}</Btn>
-                            </div>
-                        </div>
-                    </div>
-                </Modal>
-            )}
-            <Toast msg={toast} />
-        </div>
-    );
-}
-
-// ─────────────────────────────────────────────
-// TIMELINE TAB
-// ─────────────────────────────────────────────
-function TimelineTab({ caseId, timeline, setTimeline, cases }) {
-    const { t: T } = useTheme();
-    const c = cases.find(x => x.id === caseId);
-    const entries = (timeline[caseId] || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-    const [modal, setModal] = useState(false);
-    const [editEntry, setEditEntry] = useState(null);
-    const [toast, setToast] = useState(null);
-    const emptyForm = { date: new Date().toISOString().split("T")[0], type: "note", text: "", icon: "📝" };
-    const [form, setForm] = useState(emptyForm);
-
-    const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
-
-    const openAdd = () => { setForm(emptyForm); setEditEntry(null); setModal(true); };
-    const openEdit = (e) => { setForm({ ...e }); setEditEntry(e); setModal(true); };
-
-    const save = () => {
-        if (!form.text.trim() || !form.date) { showToast("⚠️ Date and description are required"); return; }
-        const icon = typeIcon[form.type] || "📝";
-        const entry = { ...form, icon, id: editEntry ? editEntry.id : "TL-" + Date.now() };
-        setTimeline(prev => {
-            const list = prev[caseId] || [];
-            return { ...prev, [caseId]: editEntry ? list.map(e => e.id === editEntry.id ? entry : e) : [entry, ...list] };
-        });
-        showToast(editEntry ? "✅ Entry updated" : "✅ Timeline entry added");
-        setModal(false);
-    };
-
-    const remove = (id) => {
-        setTimeline(prev => ({ ...prev, [caseId]: (prev[caseId] || []).filter(e => e.id !== id) }));
-        showToast("🗑 Entry removed");
-    };
-
-    const typeOptions = ["hearing", "document", "task", "filed", "milestone", "note"].map(v => ({ value: v, label: `${typeIcon[v]} ${v.charAt(0).toUpperCase() + v.slice(1)}` }));
-
-    // Group by month
-    const grouped = entries.reduce((acc, e) => {
-        const key = new Date(e.date).toLocaleDateString("en-PK", { month: "long", year: "numeric" });
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(e);
-        return acc;
-    }, {});
-
-    return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Case Timeline</div>
-                    <div style={{ fontSize: 12, color: T.textMuted, marginTop: 2 }}>Full chronological history of this case · {entries.length} entries</div>
-                </div>
-                <Btn onClick={openAdd}>+ Add Entry</Btn>
-            </div>
-
-            {/* Stats bar */}
-            <div style={{ display: "flex", gap: 10 }}>
-                {Object.entries(typeIcon).map(([type, icon]) => {
-                    const cnt = entries.filter(e => e.type === type).length;
-                    if (!cnt) return null;
-                    return (
-                        <div key={type} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 100, background: `${typeColor[type]}15`, border: `1px solid ${typeColor[type]}30`, fontSize: 12, color: typeColor[type], fontWeight: 600 }}>
-                            {icon} {cnt} {type}
-                        </div>
-                    );
-                })}
-            </div>
-
-            {entries.length === 0 ? (
-                <Card style={{ padding: 48, textAlign: "center" }}>
-                    <div style={{ fontSize: 36, marginBottom: 10 }}>🕐</div>
-                    <div style={{ fontSize: 14, color: T.textMuted, marginBottom: 14 }}>No timeline entries yet</div>
-                    <Btn onClick={openAdd}>Add First Entry</Btn>
-                </Card>
-            ) : (
-                <div>
-                    {Object.entries(grouped).map(([month, monthEntries]) => (
-                        <div key={month} style={{ marginBottom: 24 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: T.textFaint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12, paddingLeft: 22 }}>{month}</div>
-                            <div style={{ position: "relative", paddingLeft: 28 }}>
-                                <div style={{ position: "absolute", left: 9, top: 0, bottom: 0, width: 2, background: `linear-gradient(to bottom, ${T.border}, transparent)`, borderRadius: 2 }} />
-                                {monthEntries.map((e, i) => (
-                                    <div key={e.id} style={{ position: "relative", marginBottom: 12 }}>
-                                        <div style={{ position: "absolute", left: -25, top: 10, width: 12, height: 12, borderRadius: "50%", background: typeColor[e.type] || T.textMuted, border: `2px solid ${T.bg}`, boxShadow: `0 0 0 2px ${(typeColor[e.type] || T.textMuted)}40`, zIndex: 1 }} />
-                                        <Card style={{ padding: "12px 16px" }}>
-                                            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, justifyContent: "space-between" }}>
-                                                <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1 }}>
-                                                    <span style={{ fontSize: 18, flexShrink: 0, lineHeight: 1.3 }}>{e.icon}</span>
-                                                    <div>
-                                                        <div style={{ fontSize: 13, color: T.text, fontWeight: 500, lineHeight: 1.4 }}>{e.text}</div>
-                                                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                                                            <span style={{ fontSize: 11, color: T.textFaint }}>{fmtDate(e.date)}</span>
-                                                            <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 100, background: `${typeColor[e.type] || T.textFaint}18`, color: typeColor[e.type] || T.textFaint, border: `1px solid ${typeColor[e.type] || T.textFaint}25`, fontWeight: 600 }}>{e.type}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                                                    <button onClick={() => openEdit(e)} style={{ background: "none", border: "none", cursor: "pointer", color: T.textFaint, fontSize: 13, padding: "3px 6px", borderRadius: 6, transition: "color .12s" }}
-                                                        onMouseEnter={e2 => e2.currentTarget.style.color = T.primary}
-                                                        onMouseLeave={e2 => e2.currentTarget.style.color = T.textFaint}>✏️</button>
-                                                    <button onClick={() => remove(e.id)} style={{ background: "none", border: "none", cursor: "pointer", color: T.textFaint, fontSize: 13, padding: "3px 6px", borderRadius: 6, transition: "color .12s" }}
-                                                        onMouseEnter={e2 => e2.currentTarget.style.color = T.danger}
-                                                        onMouseLeave={e2 => e2.currentTarget.style.color = T.textFaint}>🗑</button>
-                                                </div>
-                                            </div>
-                                        </Card>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {modal && (
-                <Modal title={editEntry ? "Edit Timeline Entry" : "Add Timeline Entry"} subtitle={`Case: ${caseId}`} onClose={() => setModal(false)}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                        <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            <Input label="Date *" type="date" value={form.date} onChange={v => setForm(p => ({ ...p, date: v }))} />
-                            <Select label="Entry Type" value={form.type} onChange={v => setForm(p => ({ ...p, type: v }))} options={typeOptions} />
-                        </div>
-                        <Textarea label="Description *" value={form.text} onChange={v => setForm(p => ({ ...p, text: v }))} rows={3} placeholder="Describe what happened or what was done..." />
-                        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                            <Btn variant="secondary" onClick={() => setModal(false)}>Cancel</Btn>
-                            <Btn onClick={save}>{editEntry ? "Save Changes" : "Add to Timeline"}</Btn>
-                        </div>
-                    </div>
-                </Modal>
-            )}
-            <Toast msg={toast} />
-        </div>
-    );
-}
-
-// ─────────────────────────────────────────────
 // CASE WORKSPACE
 // ─────────────────────────────────────────────
 function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, setDocs, timeline, setTimeline, onBack }) {
     const { t: T } = useTheme();
     const [tab, setTab] = useState("overview");
     const c = cases.find(x => x.id === caseId);
-    if (!c) return null;
+    // Opened from elsewhere before the case list has loaded: say so, rather
+    // than rendering an empty page.
+    if (!c) return <div style={{ padding: 24, fontSize: 14, color: T.textMuted }}>Loading case…</div>;
 
     const cHearings = hearings[caseId] || [];
-    const cDocs = docs[caseId] || [];
-    const cTimeline = timeline[caseId] || [];
     const nextHearing = cHearings.filter(h => h.status === "upcoming").sort((a, b) => new Date(a.date) - new Date(b.date))[0];
 
     return (
@@ -1280,16 +604,14 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                         <div style={{ fontSize: 19, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>{c.title}</div>
                         <div style={{ display: "flex", gap: 14, marginTop: 5, flexWrap: "wrap" }}>
                             {[["👤", c.client], ["🏛", c.court], ["📁", c.type], ["💰", c.value]].map(([ic, val]) => (
-                                <span key={val} style={{ fontSize: 12, color: T.textMuted, display: "flex", alignItems: "center", gap: 5 }}>{ic} {val}</span>
+                                <span key={ic} style={{ fontSize: 12, color: T.textMuted, display: "flex", alignItems: "center", gap: 5 }}>{ic} {val}</span>
                             ))}
                         </div>
                     </div>
                     <div style={{ display: "flex", gap: 0, borderLeft: `1px solid ${T.border}`, flexShrink: 0 }}>
                         {[
                             ["Next Hearing", nextHearing ? fmtDate(nextHearing.date) : "None", T.primary],
-                            ["Docs", cDocs.length, T.info],
                             ["Hearings", cHearings.length, T.textMuted],
-                            ["Timeline", cTimeline.length, T.textMuted],
                         ].map(([l, v, clr]) => (
                             <div key={l} style={{ textAlign: "center", padding: "0 16px", borderRight: `1px solid ${T.border}` }}>
                                 <div style={{ fontSize: 10, fontWeight: 700, color: T.textFaint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>{l}</div>
@@ -1317,10 +639,8 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
                             {[
-                                { l: "Documents", v: cDocs.length, c: T.primary, emoji: "📄", gotoTab: "documents" },
                                 { l: "Hearings", v: cHearings.length, c: T.info, emoji: "⚖️", gotoTab: "hearings" },
                                 { l: "Upcoming", v: cHearings.filter(h => h.status === "upcoming").length, c: T.warn, emoji: "📅", gotoTab: "hearings" },
-                                { l: "Timeline Events", v: cTimeline.length, c: T.textMuted, emoji: "🕐", gotoTab: "timeline" },
                             ].map(s => (
                                 <Card key={s.l} style={{ padding: 16, cursor: "pointer" }} onClick={() => setTab(s.gotoTab)}>
                                     <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -1334,7 +654,7 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                             ))}
                         </div>
 
-                        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+                        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 18 }}>
                             {/* Next Hearing */}
                             <Card style={{ padding: 18 }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
@@ -1358,58 +678,13 @@ function CaseWorkspace({ caseId, cases, setCases, hearings, setHearings, docs, s
                                 )}
                             </Card>
 
-                            {/* Recent Docs */}
-                            <Card style={{ padding: 18 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                                    <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Recent Documents</div>
-                                    <button onClick={() => setTab("documents")} style={{ fontSize: 11, color: T.primary, background: "none", border: "none", cursor: "pointer" }}>Manage →</button>
-                                </div>
-                                {cDocs.slice(0, 3).map(doc => {
-                                    const DSB = { Draft: "gray", "Under Review": "warn", Approved: "success", Final: "primary" };
-                                    return (
-                                        <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
-                                            <span style={{ fontSize: 14 }}>📄</span>
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ fontSize: 12, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>{doc.title}</div>
-                                                <div style={{ fontSize: 10, color: T.textFaint }}>{doc.type}</div>
-                                            </div>
-                                            <Badge type={DSB[doc.status]} style={{ fontSize: 10, padding: "1px 7px" }}>{doc.status}</Badge>
-                                        </div>
-                                    );
-                                })}
-                                {cDocs.length === 0 && <div style={{ fontSize: 12, color: T.textFaint, padding: "12px 0", textAlign: "center" }}>No documents yet</div>}
-                            </Card>
                         </div>
 
-                        {/* Recent timeline */}
-                        <Card style={{ padding: 18 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
-                                <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Georgia, serif" }}>Recent Activity</div>
-                                <button onClick={() => setTab("timeline")} style={{ fontSize: 11, color: T.primary, background: "none", border: "none", cursor: "pointer" }}>Full Timeline →</button>
-                            </div>
-                            <div style={{ position: "relative", paddingLeft: 22 }}>
-                                <div style={{ position: "absolute", left: 7, top: 0, bottom: 0, width: 2, background: `linear-gradient(to bottom, ${T.primary}80, transparent)`, borderRadius: 2 }} />
-                                {cTimeline.slice(0, 4).map(e => (
-                                    <div key={e.id} style={{ position: "relative", marginBottom: 14 }}>
-                                        <div style={{ position: "absolute", left: -18, top: 5, width: 10, height: 10, borderRadius: "50%", background: typeColor[e.type] || T.textMuted, border: `2px solid ${T.bg}` }} />
-                                        <div style={{ fontSize: 13, color: T.text }}>{e.icon} {e.text}</div>
-                                        <div style={{ fontSize: 11, color: T.textFaint, marginTop: 2 }}>{fmtDate(e.date)}</div>
-                                    </div>
-                                ))}
-                                {cTimeline.length === 0 && <div style={{ fontSize: 12, color: T.textFaint, paddingLeft: 4 }}>No activity recorded</div>}
-                            </div>
-                        </Card>
                     </div>
                 )}
 
                 {tab === "hearings" && (
                     <HearingsTab caseId={caseId} cases={cases} setCases={setCases} hearings={hearings} setHearings={setHearings} timeline={timeline} setTimeline={setTimeline} />
-                )}
-                {tab === "documents" && (
-                    <DocumentsTab caseId={caseId} docs={docs} setDocs={setDocs} timeline={timeline} setTimeline={setTimeline} />
-                )}
-                {tab === "timeline" && (
-                    <TimelineTab caseId={caseId} timeline={timeline} setTimeline={setTimeline} cases={cases} />
                 )}
                 {tab === "messages" && <WorkspaceMessages caseId={cases.find(x => x.id === caseId)?._id || caseId} c={c} />}
                 {tab === "tasks" && <WorkspaceTasks caseId={cases.find(x => x.id === caseId)?._id || caseId} c={c} />}
@@ -1619,7 +894,9 @@ function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {} 
     const [statusF, setStatusF] = useState("All");
     const [sort, setSort] = useState({ field: "id", dir: "asc" });
 
-    const statuses = ["All", "Filed", "Under Hearing", "Adjourned", "Closed"];
+    // Only statuses the backend has. "Under Hearing" and "Adjourned" had no
+    // source and could never match a case.
+    const statuses = ["All", "Open", "In Progress", "Awaiting Lawyer", "Closed", "Dismissed"];
     const filtered = cases.filter(c =>
         (statusF === "All" || c.status === statusF) &&
         (c.title.toLowerCase().includes(search.toLowerCase()) || c.id.toLowerCase().includes(search.toLowerCase()) || c.client.toLowerCase().includes(search.toLowerCase()))
@@ -1627,9 +904,9 @@ function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {} 
 
     const stats = [
         { l: "Total", v: cases.length, c: T.text, f: null },
-        { l: "Under Hearing", v: cases.filter(c => c.status === "Under Hearing").length, c: T.info, f: "Under Hearing" },
-        { l: "Filed", v: cases.filter(c => c.status === "Filed").length, c: T.success, f: "Filed" },
-        { l: "Adjourned", v: cases.filter(c => c.status === "Adjourned").length, c: T.warn, f: "Adjourned" },
+        { l: "In Progress", v: cases.filter(c => c.status === "In Progress").length, c: T.success, f: "In Progress" },
+        { l: "Open", v: cases.filter(c => c.status === "Open").length, c: T.info, f: "Open" },
+        { l: "Awaiting Lawyer", v: cases.filter(c => c.status === "Awaiting Lawyer").length, c: T.warn, f: "Awaiting Lawyer" },
         { l: "Closed", v: cases.filter(c => c.status === "Closed").length, c: T.textMuted, f: "Closed" },
     ];
 
@@ -1716,7 +993,6 @@ function CasesList({ cases, onOpen, requests = [], onRequestsChanged = () => {} 
 // CASES PAGE — ties CasesList + CaseWorkspace
 // ─────────────────────────────────────────────
 
-const _CS = { open: "Filed", active: "Under Hearing", closed: "Closed", dismissed: "Closed" };
 function _mapApiCase(c) {
     const hearings = (c.hearing_dates || []).map((h, idx) => ({
         id: `DB-${idx}-${c._id}`,
@@ -1739,7 +1015,7 @@ function _mapApiCase(c) {
         client: c.client_name || "—",
         court: c.province || "—",
         type: c.case_type ? c.case_type.charAt(0).toUpperCase() + c.case_type.slice(1) : "Other",
-        status: _CS[c.status] || "Filed",
+        status: caseStatusLabel(c.status),
         nextHearing: nextUpcoming?.date || "",
         urgent: c.urgency === "high",
         value: "—",
@@ -1788,16 +1064,18 @@ function CasesPage() {
     const handleOpenCase = (caseId) => {
         setOpenCaseId(caseId);
         setActiveCase(caseId);
-        // Seed hearings from DB data if not already loaded locally
-        setHearings(prev => {
-            if (prev[caseId]?.length) return prev;
-            const caseData = cases.find(c => c.id === caseId);
-            if (caseData?._apiHearings?.length) {
-                return { ...prev, [caseId]: caseData._apiHearings };
-            }
-            return prev;
-        });
     };
+
+    // Seed an open case's hearings from its record, however it was opened.
+    // This used to happen only inside handleOpenCase, so a case opened from
+    // the Dashboard or the active-case banner (which set openCaseId directly)
+    // showed no hearings at all.
+    useEffect(() => {
+        if (!openCaseId) return;
+        const caseData = cases.find(c => c.id === openCaseId);
+        if (!caseData) return;
+        setHearings(prev => (openCaseId in prev ? prev : { ...prev, [openCaseId]: caseData._apiHearings || [] }));
+    }, [openCaseId, cases]);
 
     const handleBack = () => {
         setOpenCaseId(null);

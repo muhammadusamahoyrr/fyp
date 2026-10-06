@@ -280,13 +280,21 @@ async def get_case(case_id: str, requester_id: str, requester_role: str) -> dict
     return case
 
 
-async def list_cases(user_id: str, role: str, page: int, page_size: int) -> dict:
+async def list_cases(user_id: str, role: str, page: int, page_size: int,
+                     status: str | None = None) -> dict:
+    """The caller's cases, optionally narrowed to one status.
+
+    The status filter is applied INSIDE the caller's scope (client_id /
+    lawyer_id), never instead of it, so it cannot widen what anyone sees.
+    `total` then answers "how many of my cases have this status" exactly —
+    which is what the lawyer dashboard needs, without downloading the list.
+    """
     if role == "client":
-        result = await case_repo.find_by_client(user_id, page, page_size)
+        result = await case_repo.find_by_client(user_id, page, page_size, status=status)
     elif role == "lawyer":
-        result = await case_repo.find_by_lawyer(user_id, page, page_size)
+        result = await case_repo.find_by_lawyer(user_id, page, page_size, status=status)
     else:
-        result = await case_repo.paginate({}, page, page_size)
+        result = await case_repo.paginate({"status": status} if status else {}, page, page_size)
 
     # Batch-fetch all client users in one query (fixes N+1)
     client_ids = list({c.get("client_id") for c in result.items if c.get("client_id")})

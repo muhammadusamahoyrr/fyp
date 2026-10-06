@@ -342,7 +342,9 @@ async def delete_draft(
 ):
     await agreement_service.delete_draft(
         agreement_id=agreement_id, creator_id=current_user["_id"])
-    return {"status": "deleted"}
+    # Must match response_model. A bare {"status": ...} failed validation
+    # AFTER the delete had run, so the lawyer saw a 500 for a draft that was gone.
+    return StatusResponse(success=True, message="Draft deleted")
 
 
 @router.post("/drafts/{agreement_id}/send", response_model=AgreementOut)

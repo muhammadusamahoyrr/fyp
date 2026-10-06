@@ -603,11 +603,7 @@ function StatCard({ label, value, color, bg, border }) {
             padding: "16px 20px", borderRadius: 14,
             background: bg, border: `1.5px solid ${border}`,
             display: "flex", justifyContent: "space-between", alignItems: "center",
-            transition: "transform .15s", cursor: "pointer",
-        }}
-            onMouseEnter={e => e.currentTarget.style.transform = "translateY(-2px)"}
-            onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}
-        >
+        }}>
             <span style={{ fontSize: 13, color: "rgba(190,215,225,0.8)", fontWeight: 500 }}>{label}</span>
             <span style={{ fontSize: 26, fontWeight: 700, color }}>{value}</span>
         </div>
@@ -1422,11 +1418,9 @@ function AppointmentsPage() {
                                                                 exist. */}
                                                             {apt.meetingLink ? "📹 Join Call" : "📹 Add joining link"}
                                                         </button>
-                                                    ) : (
-                                                        <Btn variant="primary" size="sm" style={{ flex: 1 }}>
-                                                            <Icon d={I.map} size={12} /> View Details
-                                                        </Btn>
-                                                    )}
+                                                    ) : null /* "View Details" had no handler and there
+                                                        is no detail view; the card already shows the
+                                                        appointment's details. */}
                                                     {/* Both of these are offered on Upcoming only, because
                                                         that is the display status for `confirmed` and the
                                                         server accepts neither outcome on anything else.
@@ -1610,7 +1604,7 @@ function AppointmentsPage() {
                                                                     <div key={ei} style={{
                                                                         background: ev.type === "Video Call" ? `${t.info}22` : `${t.primary}18`,
                                                                         border: `1px solid ${ev.type === "Video Call" ? t.info : t.primary}40`,
-                                                                        borderRadius: 6, padding: "4px 6px", marginBottom: 2, cursor: "pointer",
+                                                                        borderRadius: 6, padding: "4px 6px", marginBottom: 2,
                                                                     }}>
                                                                         <div style={{ fontSize: 11, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.client}</div>
                                                                         <div style={{ fontSize: 10, color: t.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.purpose}</div>

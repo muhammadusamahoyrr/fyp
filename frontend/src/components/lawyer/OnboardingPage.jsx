@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { DARK } from "./theme.js";
-import { getMe, updateMe, updateLawyerProfile } from "@/lib/api.js";
+import { getMe, updateMe, updateLawyerProfile, listMyKycDocuments, uploadKycDocument } from "@/lib/api.js";
 
 // localStorage cache ONLY — never the source of truth. See isLawyerOnboarded.
 export const ONBOARDED_KEY = "lawyer_onboarded";
@@ -23,6 +23,20 @@ export const ONBOARDED_KEY = "lawyer_onboarded";
 export function isLawyerOnboarded(me) {
   const profile = me?.lawyer_profile;
   return Boolean(profile?.bar_number && profile?.specializations?.length);
+}
+
+// Mirrors LawyerProfileUpdate.bar_number (backend/app/schemas/user.py): 4–64
+// chars, alphanumeric at both ends. Checked here so Step 1 cannot be passed with
+// a value the server will 422 — or with a blank that it silently drops, which
+// finishes the wizard into a profile isLawyerOnboarded then rejects.
+const BAR_NUMBER_RE = /^[A-Za-z0-9][A-Za-z0-9\-/ .]*[A-Za-z0-9]$/;
+export function stepOneProblem({ license, specs }) {
+  const bar = (license || "").trim();
+  if (bar.length < 4 || bar.length > 64 || !BAR_NUMBER_RE.test(bar)) {
+    return "Enter your bar license number (at least 4 letters or digits, e.g. PBC/12345/2019).";
+  }
+  if (!specs?.length) return "Select at least one specialization.";
+  return null;
 }
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
@@ -83,8 +97,6 @@ const STEPS = [
 // Labels map to the platform's case types — matching runs on these values
 const SPECS_CORE = ["Civil Litigation", "Criminal", "Family", "Constitutional"];
 const SPEC_VALUE = { "Civil Litigation": "civil", Criminal: "criminal", Family: "family", Constitutional: "constitutional" };
-const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
-const DAY_FULL = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const CONTENT_PAD = 18;
 
 // ─── Shared UI Atoms ──────────────────────────────────────────────────────────
@@ -284,8 +296,15 @@ function StepProfessional({ onNext }) {
   const [name, setName] = useState("");
   const [exp, setExp] = useState("");
   const [license, setLicense] = useState("");
-  const [council, setCouncil] = useState("Punjab Bar Council");
   const [coreSpecs, setCoreSpecs] = useState([]);
+  const [problem, setProblem] = useState(null);
+
+  const cont = () => {
+    const specs = coreSpecs.map(s => SPEC_VALUE[s]).filter(Boolean);
+    const p = stepOneProblem({ license, specs });
+    setProblem(p);
+    if (!p) onNext({ name, exp, license: license.trim(), specs });
+  };
 
   useEffect(() => {
     getMe().then(({ data }) => {
@@ -412,20 +431,6 @@ function StepProfessional({ onNext }) {
               <span style={{ fontSize: 17, fontWeight: 800, color: T.text }}>License Information</span>
             </div>
             <div>
-              <Label>Bar Council</Label>
-              <div style={{ position: "relative" }}>
-                <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textFaint} strokeWidth="2"><path d="M15 12l-8.5 8.5a2.12 2.12 0 01-3-3L12 9M18 9l3-3M17 3l4 4" /></svg>
-                </span>
-                <input value={council} onChange={e => setCouncil(e.target.value)} style={{
-                  width: "100%", boxSizing: "border-box", background: T.inputBg,
-                  border: `1.5px solid ${T.inputBorder}`, borderRadius: T.r.md,
-                  color: T.text, fontSize: 13.5, padding: "10px 12px 10px 36px",
-                  outline: "none", fontFamily: "inherit",
-                }} />
-              </div>
-            </div>
-            <div>
               <div style={{ marginBottom: 6 }}>
                 <Label>Bar License No.</Label>
               </div>
@@ -495,7 +500,8 @@ function StepProfessional({ onNext }) {
               wizard with a profile the gate then rejects, dropping them straight
               back into onboarding: a loop, just a different one. Step 2 (photo and
               credential uploads) is genuinely optional and keeps its Skip. */}
-          <GlowBtn onClick={() => onNext({ name, exp, license, council, specs: coreSpecs.map(s => SPEC_VALUE[s]).filter(Boolean) })} style={{ padding: "7px 16px", fontSize: 12 }}>Continue {Ic.arrow("right")}</GlowBtn>
+          {problem && <span role="alert" style={{ fontSize: 12, color: "#e8526a", fontWeight: 600 }}>{problem}</span>}
+          <GlowBtn onClick={cont} style={{ padding: "7px 16px", fontSize: 12 }}>Continue {Ic.arrow("right")}</GlowBtn>
         </div>
       </div>
     </div>
@@ -503,72 +509,89 @@ function StepProfessional({ onNext }) {
 }
 
 // ─── Step 2: Credentials & Photo ──────────────────────────────────────────────
-function StepCredentials({ onNext, onBack }) {
-  const fileRef = useRef();
-  const [photo, setPhoto] = useState(null);
-  // No credential-upload endpoint yet — never show a fake "ready/uploaded" state
-  const [eduReady] = useState(false);
-  const [profReady] = useState(false);
+// Real uploads (POST /users/me/kyc/documents). Every file goes up as soon as it
+// is chosen; the card then shows what the SERVER holds, or why it refused. The
+// step stays optional (Skip), and an admin reviews whatever was sent.
+const CRED_ACCEPT = "application/pdf,image/jpeg,image/png";
 
-  const handlePhoto = (e) => {
-    const f = e.target.files?.[0];
-    if (f) setPhoto(URL.createObjectURL(f));
-  };
-
-  const CredCard = ({ svgIcon, title, sub1, sub2, uploaded, fileName }) => (
+function CredCard({ kind, svgIcon, title, sub1, sub2, doc, busy, issue, onPick }) {
+  const inputRef = useRef();
+  return (
     <div style={{
       flex: 1, background: T.card, border: `1.5px solid ${T.cardBorder}`,
       borderRadius: T.r.lg, padding: "18px 16px 16px",
       display: "flex", flexDirection: "column",
     }}>
-      {/* Icon — fixed height zone */}
       <div style={{ height: 60, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
         {svgIcon}
       </div>
-      {/* Title — fixed height zone */}
       <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 6 }}>
         <p style={{ fontSize: 14, fontWeight: 700, color: T.text, textAlign: "center", lineHeight: 1.3 }}>{title}</p>
       </div>
-      {/* Sub — fixed height zone */}
       <div style={{ height: 48, display: "flex", alignItems: "flex-start", justifyContent: "center", marginBottom: 12 }}>
         <p style={{ fontSize: 11, color: T.textFaint, textAlign: "center", lineHeight: 1.55 }}>{sub1} ·<br />{sub2}</p>
       </div>
-      {/* Upload button — same height for all */}
-      <GlowBtn style={{ width: "100%", justifyContent: "center", fontSize: 13, padding: "8px" }}>
-        Upload
+      <input type="file" ref={inputRef} accept={CRED_ACCEPT} data-kind={kind} style={{ display: "none" }}
+        onChange={e => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onPick(kind, f); }} />
+      <GlowBtn onClick={() => !busy && inputRef.current?.click()}
+        style={{ width: "100%", justifyContent: "center", fontSize: 13, padding: "8px", opacity: busy ? 0.6 : 1 }}>
+        {busy ? "Uploading…" : doc ? "Replace" : "Upload"}
       </GlowBtn>
-      {/* Status row — pinned below button */}
       <div style={{ marginTop: 8 }}>
-        {fileName ? (
+        {issue ? (
+          <p role="alert" style={{ fontSize: 11.5, color: "#e8526a", fontWeight: 600 }}>{issue}</p>
+        ) : doc ? (
           <div style={{
-            background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: T.r.sm,
-            padding: "8px 10px", display: "flex", alignItems: "center", gap: 8,
+            display: "flex", alignItems: "center", gap: 6, padding: "8px 12px",
+            background: "rgba(13,148,136,0.08)", border: `1px solid rgba(13,148,136,0.25)`, borderRadius: T.r.sm,
           }}>
-            <div style={{ width: 26, height: 26, background: T.accent, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              {Ic.doc(T.textMuted)}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: 11.5, color: T.text, fontWeight: 600 }}>{fileName}</p>
-              <p style={{ fontSize: 10, color: T.textFaint, display: "flex", alignItems: "center", gap: 3 }}>{Ic.doc(T.textFaint)} {fileName}</p>
-            </div>
-            {Ic.download(T.textMuted)}
-          </div>
-        ) : uploaded ? (
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "8px 12px", background: "rgba(13,148,136,0.08)",
-            border: `1px solid rgba(13,148,136,0.25)`, borderRadius: T.r.sm,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {Ic.check(T.primary, 14)}
-              <span style={{ fontSize: 12, fontWeight: 600, color: T.primaryLight }}>Ready to Upload</span>
-            </div>
-            {Ic.download(T.primary)}
+            {Ic.check(T.primary, 14)}
+            <span style={{ fontSize: 12, fontWeight: 600, color: T.primaryLight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              Uploaded · {doc.filename}
+            </span>
           </div>
         ) : null}
       </div>
     </div>
   );
+}
+
+function StepCredentials({ onNext, onBack, name }) {
+  const photoRef = useRef();
+  const cameraRef = useRef();
+  const [docs, setDocs] = useState({});          // kind -> server metadata
+  const [busy, setBusy] = useState(null);         // kind being uploaded
+  const [issues, setIssues] = useState({});       // kind -> server's reason
+  const [photoUrl, setPhotoUrl] = useState(null); // local preview of the uploaded photo
+  // A failed read of what was uploaded is not "nothing uploaded".
+  const [docsError, setDocsError] = useState(null);
+
+  const loadDocs = () => {
+    setDocsError(null);
+    listMyKycDocuments().then(({ data, error }) => {
+      if (error) { setDocsError(error.message || "Could not load your uploads."); return; }
+      setDocs(data || {});
+    });
+  };
+  useEffect(loadDocs, []);
+  useEffect(() => () => { if (photoUrl) URL.revokeObjectURL(photoUrl); }, [photoUrl]);
+
+  const pick = async (kind, file) => {
+    setBusy(kind);
+    setIssues(p => ({ ...p, [kind]: null }));
+    const { data, error } = await uploadKycDocument(kind, file);
+    setBusy(null);
+    if (error || !data?.[kind]) {
+      setIssues(p => ({ ...p, [kind]: error?.message || "Upload failed. Please try again." }));
+      return;
+    }
+    setDocs(p => ({ ...p, ...data }));
+    if (kind === "photo") setPhotoUrl(URL.createObjectURL(file));
+  };
+  const onPhoto = (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) pick("photo", f); };
+
+  const initials = (name || "").trim().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || "?";
+  const credCount = ["bar_certificate", "education", "professional"].filter(k => docs[k]).length;
 
   // Decorative SVG icons matching screenshot style
   const CertIcon = () => (
@@ -627,7 +650,7 @@ function StepCredentials({ onNext, onBack }) {
               </div>
             </div>
             <p style={{ fontSize: 12.5, color: T.textMuted, margin: 0, lineHeight: 1.5 }}>
-              Upload a professional photo and your credentials — clients see these before booking.
+              Upload a verification photo and your credentials. Only the admin reviewing your verification sees them; they are not shown to clients.
             </p>
           </div>
           <div style={{
@@ -659,34 +682,42 @@ function StepCredentials({ onNext, onBack }) {
             {/* Avatar */}
             <div style={{
               width: 88, height: 88, borderRadius: "50%",
-              background: photo ? "transparent" : `linear-gradient(135deg, ${T.primary}60, ${T.accent})`,
+              background: photoUrl ? "transparent" : `linear-gradient(135deg, ${T.primary}60, ${T.accent})`,
               display: "flex", alignItems: "center", justifyContent: "center",
               overflow: "hidden", border: `3px solid ${T.primary}60`,
             }}>
-              {photo
-                ? <img src={photo} alt="profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                : <span style={{ fontSize: 28, fontWeight: 800, color: T.primaryLight }}>AK</span>
+              {photoUrl
+                ? <img src={photoUrl} alt="profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : <span style={{ fontSize: 28, fontWeight: 800, color: T.primaryLight }}>{initials}</span>
               }
             </div>
             <div style={{ textAlign: "center" }}>
               <p style={{ fontSize: 14, fontWeight: 700, color: T.text }}>Profile Photo</p>
-              <p style={{ fontSize: 11, color: T.textFaint, marginTop: 2 }}>JPG or PNG · min 200×200px</p>
+              <p style={{ fontSize: 11, color: T.textFaint, marginTop: 2 }}>JPG or PNG · Max 5MB</p>
             </div>
-            <input type="file" ref={fileRef} onChange={handlePhoto} accept="image/*" style={{ display: "none" }} />
-            <GlowBtn onClick={() => fileRef.current?.click()} style={{ width: "100%", justifyContent: "center", fontSize: 13, padding: "10px" }}>
-              {Ic.camera("#fff")} Upload Photo
+            <input type="file" ref={photoRef} onChange={onPhoto} accept="image/jpeg,image/png" data-kind="photo" style={{ display: "none" }} />
+            {/* capture="user" opens the front camera on phones; elsewhere it is a file picker. */}
+            <input type="file" ref={cameraRef} onChange={onPhoto} accept="image/jpeg,image/png" capture="user" data-kind="photo-camera" style={{ display: "none" }} />
+            <GlowBtn onClick={() => busy !== "photo" && photoRef.current?.click()} style={{ width: "100%", justifyContent: "center", fontSize: 13, padding: "10px" }}>
+              {Ic.camera("#fff")} {busy === "photo" ? "Uploading…" : docs.photo ? "Replace Photo" : "Upload Photo"}
             </GlowBtn>
-            <button style={{
+            <button onClick={() => busy !== "photo" && cameraRef.current?.click()} style={{
               width: "100%", background: "transparent", border: `1.5px solid ${T.border}`,
               borderRadius: T.r.md, color: T.textMuted, fontSize: 13, padding: "9px",
               cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
             }}>
               {Ic.camera(T.textMuted)} Take Photo
             </button>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", border: `1.5px solid ${T.textFaint}` }} />
-              <span style={{ fontSize: 11, color: T.textFaint }}>No image uploaded yet</span>
-            </div>
+            {issues.photo ? (
+              <p role="alert" style={{ fontSize: 11.5, color: "#e8526a", fontWeight: 600, textAlign: "center" }}>{issues.photo}</p>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", border: `1.5px solid ${docs.photo ? T.primary : T.textFaint}`, background: docs.photo ? T.primary : "transparent" }} />
+                <span style={{ fontSize: 11, color: docs.photo ? T.primaryLight : T.textFaint }}>
+                  {docs.photo ? "Photo uploaded" : "No image uploaded yet"}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Right: verification banner + 3 cred cards */}
@@ -701,15 +732,24 @@ function StepCredentials({ onNext, onBack }) {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.warning} strokeWidth="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
               </div>
               <div>
-                <p style={{ fontSize: 12, fontWeight: 700, color: T.warning, margin: 0 }}>2 items pending verification</p>
-                <p style={{ fontSize: 10.5, color: T.textFaint, margin: "2px 0 0" }}>Credentials will be reviewed by admin within 24–48 hours</p>
+                {docsError ? (
+                  <p role="alert" style={{ fontSize: 12, fontWeight: 700, color: T.warning, margin: 0 }}>
+                    Couldn't load your uploads: {docsError}{" "}
+                    <button onClick={loadDocs} style={{ background: "none", border: "none", color: T.primaryLight, fontWeight: 700, cursor: "pointer", padding: 0 }}>Retry</button>
+                  </p>
+                ) : (
+                  <p style={{ fontSize: 12, fontWeight: 700, color: T.warning, margin: 0 }}>
+                    {credCount === 0 ? "No credentials uploaded yet" : `${credCount} of 3 credentials uploaded`}
+                  </p>
+                )}
+                <p style={{ fontSize: 10.5, color: T.textFaint, margin: "2px 0 0" }}>Uploaded files are reviewed by an admin as part of verification.</p>
               </div>
             </div>
             {/* 3 cards */}
             <div style={{ display: "flex", gap: 12, flex: 1 }}>
-              <CredCard svgIcon={<CertIcon />} title="Bar Council Certificate" sub1="Official bar membership certificate" sub2="PDF, JPG or PNG · Max 5MB" />
-              <CredCard svgIcon={<EduIcon />} title="Educational Credentials" sub1="LLB or equivalent law degree" sub2="PDF, JPG or PNG · Max 5MB" uploaded={eduReady} />
-              <CredCard svgIcon={<AwardIcon />} title="Professional Certificates" sub1="Additional certifications or awards" sub2="PDF, JPG or PNG · Max 5MB" uploaded={profReady} />
+              <CredCard kind="bar_certificate" doc={docs.bar_certificate} busy={busy === "bar_certificate"} issue={issues.bar_certificate} onPick={pick} svgIcon={<CertIcon />} title="Bar Council Certificate" sub1="Official bar membership certificate" sub2="PDF, JPG or PNG · Max 5MB" />
+              <CredCard kind="education" doc={docs.education} busy={busy === "education"} issue={issues.education} onPick={pick} svgIcon={<EduIcon />} title="Educational Credentials" sub1="LLB or equivalent law degree" sub2="PDF, JPG or PNG · Max 5MB" />
+              <CredCard kind="professional" doc={docs.professional} busy={busy === "professional"} issue={issues.professional} onPick={pick} svgIcon={<AwardIcon />} title="Professional Certificates" sub1="Additional certifications or awards" sub2="PDF, JPG or PNG · Max 5MB" />
             </div>
           </div>
         </div>
@@ -748,13 +788,8 @@ function StepOffice({ onNext, onBack, saving, error }) {
   const [city, setCity] = useState("Lahore, 54000");
   const [phone, setPhone] = useState("");
   const [minFee, setMinFee] = useState(5000);
-  const [maxFee, setMaxFee] = useState(25000);
   const [feeNote, setFeeNote] = useState("");
-  const [activeDays, setActiveDays] = useState([0, 1, 2, 3, 4]);
-  const [schedule, setSchedule] = useState("Standard 9 AM - 5 PM");
-  const [feeTier, setFeeTier] = useState("10k-25k");
 
-  const togDay = (i) => setActiveDays(p => p.includes(i) ? p.filter(d => d !== i) : [...p, i].sort((a, b) => a - b));
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -805,7 +840,7 @@ function StepOffice({ onNext, onBack, saving, error }) {
           </div>
         </div>
 
-        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "1fr", gap: 12, flex: 1 }}>
+        <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr", gap: 12, flex: 1 }}>
           {/* Location & Contact */}
           <CardPanel>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -817,7 +852,6 @@ function StepOffice({ onNext, onBack, saving, error }) {
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                 <Label>Office address</Label>
-                <span style={{ fontSize: 11, color: T.primary, cursor: "pointer" }}>Map Preview</span>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                 <div style={{ flex: 1 }}>
@@ -844,18 +878,7 @@ function StepOffice({ onNext, onBack, saving, error }) {
                 <div style={{ flex: 1 }}>
                   <Input placeholder="+92" icon={Ic.phone(T.textFaint)} value={phone} onChange={setPhone} />
                 </div>
-                <select style={{
-                  background: T.inputBg, border: `1.5px solid ${T.inputBorder}`,
-                  borderRadius: T.r.md, color: T.textMuted, fontSize: 12,
-                  padding: "10px 10px", outline: "none",
-                }}>
-                  <option>Primary/</option>
-                  <option>Secondary/</option>
-                </select>
               </div>
-            </div>
-            <div style={{ padding: "10px 12px", background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: T.r.sm, fontSize: 12, color: T.textFaint }}>
-              Map Preview
             </div>
           </CardPanel>
 
@@ -877,76 +900,14 @@ function StepOffice({ onNext, onBack, saving, error }) {
                 style={{ width: "100%", accentColor: T.primary }} />
             </div>
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <Label>Maximum Fee</Label>
-                <Label>Max: PKR 50,000</Label>
-              </div>
-              <input type="range" min="0" max="50000" step="1000" value={maxFee}
-                onChange={e => setMaxFee(+e.target.value)}
-                style={{ width: "100%", accentColor: T.primary }} />
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {["<10k", "10k-25k", ">25k"].map(t => (
-                <button key={t} onClick={() => setFeeTier(t)} style={{
-                  flex: 1, padding: "8px 6px", borderRadius: T.r.sm, fontSize: 12, fontWeight: 600, cursor: "pointer",
-                  background: feeTier === t ? T.primaryGlow : T.inputBg,
-                  border: `1.5px solid ${feeTier === t ? T.primary : T.border}`,
-                  color: feeTier === t ? T.primaryLight : T.textMuted,
-                }}>{t}</button>
-              ))}
-            </div>
-            <div>
               <Label>Explain your fees <span style={{ color: T.textFaint }}>(optional)</span></Label>
               <Textarea placeholder="" rows={3} value={feeNote} onChange={setFeeNote} />
             </div>
           </CardPanel>
 
-          {/* Working Schedule */}
-          <CardPanel>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-              <div style={{ width: 30, height: 30, borderRadius: 8, background: T.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                {Ic.clock(T.primary)}
-              </div>
-              <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>Working Schedule</span>
-            </div>
-            <div>
-              <Label>Working Days</Label>
-              <div style={{ display: "flex", gap: 5, marginTop: 6 }}>
-                {DAYS.map((d, i) => (
-                  <button key={i} onClick={() => togDay(i)} style={{
-                    width: 30, height: 30, borderRadius: "50%", border: `1.5px solid ${activeDays.includes(i) ? T.primary : T.border}`,
-                    background: activeDays.includes(i) ? T.primaryGlow : T.inputBg,
-                    color: activeDays.includes(i) ? T.primaryLight : T.textFaint,
-                    fontSize: 11, fontWeight: 700, cursor: "pointer",
-                  }}>{d}</button>
-                ))}
-              </div>
-              <p style={{ fontSize: 11, color: T.textFaint, marginTop: 6 }}>
-                Selected: {activeDays.length} Days ({activeDays.map(i => DAY_FULL[i]).join("-")})
-              </p>
-            </div>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <Label>Office Hours</Label>
-                <span style={{ fontSize: 10, color: T.textFaint }}>ⓘ</span>
-              </div>
-              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                {["AM", "Min", "AM", "Min"].map((p, i) => (
-                  <select key={i} style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: T.r.sm, color: T.textMuted, fontSize: 12, padding: "8px 6px", outline: "none" }}>
-                    <option>{p}</option>
-                  </select>
-                ))}
-              </div>
-            </div>
-            <div style={{ padding: "10px 14px", background: T.primaryGlow2, border: `1px solid ${T.primary}30`, borderRadius: T.r.sm }}>
-              <p style={{ fontSize: 12, fontWeight: 600, color: T.primaryLight }}>Standard 9 AM - 5 PM</p>
-              <p style={{ fontSize: 11, color: T.textFaint, marginTop: 2 }}>Selected: 9 AM - 5 PM (Mon-Fri)</p>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Exception/Holiday Schedule</span>
-              <span style={{ color: T.textMuted }}>▾</span>
-            </div>
-          </CardPanel>
+          {/* A "Working Schedule" card sat here: days, office hours and a holiday
+              schedule that were never sent. Working hours are set, and enforced,
+              in Appointments. */}
         </div>
       </div>
 
@@ -1054,10 +1015,6 @@ function StepSubmitted({ onBack, onComplete }) {
             </div>
             <p style={{ fontSize: 11, color: T.textFaint }}>15% Admin verification (Step 1/2) in progress.</p>
           </div>
-          <div style={{ flex: "1 1 240px", maxWidth: 240, minWidth: 0, background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: T.r.lg, padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 20 }}>✉️</span>
-            <p style={{ fontSize: 12, color: T.textMuted }}>Questions? Contact <span style={{ color: T.primaryLight, cursor: "pointer" }}>Admin Support</span>.</p>
-          </div>
         </div>
 
       </div>
@@ -1107,7 +1064,9 @@ export function OnboardingPage({ onComplete }) {
     setSaving(false);
     const err = r1.error || r2.error;
     if (err) {
-      setError(err?.detail || "Submission failed — check your connection and try again.");
+      // `message` is always a string (formatResponseError). `detail` is the raw
+      // body field — an ARRAY of objects on a 422 — and rendering it crashed React.
+      setError(err?.message || "Submission failed — please try again.");
       return;
     }
     setSubmitted(true);
@@ -1131,7 +1090,7 @@ export function OnboardingPage({ onComplete }) {
       {/* Main content */}
       <div style={{ flex: 1, overflow: "hidden", minWidth: 0, display: "flex", flexDirection: "column" }}>
         {step === 0 && <StepProfessional onNext={next} />}
-        {step === 1 && <StepCredentials onNext={next} onBack={back} />}
+        {step === 1 && <StepCredentials onNext={next} onBack={back} name={formRef.current.name} />}
         {step === 2 && <StepOffice onNext={next} onBack={back} saving={saving} error={error} />}
         {step === 3 && <StepSubmitted onBack={back} onComplete={onComplete} />}
       </div>

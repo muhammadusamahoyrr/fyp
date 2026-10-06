@@ -302,6 +302,7 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
     # "E11000 duplicate key ... cnic_encrypted: null" and the whole write failed.
     # Unsetting is also the better erasure: the value is gone rather than blanked.
     unsets = {"cnic_encrypted": ""}
+    kyc_tombstone = {}
     # Only lawyers have this sub-document. On a client it is null, and Mongo
     # refuses to create a field inside null with
     # "Cannot create field 'availability' in element {lawyer_profile: null}" —
@@ -312,6 +313,13 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
             "lawyer_profile.kyc_verified": False,
             "lawyer_profile.availability": False,
         })
+        # Identity documents uploaded for verification: TOMBSTONE FIRST. The
+        # record is cut to file ids and marked pending here; the files are
+        # deleted after the write, and the record goes only once they are gone
+        # (kyc_documents.erase). A failed deletion stays visible and retried.
+        from app.services import kyc_documents
+        kyc_tombstone = kyc_documents.closure_tombstone(user["lawyer_profile"])
+        updates.update(kyc_tombstone)
 
     await user_repo.update_one({"_id": user_id}, {"$set": updates, "$unset": unsets})
     await auth_sessions.revoke_all_best_effort(
@@ -325,12 +333,30 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
     if isinstance(user.get("lawyer_profile"), dict):
         from app.ai.lawyer_embeddings import forget_lawyers
         forget_lawyers([user_id])
+    # The closure above is committed. File erasure can fail (a locked file, a
+    # disk error); it never fails the request, and the response says what is
+    # actually true rather than claiming an erasure that has not happened.
+    kyc_erasure_pending = False
+    if kyc_tombstone:   # only a lawyer who uploaded something has files to erase
+        from app.services import kyc_documents
+        try:
+            kyc_erasure_pending = not await kyc_documents.erase(user_id)
+        except Exception:  # noqa: BLE001 -- erase() should not raise; belt and braces
+            logger.exception("kyc erasure raised during closure: %s", user_id)
+            kyc_erasure_pending = True
 
     logger.info("account closed: %s (role=%s, reason=%s)", user_id, user.get("role"), reason)
+    retained = ("Case, payment and audit records are retained where the law or "
+                "another party's rights require it.")
+    if kyc_erasure_pending:
+        detail = ("Your account is closed and your profile details have been erased. "
+                  "Your verification documents could not be deleted yet; they are "
+                  "scheduled for deletion and will be removed automatically. " + retained)
+    else:
+        detail = "Your account is closed and your personal details have been erased. " + retained
     return {
         "closed": True,
         "closed_at": now,
-        "detail": ("Your account is closed and your personal details have been "
-                   "erased. Case, payment and audit records are retained where "
-                   "the law or another party's rights require it."),
+        "kyc_erasure_pending": kyc_erasure_pending,
+        "detail": detail,
     }
