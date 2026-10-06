@@ -354,7 +354,9 @@ const ModProfile = () => {
         if (error || !data?.closed) {
             // The server refuses while engagements or payments are live and says
             // which — surface that verbatim rather than a generic failure.
-            toast.show(error?.detail || data?.error || "Could not close the account", "danger");
+            // `.message` is the formatted string. `.detail` is undefined on the
+            // error envelope (so the reason was lost) and an array on a 422.
+            toast.show(error?.message || data?.error || "Could not close the account", "danger");
             return;
         }
         toast.show("Account closed. Signing you out…", "info", 4000);
