@@ -180,8 +180,33 @@ Every commit has a regression test that fails without the fix and passes with it
 
 **Open findings from the smoke test**
 
-- **Client app shows no toasts at all (pre-existing, client module).** `ClientApp` mounts no `ToastContainer`, so `useToast()` falls back to a no-op on every client screen. The close-account fix is correct but its message is invisible until a provider is mounted. Not fixed — outside this plan.
+- **Client app showed no toasts at all (pre-existing, client module).** `ClientApp` mounted no `ToastContainer`, so `useToast()` fell back to a no-op on every client screen. **Fixed `968b624`** (one container, current theme, DOM test on the close-account refusal).
+- **"error" toasts rendered in the info palette (pre-existing, shared).** ~45 call sites pass `"error"`, which `Toast.jsx` did not know. **Fixed `8b7d1bf`** (aliased to `danger`, focused test).
 - Console noise only: Next dev HMR websocket (dev server), the Review Queue probe's expected 404 (`feature_disabled`), and a pre-existing React style warning (a card mixing `border` and `borderLeft`).
 - Hearing form pre-fills Court with the province and Judge with "—" (D6, deferred).
 
-**Still open:** the client toast provider (above); the deferred Phase 2 items (2.3, 2.5, 2.7–2.10) and Phase 4; pre-existing backend failures in `test_v2_migration_matrix.py`, `test_engagement_two_step.py`, `test_analyzer_lawyer_only.py` (44 tests, identical with and without these changes).
+---
+
+## 9. Hand-off status (branch `fix/lawyer-dashboard`, local, not pushed)
+
+**Frontend:** full suite **1,340 passed, 0 failed**; production build passes.
+
+**Backend — NOT fully green.** What was run, and what it showed:
+
+| Run | Result |
+|---|---|
+| New / changed tests: `test_cases_status_filter.py`, `test_kyc_documents.py`, `test_agreement_draft_delete_route.py` | All pass (5 + 8 + 1) against local MongoDB |
+| All case tests (`tests/test_case*.py`) | 142 passed |
+| Wider sweep of tests touching account closure, KYC and admin routes (62 files) | 1,857 passed, 216 skipped, **44 failed** |
+
+**The 44 failures are a reproducible baseline, not caused by this branch.** They fail identically with these changes stashed:
+
+| File | Failures | Typical error |
+|---|---|---|
+| `test_v2_migration_matrix.py` | 37 | `KeyError: 'migration_outcome'`; `assert ['not migrated'] == []` |
+| `test_engagement_two_step.py` | 6 | — |
+| `test_analyzer_lawyer_only.py` | 1 | — |
+
+The full backend suite was not run end to end in this session. These 44 need their own investigation (likely environment-dependent, e.g. transactions on a standalone Mongo) before anyone calls the backend green.
+
+**Still open (deferred, not blocking the demo):** Phase 2 items 2.3, 2.5, 2.7–2.10; Phase 4 (persisting the case Timeline/Documents tabs and hearing edit/delete); the hearing form's Court/Judge pre-fill (D6).
