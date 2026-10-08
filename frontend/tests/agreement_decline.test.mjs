@@ -127,9 +127,12 @@ test("the client profile no longer says session management is unavailable", () =
 
 test("both shells mount the sessions panel", () => {
     const settings = read("../src/components/lawyer/SettingsPage.jsx");
-    for (const [name, source] of [["client profile", PROFILE], ["lawyer settings", settings]]) {
-        assert.match(source, /import SessionsPanel from "@\/components\/shared\/SessionsPanel\.jsx"/,
-            `${name} does not import the panel`);
+    // The lawyer has its own copy of the panel since 2026-10-08 (docs_isolation).
+    for (const [name, source, spec] of [
+        ["client profile", PROFILE, /import SessionsPanel from "@\/components\/shared\/SessionsPanel\.jsx"/],
+        ["lawyer settings", settings, /import SessionsPanel from "\.\/SessionsPanel\.jsx"/],
+    ]) {
+        assert.match(source, spec, `${name} does not import the panel`);
         assert.match(source, /<SessionsPanel[\s\S]{0,120}onSignedOut=\{logout\}/,
             `${name} mounts the panel without wiring onSignedOut to logout — ` +
             `revoking your own session would leave a signed-out page looking signed in`);

@@ -2,7 +2,7 @@
 // Lawyer App — paste your code here
 import { useState, useEffect, useRef } from "react";
 import { DARK, LIGHT, ThemeCtx, ToggleCtx, CaseCtx, NotifCtx } from "./theme.js";
-import { ToastContainer } from "@/components/shared/Toast.jsx";
+import { ToastContainer } from "@/components/lawyer/Toast.jsx";
 import { injectGS } from "./globalStyles.js";
 import { Sidebar, ActiveCaseBanner } from "./layout.jsx";
 import { Icon, I } from "./icons.jsx";
@@ -127,6 +127,12 @@ export default function App({ initialPage = "dashboard" }) {
     }, [page]);
 
     useEffect(() => { injectGS(t); }, [t]);
+    // The lawyer app's global styles (`* {margin:0}`, `html {font-size:15px}`,
+    // DM Sans on body and controls) leave with it. Left in <head>, they styled
+    // every client screen reached afterwards without a full page load.
+    useEffect(() => () => {
+        for (const id of ["ag-gs", "ag-extra"]) document.getElementById(id)?.remove();
+    }, []);
 
     useEffect(() => {
         const id = "ag-extra"; if (document.getElementById(id)) return;

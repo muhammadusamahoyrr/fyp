@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Btn, Input } from "./components.jsx";
-import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
+import RevisionHistory from "./RevisionHistory.jsx";
 import {
     listReviewQueue, reviewDocument, downloadDocumentFile,
     fetchRevisionPreview, reviewDocumentV2, reviewQueueV2,

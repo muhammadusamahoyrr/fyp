@@ -5,7 +5,7 @@ import {
     fetchRevisionPreview,
 } from "@/lib/api.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
-import RevisionHistory from "@/components/shared/RevisionHistory.jsx";
+import RevisionHistory from "./RevisionHistory.jsx";
 
 /* Documents this lawyer owns, and can come back to.
  *

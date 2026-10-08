@@ -18,7 +18,7 @@
  * The review is NOT a statement that all personal information was removed,
  * and NOT an accuracy approval (the server's notice says so). */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Btn, Card } from "@/components/client/documents/ui.jsx";
+import { Btn, Card } from "@/components/lawyer/ui.jsx";
 import { confirmPii, getAnalysisText, getPiiConfirmation, idempotencyKey, previewPii } from "@/lib/api.js";
 
 export const PII_REVIEW_REASONS = new Set(["pii_confirmation_required", "pii_review_required", "pii_review_outdated", "pii_leak_guard"]);

@@ -2,7 +2,9 @@
 // Paste your App.jsx code here
 import React, { useState, useEffect } from "react";
 import { DARK, LIGHT } from "@/components/admin/themes.js";
-import { ThemeCtx } from "@/components/lawyer/theme.js";
+// The CLIENT theme context (it was the lawyer one: the client screens this
+// legacy shell renders read the client context, so they never saw this theme).
+import { ThemeCtx } from "@/components/client/theme.js";
 import { FONTS, makeGlobal } from "@/lib/styles.js";
 import ErrorBoundary from "@/components/shared/ErrorBoundary.jsx";
 import { ToastContainer } from "@/components/shared/Toast.jsx";

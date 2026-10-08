@@ -1,3 +1,2 @@
 'use client';
-export { useT, useHeaderActions, ThemeCtx, HeaderActionsCtx } from "@/components/client/theme.js";
-export { DARK, LIGHT } from "@/components/admin/themes.js";
+export { useT, useHeaderActions, ThemeCtx, HeaderActionsCtx, DARK, LIGHT } from "@/components/shared/ui/theme.js";

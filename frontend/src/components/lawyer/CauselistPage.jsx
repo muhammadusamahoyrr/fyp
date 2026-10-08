@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
-import { useToast } from "@/components/shared/Toast.jsx";
+import { useToast } from "@/components/lawyer/Toast.jsx";
 import {
     createCauselistWatch, listCauselistWatches, deleteCauselistWatch,
     checkCauselist, listCauselistEntries, matchCauselistText,

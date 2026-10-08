@@ -3,9 +3,9 @@ import { useEffect, useState } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Label, Input, Divider } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
-import { useToast } from "@/components/shared/Toast.jsx";
+import { useToast } from "@/components/lawyer/Toast.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import SessionsPanel from "@/components/shared/SessionsPanel.jsx";
+import SessionsPanel from "./SessionsPanel.jsx";
 import { changePassword, mySubscription, billingPlans, subscribePlan, cancelSubscription, mockPay, closeAccount } from "@/lib/api.js";
 
 function SettingsPage() {

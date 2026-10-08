@@ -6,7 +6,7 @@ import {
 } from "@/lib/bookingTime.js";
 import { useTheme } from "./theme.js";
 import { useNotif } from "./theme.js";
-import { useToast } from "@/components/shared/Toast.jsx";
+import { useToast } from "@/components/lawyer/Toast.jsx";
 import { Card, Btn } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import {

@@ -25,7 +25,7 @@ const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const api = await import("./support/api-stub.mjs");
 const { AuthProvider } = await import("../src/context/AuthContext.jsx");
-const { ToastCtx } = await import("../src/components/shared/Toast.jsx");
+const { ToastCtx } = await import("../src/components/lawyer/Toast.jsx");
 const { SettingsPage } = await import("../src/components/lawyer/SettingsPage.jsx");
 const h = React.createElement;
 

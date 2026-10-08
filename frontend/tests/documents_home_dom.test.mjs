@@ -35,6 +35,8 @@ const { default: DocsDrafts, placeholderCounts } =
 const { default: DocsAnalyzer } =
     await import("../src/components/analyzer/AnalyzerWorkspace.jsx");
 const { ToastCtx } = await import("../src/components/shared/Toast.jsx");
+// The analyzer is lawyer-owned and reads the lawyer's own toast context.
+const { ToastCtx: LawyerToastCtx } = await import("../src/components/lawyer/Toast.jsx");
 const toasts = [];
 
 const TEMPLATES = [
@@ -57,8 +59,10 @@ async function mount(Component, props) {
     const root = createRoot(container);
     const render = async (extra = {}) => {
         await act(async () => {
-            root.render(React.createElement(ToastCtx.Provider, { value: { show: m => toasts.push(m) } },
-                React.createElement(Component, { ...props, ...extra })));
+            const show = { show: m => toasts.push(m) };
+            root.render(React.createElement(ToastCtx.Provider, { value: show },
+                React.createElement(LawyerToastCtx.Provider, { value: show },
+                    React.createElement(Component, { ...props, ...extra }))));
         });
         await act(async () => { await new Promise(r => setTimeout(r, 10)); });
     };

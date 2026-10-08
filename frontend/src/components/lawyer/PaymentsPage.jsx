@@ -3,7 +3,7 @@
 // tracks what's been collected. The client pays securely (Safepay; mock in dev).
 import { useEffect, useState } from "react";
 import { useTheme } from "./theme.js";
-import { useToast } from "@/components/shared/Toast.jsx";
+import { useToast } from "@/components/lawyer/Toast.jsx";
 import {
     listPayments, paymentSummary, createFeeRequest, downloadReceipt, listCases,
     listEngagements,

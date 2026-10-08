@@ -21,8 +21,8 @@
  * Shown only while DOCUMENT_REVIEW_REQUESTS is on: a 404 `feature_disabled`
  * sends the lawyer back to Documents. */
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ThemeCtx as WorkspaceThemeCtx } from "@/components/client/theme.js";
-import { useToast } from "@/components/shared/Toast.jsx";
+import { ThemeCtx as WorkspaceThemeCtx } from "@/components/shared/ui/theme.js";
+import { useToast } from "@/components/lawyer/Toast.jsx";
 import {
     acceptReviewRequest, declineReviewRequest, downloadReviewRequestDocument, getReviewRequest,
     idempotencyKey, listEngagements, listReviewInbox, markReviewRequestViewed,
@@ -31,8 +31,8 @@ import {
     DECLINE_REASON_MAX, LAWYER_REQUEST_NOT_FOUND, counterText, lawyerActions,
     lawyerErrorMessage, lawyerStatusView, peekLawyerReviewLink, settleLawyerReviewLink,
 } from "@/lib/reviewRequests.js";
-import { Btn, Card, Label, Pill, fieldStyle } from "@/components/client/documents/ui.jsx";
-import { formatWhen } from "@/components/client/documents/DocsVault.jsx";
+import { Btn, Card, Label, Pill, fieldStyle } from "@/components/lawyer/ui.jsx";
+import { formatWhen } from "@/features/documents/formatWhen.js";
 import { useCase, useTheme } from "./theme.js";
 
 const FILTERS = [

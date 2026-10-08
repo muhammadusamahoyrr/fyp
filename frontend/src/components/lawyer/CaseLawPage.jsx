@@ -4,7 +4,7 @@
 // court's original PDF.
 import { useEffect, useState } from "react";
 import { useTheme } from "./theme.js";
-import { useToast } from "@/components/shared/Toast.jsx";
+import { useToast } from "@/components/lawyer/Toast.jsx";
 import { citatorSearch, citatorCitedBy, citatorStats } from "@/lib/api.js";
 
 function JudgmentCard({ j, t, onCiteClick }) {

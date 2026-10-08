@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useTheme } from "./theme.js";
 import { Card, Btn, Label, Badge, Divider, Input } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
-import { useToast } from "@/components/shared/Toast.jsx";
+import { useToast } from "@/components/lawyer/Toast.jsx";
 import { getMe, updateMe, updateLawyerProfile } from "@/lib/api.js";
 
 function ProfilePage() {
