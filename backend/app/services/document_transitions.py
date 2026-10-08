@@ -45,6 +45,7 @@ from app.db.collections import (
 from app.repositories import revision_repo
 from app.repositories.case_repo import CaseRepository
 from app.services import event_outbox
+from app.services import template_registry
 from app.services import document_migration as migration
 
 case_repo = CaseRepository()
@@ -1104,7 +1105,7 @@ async def _enrich_queue_page(rows: list[dict]) -> None:
     revisions = await get_document_revisions_col().find(
         {"_id": {"$in": revision_ids}},
         {"compliance": 1, "verification": 1, "extraction_status": 1,
-         "field_shape": 1, "version": 1},
+         "field_shape": 1, "version": 1, "template_type": 1},
     ).to_list(length=len(revision_ids)) if revision_ids else []
 
     by_client = {u["_id"]: u for u in clients}
@@ -1126,6 +1127,10 @@ async def _enrich_queue_page(rows: list[dict]) -> None:
         # not in the document the lawyer is about to read, and the client has no
         # reason to know that — so the reviewer is the one who must be told.
         row["field_shape"] = rev.get("field_shape")
+        # The client edited the WORDING of this revision: it began as the named
+        # template but its text is the client's. The reviewer must read it as
+        # text -- the template's reviewed wording is not what is in front of them.
+        row["text_edited"] = rev.get("template_type") in template_registry.TEXT_EDITED
         # Internal only: it named which revision the verdicts came from, and
         # the caller reads the explicit submitted_*/reviewed_* fields instead.
         row.pop("display_revision_id", None)

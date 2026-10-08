@@ -243,3 +243,11 @@ test("no cases at all resolves to no case", () => {
     assert.equal(resolveCaseId("", []), null);
     assert.equal(resolveCaseId(NO_CASE, []), null);
 });
+
+test("a document whose current version is edited text says so (2026-10-08)", () => {
+    const base = { id: "d1", template_type: "legal_notice", review_status: "none", current_version: 3 };
+    assert.equal(restoreStateFromDocument({ ...base,
+        current_revision: { revision_id: "r3", pdf_sha256: "a".repeat(64), template_type: "edited_document" } }).textEdited, true);
+    assert.equal(restoreStateFromDocument({ ...base,
+        current_revision: { revision_id: "r2", pdf_sha256: "a".repeat(64), template_type: "legal_notice" } }).textEdited, false);
+});

@@ -99,3 +99,21 @@ test("the Documents item toggles its menu and always lands on the home", () => {
         "arriving at Documents must open the home, not the last draft");
     assert.match(src, /rotate\(180deg\)/, "the arrow does not flip when the menu opens");
 });
+
+test("requestOpenDocument leaves the id pending until taken, once", async () => {
+    const nav = await import("../src/lib/documentsNav.js");
+    nav.requestOpenDocument("doc-9");
+    assert.equal(nav.takePendingDocument(), "doc-9");
+    assert.equal(nav.takePendingDocument(), null);
+    nav.requestOpenDocument("");
+    assert.equal(nav.takePendingDocument(), null, "an empty id is no request");
+});
+
+test("the open document rides in the address and leaves it cleanly (refresh reopen)", async () => {
+    const nav = await import("../src/lib/documentsNav.js");
+    assert.deepEqual(nav.readOpenDocumentLink("?doc=abc_12-X"), { id: "abc_12-X", preview: false });
+    assert.deepEqual(nav.readOpenDocumentLink("?doc=abc&view=preview"), { id: "abc", preview: true });
+    assert.equal(nav.readOpenDocumentLink("?doc=../../etc"), null, "an id that is not an id is ignored");
+    assert.equal(nav.readOpenDocumentLink("?tab=review-requests"), null);
+    assert.equal(nav.readOpenDocumentLink(""), null);
+});

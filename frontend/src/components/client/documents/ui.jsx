@@ -28,6 +28,14 @@ export const MOCKUP_DARK = {
     label: "#6fcfc3", divider: "#22404a", hover: "#21414a", navText: "#a9c3c8",
 };
 
+/* THE DOCUMENTS MODULE'S TYPEFACE (2026-10-08): the Vault's Nunito Sans, a free
+ * near-match for Avenir, across Templates, Drafts, the guided flow, the Vault
+ * and their dialogs. Scoped by [data-docs-font] so no other screen changes.
+ * !important because the shared primitives set their font inline.
+ * `data-keep-font` opts an element out (a serif heading, a monospace citation). */
+export const DOCS_FONT = "'Nunito Sans', 'Avenir Next', Avenir, system-ui, sans-serif";
+export const DOCS_FONT_CSS = `[data-docs-font], [data-docs-font] *:not([data-keep-font]) { font-family: ${DOCS_FONT} !important; }`;
+
 export function docsTheme(t) {
     return t && t.mode === "dark" ? { ...t, ...MOCKUP_DARK } : t;
 }

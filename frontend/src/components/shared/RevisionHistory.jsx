@@ -18,7 +18,11 @@ import { listRevisionsV2, errorCode } from "@/lib/api.js";
  * Silent when the feature is off. `feature_disabled` is the flag saying "not
  * here", not an error worth showing someone who was never offered the feature.
  */
-export default function RevisionHistory({ docId, t, currentRevisionId, reloadKey, onPreview }) {
+/* `renderRow(rev, { isCurrent, failed, verdict })`, when given, draws each row
+ * instead of the default compact line. The data, its order and which revision
+ * counts as current still come from here -- only the presentation is the
+ * caller's (the client drafting sidebar uses it). */
+export default function RevisionHistory({ docId, t, currentRevisionId, reloadKey, onPreview, alwaysShow = false, renderRow = null, heading = null }) {
     const [items, setItems] = useState(null);   // null = not loaded, [] = none
     const [issue, setIssue] = useState(null);
 
@@ -50,7 +54,24 @@ export default function RevisionHistory({ docId, t, currentRevisionId, reloadKey
     }, [docId, reloadKey]);
 
     // Nothing to show, and nothing worth saying: one revision is not a history.
-    if (!items || (items.length <= 1 && !issue)) return null;
+    // Unless the caller is a dedicated Versions view, where "v1 · current" is
+    // the answer to the question the user just asked.
+    if (!items) return alwaysShow ? <div style={{ fontSize: 12, color: t.textMuted }}>Loading versions…</div> : null;
+    if (items.length <= 1 && !issue && !alwaysShow) return null;
+
+    if (renderRow) {
+        return (
+            <div>
+                {heading}
+                {issue && <div style={{ fontSize: 12, color: t.textMuted, padding: "8px 4px" }}>{issue}</div>}
+                {items.map(rev => renderRow(rev, {
+                    isCurrent: rev.revision_id === currentRevisionId,
+                    failed: rev.status !== "generated",
+                    verdict: rev.status !== "generated" ? "No file was produced for this version" : _verdict(rev),
+                }))}
+            </div>
+        );
+    }
 
     return (
         <div style={{ marginTop: 14 }}>

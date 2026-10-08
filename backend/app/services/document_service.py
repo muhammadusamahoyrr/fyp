@@ -995,6 +995,8 @@ _DRAFT_ALLOWED_TAGS = {
     "p", "div", "br", "span",
     "b", "strong", "i", "em", "u", "s", "strike", "sub", "sup", "font",
     "ul", "ol", "li", "h1", "h2", "h3", "blockquote", "hr",
+    # A template's text carries tables (schedules, parties); no attributes.
+    "table", "thead", "tbody", "tr", "th", "td",
 }
 # `color` is deliberately NOT allowed: text coloured to match the background is
 # hidden from a reader but present in the markup, which would let a citation be
@@ -1003,8 +1005,12 @@ _DRAFT_ALLOWED_TAGS = {
 # parsed text as visible.
 _DRAFT_ALLOWED_ATTRS = {
     "font": {"face", "size"},
-    "*": {"align"},
+    "*": {"align", "style"},
 }
+# `style` is allowed for ONE property: the editor aligns text with
+# `style="text-align:center"`. Every other property is removed -- above all
+# colour, for the reason given above.
+_DRAFT_ALLOWED_STYLE = {"text-align"}
 
 
 class _VisibleText:
@@ -1077,7 +1083,11 @@ def _clean_draft_html(raw: str) -> str:
     """
     if not raw:
         return raw
-    return nh3.clean(raw, tags=_DRAFT_ALLOWED_TAGS, attributes=_DRAFT_ALLOWED_ATTRS)
+    cleaned = nh3.clean(raw, tags=_DRAFT_ALLOWED_TAGS, attributes=_DRAFT_ALLOWED_ATTRS,
+                        filter_style_properties=_DRAFT_ALLOWED_STYLE)
+    # A style whose every property was removed (url(), colour) is left empty;
+    # drop it, so nothing but text-align ever survives as a style.
+    return cleaned.replace(' style=""', "")
 
 
 def _draft_out(draft: dict) -> dict:

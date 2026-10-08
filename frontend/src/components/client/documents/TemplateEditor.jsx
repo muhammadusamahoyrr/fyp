@@ -292,7 +292,7 @@ function EditorWindow({ spec, onClose, onUse }) {
 
     return (
         <ModalPortal>
-        <div data-lenis-prevent onClick={onClose} style={{ ...BACKDROP, background: "rgba(12,40,44,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: "clamp(6px, 1.5vw, 20px)" }}>
+        <div data-lenis-prevent data-docs-font onClick={onClose} style={{ ...BACKDROP, background: "rgba(12,40,44,.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: "clamp(6px, 1.5vw, 20px)" }}>
             <div role="dialog" aria-modal="true" aria-label="Customize template" onClick={e => e.stopPropagation()}
                 style={{ width: "min(1680px, 100%)", height: "100%", maxHeight: "calc(100vh - 12px)", background: t.surface, border: `1px solid ${t.border}`, borderRadius: 20, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 30px 80px rgba(8,40,44,.35)" }}>
 

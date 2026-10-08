@@ -174,7 +174,7 @@ export default function ReviewRequestDialog({ row, draft = null, onClose, onDone
 
     return (
         <ModalPortal>
-            <div style={{ ...BACKDROP, overflowY: "auto" }} onMouseDown={e => { if (e.target === e.currentTarget && !busy) onClose?.(); }}>
+            <div data-docs-font style={{ ...BACKDROP, overflowY: "auto" }} onMouseDown={e => { if (e.target === e.currentTarget && !busy) onClose?.(); }}>
                 <Card role="dialog" aria-modal="true" aria-labelledby="rr-title" data-review-request-dialog style={box}>
                     <h2 id="rr-title" style={{ margin: 0, fontSize: 20, color: t.text }}>Request lawyer review</h2>
                     <p style={{ margin: "6px 0 16px", fontSize: 13.5, color: t.textMuted }}>

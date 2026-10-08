@@ -113,6 +113,8 @@ async function mountDocuments() {
 
 
 test.beforeEach(() => {
+    // The open document rides in the address (?doc=); each test starts clean.
+    dom.window.history.replaceState(null, "", "/");
     api.__reset();
     clearDrafts();
     // Signed in through the stub, so the REAL CaseProvider actually fetches.

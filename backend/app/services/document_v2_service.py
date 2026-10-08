@@ -137,7 +137,7 @@ def _require_substance(template_type: str, fields: dict | None) -> None:
         author are declared fields but are not the document.
     """
     fields = fields or {}
-    if template_type == "lawyer_draft":
+    if template_type in template_registry.FREEFORM:
         from app.services.document_service import visible_text
         if not visible_text(str(fields.get("body_html") or "")).strip():
             raise AppValidationError("The draft is empty — there is nothing to render.")
@@ -206,6 +206,11 @@ async def create_document(
     # rendered is a document that can never exist.
     validate_idempotency_key(idempotency_key)
     _require_composable_template(template_type)
+    if template_type in template_registry.TEXT_EDITED:
+        # Reached only by editing a named template's text, never created: a
+        # document begins as the instrument it is.
+        raise AppValidationError(
+            "An edited document begins as a template. Create the template, then edit its text.")
     await _require_case_access(client_id, case_id)
 
     fp = create_fingerprint(template_type=template_type, title=title,

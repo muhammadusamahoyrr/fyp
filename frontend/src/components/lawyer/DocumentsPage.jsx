@@ -412,6 +412,8 @@ function ScreenInbox({
                             {/* TYPE */}
                             <div style={{ fontSize: 12.5, color: t.textMuted, fontWeight: 400 }}>
                                 {doc.type}
+                                {doc.textEdited && <span data-wording-edited title="The client edited this document's wording"
+                                    style={{ display: "inline-block", marginLeft: 6, padding: "1px 7px", borderRadius: 999, fontSize: 10.5, fontWeight: 700, color: "#ffc857", border: "1px solid rgba(255,200,87,0.45)" }}>Wording edited</span>}
                             </div>
 
                             {/* STATUS */}
@@ -603,7 +605,7 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                         <div>
                             <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{doc.title}</div>
                             <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>
-                                {doc.type} · <span style={{ fontFamily: "monospace", color: t.primary, fontSize: 10 }}>{doc.caseId}</span> · {doc.client}
+                                {doc.type}{doc.textEdited ? " (wording edited by client)" : ""} · <span style={{ fontFamily: "monospace", color: t.primary, fontSize: 10 }}>{doc.caseId}</span> · {doc.client}
                             </div>
                         </div>
                     </div>
@@ -667,6 +669,19 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                     }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: "#FFC857", marginBottom: 4 }}>📝 Client Note</div>
                         <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.6 }}>{doc.note}</div>
+                    </div>
+                )}
+
+                {doc?.textEdited && (
+                    <div data-wording-edited-notice style={{ background: t.card, border: "1px solid rgba(255,200,87,0.45)", borderRadius: 12, padding: "14px 16px" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 3 }}>
+                            Wording edited by the client
+                        </div>
+                        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 6, lineHeight: 1.6 }}>
+                            This document began as a {doc.type} template, but the client edited
+                            its text. It is not the template's reviewed wording. Required
+                            particulars were not checked on it; read the whole text.
+                        </div>
                     </div>
                 )}
 
@@ -1256,6 +1271,8 @@ function _mapQueueDoc(d) {
         // screen knows which backend it is talking to without a probe.
         submittedVersion: d.submitted_version ?? null,
         fieldShape: d.field_shape ?? null,
+        // The client edited the wording: read it as text, not as the template.
+        textEdited: Boolean(d.text_edited),
         submittedRevisionId: d.submitted_revision_id ?? null,
         submittedPdfSha256: d.submitted_pdf_sha256 ?? null,
 

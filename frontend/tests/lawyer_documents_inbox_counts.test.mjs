@@ -105,3 +105,17 @@ test("legacy queue (V2 off): the cards count the loaded documents", async () => 
     assert.deepEqual(cardValues(view.container), ["2", "1", "0", "1"]);
     await view.unmount();
 });
+
+test("a document whose wording the client edited is marked in the inbox (2026-10-08)", async () => {
+    api.__respond("reviewQueueV2", {
+        data: { items: [{ ...row("e", "submitted"), text_edited: true }, row("p", "submitted")],
+                next_cursor: null, status: "all", counts: { all: 2, submitted: 2, approved: 0, returned: 0, rejected: 0 } },
+        error: null, status: 200,
+    });
+    const view = await mount();
+    assert.deepEqual(view.errors, []);
+    const badges = view.container.querySelectorAll("[data-wording-edited]");
+    assert.equal(badges.length, 1, "exactly the edited document carries the badge");
+    assert.match(badges[0].textContent, /Wording edited/);
+    await view.unmount();
+});

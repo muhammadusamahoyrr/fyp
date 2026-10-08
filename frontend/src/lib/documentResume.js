@@ -138,6 +138,11 @@ export function restoreStateFromDocument(detail) {
         // tell "no case" from "the field was not returned".
         caseId: detail.case_id ?? null,
         templateType: detail.template_type || revision?.template_type || null,
+        // The owner edited the wording: the current version is TEXT, not the
+        // template rendered from fields. The guided flow must not rebuild it
+        // from fields (the server refuses: `edited_text_current`); it is edited
+        // in the drafting workspace instead.
+        textEdited: revision?.template_type === "edited_document",
         docTitle: detail.title || "",
         docRevisionId: revisionId,
         docPdfSha256: pdfSha256,

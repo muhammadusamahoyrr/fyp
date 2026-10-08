@@ -2277,6 +2277,15 @@ export async function getDocumentWorkspaceV2(docId) {
   return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/workspace`);
 }
 
+/* The template's wording for these unsaved details, as HTML -- the live text
+ * view while details are typed. Saves nothing: no revision, no PDF. */
+export async function previewDocumentTextV2(docId, fields) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/workspace/text-preview`, {
+    method: 'POST',
+    body: JSON.stringify({ fields }),
+  });
+}
+
 export async function assistDocumentWorkspaceV2(docId, {
   bodyHtml = null, fields = null, instruction,
   expectedRevisionId, expectedVersion, expectedContentEpoch,

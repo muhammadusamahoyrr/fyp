@@ -8,7 +8,9 @@ mapped to a machine-readable envelope: the global handler renders
 """
 from __future__ import annotations
 
+import asyncio
 import base64
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
@@ -35,6 +37,10 @@ from app.services import document_transitions as tx
 from app.services import document_v2_service as v2
 from app.services import document_workspace_assist
 from app.services.document_service import _clean_draft_html
+from app.services import template_registry
+from app.services.pdf_generator import template_html
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents/v2", tags=["documents-v2"])
 
@@ -441,6 +447,26 @@ async def generate_revision_v2(
             ),
         })
 
+    # THE EDITED TEXT IS NOT REGENERATED OVER.
+    #
+    # Once the owner edited this document's wording, its current version is
+    # that text (an `edited_document` revision). Rendering the template again
+    # from its fields would put the template's own wording back as the current
+    # version -- the owner's edits gone from the document, kept only in its
+    # history, and nothing on screen saying so. Every client path that reached
+    # this ("Change answers", "Revise & Regenerate" after a lawyer returned it)
+    # did exactly that. Editing continues in the workspace, as text.
+    current_id = doc.get("current_revision_id")
+    current = await revision_repo.find_by_id(current_id) if current_id else None
+    if current and current.get("template_type") in template_registry.TEXT_EDITED:
+        raise HTTPException(status_code=409, detail={
+            "code": "edited_text_current",
+            "message": (
+                "This document's wording was edited, so it can't be rebuilt from its "
+                "details. Open it in the drafting workspace to keep editing the text."
+            ),
+        })
+
     rev = await _run(v2.generate_revision(
         document_id=doc_id,
         template_type=template_type,
@@ -456,6 +482,22 @@ async def generate_revision_v2(
 # â”€â”€ editable workspace â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 MAX_WORKSPACE_HTML = 200_000
+
+
+def _text_view(template_type: str | None, fields: dict | None) -> str | None:
+    """A named template's own wording for these fields, as sanitised HTML.
+
+    None when the template's text cannot be edited (see
+    template_registry.text_editable) or its builder could not compose it -- the
+    caller then keeps the PDF view, which is still correct.
+    """
+    if not template_registry.text_editable(template_type):
+        return None
+    try:
+        return _clean_draft_html(template_html(template_type, fields or {}))
+    except Exception:   # a builder refusing these values must not break the workspace
+        log.warning("text view unavailable for %s", template_type, exc_info=True)
+        return None
 
 
 async def _owner_document(doc_id: str, current_user: dict) -> dict:
@@ -483,21 +525,27 @@ async def get_document_workspace_v2(
             "message": "Generate the first revision before opening the editor.",
         })
 
-    if rev.get("template_type") == "lawyer_draft":
+    rev_template = rev.get("template_type")
+    text_html = None
+    if rev_template in template_registry.FREEFORM:
         # Read-clean covers revisions created before workspace sanitisation was
         # introduced.  This value is inserted into a rich editor by the UI.
         body_html = _clean_draft_html(
             str((rev.get("fields") or {}).get("body_html") or ""))
         source = "freeform_html"
         fields = None
+        source_template = (rev.get("fields") or {}).get("source_template")
     else:
-        # A generated PDF is not a reversible editor format.  Flattening it to
-        # paragraphs discards the builder's structure and later turns a named
-        # instrument into a generic draft.  Named templates therefore reopen
-        # as their canonical fields and regenerate through the same builder.
+        # A generated PDF is not a reversible editor format, so the text is
+        # never recovered from it. Named templates reopen as their canonical
+        # fields; `text_html` is the builder's OWN wording for those fields,
+        # composed fresh, for reading -- and for editing, which saves the text
+        # as an `edited_document` revision from then on.
         body_html = None
         fields = dict(rev.get("fields") or {})
         source = "structured_fields"
+        source_template = rev_template
+        text_html = await asyncio.to_thread(_text_view, rev_template, fields)
 
     if source == "freeform_html" and not body_html:
         raise HTTPException(status_code=409, detail={
@@ -515,6 +563,9 @@ async def get_document_workspace_v2(
         "fields": fields,
         "template_type": rev.get("template_type") or doc.get("template_type"),
         "source": source,
+        "text_html": text_html,
+        "text_editable": text_html is not None,
+        "source_template": source_template,
         "base_revision_id": revision_id,
         "base_version": doc.get("current_version", 0),
         "content_epoch": doc.get("content_epoch", 0),
@@ -571,11 +622,13 @@ async def assist_document_workspace_v2(
         "expected_version": body.expected_version,
         "expected_content_epoch": body.expected_content_epoch,
     }
-    if template_type == "lawyer_draft":
+    as_text = (template_type in template_registry.FREEFORM
+               or (body.body_html is not None and template_registry.text_editable(template_type)))
+    if as_text:
         if body.body_html is None or body.fields is not None:
             raise HTTPException(status_code=422, detail={
                 "code": "invalid_workspace_content",
-                "message": "AI Assist needs this freeform draft's editor HTML.",
+                "message": "AI Assist needs this document's editor HTML.",
             })
         return await _run(document_workspace_assist.propose(
             body_html=body.body_html, **common))
@@ -615,17 +668,43 @@ async def save_document_workspace_v2(
             "message": "This editor is no longer based on the current revision.",
         })
     template_type = base.get("template_type") or doc.get("template_type")
-    if template_type == "lawyer_draft":
+    title = (body.title or doc.get("title") or "Legal Document").strip()
+    if template_type in template_registry.FREEFORM:
         if body.body_html is None or body.fields is not None:
             raise HTTPException(status_code=422, detail={
                 "code": "invalid_workspace_content",
-                "message": "This freeform draft must be saved as editor HTML.",
+                "message": "This document must be saved as editor HTML.",
+            })
+        if template_type == "lawyer_draft":
+            fields = {
+                "title": title,
+                "author_name": str(current_user.get("full_name") or "").strip(),
+                "body_html": _clean_draft_html(body.body_html),
+            }
+        else:
+            fields = {
+                "title": title,
+                "source_template": ((base.get("fields") or {}).get("source_template")
+                                    or doc.get("template_type")),
+                "body_html": _clean_draft_html(body.body_html),
+            }
+    elif body.body_html is not None:
+        # The client edited a named template's TEXT. From this revision on the
+        # document is rendered from that text, as an edited document: the words
+        # no longer follow the fields, so the statutory particulars check
+        # reports itself not run, and the citation check runs over the text.
+        # The earlier template revisions stay in the history, untouched.
+        if body.fields is not None or not template_registry.text_editable(template_type):
+            raise HTTPException(status_code=422, detail={
+                "code": "invalid_workspace_content",
+                "message": "This template's text cannot be edited directly. Change its details instead.",
             })
         fields = {
-            "title": (body.title or doc.get("title") or "Legal Document").strip(),
-            "author_name": str(current_user.get("full_name") or "").strip(),
+            "title": title,
+            "source_template": template_type,
             "body_html": _clean_draft_html(body.body_html),
         }
+        template_type = "edited_document"
     else:
         if body.fields is None or body.body_html is not None:
             raise HTTPException(status_code=422, detail={
@@ -654,6 +733,36 @@ async def save_document_workspace_v2(
     # not learn identifiers for the owner's private revision chain.
     result["based_on_revision_id"] = rev.get("based_on_revision_id")
     return result
+
+
+class TextPreviewBody(BaseModel):
+    fields: dict
+
+
+@router.post("/{doc_id}/workspace/text-preview")
+async def preview_document_text_v2(
+    doc_id: str,
+    body: TextPreviewBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """The template's wording for these (unsaved) details, as sanitised HTML.
+
+    For the live text view while the owner fills in details. NOTHING IS SAVED:
+    no revision, no PDF, no check. Saving remains the only way a version is
+    made. Owner-only, like the workspace it serves.
+    """
+    _require_enabled()
+    doc = await _owner_document(doc_id, current_user)
+    if len(repr(body.fields)) > MAX_WORKSPACE_HTML:
+        raise HTTPException(status_code=422, detail={
+            "code": "invalid_workspace_content", "message": "Those details are too long."})
+    html = await asyncio.to_thread(_text_view, doc.get("template_type"), body.fields)
+    if html is None:
+        raise HTTPException(status_code=409, detail={
+            "code": "text_view_unavailable",
+            "message": "This document's text cannot be shown for these details.",
+        })
+    return {"text_html": html}
 
 
 # ── the owner listing, built once ────────────────────────────────────────────

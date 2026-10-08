@@ -81,6 +81,8 @@ async function openPlan(planResponse) {
     assert.ok(p.container.querySelector("[data-draft-plan]"), "the plan did not open");
     return p;
 }
+// The type picker sits at the top of the Fill details panel (no tab to open).
+async function showAll() {}
 
 test.beforeEach(() => {
     api.__reset();
@@ -96,6 +98,7 @@ test("only prompt-supported (AI) templates are offered to the planner", () => {
 
 test("an inferred type can be corrected before generation", async () => {
     const p = await openPlan(planOf());
+    await showAll(p);
     const select = p.container.querySelector("[data-plan-type]");
     assert.ok(select, "no way to change the document type");
     assert.deepEqual([...select.options].map(o => o.value), ["nda", "legal_notice"],
@@ -110,6 +113,7 @@ test("an inferred type can be corrected before generation", async () => {
 
 test("the type picker is gone once the plan is confirmed", async () => {
     const p = await openPlan(planOf({ status: "confirmed" }));
+    await showAll(p);
     assert.equal(p.container.querySelector("[data-plan-type]"), null);
     await p.unmount();
 });
@@ -169,8 +173,10 @@ test("a generated plan clears what was kept for recovery", async () => {
 
     // A failed workspace render spends its key: the next save is a new attempt.
     api.__respond("saveDocumentWorkspaceV2", { data: null, status: 503, error: { code: "generation_failed", message: "failed" } });
-    await click(buttons(p.container, "Save as new revision")[0]);
-    await click(buttons(p.container, "Save as new revision")[0]);
+    await click(p.container.querySelector("[data-placeholders-toggle]"));
+    await type(p.container.querySelector("#ph_sender_name"), "Ayesha Khan");
+    await click(buttons(p.container, "Save all changes")[0]);
+    await click(buttons(p.container, "Save all changes")[0]);
     const saves = api.__calls("saveDocumentWorkspaceV2");
     assert.equal(saves.length, 2);
     assert.notEqual(saves[0].args[2], saves[1].args[2], "a finished failure was replayed under the same key");
