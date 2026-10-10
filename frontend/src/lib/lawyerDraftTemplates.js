@@ -21,14 +21,16 @@ export const BLANK_TEMPLATE = {
     id: 0,
     name: "Blank legal draft",
     cat: "General",
+    // The law a card names: taken from what the body itself is drafted under.
+    law: "Generic scaffold — no statute",
     desc: "A generic court-filing scaffold — introduction, facts, grounds, prayer. Not specific to any instrument; adapt it yourself.",
     icon: "📄",
     popular: false,
 };
 
 export const TEMPLATES = [
-    { id: 1, name: "Dissolution of Marriage Application", cat: "Family", desc: "Starter petition under the Dissolution of Muslim Marriages Act, 1939 and MFLO 1961 — parties, marriage, grounds and prayer, with placeholders to complete.", icon: "⚖️", popular: true },
-    { id: 2, name: "Plaint — Civil Suit", template_type: "plaint_civil", cat: "Litigation", desc: "Starter plaint under Order VII Rule 1 CPC — parties, facts, cause of action, jurisdiction and prayer, with placeholders to complete.", icon: "🏛️", popular: true },
+    { id: 1, name: "Dissolution of Marriage Application", cat: "Family", law: "DMMA 1939 · MFLO 1961", desc: "Starter petition under the Dissolution of Muslim Marriages Act, 1939 and MFLO 1961 — parties, marriage, grounds and prayer, with placeholders to complete.", icon: "⚖️", popular: true },
+    { id: 2, name: "Plaint — Civil Suit", template_type: "plaint_civil", cat: "Litigation", law: "CPC Order VII Rule 1", desc: "Starter plaint under Order VII Rule 1 CPC — parties, facts, cause of action, jurisdiction and prayer, with placeholders to complete.", icon: "🏛️", popular: true },
     BLANK_TEMPLATE,
 ];
 

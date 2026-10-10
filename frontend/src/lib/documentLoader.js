@@ -71,10 +71,11 @@ const DECIDED = new Set(["approved", "returned", "rejected"]);
  * lawyer had already decided kept reading "waiting for lawyer". It also needed
  * a case id, so a caseless document was never polled at all.
  *
- * THE NOTE. V2 keeps one `review_note`: the client's note while the document
- * is submitted, overwritten with the lawyer's when they decide. Reading it
- * before a decision would show the client their own note as the lawyer's
- * reply, so it is the lawyer's note only once the status is a decision.
+ * THE NOTE. V2 keeps the client's note in `client_note` and the lawyer's in
+ * `review_note` (2026-10-09; before that one field held both, the lawyer's
+ * overwriting the client's). A document submitted before the split still has
+ * the client's note in `review_note` while submitted, so it is read as the
+ * lawyer's note only once the status is a decision.
  * Legacy has a separate `lawyer_note`. */
 export function reviewStateFromDetail(detail) {
     if (!detail || !detail.review_status) return null;

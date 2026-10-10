@@ -155,6 +155,14 @@ export function restoreStateFromDocument(detail) {
         reviewSent: sent,
         reviewStatus: sent ? status : null,
         reviewRecovery: detail.recovery || null,
+        // THE LAWYER'S NOTE, for a decided document (2026-10-09). Not restored
+        // before, and the review poll stops once a decision exists, so a
+        // returned or rejected document reopened later read "No note provided."
+        // while the server held the lawyer's note. Only on a decision: before
+        // one, a document submitted before client_note existed still carries
+        // the client's own note in review_note.
+        lawyerNote: legacy ? detail.lawyer_note || ""
+            : (["approved", "returned", "rejected"].includes(status) ? detail.review_note || "" : ""),
         // 3 = the review panel, where a decision or a recovery explanation is
         // shown; 2 = the generated preview; 1 = the form.
         step: sent ? 3 : hasPdf ? 2 : 1,

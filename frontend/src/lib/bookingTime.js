@@ -112,6 +112,33 @@ export function pktWeekDayKeys(now = new Date()) {
     });
 }
 
+/**
+ * The day keys of a month view: whole Mon–Sun weeks covering `monthKey`
+ * ("YYYY-MM"), so the grid starts on a Monday and ends on a Sunday. Days
+ * outside the month are included, as a wall calendar shows them.
+ */
+export function pktMonthGridKeys(monthKey) {
+    // Noon UTC, as in pktWeekDayKeys: pure calendar arithmetic.
+    const first = new Date(`${monthKey}-01T12:00:00Z`);
+    const start = new Date(first);
+    start.setUTCDate(1 - (first.getUTCDay() + 6) % 7);
+    const last = new Date(first);
+    last.setUTCMonth(first.getUTCMonth() + 1, 0);
+    const days = Math.round((last - start) / 86400000) + 1;
+    return Array.from({ length: Math.ceil(days / 7) * 7 }, (_, i) => {
+        const d = new Date(start);
+        d.setUTCDate(start.getUTCDate() + i);
+        return d.toISOString().slice(0, 10);
+    });
+}
+
+/** A "YYYY-MM" month key moved by `delta` months. */
+export function shiftMonth(monthKey, delta) {
+    const d = new Date(`${monthKey}-01T12:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() + delta);
+    return d.toISOString().slice(0, 7);
+}
+
 /** The day-of-month shown on a calendar column, from a day key. */
 export function dayOfMonth(dayKey) {
     return dayKey ? Number(dayKey.slice(8, 10)) : NaN;

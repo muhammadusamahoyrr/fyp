@@ -79,6 +79,7 @@ function mountList({ fetchPage, pageSize = 2, enabled = true }) {
             error: state.error,
             hasMore: state.hasMore,
             isEmpty: state.isEmpty,
+            unavailable: state.unavailable,
         });
         api.loadMore = state.loadMore;
         api.reload = state.reload;
@@ -368,4 +369,21 @@ test("under StrictMode the first page still lands", async () => {
     assert.deepEqual(state.items.map(r => r.id), ["s1"]);
     await act(async () => root.unmount());
     container.remove();
+});
+
+test("documents switched off on the server read as unavailable, not as a failure to retry (2026-10-09)", async () => {
+    const p = deferredPages();
+    const list = mountList({ fetchPage: p.fetchPage });
+    await act(async () => {
+        p.answer(0, { error: { code: "feature_disabled", message: "not enabled" } });
+    });
+    assert.equal(list.latest().unavailable, true);
+    assert.equal(list.latest().isEmpty, false);
+    list.unmount();
+
+    const q = deferredPages();
+    const other = mountList({ fetchPage: q.fetchPage });
+    await act(async () => { q.answer(0, { error: { code: "server_error", message: "x" } }); });
+    assert.equal(other.latest().unavailable, false, "an ordinary failure is still retryable");
+    other.unmount();
 });

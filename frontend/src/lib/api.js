@@ -162,7 +162,17 @@ async function apiFetch(path, options = {}) {
   // in the request rather than "you have been signed out", which is the one
   // thing the user can act on. Note tokens and cookies are per-ORIGIN: a session
   // established on localhost does not exist on a tunnel URL, and vice versa.
-  if (res.status === 401 && !token) {
+  // Public authentication routes use 401 to explain why an anonymous action
+  // failed (most importantly: bad login credentials). Replacing that response
+  // with "you are signed out" hides the only useful diagnosis from someone
+  // who is already on the sign-in screen.
+  const anonymousAuthRoute = [
+    '/auth/login',
+    '/auth/register',
+    '/auth/forgot-password',
+    '/auth/reset-password',
+  ].includes(path);
+  if (res.status === 401 && !token && !anonymousAuthRoute) {
     return {
       data: null,
       error: formatResponseError({
@@ -446,6 +456,11 @@ export async function getCase(caseId) {
   return apiFetch(`/cases/${caseId}`);
 }
 
+/** A lawyer opens a case for a client who is not on the platform (walk-in). */
+export async function createWalkInCase(body) {
+  return apiFetch('/cases/walk-in', { method: 'POST', body: JSON.stringify(body) });
+}
+
 export async function createCase({ title, description, case_type, province }) {
   return apiFetch('/cases', {
     method: 'POST',
@@ -482,7 +497,10 @@ export async function recordHearingOutcome(caseId, hearingId, { outcome, note, n
   });
 }
 
-export async function addHearing(caseId, { date, court, judge, purpose, time, outcome }) {
+// `request_id`: one per hearing FORM, kept across retries of that form, so
+// the server can recognise a repeat (double click, retry after a lost reply)
+// and return the hearing it already created instead of adding another.
+export async function addHearing(caseId, { date, court, judge, purpose, time, outcome, request_id }) {
   return apiFetch(`/cases/${caseId}/hearings`, {
     method: 'POST',
     body: JSON.stringify({
@@ -492,6 +510,7 @@ export async function addHearing(caseId, { date, court, judge, purpose, time, ou
       purpose: purpose || null,
       time: time || null,
       outcome: outcome || null,
+      ...(request_id ? { request_id } : {}),
     }),
   });
 }
@@ -500,6 +519,14 @@ export async function addMilestone(caseId, { title, description, date }) {
   return apiFetch(`/cases/${caseId}/milestones`, {
     method: 'POST',
     body: JSON.stringify({ title, description: description || null, date }),
+  });
+}
+
+// Move an upcoming hearing to a new date; the client is notified.
+export async function rescheduleHearing(caseId, hearingId, { date, time, reason }) {
+  return apiFetch(`/cases/${caseId}/hearings/${hearingId}/reschedule`, {
+    method: 'PATCH',
+    body: JSON.stringify({ date, time: time || null, reason: reason || null }),
   });
 }
 
@@ -601,9 +628,12 @@ export async function bookAppointment({ lawyer_id, case_id, scheduled_at, durati
   });
 }
 
-export async function listAppointments({ status, page, page_size } = {}) {
+export async function listAppointments({ status, page, page_size, starts_from, starts_before } = {}) {
   const p = new URLSearchParams();
   if (status) p.set('status', status);
+  // Optional start-time window, ISO instants with an offset.
+  if (starts_from) p.set('starts_from', starts_from);
+  if (starts_before) p.set('starts_before', starts_before);
   if (page) p.set('page', page);
   if (page_size) p.set('page_size', page_size);
   const qs = p.toString() ? `?${p}` : '';
@@ -1036,6 +1066,23 @@ export async function getMyWorkingHours() {
  * Wholesale, never patched: the rule that matters most — no two intervals on
  * one weekday may overlap — is about the set as a whole.
  */
+// ── Lawyer diary: the lawyer's own meetings and events ──
+// Private to the lawyer; not appointments (only clients book those).
+
+/** Entries starting in [start, end) — ISO strings with an offset, at most 62 days apart. */
+export async function listLawyerEvents({ start, end }) {
+  const p = new URLSearchParams({ start, end });
+  return apiFetch(`/lawyer-events?${p}`);
+}
+
+export async function createLawyerEvent(body) {
+  return apiFetch('/lawyer-events', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function deleteLawyerEvent(id) {
+  return apiFetch(`/lawyer-events/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 export async function saveMyWorkingHours({ working_hours, exceptions }) {
   return apiFetch('/lawyers/me/availability', {
     method: 'PUT',
@@ -1292,6 +1339,12 @@ export async function revokeAllSessions() {
 // kind: "photo" | "bar_certificate" | "education" | "professional".
 export async function listMyKycDocuments() {
   return apiFetch('/users/me/kyc/documents');
+}
+
+// A rejected lawyer asks for verification to be reviewed again (the only way
+// back to pending; the server refuses when there is nothing to resubmit).
+export async function resubmitKyc() {
+  return apiFetch('/users/me/kyc/resubmit', { method: 'POST' });
 }
 
 export async function uploadKycDocument(kind, file) {
@@ -2463,9 +2516,13 @@ export async function reviewQueueV2({ status = 'submitted', cursor = null, limit
  * downloadDocumentFile needs to fetch the right bytes. `downloadable` is false
  * for a document whose render never produced any.
  */
-export async function myDocumentsV2({ cursor = null, limit = 25 } = {}) {
+export async function myDocumentsV2({ cursor = null, limit = 25, folder = null, caseId = null } = {}) {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set('cursor', cursor);
+  // A lawyer's Vault folder: an id, or "none" for documents in no folder.
+  if (folder) params.set('folder', folder);
+  // One case's documents, still only the caller's own (the case Tracking page).
+  if (caseId) params.set('case', caseId);
   return apiFetch(`/documents/v2/mine?${params.toString()}`);
 }
 
@@ -2671,4 +2728,30 @@ export async function listDeletedDocumentsV2() {
 
 export async function restoreDocumentV2(docId) {
   return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/restore`, { method: 'POST' });
+}
+
+/* ── A lawyer's Vault folders (lawyer only; services/document_folders.py) ── */
+export async function listDocumentFoldersV2() {
+  return apiFetch('/documents/v2/folders');
+}
+
+export async function createDocumentFolderV2(name) {
+  return apiFetch('/documents/v2/folders', { method: 'POST', body: JSON.stringify({ name }) });
+}
+
+export async function renameDocumentFolderV2(folderId, name) {
+  return apiFetch(`/documents/v2/folders/${encodeURIComponent(folderId)}`, {
+    method: 'PATCH', body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteDocumentFolderV2(folderId) {
+  return apiFetch(`/documents/v2/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' });
+}
+
+/* File one of the caller's own documents into a folder, or (null) out of every folder. */
+export async function moveDocumentToFolderV2(docId, folderId) {
+  return apiFetch(`/documents/v2/${encodeURIComponent(docId)}/folder`, {
+    method: 'PUT', body: JSON.stringify({ folder_id: folderId || null }),
+  });
 }

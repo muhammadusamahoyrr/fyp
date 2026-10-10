@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, listCases, listAppointments, openNotificationSocket } from "@/lib/api.js";
+import { broadcastNotification, reconnectDelay } from "@/lib/notificationTarget.js";
 
 /* ═══════════════════════════════════════════════════════════════
    GLOBAL CASE CONTEXT  —  Fix #1
@@ -49,7 +50,7 @@ const normalizeNotificationType = (type) => {
     if (!type) return "info";
     if (type.startsWith("appointment_")) return "appointment";
     if (type === "appointment") return "appointment";
-    if (type === "hearing_scheduled") return "hearing";
+    if (type === "hearing_scheduled" || type === "hearing_reminder") return "hearing";
     if (type === "document_ready") return "document";
     if (type === "case_update") return "status";
     if (type === "lawyer_assigned") return "status";
@@ -113,6 +114,9 @@ export const CaseProvider = ({ children }) => {
      * the second request racing the first and the later reply winning
      * regardless of which is fresher. */
     const casesInFlight = useRef(null);
+    // The latest state, for callbacks created once (the socket's).
+    const caseDataRef = useRef(caseData);
+    caseDataRef.current = caseData;
 
     const updateCase = (patch) =>
         setCaseData(prev => ({ ...prev, ...patch }));
@@ -123,33 +127,26 @@ export const CaseProvider = ({ children }) => {
 
     const selectLawyer = (lawyer) => updateCase({ selectedLawyer: lawyer });
 
-    const confirmAppointment = ({ date, time, details }) => {
-        const milestoneId = `appt-${Date.now()}`;
-        setCaseData(prev => {
-            const milestone = {
-                id: milestoneId,
-                status: "active",
-                event: `Consultation — ${prev.selectedLawyer?.name ?? "Lawyer"}`,
-                date,
-                time,
-                desc: details || "Initial consultation appointment confirmed.",
-                tag: "appointment",
-                milestoneId,
-            };
-            return {
-                ...prev,
-                appointment: { date, time, details, status: "confirmed" },
-                appointmentMilestones: [...prev.appointmentMilestones, milestone],
-            };
-        });
+    /* A booking was SENT. It is a request the lawyer has not accepted, so it
+     * is recorded as pending, and no timeline milestone is invented for it:
+     * one used to be added saying the consultation was "confirmed", which it
+     * was not, and it lived only in this browser. The appointment itself comes
+     * from the server (re-read here), which also sends the client's notice. */
+    const confirmAppointment = ({ date, time, details, appointmentId = null }) => {
+        updateCase({ appointment: { date, time, details, appointmentId, status: "pending" } });
+        refreshAppointments().catch(() => {});
     };
 
     const markNotificationDone = async (id) => {
+        const row = caseData.notifications.find(n => n.id === id);
         updateCase({
             notifications: caseData.notifications.map(n =>
                 n.id === id ? { ...n, done: true } : n
             ),
         });
+        // A notice made in this browser has no server row: its made-up id
+        // used to be sent to the server, which refused it.
+        if (row?.local) return;
 
         const { error } = await markNotificationRead(id);
         if (error) console.error("❌ Failed to mark notification read:", error);
@@ -167,7 +164,7 @@ export const CaseProvider = ({ children }) => {
     const addNotification = (notif) =>
         setCaseData(prev => ({
             ...prev,
-            notifications: [{ id: `n-${Date.now()}`, done: false, ...notif }, ...prev.notifications],
+            notifications: [{ ...notif, id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, done: false, local: true }, ...prev.notifications],
         }));
 
     const unreadCount = caseData.notifications.filter(n => !n.done).length;
@@ -185,7 +182,11 @@ export const CaseProvider = ({ children }) => {
             if (cancelled) return;
 
             const patch = {};
-            if (notifRes.data)  patch.notifications = notifRes.data.map(mapNotification);
+            if (notifRes.data) {
+                // Server rows replace what is shown; this browser's own notices stay.
+                const local = (caseDataRef.current?.notifications || []).filter(n => n.local);
+                patch.notifications = [...notifRes.data.map(mapNotification), ...local];
+            }
             if (casesRes.data)  patch.cases         = casesRes.data.items || casesRes.data || [];
             if (apptsRes.data) {
                 patch.appointments = apptsRes.data.items || apptsRes.data || [];
@@ -208,26 +209,67 @@ export const CaseProvider = ({ children }) => {
             setCasesReady(true);
         };
 
+        // Re-read what a live notification is about, so open pages show it.
+        const refreshFor = async (rawType) => {
+            const t = String(rawType || "");
+            if (t.startsWith("appointment_")) {
+                const { data } = await listAppointments({ page_size: 50 });
+                if (cancelled || !data) return;
+                updateCase({
+                    appointments: data.items || data || [],
+                    appointmentsComplete: Number.isInteger(data.pages) ? data.pages <= 1 : false,
+                    appointmentsTotal: Number.isInteger(data.total) ? data.total : null,
+                });
+            } else if (t.startsWith("engagement_") || t === "lawyer_assigned"
+                       || t === "case_update" || t === "hearing_scheduled") {
+                const { data } = await listCases({ page_size: 50 });
+                if (cancelled || !data) return;
+                updateCase({ cases: data.items || data || [] });
+            }
+        };
+
+        // The socket used to be opened once: when it closed (server restart,
+        // network drop, laptop asleep) nothing arrived until a reload. It now
+        // reconnects with backoff and re-reads everything when it is back.
+        let attempt = 0;
+        let retryTimer = null;
+        const scheduleRetry = () => {
+            if (cancelled || !user?._id) return;
+            retryTimer = setTimeout(connectLiveNotifications, reconnectDelay(attempt));
+            attempt += 1;
+        };
         const connectLiveNotifications = async () => {
-            if (!user?._id) return;
-            const sock = await openNotificationSocket((message) => {
-                if (message?.type === "notification" && message.notification) {
-                    const incoming = mapNotification(message.notification);
-                    setCaseData(prev => ({
-                        ...prev,
-                        notifications: [incoming, ...prev.notifications.filter(n => n.id !== incoming.id)],
-                    }));
-                }
-            });
+            if (!user?._id || cancelled) return;
+            let sock;
+            try {
+                sock = await openNotificationSocket((message) => {
+                    if (message?.type === "notification" && message.notification) {
+                        const incoming = mapNotification(message.notification);
+                        setCaseData(prev => ({
+                            ...prev,
+                            notifications: [incoming, ...prev.notifications.filter(n => n.id !== incoming.id)],
+                        }));
+                        broadcastNotification({ id: incoming.id, type: incoming.rawType, payload: incoming.payload });
+                        refreshFor(incoming.rawType);
+                    }
+                });
+            } catch { sock = null; }
             if (cancelled) { try { sock?.close(); } catch {} return; }
+            if (!sock) { scheduleRetry(); return; }
             ws = sock;
-            if (ws) ws.onerror = () => console.warn("⚠️ Notification websocket connection failed");
+            sock.addEventListener?.("open", () => {
+                if (attempt > 0) fetchAll();   // catch up on what was missed
+                attempt = 0;
+            });
+            sock.addEventListener?.("error", () => console.warn("⚠️ Notification websocket connection failed"));
+            sock.addEventListener?.("close", () => { if (ws === sock) { ws = null; scheduleRetry(); } });
         };
 
         fetchAll();
         connectLiveNotifications();
         return () => {
             cancelled = true;
+            clearTimeout(retryTimer);
             try { ws?.close(); } catch {}
         };
     }, [user?._id]);
