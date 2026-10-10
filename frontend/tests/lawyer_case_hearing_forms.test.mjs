@@ -50,7 +50,9 @@ async function mount() {
     const root = createRoot(container);
     await act(async () => { root.render(h(Host)); });
     await settle();
-    return { container, unmount: async () => { await act(async () => root.unmount()); container.remove(); } };
+    // Queries run from <body>: the page's dialogs render there (a portal), not
+    // inside the page's own container.
+    return { container: document.body, unmount: async () => { await act(async () => root.unmount()); container.remove(); } };
 }
 
 const buttonWith = (root, text) => [...root.querySelectorAll("button")]
@@ -86,9 +88,9 @@ const CASE = {
 
 async function openHearings() {
     const view = await mount();
-    await click(buttonWith(view.container, "Open"));
-    // The overview's first "Manage →" is the Next Hearing card's link to the hearings view.
-    await click(buttonWith(view.container, "Manage →"));
+    await click(view.container.querySelector('button[aria-label="Open case"]'));
+    // Hearings live on the workspace's Schedule tab.
+    await click([...view.container.querySelectorAll('[role="tab"]')].find(b => b.textContent.startsWith("Schedule")));
     assert.ok(buttonWith(view.container, "Schedule Hearing"), "the hearings view did not open");
     return view;
 }
@@ -102,7 +104,7 @@ test.beforeEach(() => {
 test("Schedule Hearing sends the typed date, court and purpose", async () => {
     api.__respond("addHearing", { data: CASE, error: null });
     const view = await openHearings();
-    await click(buttonWith(view.container, "+ Schedule Hearing"));
+    // The schedule form sits in the Schedule tab itself (2026-10-09).
 
     await type(fieldFor(view.container, "Date *"), "2026-11-20");
     await type(fieldFor(view.container, "Court *"), "Lahore High Court");
@@ -123,7 +125,7 @@ test("Schedule Hearing sends the typed date, court and purpose", async () => {
 test("Record Outcome with a next date is sent and the button does not stick on Saving…", async () => {
     api.__respond("recordHearingOutcome", { data: CASE, error: null });
     const view = await openHearings();
-    await click(buttonWith(view.container, "Add Outcome"));
+    await click(buttonWith(view.container, "Record outcome"));
 
     assert.ok(fieldFor(view.container, "Time"), "the Time label is not rendered");
     await type(fieldFor(view.container, "Next hearing date (auto-schedules)"), "2026-12-01");

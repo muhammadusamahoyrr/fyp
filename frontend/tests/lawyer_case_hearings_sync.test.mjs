@@ -56,7 +56,9 @@ async function mount(props = {}) {
     const root = createRoot(container);
     await act(async () => { root.render(h(Host, props)); });
     await settle();
-    return { container, unmount: async () => { await act(async () => root.unmount()); container.remove(); } };
+    // Queries run from <body>: the page's dialogs render there (a portal), not
+    // inside the page's own container.
+    return { container: document.body, unmount: async () => { await act(async () => root.unmount()); container.remove(); } };
 }
 
 const buttons = (root, text) => [...root.querySelectorAll("button")].filter(b => b.textContent.includes(text));
@@ -74,10 +76,10 @@ async function type(input, value) {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     await act(async () => { setter.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
 }
-const goToHearings = (root) => click(buttons(root, "Manage →")[0]);
-// Through the list's own Open button, which seeded hearings even before the
+const goToHearings = (root) => click([...root.querySelectorAll('[role="tab"]')].find(b => b.textContent.startsWith("Schedule")));
+// Through the list's own open control, which seeded hearings even before the
 // fix: the id tests below must fail on the missing `_id`, not on seeding.
-async function openFromList(root) { await click(buttons(root, "Open →")[0]); await goToHearings(root); }
+async function openFromList(root) { await click(root.querySelector('button[aria-label="Open case"]')); await goToHearings(root); }
 const outcomeModalOpen = (root) => root.textContent.includes("Record Hearing Outcome");
 
 test.beforeEach(() => {
@@ -105,13 +107,13 @@ test("a newly scheduled hearing carries the server's id, so Add Outcome works at
         ...CASE.hearing_dates, hearing("h2", "2026-11-20", "Evidence")] }, error: null });
     const view = await mount();
     await openFromList(view.container);
-    await click(buttons(view.container, "+ Schedule Hearing")[0]);
+    // the schedule form is inline on the Schedule tab (2026-10-09)
     await type(fieldFor(view.container, "Date *"), "2026-11-20");
     await type(fieldFor(view.container, "Purpose / Agenda *"), "Evidence");
     await click(buttons(view.container, "Schedule Hearing").find(b => b.textContent.trim() === "Schedule Hearing"));
 
-    // Hearings are listed newest first, so the new one's button comes first.
-    const add = buttons(view.container, "Add Outcome");
+    // One "Record outcome" per upcoming hearing, the new one included.
+    const add = buttons(view.container, "Record outcome");
     assert.equal(add.length, 2);
     await click(add[0]);
     assert.ok(outcomeModalOpen(view.container), "Add Outcome was refused for the new hearing");
@@ -124,11 +126,11 @@ test("the next hearing an outcome auto-schedules carries the server's id", async
         hearing("h3", "2026-12-01", "Next hearing")] }, error: null });
     const view = await mount();
     await openFromList(view.container);
-    await click(buttons(view.container, "Add Outcome")[0]);
+    await click(buttons(view.container, "Record outcome")[0]);
     await type(fieldFor(view.container, "Next hearing date (auto-schedules)"), "2026-12-01");
     await click(buttons(view.container, "Record & Notify Client")[0]);
 
-    const add = buttons(view.container, "Add Outcome");
+    const add = buttons(view.container, "Record outcome");
     assert.equal(add.length, 1, "the auto-scheduled hearing is missing");
     await click(add[0]);
     assert.ok(outcomeModalOpen(view.container), "Add Outcome was refused for the auto-scheduled hearing");
@@ -138,7 +140,7 @@ test("the next hearing an outcome auto-schedules carries the server's id", async
 test("saving a hearing keeps the client's name (the hearing route returns the bare case)", async () => {
     // Found in the live smoke test: POST /cases/{id}/hearings returns CaseOut
     // WITHOUT client_name (only the list route adds it), and replacing the case
-    // with it blanked the header to "👤 —" — colliding with "💰 —" as a key.
+    // with it blanked the header's client to "—".
     const { client_name, ...bare } = CASE;
     api.__respond("addHearing", { data: { ...bare, hearing_dates: [
         ...CASE.hearing_dates, hearing("h2", "2026-11-20", "Evidence")] }, error: null });
@@ -148,11 +150,12 @@ test("saving a hearing keeps the client's name (the hearing route returns the ba
     try {
         const view = await mount();
         await openFromList(view.container);
-        await click(buttons(view.container, "+ Schedule Hearing")[0]);
+        // the schedule form is inline on the Schedule tab (2026-10-09)
         await type(fieldFor(view.container, "Date *"), "2026-11-20");
         await type(fieldFor(view.container, "Purpose / Agenda *"), "Evidence");
         await click(buttons(view.container, "Schedule Hearing").find(b => b.textContent.trim() === "Schedule Hearing"));
-        assert.match(view.container.textContent, /👤 Ayesha/, "the client's name was lost after saving");
+        const chips = [...view.container.querySelectorAll("span")].map(s => s.textContent.trim());
+        assert.ok(chips.includes("Ayesha"), "the client's name was lost after saving");
         assert.ok(!errors.some(e => /same key/.test(e)), "duplicate React keys in the workspace header");
         await view.unmount();
     } finally {
