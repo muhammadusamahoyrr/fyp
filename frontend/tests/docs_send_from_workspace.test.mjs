@@ -282,3 +282,40 @@ test("a refresh of an open Vault preview reopens that preview", async () => {
     assert.equal(new URL(dom.window.location.href).searchParams.get("doc"), null);
     await p.unmount();
 });
+
+/* A case is OPTIONAL (2026-10-09). The server's rule (document_sharing.py): a
+ * caseless document may go to any engaged lawyer; a case's document only to a
+ * lawyer engaged on THAT case. The picker offered every engaged lawyer for a
+ * case document, and the server then refused the send with a 403. */
+const TWO = [{ lawyer_id: "L1", lawyer_name: "Sara Ahmed", case_id: "c1", case_title: "Shop dispute" },
+             { lawyer_id: "L2", lawyer_name: "Bilal Khan", case_id: "c2", case_title: "Rent" }];
+
+test("a case's document offers only the lawyer engaged on that case, chosen for the client", async () => {
+    api.__respond("listEngagements", { data: TWO });
+    api.__respond("getDocumentV2", { data: { ...DETAIL, case_id: "c1" } });
+    const p = await openSendScreen();
+    const names = [...panel(p.container).querySelectorAll('[aria-label="Reviewing lawyer"] [role="radio"]')].map(b => b.textContent);
+    assert.equal(names.length, 1, `offered: ${names}`);
+    assert.match(names[0], /Sara Ahmed/);
+    assert.equal(panel(p.container).querySelector('[aria-label="Reviewing lawyer"] [role="radio"]').getAttribute("aria-checked"), "true");
+    await p.unmount();
+});
+
+test("a document with no case offers every engaged lawyer", async () => {
+    api.__respond("listEngagements", { data: TWO });
+    api.__respond("getDocumentV2", { data: { ...DETAIL, case_id: null } });
+    const p = await openSendScreen();
+    const names = [...panel(p.container).querySelectorAll('[aria-label="Reviewing lawyer"] [role="radio"]')].map(b => b.textContent).join(" | ");
+    assert.match(names, /Sara Ahmed/);
+    assert.match(names, /Bilal Khan/);
+    await p.unmount();
+});
+
+test("a case with no lawyer engaged on it says so, instead of offering lawyers the server refuses", async () => {
+    api.__respond("listEngagements", { data: TWO });
+    api.__respond("getDocumentV2", { data: { ...DETAIL, case_id: "c9" } });
+    const p = await openSendScreen();
+    assert.equal(panel(p.container).querySelectorAll('[aria-label="Reviewing lawyer"] [role="radio"]').length, 0);
+    assert.match(panel(p.container).querySelector("[data-no-engaged-lawyer]").textContent, /engaged on this document's case/);
+    await p.unmount();
+});

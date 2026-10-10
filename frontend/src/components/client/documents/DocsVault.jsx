@@ -11,7 +11,7 @@ import { useT } from "../theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
 import { myDocumentsV2, downloadDocumentFile, listReviewRequests, getDocumentV2 } from "@/lib/api.js";
 import { linkOpenDocument, unlinkOpenDocument } from "@/lib/documentsNav.js";
-import { useMyDocuments, rowActions } from "@/lib/useMyDocuments.js";
+import { useMyDocuments, rowActions, DOCUMENTS_UNAVAILABLE } from "@/lib/useMyDocuments.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { humanise } from "@/lib/fieldReview.js";
 import { useIsMobile } from "@/lib/i18n.jsx";
@@ -38,9 +38,16 @@ export function reviewRequestsAvailable(res) {
     return Boolean(res && !res.error && res.data);
 }
 
-/* Who can see a document right now, in the vault's words. */
+/* Who can see a document right now, in the vault's words.
+ *
+ * "Private" was wrong once a lawyer had decided: the reviewer keeps read access
+ * to the version they reviewed (documents_v2._readable_scoped). So a decided
+ * document says a lawyer has seen it; only a never-shared one is private. */
+const REVIEWED = new Set(["approved", "returned", "rejected", "needs_reapproval"]);
 export function accessOf(row) {
-    return row?.review_status === "submitted" ? "With lawyer" : "Private";
+    const status = row?.review_status;
+    if (status === "submitted") return "With lawyer";
+    return REVIEWED.has(status) ? "Lawyer reviewed" : "Private";
 }
 
 /* How many documents were created in the last seven days. */
@@ -289,7 +296,7 @@ export default function DocsVault({ onBack, onEdit, reviewLink = null, previewId
                         </div>
                     ) : docs.error ? (
                         <div role="alert" style={{ padding: 28, display: "flex", alignItems: "center", gap: 12, color: t.text, fontSize: 15 }}>
-                            Could not load your documents. <Btn onClick={docs.reload}>Try again</Btn>
+                            {docs.unavailable ? DOCUMENTS_UNAVAILABLE : <>Could not load your documents. <Btn onClick={docs.reload}>Try again</Btn></>}
                         </div>
                     ) : !docs.loaded ? (
                         <div aria-busy="true" style={{ padding: 34, textAlign: "center", color: t.textMuted, fontSize: 15 }}>Loading your documents…</div>
@@ -319,7 +326,7 @@ export default function DocsVault({ onBack, onEdit, reviewLink = null, previewId
                                             </span>
                                             <span style={{ color: t.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.template_type ? humanise(row.template_type) : "—"}</span>
                                             <span style={{ color: t.textMuted }}>—</span>
-                                            <span><Pill tone={accessOf(row) === "With lawyer" ? "info" : "muted"}>{accessOf(row)}</Pill></span>
+                                            <span title={accessOf(row) === "Lawyer reviewed" ? "The lawyer who reviewed it can still read the version they reviewed." : undefined}><Pill tone={accessOf(row) === "Private" ? "muted" : "info"}>{accessOf(row)}</Pill></span>
                                             <span><Pill tone={TONE[status.tone] || "muted"}>{status.label}</Pill></span>
                                             <span style={{ color: t.textMuted }}>{formatWhen(row.updated_at || row.created_at)}</span>
                                             <span style={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>

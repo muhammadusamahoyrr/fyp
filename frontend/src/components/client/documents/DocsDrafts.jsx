@@ -30,7 +30,7 @@ import { humanise } from "@/lib/fieldReview.js";
 import { complianceSummary } from "@/lib/complianceSummary.js";
 import { verificationView } from "@/lib/draftVerification.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
-import { useMyDocuments, rowActions } from "@/lib/useMyDocuments.js";
+import { useMyDocuments, rowActions, DOCUMENTS_UNAVAILABLE } from "@/lib/useMyDocuments.js";
 import { DeleteDocumentDialog } from "./VaultTrash.jsx";
 import { useIsMobile } from "@/lib/i18n.jsx";
 import { PromptCard } from "../DocumentsHome.jsx";
@@ -702,9 +702,6 @@ export default function DocsDrafts({ seed, templates, cases, onBack, onOpenView,
     }, [content, workspace, textEdit]);
     // "Send to lawyer" opens the send panel beside the document.
     const sendForReview = () => { setSendIssue(null); setPanel("send"); };
-    // The case's own lawyer, when the document belongs to a case that has one:
-    // its documents are reviewed by that lawyer.
-    const caseLawyerId = (cases || []).find(c => (c._id || c.id) === detail?.case_id)?.lawyer_id || null;
     useEffect(() => {
         if (panel !== "send" || lawyers !== null) return undefined;
         let live = true;
@@ -715,15 +712,26 @@ export default function DocsDrafts({ seed, templates, cases, onBack, onOpenView,
             const items = Array.isArray(data) ? data : (data?.items || []);
             const byLawyer = new Map();
             for (const e of items) {
-                if (e?.lawyer_id && !byLawyer.has(e.lawyer_id)) {
-                    byLawyer.set(e.lawyer_id, { id: e.lawyer_id, name: e.lawyer_name || "Your lawyer", sub: e.case_title ? `Engaged on: ${e.case_title}` : "Engaged lawyer" });
+                if (!e?.lawyer_id) continue;
+                if (!byLawyer.has(e.lawyer_id)) {
+                    byLawyer.set(e.lawyer_id, { id: e.lawyer_id, name: e.lawyer_name || "Your lawyer", sub: e.case_title ? `Engaged on: ${e.case_title}` : "Engaged lawyer", caseIds: [] });
                 }
+                // The cases each lawyer is engaged on (see shownLawyers).
+                if (e.case_id) byLawyer.get(e.lawyer_id).caseIds.push(e.case_id);
             }
             setLawyers([...byLawyer.values()]);
         }).catch(() => { if (live) setLawyers([]); });
         return () => { live = false; };
     }, [panel, lawyers]);
-    useEffect(() => { if (caseLawyerId) setSendForm(f => ({ ...f, lawyerId: caseLawyerId })); }, [caseLawyerId]);
+    // Preselect only a lawyer the server will accept: the one lawyer engaged on
+    // this document's case. A case's `lawyer_id` alone is not that (it can be
+    // missing or stale), and a caseless document leaves the choice to the client.
+    useEffect(() => {
+        const docCase = detail?.case_id || null;
+        if (!docCase || !Array.isArray(lawyers)) return;
+        const onCase = lawyers.filter(l => l.caseIds.includes(docCase));
+        if (onCase.length === 1) setSendForm(f => ({ ...f, lawyerId: onCase[0].id }));
+    }, [detail?.case_id, lawyers]);
     const submitForReview = async (retry = false) => {
         const rev = detail?.current_revision;
         if (!workspace || !rev?.revision_id || !sendForm.lawyerId || !sendForm.confirmed || sending) return;
@@ -933,7 +941,7 @@ export default function DocsDrafts({ seed, templates, cases, onBack, onOpenView,
                             </div>
                         );
                     })}
-                    {docs.error && <div style={{ fontSize: 12.5, color: t.warn, padding: 8 }}>Could not load your documents. <button type="button" onClick={docs.reload} style={{ background: "none", border: "none", color: t.primary, cursor: "pointer", padding: 0, fontSize: 12.5 }}>Try again</button></div>}
+                    {docs.error && <div style={{ fontSize: 12.5, color: t.warn, padding: 8 }}>{docs.unavailable ? DOCUMENTS_UNAVAILABLE : <>Could not load your documents. <button type="button" onClick={docs.reload} style={{ background: "none", border: "none", color: t.primary, cursor: "pointer", padding: 0, fontSize: 12.5 }}>Try again</button></>}</div>}
                     {!docs.loaded && !docs.error && <div style={{ fontSize: 12.5, color: t.textMuted, padding: 8 }}>Loading your documents…</div>}
                     {docs.isEmpty && <div style={{ fontSize: 13, color: t.textMuted, padding: 8 }}>No documents yet. Describe one to start.</div>}
                     {docs.hasMore && <button type="button" onClick={docs.loadMore} style={{ ...hist(false), textAlign: "center", color: t.primary, fontSize: 13 }}>Load more</button>}
@@ -1039,7 +1047,10 @@ export default function DocsDrafts({ seed, templates, cases, onBack, onOpenView,
         const reviewBanner = doc => {
             const status = doc?.review_status;
             const view = documentStatusView(doc || {});
-            const note = String(doc?.review_note || "").trim();
+            // review_note is the LAWYER's note, once they decide. Before that a
+            // document submitted before client_note existed still holds the
+            // client's own note there, which must not read as the lawyer's reply.
+            const note = ["returned", "rejected", "approved"].includes(status) ? String(doc?.review_note || "").trim() : "";
             const B = {
                 submitted: { tone: t.info, icon: "lock", title: "With your lawyer for review",
                     text: `Frozen for lawyer review — editing is off until the lawyer responds.${doc?.submitted_at ? ` Sent ${editedLabel(doc.submitted_at)}.` : ""}` },
@@ -1175,7 +1186,10 @@ export default function DocsDrafts({ seed, templates, cases, onBack, onOpenView,
         // The send panel: ready to send?, to whom, how soon, a note, and the
         // owner's confirmation that this is the version they mean.
         const toneMark = tone => (["success", "ok"].includes(tone) ? ["✓", t.success] : ["warn", "danger"].includes(tone) ? ["!", t.warn] : ["–", t.textMuted]);
-        const shownLawyers = caseLawyerId ? (lawyers || []).filter(l => l.id === caseLawyerId) : (lawyers || []);
+        // The server's rule (document_sharing.py), and a case is OPTIONAL: no
+        // case, any engaged lawyer; a case, only a lawyer engaged on that case.
+        const docCaseId = detail?.case_id || null;
+        const shownLawyers = docCaseId ? (lawyers || []).filter(l => l.caseIds.includes(docCaseId)) : (lawyers || []);
         const canSend = Boolean(revision?.revision_id && sendForm.lawyerId && sendForm.confirmed && !dirty && !locked && !sending);
         const sectionLabel = text => <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: t.textMuted, margin: "4px 2px 8px" }}>{text}</div>;
         const sendPanel = (
@@ -1196,11 +1210,11 @@ export default function DocsDrafts({ seed, templates, cases, onBack, onOpenView,
                         })}
                     </section>
                     <section aria-label="Your lawyer">
-                        {sectionLabel(caseLawyerId ? "Your case lawyer" : "Send to")}
+                        {sectionLabel(docCaseId && shownLawyers.length ? "Your case lawyer" : "Send to")}
                         {lawyers === null && <div style={{ fontSize: 12.5, color: t.textMuted }}>Loading your lawyers…</div>}
                         {lawyers !== null && !shownLawyers.length && (
                             <div data-no-engaged-lawyer role="note" style={{ fontSize: 12.5, color: t.textMuted, lineHeight: 1.55 }}>
-                                {caseLawyerId ? "This case's lawyer is not among your engaged lawyers." : "You have no lawyer engaged yet. A document can be sent only to a lawyer you have hired."}{" "}
+                                {docCaseId && (lawyers || []).length ? "No lawyer is engaged on this document's case yet. A case's document can be sent only to the lawyer engaged on that case." : "You have no lawyer engaged yet. A document can be sent only to a lawyer you have hired."}{" "}
                                 <button type="button" onClick={() => router.push("/lawyers")} style={{ background: "none", border: "none", padding: 0, color: t.primary, fontWeight: 700, cursor: "pointer", fontSize: 12.5 }}>Find a lawyer</button>
                             </div>
                         )}

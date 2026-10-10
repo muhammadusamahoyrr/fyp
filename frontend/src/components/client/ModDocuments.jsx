@@ -351,7 +351,10 @@ const ModDocuments = () => {
             const items = Array.isArray(data) ? data : (data?.items || []);
             const byLawyer = new Map();
             for (const e of items) {
-                if (!e?.lawyer_id || byLawyer.has(e.lawyer_id)) continue;
+                if (!e?.lawyer_id) continue;
+                // Which cases each lawyer is engaged on: a case's document may go
+                // only to the lawyer of an accepted engagement on THAT case.
+                if (byLawyer.has(e.lawyer_id)) { if (e.case_id) byLawyer.get(e.lawyer_id).caseIds.push(e.case_id); continue; }
                 const name = e.lawyer_name || "Your lawyer";
                 byLawyer.set(e.lawyer_id, {
                     _id: e.lawyer_id,
@@ -360,6 +363,7 @@ const ModDocuments = () => {
                     rating: 0,
                     avail: null,
                     avatar: name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
+                    caseIds: e.case_id ? [e.case_id] : [],
                 });
             }
             setRevLawyers([...byLawyer.values()]);
@@ -403,8 +407,20 @@ const ModDocuments = () => {
     useEffect(() => {
         const c = cases.find(x => (x._id || x.id) === genCaseId);
         setCaseLawyerId(c?.lawyer_id || null);
-        if (c?.lawyer_id) setSelLawyer(c.lawyer_id);
     }, [genCaseId, cases]);
+    // WHO MAY RECEIVE THIS DOCUMENT, by the server's own rule (document_sharing.py).
+    // A CASE IS OPTIONAL. A document with no case may go to the lawyer of any
+    // of the client's accepted engagements; a case's document only to a lawyer
+    // engaged on that case. The case's `lawyer_id` alone decided before, and a
+    // case without one (or a stale one) offered lawyers the server then refused.
+    const eligibleLawyers = genCaseId ? revLawyers.filter(l => (l.caseIds || []).includes(genCaseId)) : revLawyers;
+    useEffect(() => {
+        // One lawyer on the case: chosen for the client. Never a lawyer the
+        // server would refuse.
+        if (genCaseId && eligibleLawyers.length === 1 && selLawyer !== eligibleLawyers[0]._id) setSelLawyer(eligibleLawyers[0]._id);
+        else if (selLawyer && revLawyersLoaded && !eligibleLawyers.some(l => l._id === selLawyer)) setSelLawyer(null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [genCaseId, revLawyers, revLawyersLoaded]);
 
     // RESUME AFTER A REFRESH.
     //
@@ -461,6 +477,7 @@ const ModDocuments = () => {
         setReviewSent(restored.reviewSent);
         setReviewStatus(restored.reviewStatus);
         setReviewRecovery(restored.reviewRecovery);
+        setLawyerNote(restored.lawyerNote || "");
         setStep(restored.step);
         // REMEMBERED UNDER ITS OWN CASE — including when that case is NONE.
         //
@@ -1768,14 +1785,14 @@ const ModDocuments = () => {
 
                             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                                 <div style={panelCard}>
-                                    {stepLbl(1, caseLawyerId ? "Your case lawyer" : "Choose a lawyer")}
+                                    {stepLbl(1, genCaseId && eligibleLawyers.length ? "Your case lawyer" : "Choose a lawyer")}
                                     <div role="radiogroup" aria-label="Reviewing lawyer" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                        {caseLawyerId && (
+                                        {genCaseId && eligibleLawyers.length > 0 && (
                                             <div style={{ fontSize: 12, color: t.textMuted, padding: "8px 12px", borderRadius: 10, background: t.primaryGlow2, lineHeight: 1.55 }}>
-                                                This case already has an engaged lawyer — documents for it are reviewed by them.
+                                                This document belongs to a case, so it goes to a lawyer engaged on that case.
                                             </div>
                                         )}
-                                        {(caseLawyerId ? revLawyers.filter(l => l._id === caseLawyerId) : revLawyers).map(l => {
+                                        {eligibleLawyers.map(l => {
                                             const on = selLawyer === l._id;
                                             return (
                                                 <button key={l._id} type="button" role="radio" aria-checked={on} onClick={() => setSelLawyer(l._id)}
@@ -1789,15 +1806,14 @@ const ModDocuments = () => {
                                                 </button>
                                             );
                                         })}
-                                        {caseLawyerId && !revLawyers.some(l => l._id === caseLawyerId) && (
-                                            <div style={{ padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${t.primary}`, background: t.primaryGlow2, fontSize: 14, fontWeight: 700, color: t.text }}>⚖️ Your engaged case lawyer</div>
-                                        )}
-                                        {!caseLawyerId && !revLawyers.length && !revLawyersLoaded && (
+                                        {!eligibleLawyers.length && !revLawyersLoaded && (
                                             <div style={{ fontSize: 12.5, color: t.textMuted, textAlign: "center", padding: "18px 0" }}>Loading your lawyers…</div>
                                         )}
-                                        {!caseLawyerId && !revLawyers.length && revLawyersLoaded && (
+                                        {!eligibleLawyers.length && revLawyersLoaded && (
                                             <div data-no-engaged-lawyer role="note" style={{ fontSize: 13, color: t.textMuted, textAlign: "center", padding: "18px 8px", lineHeight: 1.55 }}>
-                                                You have no lawyer engaged yet. A document can be sent only to a lawyer you have hired — hire a lawyer first, then send it for review.
+                                                {genCaseId && revLawyers.length
+                                                    ? "No lawyer is engaged on this case yet. A case's document can be sent only to the lawyer engaged on that case — engage one for this case, or draft the document without a case."
+                                                    : "You have no lawyer engaged yet. A document can be sent only to a lawyer you have hired — hire a lawyer first, then send it for review."}
                                             </div>
                                         )}
                                     </div>
@@ -1914,11 +1930,11 @@ const ModDocuments = () => {
                                         <span style={{ width: 32, height: 32, borderRadius: "50%", background: t.primaryGlow2, color: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>⚖️</span>
                                         <div style={{ fontSize: 13.5, color: t.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{lawyerNote || "No note provided."}</div>
                                     </div>
-                                    {reviewStatus === "returned" && (
-                                        <Btn kind="primary" onClick={() => { setReviewSent(false); setReviewStatus(null); goTo(1); }} style={{ width: "100%", marginTop: 12 }}>
-                                            ✏️ {textEdited ? "Revise in workspace" : "Revise & Regenerate"} →
-                                        </Btn>
-                                    )}
+                                    {/* Rejected is not a dead end: the server accepts a
+                                        resubmission from `rejected` as from `returned`. */}
+                                    <Btn kind="primary" data-revise={reviewStatus} onClick={() => { setReviewSent(false); setReviewStatus(null); goTo(1); }} style={{ width: "100%", marginTop: 12 }}>
+                                        ✏️ {reviewStatus === "rejected" ? "Revise and send again" : textEdited ? "Revise in workspace" : "Revise & Regenerate"} →
+                                    </Btn>
                                 </div>
                             )}
                             {reviewStatus === "approved" && (

@@ -19,7 +19,7 @@
 import { useCallback, useState } from "react";
 
 import { myDocumentsV2, downloadDocumentFile, getDocumentV2 } from "@/lib/api.js";
-import { useMyDocuments, rowActions } from "@/lib/useMyDocuments.js";
+import { useMyDocuments, rowActions, DOCUMENTS_UNAVAILABLE } from "@/lib/useMyDocuments.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
 import { restoreStateFromDocument } from "@/lib/documentResume.js";
 
@@ -95,9 +95,10 @@ export default function MyDocumentsPanel({ t, onOpen, onPreview }) {
             {error && (
                 <div style={{ padding: "11px 13px", borderRadius: 11, background: `${t.danger}10`, border: `1px solid ${t.danger}30`, marginBottom: 10 }}>
                     <div style={{ fontSize: 11.5, color: t.text, lineHeight: 1.6 }}>
+                        {error.code === "feature_disabled" ? DOCUMENTS_UNAVAILABLE : <>
                         We could not load your documents. This does not mean they
                         are gone — only that we could not reach them just now.
-                        {error.message ? ` (${error.message})` : ""}
+                        {error.message ? ` (${error.message})` : ""}</>}
                     </div>
                     <button onClick={reload}
                         style={{ marginTop: 8, background: "transparent", border: `1px solid ${t.border}`, color: t.text, borderRadius: 9, padding: "5px 11px", fontSize: 11, cursor: "pointer", fontFamily: "'Inter',sans-serif" }}>

@@ -11,8 +11,10 @@ import { Card, BtnPrimary, BtnOutline, ThemedInput, Badge } from "@/components/s
 import { searchLawyers, matchLawyers, submitReview, getLawyerReviews, bookAppointment, getBookableSlots, listCases, listHireConsultations, listEngagements, requestEngagement, cancelEngagement, acceptEngagementTerms, declineEngagementTerms, completeEngagement, terminateEngagement } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { hireableCases as hireable, isDraftCase } from "@/lib/caseStatus.js";
+import { onNotification } from "@/lib/notificationTarget.js";
+import { listAllCases } from "@/lib/allCases.js";
 import { readIntakeValue } from "@/lib/intakeStorage.js";
-import { pktToday, pktSlotToDate, pktSlotToUtcISO, isPktSlotPast, formatPkt } from "@/lib/bookingTime.js";
+import { pktToday, pktSlotToUtcISO, isPktSlotPast } from "@/lib/bookingTime.js";
 import { createBookingKeyHolder } from "@/lib/bookingIdempotency.js";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), {
@@ -47,11 +49,21 @@ const SPEC_TO_CASE_TYPE = {
 /* ══════════════════════════════════════════════════════
    MODULE: LAWYER DISCOVERY
 ══════════════════════════════════════════════════════ */
+// Engagements still being negotiated, by case. The server treats both of
+// these as open and refuses a second request on the case (ENGAGEMENT_OPEN_
+// STATUSES); counting only `requested` offered a case with terms on the table.
+const OPEN_ENGAGEMENT = new Set(["requested", "terms_proposed"]);
+function openByCase(engagements) {
+    const m = {};
+    (engagements || []).filter(e => OPEN_ENGAGEMENT.has(e.status)).forEach(e => { m[e.case_id] = e; });
+    return m;
+}
+
 const ModLawyers = () => {
     const t = useT();
     const searchParams = useSearchParams();
     const router = useNextRouter();
-    const { selectLawyer, confirmAppointment, addNotification, caseType } = useCase();
+    const { selectLawyer, confirmAppointment, caseType } = useCase();
     const toast = useToast();
     const { user } = useAuth();
     const lawyerUserId = user?._id || user?.id || null;
@@ -64,7 +76,8 @@ const ModLawyers = () => {
     const [showApptModal, setShowApptModal] = useState(false);
     const [apptLawyer, setApptLawyer] = useState(null);
     const [apptDate, setApptDate] = useState("");
-    const [apptTime, setApptTime] = useState("10:00");
+    // Empty until the client picks one of the slots the server offered.
+    const [apptTime, setApptTime] = useState("");
     const [apptDetails, setApptDetails] = useState("");
     const [apptMode, setApptMode] = useState("video");
     const [apptSubmitting, setApptSubmitting] = useState(false);
@@ -125,19 +138,32 @@ const ModLawyers = () => {
     const [hireAppointmentId, setHireAppointmentId] = useState("");
     const [hireOpening, setHireOpening] = useState(false);
 
-    const refreshEngagements = () => {
-        listEngagements().then(({ data }) => {
-            if (Array.isArray(data)) setMyEngagements(data);
-        }).catch(() => { });
+    // Cases AND engagements, read together. Both decide which cases can be
+    // sent to a lawyer, and the cases were read once per visit: after terms
+    // were accepted (the case gains a lawyer) or an engagement ended (it loses
+    // one), the picker still showed the old answer. Resolves to what it read;
+    // a failed half keeps what is on screen.
+    const refreshHiring = async () => {
+        const [casesRes, engRes] = await Promise.all([
+            listAllCases(listCases).catch(() => ({})),
+            listEngagements().catch(() => ({})),
+        ]);
+        const cases = casesRes?.data?.items;
+        const engs = engRes?.data;
+        if (Array.isArray(cases)) setMyCases(cases);
+        if (Array.isArray(engs)) setMyEngagements(engs);
+        setCasesLoaded(true);
+        return { cases: Array.isArray(cases) ? cases : null, engs: Array.isArray(engs) ? engs : null };
     };
+    const refreshEngagements = () => { refreshHiring(); };
 
-    useEffect(() => {
-        listCases({ page_size: 50 }).then(({ data }) => {
-            if (data?.items) setMyCases(data.items);
-            setCasesLoaded(true);
-        }).catch(() => { setCasesLoaded(true); });
-        refreshEngagements();
-    }, []);
+    useEffect(() => { refreshHiring(); }, []);
+
+    // A lawyer proposing terms, or an engagement ending, arrives live.
+    useEffect(() => onNotification((n) => {
+        const t = String(n.type || "");
+        if (t.startsWith("engagement_") || t === "lawyer_assigned") refreshHiring();
+    }), []);
 
     // Cases you can still hire a lawyer for: CONFIRMED, no lawyer yet, not
     // closed, and no request already pending on them.
@@ -147,11 +173,7 @@ const ModLawyers = () => {
     // lawyer is rejected. Offering it here would put a case in the picker whose
     // only possible outcome is an error the client cannot act on from this
     // screen; the action they actually need is on the intake page.
-    const pendingByCase = useMemo(() => {
-        const m = {};
-        myEngagements.filter(e => e.status === "requested").forEach(e => { m[e.case_id] = e; });
-        return m;
-    }, [myEngagements]);
+    const pendingByCase = useMemo(() => openByCase(myEngagements), [myEngagements]);
     const hireableCases = useMemo(
         () => hireable(myCases, pendingByCase),
         [myCases, pendingByCase]);
@@ -374,7 +396,8 @@ const ModLawyers = () => {
             setSlotState("idle"); setSlots([]); setSlotNotice("");
             return () => { cancelled = true; };
         }
-        setSlotState("loading"); setSlots([]);
+        // A new day means a new set of times: the old pick is not one of them.
+        setSlotState("loading"); setSlots([]); setApptTime("");
         getBookableSlots(apptLawyer._id, { from: apptDate, duration_minutes: 60 })
             .then(({ data, error }) => {
                 if (cancelled) return;
@@ -633,7 +656,7 @@ const ModLawyers = () => {
         setApptLawyer(lawyer);
         selectLawyer(lawyer);
         setApptDate(pktToday()); // default to today IN PAKISTAN
-        setApptTime("10:00");
+        setApptTime("");
         setApptDetails("");
         setApptMode("video");
         setSlotState("idle"); setSlots([]); setSlotNotice("");
@@ -652,8 +675,15 @@ const ModLawyers = () => {
                 return;
             }
 
-            if (!apptTime) {
-                toast.show("Please select a time slot.", "warn", 3500);
+            if (slotState === "unconfigured") {
+                toast.show("This lawyer has not published working hours yet, so no time can be booked.", "warn", 4000);
+                return;
+            }
+            // Only a time the server offered for this day. A default or a
+            // stale pick would book a time the client never chose, possibly
+            // outside the lawyer's hours.
+            if (!apptTime || slotState !== "ready" || !slots.some(s => s.local_time === apptTime)) {
+                toast.show("Please choose one of the available times.", "warn", 3500);
                 return;
             }
 
@@ -711,21 +741,13 @@ const ModLawyers = () => {
                 appointmentId: bookingData?.id || null,
             });
 
-            addNotification({
-                type: "hearing",
-                urgency: "upcoming",
-                title: `Appointment — ${apptLawyer?.name}`,
-                date: formatPkt(pktSlotToDate(apptDate, apptTime), { month: "short", day: "numeric" }),
-                time: apptTime,
-                desc: `Consultation booked · ${apptLawyer?.spec} · ${fmtFee(apptLawyer?.fee)}/hr`,
-            });
-
             // The intent is finished, so its key is retired: the next booking
             // is a NEW booking, and reusing this key would make the server
             // replay this appointment instead of creating that one.
             bookingKey.current.complete();
 
-            toast.show("Appointment booked! Redirecting to tracking…", "success", 2500);
+            // A request, not a booking: the lawyer still has to accept it.
+            toast.show("Request sent. The lawyer will confirm or decline it. Redirecting…", "success", 2500);
             setShowApptModal(false);
             setTimeout(() => router.push("/tracking"), 600);
 
@@ -741,11 +763,18 @@ const ModLawyers = () => {
             toast.show("This lawyer is a sample profile — only listed lawyers can be hired.", "warn", 4000);
             return;
         }
-        if (!hireableCases.length) {
+        if (hireOpening) return;
+        // Decided on a FRESH read, not on what this page loaded earlier.
+        setHireOpening(true);
+        const fresh = await refreshHiring();
+        setHireOpening(false);
+        const casesNow = fresh.cases || myCases;
+        const canHire = hireable(casesNow, openByCase(fresh.engs || myEngagements));
+        if (!canHire.length) {
             toast.show(
-                myCases.some(isDraftCase)
+                casesNow.some(isDraftCase)
                     ? "Finish confirming your case at the end of the intake — a draft cannot be sent to a lawyer yet."
-                    : myCases.length
+                    : casesNow.length
                         ? "All your cases already have a lawyer or a pending request."
                         : "Create a case first (via Intake) — then you can request a lawyer for it.",
                 "info", 4500
@@ -920,7 +949,11 @@ const ModLawyers = () => {
     };
 
     // ── HIRE MODAL ────────────────────────────────────────────────
-    const HireModal = () => {
+    // Called as functions, NOT rendered as <HireModal />: a component declared
+    // inside the render is a new type on every render, so React remounted the
+    // whole form on each keystroke and the text box lost focus after every
+    // character.
+    const renderHireModal = () => {
         if (!hireLawyer || typeof document === "undefined") return null;
         const hireConsult = hireConsults.find(a => a.id === hireAppointmentId) || null;
         const hireCaseOptions = casesForConsult(hireConsult);
@@ -1013,7 +1046,7 @@ const ModLawyers = () => {
     };
 
     // ── APPOINTMENT MODAL ─────────────────────────────────────────
-    const AppointmentModal = () => {
+    const renderAppointmentModal = () => {
         if (!apptLawyer || typeof document === "undefined") return null;
         return createPortal(
             <div style={{
@@ -1164,8 +1197,8 @@ const ModLawyers = () => {
         const ac = getAccent(l);
         return (
             <div style={{ position: "relative" }}>
-                {showApptModal && <AppointmentModal />}
-                {showHireModal && <HireModal />}
+                {showApptModal && renderAppointmentModal()}
+                {showHireModal && renderHireModal()}
                 <button onClick={() => setActiveView("list")} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: t.primary, cursor: "pointer", fontSize: 13, fontWeight: 600, marginBottom: 20, padding: 0 }}>
                     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={t.primary} strokeWidth="2"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
                     Back to Lawyers
@@ -1476,6 +1509,27 @@ const ModLawyers = () => {
     // screen where they see a price before agreeing to it.
     const VISIBLE_ENG = ["requested", "terms_proposed", "accepted"];
     const visibleEngagements = myEngagements.filter(e => VISIBLE_ENG.includes(e.status));
+    // Ended ones stay visible as a short history. They used to vanish the
+    // moment a lawyer declined or an engagement ended, so the client could not
+    // see what happened to a request, or why.
+    const ENDED_ENG = ["declined", "cancelled", "completed", "terminated"];
+    const endedEngagements = myEngagements
+        .filter(e => ENDED_ENG.includes(e.status))
+        .sort((a, b) => new Date(b.updated_at || b.responded_at || b.created_at || 0) - new Date(a.updated_at || a.responded_at || a.created_at || 0))
+        .slice(0, 5);
+    const endedText = (e) => {
+        const why = (r) => (r ? ` Reason: ${r}` : "");
+        if (e.status === "declined") {
+            return e.declined_by === "client"
+                ? `You declined the terms.${why(e.decline_reason)}`
+                : e.terms_withdrawn
+                    ? `${e.lawyer_name || "The lawyer"} withdrew the terms they proposed.${why(e.decline_reason)}`
+                    : `${e.lawyer_name || "The lawyer"} declined this request.${why(e.decline_reason)}`;
+        }
+        if (e.status === "cancelled") return "You withdrew this request.";
+        if (e.status === "completed") return "The engagement was completed.";
+        return `The engagement was ended.${why(e.termination_reason)}`;
+    };
     const FEE_SUFFIX = { hourly: "/hr", per_hearing: "/hearing" };
     const feeLabel = (e) =>
         e.fee_amount
@@ -1494,11 +1548,13 @@ const ModLawyers = () => {
         accepted:       { label: "Engaged",       color: "#1D9E75" },
         completed:      { label: "Completed",     color: "#6B7280" },
         terminated:     { label: "Ended",         color: "#9CA3AF" },
+        declined:       { label: "Declined",      color: "#9CA3AF" },
+        cancelled:      { label: "Withdrawn",     color: "#9CA3AF" },
     };
     return (
         <div style={{ position: "relative" }}>
-            {showApptModal && <AppointmentModal />}
-            {showHireModal && <HireModal />}
+            {showApptModal && renderAppointmentModal()}
+            {showHireModal && renderHireModal()}
 
             {/* ── Directory Banner ─────────────────────────── */}
             <div style={{ position: "relative", marginBottom: 22, borderRadius: 20, overflow: "hidden", border: `1px solid ${t.border}`, boxShadow: t.shadowCard }}>
@@ -1680,7 +1736,7 @@ const ModLawyers = () => {
             )}
 
             {/* My hire requests */}
-            {visibleEngagements.length > 0 && (
+            {(visibleEngagements.length > 0 || endedEngagements.length > 0) && (
                 <div style={{ background: t.card, border: `1.5px solid ${t.border}`, borderRadius: 16, padding: "14px 18px", marginBottom: 20 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, color: t.text, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
                         <Ic n="shield" s={14} c={t.primary} /> My Hire Requests
@@ -1750,6 +1806,25 @@ const ModLawyers = () => {
                             </div>
                         );
                     })}
+                    {endedEngagements.length > 0 && (
+                        <div data-ended-engagements style={{ marginTop: visibleEngagements.length ? 12 : 0 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: "uppercase", letterSpacing: "0.6px", margin: "4px 0 2px" }}>Past requests</div>
+                            {endedEngagements.map(e => {
+                                const badge = ENG_BADGE[e.status];
+                                return (
+                                    <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: `1px solid ${t.border}` }}>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: 12.5, fontWeight: 600, color: t.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                {e.lawyer_name || "Lawyer"} · {e.case_title || e.case_number}
+                                            </div>
+                                            <div style={{ fontSize: 11, color: t.textMuted, overflowWrap: "anywhere" }}>{endedText(e)}</div>
+                                        </div>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: badge.color, background: `${badge.color}18`, borderRadius: 20, padding: "3px 10px", flexShrink: 0 }}>{badge.label}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             )}
 

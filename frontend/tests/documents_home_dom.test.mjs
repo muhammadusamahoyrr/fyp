@@ -375,7 +375,10 @@ test("an empty vault and a failed load are told apart", async () => {
 
 test("vault helpers", () => {
     assert.equal(accessOf({ review_status: "submitted" }), "With lawyer");
-    assert.equal(accessOf({ review_status: "approved" }), "Private");
+    // A reviewer keeps read access to the version they decided (2026-10-09).
+    assert.equal(accessOf({ review_status: "approved" }), "Lawyer reviewed");
+    assert.equal(accessOf({ review_status: "returned" }), "Lawyer reviewed");
+    assert.equal(accessOf({ review_status: "none" }), "Private");
     assert.equal(formatWhen(null), "—");
     assert.equal(formatWhen("not a date"), "—");
     assert.equal(formatWhen(new Date().toISOString()), "Today");

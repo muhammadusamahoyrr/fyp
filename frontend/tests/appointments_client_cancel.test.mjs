@@ -177,6 +177,15 @@ test.beforeEach(() => {
     api.__respond("getMe", { data: { _id: "c1", role: "client" } });
     api.__respond("listCases", { data: { items: [] } });
     api.__respond("getNotifications", { data: { items: [] } });
+    // The reschedule form offers only the lawyer's free times. By default the
+    // lawyer is free at 10:00 and 15:30 on any day asked about.
+    api.__respond("getBookableSlots", (_lawyer, { from } = {}) => ({
+        data: { configured: true, days: [{ date: from, slots: [
+            { start: `${from}T05:00:00Z`, local_time: "10:00" },
+            { start: `${from}T10:30:00Z`, local_time: "15:30" },
+        ] }] },
+        error: null, status: 200,
+    }));
 });
 
 test.after(() => {
@@ -891,9 +900,14 @@ async function openReschedule(ui) {
     await act(async () => {
         nativeSet(date, NEW_DATE);
         date.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    // The new day's free times load before one can be chosen.
+    await ui.settle(30);
+    await act(async () => {
         nativeSet(time, NEW_TIME, "HTMLSelectElement");
         time.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     });
+    assert.equal(time.value, NEW_TIME, "the lawyer's free time was not offered");
     return { date, time };
 }
 
@@ -1407,4 +1421,108 @@ test("the client is never shown the lawyer's private notes", async () => {
     assert.doesNotMatch(ui.text(), /PRIVATE-NOTE-7f3a/);
     assert.doesNotMatch(ui.text(), /unreliable/);
     await ui.unmount();
+});
+
+// ── #21: the new time is one the lawyer actually has free ──────────────────
+//
+// The picker offered all 48 half-hours of the day (03:00 included, and hours
+// the lawyer was already booked or in court), which the client could only
+// discover by being refused.
+
+const optionValues = (sel) => [...sel.querySelectorAll("option")].map(o => o.value).filter(Boolean);
+
+test("the time list is the lawyer's free times, plus the current one marked", async () => {
+    serveAppointments([appointment({ status: "pending", lawyer_id: "law-9", scheduled_at: "2026-11-20T09:00:00.000Z" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await ui.click("Change time");
+    await ui.settle(30);
+    const sel = ui.container.querySelector("select");
+    assert.deepEqual(optionValues(sel), ["14:00", "10:00", "15:30"]);
+    assert.match(sel.textContent, /14:00 \(current\)/);
+    assert.ok(!optionValues(sel).includes("03:00"));
+    const call = api.__calls("getBookableSlots").at(-1);
+    assert.deepEqual(call.args, ["law-9", { from: "2026-11-20", duration_minutes: 60 }]);
+    await ui.unmount();
+});
+
+test("keeping the current time is refused before anything is sent", async () => {
+    serveAppointments([appointment({ status: "pending", lawyer_id: "law-9", scheduled_at: "2026-11-20T09:00:00.000Z" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await ui.click("Change time");
+    await ui.settle(30);
+    await ui.click("Confirm new time");
+    assert.match(ui.text(), /already the time of this request/);
+    assert.equal(api.__calls("rescheduleAppointment").length, 0);
+    await ui.unmount();
+});
+
+test("a lawyer with no working hours gets an explanation, not a list of every hour", async () => {
+    api.__respond("getBookableSlots", { data: { configured: false, days: [] }, error: null, status: 200 });
+    serveAppointments([appointment({ status: "pending", lawyer_id: "law-9", scheduled_at: "2026-11-20T09:00:00.000Z" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await ui.click("Change time");
+    await ui.settle(30);
+    assert.match(ui.text(), /has not set their working hours/);
+    assert.deepEqual(optionValues(ui.container.querySelector("select")), ["14:00"]);
+    await ui.unmount();
+});
+
+test("a failed read of free times says so", async () => {
+    api.__respond("getBookableSlots", { data: null, error: { message: "down" }, status: 503 });
+    serveAppointments([appointment({ status: "pending", lawyer_id: "law-9" })]);
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    await ui.click("Change time");
+    await ui.settle(30);
+    assert.match(ui.text(), /Could not load this lawyer's free times/);
+    await ui.unmount();
+});
+
+// ── a re-read keeps the cards (and the form being typed into) mounted ──────
+
+test("a live update re-reads the list without wiping an open reschedule form", async () => {
+    const { broadcastNotification } = await import("../src/lib/notificationTarget.js");
+    let reads = 0;
+    api.__respond("listAppointments", async () => {
+        reads += 1;
+        // A real read takes time; the old page showed its spinner meanwhile,
+        // which unmounted the cards.
+        if (reads > 1) await new Promise(r => realSetTimeout(r, 25));
+        return { data: { items: [appointment({ status: "pending", lawyer_id: "law-9" })] }, error: null, status: 200 };
+    });
+    const ui = await mountTracking();
+    await ui.openAppointments();
+    const { date } = await openReschedule(ui);
+    const before = reads;
+    await act(async () => { broadcastNotification({ type: "appointment_confirmed", payload: { appointment_id: "other" } }); });
+    await ui.settle(60);
+    assert.ok(reads > before, "the list was not re-read on a live appointment notice");
+    const stillOpen = ui.container.querySelector('input[type="date"]');
+    assert.ok(stillOpen, "the reschedule form was wiped by the re-read");
+    assert.equal(stillOpen.value, NEW_DATE);
+    assert.equal(ui.container.querySelector("select").value, NEW_TIME);
+    assert.equal(date, stillOpen, "the form was remounted");
+    await ui.unmount();
+});
+
+test("Join Meeting is offered only on a confirmed consultation that has not ended", async () => {
+    const future = appointment({ status: "confirmed", meeting_link: "https://meet.example/x" });
+    const cases = [
+        [future, true],
+        [{ ...future, status: "cancelled" }, false],
+        [{ ...future, status: "completed" }, false],
+        [{ ...future, status: "no_show" }, false],
+        [{ ...future, end_at: new Date(Date.now() - 6e4).toISOString() }, false],
+    ];
+    for (const [appt, offered] of cases) {
+        serveAppointments([appt]);
+        const ui = await mountTracking();
+        await ui.openAppointments();
+        const join = [...ui.container.querySelectorAll("a")].find(a => a.textContent.includes("Join Meeting"));
+        assert.equal(!!join, offered, `${appt.status} ending ${appt.end_at}`);
+        await ui.unmount();
+    }
 });

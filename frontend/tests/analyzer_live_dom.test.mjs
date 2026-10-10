@@ -102,8 +102,14 @@ test("the file picker is disabled until the synthetic confirmation is ticked", a
     const input = p.container.querySelector('input[type="file"]');
     assert.equal(input.disabled, true);
     assert.equal(input.accept, ".pdf,.docx,.jpg,.jpeg,.png");
+    // The styled "Select file" button follows the same gate as the hidden input.
+    const pick = () => [...p.container.querySelectorAll("button")].find(b => b.textContent === "Select file");
+    assert.equal(pick().disabled, true);
+    assert.ok(p.container.querySelector("[data-upload-card]"));
+    assert.notEqual(p.container.querySelector('select[aria-label="Your side"]').style.color, "", "the side select must be themed (readable)");
     await tick(p.container.querySelector("[data-attest]"));
     assert.equal(p.container.querySelector('input[type="file"]').disabled, false);
+    assert.equal(pick().disabled, false);
     await p.unmount();
 });
 
