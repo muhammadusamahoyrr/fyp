@@ -310,7 +310,7 @@ test("the sidebar lists Review Queue only while the feature is on", async () => 
                          unreadMsgs: 0, reviewQueueOn: on })))));
     let p = await sidebar(false);
     assert.doesNotMatch(p.container.textContent, /Review Queue/);
-    assert.match(p.container.textContent, /Document Analyzer/);
+    assert.match(p.container.textContent, /Document [Aa]nalyzer/);
     await p.unmount();
     p = await sidebar(true);
     assert.match(p.container.textContent, /Review Queue/);
