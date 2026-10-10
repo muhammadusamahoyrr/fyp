@@ -532,27 +532,16 @@ test("the invented working-day grid is gone", async () => {
     await ui.unmount();
 });
 
-test("today's booked hours are read-only, not clickable", async () => {
-    // An appointment that started an hour ago is today's.
+test("the list has no side panel, and no times rendered as buttons", async () => {
+    // The panel ("today's booked hours", "next meeting") was removed: it
+    // repeated the cards and the stat cards. Its old failure mode, times drawn
+    // as clickable slots with nothing behind them, must not come back.
     const ui = await mountAppointments([appointment({ status: "confirmed" })]);
 
-    assert.match(ui.text(), /TODAY'S BOOKED HOURS/);
-    // Whatever times are shown must not be buttons.
+    assert.doesNotMatch(ui.text(), /TODAY'S BOOKED HOURS|Next Meeting|Nothing booked today/i);
     const timeButtons = ui.labels().filter(l => /^\d{2}:\d{2}$/.test(l));
     assert.deepEqual(timeButtons, [],
-                     `booked hours are rendered as buttons: ${timeButtons}`);
-    await ui.unmount();
-});
-
-test("an empty day says so rather than showing invented free slots", async () => {
-    const future = new Date(Date.now() + 30 * 24 * 36e5);
-    const ui = await mountAppointments([appointment({
-        status: "confirmed",
-        scheduled_at: future.toISOString(),
-        end_at: new Date(future.getTime() + 18e5).toISOString(),
-    })]);
-
-    assert.match(ui.text(), /Nothing booked today/);
+                     `times are rendered as buttons: ${timeButtons}`);
     await ui.unmount();
 });
 

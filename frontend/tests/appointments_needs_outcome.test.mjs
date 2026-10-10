@@ -159,11 +159,12 @@ test.after(() => {
 
 /* ── the three states, kept apart ─────────────────────────────────────────── */
 
-test("a genuine empty queue says so", async () => {
+test("a genuine empty queue shows no section at all", async () => {
     api.__respond("listPendingOutcomes", page([]));
     const ui = await mount();
 
-    assert.match(ui.text(), /No consultations are waiting on an outcome/);
+    assert.doesNotMatch(ui.text(), /Needs outcome/);
+    assert.doesNotMatch(ui.text(), /No consultations are waiting on an outcome/);
     await ui.unmount();
 });
 
@@ -176,8 +177,7 @@ test("a failed read is NOT reported as an empty queue", async () => {
                   { data: null, error: { message: "network down" }, status: 0 });
     const ui = await mount();
 
-    assert.ok(!ui.text().includes("No consultations are waiting on an outcome"),
-              "a failed read was shown as an empty queue");
+    assert.match(ui.text(), /Needs outcome/, "a failed read hid the section like an empty queue");
     assert.match(ui.text(), /Could not load outstanding outcomes/);
     await ui.unmount();
 });
@@ -267,7 +267,7 @@ test("the queue is re-read from the server after an outcome is recorded",
 
     assert.ok(api.__calls("listPendingOutcomes").length >= 2,
               "the queue was not re-read from the server");
-    assert.match(ui.text(), /No consultations are waiting on an outcome/);
+    assert.doesNotMatch(ui.text(), /Needs outcome/, "the emptied queue is still shown");
     await ui.unmount();
 });
 
@@ -284,6 +284,16 @@ test("a refused outcome leaves the row in the queue", async () => {
 
     assert.match(ui.text(), /Ayesha Bibi/,
                  "a refused outcome removed the row anyway");
+    await ui.unmount();
+});
+
+test("a refused outcome says why, rather than silently reloading", async () => {
+    api.__respond("listPendingOutcomes", page([pending()]));
+    api.__respond("completeAppointment",
+                  { data: null, error: { message: "already completed" }, status: 409 });
+    const ui = await mount();
+    await ui.click("Completed");
+    assert.match(ui.text(), /already completed/);
     await ui.unmount();
 });
 
