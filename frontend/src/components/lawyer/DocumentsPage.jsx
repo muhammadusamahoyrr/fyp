@@ -5,6 +5,8 @@ import { useTheme } from "./theme.js";
 import { useCase } from "./theme.js";
 import { Btn, Input } from "./components.jsx";
 import RevisionHistory from "./RevisionHistory.jsx";
+import { Icon, I } from "./icons.jsx";
+import { DRAFTING_TOKENS_CSS, draftingMode } from "./draftingTheme.js";
 import {
     listReviewQueue, reviewDocument, downloadDocumentFile,
     fetchRevisionPreview, reviewDocumentV2, reviewQueueV2,
@@ -12,6 +14,7 @@ import {
 } from "@/lib/api.js";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { createGeneration } from "@/lib/attempt.js";
+import { onNotification } from "@/lib/notificationTarget.js";
 import { complianceSummary } from "@/lib/complianceSummary.js";
 
 // ─── THEME ────────────────────────────────────────────────────
@@ -145,30 +148,6 @@ function Stepper({ step, t }) {
 // SCREEN 1 — DOCUMENT INBOX
 // ═══════════════════════════════════════════════════════════════
 
-const STATUS_COLOR_V2 = {
-    "Pending Review": { dot: "#e8b84b", text: "#e8b84b", badge: "rgba(232,184,75,0.14)", border: "rgba(232,184,75,0.45)" },
-    "Under Review": { dot: "#5aafd4", text: "#5aafd4", badge: "rgba(90,175,212,0.14)", border: "rgba(90,175,212,0.45)" },
-    "Approved": { dot: "#3ec99a", text: "#3ec99a", badge: "rgba(62,201,154,0.14)", border: "rgba(62,201,154,0.45)" },
-    "Returned": { dot: "#e8b84b", text: "#e8b84b", badge: "rgba(232,184,75,0.14)", border: "rgba(232,184,75,0.45)" },
-    "Rejected": { dot: "#e8526a", text: "#e8526a", badge: "rgba(232,82,106,0.14)", border: "rgba(232,82,106,0.45)" },
-    "Final": { dot: "#38d8c4", text: "#38d8c4", badge: "rgba(56,216,196,0.14)", border: "rgba(56,216,196,0.45)" },
-};
-
-const URGENCY_V2 = {
-    Normal: { dot: "#7a8f96", label: "#9ab0b8" },
-    Priority: { dot: "#e8b84b", label: "#e8b84b" },
-    Urgent: { dot: "#e8526a", label: "#e8526a" },
-};
-
-const ACTION_CFG = {
-    "Pending Review": { label: "Review Now", icon: "👁", bg: "#b8890e", glow: "rgba(184,137,14,0.45)" },
-    "Under Review": { label: "Review", icon: "📋", bg: "#2660a8", glow: "rgba(38,96,168,0.45)" },
-    "Approved": { label: "Open", icon: "📁", bg: "#1e9868", glow: "rgba(30,152,104,0.45)" },
-    "Returned": { label: "Open", icon: "📁", bg: "#b8890e", glow: "rgba(184,137,14,0.45)" },
-    "Rejected": { label: "Open", icon: "📁", bg: "#a83a4e", glow: "rgba(168,58,78,0.45)" },
-    "Final": { label: "Open", icon: "📁", bg: "#189888", glow: "rgba(24,152,136,0.45)" },
-};
-
 /* The tabs, and the server status each one asks for.
  *
  * ONE TABLE, so a label and the query behind it cannot drift apart. They did:
@@ -192,12 +171,187 @@ const QUEUE_TABS = [
     ["Rejected", "rejected"],
 ];
 
+/* The review inbox's look (2026-10-09): the Legal Drafting palette
+ * (draftingTheme.js). Scoped by [data-review-inbox]. */
+export const INBOX_CSS = `[data-review-inbox]{flex:1;min-height:0;overflow-y:auto;background:radial-gradient(900px 360px at 25% -80px,var(--glow),transparent 70%) no-repeat,var(--bg);color:var(--ink);font:15px/1.5 "Hanken Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+[data-review-inbox] *{box-sizing:border-box}
+[data-review-inbox] button,[data-review-inbox] input{font:inherit;color:inherit}
+[data-review-inbox] :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+[data-review-inbox] .ri-wrap{max-width:1240px;margin:0 auto;padding:22px clamp(16px,3.2vw,40px) 64px;display:grid;gap:22px}
+[data-review-inbox] .ri-crumbs{font-size:13px;color:var(--muted)}
+[data-review-inbox] .ri-crumbs b{color:var(--ink);font-weight:600}
+[data-review-inbox] .ri-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap}
+[data-review-inbox] .ri-head h1{margin:0;font:600 clamp(28px,3.4vw,38px)/1.1 "Literata",Georgia,serif;letter-spacing:-.01em}
+[data-review-inbox] .ri-accent{background:linear-gradient(90deg,var(--brand-text),var(--teal-ink));-webkit-background-clip:text;background-clip:text;color:transparent}
+[data-review-inbox] .ri-head p{margin:8px 0 0;color:var(--muted);max-width:66ch}
+[data-review-inbox] .ri-btn{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);font-weight:600;font-size:14px;white-space:nowrap;cursor:pointer}
+[data-review-inbox] .ri-btn:hover:not(:disabled){border-color:var(--hover-line);background:var(--hover-tint);color:var(--hover-ink)}
+[data-review-inbox] .ri-btn:disabled{opacity:.55;cursor:default}
+[data-review-inbox] .ri-btn.primary{background:var(--brand-solid);border-color:transparent;color:var(--on-brand)}
+[data-review-inbox] .ri-btn.primary:hover:not(:disabled){background:var(--brand-solid-hover);color:var(--on-brand)}
+[data-review-inbox] .ri-cta{display:inline-flex;align-items:center;gap:10px;height:48px;padding:0 24px;border-radius:14px;border:0;background:var(--brand-solid);color:var(--on-brand);font-weight:700;font-size:15.5px;cursor:pointer;box-shadow:0 10px 24px -12px rgba(46,196,214,.8);transition:transform .15s,box-shadow .15s}
+[data-review-inbox] .ri-cta:hover{background:var(--brand-solid-hover);transform:translateY(-1px);box-shadow:0 14px 28px -12px rgba(46,196,214,.9)}
+[data-review-inbox] .ri-filters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px}
+[data-review-inbox] .ri-f{position:relative;display:grid;grid-template-columns:auto 1fr;grid-template-areas:"ic l" "v v" "s s";column-gap:12px;align-items:center;text-align:left;padding:18px 18px 16px;border-radius:20px;border:1px solid color-mix(in srgb,var(--c) 14%,var(--line));background:radial-gradient(120% 90% at 100% 0%,color-mix(in srgb,var(--c) 13%,transparent) 0%,transparent 55%),linear-gradient(180deg,color-mix(in srgb,var(--surface) 92%,#fff 8%),var(--surface));box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 10px 24px -18px rgba(0,0,0,.65);cursor:pointer;overflow:hidden;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease,background .18s ease}
+[data-review-inbox] .ri-f:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--c) 45%,var(--line));box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 18px 32px -20px color-mix(in srgb,var(--c) 70%,#000)}
+[data-review-inbox] .ri-f[aria-selected="true"]{border-color:color-mix(in srgb,var(--c) 70%,transparent);background:radial-gradient(130% 100% at 100% 0%,color-mix(in srgb,var(--c) 26%,transparent) 0%,transparent 60%),linear-gradient(180deg,color-mix(in srgb,var(--c) 12%,var(--surface)),var(--surface));box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent),0 18px 32px -20px color-mix(in srgb,var(--c) 70%,#000)}
+[data-review-inbox] .ri-f .ic{grid-area:ic;width:38px;height:38px;border-radius:12px;display:grid;place-items:center;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--c) 22%,transparent) inset}
+[data-review-inbox] .ri-f[aria-selected="true"] .ic{background:var(--c);color:var(--surface-2)}
+[data-review-inbox] .ri-f .l{grid-area:l;display:block;font-size:13.5px;font-weight:600;color:var(--muted);line-height:1.25}
+[data-review-inbox] .ri-f[aria-selected="true"] .l{color:var(--ink)}
+[data-review-inbox] .ri-f .v{grid-area:v;display:block;font:600 34px/1 "Literata",Georgia,serif;margin:16px 0 6px;letter-spacing:-.01em}
+[data-review-inbox] .ri-f .s{grid-area:s;display:block;font-size:12.5px;color:var(--muted)}
+[data-review-inbox] .ri-f .tick{position:absolute;top:14px;right:14px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--c);color:var(--surface-2);opacity:0;transform:scale(.6);transition:opacity .18s,transform .18s}
+[data-review-inbox] .ri-f[aria-selected="true"] .tick{opacity:1;transform:none}
+[data-review-inbox] .ri-card{border-radius:16px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow-rest);overflow:hidden}
+[data-review-inbox] .ri-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--line)}
+[data-review-inbox] .ri-bar h2{margin:0;font:600 19px/1.2 "Literata",Georgia,serif}
+[data-review-inbox] .ri-bar small{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
+[data-review-inbox] .ri-tools{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+[data-review-inbox] .ri-search{flex:1 1 420px;display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-rest)}
+[data-review-inbox] .ri-search:hover{border-color:var(--hover-line)}
+[data-review-inbox] .ri-search svg{color:var(--faint)}
+[data-review-inbox] .ri-kbd{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--faint);border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:5px;padding:0 6px;line-height:18px}
+[data-review-inbox] .ri-filter{position:relative;display:flex;align-items:center;height:48px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-rest);min-width:230px}
+[data-review-inbox] .ri-filter:hover{border-color:var(--hover-line)}
+[data-review-inbox] .ri-filter:focus-within{border-color:var(--focus);box-shadow:0 0 0 3px var(--brand-soft)}
+[data-review-inbox] .ri-filter > svg{position:absolute;left:14px;color:var(--muted);pointer-events:none}
+[data-review-inbox] .ri-filter select{appearance:none;-webkit-appearance:none;width:100%;height:100%;border:0;outline:none;background:transparent;padding:0 38px 0 42px;font-weight:600;font-size:14.5px;cursor:pointer}
+[data-review-inbox] .ri-filter select option{background:var(--surface);color:var(--ink)}
+[data-review-inbox] .ri-filter .chev{position:absolute;left:auto;right:14px;color:var(--muted);pointer-events:none}
+[data-review-inbox] .ri-filter.on{border-color:var(--brand-text)}
+[data-review-inbox] .ri-search:focus-within{border-color:var(--focus);box-shadow:0 0 0 3px var(--brand-soft)}
+[data-review-inbox] .ri-search input{flex:1;min-width:0;border:0;outline:none;background:transparent;font-size:15px}
+[data-review-inbox] .ri-search input::placeholder{color:var(--faint)}
+[data-review-inbox] .ri-grid{display:grid;gap:14px;align-items:center;padding:14px 22px;position:relative}
+[data-review-inbox] .ri-th{font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--muted);background:var(--surface-2);border-bottom:1px solid var(--line);padding-block:10px}
+[data-review-inbox] .ri-th span{display:flex;align-items:center;gap:6px}
+[data-review-inbox] .ri-th span:last-child{justify-content:flex-end}
+[data-review-inbox] .ri-row{border-bottom:1px solid var(--line);transition:background .15s,box-shadow .15s;cursor:pointer}
+[data-review-inbox] .ri-row:last-child{border-bottom:0}
+[data-review-inbox] .ri-row:hover{background:var(--hover-tint);box-shadow:inset 0 0 0 1px var(--hover-line)}
+[data-review-inbox] .ri-row:hover .ri-title{color:var(--hover-ink)}
+[data-review-inbox] .ri-row:hover .ri-av{background:var(--brand-solid);color:var(--on-brand)}
+[data-review-inbox] .ri-row::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--stripe,transparent)}
+[data-review-inbox] .ri-title{font:600 16.5px/1.3 "Literata",Georgia,serif}
+[data-review-inbox] .ri-sub{font-size:12.5px;color:var(--muted);margin-top:3px}
+[data-review-inbox] .ri-note{margin-top:5px;font-size:13px;font-style:italic;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:50ch}
+[data-review-inbox] .ri-client{display:flex;align-items:center;gap:10px;min-width:0}
+[data-review-inbox] .ri-av{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--teal-soft);color:var(--teal-ink)}
+[data-review-inbox] .ri-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+[data-review-inbox] .ri-pill i{width:6px;height:6px;border-radius:50%;background:currentColor}
+[data-review-inbox] .ri-edited{background:rgba(242,195,94,.14);color:var(--gold);border:1px solid rgba(242,195,94,.4)}
+[data-review-inbox] .ri-mono{font-family:"JetBrains Mono",monospace;font-size:12.5px}
+[data-review-inbox] .ri-wait{font-size:13.5px;font-weight:600}
+[data-review-inbox] .ri-wait.late{color:var(--gold)}
+[data-review-inbox] .ri-empty{padding:52px 20px;text-align:center;color:var(--muted)}
+[data-review-inbox] .ri-f .ic svg{transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
+[data-review-inbox] .ri-f:hover .ic.k-all svg{animation:riDrop .6s ease}
+[data-review-inbox] .ri-f .hand,[data-review-inbox] .ri-f .cross{transform-box:view-box;transform-origin:12px 12px;transition:transform .6s cubic-bezier(.34,1.56,.64,1)}
+[data-review-inbox] .ri-f:hover .hand{transform:rotate(360deg)}
+[data-review-inbox] .ri-f:hover .cross{transform:rotate(90deg)}
+[data-review-inbox] .ri-f .draw{stroke-dasharray:14;stroke-dashoffset:0}
+[data-review-inbox] .ri-f:hover .draw{animation:riDraw .55s ease}
+[data-review-inbox] .ri-f:hover .ic.k-returned svg{animation:riSwing .6s ease}
+[data-review-inbox] .ri-cta{position:relative;overflow:hidden}
+[data-review-inbox] .ri-cta::after{content:"";position:absolute;top:0;bottom:0;left:0;width:40%;pointer-events:none;background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);transform:translateX(-130%) skewX(-20deg)}
+[data-review-inbox] .ri-cta:hover::after{animation:riShine .8s ease}
+[data-review-inbox] .ri-cta:hover svg{animation:riTwinkle 1s ease-in-out infinite}
+[data-review-inbox] .ri-row:hover .ri-btn.primary svg{animation:riBlink 1.4s ease infinite}
+[data-review-inbox] .ri-row .ri-btn:not(.primary) svg{transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
+[data-review-inbox] .ri-row:hover .ri-btn:not(.primary) svg{transform:translateY(-2px) rotate(-8deg)}
+@keyframes riDrop{0%,100%{transform:translateY(0)}40%{transform:translateY(3px)}70%{transform:translateY(-1px)}}
+@keyframes riDraw{from{stroke-dashoffset:14}to{stroke-dashoffset:0}}
+@keyframes riSwing{0%,100%{transform:translateX(0) rotate(0)}40%{transform:translateX(-4px) rotate(-10deg)}}
+@keyframes riShine{to{transform:translateX(360%) skewX(-20deg)}}
+@keyframes riTwinkle{0%,100%{transform:scale(1) rotate(0)}50%{transform:scale(1.2) rotate(20deg)}}
+@keyframes riBlink{0%,42%,52%,100%{transform:scaleY(1)}47%{transform:scaleY(.1)}}
+@media (prefers-reduced-motion:reduce){[data-review-inbox] *,[data-review-inbox] *::after{transition:none!important;animation:none!important}}
+[data-review-inbox] .ri-empty b{display:block;font:600 19px "Literata",Georgia,serif;color:var(--ink);margin-bottom:6px}`;
+
+// Status and priority, in the palette's own colours (each readable on its tint).
+const STATUS_TONE = {
+    "Pending Review": "var(--gold)", "Under Review": "var(--teal-ink)", "Approved": "var(--brand-text)",
+    "Returned": "var(--teal-ink)", "Rejected": "var(--danger)", "Final": "var(--teal-ink)",
+};
+const PRIORITY_TONE = { Urgent: "var(--danger)", Priority: "var(--gold)", Normal: "var(--muted)" };
+const PRIORITY_RANK = { Urgent: 0, Priority: 1, Normal: 2 };
+const tint = colour => ({ color: colour, background: `color-mix(in srgb, ${colour} 14%, transparent)` });
+
+/* How long ago, in a lawyer's words: "2 h", "3 days". */
+export function sinceWords(iso, now = Date.now()) {
+    const at = iso ? new Date(iso).getTime() : NaN;
+    if (Number.isNaN(at)) return null;
+    const mins = Math.max(0, Math.round((now - at) / 60000));
+    if (mins < 60) return mins < 2 ? "just now" : `${mins} min`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours} h`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+/* The order a reviewer works in: what still needs a decision first; among it
+ * the urgent, then the priority, and the longest-waiting first. Decided rows
+ * keep the server's order (most recent first). Only the loaded rows are
+ * ordered -- the screen says so when more are still to load. */
+export function workOrder(rows) {
+    const pending = d => d.status === "Pending Review";
+    const time = d => (d.submittedAt ? new Date(d.submittedAt).getTime() : Infinity) || Infinity;
+    return rows.map((d, i) => [d, i]).sort(([a, ia], [b, ib]) => {
+        if (pending(a) !== pending(b)) return pending(a) ? -1 : 1;
+        if (!pending(a)) return ia - ib;
+        return (PRIORITY_RANK[a.urgency] ?? 2) - (PRIORITY_RANK[b.urgency] ?? 2) || time(a) - time(b) || ia - ib;
+    }).map(([d]) => d);
+}
+
+const FILTER_CARDS = [
+    // Each icon's moving part carries a class the hover animates (INBOX_CSS).
+    ["All", "Everything sent to you", "var(--teal-ink)", <><path d="M4 13h4l2 3h4l2-3h4" /><path d="M5.5 5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z" /></>, "k-all"],
+    ["Pending Review", "Awaiting your decision", "var(--gold)", <><circle cx="12" cy="12" r="8.5" /><path className="hand" d="M12 7.5V12l3 2" /></>, "k-pending"],
+    ["Approved", "Approved by you", "var(--brand-text)", <><circle cx="12" cy="12" r="8.5" /><path className="draw" d="m8.5 12.2 2.4 2.4 4.6-5" /></>, "k-approved"],
+    ["Returned", "Sent back with changes", "var(--teal-ink)", <><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></>, "k-returned"],
+    ["Rejected", "Declined by you", "var(--danger)", <><circle cx="12" cy="12" r="8.5" /><path className="cross" d="m9.2 9.2 5.6 5.6M14.8 9.2l-5.6 5.6" /></>, "k-rejected"],
+];
+const cardIcon = d => <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>;
+const LATE_DAYS = 2;
+// The filter beside the search: narrows the loaded rows of the chosen tab.
+const ROW_FILTERS = {
+    all: { label: "All priorities", test: () => true },
+    urgent: { label: "Urgent only", test: d => d.urgency === "Urgent" },
+    priority: { label: "Priority only", test: d => d.urgency === "Priority" },
+    normal: { label: "Normal only", test: d => d.urgency === "Normal" },
+    edited: { label: "Wording edited", test: d => Boolean(d.textEdited) },
+};
+// What an empty tab says: about THAT tab, not the inbox in general.
+const EMPTY = {
+    "All": ["Nothing here yet", "Documents your clients send you for review appear here."],
+    "Pending Review": ["You're all caught up", "No document is waiting for your decision."],
+    "Approved": ["Nothing approved yet", "Documents you approve are listed here, with the version you approved."],
+    "Returned": ["Nothing returned", "Documents you send back to a client with changes are listed here."],
+    "Rejected": ["Nothing rejected", "Documents you decline are listed here."],
+};
+
 function ScreenInbox({
     t, onOpen, docs, loading, hasMore, loadingMore, onLoadMore,
     statusF, onStatusChange, counts, serverFiltered,
 }) {
     const [search, setSearch] = useState("");
+    const [filter, setFilter] = useState("all");
+    const searchRef = useRef(null);
     const { setPage } = useCase();
+    const q = search.trim().toLowerCase();
+    // "/" jumps to the search, as the hint in it says (not while typing elsewhere).
+    useEffect(() => {
+        const onKey = e => {
+            if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+            const el = e.target;
+            if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+            e.preventDefault();
+            searchRef.current?.focus();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, []);
 
     // The status filter is applied BY THE SERVER when V2 is live: `docs` already
     // contains only the selected tab, and re-filtering here would be a no-op at
@@ -205,300 +359,160 @@ function ScreenInbox({
     // parameter — it returns everything, unpaginated — so with the flag off the
     // filtering has to happen here, and `serverFiltered` says which world we are
     // in rather than leaving it to be guessed from the data.
-    const filtered = docs.filter(d =>
+    const filtered = workOrder(docs.filter(d =>
         (serverFiltered || statusF === "All" || d.status === statusF) &&
-        (d.title.toLowerCase().includes(search.toLowerCase()) ||
-            d.client.toLowerCase().includes(search.toLowerCase()) ||
-            d.caseId.toLowerCase().includes(search.toLowerCase()))
-    );
-
-    // Stat cards — each with a distinct, visible tinted background.
-    // Values go through _tabCount, the same as the tab badges: `counts` is null
-    // until the first page answers (and always on the legacy queue), and its
-    // keys are server statuses ("submitted"…), not these display labels.
-    // Indexing it directly crashed the inbox on its first render.
-    const statCards = [
-        {
-            label: "Pending Review", value: _tabCount(counts, "Pending Review", docs, serverFiltered), icon: "📥",
-            numColor: "#e05565",
-            bg: "linear-gradient(135deg, rgba(150,195,225,0.22) 0%, rgba(130,180,215,0.14) 100%)",
-            border: "rgba(160,200,228,0.32)"
-        },
-        {
-            label: "Approved", value: _tabCount(counts, "Approved", docs, serverFiltered), icon: "✅",
-            numColor: "#2ec890",
-            bg: "linear-gradient(135deg, rgba(55,175,125,0.22) 0%, rgba(40,155,108,0.13) 100%)",
-            border: "rgba(55,180,128,0.32)"
-        },
-        {
-            label: "Returned", value: _tabCount(counts, "Returned", docs, serverFiltered), icon: "↩️",
-            numColor: "#e8b84b",
-            bg: "linear-gradient(135deg, rgba(232,184,75,0.16) 0%, rgba(200,155,60,0.10) 100%)",
-            border: "rgba(232,184,75,0.30)"
-        },
-        {
-            label: "Rejected", value: _tabCount(counts, "Rejected", docs, serverFiltered), icon: "❌",
-            numColor: "#e8526a",
-            bg: "linear-gradient(135deg, rgba(232,82,106,0.16) 0%, rgba(200,60,85,0.10) 100%)",
-            border: "rgba(232,82,106,0.30)"
-        },
-    ];
-
-    // Table column header labels + dedicated visible color
-    const tableHeaders = ["DOCUMENT", "CLIENT", "CASE", "TYPE", "STATUS", "URGENCY", "ACTIONS", ""];
+        (!q || d.title.toLowerCase().includes(q) || d.client.toLowerCase().includes(q) || d.caseId.toLowerCase().includes(q)) &&
+        (ROW_FILTERS[filter] || ROW_FILTERS.all).test(d)));
+    const showStatus = statusF === "All";
+    const columns = `minmax(0,2.4fr) minmax(0,1.4fr) minmax(0,.95fr) 64px 100px${showStatus ? " 136px" : ""} 140px`;
+    const heading = statusF === "All" ? "All documents" : statusF;
+    const count = _tabCount(counts, statusF, docs, serverFiltered);
 
     return (
-        <div style={{ flex: 1, padding: "22px 28px 36px", overflowY: "auto" }}>
+        <div data-review-inbox data-drafting-theme data-mode={draftingMode(t)}>
+            <style>{`${DRAFTING_TOKENS_CSS}\n${INBOX_CSS}`}</style>
+            <div className="ri-wrap">
+                <nav className="ri-crumbs" aria-label="Breadcrumb">Documents <span aria-hidden="true">/</span> <b>Document review</b></nav>
 
-            {/* ── Page header ────────────────────────────────── */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 }}>
-                <div>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: t.text, fontFamily: "Georgia,serif", marginBottom: 4 }}>
-                        Document Inbox
+                <div className="ri-head">
+                    <div>
+                        <h1>Document <span className="ri-accent">review</span></h1>
+                        <p>Documents your clients sent you. Each is frozen at the version they sent — your decision binds to that exact version.</p>
                     </div>
-                    <div style={{ fontSize: 13, color: t.textMuted }}>
-                        Client-submitted documents awaiting your legal review
-                    </div>
+                    {/* AI Generate opens the Draft Generator, where a lawyer's own
+                        AI drafting lives; a review inbox has no upload. */}
+                    <button type="button" className="ri-cta" onClick={() => setPage?.("doc-automation")}>
+                        <Icon d={I.sparkles} size={18} /> AI Generate
+                    </button>
                 </div>
-                <div style={{ display: "flex", gap: 10 }}>
-                    {/* Upload had no handler and there is no lawyer upload endpoint
-                        here, so it is gone. AI Generate opens the Draft Generator,
-                        which is where a lawyer's AI drafting actually lives. */}
-                    <button onClick={() => setPage?.("doc-automation")} style={{
-                        display: "inline-flex", alignItems: "center", gap: 7,
-                        padding: "9px 20px", borderRadius: 10, border: "none",
-                        background: `linear-gradient(135deg, ${t.primary} 0%, #22a898 100%)`,
-                        color: t.mode === "dark" ? "#0b1c22" : "#fff",
-                        fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
-                        boxShadow: `0 3px 14px ${t.primary}45`,
-                    }}>✨ AI Generate</button>
-                </div>
-            </div>
 
-            {/* ── Stat cards ─────────────────────────────────── */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 26 }}>
-                {statCards.map(s => (
-                    <div key={s.label} style={{
-                        display: "flex", justifyContent: "space-between", alignItems: "center",
-                        padding: "18px 20px", borderRadius: 14,
-                        background: s.bg, border: `1px solid ${s.border}`,
-                    }}>
-                        <div>
-                            <div style={{
-                                fontSize: 10, fontWeight: 700, color: "rgba(200,220,230,0.75)",
-                                textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 8,
-                            }}>{s.label}</div>
-                            <div style={{ fontSize: 32, fontWeight: 700, color: s.numColor, lineHeight: 1 }}>{s.value}</div>
-                        </div>
-                        <span style={{ fontSize: 30, opacity: 0.75 }}>{s.icon}</span>
-                    </div>
-                ))}
-            </div>
-
-            {/* ── Filter pills ──────────────────────────────── */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
-                {QUEUE_TABS.map(([tab]) => {
-                    const active = statusF === tab;
-                    return (
-                        <button key={tab} onClick={() => onStatusChange(tab)} style={{
-                            display: "inline-flex", alignItems: "center", gap: 6,
-                            padding: "7px 14px", borderRadius: 999, border: "none",
-                            background: active ? t.primary : "rgba(255,255,255,0.07)",
-                            color: active ? (t.mode === "dark" ? "#0b1c22" : "#fff") : "rgba(200,220,230,0.75)",
-                            fontSize: 12.5, fontWeight: active ? 700 : 500,
-                            fontFamily: "inherit", cursor: "pointer",
-                            boxShadow: active ? `0 2px 10px ${t.primary}45` : "none",
-                            transition: "all .15s",
-                        }}>
-                            {tab === "All" ? "All Documents" : tab}
-                            <span style={{
-                                display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                minWidth: 20, height: 20, borderRadius: 999, padding: "0 5px",
-                                background: active ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)",
-                                color: active ? (t.mode === "dark" ? "#0b1c22" : "#fff") : "rgba(200,220,230,0.7)",
-                                fontSize: 11, fontWeight: 700,
-                            }}>{_tabCount(counts, tab, docs, serverFiltered)}</span>
+                {/* THE FILTERS ARE THE COUNTS: one control, each number shown once.
+                    Values go through _tabCount, like everything else here: `counts`
+                    is null until the first page answers (and always on the legacy
+                    queue), and its keys are server statuses, not these labels. */}
+                <div className="ri-filters" role="tablist" aria-label="Review status">
+                    {FILTER_CARDS.map(([tab, sub, colour, icon, motion]) => (
+                        <button key={tab} type="button" role="tab" className="ri-f" aria-selected={statusF === tab}
+                            onClick={() => onStatusChange(tab)} style={{ "--c": colour }}
+                            {...(tab === "All" ? { "data-inbox-all": "" } : { "data-inbox-stat": tab })}>
+                            <span className={`ic ${motion}`}>{cardIcon(icon)}</span>
+                            <span className="tick" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg></span>
+                            <span className="l">{tab === "All" ? "All documents" : tab}</span>
+                            <span className="v" data-stat-value={tab === "All" ? undefined : ""}>{_tabCount(counts, tab, docs, serverFiltered)}</span>
+                            <span className="s">{sub}</span>
                         </button>
-                    );
-                })}
-            </div>
-
-            {/* ── Document Table ─────────────────────────────── */}
-            {/* 8 columns can't meaningfully stack — scroll the table sideways
-                on narrow screens instead of crushing the cells. */}
-            <div style={{
-                background: t.card, borderRadius: 14,
-                border: `1px solid ${t.border}`, overflowX: "auto", overflowY: "hidden",
-            }}>
-
-                {/* ── Table header — high contrast, clearly visible ── */}
-                <div style={{
-                    display: "grid",
-                    gridTemplateColumns: "2.4fr 0.9fr 0.9fr 1.1fr 1.15fr 0.85fr 1.25fr 32px",
-                    minWidth: 900,
-                    padding: "14px 22px",
-                    /* Distinct teal-tinted dark background so headers stand out */
-                    background: "linear-gradient(90deg, rgba(28,68,80,0.95) 0%, rgba(22,58,70,0.95) 100%)",
-                    borderBottom: `2px solid ${t.primary}40`,
-                    alignItems: "center", gap: 8,
-                }}>
-                    {tableHeaders.map((h, i) => (
-                        <div key={i} style={{
-                            fontSize: 11.5,
-                            fontWeight: 800,
-                            /* Bright teal-white so text is unmistakably visible */
-                            color: h ? "rgba(160,230,220,0.95)" : "transparent",
-                            letterSpacing: "0.09em",
-                            textTransform: "uppercase",
-                            /* Subtle text shadow to lift off background */
-                            textShadow: h ? "0 0 12px rgba(80,220,200,0.3)" : "none",
-                        }}>{h}</div>
                     ))}
                 </div>
 
-                {/* Rows */}
-                {filtered.map((doc, idx) => {
-                    const sc = STATUS_COLOR_V2[doc.status] || STATUS_COLOR_V2["Under Review"];
-                    const urg = URGENCY_V2[doc.urgency] || URGENCY_V2.Normal;
-                    const ac = ACTION_CFG[doc.status] || ACTION_CFG["Final"];
+                <div className="ri-tools">
+                    <label className="ri-search">
+                        <Icon d={I.search} size={18} />
+                        <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>Search documents</span>
+                        <input ref={searchRef} type="search" value={search} onChange={e => setSearch(e.target.value)}
+                            placeholder="Search by document, client or case" />
+                        <span className="ri-kbd" aria-hidden="true">/</span>
+                    </label>
+                    <label className={`ri-filter${filter !== "all" ? " on" : ""}`}>
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+                        <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>Filter documents</span>
+                        <select value={filter} onChange={e => setFilter(e.target.value)} data-inbox-filter>
+                            {Object.entries(ROW_FILTERS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}
+                        </select>
+                        <svg className="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                    </label>
+                </div>
 
-                    return (
-                        <div key={doc.id} style={{
-                            display: "grid",
-                            gridTemplateColumns: "2.4fr 0.9fr 0.9fr 1.1fr 1.15fr 0.85fr 1.25fr 32px",
-                    minWidth: 900,
-                            padding: "14px 22px", alignItems: "center", gap: 8,
-                            borderBottom: idx < filtered.length - 1 ? `1px solid ${t.border}` : "none",
-                            transition: "background .12s", cursor: "pointer",
-                        }}
-                            onMouseEnter={e => e.currentTarget.style.background = `${t.primary}09`}
-                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                        >
-                            {/* DOCUMENT */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                <div style={{
-                                    width: 30, height: 36, borderRadius: 5, flexShrink: 0,
-                                    background: `${t.primary}12`, border: `1px solid ${t.primary}28`,
-                                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
-                                }}>📄</div>
-                                <div>
-                                    <div style={{ fontSize: 13.5, fontWeight: 700, color: t.text, lineHeight: 1.3 }}>
-                                        {doc.title}
-                                    </div>
-                                    <div style={{ fontSize: 11, color: t.textFaint, marginTop: 3 }}>{doc.submitted}</div>
-                                </div>
-                            </div>
-
-                            {/* CLIENT */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <div style={{
-                                    width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
-                                    background: `${t.primary}22`, border: `1.5px solid ${t.primary}50`,
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    fontSize: 10.5, fontWeight: 700, color: t.primary,
-                                }}>
-                                    {doc.client.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
-                                </div>
-                                <span style={{ fontSize: 13, color: t.text, fontWeight: 500 }}>
-                                    {doc.client.split(" ")[0]}
-                                </span>
-                            </div>
-
-                            {/* CASE */}
-                            <div style={{ fontSize: 12, color: "#4fb8e0", fontFamily: "monospace", fontWeight: 700 }}>
-                                {doc.caseId}
-                            </div>
-
-                            {/* TYPE */}
-                            <div style={{ fontSize: 12.5, color: t.textMuted, fontWeight: 400 }}>
-                                {doc.type}
-                                {doc.textEdited && <span data-wording-edited title="The client edited this document's wording"
-                                    style={{ display: "inline-block", marginLeft: 6, padding: "1px 7px", borderRadius: 999, fontSize: 10.5, fontWeight: 700, color: "#ffc857", border: "1px solid rgba(255,200,87,0.45)" }}>Wording edited</span>}
-                            </div>
-
-                            {/* STATUS */}
-                            <span style={{
-                                display: "inline-flex", alignItems: "center", gap: 6,
-                                padding: "5px 12px", borderRadius: 999,
-                                background: sc.badge, color: sc.text,
-                                border: `1.5px solid ${sc.border}`,
-                                fontSize: 12, fontWeight: 700, whiteSpace: "nowrap",
-                            }}>
-                                <span style={{
-                                    width: 6, height: 6, borderRadius: "50%",
-                                    background: sc.dot, flexShrink: 0,
-                                    boxShadow: `0 0 5px ${sc.dot}`,
-                                }} />
-                                {doc.status}
-                            </span>
-
-                            {/* URGENCY */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                                <span style={{
-                                    width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                                    background: urg.dot, display: "inline-block",
-                                    boxShadow: `0 0 5px ${urg.dot}`,
-                                }} />
-                                <span style={{ fontSize: 12.5, fontWeight: 600, color: urg.label }}>
-                                    {doc.urgency}
-                                </span>
-                            </div>
-
-                            {/* ACTIONS */}
-                            <button
-                                onClick={e => { e.stopPropagation(); onOpen(doc); }}
-                                style={{
-                                    display: "inline-flex", alignItems: "center", gap: 7,
-                                    padding: "8px 16px", borderRadius: 999, border: "none",
-                                    background: ac.bg, color: "#fff",
-                                    fontSize: 12.5, fontWeight: 700, fontFamily: "inherit",
-                                    cursor: "pointer", whiteSpace: "nowrap",
-                                    boxShadow: `0 3px 10px ${ac.glow}`,
-                                    transition: "opacity .15s, transform .15s",
-                                }}
-                                onMouseEnter={e => { e.currentTarget.style.opacity = "0.82"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                                onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(0)"; }}
-                            >
-                                {ac.icon} {ac.label}
+                <section className="ri-card" aria-label={heading}>
+                    <div className="ri-bar">
+                        <div>
+                            <h2>{heading} <span className="ri-mono" style={{ color: "var(--muted)", fontSize: 14 }}>· {count}</span></h2>
+                            <small>
+                                {statusF === "Pending Review" || statusF === "All"
+                                    ? `Most urgent first, then the longest waiting${hasMore ? " (among the documents loaded)" : ""}.`
+                                    : "Most recent decision first."}
+                            </small>
+                        </div>
+                        {(q || filter !== "all") && (
+                            <button type="button" className="ri-btn" style={{ height: 36 }} onClick={() => { setSearch(""); setFilter("all"); }}>
+                                Clear search and filter
                             </button>
-
-                        </div>
-                    );
-                })}
-
-                {/* MORE OF THE INBOX.
-                    Follows the cursor, not "did this page return rows" — a page
-                    can come back short after documents are filtered and still
-                    have a next one. A button rather than infinite scroll: this
-                    is a work queue, and a lawyer deciding when to take on more
-                    is the correct interaction. */}
-                {!loading && hasMore && (
-                    <div style={{ display: "flex", justifyContent: "center", padding: "14px 0 4px" }}>
-                        <button
-                            onClick={onLoadMore}
-                            disabled={loadingMore}
-                            style={{
-                                padding: "7px 18px", fontSize: 12, borderRadius: 999,
-                                background: "none", color: t.textMuted,
-                                border: `1px solid ${t.border}`,
-                                cursor: loadingMore ? "default" : "pointer",
-                            }}>
-                            {loadingMore ? "Loading…" : "Load more"}
-                        </button>
+                        )}
                     </div>
-                )}
 
-                {/* Empty / Loading */}
-                {loading ? (
-                    <div style={{ padding: "52px", textAlign: "center", fontSize: 13, color: t.textMuted }}>Loading documents…</div>
-                ) : !filtered.length && (
-                    <div style={{ padding: "52px", textAlign: "center" }}>
-                        <div style={{ fontSize: 34, marginBottom: 12 }}>📂</div>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: t.textMuted }}>
-                            {docs.length === 0 ? "No documents yet — client submissions for review will appear here." : "No documents match your search."}
-                        </div>
+                    <div>
+                        {filtered.length > 0 && (
+                            <div className="ri-grid ri-th" style={{ gridTemplateColumns: columns }}>
+                                <span>Document</span><span>Client · Case</span><span>{statusF === "Pending Review" ? "Waiting" : "When"}</span>
+                                <span>Version</span><span>Priority</span>{showStatus && <span>Status</span>}<span>Action</span>
+                            </div>
+                        )}
+                        {filtered.map(doc => {
+                            const pending = doc.status === "Pending Review";
+                            const waited = pending ? sinceWords(doc.submittedAt) : null;
+                            const late = pending && doc.submittedAt && (Date.now() - new Date(doc.submittedAt).getTime()) > LATE_DAYS * 86400000;
+                            const decided = !pending && doc.reviewedAt ? sinceWords(doc.reviewedAt) : null;
+                            const initials = (doc.client || "?").split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+                            return (
+                                <div key={doc.id} className="ri-grid ri-row" data-inbox-row={doc.id} onClick={() => onOpen(doc)}
+                                    style={{ gridTemplateColumns: columns, "--stripe": pending ? (PRIORITY_TONE[doc.urgency] === "var(--muted)" ? "transparent" : PRIORITY_TONE[doc.urgency]) : "transparent" }}>
+                                    <div style={{ minWidth: 0 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                            <span className="ri-title">{doc.title}</span>
+                                            {doc.textEdited && <span data-wording-edited className="ri-pill ri-edited" title="The client edited this document's wording">
+                                                <Icon d={I.edit} size={12} />Wording edited</span>}
+                                        </div>
+                                        <div className="ri-sub">{doc.type}</div>
+                                        {/* The client's note to the lawyer, as they wrote it. */}
+                                        {doc.note && <div className="ri-note" data-client-note title={doc.note}>“{doc.note}”</div>}
+                                    </div>
+                                    <div className="ri-client">
+                                        <span className="ri-av" aria-hidden="true">{initials}</span>
+                                        <span style={{ minWidth: 0 }}>
+                                            <span style={{ display: "block", fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{doc.client}</span>
+                                            <span className="ri-sub" style={{ display: "block" }}>{doc.caseId && doc.caseId !== "—" ? <span className="ri-mono">{doc.caseId}</span> : "No case linked"}</span>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        {pending
+                                            ? <span className={`ri-wait${late ? " late" : ""}`} title={doc.submitted ? `Sent ${doc.submitted}` : undefined}>{waited ? (waited === "just now" ? "Sent just now" : `Waiting ${waited}`) : "—"}</span>
+                                            : <span className="ri-wait" title={doc.submitted ? `Sent ${doc.submitted}` : undefined}>{decided ? `Decided ${decided === "just now" ? "just now" : `${decided} ago`}` : (doc.submitted || "—")}</span>}
+                                        {pending && <div className="ri-sub">{doc.submitted ? `since ${doc.submitted}` : ""}</div>}
+                                    </div>
+                                    <span className="ri-mono">{doc.submittedVersion ? `v${doc.submittedVersion}` : "—"}</span>
+                                    <span><span className="ri-pill" style={tint(PRIORITY_TONE[doc.urgency] || PRIORITY_TONE.Normal)}><i />{doc.urgency}</span></span>
+                                    {showStatus && <span><span className="ri-pill" style={tint(STATUS_TONE[doc.status] || STATUS_TONE["Under Review"])}><i />{doc.status}</span></span>}
+                                    <span style={{ textAlign: "right" }}>
+                                        <button type="button" className={`ri-btn${pending ? " primary" : ""}`} style={{ height: 36 }}
+                                            onClick={e => { e.stopPropagation(); onOpen(doc); }}>
+                                            <Icon d={pending ? I.eye : I.folder} size={15} />{pending ? "Review Now" : "Open"}
+                                        </button>
+                                    </span>
+                                </div>
+                            );
+                        })}
                     </div>
-                )}
+
+                    {/* MORE OF THE INBOX. Follows the cursor, not "did this page
+                        return rows". A button rather than infinite scroll: this is a
+                        work queue, and a lawyer deciding when to take on more is the
+                        correct interaction. */}
+                    {!loading && hasMore && (
+                        <div style={{ display: "flex", justifyContent: "center", padding: "14px 0", borderTop: "1px solid var(--line)" }}>
+                            <button type="button" className="ri-btn" onClick={onLoadMore} disabled={loadingMore}>
+                                {loadingMore ? "Loading…" : "Load more"}
+                            </button>
+                        </div>
+                    )}
+
+                    {loading ? (
+                        <div className="ri-empty" aria-busy="true">Loading documents…</div>
+                    ) : !filtered.length && (
+                        <div className="ri-empty">
+                            <b>{docs.length ? "No document matches" : (EMPTY[statusF] || EMPTY.All)[0]}</b>
+                            {docs.length ? `Nothing matches${q ? ` “${search}”` : ""}${filter !== "all" ? ` with “${ROW_FILTERS[filter].label}”` : ""}.` : (EMPTY[statusF] || EMPTY.All)[1]}
+                        </div>
+                    )}
+                </section>
             </div>
         </div>
     );
@@ -530,6 +544,20 @@ function DownloadPdfButton({ doc, t, style }) {
             <button onClick={download} disabled={busy} style={style}>{busy ? "Downloading…" : "⬇ Download PDF"}</button>
             {issue && <div role="alert" style={{ fontSize: 11, color: t.danger }}>{issue}</div>}
         </div>
+    );
+}
+
+/* The document's case, as a way to it (2026-10-09): review used to be a dead
+ * end with only a shortened reference. A standalone document says so plainly. */
+function CaseLink({ doc, t }) {
+    const { setPage, setOpenCaseId } = useCase();
+    if (!doc.caseRawId) return <span data-case-link="none" style={{ color: t.textMuted }}>No case — standalone document</span>;
+    return (
+        <button type="button" data-case-link={doc.caseRawId} title="Open this case"
+            onClick={() => { setOpenCaseId?.(doc.caseRawId); setPage?.("cases"); }}
+            style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontFamily: "monospace", fontSize: 10.5, color: t.primary, textDecoration: "underline", textUnderlineOffset: 2 }}>
+            Case {doc.caseId} ↗
+        </button>
     );
 }
 
@@ -605,7 +633,7 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                         <div>
                             <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{doc.title}</div>
                             <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>
-                                {doc.type}{doc.textEdited ? " (wording edited by client)" : ""} · <span style={{ fontFamily: "monospace", color: t.primary, fontSize: 10 }}>{doc.caseId}</span> · {doc.client}
+                                {doc.type}{doc.textEdited ? " (wording edited by client)" : ""} · <CaseLink doc={doc} t={t} /> · {doc.client}
                             </div>
                         </div>
                     </div>
@@ -817,7 +845,7 @@ function ScreenReview({ doc, t, onBack, onContinue }) {
                     }}>Document Info</div>
                     {[
                         ["Type", doc.type],
-                        ["Case Ref", doc.caseId],
+                        ["Case Ref", doc.caseRawId ? doc.caseId : "None — standalone document"],
                         ["Client", doc.client],
                         ["Category", doc.caseCategory],
                         ["Submitted", doc.submitted],
@@ -878,7 +906,7 @@ function ScreenDecision({ doc, t, onBack, onDecide, busy }) {
                         <span style={{ fontSize: 20 }}>📄</span>
                         <div>
                             <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{doc.title}</div>
-                            <div style={{ fontSize: 11, color: t.textMuted }}>{doc.client} · <span style={{ color: t.primary, fontFamily: "monospace" }}>{doc.caseId}</span></div>
+                            <div style={{ fontSize: 11, color: t.textMuted }}>{doc.client} · <CaseLink doc={doc} t={t} /></div>
                         </div>
                     </div>
                     <span style={{
@@ -1153,7 +1181,7 @@ function ScreenFinal({ doc, t, onBack }) {
                     {[
                         ["Type", doc.type],
                         ["Template", doc.title.split(" — ")[0]],
-                        ["Case Ref", doc.caseId],
+                        ["Case Ref", doc.caseRawId ? doc.caseId : "None — standalone document"],
                         ["Client", doc.client],
                         ["Reviewer", `${lawyerName}, Advocate`],
                         ["Status", "Final"],
@@ -1250,14 +1278,23 @@ function _mapQueueDoc(d) {
         id: d.id,
         client: d.client_name || "Client",
         caseId: (d.case_number || d.case_id || "—").slice(-8).toUpperCase(),
+        // The full id, to open the case. Null for a standalone document: a case
+        // is optional, and "no case" is a normal state, not an error.
+        caseRawId: d.case_id || null,
         caseCategory: _CASE_TYPE_MAP[d.case_type] || "General",
         title: d.title || "Legal Document",
         type: _TMPL_MAP[d.template_type] || d.template_type || "Document",
         status: _REVIEW_STATUS_LABEL[d.review_status] || "Pending Review",
         urgency: _URGENCY_LABEL[d.urgency] || "Normal",
         submitted: d.submitted_at ? new Date(d.submitted_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
-        note: d.review_note || "",
-        lawyerNote: d.lawyer_note || "",
+        // The raw instant, for "waiting 2 days" and for working in order.
+        submittedAt: d.submitted_at || null,
+        // The CLIENT's note and the LAWYER's are separate fields on v2: the
+        // queue sends client_note, and review_note only on a decided row (the
+        // lawyer's own note for that cycle). The legacy queue has no queue_role
+        // and still carries the client's note in review_note.
+        note: d.client_note || (d.queue_role ? "" : d.review_note) || "",
+        lawyerNote: d.lawyer_note || (d.queue_role === "decided" ? d.review_note : "") || "",
         // Carried through verbatim: the review screen shows what was actually
         // checked when the draft was generated. Dropping them here would leave
         // the panels blank, which reads as "nothing to report".
@@ -1440,6 +1477,41 @@ function DocWorkflowApp() {
     const openDoc = (doc) => { setActiveDoc(doc); setScreen(doc.status === "Approved" ? "final" : "review"); };
     const reset = () => { setScreen("inbox"); setActiveDoc(null); };
 
+    // FROM A NOTIFICATION, STRAIGHT TO THE DOCUMENT (2026-10-09). The bell used
+    // to land on the inbox and leave the lawyer to find the row. App.jsx leaves
+    // the id in sessionStorage (this page not open yet) or announces it (open).
+    const [wantDoc, setWantDoc] = useState(() => {
+        try {
+            const id = sessionStorage.getItem("attorney:lawyer-open-doc");
+            if (id) sessionStorage.removeItem("attorney:lawyer-open-doc");
+            return id || null;
+        } catch { return null; }
+    });
+    // The latest load, for listeners registered once.
+    const loadRef = useRef(load);
+    loadRef.current = load;
+    useEffect(() => {
+        const onOpen = e => {
+            try { sessionStorage.removeItem("attorney:lawyer-open-doc"); } catch { /* storage off */ }
+            if (e.detail) { setWantDoc(e.detail); loadRef.current().catch(() => {}); }
+        };
+        window.addEventListener("attorney:open-review-doc", onOpen);
+        // A new submission, a withdrawal: re-read the queue while the lawyer is
+        // on it, instead of only when they navigate away and back.
+        const off = onNotification(n => {
+            if (String(n?.type || "").startsWith("document_")) loadRef.current().catch(() => {});
+        });
+        return () => { window.removeEventListener("attorney:open-review-doc", onOpen); off(); };
+    }, []);
+    useEffect(() => {
+        if (!wantDoc || loading) return;
+        const row = docs.find(d => d.id === wantDoc);
+        setWantDoc(null);
+        if (row) openDoc(row);
+        else showToast("That document is not in this list any more. It may have been withdrawn.");
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [wantDoc, loading, docs]);
+
     // The real decision: persists the status and notifies the client.
     //
     // ON V2 IT IS GUARDED AGAINST A STALE REVISION. The server matches the
@@ -1515,15 +1587,23 @@ function DocWorkflowApp() {
         showToast(`✅ ${newLabel} — the client has been notified`);
         setRetry(null);
         reset();
+        // The decision moved the document between tabs and changed the counts:
+        // re-read the current tab from the server (the row patched above only
+        // bridges the round trip), and tell the shell its sidebar badge is stale.
+        load().catch(() => {});
+        if (typeof window !== "undefined") window.dispatchEvent(new Event("attorney:review-decided"));
     };
 
     return (
+        // Exactly the app's <main> (which does not scroll for this page): each
+        // screen scrolls inside it. With minHeight:100vh a long inbox grew past
+        // <main> and its lower rows were clipped.
         <div style={{
-            minHeight: "100vh", display: "flex", flexDirection: "column",
+            flex: 1, minHeight: 0, display: "flex", flexDirection: "column",
             background: t.bg, fontFamily: "DM Sans,system-ui,sans-serif", color: t.text
         }}>
 
-            <Stepper step={screen} t={t} />
+            {screen !== "inbox" && <Stepper step={screen} t={t} />}
 
             {screen === "inbox" && <ScreenInbox t={t} onOpen={openDoc} docs={docs}
                 loading={loading} hasMore={!!queueCursor} loadingMore={loadingMore}

@@ -15,8 +15,10 @@ function templateCaseType(name = "") {
     return "civil";
 }
 import { useAuth } from "@/context/AuthContext.jsx";
-import MyDocuments from "./MyDocuments.jsx";
-import { TEMPLATES, CATEGORIES, BLANK_TEMPLATE, buildContent } from "@/lib/lawyerDraftTemplates.js";
+import DraftingHome from "./DraftingHome.jsx";
+import { DRAFTING_TOKENS_CSS, draftingMode } from "./draftingTheme.js";
+import { ModalPortal } from "./ui.jsx";
+import { TEMPLATES, buildContent } from "@/lib/lawyerDraftTemplates.js";
 import {
     NO_CASE, bindingForNewDocument, pendingBindingForDraft, bindingForDraft,
     caseActionsBlocked, boundCaseId,
@@ -25,186 +27,106 @@ import { verificationView } from "@/lib/draftVerification.js";
 import { pleadingRequirements } from "@/lib/api.js";
 
 // ============================================================
-// TOOLBAR BUTTON
+// EDITOR LOOK (2026-10-09) — the approved drafting-editor design, on the
+// Legal Drafting palette (draftingTheme.js). Scoped by [data-drafter-editor].
 // ============================================================
-function ToolBtn({ label, active, onClick, children, style = {} }) {
-    const { t } = useTheme();
-    const [hov, setHov] = useState(false);
+export const EDITOR_CSS = `[data-drafter-editor]{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;--top-h:72px;--tools-h:72px;background:var(--bg);color:var(--ink);font:15px/1.5 "Hanken Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased;--stage:rgba(0,0,0,.16)}
+[data-drafter-editor][data-mode="light"]{--stage:#E6E4EA}
+[data-drafter-editor] *{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+[data-drafter-editor] ::-webkit-scrollbar{width:8px;height:6px}
+[data-drafter-editor] ::-webkit-scrollbar-track{background:transparent}
+[data-drafter-editor] ::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:6px}
+[data-drafter-editor] button,[data-drafter-editor] select,[data-drafter-editor] textarea{font:inherit;color:inherit}
+[data-drafter-editor] :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+[data-drafter-editor] .de-top{position:sticky;top:0;z-index:8;min-height:var(--top-h);background:var(--bg);box-shadow:0 2px 0 var(--bg);display:flex;align-items:center;gap:14px;padding:14px 26px;flex-wrap:wrap}
+[data-drafter-editor] .de-back{width:44px;height:44px;flex:none;border-radius:12px;border:1px solid transparent;background:transparent;color:var(--ink);display:grid;place-items:center;cursor:pointer}
+[data-drafter-editor] .de-back:hover{background:var(--hover-tint);border-color:var(--hover-line);color:var(--hover-ink)}
+[data-drafter-editor] .de-title{min-width:0;flex:1}
+[data-drafter-editor] .de-title h1{margin:0;font:600 19px/1.25 "Literata",Georgia,serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-drafter-editor] .de-meta{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+[data-drafter-editor] .de-cat{font-weight:600;color:var(--brand-text)}
+[data-drafter-editor] .de-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto}
+[data-drafter-editor] .de-btn{display:inline-flex;align-items:center;gap:7px;height:40px;padding:0 15px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);font-weight:600;font-size:13.5px;white-space:nowrap;cursor:pointer}
+[data-drafter-editor] .de-btn:hover:not(:disabled){border-color:var(--hover-line);background:var(--hover-tint);color:var(--hover-ink)}
+[data-drafter-editor] .de-btn:disabled{opacity:.55;cursor:not-allowed}
+[data-drafter-editor] .de-btn.primary{background:var(--brand-solid);border-color:transparent;color:var(--on-brand)}
+[data-drafter-editor] .de-btn.primary:hover:not(:disabled){background:var(--brand-solid-hover);color:var(--on-brand)}
+[data-drafter-editor] .de-note{font-size:12.5px;font-weight:600;padding:5px 11px;border-radius:999px;white-space:nowrap}
+[data-drafter-editor] .de-note.ok{background:var(--brand-soft);color:var(--brand-text)}
+[data-drafter-editor] .de-note.bad{background:var(--danger-soft);color:var(--danger)}
+[data-drafter-editor] .de-acct{display:flex;align-items:center;gap:10px;height:46px;padding:0 14px 0 6px;border-radius:999px;border:1px solid var(--line);background:var(--surface);max-width:250px}
+[data-drafter-editor] .de-acct b{display:block;font-size:13px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-drafter-editor] .de-acct small{font-size:11.5px;color:var(--muted)}
+[data-drafter-editor] .de-avatar{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:#5B7BE0;color:#fff}
+[data-drafter-editor] .de-stage{flex:none;margin:0 18px 18px;border-radius:24px;background:var(--stage);display:flex;flex-direction:column;padding:0 18px 18px}
+[data-drafter-editor] .de-tools{position:sticky;top:var(--top-h);z-index:7;padding-top:18px;margin:0 -18px;padding-inline:18px;border-radius:24px 24px 0 0;background:linear-gradient(var(--stage),var(--stage)) top/100% 18px no-repeat,linear-gradient(var(--bg),var(--bg)) top/100% 18px no-repeat}
+[data-drafter-editor] .de-toolbar{display:flex;align-items:center;gap:2px;padding:8px;border-radius:16px;border:1px solid var(--line);background:var(--surface);overflow-x:auto;scrollbar-width:thin;box-shadow:var(--shadow-rest)}
+[data-drafter-editor] .de-tb{height:36px;min-width:34px;padding:0 6px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;font-weight:700;font-size:15px;flex:none}
+[data-drafter-editor] .de-tb:hover{background:var(--hover-tint);color:var(--hover-ink)}
+[data-drafter-editor] .de-tb[aria-pressed="true"]{background:var(--teal);color:var(--on-teal)}
+[data-drafter-editor] .de-sep{width:1px;height:24px;background:var(--line-strong);margin:0 4px;flex:none}
+[data-drafter-editor] .de-select{height:40px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--input);font-size:14px;flex:none;cursor:pointer}
+[data-drafter-editor] .de-select:hover{border-color:var(--hover-line)}
+[data-drafter-editor] .de-split{display:flex;gap:16px;margin-top:16px;align-items:flex-start}
+[data-drafter-editor] .de-doc{flex:1;min-width:0;display:flex;flex-direction:column;border-radius:18px;border:1px solid var(--line);background:var(--surface)}
+[data-drafter-editor] .de-strips{flex:none;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
+[data-drafter-editor] .de-strips > div{padding:7px 20px}
+[data-drafter-editor] .de-strips > div + div{border-top:1px solid var(--line)}
+[data-drafter-editor] .de-scroll{padding:28px 24px 24px}
+[data-drafter-editor] .de-paper{max-width:820px;margin:0 auto;min-height:640px;background:var(--paper);color:var(--paper-ink);border-radius:6px;padding:64px 76px;line-height:1.95;font-size:15px;outline:none;white-space:pre-wrap;box-shadow:0 18px 40px -22px rgba(0,0,0,.65)}
+[data-drafter-editor] .de-page{text-align:center;margin-top:10px;font-size:11px;color:var(--faint)}
+[data-drafter-editor] .de-assist{width:400px;flex:none;display:flex;flex-direction:column;border-radius:18px;border:1px solid var(--line);background:var(--surface);overflow:hidden;position:sticky;top:calc(var(--top-h) + var(--tools-h) + 16px);height:calc(100vh - var(--top-h) - var(--tools-h) - 40px);min-height:420px}
+[data-drafter-editor] .de-assist-head{padding:18px 24px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+[data-drafter-editor] .de-assist-head b{display:block;font-size:17px}
+[data-drafter-editor] .de-assist-head span{font-size:13.5px;color:var(--muted)}
+[data-drafter-editor] .de-assist-body{flex:1;min-height:0;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px;scrollbar-width:thin}
+[data-drafter-editor] .de-hello{border:1px solid var(--line);border-radius:18px;background:var(--surface-2);padding:20px}
+[data-drafter-editor] .de-hello-top{display:flex;gap:14px;align-items:center}
+[data-drafter-editor] .de-hello-ic{width:58px;height:58px;flex:none;border-radius:14px;background:var(--brand-solid);color:var(--on-brand);display:grid;place-items:center}
+[data-drafter-editor] .de-hello-top b{display:block;font-size:19px;line-height:1.2}
+[data-drafter-editor] .de-hello-top span{font-size:14px;color:var(--muted)}
+[data-drafter-editor] .de-greet{margin-top:16px;border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--surface)}
+[data-drafter-editor] .de-greet b{font-size:16px}
+[data-drafter-editor] .de-greet b em{font-style:normal;color:var(--brand-text)}
+[data-drafter-editor] .de-greet p{margin:6px 0 0;font-size:13.5px;color:var(--muted);line-height:1.6}
+[data-drafter-editor] .de-label{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:600}
+[data-drafter-editor] .de-quick{display:flex;flex-direction:column;gap:6px}
+[data-drafter-editor] .de-quick button{padding:9px 12px;border-radius:11px;border:1px solid var(--line);background:transparent;color:var(--muted);text-align:left;font-size:13px;cursor:pointer}
+[data-drafter-editor] .de-quick button:hover{border-color:var(--hover-line);background:var(--hover-tint);color:var(--hover-ink)}
+[data-drafter-editor] .de-msg{max-width:92%;padding:10px 13px;font-size:13.5px;line-height:1.6;white-space:pre-wrap}
+[data-drafter-editor] .de-msg.user{align-self:flex-end;border-radius:14px 14px 4px 14px;background:var(--teal);color:var(--on-teal)}
+[data-drafter-editor] .de-msg.ai{align-self:flex-start;border-radius:4px 14px 14px 14px;background:var(--surface-2);border:1px solid var(--line)}
+[data-drafter-editor] .de-dots{display:flex;gap:5px;padding:12px 16px}
+[data-drafter-editor] .de-dots i{width:6px;height:6px;border-radius:50%;background:var(--brand-text);animation:pulse 1.2s ease infinite}
+[data-drafter-editor] .de-compose{flex:none;padding:14px 18px 16px;border-top:1px solid var(--line)}
+[data-drafter-editor] .de-compose-box{border:1px solid var(--line);border-radius:18px;background:var(--surface-2);overflow:hidden}
+[data-drafter-editor] .de-compose-box:focus-within{border-color:var(--focus);box-shadow:0 0 0 3px var(--brand-soft)}
+[data-drafter-editor] .de-compose textarea{width:100%;border:0;outline:none;background:transparent;resize:none;padding:16px 18px 6px;font-size:15px;line-height:1.55}
+[data-drafter-editor] .de-compose textarea::placeholder{color:var(--faint)}
+[data-drafter-editor] .de-compose-row{display:flex;justify-content:space-between;align-items:center;padding:4px 10px 10px 18px;gap:10px}
+[data-drafter-editor] .de-hint{font-size:11.5px;color:var(--faint)}
+[data-drafter-editor] .de-foot{font-size:11.5px;color:var(--faint);text-align:center;margin-top:9px}
+[data-drafter-editor] .de-send{overflow:hidden}
+[data-drafter-editor] .de-send:hover:not(:disabled) svg{animation:deFly .75s cubic-bezier(.5,0,.3,1)}
+[data-drafter-editor] .de-tb svg{transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
+[data-drafter-editor] .de-tb:hover svg{transform:translateY(-1px) scale(1.12)}
+[data-drafter-editor] .de-back svg{transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
+[data-drafter-editor] .de-back:hover svg{transform:translateX(-3px)}
+@keyframes deFly{0%{transform:translate(0,0)}40%{transform:translate(16px,-16px);opacity:0}41%{transform:translate(-16px,16px);opacity:0}100%{transform:translate(0,0);opacity:1}}
+@media (prefers-reduced-motion:reduce){[data-drafter-editor] *{transition:none!important;animation:none!important}}`;
+
+/* One toolbar button: an icon with its name for screen readers and hover. */
+function TB({ label, active, onClick, children, style }) {
     return (
-        <button
-            title={label} onClick={onClick}
-            onMouseEnter={() => setHov(true)}
-            onMouseLeave={() => setHov(false)}
-            style={{
-                height: 30, minWidth: 30, padding: "0 7px",
-                borderRadius: 6,
-                border: active
-                    ? `1.5px solid ${t.primary}50`
-                    : `1.5px solid ${hov ? t.border : "transparent"}`,
-                cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                gap: 3, fontSize: 12, fontWeight: 600, fontFamily: "inherit",
-                background: active
-                    ? t.primaryGlow
-                    : hov ? t.cardHi
-                        : "transparent",
-                color: active ? t.primary : hov ? t.text : t.textMuted,
-                transition: "all .1s",
-                boxShadow: active ? `0 0 0 1px ${t.primary}20` : "none",
-                ...style,
-            }}
-        >
-            {children || label}
+        <button type="button" className="de-tb" title={label} aria-label={label}
+            aria-pressed={active === undefined ? undefined : Boolean(active)}
+            onMouseDown={e => e.preventDefault()} onClick={onClick} style={style}>
+            {children}
         </button>
     );
 }
 
-function ToolSep() {
-    const { t } = useTheme();
-    return <div style={{ width: 1, height: 18, background: t.border, margin: "0 5px", flexShrink: 0 }} />;
-}
-
-// ============================================================
-// STAGE 1 — TEMPLATE GALLERY
-// ============================================================
-function StageGallery({ onSelect, drafts, onOpenDraft, onDeleteDraft, t }) {
-    const [showDrafts, setShowDrafts] = useState(false);
-    const [search, setSearch] = useState("");
-    const [cat, setCat] = useState("All");
-    const [bookmarked, setBookmarked] = useState(new Set([1]));
-
-    const filtered = TEMPLATES.filter(tmpl =>
-        (cat === "All" || tmpl.cat === cat) &&
-        (tmpl.name.toLowerCase().includes(search.toLowerCase()) || tmpl.desc.toLowerCase().includes(search.toLowerCase()))
-    );
-
-    const toggleBookmark = (e, id) => {
-        e.stopPropagation();
-        setBookmarked(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-    };
-
-    return (
-        <div style={{ display: "flex", flexDirection: "column", padding: "24px 28px" }} className="fade-in">
-            {/* Header */}
-            <div style={{ marginBottom: 24 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                    <div style={{ width: 32, height: 32, borderRadius: 9, background: t.primaryGlow, border: `1.5px solid ${t.primary}30`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>⚖️</div>
-                    <div className="serif" style={{ fontSize: 26, fontWeight: 700, color: t.text, letterSpacing: "0.02em" }}>Drafter</div>
-                </div>
-                <div style={{ fontSize: 13, color: t.textMuted, marginTop: 2 }}>AI-powered legal document generation for Pakistani law</div>
-            </div>
-
-            {/* Search */}
-            <div style={{ position: "relative", marginBottom: 18, border: `1.5px solid ${t.border}`, borderRadius: 12, background: t.card, overflow: "hidden", boxShadow: t.shadowCard, transition: "border-color .15s" }}
-                onFocusCapture={e => e.currentTarget.style.borderColor = t.primary}
-                onBlurCapture={e => e.currentTarget.style.borderColor = t.border}>
-                <div style={{ position: "absolute", left: 15, top: "50%", transform: "translateY(-50%)", color: t.textFaint }}><Icon d={I.search} size={16} /></div>
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search templates…"
-                    style={{ width: "100%", height: 46, paddingLeft: 44, paddingRight: 16, background: "transparent", border: "none", outline: "none", color: t.text, fontSize: 14, fontFamily: "inherit" }} />
-            </div>
-
-            {/* Category Pills */}
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 24 }}>
-                {CATEGORIES.map(c => (
-                    <button key={c} onClick={() => setCat(c)}
-                        style={{ padding: "6px 14px", borderRadius: 100, fontSize: 12, fontWeight: 600, border: `1.5px solid ${cat === c ? t.primary : t.border}`, background: cat === c ? t.primary : "transparent", color: cat === c ? (t.mode === "dark" ? t.bg : t.surface) : t.textMuted, cursor: "pointer", transition: "all .15s", whiteSpace: "nowrap" }}>
-                        {c}
-                    </button>
-                ))}
-            </div>
-
-            {/* Hero Cards */}
-            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-                {[
-                    { label: "New Document", sub: "Start from the generic legal-draft scaffold.", icon: I.plus, color: t.primary, onClick: () => onSelect(BLANK_TEMPLATE) },
-                    { label: "My Drafts", sub: `${drafts.length} saved draft${drafts.length === 1 ? "" : "s"} — continue where you left off.`, icon: I.save, color: t.warn, onClick: () => setShowDrafts(v => !v) },
-                ].map(h => (
-                    <button key={h.label} onClick={h.onClick}
-                        style={{ padding: "20px 20px", borderRadius: 14, textAlign: "left", border: `1.5px solid ${t.border}`, background: t.card, cursor: "pointer", transition: "all .18s" }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = h.color; e.currentTarget.style.background = `${h.color}08`; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.card; e.currentTarget.style.transform = "none"; }}>
-                        <div style={{ width: 38, height: 38, borderRadius: 11, border: `1.5px solid ${h.color}40`, background: `${h.color}14`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
-                            <Icon d={h.icon} size={18} style={{ color: h.color }} />
-                        </div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: t.text, marginBottom: 3 }}>{h.label}</div>
-                        <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.5 }}>{h.sub}</div>
-                    </button>
-                ))}
-            </div>
-
-            {/* Saved drafts */}
-            {showDrafts && (
-                <div style={{ marginBottom: 24 }} className="fade-in">
-                    <div style={{ fontSize: 10, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>My Drafts</div>
-                    {drafts.length === 0 && (
-                        <div style={{ padding: "18px 16px", borderRadius: 12, border: `1.5px dashed ${t.border}`, color: t.textMuted, fontSize: 12.5 }}>
-                            No saved drafts yet — open a template and hit "Save Draft".
-                        </div>
-                    )}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {drafts.map(d => (
-                            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${t.border}`, background: t.card }}>
-                                <div style={{ width: 34, height: 34, borderRadius: 9, background: t.cardHi, border: `1px solid ${t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{d.template_icon || "📄"}</div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.title}</div>
-                                    <div style={{ fontSize: 11, color: t.textMuted }}>
-                                        Last saved {d.updated_at ? new Date(d.updated_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
-                                    </div>
-                                </div>
-                                <button onClick={() => onOpenDraft(d)}
-                                    style={{ padding: "6px 14px", borderRadius: 8, border: `1.5px solid ${t.primary}40`, background: t.primaryGlow2, color: t.primary, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
-                                    Open
-                                </button>
-                                <button onClick={() => onDeleteDraft(d.id)}
-                                    style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${t.border}`, background: "transparent", color: t.textMuted, cursor: "pointer", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}
-                                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.danger || "#e5484d"; e.currentTarget.style.color = t.danger || "#e5484d"; }}
-                                    onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}>
-                                    Delete
-                                </button>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Persistent, unlike the editor's in-session "Saved" state: this
-                reads the server every time the gallery mounts, so a document
-                saved before a refresh or a navigation is still here. */}
-            <MyDocuments t={t} />
-
-            {search === "" && cat === "All" && (
-                <div style={{ fontSize: 10, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Popular Templates</div>
-            )}
-
-            {/* Template Grid */}
-            <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {filtered.map(tmpl => (
-                    <button key={tmpl.id} onClick={() => onSelect(tmpl)}
-                        style={{ padding: "18px 18px 16px", borderRadius: 14, textAlign: "left", border: `1.5px solid ${t.border}`, background: t.card, cursor: "pointer", transition: "all .18s", position: "relative" }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = t.borderHi; e.currentTarget.style.background = t.cardHi; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.card; e.currentTarget.style.transform = "none"; }}>
-                        <div onClick={e => toggleBookmark(e, tmpl.id)}
-                            style={{ position: "absolute", top: 12, right: 12, width: 26, height: 26, borderRadius: 7, background: bookmarked.has(tmpl.id) ? `${t.warn}18` : "transparent", border: `1px solid ${bookmarked.has(tmpl.id) ? t.warn + "40" : "transparent"}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: bookmarked.has(tmpl.id) ? t.warn : t.textFaint, transition: "all .12s" }}
-                            onMouseEnter={e => { e.currentTarget.style.color = t.warn; e.currentTarget.style.background = `${t.warn}18`; e.currentTarget.style.borderColor = `${t.warn}40`; }}
-                            onMouseLeave={e => { e.currentTarget.style.color = bookmarked.has(tmpl.id) ? t.warn : t.textFaint; e.currentTarget.style.background = bookmarked.has(tmpl.id) ? `${t.warn}18` : "transparent"; }}>
-                            <Icon d={I.bookmark} size={13} />
-                        </div>
-                        <div style={{ width: 36, height: 36, borderRadius: 9, background: t.cardHi, border: `1px solid ${t.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, marginBottom: 10 }}>{tmpl.icon}</div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 5, paddingRight: 26, lineHeight: 1.35 }}>{tmpl.name}</div>
-                        <div style={{ fontSize: 11, color: t.textMuted, lineHeight: 1.6, marginBottom: 12 }}>{tmpl.desc}</div>
-                        <div style={{ display: "flex", gap: 5 }}>
-                            <span style={{ fontSize: 9.5, padding: "2px 7px", borderRadius: 5, background: t.primaryGlow2, color: t.primary, fontWeight: 700 }}>{tmpl.cat}</span>
-                            {tmpl.popular && <span style={{ fontSize: 9.5, padding: "2px 7px", borderRadius: 5, background: `${t.warn}14`, color: t.warn, fontWeight: 700 }}>Popular</span>}
-                        </div>
-                    </button>
-                ))}
-                {filtered.length === 0 && (
-                    <div style={{ gridColumn: "1/-1", padding: "48px 0", textAlign: "center", color: t.textFaint, fontSize: 13 }}>No templates found for "{search}"</div>
-                )}
-            </div>
-        </div>
-    );
-}
+// STAGE 1 — the template home lives in DraftingHome.jsx (2026-10-09).
 
 // ============================================================
 // STAGE 2 — EDITOR
@@ -219,11 +141,10 @@ function CitationStrip({ t, draftCheck, stale, documentCheck }) {
     const tone = _TONE(t);
     return (
         <div data-citation-strip style={{
-            flexShrink: 0, padding: "5px 24px", fontSize: 11, borderBottom: `1px solid ${t.border}`,
-            background: t.surface, color: t.textMuted, display: "flex", flexWrap: "wrap", gap: "4px 18px",
+            fontSize: 12, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: "4px 18px",
         }}>
             <span data-check="draft">
-                <b style={{ color: t.textDim }}>Citation check · last saved draft:</b>{" "}
+                <b style={{ color: "var(--ink)" }}>Citation check · last saved draft:</b>{" "}
                 {d ? <>
                     <span style={{ color: stale ? t.textMuted : tone[d.tone], fontWeight: 700,
                                    textDecoration: stale ? "line-through" : "none" }}>{d.headline}</span>
@@ -234,7 +155,7 @@ function CitationStrip({ t, draftCheck, stale, documentCheck }) {
             </span>
             {doc && (
                 <span data-check="document">
-                    <b style={{ color: t.textDim }}>Copy saved to Documents (frozen):</b>{" "}
+                    <b style={{ color: "var(--ink)" }}>Copy saved to Documents (frozen):</b>{" "}
                     <span style={{ color: tone[doc.tone], fontWeight: 700 }}>{doc.headline}</span>
                 </span>
             )}
@@ -259,13 +180,10 @@ function RequirementsChecklist({ t, report }) {
         return next;
     });
     return (
-        <div data-requirements style={{
-            flexShrink: 0, padding: "5px 24px", fontSize: 11, borderBottom: `1px solid ${t.border}`,
-            background: t.surface, color: t.textMuted,
-        }}>
+        <div data-requirements style={{ fontSize: 12, color: "var(--muted)" }}>
             <button type="button" onClick={() => setOpen(o => !o)} style={{
                 background: "transparent", border: "none", padding: 0, cursor: "pointer",
-                color: t.textDim, fontSize: 11, fontWeight: 700,
+                color: "var(--ink)", fontSize: 12, fontWeight: 700,
             }}>
                 {open ? "▾" : "▸"} Requirements checklist · {report.basis} — {ticked.size}/{report.items.length} confirmed by you
             </button>
@@ -294,6 +212,7 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
     // the page selector's current value. See lib/draftCaseBinding.js.
     const caseObj = binding.caseObj;
     const caseId = boundCaseId(binding);
+    const { setPage } = useCase();
     const caseBlocked = caseActionsBlocked(binding);
     // The instrument this draft is, when the system knows one. A reopened draft
     // may carry only the template's name, so the catalogue is asked by name too.
@@ -358,14 +277,19 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
     const editorRef = useRef(null);
     const aiEndRef = useRef(null);
     const aiInputRef = useRef(null);
+    // "Draft with AI" from the template home opens here, ready to describe the facts.
+    useEffect(() => { if (tmpl?.aiFirst) aiInputRef.current?.focus(); }, [tmpl]);
 
     const h = new Date().getHours();
     const greeting = h < 12 ? "Good Morning" : h < 17 ? "Good Afternoon" : "Good Evening";
     const { user } = useAuth();
     const userName = user?.full_name?.split(" ")[0] || "Counselor";
-    const greetIcon = h < 12 ? "🌅" : h < 17 ? "☀️" : "🌙";
 
-    useEffect(() => { aiEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [aiMessages, aiLoading]);
+    // Follow the conversation once there is one. On an empty panel this would
+    // scroll the assistant's introduction out of view.
+    useEffect(() => {
+        if (aiMessages.length || aiLoading) aiEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, [aiMessages, aiLoading]);
     useEffect(() => { setWordCount((editorRef.current?.innerText || "").trim().split(/\s+/).filter(Boolean).length); }, []);
 
     // Emit tag-based formatting (<b>, <font face>, align=) rather than inline
@@ -584,541 +508,222 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
 
     const FONT_OPTIONS = ["Default Font", "Georgia", "Times New Roman", "Courier New", "Arial"];
     const SIZE_OPTIONS = ["10", "11", "12", "13", "14", "16", "18", "20"];
-    const selStyle = { height: 26, borderRadius: 7, border: `1.5px solid ${t.border}`, background: t.card, color: t.text, fontSize: 11.5, padding: "0 6px", cursor: "pointer", fontFamily: "inherit", outline: "none" };
+    const mode = draftingMode(t);
+    const displayName = user?.full_name || "Advocate";
+    const initials = displayName.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+    const docFile = (draft?.title || tmpl.name).replace(/[^\w\s-]/g, "").trim() || "document";
+    const lineIcon = d => <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 56, right: 0, bottom: 0, background: t.bg, zIndex: 10, transition: "left .25s ease" }}>
+        <div data-drafter-editor data-drafting-theme data-mode={mode}>
+            <style>{DRAFTING_TOKENS_CSS + "\n" + EDITOR_CSS}</style>
 
-            {/* ── Enhanced Top bar ── */}
-            <div style={{
-                height: 64, minHeight: 64,
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                borderBottom: `2px solid ${t.border}`,
-                background: `linear-gradient(90deg, ${t.surface} 0%, ${t.cardHi} 100%)`,
-                padding: "0 24px",
-                flexShrink: 0,
-                gap: 32,
-                boxShadow: `0 2px 8px ${t.border}20`,
-            }}>
-
-                {/* LEFT — Enhanced navigation and document info */}
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-
-                    <button onClick={onBack}
-                        style={{
-                            display: "flex", alignItems: "center", gap: 6,
-                            background: `linear-gradient(135deg, ${t.primary}15, ${t.primary}05)`,
-                            border: `1.5px solid ${t.primary}30`,
-                            color: t.primary, cursor: "pointer",
-                            fontSize: 12, fontWeight: 600,
-                            padding: "8px 12px 8px 8px", borderRadius: 10,
-                            transition: "all .15s", flexShrink: 0, whiteSpace: "nowrap",
-                        }}
-                        onMouseEnter={e => {
-                            e.currentTarget.style.background = `linear-gradient(135deg, ${t.primary}25, ${t.primary}10)`;
-                            e.currentTarget.style.borderColor = t.primary;
-                            e.currentTarget.style.transform = "translateY(-1px)";
-                        }}
-                        onMouseLeave={e => {
-                            e.currentTarget.style.background = `linear-gradient(135deg, ${t.primary}15, ${t.primary}05)`;
-                            e.currentTarget.style.borderColor = `${t.primary}30`;
-                            e.currentTarget.style.transform = "translateY(0)";
-                        }}>
-                        <Icon d={I.chevronLeft} size={14} /> Back to Templates
-                    </button>
-
-                    {/* Enhanced separator */}
-                    <div style={{
-                        width: 1, height: 24,
-                        background: `linear-gradient(to bottom, transparent, ${t.border}, transparent)`,
-                        flexShrink: 0
-                    }} />
-
-                    {/* Enhanced document info with icon */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                        <div style={{
-                            width: 36, height: 36, borderRadius: 10,
-                            background: `linear-gradient(135deg, ${t.primary}20, ${t.primary}10)`,
-                            border: `1.5px solid ${t.primary}35`,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 16, flexShrink: 0,
-                        }}>
-                            {tmpl.icon}
-                        </div>
-
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                            <div style={{
-                                fontSize: 14, fontWeight: 700, color: t.text,
-                                whiteSpace: "nowrap", letterSpacing: "-0.01em",
-                                lineHeight: 1.2
-                            }}>
-                                {tmpl.name}
-                            </div>
-                            <div style={{
-                                fontSize: 11, color: t.textMuted, whiteSpace: "nowrap",
-                                letterSpacing: "0.02em", display: "flex", alignItems: "center", gap: 6
-                            }}>
-                                <span style={{
-                                    padding: "2px 6px", borderRadius: 4,
-                                    background: `${t.primary}15`, color: t.primary,
-                                    fontSize: 10, fontWeight: 600
-                                }}>
-                                    {tmpl.cat}
-                                </span>
-                                <span style={{ color: t.border }}>•</span>
-                                <span>{new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
-                                <span style={{ color: t.border }}>•</span>
-                                <span style={{ color: t.success, fontWeight: 600 }}>{wordCount} words</span>
-                            </div>
-                        </div>
+            {/* ── Top bar: back, the document, its actions, the account ── */}
+            <header className="de-top">
+                <button type="button" className="de-back" onClick={onBack} aria-label="Back to templates" title="Back to templates">
+                    <Icon d={I.chevronLeft} size={20} />
+                </button>
+                <div className="de-title">
+                    <h1>{draft?.title || tmpl.name}</h1>
+                    <div className="de-meta">
+                        <span className="de-cat">{tmpl.cat}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{wordCount} words</span>
                     </div>
-
                 </div>
-
-                {/* RIGHT — Enhanced action buttons */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-
-                    {saved && (
-                        <span style={{
-                            fontSize: 11, color: t.success,
-                            display: "flex", alignItems: "center", gap: 5,
-                            padding: "6px 12px", borderRadius: 10,
-                            background: `linear-gradient(135deg, ${t.success}20, ${t.success}10)`,
-                            border: `1.5px solid ${t.success}40`,
-                            whiteSpace: "nowrap", fontWeight: 600,
-                            boxShadow: `0 2px 8px ${t.success}25`,
-                        }}>
-                            <Icon d={I.checkCircle} size={12} /> Draft Saved
-                        </span>
-                    )}
-                    {publishIssue && (
-                        <span style={{ fontSize: 11, color: t.danger, whiteSpace: "nowrap" }}>
-                            {publishIssue}
-                        </span>
-                    )}
-
-                    {saveErr && (
-                        <span style={{
-                            fontSize: 11, color: t.danger || "#e5484d",
-                            padding: "6px 12px", borderRadius: 10,
-                            background: `${t.danger || "#e5484d"}15`,
-                            border: `1.5px solid ${t.danger || "#e5484d"}40`,
-                            whiteSpace: "nowrap", fontWeight: 600,
-                        }}>
-                            {saveErr}
-                        </span>
-                    )}
-
-                    {/* Enhanced divider */}
-                    <div style={{
-                        width: 1, height: 20,
-                        background: `linear-gradient(to bottom, transparent, ${t.border}, transparent)`,
-                        flexShrink: 0, margin: "0 4px"
-                    }} />
-
-                    {/* Save button — persists the draft to the backend */}
-                    <button
-                        onClick={handleSave}
-                        disabled={saving || caseBlocked}
-                        style={{
-                            padding: "7px 14px", borderRadius: 10,
-                            border: `1.5px solid ${t.border}`,
-                            background: `linear-gradient(135deg, ${t.cardHi}, ${t.card})`,
-                            color: t.text, cursor: "pointer",
-                            fontSize: 11.5, fontWeight: 600, fontFamily: "inherit",
-                            display: "flex", alignItems: "center", gap: 5,
-                            whiteSpace: "nowrap", transition: "all .15s",
-                            boxShadow: `0 2px 4px ${t.border}30`,
-                        }}
-                        onMouseEnter={e => {
-                            e.currentTarget.style.background = `linear-gradient(135deg, ${t.primary}15, ${t.primary}05)`;
-                            e.currentTarget.style.borderColor = t.primary;
-                            e.currentTarget.style.color = t.primary;
-                            e.currentTarget.style.transform = "translateY(-1px)";
-                        }}
-                        onMouseLeave={e => {
-                            e.currentTarget.style.background = `linear-gradient(135deg, ${t.cardHi}, ${t.card})`;
-                            e.currentTarget.style.borderColor = t.border;
-                            e.currentTarget.style.color = t.text;
-                            e.currentTarget.style.transform = "translateY(0)";
-                        }}>
-                        <Icon d={I.save} size={13} /> {saving ? "Saving…" : "Save Draft"}
+                <div className="de-right">
+                    {saved && <span className="de-note ok"><Icon d={I.checkCircle} size={12} /> Draft Saved</span>}
+                    {saveErr && <span className="de-note bad" role="alert">{saveErr}</span>}
+                    {publishIssue && <span className="de-note bad" role="alert">{publishIssue}</span>}
+                    <button type="button" className="de-btn primary" onClick={handleSave} disabled={saving || caseBlocked}>
+                        <Icon d={I.save} size={15} /> {saving ? "Saving…" : "Save Draft"}
                     </button>
-
-                    {/* Beside Export, not instead of it.
-                        Export hands someone a file they will edit. This keeps
-                        the draft as an artifact the system can name, hash and
-                        reproduce — which is what makes a citation check on it
-                        mean anything later. It does NOT file anything with a
-                        court, and the label must not suggest that it does. */}
-                    <button onClick={publishAsDocument} disabled={publishing || caseBlocked}
-                        title="Save a fixed, hashed copy of this draft into your documents"
-                        style={{
-                            padding: "5px 13px", borderRadius: 8,
-                            border: `1px solid ${t.primary}50`,
-                            background: published ? `${t.primary}22` : t.primaryGlow2,
-                            color: t.primary, cursor: publishing ? "default" : "pointer",
-                            fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
-                            display: "flex", alignItems: "center", gap: 4,
-                            whiteSpace: "nowrap", opacity: publishing ? 0.6 : 1,
-                        }}>
-                        <Icon d={I.save} size={12} />{" "}
-                        {publishing ? "Saving…" : published ? "Saved ✓" : "Save to Documents"}
+                    {/* Beside Export, not instead of it. Export hands someone a
+                        file they will edit. This keeps the draft as an artifact the
+                        system can name, hash and reproduce — which is what makes a
+                        citation check on it mean anything later. It does NOT file
+                        anything with a court, and the label must not suggest so. */}
+                    <button type="button" className="de-btn" onClick={publishAsDocument} disabled={publishing || caseBlocked}
+                        title="Save a fixed, hashed copy of this draft into your documents">
+                        <Icon d={I.fileText} size={15} /> {publishing ? "Saving…" : published ? "Saved ✓" : "Save to Documents"}
                     </button>
-
                     {published && (
-                        <button
+                        <button type="button" className="de-btn"
                             onClick={async () => {
                                 setPublishIssue("");
-                                const saved = await downloadDocumentFile(
-                                    published.docId,
-                                    `${(draft?.title || tmpl.name).replace(/[^\w\s-]/g, "").trim() || "document"}.pdf`,
-                                    { revisionId: published.revisionId,
-                                      expectedPdfSha256: published.pdfSha256 });
+                                const saved = await downloadDocumentFile(published.docId, `${docFile}.pdf`,
+                                    { revisionId: published.revisionId, expectedPdfSha256: published.pdfSha256 });
                                 if (saved?.error) setPublishIssue(saved.error);
-                            }}
-                            style={{
-                                padding: "5px 13px", borderRadius: 8,
-                                border: `1px solid ${t.border}`, background: t.card,
-                                color: t.text, cursor: "pointer",
-                                fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
-                                display: "flex", alignItems: "center", gap: 4,
-                                whiteSpace: "nowrap",
                             }}>
-                            <Icon d={I.download} size={12} /> Saved PDF
+                            <Icon d={I.download} size={15} /> Saved PDF
                         </button>
                     )}
-
-                    <button onClick={handleExport} style={{
-                        padding: "5px 13px", borderRadius: 8,
-                        border: `1px solid ${t.primary}50`, background: t.primaryGlow2,
-                        color: t.primary, cursor: "pointer",
-                        fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
-                        display: "flex", alignItems: "center", gap: 4,
-                        whiteSpace: "nowrap",
-                    }}>
-                        <Icon d={I.download} size={12} /> Export Word
-                    </button>
-
-                    <button onClick={translateToUrdu} title="Translate this draft into court Urdu" style={{
-                        padding: "5px 13px", borderRadius: 8,
-                        border: `1px solid #16a34a55`, background: "#16a34a12",
-                        color: "#16a34a", cursor: "pointer",
-                        fontSize: 11.5, fontWeight: 700, fontFamily: "inherit",
-                        display: "flex", alignItems: "center", gap: 5,
-                        whiteSpace: "nowrap",
-                    }}>
-                        <span style={{ fontSize: 13 }}>اردو</span> Court Urdu
-                    </button>
-                </div>
-            </div>
-
-            {/* Which matter this document belongs to. The page's case selector is
-                hidden under this full-screen editor, so without this strip the
-                lawyer cannot see which case the AI and Save are acting on. */}
-            <div data-case-binding={binding.state} style={{
-                flexShrink: 0, padding: "6px 24px", fontSize: 11.5, fontWeight: 600,
-                borderBottom: `1px solid ${t.border}`,
-                background: binding.state === "unavailable" ? `${t.danger || "#e5484d"}14` : t.surface,
-                color: binding.state === "unavailable" ? (t.danger || "#e5484d") : t.textMuted,
-            }}>
-                {binding.state === "bound" && <>Case: {caseObj?.id} — {caseObj?.title}</>}
-                {binding.state === "none" && <>No case — this draft is not attached to any matter.</>}
-                {binding.state === "loading" && <>Loading the case this draft belongs to…</>}
-                {binding.state === "unavailable" && <>
-                    This draft belongs to a case that could not be loaded — it may have been
-                    reassigned, or you may be offline. Save, AI drafting and Save to Documents
-                    are paused so this draft is not attached to another matter. Export still works.
-                </>}
-            </div>
-
-            {/* Citation check — the server's, not the browser's. Two results,
-                kept apart: the draft as last saved (goes stale on edit) and the
-                copy saved to Documents (frozen; describes that copy). */}
-            <CitationStrip t={t} draftCheck={savedCheck} stale={checkStale}
-                documentCheck={published?.verification ?? null} />
-            <RequirementsChecklist t={t} report={requirements} />
-
-            {/* ── Rich-text Toolbar ── */}
-            <div style={{
-                display: "flex", alignItems: "center", gap: 2,
-                padding: "0 10px", height: 40, minHeight: 40,
-                borderBottom: `1px solid ${t.border}`,
-                background: t.surface,
-                flexWrap: "nowrap", overflowX: "auto", flexShrink: 0,
-            }}>
-
-                {/* History */}
-                <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
-                    <ToolBtn label="Undo (Ctrl+Z)" onClick={() => exec("undo")}>
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 7.5H10a4 4 0 010 8H6" /><path d="M.5 7.5l3-3M.5 7.5l3 3" /></svg>
-                    </ToolBtn>
-                    <ToolBtn label="Redo (Ctrl+Y)" onClick={() => exec("redo")}>
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M13.5 7.5H6a4 4 0 000 8h4" /><path d="M15.5 7.5l-3-3M15.5 7.5l-3 3" /></svg>
-                    </ToolBtn>
-                </div>
-                <ToolSep />
-
-                {/* Font family + size */}
-                <select value={font} onChange={e => { setFont(e.target.value); exec("fontName", e.target.value); }} style={{ ...selStyle, width: 124 }}>
-                    {FONT_OPTIONS.map(f => <option key={f} value={f} style={{ background: t.surface }}>{f}</option>)}
-                </select>
-                <select value={fontSize} onChange={e => { setFontSize(e.target.value); exec("fontSize", e.target.value); }} style={{ ...selStyle, width: 44 }}>
-                    {SIZE_OPTIONS.map(s => <option key={s} value={s} style={{ background: t.surface }}>{s}</option>)}
-                </select>
-                <ToolSep />
-
-                {/* Text formatting */}
-                <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
-                    <ToolBtn label="Bold (Ctrl+B)" active={queryState("bold")} onClick={() => exec("bold")}
-                        style={{ fontFamily: "Georgia, serif", fontWeight: 900, fontSize: 14, letterSpacing: "-0.5px" }}>B</ToolBtn>
-                    <ToolBtn label="Italic (Ctrl+I)" active={queryState("italic")} onClick={() => exec("italic")}
-                        style={{ fontFamily: "Georgia, serif", fontStyle: "italic", fontWeight: 400, fontSize: 14 }}>I</ToolBtn>
-                    <ToolBtn label="Underline (Ctrl+U)" active={queryState("underline")} onClick={() => exec("underline")}
-                        style={{ textDecoration: "underline", fontSize: 13, fontWeight: 700 }}>U</ToolBtn>
-                    <ToolBtn label="Strikethrough" onClick={() => exec("strikeThrough")}
-                        style={{ textDecoration: "line-through", fontSize: 12, fontWeight: 500, color: "inherit", opacity: 0.8 }}>S</ToolBtn>
-                    <ToolBtn label="Subscript" onClick={() => exec("subscript")} style={{ fontSize: 11, fontWeight: 600 }}>
-                        X<sub style={{ fontSize: "65%", lineHeight: 0, verticalAlign: "sub" }}>2</sub>
-                    </ToolBtn>
-                    <ToolBtn label="Superscript" onClick={() => exec("superscript")} style={{ fontSize: 11, fontWeight: 600 }}>
-                        X<sup style={{ fontSize: "65%", lineHeight: 0, verticalAlign: "super" }}>2</sup>
-                    </ToolBtn>
-                </div>
-                <ToolSep />
-
-                {/* Alignment */}
-                <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
-                    <ToolBtn label="Align Left" active={queryState("justifyLeft")} onClick={() => exec("justifyLeft")}>
-                        <svg width="15" height="13" viewBox="0 0 15 13" fill="currentColor">
-                            <rect x="0" y="0" width="15" height="2" rx="1" />
-                            <rect x="0" y="3.5" width="10" height="2" rx="1" />
-                            <rect x="0" y="7" width="15" height="2" rx="1" />
-                            <rect x="0" y="10.5" width="7" height="2" rx="1" />
-                        </svg>
-                    </ToolBtn>
-                    <ToolBtn label="Align Center" active={queryState("justifyCenter")} onClick={() => exec("justifyCenter")}>
-                        <svg width="15" height="13" viewBox="0 0 15 13" fill="currentColor">
-                            <rect x="0" y="0" width="15" height="2" rx="1" />
-                            <rect x="2.5" y="3.5" width="10" height="2" rx="1" />
-                            <rect x="0" y="7" width="15" height="2" rx="1" />
-                            <rect x="4" y="10.5" width="7" height="2" rx="1" />
-                        </svg>
-                    </ToolBtn>
-                    <ToolBtn label="Align Right" active={queryState("justifyRight")} onClick={() => exec("justifyRight")}>
-                        <svg width="15" height="13" viewBox="0 0 15 13" fill="currentColor">
-                            <rect x="0" y="0" width="15" height="2" rx="1" />
-                            <rect x="5" y="3.5" width="10" height="2" rx="1" />
-                            <rect x="0" y="7" width="15" height="2" rx="1" />
-                            <rect x="8" y="10.5" width="7" height="2" rx="1" />
-                        </svg>
-                    </ToolBtn>
-                    <ToolBtn label="Justify" active={queryState("justifyFull")} onClick={() => exec("justifyFull")}>
-                        <svg width="15" height="13" viewBox="0 0 15 13" fill="currentColor">
-                            <rect x="0" y="0" width="15" height="2" rx="1" />
-                            <rect x="0" y="3.5" width="15" height="2" rx="1" />
-                            <rect x="0" y="7" width="15" height="2" rx="1" />
-                            <rect x="0" y="10.5" width="15" height="2" rx="1" />
-                        </svg>
-                    </ToolBtn>
-                </div>
-                <ToolSep />
-
-                {/* Lists */}
-                <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
-                    <ToolBtn label="Bullet List" active={queryState("insertUnorderedList")} onClick={() => exec("insertUnorderedList")}>
-                        <svg width="15" height="13" viewBox="0 0 15 13" fill="currentColor">
-                            <circle cx="1.5" cy="2" r="1.5" />
-                            <circle cx="1.5" cy="6.5" r="1.5" />
-                            <circle cx="1.5" cy="11" r="1.5" />
-                            <rect x="4.5" y="1" width="10" height="2" rx="1" />
-                            <rect x="4.5" y="5.5" width="10" height="2" rx="1" />
-                            <rect x="4.5" y="10" width="10" height="2" rx="1" />
-                        </svg>
-                    </ToolBtn>
-                    <ToolBtn label="Numbered List" active={queryState("insertOrderedList")} onClick={() => exec("insertOrderedList")}>
-                        <svg width="15" height="13" viewBox="0 0 15 13" fill="currentColor">
-                            <text x="0" y="3.5" fontSize="4" fontFamily="monospace" fontWeight="bold">1.</text>
-                            <text x="0" y="8" fontSize="4" fontFamily="monospace" fontWeight="bold">2.</text>
-                            <text x="0" y="12.5" fontSize="4" fontFamily="monospace" fontWeight="bold">3.</text>
-                            <rect x="5.5" y="1" width="9" height="2" rx="1" />
-                            <rect x="5.5" y="5.5" width="9" height="2" rx="1" />
-                            <rect x="5.5" y="10" width="9" height="2" rx="1" />
-                        </svg>
-                    </ToolBtn>
-                </div>
-                <ToolSep />
-
-                {/* Headings */}
-                <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
-                    <ToolBtn label="Heading 1" onClick={() => exec("formatBlock", "h1")}
-                        style={{ fontSize: 13, fontWeight: 900, fontFamily: "Georgia,serif", letterSpacing: "-0.3px" }}>H1</ToolBtn>
-                    <ToolBtn label="Heading 2" onClick={() => exec("formatBlock", "h2")}
-                        style={{ fontSize: 11.5, fontWeight: 800, fontFamily: "Georgia,serif" }}>H2</ToolBtn>
-                    <ToolBtn label="Heading 3" onClick={() => exec("formatBlock", "h3")}
-                        style={{ fontSize: 10, fontWeight: 700, fontFamily: "Georgia,serif" }}>H3</ToolBtn>
-                </div>
-                <ToolSep />
-
-                {/* Extras */}
-                <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
-                    <ToolBtn label="Block Quote" onClick={() => exec("formatBlock", "blockquote")}>
-                        <svg width="14" height="12" viewBox="0 0 14 12" fill="currentColor" opacity="0.9">
-                            <path d="M0 0h5v5H3C3 7 4 8 6 8v2C2 10 0 8 0 5V0zm8 0h5v5h-2C11 7 12 8 14 8v2c-4 0-6-2-6-5V0z" />
-                        </svg>
-                    </ToolBtn>
-                    <ToolBtn label="Horizontal Rule" onClick={() => exec("insertHorizontalRule")}>
-                        <svg width="14" height="10" viewBox="0 0 14 10" fill="currentColor">
-                            <rect x="0" y="4" width="14" height="2" rx="1" />
-                            <rect x="0" y="0" width="3" height="1.5" rx="0.5" opacity="0.4" />
-                            <rect x="11" y="0" width="3" height="1.5" rx="0.5" opacity="0.4" />
-                            <rect x="0" y="8.5" width="3" height="1.5" rx="0.5" opacity="0.4" />
-                            <rect x="11" y="8.5" width="3" height="1.5" rx="0.5" opacity="0.4" />
-                        </svg>
-                    </ToolBtn>
-                </div>
-
-                {/* Word count */}
-                <div style={{ marginLeft: "auto", fontSize: 10, color: t.textFaint, whiteSpace: "nowrap", paddingLeft: 12, paddingRight: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                    <svg width="10" height="10" viewBox="0 0 12 12" fill={t.textFaint}><rect x="1" y="1" width="10" height="1.5" rx="0.6" /><rect x="1" y="4" width="7" height="1.5" rx="0.6" /><rect x="1" y="7" width="10" height="1.5" rx="0.6" /><rect x="1" y="10" width="5" height="1.5" rx="0.6" /></svg>
-                    {wordCount} words
-                </div>
-            </div>
-
-            {/* ── Main Split ── */}
-            <div style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0, overflow: "hidden" }}>
-
-                {/* LEFT — Paper canvas */}
-                <div style={{
-                    flex: 1, minWidth: 0,
-                    overflowY: "auto", overflowX: "hidden",
-                    background: t.bg, padding: "32px 28px",
-                }}>
-                    <div
-                        ref={editorRef}
-                        contentEditable
-                        suppressContentEditableWarning
-                        spellCheck={false}
-                        onInput={e => { markEdited(); setWordCount(e.currentTarget.innerText.trim().split(/\s+/).filter(Boolean).length); }}
-                        style={{
-                            minHeight: 600, maxWidth: 780, margin: "0 auto",
-                            background: t.card, borderRadius: 4,
-                            boxShadow: t.shadowCard,
-                            padding: "68px 80px",
-                            fontFamily: font === "Default Font" ? "Georgia, 'Times New Roman', serif" : font,
-                            fontSize: 13.5, lineHeight: 1.95,
-                            color: t.text, outline: "none", whiteSpace: "pre-wrap", letterSpacing: "0.01em",
-                        }}
-                        dangerouslySetInnerHTML={{ __html: initialHtml }}
-                    />
-                    <div style={{ textAlign: "center", marginTop: 10, fontSize: 10, color: t.textFaint, letterSpacing: "0.05em" }}>— Page 1 —</div>
-                </div>
-
-                {/* RIGHT — AI Panel */}
-                <div style={{ display: "flex", flexDirection: "column", width: 370, flexShrink: 0, borderLeft: `1px solid ${t.border}`, background: t.surface, overflow: "hidden" }}>
-
-                    {/* Messages */}
-                    <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px 8px", display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
-
-                        {aiMessages.length === 0 && (
-                            <div className="fade-in">
-                                <div style={{ background: t.mode === "dark" ? `linear-gradient(140deg, ${t.primaryGlow} 0%, ${t.primaryGlow2} 100%)` : `linear-gradient(140deg, ${t.primaryGlow2} 0%, ${t.cardHi} 100%)`, border: `1.5px solid ${t.primary}20`, borderRadius: 14, padding: "14px 14px 12px", marginBottom: 12 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                                        <span style={{ fontSize: 20 }}>{greetIcon}</span>
-                                        <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{greeting}, {userName}!</div>
-                                    </div>
-                                    <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.6 }}>
-                                        <strong style={{ color: t.primary }}>{tmpl.name}</strong> is loaded. What would you like to change?
-                                    </div>
-                                </div>
-
-                                <div style={{ fontSize: 10, fontWeight: 700, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 7 }}>Quick Actions</div>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                                    {[
-                                        { icon: "⚡", text: "Add a stronger prayer clause" },
-                                        { icon: "🎩", text: "Make the tone more formal" },
-                                        { icon: "📍", text: "Add a jurisdiction paragraph" },
-                                        { icon: "📋", text: "Summarise key arguments" },
-                                    ].map(s => (
-                                        <button key={s.text} onClick={() => { setAiInput(s.text); aiInputRef.current?.focus(); }}
-                                            style={{ padding: "8px 11px", borderRadius: 10, border: `1.5px solid ${t.border}`, background: t.card, color: t.textMuted, cursor: "pointer", fontSize: 11.5, textAlign: "left", transition: "all .15s", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 7 }}
-                                            onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.text; e.currentTarget.style.background = t.primaryGlow2; }}
-                                            onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; e.currentTarget.style.background = t.card; }}>
-                                            <span style={{ fontSize: 14 }}>{s.icon}</span>{s.text}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {aiMessages.map((msg, i) => (
-                            <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start", gap: 3 }}>
-                                {msg.role === "assistant" && (
-                                    <div style={{ display: "flex", alignItems: "center", gap: 5, marginLeft: 2 }}>
-                                        <div style={{ width: 16, height: 16, borderRadius: 5, background: t.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                            <Icon d={I.sparkles} size={9} style={{ color: t.primary }} />
-                                        </div>
-                                        <span style={{ fontSize: 10, color: t.textFaint, fontWeight: 600 }}>Claude</span>
-                                    </div>
-                                )}
-                                <div style={{
-                                    maxWidth: "90%", padding: "9px 12px",
-                                    borderRadius: msg.role === "user" ? "13px 13px 3px 13px" : "3px 13px 13px 13px",
-                                    background: msg.role === "user" ? t.primary : t.surface,
-                                    border: msg.role === "user" ? "none" : `1.5px solid ${t.border}`,
-                                    color: msg.role === "user" ? (t.mode === "dark" ? t.bg : t.surface) : t.text,
-                                    fontSize: 12.5, lineHeight: 1.65,
-                                }}>
-                                    {msg.text}
-                                </div>
-                            </div>
-                        ))}
-
-                        {aiLoading && (
-                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 3 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 5, marginLeft: 2 }}>
-                                    <div style={{ width: 16, height: 16, borderRadius: 5, background: t.primaryGlow, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon d={I.sparkles} size={9} style={{ color: t.primary }} /></div>
-                                    <span style={{ fontSize: 10, color: t.textFaint, fontWeight: 600 }}>Claude</span>
-                                </div>
-                                <div style={{ background: t.surface, border: `1.5px solid ${t.border}`, borderRadius: "3px 13px 13px 13px", padding: "11px 16px", display: "flex", gap: 5, alignItems: "center" }}>
-                                    {[0, 1, 2].map(d => <div key={d} style={{ width: 6, height: 6, borderRadius: "50%", background: t.primary, animation: `pulse 1.2s ease ${d * 0.2}s infinite`, opacity: 0.8 }} />)}
-                                </div>
-                            </div>
-                        )}
-                        <div ref={aiEndRef} />
+                    {/* Where the saved copy now lives: the lawyer's Vault, to file it
+                        into a folder or find it again. Not a dead end after saving. */}
+                    {published && (
+                        <button type="button" className="de-btn" data-open-vault onClick={() => setPage?.("vault")}>
+                            <Icon d={I.folder} size={15} /> Open in Vault
+                        </button>
+                    )}
+                    <div className="de-acct" data-account>
+                        <span className="de-avatar" aria-hidden="true">{initials}</span>
+                        <span style={{ minWidth: 0 }}><b>{displayName}</b><small>Advocate</small></span>
                     </div>
+                </div>
+            </header>
 
-                    {/* Input */}
-                    <div style={{ padding: "10px 12px 13px", borderTop: `1px solid ${t.border}`, flexShrink: 0, background: t.surface }}>
-                        <div style={{ border: `1.5px solid ${t.border}`, borderRadius: 13, background: t.card, overflow: "hidden", transition: "border-color .15s, box-shadow .15s" }}
-                            onFocusCapture={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.boxShadow = `0 0 0 3px ${t.primary}12`; }}
-                            onBlurCapture={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.boxShadow = "none"; }}>
-                            <textarea
-                                ref={aiInputRef}
-                                value={aiInput} onChange={e => setAiInput(e.target.value)}
-                                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendToAI(); } }}
-                                placeholder="Describe changes or ask a question…"
-                                rows={3}
-                                style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: t.text, fontSize: 12.5, padding: "11px 13px 5px", resize: "none", fontFamily: "inherit", lineHeight: 1.6, boxSizing: "border-box" }}
+            <div className="de-stage">
+                {/* ── Formatting toolbar ── */}
+                <div className="de-tools">
+                <div className="de-toolbar" role="toolbar" aria-label="Formatting">
+                    <TB label="Undo (Ctrl+Z)" onClick={() => exec("undo")}>{lineIcon(<><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></>)}</TB>
+                    <TB label="Redo (Ctrl+Y)" onClick={() => exec("redo")}>{lineIcon(<><path d="m15 14 5-5-5-5" /><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" /></>)}</TB>
+                    <span className="de-sep" />
+                    <label style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }} htmlFor="de-font">Font</label>
+                    <select id="de-font" className="de-select" style={{ width: 146 }} value={font}
+                        onChange={e => { setFont(e.target.value); exec("fontName", e.target.value); }}>
+                        {FONT_OPTIONS.map(f => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                    <label style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }} htmlFor="de-size">Font size</label>
+                    <select id="de-size" className="de-select" style={{ width: 62 }} value={fontSize}
+                        onChange={e => { setFontSize(e.target.value); exec("fontSize", e.target.value); }}>
+                        {SIZE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <span className="de-sep" />
+                    <TB label="Bold (Ctrl+B)" active={queryState("bold")} onClick={() => exec("bold")} style={{ fontFamily: "Georgia, serif", fontWeight: 900, fontSize: 17 }}>B</TB>
+                    <TB label="Italic (Ctrl+I)" active={queryState("italic")} onClick={() => exec("italic")} style={{ fontFamily: "Georgia, serif", fontStyle: "italic", fontWeight: 400, fontSize: 17 }}>I</TB>
+                    <TB label="Underline (Ctrl+U)" active={queryState("underline")} onClick={() => exec("underline")} style={{ textDecoration: "underline", fontSize: 16 }}>U</TB>
+                    <TB label="Subscript" onClick={() => exec("subscript")} style={{ fontSize: 15 }}><span>X<sub style={{ fontSize: "60%" }}>1</sub></span></TB>
+                    <TB label="Superscript" onClick={() => exec("superscript")} style={{ fontSize: 15 }}><span>X<sup style={{ fontSize: "60%" }}>1</sup></span></TB>
+                    <TB label="Strikethrough" onClick={() => exec("strikeThrough")} style={{ textDecoration: "line-through", fontSize: 16 }}>S</TB>
+                    <span className="de-sep" />
+                    <TB label="Align left" active={queryState("justifyLeft")} onClick={() => exec("justifyLeft")}>{lineIcon(<path d="M4 6h16M4 10h10M4 14h16M4 18h10" />)}</TB>
+                    <TB label="Align centre" active={queryState("justifyCenter")} onClick={() => exec("justifyCenter")}>{lineIcon(<path d="M4 6h16M7 10h10M4 14h16M7 18h10" />)}</TB>
+                    <TB label="Align right" active={queryState("justifyRight")} onClick={() => exec("justifyRight")}>{lineIcon(<path d="M4 6h16M10 10h10M4 14h16M10 18h10" />)}</TB>
+                    <TB label="Justify" active={queryState("justifyFull")} onClick={() => exec("justifyFull")}>{lineIcon(<path d="M4 6h16M4 10h16M4 14h16M4 18h16" />)}</TB>
+                    <span className="de-sep" />
+                    <TB label="Bullet list" active={queryState("insertUnorderedList")} onClick={() => exec("insertUnorderedList")}>{lineIcon(<><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" strokeWidth="3" /></>)}</TB>
+                    <TB label="Numbered list" active={queryState("insertOrderedList")} onClick={() => exec("insertOrderedList")}>{lineIcon(<><path d="M10 6h10M10 12h10M10 18h10" /><path d="M4 5h1.5v4M4 9h3M4 13.5c0-1 2.8-1 2.8.4 0 1-2.8 1.8-2.8 3.1h3" strokeWidth="1.5" /></>)}</TB>
+                    <span className="de-sep" />
+                    <TB label="Heading 1" onClick={() => exec("formatBlock", "h1")} style={{ fontSize: 15 }}>H1</TB>
+                    <TB label="Heading 2" onClick={() => exec("formatBlock", "h2")} style={{ fontSize: 15 }}>H2</TB>
+                    <TB label="Heading 3" onClick={() => exec("formatBlock", "h3")} style={{ fontSize: 15 }}>H3</TB>
+                    <span className="de-sep" />
+                    <TB label="Block quote" onClick={() => exec("formatBlock", "blockquote")}>{lineIcon(<path d="M7 7h4v4H8.5c0 2 1 3 2.5 3.5M14 7h4v4h-2.5c0 2 1 3 2.5 3.5" />)}</TB>
+                    <TB label="Horizontal rule" onClick={() => exec("insertHorizontalRule")}>{lineIcon(<path d="M4 12h16" strokeWidth="2.6" />)}</TB>
+                    <span className="de-sep" />
+                    <TB label="Export Word (.doc)" onClick={handleExport} style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em" }}>
+                        <span style={{ display: "grid", placeItems: "center", gap: 1 }}><Icon d={I.fileText} size={15} />DOC</span>
+                    </TB>
+                    <TB label="Translate this draft into court Urdu" onClick={translateToUrdu} style={{ fontSize: 14, fontWeight: 600, padding: "0 10px" }}>اردو</TB>
+                </div>
+                </div>
+
+                <div className="de-split">
+                    {/* ── The document ── */}
+                    <section className="de-doc" aria-label="Document">
+                        <div className="de-strips">
+                            {/* Which matter this document belongs to: the page's case
+                                selector is not visible here, so without this the lawyer
+                                cannot see which case the AI and Save act on. */}
+                            <div data-case-binding={binding.state} style={{
+                                fontWeight: 600,
+                                background: binding.state === "unavailable" ? "var(--danger-soft)" : "transparent",
+                                color: binding.state === "unavailable" ? "var(--danger)" : "var(--muted)",
+                            }}>
+                                {binding.state === "bound" && <>Case: {caseObj?.id} — {caseObj?.title}</>}
+                                {binding.state === "none" && <>No case — this draft is not attached to any matter.</>}
+                                {binding.state === "loading" && <>Loading the case this draft belongs to…</>}
+                                {binding.state === "unavailable" && <>
+                                    This draft belongs to a case that could not be loaded — it may have been
+                                    reassigned, or you may be offline. Save, AI drafting and Save to Documents
+                                    are paused so this draft is not attached to another matter. Export still works.
+                                </>}
+                            </div>
+                            {/* Citation check — the server's, not the browser's: the
+                                draft as last saved (stale on edit) and the copy saved
+                                to Documents (frozen). */}
+                            <CitationStrip t={t} draftCheck={savedCheck} stale={checkStale}
+                                documentCheck={published?.verification ?? null} />
+                            <RequirementsChecklist t={t} report={requirements} />
+                        </div>
+                        <div className="de-scroll">
+                            <div
+                                ref={editorRef}
+                                className="de-paper"
+                                contentEditable
+                                suppressContentEditableWarning
+                                spellCheck={false}
+                                aria-label={`${tmpl.name} — document text`}
+                                onInput={e => { markEdited(); setWordCount(e.currentTarget.innerText.trim().split(/\s+/).filter(Boolean).length); }}
+                                style={{ fontFamily: font === "Default Font" ? "Georgia, 'Times New Roman', serif" : font }}
+                                dangerouslySetInnerHTML={{ __html: initialHtml }}
                             />
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 9px 9px" }}>
-                                <span style={{ fontSize: 10, color: t.textFaint }}>⏎ Send · Shift+⏎ New line</span>
-                                <button onClick={sendToAI} disabled={!aiInput.trim() || aiLoading || caseBlocked}
-                                    style={{ height: 29, paddingLeft: 13, paddingRight: 13, borderRadius: 8, border: "none", background: aiInput.trim() && !aiLoading ? t.primary : t.border, color: aiInput.trim() && !aiLoading ? (t.mode === "dark" ? t.bg : t.surface) : t.textFaint, cursor: aiInput.trim() && !aiLoading ? "pointer" : "default", display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 700, fontFamily: "inherit", transition: "all .15s" }}>
-                                    <Icon d={I.send} size={11} style={{ transform: "rotate(45deg)" }} />
-                                    Generate
-                                </button>
+                            <div className="de-page">— Page 1 —</div>
+                        </div>
+                    </section>
+
+                    {/* ── Draft Assistant ── */}
+                    <aside className="de-assist" aria-label="Draft Assistant">
+                        <div className="de-assist-head">
+                            <b>Draft Assistant</b>
+                            <span>Prompt edits and improvements</span>
+                        </div>
+                        <div className="de-assist-body">
+                            {aiMessages.length === 0 && (
+                                <>
+                                    <div className="de-hello">
+                                        <div className="de-hello-top">
+                                            <span className="de-hello-ic"><Icon d={I.sparkles} size={24} /></span>
+                                            <span style={{ flex: 1, minWidth: 0 }}><b>AI Drafter Assistant</b><span>Your legal drafting co-pilot</span></span>
+                                            <span aria-hidden="true" style={{ color: "var(--gold)", alignSelf: "flex-start" }}><Icon d={h < 17 ? I.sun : I.moon} size={22} /></span>
+                                        </div>
+                                        <div className="de-greet">
+                                            <b>{greeting}, <em>{userName}</em></b>
+                                            <p><strong style={{ color: "var(--ink)" }}>{tmpl.name}</strong> is loaded. Ask for a new clause, a rewrite, a tone change or an improvement to the current draft.</p>
+                                        </div>
+                                    </div>
+                                    <div className="de-label">Quick actions</div>
+                                    <div className="de-quick">
+                                        {["Add a stronger prayer clause", "Make the tone more formal", "Add a jurisdiction paragraph", "Summarise key arguments"].map(text => (
+                                            <button key={text} type="button" onClick={() => { setAiInput(text); aiInputRef.current?.focus(); }}>{text}</button>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                            {aiMessages.map((msg, i) => (
+                                <div key={i} className={`de-msg ${msg.role === "user" ? "user" : "ai"}`}>{msg.text}</div>
+                            ))}
+                            {aiLoading && <div className="de-msg ai de-dots" aria-label="Drafting"><i /><i style={{ animationDelay: ".2s" }} /><i style={{ animationDelay: ".4s" }} /></div>}
+                            <div ref={aiEndRef} />
+                        </div>
+                        <div className="de-compose">
+                            <div className="de-compose-box">
+                                <label style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }} htmlFor="de-prompt">Prompt for the draft assistant</label>
+                                <textarea
+                                    id="de-prompt"
+                                    ref={aiInputRef}
+                                    value={aiInput} onChange={e => setAiInput(e.target.value)}
+                                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendToAI(); } }}
+                                    placeholder="Enter prompt to generate or modify draft"
+                                    rows={3}
+                                />
+                                <div className="de-compose-row">
+                                    <span className="de-hint">Enter to send · Shift+Enter for a new line</span>
+                                    <button type="button" className="de-btn primary de-send" style={{ height: 36 }} onClick={sendToAI} disabled={!aiInput.trim() || aiLoading || caseBlocked}>
+                                        <Icon d={I.send} size={13} /> Generate
+                                    </button>
+                                </div>
                             </div>
+                            <div className="de-foot">AI-generated draft — verify before filing</div>
                         </div>
-                        <div style={{ fontSize: 10, color: t.textFaint, textAlign: "center", marginTop: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-                            <svg width="10" height="10" viewBox="0 0 12 12" fill={t.textFaint}><path d="M6 1a5 5 0 100 10A5 5 0 006 1zm0 1.5a.75.75 0 110 1.5.75.75 0 010-1.5zm0 2.5a.75.75 0 01.75.75v3a.75.75 0 01-1.5 0v-3A.75.75 0 016 5z" /></svg>
-                            AI-generated draft — verify before filing
-                        </div>
-                    </div>
+                    </aside>
                 </div>
             </div>
 
-            {urduOpen && (
+            {urduOpen && (<ModalPortal>
                 <div onClick={() => setUrduOpen(false)} style={{
                     position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 60,
                     display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
@@ -1162,7 +767,7 @@ function StageEditor({ tmpl, binding = NO_CASE, draft, onBack, t }) {
                         </div>
                     </div>
                 </div>
-            )}
+            </ModalPortal>)}
         </div>
     );
 }
@@ -1188,7 +793,6 @@ function DocAutomationPage() {
     const { activeCase } = useCase();
     const [stage, setStage] = useState("gallery");
     const [selectedTemplate, setSelectedTemplate] = useState(null);
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [apiCases, setApiCases] = useState([]);
     const [selectedCaseId, setSelectedCaseId] = useState("");
     const [drafts, setDrafts] = useState([]);
@@ -1232,11 +836,14 @@ function DocAutomationPage() {
             if (data?.items) {
                 const mapped = data.items.map(_mapCase);
                 setApiCases(mapped);
+                // A CASE IS OPTIONAL. Only the case the lawyer is already working
+                // in is preselected. It used to fall back to the FIRST listed case,
+                // so a new template silently bound itself -- prefilled with that
+                // case's client -- to a matter the lawyer never chose, and "Save to
+                // Documents" filed it there. No active case: no case.
                 if (activeCase) {
                     const match = mapped.find(c => c.id === activeCase || c._id === activeCase);
                     if (match) setSelectedCaseId(match.id);
-                } else if (mapped.length) {
-                    setSelectedCaseId(mapped[0].id);
                 }
             }
         });
@@ -1244,45 +851,26 @@ function DocAutomationPage() {
 
     const activeCaseObj = apiCases.find(c => c.id === selectedCaseId) || null;
 
-    // Listen for sidebar collapse changes
-    useEffect(() => {
-        const checkSidebarState = () => {
-            const sidebar = document.querySelector('[data-sidebar]');
-            if (sidebar) {
-                const isCollapsed = sidebar.style.width === '56px' || sidebar.style.minWidth === '56px';
-                setSidebarCollapsed(isCollapsed);
-            }
-        };
-
-        // Initial check
-        checkSidebarState();
-
-        // Listen for changes
-        const observer = new MutationObserver(checkSidebarState);
-        const sidebar = document.querySelector('[data-sidebar]');
-        if (sidebar) {
-            observer.observe(sidebar, { attributes: true, attributeFilter: ['style'] });
-        }
-
-        return () => observer.disconnect();
-    }, []);
-
+    // Fills the app's <main> in normal flow (2026-10-09). It used to be
+    // position:fixed at the sidebar's guessed width, but <main> animates in
+    // with a transform, which makes it the containing block: the offset
+    // applied twice and left an empty band beside the sidebar.
     return (
-        <div className="lw-fixed-pane" style={{ display: "flex", flexDirection: "column", position: "fixed", top: 0, left: sidebarCollapsed ? 56 : 240, right: 0, bottom: 0, background: t.bg, zIndex: 10, transition: "left .25s ease" }}>
+        <div data-drafter-pane style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, minWidth: 0, background: t.bg }}>
             {/* Case selector strip — always visible */}
             {apiCases.length > 0 && (
                 <div style={{ flexShrink: 0, padding: "8px 24px", background: t.surface, borderBottom: `1px solid ${t.border}`, display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 12, color: t.textMuted, fontWeight: 600 }}>Case context:</span>
                     <select value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)}
                         style={{ height: 32, border: `1px solid ${t.border}`, borderRadius: 8, background: t.inputBg, color: t.text, fontSize: 12, padding: "0 12px", outline: "none", cursor: "pointer", minWidth: 260 }}>
-                        <option value="">— No case selected —</option>
+                        <option value="">No case — standalone document</option>
                         {apiCases.map(c => <option key={c.id} value={c.id} style={{ background: t.surface }}>{c.id} — {c.title}</option>)}
                     </select>
                     {activeCaseObj && <span style={{ fontSize: 11, color: t.primary, fontWeight: 600 }}>{activeCaseObj.type} · {activeCaseObj.status}</span>}
                 </div>
             )}
             {stage === "gallery" && (
-                <StageGallery
+                <DraftingHome
                     onSelect={openTemplate}
                     drafts={drafts}
                     onOpenDraft={openDraft}
