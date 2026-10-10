@@ -111,6 +111,11 @@ def get_doc_drafts_col() -> AsyncIOMotorCollection:
     return get_database()["doc_drafts"]
 
 
+def get_lawyer_events_col() -> AsyncIOMotorCollection:
+    """A lawyer's own meetings and events (private diary entries)."""
+    return get_database()["lawyer_events"]
+
+
 def get_causelist_watches_col() -> AsyncIOMotorCollection:
     return get_database()["causelist_watches"]
 
@@ -200,6 +205,12 @@ def get_retrieval_labels_col() -> AsyncIOMotorCollection:
 # append-only revision chain, the decision ledger, the typed notification
 # outbox, the crash-consistent transition receipts and the deletion tombstones.
 # See the drafting remediation plan (v5 §2, v5.1) for the schemas.
+
+def get_document_folders_col() -> AsyncIOMotorCollection:
+    """A lawyer's Vault folders (services/document_folders.py). A document in
+    one carries its `folder_id`; deleting a folder never deletes a document."""
+    return get_database()["document_folders"]
+
 
 def get_deleted_documents_col() -> AsyncIOMotorCollection:
     """The Vault trash: a deleted DOCUMENTS_V2 document's row, moved here with

@@ -33,6 +33,7 @@ from app.db.collections import (
     get_documents_col,
     get_engagements_col,
     get_intakes_col,
+    get_lawyer_events_col,
     get_lawyer_reviews_col,
     get_notifications_col,
     get_password_reset_col,
@@ -505,6 +506,7 @@ async def create_all_indexes() -> None:
     await _appointments_indexes()
     await _engagements_indexes()
     await _lawyer_reviews_indexes()
+    await _lawyer_events_indexes()
     await _auth_indexes()
     await _payments_indexes()
     await _checkpoint_indexes()
@@ -514,6 +516,23 @@ async def create_all_indexes() -> None:
     await _ocr_revision_indexes()
     await _review_request_indexes()
     await _vault_trash_indexes()
+    await _document_folder_indexes()
+
+
+async def _document_folder_indexes() -> None:
+    """A lawyer's Vault folders (services/document_folders.py): one name per
+    owner, case-insensitively; and a folder's documents, newest first."""
+    from app.db.collections import get_document_folders_col, get_documents_col
+
+    await get_document_folders_col().create_indexes([
+        IndexModel([("owner_id", ASCENDING), ("name_key", ASCENDING)], unique=True,
+                   name="document_folders_owner_name"),
+        IndexModel([("owner_id", ASCENDING), ("created_at", ASCENDING)], name="document_folders_owner_recent"),
+    ])
+    await get_documents_col().create_indexes([
+        IndexModel([("client_id", ASCENDING), ("folder_id", ASCENDING), ("created_at", DESCENDING), ("_id", ASCENDING)],
+                   name="documents_owner_folder_recent", sparse=False),
+    ])
 
 
 async def _vault_trash_indexes() -> None:
@@ -1010,6 +1029,13 @@ async def _lawyer_reviews_indexes() -> None:
         col, [("client_id", ASCENDING), ("lawyer_id", ASCENDING)],
         "uniq_client_lawyer_review",
     )
+
+
+async def _lawyer_events_indexes() -> None:
+    # Every read is one lawyer's entries in a date window.
+    await get_lawyer_events_col().create_indexes([
+        IndexModel([("lawyer_id", ASCENDING), ("starts_at", ASCENDING)]),
+    ])
 
 
 async def _payments_indexes() -> None:

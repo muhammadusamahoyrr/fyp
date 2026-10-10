@@ -86,3 +86,12 @@ def test_platform_start_scripts_use_the_single_instance_launcher():
         assert "scripts\\serve.py" in source
         assert "uvicorn" not in source
         assert "--reload" not in source
+
+
+def test_demo_launcher_uses_the_single_instance_backend_launcher():
+    root = pathlib.Path(__file__).resolve().parents[2]
+    source = (root / "demo" / "start-demo.ps1").read_text(encoding="utf-8")
+
+    assert "scripts\\serve.py" in source
+    assert "uvicorn.exe app.main:app" not in source
+    assert "--reload --port 8000" not in source

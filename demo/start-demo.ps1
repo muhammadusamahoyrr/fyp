@@ -105,8 +105,10 @@ foreach ($k in @('SMTP_USER', 'SMTP_PASSWORD')) {
   }
 }
 
-$uvicorn = Join-Path $Backend 'venv\Scripts\uvicorn.exe'
-if (-not (Test-Path $uvicorn)) { Die "venv uvicorn not found at $uvicorn" }
+$BackendPython = Join-Path $Backend 'venv\Scripts\python.exe'
+$ServeLauncher = Join-Path $Backend 'scripts\serve.py'
+if (-not (Test-Path $BackendPython)) { Die "venv python not found at $BackendPython" }
+if (-not (Test-Path $ServeLauncher)) { Die "backend launcher not found at $ServeLauncher" }
 Ok 'backend venv present'
 
 $ngrokCfg = Join-Path $env:LOCALAPPDATA 'ngrok\ngrok.yml'
@@ -252,8 +254,16 @@ $existingApi = Get-PortOwner 8000
 if ($existingApi) {
   if (@('python', 'pythonw', 'uvicorn') -contains $existingApi.ProcessName) {
     Warn "restarting the backend (PID $($existingApi.Id)) so it picks up FRONTEND_URL"
-    Stop-Process -Id $existingApi.Id -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
+    # Prefer the managed launcher's graceful sentinel path. A legacy backend
+    # started directly with uvicorn has no pid file, so clean that up only if it
+    # is still holding the port afterward.
+    & $BackendPython $ServeLauncher stop --grace 60
+    $existingApi = Get-PortOwner 8000
+    if ($existingApi) {
+      Warn "backend is not managed by serve.py; stopping legacy PID $($existingApi.Id)"
+      Stop-Process -Id $existingApi.Id -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 3
+    }
   } else {
     Warn ":8000 is held by '$($existingApi.ProcessName)' (PID $($existingApi.Id)) -- not touching it"
     Warn 'if that is not the API, emailed links may point at the previous tunnel'
@@ -261,8 +271,12 @@ if ($existingApi) {
 }
 
 if (-not (Get-PortOwner 8000)) {
-  $beCmd = "Set-Location '$Backend'; Write-Host 'BACKEND :8000' -ForegroundColor Cyan; venv\Scripts\uvicorn.exe app.main:app --reload --port 8000"
-  Start-Process powershell -ArgumentList @('-NoExit', '-Command', $beCmd) | Out-Null
+  # No --reload here. A branch switch or merge changes hundreds of files at
+  # once; WatchFiles can repeatedly tear the API down while the frontend is
+  # sending login/refresh requests. The managed launcher also refuses a
+  # duplicate port owner and keeps the backend log across runs.
+  & $BackendPython $ServeLauncher start
+  if ($LASTEXITCODE -ne 0) { Die 'managed backend launcher failed' }
   if (Wait-Http 'http://127.0.0.1:8000/api/v1/agreements' 240 'backend') { Ok 'backend answering' }
 }
 
