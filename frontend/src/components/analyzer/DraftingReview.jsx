@@ -23,7 +23,7 @@
  *  - Decisions are append-only: the history is shown, nothing is edited.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Btn, Card } from "@/components/client/documents/ui.jsx";
+import { Btn, Card } from "@/components/lawyer/ui.jsx";
 import { getAnalysisText, getDraftingReview, idempotencyKey, recordDraftingDecision } from "@/lib/api.js";
 import MaskingNote from "@/components/analyzer/MaskingNote.jsx";
 import PiiConfirmation, { PII_REVIEW_REASONS } from "@/components/analyzer/PiiConfirmation.jsx";

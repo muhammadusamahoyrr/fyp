@@ -82,8 +82,9 @@ test("active cases are the server's open + in_progress totals; pending docs come
     assert.equal(stat(view.container, "Active Cases"), "8");
     const asked = api.__calls("listCases").map(c => c.args[0]?.status).filter(Boolean).sort();
     assert.deepEqual(asked, ["in_progress", "open"], "active must be counted by the server, per status");
-    assert.equal(stat(view.container, "Pending Docs"), "4");
-    assert.equal(stat(view.container, "Total Clients"), "3");
+    assert.equal(stat(view.container, "Docs to Review"), "4");
+    // The dashboard (2026-10-10) counts hearings in the next 7 days; 20 Nov is not one.
+    assert.equal(stat(view.container, "Hearings This Week"), "0");
     assert.match(view.container.textContent, /20 Nov 2026/, "the next hearing date is not shown");
     await view.unmount();
 });
@@ -92,16 +93,17 @@ test("a real zero is shown as 0, not as unknown", async () => {
     serve({ cases: [], submitted: 0 });
     const view = await mount();
     assert.equal(stat(view.container, "Active Cases"), "0");
-    assert.equal(stat(view.container, "Pending Docs"), "0");
+    assert.equal(stat(view.container, "Docs to Review"), "0");
     await view.unmount();
 });
 
-test("active is exact even past the first page; client counts from a partial list are a floor", async () => {
+test("active is exact even past the first page; counts from a partial list are a floor", async () => {
     serve({ cases: [kase(1, "in_progress"), kase(2, "open")], total: 120, submitted: 0,
             byStatus: { open: 40, in_progress: 61 } });
     const view = await mount();
     assert.equal(stat(view.container, "Active Cases"), "101");
-    assert.equal(stat(view.container, "Total Clients"), "2+");
+    // Counted from a partial case list, so shown as a floor.
+    assert.equal(stat(view.container, "Hearings This Week"), "0+");
     await view.unmount();
 });
 
@@ -114,12 +116,44 @@ test("no decorative progress bars pretend to measure anything", async () => {
     await view.unmount();
 });
 
-test("an empty agenda claims only what the preview shows, not 'nothing today'", async () => {
-    // The agenda reads the first 50 appointments only; it cannot know the day
-    // is empty (branch review). Until a date-range query exists, it says so.
+test("the agenda asks for TODAY by date, and only then says the day is empty", async () => {
+    // It used to read the first 50 appointments, which are the OLDEST (the
+    // list is sorted by start time), so a lawyer with a history never saw
+    // today. It now asks for one Pakistan day, so "no appointments today" is
+    // an answer, not a guess.
     serve({ cases: [], submitted: 0 });
     const view = await mount();
-    assert.doesNotMatch(view.container.textContent, /Nothing scheduled today/);
-    assert.match(view.container.textContent, /No appointments found in this preview/);
+    const agenda = api.__calls("listAppointments").map(c => c.args[0] || {}).find(a => a.starts_from);
+    assert.ok(agenda, "today's agenda was not asked for by date");
+    assert.match(agenda.starts_from, /T00:00:00\+05:00$/);
+    assert.match(agenda.starts_before, /T00:00:00\+05:00$/);
+    assert.match(view.container.textContent, /No appointments today/);
+    await view.unmount();
+});
+
+test("a failed agenda read is not shown as an empty day", async () => {
+    serve({ cases: [], submitted: 0 });
+    api.__respond("listAppointments", (args = {}) => (args.starts_from
+        ? { data: null, error: { message: "down" }, status: 0 }
+        : { data: { items: [], total: 0, pages: 0 }, error: null }));
+    const view = await mount();
+    assert.match(view.container.textContent, /Could not load today/);
+    assert.doesNotMatch(view.container.textContent, /No appointments today/);
+    await view.unmount();
+});
+
+test("a case's next hearing is its soonest upcoming one, not the first one added", async () => {
+    const { pktToday } = await import("../src/lib/bookingTime.js");
+    const plus = (n) => { const d = new Date(`${pktToday()}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const { fmtDate } = await import("../src/components/lawyer/data.js");
+    serve({ submitted: 0, cases: [kase(1, "in_progress", { hearing_dates: [
+        { _id: "past", date: `${plus(-3)}T00:00:00Z`, outcome: null },     // passed, no outcome
+        { _id: "late", date: `${plus(40)}T00:00:00Z`, outcome: null },     // added first
+        { _id: "soon", date: `${plus(6)}T00:00:00Z`, outcome: null },      // added later, sooner
+    ] })] });
+    const view = await mount();
+    const text = view.container.textContent;
+    assert.ok(text.includes(fmtDate(`${plus(6)}T00:00:00Z`)), "the soonest upcoming hearing is not shown");
+    assert.ok(!text.includes(fmtDate(`${plus(40)}T00:00:00Z`)), "the first-added hearing is shown instead");
     await view.unmount();
 });

@@ -60,7 +60,7 @@ async function settle(ms = 40) {
 async function mountPayments() {
     const { PaymentsPage } =
         await import("../src/components/lawyer/PaymentsPage.jsx");
-    const { ToastContainer } = await import("../src/components/shared/Toast.jsx");
+    const { ToastContainer } = await import("../src/components/lawyer/Toast.jsx");
     const { DARK } = await import("../src/components/admin/themes.js");
 
     const container = dom.window.document.createElement("div");

@@ -226,7 +226,91 @@ async def _taken_slots(lawyer_id: str, days: list[date]) -> set[datetime]:
                     taken.add(_as_utc(slot))
             continue
         taken.update(occupied_slots(_as_utc(at), minutes))
+
+    # The lawyer's other commitments block client bookings too: court
+    # hearings on their cases, and their own diary meetings and events. Until
+    # now only appointments counted, so a client could book the hour a lawyer
+    # was due in court.
+    window_start = (start - timedelta(days=1)).astimezone(timezone.utc)
+    window_end = (end + timedelta(days=2)).astimezone(timezone.utc)
+    taken.update(await _hearing_slots(lawyer_id, window_start, window_end))
+    taken.update(await _diary_slots(lawyer_id, window_start, window_end))
     return taken
+
+
+# A hearing's length is not known. Court work runs the morning; three hours
+# from the listed time is a conservative hold. A hearing with no time holds
+# the whole day.
+HEARING_HOLD_MINUTES = 180
+
+
+def _half_hours(start: datetime, minutes: int) -> set[datetime]:
+    """Every half-hour slot that [start, start + minutes) touches, UTC."""
+    start = _as_utc(start)
+    floored = start.replace(minute=0 if start.minute < 30 else 30, second=0, microsecond=0)
+    out: set[datetime] = set()
+    t = floored
+    while t < start + timedelta(minutes=minutes):
+        out.add(t)
+        t += timedelta(minutes=30)
+    return out
+
+
+async def _hearing_slots(lawyer_id: str, window_start: datetime, window_end: datetime,
+                         schedule: dict | None = None) -> set[datetime]:
+    from app.db.collections import get_cases_col
+
+    out: set[datetime] = set()
+    cursor = get_cases_col().find(
+        {"lawyer_id": lawyer_id,
+         "status": {"$nin": ["closed", "dismissed"]},
+         "hearing_dates.date": {"$gte": window_start - timedelta(days=1), "$lt": window_end}},
+        {"hearing_dates": 1},
+    )
+    async for case in cursor:
+        for h in case.get("hearing_dates") or []:
+            when = h.get("date")
+            if h.get("outcome") or not isinstance(when, datetime):
+                continue
+            # Stored as the UTC midnight of the day; the day itself is PKT.
+            day = (_as_utc(when) + timedelta(hours=5)).date()
+            moment = None
+            if h.get("time"):
+                try:
+                    moment = policy.parse_hhmm(h.get("time"), "start")
+                except Exception:  # noqa: BLE001
+                    # A legacy value the schema now refuses ("10am"). It used
+                    # to block the whole day. Hold the START of the lawyer's own
+                    # working day instead (courts sit in the morning) — their
+                    # schedule, never an invented hour; no working hours that
+                    # day means nothing bookable to hold.
+                    if schedule is None:
+                        schedule = await get_schedule(lawyer_id)
+                    starts = sorted(i["start"] for i in policy.intervals_for(schedule, day))
+                    if starts:
+                        out |= _half_hours(policy._pkt_instant(day, policy.parse_hhmm(starts[0], "start")),
+                                           HEARING_HOLD_MINUTES)
+                    continue
+            if moment is None:
+                begin = policy._pkt_instant(day, policy.parse_hhmm("00:00", "start"))
+                out |= _half_hours(begin, 24 * 60)
+            else:
+                out |= _half_hours(policy._pkt_instant(day, moment), HEARING_HOLD_MINUTES)
+    return out
+
+
+async def _diary_slots(lawyer_id: str, window_start: datetime, window_end: datetime) -> set[datetime]:
+    from app.db.collections import get_lawyer_events_col
+
+    out: set[datetime] = set()
+    cursor = get_lawyer_events_col().find(
+        {"lawyer_id": lawyer_id, "starts_at": {"$gte": window_start, "$lt": window_end}},
+        {"starts_at": 1, "duration_minutes": 1},
+    )
+    async for e in cursor:
+        if isinstance(e.get("starts_at"), datetime) and isinstance(e.get("duration_minutes"), int):
+            out |= _half_hours(e["starts_at"], e["duration_minutes"])
+    return out
 
 
 def policy_active_statuses() -> tuple[str, ...]:
@@ -329,3 +413,15 @@ async def assert_bookable(
         raise AppValidationError(
             "That time is outside this lawyer's working hours. Choose one of "
             "the times they have listed as available.")
+
+    # Inside working hours is not enough: the lawyer may be in court or have
+    # a meeting in their diary then. (Other appointments are refused by the
+    # unique slot index with their own conflict message.)
+    wanted = occupied_slots(_as_utc(scheduled_at), duration_minutes)
+    lo = _as_utc(scheduled_at) - timedelta(days=1)
+    hi = _as_utc(scheduled_at) + timedelta(days=1)
+    busy = await _hearing_slots(lawyer_id, lo, hi) | await _diary_slots(lawyer_id, lo, hi)
+    if busy & set(wanted):
+        raise AppValidationError(
+            "The lawyer is not available at that time. Choose one of the "
+            "times they have listed as available.")

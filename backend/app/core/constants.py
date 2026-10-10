@@ -262,6 +262,8 @@ class NotificationType(str, Enum):
     ENGAGEMENT_COMPLETED = "engagement_completed"
     ENGAGEMENT_TERMINATED = "engagement_terminated"
     HEARING_SCHEDULED = "hearing_scheduled"
+    # The day before a hearing (services/hearing_reminders.py).
+    HEARING_REMINDER = "hearing_reminder"
     DOCUMENT_READY = "document_ready"
     DOCUMENT_SUBMITTED = "document_submitted"
     DOCUMENT_APPROVED = "document_approved"

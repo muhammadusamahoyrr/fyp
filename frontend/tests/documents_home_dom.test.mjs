@@ -35,6 +35,8 @@ const { default: DocsDrafts, placeholderCounts } =
 const { default: DocsAnalyzer } =
     await import("../src/components/analyzer/AnalyzerWorkspace.jsx");
 const { ToastCtx } = await import("../src/components/shared/Toast.jsx");
+// The analyzer is lawyer-owned and reads the lawyer's own toast context.
+const { ToastCtx: LawyerToastCtx } = await import("../src/components/lawyer/Toast.jsx");
 const toasts = [];
 
 const TEMPLATES = [
@@ -57,8 +59,10 @@ async function mount(Component, props) {
     const root = createRoot(container);
     const render = async (extra = {}) => {
         await act(async () => {
-            root.render(React.createElement(ToastCtx.Provider, { value: { show: m => toasts.push(m) } },
-                React.createElement(Component, { ...props, ...extra })));
+            const show = { show: m => toasts.push(m) };
+            root.render(React.createElement(ToastCtx.Provider, { value: show },
+                React.createElement(LawyerToastCtx.Provider, { value: show },
+                    React.createElement(Component, { ...props, ...extra }))));
         });
         await act(async () => { await new Promise(r => setTimeout(r, 10)); });
     };
@@ -139,6 +143,9 @@ test("search narrows the cards and an empty result offers a way back", async () 
 test("a category chip filters, and says how many it holds", async () => {
     const p = await mountHome();
     const filter = p.container.querySelector('[aria-label="Filter by category"]');
+    // The chips are a row of their own; search sits on the heading row (2026-10-08).
+    assert.equal(filter.querySelector("#tpl-search"), null, "search is not in the chip row");
+    assert.ok(p.container.querySelector("[data-template-search] #tpl-search"));
     const employment = buttons(filter, "Employment")[0];
     assert.match(employment.textContent, /1$/);
     await click(employment);
@@ -306,17 +313,51 @@ test("the vault lists the client's real documents", async () => {
     await p.unmount();
 });
 
-test("opening a vault row restores that document", async () => {
+test("a vault row previews the real file, with Open (edit) and Download (2026-10-08)", async () => {
     api.__respond("myDocumentsV2", { data: { items: ROWS, has_more: false } });
-    api.__respond("getDocumentV2", { data: {
-        id: "d1", title: "Rent notice", review_status: "submitted", current_version: 2,
-        current_revision: { revision_id: "r1", pdf_sha256: "a".repeat(64) } } });
-    const opened = [];
-    const p = await mount(DocsVault, { onBack: () => {}, onOpen: r => opened.push(r) });
-    await click(byLabel(p.container, "Open Rent notice"));
-    assert.equal(api.__calls("getDocumentV2")[0].args[0], "d1");
-    assert.equal(opened[0]?.docId, "d1");
+    api.__respond("previewRevisionV2", { data: { url: "blob:rent-notice" } });
+    const edited = [];
+    const p = await mount(DocsVault, { onBack: () => {}, onEdit: id => edited.push(id) });
+    await click(byLabel(p.container, "Preview Rent notice"));
+    const preview = p.container.querySelector("[data-vault-preview]");
+    assert.ok(preview, "the preview did not open");
+    assert.equal(p.container.querySelector("[data-vault-row]"), null, "the list gives way to the preview");
+    // The exact revision the row names, by its id and hash.
+    const [call] = api.__calls("previewRevisionV2");
+    assert.equal(call.args[0], "d1");
+    assert.equal(call.args[1], ROWS[0].revision_id);
+    assert.equal(call.args[2].expectedPdfSha256, ROWS[0].pdf_sha256);
+    assert.equal(preview.querySelector("[data-preview-title]").textContent, "Rent notice");
+    assert.match(preview.querySelector("[data-preview-meta]").textContent, /Legal notice.*PDF/i);
+    assert.match(preview.querySelector("[data-preview-frame]").getAttribute("src"), /^blob:rent-notice/);
+    // Open edits it in the drafting workspace; Download fetches that revision.
+    await click(preview.querySelector("[data-preview-open]"));
+    assert.deepEqual(edited, ["d1"]);
+    await click(preview.querySelector("[data-preview-download]"));
+    assert.equal(api.__calls("downloadDocumentFile").slice(-1)[0].args[0], "d1");
+    // Back returns to the list.
+    await click(byLabel(p.container, "Back to the Vault"));
+    assert.ok(p.container.querySelector("[data-vault-row]"));
     await p.unmount();
+});
+
+test("a vault document with no file yet previews as a plain notice, not an empty frame", async () => {
+    api.__respond("myDocumentsV2", { data: { items: ROWS, has_more: false } });
+    const p = await mount(DocsVault, { onBack: () => {}, onEdit: () => {} });
+    await click(byLabel(p.container, "Preview Affidavit draft"));
+    const preview = p.container.querySelector("[data-vault-preview]");
+    assert.equal(preview.querySelector("[data-preview-frame]"), null);
+    assert.match(preview.textContent, /not been generated yet/);
+    assert.equal(preview.querySelector("[data-preview-download]").disabled, true);
+    assert.equal(api.__calls("previewRevisionV2").length, 0, "nothing to fetch");
+    await p.unmount();
+});
+
+test("formatSize", async () => {
+    const { formatSize } = await import("../src/components/client/documents/VaultPreview.jsx");
+    assert.equal(formatSize(491622), "480.10 KB");
+    assert.equal(formatSize(3 * 1024 * 1024), "3.00 MB");
+    assert.equal(formatSize(0), null);
 });
 
 test("an empty vault and a failed load are told apart", async () => {
@@ -334,7 +375,10 @@ test("an empty vault and a failed load are told apart", async () => {
 
 test("vault helpers", () => {
     assert.equal(accessOf({ review_status: "submitted" }), "With lawyer");
-    assert.equal(accessOf({ review_status: "approved" }), "Private");
+    // A reviewer keeps read access to the version they decided (2026-10-09).
+    assert.equal(accessOf({ review_status: "approved" }), "Lawyer reviewed");
+    assert.equal(accessOf({ review_status: "returned" }), "Lawyer reviewed");
+    assert.equal(accessOf({ review_status: "none" }), "Private");
     assert.equal(formatWhen(null), "—");
     assert.equal(formatWhen("not a date"), "—");
     assert.equal(formatWhen(new Date().toISOString()), "Today");
@@ -352,7 +396,8 @@ test("a seeded prompt opens the server plan, never a sample legal document", asy
     } });
     const p = await mount(DocsDrafts, { seed: { prompt: "An NDA for a designer", templateType: "nda" }, templates: TEMPLATES, onBack: () => {}, onOpenView: () => {} });
     assert.ok(p.container.querySelector("[data-draft-plan]"));
-    assert.match(p.container.textContent, /Review the draft plan/);
+    assert.match(p.container.textContent, /Complete document/);
+    assert.match(p.container.textContent, /full document is generated after you confirm/);
     assert.match(p.container.textContent, /ABC Ltd/);
     assert.doesNotMatch(p.container.textContent, /Required clauses present|Citations verified|Sample draft/);
     assert.equal(api.__calls("createDraftPlanV2").length, 1);
@@ -379,14 +424,16 @@ test("drafts history lists the client's real documents and opens them", async ()
     assert.doesNotMatch(p.container.textContent, /2 drafts/);
     // The start screen: type, linked case and the prompt, as in the design.
     const caseSelect = p.container.querySelector("#docs-dcase");
-    assert.ok([...caseSelect.options].some(o => o.textContent === "Standalone — no linked case"));
+    assert.ok([...caseSelect.options].some(o => o.textContent === "Standalone"));
     // The centre is the same prompt card as the Documents home.
-    assert.match(p.container.textContent, /What would you like to draft\?/);
+    assert.match(p.container.textContent, /What do you need to draft\?/);
     assert.doesNotMatch(p.container.textContent, /Draft your first document/);
     await click(row);
     assert.ok(p.container.querySelector("[data-document-workspace]"));
     assert.match(p.container.textContent, /Frozen for lawyer review/);
-    assert.equal(buttons(p.container, "Save as new revision")[0].disabled, true);
+    // Frozen: the details panel cannot be opened for editing, and nothing saves.
+    assert.equal(p.container.querySelector("[data-placeholders-toggle]").disabled, true);
+    assert.equal(p.container.querySelector("[data-save]").disabled, true);
     await p.unmount();
 });
 
@@ -394,9 +441,9 @@ test("the AI drafting history column collapses and returns like the analyzer sid
     api.__respond("myDocumentsV2", { data: { items: [], has_more: false } });
     const p = await mount(DocsDrafts, { seed: null, templates: TEMPLATES, cases: [], onBack: () => {}, onOpenView: () => {} });
     assert.ok(p.container.querySelector('[aria-label="Draft history"]'));
-    await click(byLabel(p.container, "Hide draft history"));
+    await click(byLabel(p.container, "Hide history"));
     assert.equal(p.container.querySelector('[aria-label="Draft history"]'), null);
-    await click(byLabel(p.container, "Show draft history"));
+    await click(byLabel(p.container, "Show history"));
     assert.ok(p.container.querySelector('[aria-label="Draft history"]'));
     await p.unmount();
 });
@@ -410,10 +457,10 @@ test("planning from the drafts prompt card starts a draft with that description"
     } }));
     const p = await mount(DocsDrafts, { seed: null, templates: TEMPLATES, cases: [], onBack: () => {}, onOpenView: () => {} });
     await click(buttons(p.container, "Affidavit")[0]);
-    await click(buttons(p.container, "Create draft plan")[0]);
+    await click(buttons(p.container, "Plan my draft")[0]);
     assert.ok(p.container.querySelector("[data-draft-plan]"), "no server plan was opened");
-    assert.equal(p.container.querySelector('[aria-label="Draft history"]'), null,
-        "history stayed open in the plan review");
+    // The editor layout (2026-10-07): the history column stays beside the plan.
+    assert.ok(p.container.querySelector('[aria-label="Draft history"]'), "the plan lost its history column");
     assert.match(api.__calls("createDraftPlanV2")[0].args[0].prompt, /Affidavit/i);
     await p.unmount();
 });
@@ -453,7 +500,7 @@ test("a confirmed plan generates and opens its real document workspace", async (
         onOpenView: () => {}, onOpenDocument: () => {},
     });
     await type(p.container.querySelector("#docs-need"), "Demand unpaid fees");
-    await click(buttons(p.container, "Create draft plan")[0]);
+    await click(buttons(p.container, "Plan my draft")[0]);
     await click(buttons(p.container, "Confirm plan")[0]);
     await click(buttons(p.container, "Generate document")[0]);
 
@@ -462,7 +509,10 @@ test("a confirmed plan generates and opens its real document workspace", async (
     assert.equal(api.__calls("confirmDraftPlanV2")[0].args[1].expectedVersion, 0);
     assert.equal(api.__calls("generateDraftPlanV2")[0].args[1].expectedVersion, 1);
     assert.equal(api.__calls("getDocumentWorkspaceV2")[0].args[0], "d3");
-    assert.equal(buttons(p.container, "Save as new revision")[0].disabled, false);
+    // The details panel opens from the toolbar (2026-10-08 layout).
+    await click(p.container.querySelector("[data-placeholders-toggle]"));
+    assert.ok(p.container.querySelector('[aria-label="Complete document"]'));
+    assert.equal(p.container.querySelector("#ph_sender_name").disabled, false, "the details are editable");
     await p.unmount();
 });
 
@@ -726,5 +776,14 @@ test("the vault header, stats and sort follow the reference layout", async () =>
     await click(buttons(p.container.querySelector('[role="menu"]'), "Name (A–Z)")[0]);
     const order = [...p.container.querySelectorAll("[data-vault-row]")].map(r => r.dataset.vaultRow);
     assert.deepEqual(order, ["d2", "d1"], "Affidavit draft sorts before Rent notice");
+    await p.unmount();
+});
+
+test("a template card is balanced: name and facts, no description paragraph (2026-10-08)", async () => {
+    const p = await mountHome();
+    const card = p.container.querySelector('[data-template="legal_notice"]');
+    assert.doesNotMatch(card.textContent, /A formal demand before suing/, "the description is not repeated on the card");
+    assert.equal(card.getAttribute("title"), "A formal demand before suing.", "it is the card's tooltip");
+    assert.match(card.textContent, /Civil.*Legal Notice.*2 details to fill.*PDF.*Use template/s);
     await p.unmount();
 });

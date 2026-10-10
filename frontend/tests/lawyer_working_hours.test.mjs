@@ -99,6 +99,15 @@ async function mountLawyer() {
     const buttons = () => [...container.querySelectorAll("button")];
     const byText = (label) => buttons().find(b => b.textContent.trim() === label);
 
+    // The editor lives in the "Set working hours" drawer, not inline on the page.
+    // Opened from the Working hours card (the toolbar has the range menu there now).
+    const opener = buttons().find(b => b.closest('section[aria-label="Working hours"]') && /^(Edit hours|Set up)/.test(b.textContent.trim()));
+    assert.ok(opener, "no Set working hours button");
+    await act(async () => {
+        opener.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    await act(async () => { await new Promise(r => realSetTimeout(r, 40)); });
+
     return {
         container,
         text: () => container.textContent,
@@ -193,7 +202,7 @@ test("saving sends the whole schedule, not a patch", async () => {
     api.__respond("saveMyWorkingHours", ok(schedule()));
     const ui = await mountLawyer();
 
-    await ui.click("Save working hours");
+    await ui.click("Save hours");
 
     const calls = api.__calls("saveMyWorkingHours");
     assert.equal(calls.length, 1);
@@ -213,7 +222,7 @@ test("a refused save shows the server's reason", async () => {
                   { data: null, error: { message: "Tuesday: 09:00–12:00 overlaps 11:00–13:00" }, status: 422 });
     const ui = await mountLawyer();
 
-    await ui.click("Save working hours");
+    await ui.click("Save hours");
 
     assert.match(ui.text(), /overlaps/);
     await ui.unmount();
@@ -225,7 +234,7 @@ test("a day off with no date is not sent as an instruction", async () => {
     const ui = await mountLawyer();
 
     await ui.click("Add day off");
-    await ui.click("Save working hours");
+    await ui.click("Save hours");
 
     const sent = api.__calls("saveMyWorkingHours")[0].args[0];
     assert.deepEqual(sent.exceptions, [], "an unfinished row was sent");

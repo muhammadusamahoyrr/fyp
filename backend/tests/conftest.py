@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import base64
 import importlib
+import re
+import secrets
 import sys
 from pathlib import Path
 
@@ -27,6 +29,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 TEST_DB_SUFFIX = "_test"
+#: Every database this suite creates carries this marker before the suffix, so
+#: cleanup can tell a pytest-owned database from anything else ending "_test".
+TEST_DB_MARKER = "_pt"
+#: MongoDB refuses database names of 64 bytes or more.
+MONGO_DB_NAME_MAX = 63
+_RUN_ID_MAX = 16
 
 
 # ── live tiers are opt-in; the default run never leaves the machine ──────────
@@ -232,6 +240,71 @@ def _looks_like_the_configured_uri(candidate: str | None, configured: str) -> bo
     return host_of(candidate) == configured_host
 
 
+def _sanitise_run_id(raw: str | None) -> str:
+    """AAI_TEST_RUN_ID reduced to what a database name may hold, bounded."""
+    return re.sub(r"[^a-z0-9]", "", (raw or "").lower())[:_RUN_ID_MAX]
+
+
+def make_test_db_name(original: str, *, pid: int, worker: str, token: str,
+                     run_id: str | None = None) -> str:
+    """The throwaway database name for ONE pytest process.
+
+    A fixed `<name>_test` was shared by every pytest process on the machine, so
+    two runs at once read and deleted each other's documents: a full run made
+    while a targeted run was going reported dozens of failures that passed
+    alone. pid + xdist worker + a random token make the name unique per
+    process; AAI_TEST_RUN_ID, when set, is added (sanitised and bounded) so a
+    run can be found by name. The result always ends `_test`, always carries
+    TEST_DB_MARKER, never equals `original`, and fits MongoDB's length limit.
+    """
+    base = re.sub(r"[^A-Za-z0-9_]", "_", original or "db")
+    if base.endswith(TEST_DB_SUFFIX):
+        base = base[: -len(TEST_DB_SUFFIX)]
+    parts = [str(pid), re.sub(r"[^a-z0-9]", "", worker.lower())[:8] or "main",
+             re.sub(r"[^a-z0-9]", "", token.lower())[:8]]
+    run = _sanitise_run_id(run_id)
+    if run:
+        parts.append(run)
+    tail = f"{TEST_DB_MARKER}{'_'.join(parts)}{TEST_DB_SUFFIX}"
+    base = base[: max(1, MONGO_DB_NAME_MAX - len(tail))] or "db"
+    return f"{base}{tail}"[:MONGO_DB_NAME_MAX]
+
+
+def assert_droppable_test_db(name: str, *, original: str, own: str) -> None:
+    """Refuse to drop anything but THIS process's own throwaway database."""
+    assert name == own, f"refusing to drop {name!r}: this run created {own!r}"
+    assert name.endswith(TEST_DB_SUFFIX), f"refusing to drop {name!r}: not a test database"
+    assert name != original, f"refusing to drop {name!r}: it is the application database"
+    assert TEST_DB_MARKER in name[: -len(TEST_DB_SUFFIX)], (
+        f"refusing to drop {name!r}: it carries no pytest marker")
+
+
+def _drop_own_test_database(name: str, original: str) -> None:
+    """Drop this run's database on the test Mongo, never anywhere else.
+
+    Only the explicit AAI_TEST_MONGO_URL or local Mongo is contacted, and only
+    a host on this machine; an unreachable server means nothing was created.
+    """
+    from urllib.parse import urlparse
+
+    assert_droppable_test_db(name, original=original, own=name)
+    url = os.environ.get("AAI_TEST_MONGO_URL") or "mongodb://localhost:27017"
+    hosts = urlparse(url).netloc.split("@")[-1].split(",")
+    if not all(_is_local(h.rsplit(":", 1)[0]) for h in hosts if h):
+        return
+    try:
+        from pymongo import MongoClient
+
+        client = MongoClient(url, serverSelectionTimeoutMS=2000)
+        try:
+            if name in client.list_database_names():
+                client.drop_database(name)
+        finally:
+            client.close()
+    except Exception:  # noqa: BLE001 - no server, nothing to drop
+        pass
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_test_database():
     """Point every database read and write at a throwaway database.
@@ -246,18 +319,27 @@ def _isolate_test_database():
     here redirects the application code under test as well as the fixtures.
     While this is in force there is no path left that reaches production.
 
+    The name is unique to this pytest PROCESS (see make_test_db_name), and the
+    database is dropped when the session ends, pass or fail. Only that exact
+    database is dropped (assert_droppable_test_db).
+
     Autouse and session-scoped on purpose: an opt-in guard protects only the
     tests that remember to opt in, which is the property that failed here.
     """
     from app.core.config import settings
 
     original = settings.db_name
-    if not original.endswith(TEST_DB_SUFFIX):
-        settings.db_name = f"{original}{TEST_DB_SUFFIX}"
+    own = make_test_db_name(
+        original, pid=os.getpid(),
+        worker=os.environ.get("PYTEST_XDIST_WORKER", "main"),
+        token=secrets.token_hex(3), run_id=os.environ.get("AAI_TEST_RUN_ID"))
+    assert own != original and own.endswith(TEST_DB_SUFFIX)
+    settings.db_name = own
     try:
         yield settings.db_name
     finally:
         settings.db_name = original
+        _drop_own_test_database(own, original)
 
 
 @pytest.fixture(scope="session", autouse=True)

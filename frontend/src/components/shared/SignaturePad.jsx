@@ -13,7 +13,7 @@
  * passes them straight through and there is no mapping table to drift.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useT } from "@/components/client/theme.js";
+import { useT } from "@/components/shared/ui/theme.js";
 
 /* WHAT THE SERVER WILL ACTUALLY TAKE.
  *

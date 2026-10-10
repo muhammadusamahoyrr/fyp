@@ -24,15 +24,15 @@
  * review risks yet. Off (404), unavailable (503) or no answer: this
  * fictional demonstration, unchanged. */
 import React, { useEffect, useRef, useState } from "react";
-import { useT } from "@/components/client/theme.js";
-import { useToast } from "@/components/shared/Toast.jsx";
+import { useT } from "@/components/shared/ui/theme.js";
+import { useToast } from "@/components/lawyer/Toast.jsx";
 import { useIsMobile } from "@/lib/i18n.jsx";
 import { analyzerAttestation } from "@/lib/api.js";
 import AnalyzerLive from "./AnalyzerLive.jsx";
 import {
     Btn, Chip, Pill, Label, Card, Paper, PreviewBadge, ScreenHeader, Icon,
     SERIF, SEVERITY, onPrimary, splitLayout,
-} from "@/components/client/documents/ui.jsx";
+} from "@/components/lawyer/ui.jsx";
 
 /* Shown wherever the sample names a legal source. The sample's law is not
  * checked against anything: our library holds none of these statutes yet. */

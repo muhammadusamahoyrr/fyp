@@ -2,7 +2,7 @@ from pathlib import Path
 
 from datetime import datetime, timezone
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -297,6 +297,13 @@ class Settings(BaseSettings):
     # Enabling either sends messages to real people, so the defaults here are
     # the safety property — not a placeholder to be flipped by a deployment.
     appointment_reminders_enabled: bool = False
+
+    # COURT HEARING REMINDERS, the day before (services/hearing_reminders.py).
+    # OFF, for the same reason: it messages real people. Runs in the in-process
+    # scheduler group (`run_schedulers` / Redis period-lock); each notice is
+    # de-duplicated by the notifications' unique `logical_event_id`.
+    hearing_reminders_enabled: bool = False
+    hearing_reminder_interval_minutes: int = Field(default=60, ge=5, le=720)
     appointment_outcome_nudges_enabled: bool = False
 
     # THE ACTIVATION INSTANT FOR OUTCOME NUDGES, and it is deliberately not

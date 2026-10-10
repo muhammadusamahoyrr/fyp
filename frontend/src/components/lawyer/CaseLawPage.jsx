@@ -4,7 +4,7 @@
 // court's original PDF.
 import { useEffect, useState } from "react";
 import { useTheme } from "./theme.js";
-import { useToast } from "@/components/shared/Toast.jsx";
+import { useToast } from "@/components/lawyer/Toast.jsx";
 import { citatorSearch, citatorCitedBy, citatorStats } from "@/lib/api.js";
 
 function JudgmentCard({ j, t, onCiteClick }) {
@@ -62,10 +62,24 @@ function CaseLawPage() {
 
     useEffect(() => { citatorStats().then(({ data }) => { if (data) setStats(data); }); }, []);
 
-    const runSearch = async () => {
-        if (!q.trim() || busy) return;
+    // "Open in Legal library" from the AI Assistant's Sources panel: one
+    // citation, handed over once and searched straight away.
+    useEffect(() => {
+        let term = "";
+        try {
+            term = sessionStorage.getItem("attorney:caselaw-query") || "";
+            sessionStorage.removeItem("attorney:caselaw-query");
+        } catch { /* storage off */ }
+        if (term) { setQ(term); runSearch(term); }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // `term` is a handed-over search; a click passes an event, so fall back to q.
+    const runSearch = async (given) => {
+        const term = typeof given === "string" ? given : q;
+        if (!term.trim() || busy) return;
         setBusy(true); setMode("search"); setCitedBy(null);
-        const { data, error } = await citatorSearch(q.trim());
+        const { data, error } = await citatorSearch(term.trim());
         setBusy(false);
         if (error) { toast.show("❌ " + (error.message || "Search failed"), "error", 3000); return; }
         setResults(Array.isArray(data) ? data : []);

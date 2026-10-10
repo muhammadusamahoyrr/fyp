@@ -48,7 +48,7 @@ export function DeleteDocumentDialog({ row, onClose, onDeleted }) {
     const warnings = deletionWarnings(preview);
     return (
         <ModalPortal>
-            <div style={BACKDROP} onMouseDown={e => { if (e.target === e.currentTarget && !busy) onClose?.(); }}>
+            <div data-docs-font style={BACKDROP} onMouseDown={e => { if (e.target === e.currentTarget && !busy) onClose?.(); }}>
                 <Card role="dialog" aria-modal="true" aria-labelledby="vd-title" data-delete-dialog
                     style={{ width: "min(520px, calc(100vw - 32px))", margin: "12vh auto 0", padding: 24, boxSizing: "border-box" }}>
                     <h2 id="vd-title" style={{ margin: 0, fontSize: 19, color: t.text }}>Delete “{row.title || "Untitled document"}”?</h2>

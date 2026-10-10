@@ -10,13 +10,20 @@ import { Icon, I } from "./icons.jsx";
 function Card({ children, style = {}, className = "", onClick, hover = true }) {
     const { t } = useTheme();
     const [hov, setHov] = useState(false);
+    // Keep only one spelling of the border in React's style object. Several
+    // cards pass borderColor for an accent; retaining that longhand alongside
+    // this component's hover-driven `border` shorthand makes React warn on
+    // every hover rerender and leaves precedence dependent on key order.
+    const { border, borderColor, ...restStyle } = style;
+    const resolvedBorder = border
+        ?? `1px solid ${borderColor ?? (hov && hover ? t.borderHi : t.border)}`;
     return (
         <div onClick={onClick} onMouseEnter={() => hover && setHov(true)} onMouseLeave={() => setHov(false)}
             className={className}
             style={{
-                background: t.card, border: `1px solid ${hov && hover ? t.borderHi : t.border}`, borderRadius: 12,
+                background: t.card, border: resolvedBorder, borderRadius: 12,
                 boxShadow: hov && hover ? t.shadowHover : t.shadowCard, transition: "all .2s ease",
-                cursor: onClick ? "pointer" : undefined, ...style
+                cursor: onClick ? "pointer" : undefined, ...restStyle
             }}>
             {children}
         </div>
@@ -27,7 +34,7 @@ function Card({ children, style = {}, className = "", onClick, hover = true }) {
 // without saying why reads as broken. Every disabled state in this file is a
 // rule the server enforces, so the tooltip is the only place the rule is
 // visible before the user clicks.
-function Btn({ children, variant = "primary", size = "md", onClick, style = {}, disabled = false, full = false, title }) {
+function Btn({ children, variant = "primary", size = "md", onClick, style = {}, disabled = false, full = false, title, "aria-label": ariaLabel }) {
     const { t } = useTheme();
     const [hov, setHov] = useState(false);
     const vs = {
@@ -41,15 +48,20 @@ function Btn({ children, variant = "primary", size = "md", onClick, style = {}, 
     };
     const ss = { sm: { p: "6px 13px", fs: 13 }, md: { p: "9px 17px", fs: 14 }, lg: { p: "12px 24px", fs: 15 } };
     const v = vs[variant] || vs.primary, s = ss[size] || ss.md;
+    // As with Card, callers use borderColor to tint an outline. Fold it into
+    // the shorthand so hover rerenders never contain both CSS spellings.
+    const { border, borderColor, ...restStyle } = style;
+    const resolvedBorder = border
+        ?? (borderColor ? `1px solid ${borderColor}` : (v.border || "none"));
     return (
-        <button disabled={disabled} title={title} onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+        <button disabled={disabled} title={title} aria-label={ariaLabel} onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
             style={{
                 display: "inline-flex", alignItems: "center", gap: 7, justifyContent: "center", borderRadius: 9,
                 fontWeight: 600, transition: "all .18s ease", width: full ? "100%" : undefined,
                 letterSpacing: "0.01em",
                 opacity: disabled ? .45 : 1, cursor: disabled ? "not-allowed" : "pointer",
-                background: v.bg, color: v.color, border: v.border || "none", boxShadow: v.box,
-                padding: s.p, fontSize: s.fs, ...style
+                background: v.bg, color: v.color, border: resolvedBorder, boxShadow: v.box,
+                padding: s.p, fontSize: s.fs, ...restStyle
             }}>
             {children}
         </button>

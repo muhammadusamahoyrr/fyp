@@ -5,6 +5,7 @@ import { useCase } from "./theme.js";
 import { Card, Btn, Input, Badge, Divider } from "./components.jsx";
 import { Icon, I } from "./icons.jsx";
 import { listCases } from "@/lib/api.js";
+import { listAllCases } from "@/lib/allCases.js";
 
 function ClientsPage() {
     const { t } = useTheme();
@@ -14,7 +15,8 @@ function ClientsPage() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        listCases({ page_size: 50 }).then(({ data }) => {
+        // Every page of cases: clients past the first 50 cases were missing.
+        listAllCases(listCases).then(({ data }) => {
             if (!data?.items) { setLoading(false); return; }
             const map = {};
             data.items.forEach(c => {

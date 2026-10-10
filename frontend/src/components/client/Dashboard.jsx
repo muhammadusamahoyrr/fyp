@@ -2,11 +2,12 @@
 // Paste your Dashboard.jsx code here
 import React, { useState, useRef, useEffect } from "react";
 import { usePathname, useRouter as useNextRouter } from "next/navigation";
+import { reviewRequestDeepLink } from "@/lib/reviewRequests.js";
 import { DARK, LIGHT, ThemeCtx, HeaderActionsCtx } from "./theme.js";
 import { CaseProvider, useCase } from "./CaseContext.jsx";
 import { LangProvider, useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
-import { requestDocumentsView, DOCUMENTS_SHOWN_EVENT } from "@/lib/documentsNav.js";
+import { requestDocumentsView, requestOpenDocument, DOCUMENTS_SHOWN_EVENT } from "@/lib/documentsNav.js";
 import Ic from "./Ic.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import ModOverview from "./ModOverview.jsx";
@@ -61,7 +62,7 @@ const SUB_ITEMS = {
 };
 
 /* ─── Notification Drawer ───────────────────────────────────── */
-const NotifDrawer = ({ open, onClose, onGoTracking, t }) => {
+const NotifDrawer = ({ open, onClose, onGoTracking, onOpenDocument, onOpenReviewRequest, t }) => {
     const { notifications, markNotificationDone, markAllNotificationsDone, unreadCount } = useCase();
     const drawerRef = useRef(null);
 
@@ -153,7 +154,15 @@ const NotifDrawer = ({ open, onClose, onGoTracking, t }) => {
                     {notifications.map(n => (
                         <div
                             key={n.id}
-                            onClick={() => !n.done && markNotificationDone(n.id)}
+                            data-notification={n.id}
+                            onClick={() => {
+                                if (!n.done) markNotificationDone(n.id);
+                                // A lawyer's decision on a document opens that document.
+                                if (n.payload?.doc_id && onOpenDocument) { onOpenDocument(n.payload.doc_id); onClose(); }
+                                // A review request (accepted / declined) carries no doc_id: it
+                                // opens the request on Documents. Before, the click went nowhere.
+                                else if (n.payload?.review_request_id && onOpenReviewRequest) { onOpenReviewRequest(n.payload.review_request_id); onClose(); }
+                            }}
                             style={{
                                 display: "flex", gap: 12, padding: "13px 20px",
                                 borderBottom: `1px solid ${t.border}`,
@@ -190,7 +199,9 @@ const NotifDrawer = ({ open, onClose, onGoTracking, t }) => {
                                     fontSize: 12, color: t.textDim, lineHeight: 1.5, marginBottom: 3,
                                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                                 }}>{n.desc}</div>
-                                <div style={{ fontSize: 10, color: t.textFaint }}>{n.date} · {n.time}</div>
+                                <div style={{ fontSize: 10, color: t.textFaint }}>{n.date} · {n.time}
+                                    {n.payload?.doc_id && <span data-open-doc style={{ color: t.primary, fontWeight: 700 }}> · Open document →</span>}
+                                </div>
                             </div>
                         </div>
                     ))}
@@ -302,6 +313,8 @@ const DashboardInner = ({ go, isDark, toggleTheme, initialTab = "overview" }) =>
                     open={drawerOpen}
                     onClose={() => setDrawerOpen(false)}
                     onGoTracking={() => setTab("tracking")}
+                    onOpenDocument={id => { requestOpenDocument(id); if (tab !== "documents") navRouter.push("/documents"); }}
+                    onOpenReviewRequest={id => navRouter.push(reviewRequestDeepLink(id))}
                     t={t}
                 />
 

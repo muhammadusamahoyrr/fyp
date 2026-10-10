@@ -29,12 +29,14 @@ from app.api.v1.routes import (
     documents,
     documents_v2,
     documents_v2_trash,
+    documents_v2_folders,
     document_analyses,
     document_draft_plans,
     engagements,
     inheritance,
     intake,
     labeling,
+    lawyer_events,
     lawyers,
     notifications,
     payments,
@@ -89,6 +91,32 @@ async def _causelist_scheduler():
             raise
         except Exception:
             logging.getLogger(__name__).exception("Cause-list scheduler sweep failed")
+
+
+async def _hearing_reminder_scheduler():
+    """Remind clients and lawyers the day before a hearing. Off unless
+    `hearing_reminders_enabled`. Runs first, then sleeps, so a restart the
+    evening before still sends. The period-lock keeps one worker per period;
+    the notifications' unique `logical_event_id` keeps one notice per person
+    per hearing date even if two runs overlap."""
+    import asyncio
+    import logging
+    from app.core.redis_client import acquire_period_lock
+    from app.services.hearing_reminders import send_due_hearing_reminders
+
+    interval = int(settings.hearing_reminder_interval_minutes) * 60
+    log = logging.getLogger(__name__)
+    while True:
+        try:
+            if await acquire_period_lock("lock:scheduler:hearing_reminders",
+                                         ttl_seconds=int(interval * 0.8)):
+                counts = await send_due_hearing_reminders()
+                log.info("hearing_reminders_ran %s", counts)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Hearing reminder sweep failed")
+        await asyncio.sleep(interval)
 
 
 async def _lawyer_index_reconciler():
@@ -479,6 +507,9 @@ async def lifespan(app: FastAPI):
             # Same reason: KYC erasure retry is not lease-guarded.
             _asyncio.create_task(_kyc_erasure_retry()),
         ]
+        # No task at all unless switched on: it messages real people.
+        if settings.hearing_reminders_enabled:
+            scheduler_tasks.append(_asyncio.create_task(_hearing_reminder_scheduler()))
 
     # The provenance relay is NOT behind that gate.
     #
@@ -624,6 +655,8 @@ app.include_router(documents.router, prefix=API_PREFIX)
 app.include_router(document_draft_plans.router, prefix=API_PREFIX)
 # BEFORE documents_v2: `/documents/v2/trash` must not be read as a document id.
 app.include_router(documents_v2_trash.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
+# Also BEFORE documents_v2: `/documents/v2/folders` must not be read as a document id.
+app.include_router(documents_v2_folders.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(documents_v2.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(inheritance.router, prefix=API_PREFIX)
 app.include_router(agreements.router, prefix=API_PREFIX)
@@ -633,6 +666,7 @@ app.include_router(voice.router, prefix=API_PREFIX)
 app.include_router(appointments.router, prefix=API_PREFIX)
 app.include_router(engagements.router, prefix=API_PREFIX)
 app.include_router(causelist.router, prefix=API_PREFIX)
+app.include_router(lawyer_events.router, prefix=API_PREFIX)
 app.include_router(citator.router, prefix=API_PREFIX)
 app.include_router(payments.router, prefix=API_PREFIX)
 app.include_router(payments.webhook_router, prefix=API_PREFIX)

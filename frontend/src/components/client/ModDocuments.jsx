@@ -13,7 +13,7 @@ import DocumentsHome from "./DocumentsHome.jsx";
 import DocsDrafts from "./documents/DocsDrafts.jsx";
 import DocsVault from "./documents/DocsVault.jsx";
 import { readReviewRequestLink } from "@/lib/reviewRequests.js";
-import { Btn, Pill, Label, Paper, TOKEN_STYLE, VALUE_STYLE, docsTheme } from "./documents/ui.jsx";
+import { Btn, Pill, Label, Paper, SERIF, TOKEN_STYLE, VALUE_STYLE, docsTheme, DOCS_FONT_CSS } from "./documents/ui.jsx";
 import { useIsMobile } from "@/lib/i18n.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import FieldReview from "./FieldReview.jsx";
@@ -28,7 +28,8 @@ import { useDocumentResume, NO_CASE } from "@/lib/useDocumentResume.js";
 import { caseSelection } from "@/lib/caseSelection.js";
 import {
     DOCUMENTS_VIEW_EVENT, peekPendingDocumentsView, takePendingDocumentsView,
-    announceDocumentsView,
+    announceDocumentsView, DOCUMENT_OPEN_EVENT, takePendingDocument,
+    readOpenDocumentLink, linkOpenDocument, unlinkOpenDocument,
 } from "@/lib/documentsNav.js";
 import {
     extractDocumentFields, generateDocument, downloadDocumentFile,
@@ -183,6 +184,10 @@ const ModDocuments = () => {
     // Changing either creates a new document rather than disguising a different
     // legal instrument as version 2 of the old one.
     const [documentTemplateType, setDocumentTemplateType] = useState(null);
+    // The open document's current version is edited TEXT (see documentResume):
+    // "Change answers" and "Revise" then go to the drafting workspace rather
+    // than rebuilding the document from the template's fields.
+    const [textEdited, setTextEdited] = useState(false);
     const [documentIdentityTitle, setDocumentIdentityTitle] = useState(null);
 
     // ONE KEY PER LOGICAL ACTION, held across retries of THAT action.
@@ -346,7 +351,10 @@ const ModDocuments = () => {
             const items = Array.isArray(data) ? data : (data?.items || []);
             const byLawyer = new Map();
             for (const e of items) {
-                if (!e?.lawyer_id || byLawyer.has(e.lawyer_id)) continue;
+                if (!e?.lawyer_id) continue;
+                // Which cases each lawyer is engaged on: a case's document may go
+                // only to the lawyer of an accepted engagement on THAT case.
+                if (byLawyer.has(e.lawyer_id)) { if (e.case_id) byLawyer.get(e.lawyer_id).caseIds.push(e.case_id); continue; }
                 const name = e.lawyer_name || "Your lawyer";
                 byLawyer.set(e.lawyer_id, {
                     _id: e.lawyer_id,
@@ -355,6 +363,7 @@ const ModDocuments = () => {
                     rating: 0,
                     avail: null,
                     avatar: name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
+                    caseIds: e.case_id ? [e.case_id] : [],
                 });
             }
             setRevLawyers([...byLawyer.values()]);
@@ -398,8 +407,20 @@ const ModDocuments = () => {
     useEffect(() => {
         const c = cases.find(x => (x._id || x.id) === genCaseId);
         setCaseLawyerId(c?.lawyer_id || null);
-        if (c?.lawyer_id) setSelLawyer(c.lawyer_id);
     }, [genCaseId, cases]);
+    // WHO MAY RECEIVE THIS DOCUMENT, by the server's own rule (document_sharing.py).
+    // A CASE IS OPTIONAL. A document with no case may go to the lawyer of any
+    // of the client's accepted engagements; a case's document only to a lawyer
+    // engaged on that case. The case's `lawyer_id` alone decided before, and a
+    // case without one (or a stale one) offered lawyers the server then refused.
+    const eligibleLawyers = genCaseId ? revLawyers.filter(l => (l.caseIds || []).includes(genCaseId)) : revLawyers;
+    useEffect(() => {
+        // One lawyer on the case: chosen for the client. Never a lawyer the
+        // server would refuse.
+        if (genCaseId && eligibleLawyers.length === 1 && selLawyer !== eligibleLawyers[0]._id) setSelLawyer(eligibleLawyers[0]._id);
+        else if (selLawyer && revLawyersLoaded && !eligibleLawyers.some(l => l._id === selLawyer)) setSelLawyer(null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [genCaseId, revLawyers, revLawyersLoaded]);
 
     // RESUME AFTER A REFRESH.
     //
@@ -448,6 +469,7 @@ const ModDocuments = () => {
         setDocPdfSha256(restored.docPdfSha256);
         setDocVersion(restored.docVersion);
         setDocumentTemplateType(restored.templateType);
+        setTextEdited(Boolean(restored.textEdited));
         setDocumentIdentityTitle(restored.docTitle || null);
         setCompliance(restored.compliance ?? null);
         setVerification(restored.verification ?? null);
@@ -455,6 +477,7 @@ const ModDocuments = () => {
         setReviewSent(restored.reviewSent);
         setReviewStatus(restored.reviewStatus);
         setReviewRecovery(restored.reviewRecovery);
+        setLawyerNote(restored.lawyerNote || "");
         setStep(restored.step);
         // REMEMBERED UNDER ITS OWN CASE — including when that case is NONE.
         //
@@ -502,6 +525,7 @@ const ModDocuments = () => {
         setDocPdfSha256(null);
         setDocVersion(null);
         setDocumentTemplateType(null);
+        setTextEdited(false);
         setDocumentIdentityTitle(null);
         setGenDone(false);
         setReviewSent(false);
@@ -521,6 +545,7 @@ const ModDocuments = () => {
      * document's generate or submit for the new one. */
     const startNewDocument = () => {
         clearOpenDocument();
+        unlinkOpenDocument();
         setSelectedType(null);
         setDocTitle("");
         setExtractNotice(null);
@@ -561,12 +586,35 @@ const ModDocuments = () => {
         : readReviewRequestLink(window.location.search)));
     useEffect(() => { if (reviewLink.open) setView("vault"); }, [reviewLink]);
     const [draftsSeed, setDraftsSeed] = useState(null);
-    useEffect(() => { announceDocumentsView(view === "flow" ? "new" : view); }, [view]);
+    // The document the address names (`?doc=<id>`), read once: a refresh of an
+    // open document reopens it -- see lib/documentsNav.js.
+    const [linkedDoc] = useState(() => (typeof window === "undefined" ? null
+        : readOpenDocumentLink(window.location.search)));
+    const [vaultPreviewId, setVaultPreviewId] = useState(null);
+    /* Where the flow was entered from. "Send to lawyer" in the AI drafting
+     * workspace opens the send screen directly (the workspace IS the review),
+     * and its way back returns to that document in the workspace rather than
+     * to the guided flow's review step. The sidebar keeps "AI drafting" lit. */
+    const [flowOrigin, setFlowOrigin] = useState(null);       // { from: "drafts", documentId } | null
+    const [draftsOpen, setDraftsOpen] = useState(null);       // { id, at } — reopen in the workspace
+    useEffect(() => {
+        announceDocumentsView(view === "flow" ? (flowOrigin?.from === "drafts" ? "drafts" : "new") : view);
+    }, [view, flowOrigin]);
+    const backToDraft = () => {
+        const id = flowOrigin?.documentId || docId;
+        setFlowOrigin(null);
+        setDraftsOpen(id ? { id, at: Date.now() } : null);
+        setView("drafts");
+    };
     // Details typed in the template's Customize editor, carried into the
     // drafting form so nothing typed there is lost.
     const prefillRef = useRef(null);
     const showView = view => {
+        setFlowOrigin(null);
+        unlinkOpenDocument();
+        setVaultPreviewId(null);
         if (view === "drafts" || view === "vault") {
+            if (view === "drafts") setDraftsOpen(null);
             setView(view);
             return;
         }
@@ -583,10 +631,35 @@ const ModDocuments = () => {
             takePendingDocumentsView();
             showView(e?.detail?.view);
         };
+        // A notification asked for one document: it opens in the workspace.
+        const openDocument = id => {
+            if (!id) return;
+            stayHomeRef.current = true;          // no draft resume over it
+            setFlowOrigin(null);
+            setDraftsOpen({ id, at: Date.now() });
+            setView("drafts");
+        };
+        // A notification's request wins; otherwise the address's document
+        // (a refresh). A sidebar request made before mount wins over both.
+        const asked = takePendingDocument();
+        if (asked) openDocument(asked);
+        else if (!initialView && linkedDoc) {
+            if (linkedDoc.preview) { stayHomeRef.current = true; setVaultPreviewId(linkedDoc.id); setView("vault"); }
+            else openDocument(linkedDoc.id);
+        }
+        const onOpen = e => { takePendingDocument(); openDocument(e?.detail?.id); };
         window.addEventListener(DOCUMENTS_VIEW_EVENT, onView);
-        return () => window.removeEventListener(DOCUMENTS_VIEW_EVENT, onView);
+        window.addEventListener(DOCUMENT_OPEN_EVENT, onOpen);
+        return () => {
+            window.removeEventListener(DOCUMENTS_VIEW_EVENT, onView);
+            window.removeEventListener(DOCUMENT_OPEN_EVENT, onOpen);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // A document generated or opened in the guided flow is linked too; a
+    // refresh reopens it in the drafting workspace -- the one editor.
+    useEffect(() => { if (view === "flow" && docId) linkOpenDocument(docId); }, [view, docId]);
 
     useDocumentResume({
         caseId: resumeCaseId,
@@ -756,18 +829,14 @@ const ModDocuments = () => {
 
     const tbBtn = { padding: "5px 10px", borderRadius: 8, border: `1px solid ${t.border}`, background: t.card, color: t.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif" };
 
-    const goTo = n => setStep(n);
-    const nextStep = () => {
-        if (step === 0 && !selectedType) {
-            toast.show("⚠️ Select a template first", "warn"); return;
-        }
-        // The final step is only reachable once the lawyer has actually approved
-        if (step === 3 && reviewStatus !== "approved") {
-            toast.show("⚠️ The final version unlocks after your lawyer approves the document", "warn", 3500); return;
-        }
-        if (step < STEPS.length - 1) setStep(s => s + 1);
-    };
-    const prevStep = () => { if (step > 0) setStep(s => s - 1); };
+    // Step 1 rebuilds the document from the template's fields. For edited
+    // text that would replace the owner's words, so it opens the workspace.
+    const openInWorkspace = () => { if (docId) { setDraftsOpen({ id: docId, at: Date.now() }); setFlowOrigin(null); setView("drafts"); } };
+    const goTo = n => (n === 1 && textEdited ? openInWorkspace() : setStep(n));
+    const reviseLabel = textEdited ? "Edit in workspace" : "Change answers";
+    // Fixing what the send screen flags: in the workspace when the document
+    // came from there (that is where its details are edited), else the step.
+    const fixAt = n => (flowOrigin?.from === "drafts" ? backToDraft() : goTo(n));
 
     const pickDraft = spec => {
         if (!spec || draftingMode(spec) === "dedicated") return;
@@ -780,6 +849,7 @@ const ModDocuments = () => {
     const useTemplate = (spec, prefill = null) => {
         const chosen = spec || selectedType;
         if (!chosen) { toast.show("⚠️ Select a template first", "warn"); return; }
+        setFlowOrigin(null);
         takePendingDocumentsView();
         if (draftingMode(chosen) === "dedicated") return;
         if (spec && spec.template_type !== selectedType?.template_type) pickDraft(spec);
@@ -1115,20 +1185,37 @@ const ModDocuments = () => {
      * back to the Documents home. */
     const STEP_LABELS = ["Templates", "Draft details", "Review", "Send to lawyer", "Final & export"];
     const isMobile = useIsMobile();
-    const flowHeader = step > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingBottom: 18 }}>
-            <button type="button" onClick={() => startNewDocument()}
-                style={{ background: "none", border: "none", color: t.primary, fontSize: 14, cursor: "pointer", padding: "6px 2px", fontFamily: "'Inter',sans-serif" }}>
-                ← Documents
-            </button>
+    /* The approved design's header (2026-10-07): a way back, the document, and
+     * a progress rail — no "Step x of 4" pill and no Back/Continue pair. Every
+     * step carries its own forward action (Review Draft, Send to a lawyer, Send
+     * for review, View Final Version) and its own way back, so the pair only
+     * duplicated them. The send screen has the mockup's own header. */
+    const sendScreen = step === 3 && !reviewSent;
+    const linkBtn = { background: "none", border: "none", color: t.primary, fontSize: 14, cursor: "pointer", padding: "6px 2px", fontFamily: "'Inter',sans-serif" };
+    const flowHeader = step > 0 && (sendScreen ? (
+        <div data-flow-header="send" style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", paddingBottom: 18 }}>
+            <button type="button" onClick={() => fixAt(2)} style={linkBtn}>← Back to draft</button>
+            <h1 style={{ margin: 0, fontFamily: SERIF, fontSize: 26, fontWeight: 600, color: t.text }}>Send for lawyer review</h1>
+        </div>
+    ) : (
+        <div data-flow-header style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingBottom: 18 }}>
+            <button type="button" onClick={() => startNewDocument()} style={linkBtn}>← Documents</button>
             <span style={{ color: t.textMuted }}>/</span>
             <span style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{selectedType?.label || docTitle || "Document"}</span>
-            <Pill tone="info">Step {step} of 4 · {STEP_LABELS[step]}</Pill>
             <div style={{ flex: 1 }} />
-            <Btn onClick={prevStep} style={{ minHeight: 38 }}>← Back</Btn>
-            {step < 4 && <Btn kind="primary" onClick={nextStep} style={{ minHeight: 38 }}>Continue →</Btn>}
+            <ol aria-label="Progress" style={{ display: "flex", alignItems: "center", gap: 12, listStyle: "none", margin: 0, padding: 0, fontSize: 12.5, flexWrap: "wrap" }}>
+                {STEP_LABELS.slice(1).map((label, i) => {
+                    const n = i + 1, done = n < step, current = n === step;
+                    return (
+                        <li key={label} aria-current={current ? "step" : undefined}
+                            style={{ color: done ? t.success : current ? t.text : t.textMuted, fontWeight: current ? 700 : 500 }}>
+                            {done ? "✓ " : `${n}. `}{label}
+                        </li>
+                    );
+                })}
+            </ol>
         </div>
-    );
+    ));
 
 
     /* ── Shared pieces of the flow steps (mockup workspace layout) ── */
@@ -1182,19 +1269,24 @@ const ModDocuments = () => {
     const backHome = () => { startNewDocument(); setView("flow"); };
     const frame = content => (
         <ThemeCtx.Provider value={t}>
-            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: t.bg, color: t.text }}>
+            <div data-docs-font style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: t.bg, color: t.text }}>
+                <style>{DOCS_FONT_CSS}</style>
                 {content}
             </div>
         </ThemeCtx.Provider>
     );
     if (view === "drafts") {
         return frame(<DocsDrafts seed={draftsSeed} templates={templates} cases={cases} onBack={backHome}
-            onOpenView={v => setView(v)}
-            onOpenDocument={restored => { setView("flow"); setViewRev(null); applyRestored(restored); }} />);
+            onOpenView={v => setView(v)} openDocument={draftsOpen} />);
+        // (Sending is done in the workspace's own send panel since 2026-10-08;
+        // the drafting workspace no longer hands a document to the guided flow.)
     }
     if (view === "vault") {
-        return frame(<DocsVault onBack={backHome} reviewLink={reviewLink}
-            onOpen={restored => { setView("flow"); setViewRev(null); applyRestored(restored); }} />);
+        // Open from the Vault edits in the AI drafting workspace -- one editor
+        // for a document, wherever it is opened from. (The guided flow stays
+        // for building a document from a template.)
+        return frame(<DocsVault onBack={backHome} reviewLink={reviewLink} previewId={vaultPreviewId}
+            onEdit={id => { setDraftsOpen({ id, at: Date.now() }); setFlowOrigin(null); setView("drafts"); }} />);
     }
 
     return frame(
@@ -1542,7 +1634,7 @@ const ModDocuments = () => {
                             {/* "Change answers", not "Edit": THE DOCUMENT IS A PDF.
                                 Changing the answers and regenerating IS the edit,
                                 and it maps onto how the document is versioned. */}
-                            <Btn onClick={() => goTo(1)} title="Go back and change your answers, then regenerate" style={{ minHeight: 38 }}>✏️ Change answers</Btn>
+                            <Btn onClick={() => goTo(1)} data-change-answers title={textEdited ? "This document's wording was edited: keep editing it as text" : "Go back and change your answers, then regenerate"} style={{ minHeight: 38 }}>✏️ {reviseLabel}</Btn>
                             <Btn onClick={() => { if (docId) { downloadDocumentFile(docId, docTitle || "document", {
                                     revisionId: viewRev?.revision_id || docRevisionId,
                                     expectedPdfSha256: viewRev?.pdf_sha256 || docPdfSha256,
@@ -1600,7 +1692,7 @@ const ModDocuments = () => {
                                     {!userApproved ? (
                                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                                             <Btn kind="primary" onClick={() => { setUserApproved(true); toast.show("Marked as approved by you. Send it to a lawyer for their review.", "success", 4000); }}>✅ Approve Draft</Btn>
-                                            <Btn onClick={() => goTo(1)}>✏️ Change answers</Btn>
+                                            <Btn onClick={() => goTo(1)}>✏️ {reviseLabel}</Btn>
                                         </div>
                                     ) : (
                                         <Btn kind="primary" onClick={() => goTo(3)} style={{ width: "100%" }}>⚖️ Send to a lawyer →</Btn>
@@ -1608,11 +1700,26 @@ const ModDocuments = () => {
                                 </div>
 
                                 <div style={panelCard}>
+                                    {/* The rows are drawn HERE, by the client: RevisionHistory
+                                        keeps the data and which version is current, and its
+                                        default look belongs to the lawyer screens. */}
                                     <RevisionHistory
+                                        heading={<div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", color: t.textMuted, margin: "14px 0 8px" }}>Version history</div>}
                                         docId={docId} t={t} reloadKey={docRevisionId}
                                         currentRevisionId={viewRev?.revision_id || docRevisionId}
                                         onPreview={rev => setViewRev(
-                                            rev.revision_id === docRevisionId ? null : rev)} />
+                                            rev.revision_id === docRevisionId ? null : rev)}
+                                        renderRow={(rev, { isCurrent, failed, verdict }) => (
+                                            <div key={rev.revision_id} data-client-version={rev.version}
+                                                onClick={() => !failed && setViewRev(rev.revision_id === docRevisionId ? null : rev)}
+                                                style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 9px", borderRadius: 8, marginBottom: 3,
+                                                    cursor: failed ? "default" : "pointer", opacity: failed ? 0.6 : 1,
+                                                    background: isCurrent ? t.primaryGlow : "transparent", border: `1px solid ${isCurrent ? `${t.primary}40` : "transparent"}` }}>
+                                                <span style={{ fontSize: 11.5, fontWeight: 700, color: isCurrent ? t.primary : t.text, minWidth: 30 }}>v{rev.version}</span>
+                                                <span style={{ flex: 1, fontSize: 11.5, color: t.textMuted }}>{verdict}</span>
+                                                {isCurrent && <span style={{ fontSize: 10, fontWeight: 700, color: t.primary }}>CURRENT</span>}
+                                            </div>
+                                        )} />
                                 </div>
                             </div>
                         </div>
@@ -1628,7 +1735,9 @@ const ModDocuments = () => {
                     const cv = verification ? verificationView(verification) : null;
                     const ready = [
                         { ok: Boolean(docId), label: "Draft generated", sub: docId ? `Version ${docVersion ?? 1}` : "Generate it first", fix: 1 },
-                        { ok: userApproved, label: "Approved by you", sub: userApproved ? "You read and approved it" : "Read the draft and approve it", fix: 2 },
+                        // Approved here, in place: a trip back to the review step
+                        // only to press one button was the old flow's detour.
+                        { ok: userApproved, label: "Approved by you", sub: userApproved ? "You read and approved it" : "You have read the draft and it is right", approve: true },
                         compliance?.checked
                             ? { ok: compliance.complete, label: "Required particulars", sub: compliance.complete ? "Every particular is present" : `${compliance.missing} missing`, fix: 1 }
                             : { ok: null, label: "Required particulars", sub: "Not encoded for this document type" },
@@ -1655,27 +1764,35 @@ const ModDocuments = () => {
                                                 <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{r.label}</div>
                                                 <div style={{ fontSize: 12, color: t.textMuted }}>{r.sub}</div>
                                             </div>
+                                            {r.ok === false && r.approve && (
+                                                <button type="button" data-approve-draft onClick={() => setUserApproved(true)} style={{ background: "none", border: "none", color: t.primary, fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Approve</button>
+                                            )}
                                             {r.ok === false && r.fix != null && (
-                                                <button type="button" onClick={() => goTo(r.fix)} style={{ background: "none", border: "none", color: t.primary, fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Fix</button>
+                                                <button type="button" onClick={() => fixAt(r.fix)} style={{ background: "none", border: "none", color: t.primary, fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>Fix</button>
                                             )}
                                         </div>
                                     ))}
                                 </div>
-                                <div style={{ fontSize: 12.5, color: t.textMuted, lineHeight: 1.55, padding: "0 4px" }}>
-                                    Don't need a lawyer? You can download the draft from the review step — it stays marked as not reviewed.
+                                <div style={{ ...panelCard, background: "transparent", borderStyle: "dashed", fontSize: 13, color: t.textMuted, lineHeight: 1.6 }}>
+                                    <b style={{ color: t.text }}>Don't need a lawyer?</b> The draft can be downloaded as it is — it stays marked as not reviewed.{" "}
+                                    <button type="button" data-download-draft disabled={!docId} onClick={() => downloadDocumentFile(docId, docTitle || "document", {
+                                            revisionId: docRevisionId, expectedPdfSha256: docPdfSha256 })}
+                                        style={{ background: "none", border: "none", padding: 0, color: t.primary, fontWeight: 700, textDecoration: "underline", cursor: docId ? "pointer" : "default", fontSize: 13, fontFamily: "'Inter',sans-serif" }}>
+                                        Download draft
+                                    </button>
                                 </div>
                             </div>
 
                             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                                 <div style={panelCard}>
-                                    {stepLbl(1, caseLawyerId ? "Your case lawyer" : "Choose a lawyer")}
+                                    {stepLbl(1, genCaseId && eligibleLawyers.length ? "Your case lawyer" : "Choose a lawyer")}
                                     <div role="radiogroup" aria-label="Reviewing lawyer" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                        {caseLawyerId && (
+                                        {genCaseId && eligibleLawyers.length > 0 && (
                                             <div style={{ fontSize: 12, color: t.textMuted, padding: "8px 12px", borderRadius: 10, background: t.primaryGlow2, lineHeight: 1.55 }}>
-                                                This case already has an engaged lawyer — documents for it are reviewed by them.
+                                                This document belongs to a case, so it goes to a lawyer engaged on that case.
                                             </div>
                                         )}
-                                        {(caseLawyerId ? revLawyers.filter(l => l._id === caseLawyerId) : revLawyers).map(l => {
+                                        {eligibleLawyers.map(l => {
                                             const on = selLawyer === l._id;
                                             return (
                                                 <button key={l._id} type="button" role="radio" aria-checked={on} onClick={() => setSelLawyer(l._id)}
@@ -1689,15 +1806,14 @@ const ModDocuments = () => {
                                                 </button>
                                             );
                                         })}
-                                        {caseLawyerId && !revLawyers.some(l => l._id === caseLawyerId) && (
-                                            <div style={{ padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${t.primary}`, background: t.primaryGlow2, fontSize: 14, fontWeight: 700, color: t.text }}>⚖️ Your engaged case lawyer</div>
-                                        )}
-                                        {!caseLawyerId && !revLawyers.length && !revLawyersLoaded && (
+                                        {!eligibleLawyers.length && !revLawyersLoaded && (
                                             <div style={{ fontSize: 12.5, color: t.textMuted, textAlign: "center", padding: "18px 0" }}>Loading your lawyers…</div>
                                         )}
-                                        {!caseLawyerId && !revLawyers.length && revLawyersLoaded && (
+                                        {!eligibleLawyers.length && revLawyersLoaded && (
                                             <div data-no-engaged-lawyer role="note" style={{ fontSize: 13, color: t.textMuted, textAlign: "center", padding: "18px 8px", lineHeight: 1.55 }}>
-                                                You have no lawyer engaged yet. A document can be sent only to a lawyer you have hired — hire a lawyer first, then send it for review.
+                                                {genCaseId && revLawyers.length
+                                                    ? "No lawyer is engaged on this case yet. A case's document can be sent only to the lawyer engaged on that case — engage one for this case, or draft the document without a case."
+                                                    : "You have no lawyer engaged yet. A document can be sent only to a lawyer you have hired — hire a lawyer first, then send it for review."}
                                             </div>
                                         )}
                                     </div>
@@ -1739,7 +1855,7 @@ const ModDocuments = () => {
                                         </div>
                                         <div style={{ fontSize: 12, color: t.textMuted }}>This version is frozen for review — later edits make a new version.</div>
                                     </div>
-                                    <Btn onClick={() => goTo(2)}>Keep editing</Btn>
+                                    <Btn onClick={() => fixAt(2)}>Keep editing</Btn>
                                     <Btn kind="primary" onClick={() => submitToLawyer()} disabled={submitting || !selLawyer}>
                                         {submitting ? "⏳ Submitting…" : "📤 Send for review"}
                                     </Btn>
@@ -1814,11 +1930,11 @@ const ModDocuments = () => {
                                         <span style={{ width: 32, height: 32, borderRadius: "50%", background: t.primaryGlow2, color: t.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>⚖️</span>
                                         <div style={{ fontSize: 13.5, color: t.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{lawyerNote || "No note provided."}</div>
                                     </div>
-                                    {reviewStatus === "returned" && (
-                                        <Btn kind="primary" onClick={() => { setReviewSent(false); setReviewStatus(null); goTo(1); }} style={{ width: "100%", marginTop: 12 }}>
-                                            ✏️ Revise & Regenerate →
-                                        </Btn>
-                                    )}
+                                    {/* Rejected is not a dead end: the server accepts a
+                                        resubmission from `rejected` as from `returned`. */}
+                                    <Btn kind="primary" data-revise={reviewStatus} onClick={() => { setReviewSent(false); setReviewStatus(null); goTo(1); }} style={{ width: "100%", marginTop: 12 }}>
+                                        ✏️ {reviewStatus === "rejected" ? "Revise and send again" : textEdited ? "Revise in workspace" : "Revise & Regenerate"} →
+                                    </Btn>
                                 </div>
                             )}
                             {reviewStatus === "approved" && (

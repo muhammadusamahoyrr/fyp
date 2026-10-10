@@ -244,7 +244,10 @@ test("a draft on a case beyond the first page is fetched and bound", async () =>
 test("a new document uses the case selected when it was opened", async () => {
     api.__respond("listDocDrafts", { data: [] });
     const page = await mountDrafter({ selected: "B-002" });
-    await page.click(page.byText(/Plaint — Civil Suit/));
+    // The template home's card opens a template from its "Use template" button.
+    const plaint = [...page.container.querySelectorAll("[data-template]")]
+        .find(card => /Plaint — Civil Suit/.test(card.textContent));
+    await page.click([...plaint.querySelectorAll("button")].find(b => /Use template/.test(b.textContent)));
 
     assert.equal(page.strip().dataset.caseBinding, "bound");
     await page.click(page.byText(/Save Draft/));

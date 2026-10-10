@@ -134,3 +134,16 @@ test("from the Vault: delete moves it to Recently deleted, and Restore brings it
     assert.deepEqual(api.__calls("restoreDocumentV2").map(c => c.args[0]), ["d1"]);
     assert.match(toasts.join(" "), /is back in your Vault/);
 });
+
+test("Create Folder and Upload File have no backend: disabled and labelled, never a working action", async () => {
+    api.__respond("myDocumentsV2", { data: { items: [ROW], has_more: false } });
+    api.__respond("listReviewRequests", { data: null, status: 404, error: { code: "feature_disabled" } });
+    const p = await mount(h(DocsVault, { onBack: () => {}, onOpen: () => {} }));
+    for (const label of ["Create Folder", "Upload File"]) {
+        const b = p.container.querySelector(`[data-vault-soon="${label}"]`);
+        assert.ok(b, `${label} is missing`);
+        assert.equal(b.disabled, true, `${label} looks clickable`);
+        assert.match(b.textContent, /Soon/);
+    }
+    assert.equal(p.container.querySelector("#vault-folder"), null, "the folder form led nowhere");
+});

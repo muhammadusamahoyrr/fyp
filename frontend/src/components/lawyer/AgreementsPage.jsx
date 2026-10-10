@@ -6,7 +6,7 @@ import { useTheme } from "./theme.js";
 import { Card, Btn, Badge } from "./components.jsx";
 import { useAuth } from "@/context/AuthContext.jsx";
 import { listAgreements, getAgreement, signAgreement, declineAgreement, downloadExecutedAgreement } from "@/lib/api.js";
-import SignaturePad from "@/components/shared/SignaturePad.jsx";
+import SignaturePad from "./SignaturePad.jsx";
 import { DraftComposer } from "./DraftComposer.jsx";
 
 const PAGE_SIZE = 25;

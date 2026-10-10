@@ -22,6 +22,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+/* Said when the server has saved documents switched off (DOCUMENTS_V2 off: every
+ * V2 route answers 404 `feature_disabled`). That is not a failure to retry, and
+ * "Could not load your documents. Try again" sent people round a loop. */
+export const DOCUMENTS_UNAVAILABLE =
+    "Saved documents are not switched on for this server, so there is nothing to list here.";
+
 export function useMyDocuments({ fetchPage, pageSize = 20, enabled = true }) {
     const [items, setItems] = useState([]);
     const [cursor, setCursor] = useState(null);
@@ -108,6 +114,8 @@ export function useMyDocuments({ fetchPage, pageSize = 20, enabled = true }) {
         hasMore,
         // Only ever true once an answer has actually arrived.
         isEmpty: loaded && !loading && !error && items.length === 0,
+        // The feature is off on the server: show DOCUMENTS_UNAVAILABLE, not a retry.
+        unavailable: Boolean(error && error.code === "feature_disabled"),
         loaded,
         reload: () => load(),
         loadMore,

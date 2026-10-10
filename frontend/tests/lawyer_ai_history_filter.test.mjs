@@ -143,12 +143,11 @@ async function ask(container, question) {
     await settle(100);
 }
 
+// The sidebar has no search box any more: a thread is opened from the list.
 async function openSearchHit(container, title) {
-    await typeInto(container.querySelector('input[placeholder="Search research"]'), "wall");
-    await settle(500);   // the search is debounced
-    const hit = [...container.querySelectorAll("div")]
-        .find(d => d.children.length === 0 && d.textContent.trim() === title);
-    assert.ok(hit, `search hit "${title}" was not rendered`);
+    await settle(300);
+    const hit = container.querySelector(`.cv[title="${title}"]`);
+    assert.ok(hit, `history row "${title}" was not rendered`);
     await act(async () => { hit.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     await settle(100);
 }

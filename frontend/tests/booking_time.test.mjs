@@ -31,6 +31,8 @@ import {
     pktHourMinute,
     pktHour,
     pktWeekDayKeys,
+    pktMonthGridKeys,
+    shiftMonth,
     dayOfMonth,
 } from "../src/lib/bookingTime.js";
 
@@ -178,4 +180,25 @@ test("a week spanning a month boundary still numbers its columns correctly", () 
     assert.equal(keys[0], "2026-09-28");
     assert.equal(dayOfMonth(keys[0]), 28);
     assert.equal(dayOfMonth(keys[3]), 1, "1 October, not 31 September");
+});
+
+test("a month view is whole Monday-first weeks covering the month", () => {
+    // October 2026: the 1st is a Thursday, the 31st a Saturday.
+    const keys = pktMonthGridKeys("2026-10");
+    assert.equal(keys.length, 35);
+    assert.equal(keys[0], "2026-09-28");
+    assert.equal(keys[3], "2026-10-01");
+    assert.equal(keys[34], "2026-11-01");
+    // A month starting on a Monday has no leading days; one that needs six
+    // rows gets six.
+    assert.equal(pktMonthGridKeys("2026-06")[0], "2026-06-01");
+    assert.equal(pktMonthGridKeys("2026-08").length, 42);   // Sat 1st .. Mon 31st
+    // February of a non-leap year that starts on a Monday fits four rows.
+    assert.equal(pktMonthGridKeys("2027-02").length, 28);
+});
+
+test("shiftMonth crosses year boundaries both ways", () => {
+    assert.equal(shiftMonth("2026-12", 1), "2027-01");
+    assert.equal(shiftMonth("2026-01", -1), "2025-12");
+    assert.equal(shiftMonth("2026-10", 0), "2026-10");
 });

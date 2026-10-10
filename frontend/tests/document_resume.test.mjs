@@ -243,3 +243,20 @@ test("no cases at all resolves to no case", () => {
     assert.equal(resolveCaseId("", []), null);
     assert.equal(resolveCaseId(NO_CASE, []), null);
 });
+
+test("a document whose current version is edited text says so (2026-10-08)", () => {
+    const base = { id: "d1", template_type: "legal_notice", review_status: "none", current_version: 3 };
+    assert.equal(restoreStateFromDocument({ ...base,
+        current_revision: { revision_id: "r3", pdf_sha256: "a".repeat(64), template_type: "edited_document" } }).textEdited, true);
+    assert.equal(restoreStateFromDocument({ ...base,
+        current_revision: { revision_id: "r2", pdf_sha256: "a".repeat(64), template_type: "legal_notice" } }).textEdited, false);
+});
+
+test("a decided document reopens with the lawyer's note; a pending one never shows a note as the lawyer's (2026-10-09)", async () => {
+    const { restoreStateFromDocument } = await import("../src/lib/documentResume.js");
+    const base = { id: "d1", current_version: 1, current_revision: { revision_id: "r1", pdf_sha256: "h" } };
+    assert.equal(restoreStateFromDocument({ ...base, review_status: "returned", review_note: "fix para 3" }).lawyerNote, "fix para 3");
+    assert.equal(restoreStateFromDocument({ ...base, review_status: "rejected", review_note: "wrong court" }).lawyerNote, "wrong court");
+    // Submitted before client_note existed: review_note is the CLIENT's note.
+    assert.equal(restoreStateFromDocument({ ...base, review_status: "submitted", review_note: "urgent" }).lawyerNote, "");
+});

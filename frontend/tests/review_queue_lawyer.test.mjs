@@ -30,7 +30,7 @@ const { default: LawyerLink } = await import("../src/app/lawyer/review-requests/
 const { Sidebar } = await import("../src/components/lawyer/layout.jsx");
 const { ThemeCtx, CaseCtx, NotifCtx } = await import("../src/components/lawyer/theme.js");
 const { DARK } = await import("../src/components/admin/themes.js");
-const { ToastCtx } = await import("../src/components/shared/Toast.jsx");
+const { ToastCtx } = await import("../src/components/lawyer/Toast.jsx");
 const { AuthProvider } = await import("../src/context/AuthContext.jsx");
 const h = React.createElement;
 
@@ -310,7 +310,7 @@ test("the sidebar lists Review Queue only while the feature is on", async () => 
                          unreadMsgs: 0, reviewQueueOn: on })))));
     let p = await sidebar(false);
     assert.doesNotMatch(p.container.textContent, /Review Queue/);
-    assert.match(p.container.textContent, /Document Analyzer/);
+    assert.match(p.container.textContent, /Document [Aa]nalyzer/);
     await p.unmount();
     p = await sidebar(true);
     assert.match(p.container.textContent, /Review Queue/);

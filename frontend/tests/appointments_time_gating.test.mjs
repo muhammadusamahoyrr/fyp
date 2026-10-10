@@ -122,7 +122,8 @@ async function mountAppointments(items) {
     });
     await act(async () => { await new Promise(r => realSetTimeout(r, 30)); });
 
-    const find = (label) => [...container.querySelectorAll("button")]
+    // Row actions only: the status filter tabs share labels ("No Show").
+    const find = (label) => [...container.querySelectorAll('button:not([role="tab"])')]
         .find(b => b.textContent.trim() === label);
 
     return {

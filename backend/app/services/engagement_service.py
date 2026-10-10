@@ -71,7 +71,8 @@ async def _notify(user_id: str, ntype: NotificationType, title: str, body: str, 
         from app.services import notification_service
         await notification_service.create_notification(user_id, ntype, title, body, payload=payload)
     except Exception:
-        pass  # notification failure must not block the engagement flow
+        # Must not block the engagement flow, but must be findable.
+        logger.exception("engagement notification %s to %s failed", ntype.value, user_id)
 
 
 def _fee_str(fee_amount, fee_type) -> str:
@@ -479,20 +480,26 @@ async def decline_engagement(engagement_id: str, lawyer_id: str, reason: str | N
     if eng["status"] not in ENGAGEMENT_OPEN_STATUSES:
         raise AppValidationError(f"Cannot decline a request in '{eng['status']}' status")
 
+    # Withdrawing terms already sent is not declining a request, and the
+    # client was told it was. Same transition, said truthfully, and recorded
+    # so the client's history can say it too.
+    withdrawn = eng["status"] == EngagementStatus.TERMS_PROPOSED.value
     await engagement_repo.set_status(
         engagement_id, EngagementStatus.DECLINED.value,
-        {"decline_reason": reason, "declined_by": "lawyer"},
+        {"decline_reason": reason, "declined_by": "lawyer", "terms_withdrawn": withdrawn},
     )
     await _reopen_case(eng["case_id"])
 
     lawyer = await user_repo.find_by_id(lawyer_id)
     case = await case_repo.find_by_id(eng["case_id"])
+    who = (lawyer or {}).get('full_name', 'The lawyer')
+    what = (case or {}).get('title', 'your case')
     await _notify(
         eng["client_id"],
         NotificationType.ENGAGEMENT_DECLINED,
-        "Engagement request declined",
-        f"{(lawyer or {}).get('full_name', 'The lawyer')} declined your request for "
-        f"\"{(case or {}).get('title', 'your case')}\"."
+        "Terms withdrawn" if withdrawn else "Engagement request declined",
+        (f"{who} withdrew the terms they proposed for \"{what}\"."
+         if withdrawn else f"{who} declined your request for \"{what}\".")
         + (f" Reason: {reason}" if reason else "")
         + " You can request another lawyer from the directory.",
         {"engagement_id": engagement_id, "case_id": eng["case_id"]},
@@ -873,6 +880,10 @@ async def _terminate_in_transaction(session, *, engagement_id: str, expected: di
                       "updated_at": now}},
             session=session,
         )
+        # The departing lawyer's conversation and tasks stay with THEM: the
+        # next lawyer engaged on this case must not read either.
+        from app.services.case_service import seal_threads_for
+        await seal_threads_for(case_id, lawyer_id, session=session)
         # The milestone belongs to the RELEASE. A case now run by another
         # lawyer must not gain an entry about an engagement that is not its own.
         await get_cases_col().update_one(

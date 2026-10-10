@@ -117,6 +117,10 @@ test("a failed delete is reported and does not discard the open thread", async (
     serve({ rows: [{ session_id: "s1", title: "My thread", updated_at: new Date().toISOString() }] });
     api.__respond("deleteResearchConversation", { data: null, status: 500, error: { message: "Could not delete right now." } });
     const view = await mount();
+    // Delete sits in the thread's "…" menu.
+    const more = view.container.querySelector('button[title="More actions"]');
+    assert.ok(more, "no thread menu button");
+    await act(async () => { more.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     const del = [...view.container.querySelectorAll('button[title="Delete"]')][0];
     assert.ok(del, "no delete button");
     const created = api.__calls("createResearchConversation").length;

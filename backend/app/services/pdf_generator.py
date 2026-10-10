@@ -10,7 +10,9 @@ keep Urdu values markup-free.
 
 import logging
 import re
+from contextvars import ContextVar
 from datetime import datetime, timezone
+from html import escape as _html_escape
 from io import BytesIO
 from pathlib import Path
 from html.parser import HTMLParser as _HTMLParser
@@ -160,12 +162,39 @@ def P(text, style, raw: bool = False):
                 f"{style.name}_ur", parent=style, fontName=font,
                 alignment=TA_RIGHT, leading=max(getattr(style, "leading", 14) or 14, style.fontSize + 8),
             )
-            return Paragraph(shaped, ur_style)
-    return Paragraph(text, style)
+            para = Paragraph(shaped, ur_style)
+            # The text view (template_html) needs the words, not the glyphs
+            # shaped and reversed for the PDF.
+            para._source_markup = text
+            return para
+    para = Paragraph(text, style)
+    para._source_markup = text
+    return para
 
 # ── Shared styles ─────────────────────────────────────────────────────────────
 
+class _StoryCapture:
+    """Stands in for the document while `template_html` runs a builder: it
+    keeps the story instead of writing a PDF."""
+
+    def __init__(self, sink: list):
+        self._sink = sink
+
+    def build(self, story, *args, **kwargs):
+        self._sink.append(list(story))
+
+
+# Set only inside template_html. Every builder obtains its document from
+# _base_doc and does nothing with it but build(story), so swapping the document
+# is enough to read the story ANY builder composes -- one converter, the
+# builders' own reviewed wording, nothing re-typed.
+_STORY_CAPTURE: ContextVar[list | None] = ContextVar("_STORY_CAPTURE", default=None)
+
+
 def _base_doc(output_path: Path) -> SimpleDocTemplate:
+    sink = _STORY_CAPTURE.get()
+    if sink is not None:
+        return _StoryCapture(sink)
     return SimpleDocTemplate(
         str(output_path),
         pagesize=A4,
@@ -1795,6 +1824,326 @@ def _draft_blocks(html: str) -> list[tuple[str, str]]:
     return parser.blocks
 
 
+# ── Templates as editable text ───────────────────────────────────────────────
+#
+# A client can read and edit a named template as TEXT. The text is not written
+# here: `template_html` runs the template's own builder, keeps the story it
+# composes, and turns that story into HTML -- the reviewed wording, exactly.
+# Once the client edits that text, the document's next revision renders through
+# `edited_document`, which names no instrument, so the statutory particulars
+# check reports itself as not run rather than judging fields that no longer
+# describe the words. The citation check still runs over the text.
+
+_ALIGN_NAME = {TA_CENTER: "center", TA_RIGHT: "right", TA_JUSTIFY: "justify"}
+_ALIGN_ENUM = {"center": TA_CENTER, "right": TA_RIGHT, "justify": TA_JUSTIFY, "left": TA_LEFT}
+
+# reportlab inline tag -> HTML inline tag. Anything else contributes its text.
+_RL_TO_HTML = {"b": "b", "strong": "b", "i": "i", "em": "i", "u": "u",
+               "strike": "s", "s": "s", "super": "sup", "sup": "sup", "sub": "sub"}
+
+
+class _MarkupToHtml(_HTMLParser):
+    """reportlab paragraph markup -> safe inline HTML (allowlisted tags, every
+    text node escaped)."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._open: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "br":
+            self.parts.append("<br>")
+            return
+        html_tag = _RL_TO_HTML.get(tag)
+        if html_tag:
+            self._open.append(html_tag)
+            self.parts.append(f"<{html_tag}>")
+
+    def handle_startendtag(self, tag, attrs):
+        if tag.lower() == "br":
+            self.parts.append("<br>")
+
+    def handle_endtag(self, tag):
+        html_tag = _RL_TO_HTML.get(tag.lower())
+        if html_tag and html_tag in self._open:
+            while self._open:
+                open_tag = self._open.pop()
+                self.parts.append(f"</{open_tag}>")
+                if open_tag == html_tag:
+                    break
+
+    def handle_data(self, data):
+        # A newline inside a field ("name\naddress") is a line the writer meant.
+        self.parts.append(_html_escape(data, quote=False).replace("\n", "<br>"))
+
+    def html(self) -> str:
+        self.close()
+        return "".join(self.parts) + "".join(f"</{t}>" for t in reversed(self._open))
+
+
+def _markup_html(markup: str) -> str:
+    parser = _MarkupToHtml()
+    parser.feed(markup or "")
+    return parser.html()
+
+
+def _cell_html(cell) -> str:
+    if isinstance(cell, Paragraph):
+        return _markup_html(getattr(cell, "_source_markup", None) or cell.text)
+    if isinstance(cell, (list, tuple)):
+        return "<br>".join(h for h in (_cell_html(c) for c in cell) if h)
+    if isinstance(cell, str):
+        return _html_escape(cell, quote=False).replace("\n", "<br>")
+    return ""   # drawings (QR codes), spacers: nothing a reader edits
+
+
+def _flowable_html(fl) -> str:
+    if isinstance(fl, Paragraph):
+        inner = _markup_html(getattr(fl, "_source_markup", None) or fl.text)
+        if not inner.strip():
+            return ""
+        name = fl.style.name.removesuffix("_ur")
+        align = _ALIGN_NAME.get(fl.style.alignment)
+        attr = f' style="text-align:{align}"' if align else ""
+        if name == "title":
+            return f"<h1{attr}>{inner}</h1>"
+        if name == "heading":
+            return f"<h2{attr}>{inner}</h2>"
+        if name == "label":
+            return f"<p{attr}><b>{inner}</b></p>"
+        return f"<p{attr}>{inner}</p>"
+    if isinstance(fl, HRFlowable):
+        return "<hr>"
+    if isinstance(fl, Table):
+        rows = "".join(
+            "<tr>" + "".join(f"<td>{_cell_html(c)}</td>" for c in row) + "</tr>"
+            for row in getattr(fl, "_cellvalues", []))
+        return f"<table><tbody>{rows}</tbody></table>" if rows else ""
+    inner = getattr(fl, "_content", None)        # KeepTogether and friends
+    if isinstance(inner, (list, tuple)):
+        return "".join(_flowable_html(f) for f in inner)
+    return ""   # Spacer, Drawing (QR): layout, not words
+
+
+def template_html(template_type: str, fields: dict, *, placeholders: bool = True) -> str:
+    """The template's own wording as HTML, for reading and editing as text.
+
+    Runs the builder with its document swapped for a story capture, so this
+    produces no file. With `placeholders`, a blank field that the PDF would
+    leave blank is shown as `[[FIELD_NAME]]`, so what is missing is visible in
+    the text and can be filled there. A blank field the builder fills with its
+    own default (today's date, "15 days") is NOT a placeholder: the text shows
+    the default, because that is what the PDF prints.
+    Raises ValueError for an unknown template.
+    """
+    from app.services import template_registry   # registry imports this module
+
+    fn = _GENERATORS.get(template_type)
+    if not fn:
+        raise ValueError(f"Unknown template type: {template_type}")
+
+    def render(values: dict) -> str:
+        sink: list = []
+        token = _STORY_CAPTURE.set(sink)
+        try:
+            fn("text-view", values)
+        finally:
+            _STORY_CAPTURE.reset(token)
+        return "".join(_flowable_html(fl) for fl in (sink[-1] if sink else []))
+
+    values = dict(fields or {})
+    if placeholders:
+        structured = set(template_registry.STRUCTURED.get(template_type, frozenset()))
+        for key in sorted(template_registry.fields_for(template_type) - structured):
+            if str(values.get(key) or "").strip():
+                continue
+            absent = {k: v for k, v in values.items() if k != key}
+            try:
+                # Same output with the key missing and with it empty: the
+                # builder has no default for it, so the PDF really is blank here.
+                if render(absent) != render({**absent, key: ""}):
+                    continue
+                trial = {**values, key: f"[[{key.upper()}]]"}
+                render(trial)           # a builder that computes with it (an amount) refuses text
+            except Exception:
+                continue
+            values = trial
+    return render(values)
+
+
+_EDIT_BLOCK = {"p": "body", "div": "body", "li": "bullet", "blockquote": "body",
+               "h1": "title", "h2": "heading", "h3": "heading"}
+
+
+def _align_of(attrs) -> str | None:
+    for name, value in attrs:
+        value = (value or "").strip().lower()
+        if name == "align" and value in _ALIGN_ENUM:
+            return value
+        if name == "style":
+            found = re.search(r"text-align\s*:\s*(left|center|right|justify)", value)
+            if found:
+                return found.group(1)
+    return None
+
+
+class _EditedFlow(_HTMLParser):
+    """Sanitised editor HTML -> (kind, payload, align) blocks for
+    `edited_document`. Like _DraftFlow, nothing is passed through: inline tags
+    are rebuilt from `_DRAFT_INLINE` and every text node is escaped. Adds what a
+    template's text carries and a free draft did not: alignment and tables."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.blocks: list[tuple[str, object, str | None]] = []
+        self._parts: list[str] = []
+        self._open: list[str] = []
+        self._kind = "body"
+        self._align: str | None = None
+        self._table: list[list[str]] | None = None
+        self._row: list[str] | None = None
+        self._in_cell = False
+
+    def _take(self) -> str:
+        text = "".join(self._parts) + "".join(f"</{t}>" for t in reversed(self._open))
+        self._parts = ["".join(f"<{t}>" for t in self._open)]
+        return text.strip()
+
+    def _flush(self):
+        if self._in_cell:
+            return
+        text = self._take()
+        if re.sub(r"<[^>]+>", "", text).strip():      # visible text, not bare tags
+            self.blocks.append((self._kind, text, self._align))
+        self._kind, self._align = "body", None
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "br":
+            self._parts.append("<br/>")
+            return
+        if tag == "hr":
+            self._flush()
+            self.blocks.append(("rule", "", None))
+            return
+        if tag == "table":
+            self._flush()
+            self._table = []
+            return
+        if tag == "tr" and self._table is not None:
+            self._row = []
+            return
+        if tag in ("td", "th") and self._row is not None:
+            self._parts, self._open, self._in_cell = [], [], True
+            return
+        if tag in _EDIT_BLOCK or tag in ("ul", "ol"):
+            self._flush()
+            if tag in _EDIT_BLOCK and not self._in_cell:
+                self._kind = _EDIT_BLOCK[tag]
+                self._align = _align_of(attrs)
+            return
+        inline = _DRAFT_INLINE.get(tag)
+        if inline:
+            self._open.append(inline)
+            self._parts.append(f"<{inline}>")
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in ("td", "th") and self._in_cell:
+            self._in_cell = False
+            cell = self._take()
+            self._parts, self._open = [], []
+            if self._row is not None:
+                self._row.append(cell)
+            return
+        if tag == "tr" and self._row is not None:
+            if self._table is not None and self._row:
+                self._table.append(self._row)
+            self._row = None
+            return
+        if tag == "table" and self._table is not None:
+            if self._table:
+                width = max(len(r) for r in self._table)
+                rows = [r + [""] * (width - len(r)) for r in self._table]
+                self.blocks.append(("table", rows, None))
+            self._table = None
+            return
+        if tag in _EDIT_BLOCK or tag in ("ul", "ol"):
+            self._flush()
+            return
+        inline = _DRAFT_INLINE.get(tag)
+        if inline and inline in self._open:
+            while self._open:
+                open_tag = self._open.pop()
+                self._parts.append(f"</{open_tag}>")
+                if open_tag == inline:
+                    break
+
+    def handle_data(self, data):
+        self._parts.append(_xml_escape(data))
+
+    def close(self):
+        super().close()
+        self._in_cell = False
+        self._flush()
+
+
+def _edited_blocks(html: str) -> list[tuple[str, object, str | None]]:
+    parser = _EditedFlow()
+    parser.feed(html or "")
+    parser.close()
+    return parser.blocks
+
+
+def edited_document(doc_id: str, f: dict) -> Path:
+    """A named template whose wording the client edited as text.
+
+    The body is the editor's sanitised HTML, rebuilt block by block exactly as
+    `lawyer_draft` does it -- never passed to reportlab as markup -- plus the
+    alignment and tables a template's text carries. No header is added: the
+    template's own title is already the first line of the text.
+
+    `source_template` records which instrument the text began as, and `title`
+    the document's name; neither is printed. This builder names no instrument,
+    so `pleading_rules` reports its particulars as not checked.
+    """
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    out = UPLOADS_DIR / f"{doc_id}.pdf"
+    s = _styles()
+    doc = _base_doc(out)
+    _provenance = (f.get("source_template"), f.get("title"))   # recorded, not printed
+
+    story = []
+    for kind, payload, align in _edited_blocks(f.get("body_html") or ""):
+        if kind == "rule":
+            story.append(_hr())
+            continue
+        if kind == "table":
+            cells = [[P(c, s["body"], raw=True) for c in row] for row in payload]
+            table = Table(cells, hAlign="LEFT")
+            table.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.lightgrey),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ]))
+            story += [table, Spacer(1, 0.3 * cm)]
+            continue
+        style = {"title": s["title"], "heading": s["heading"]}.get(kind, s["body"])
+        if align and _ALIGN_ENUM[align] != style.alignment:
+            style = ParagraphStyle(f"{style.name}_{align}", parent=style, alignment=_ALIGN_ENUM[align])
+        text = f"•&nbsp;&nbsp;{payload}" if kind == "bullet" else payload
+        story.append(P(text, style, raw=True))
+    if not story:
+        story.append(P("This document is empty.", s["body"]))
+
+    doc.build(story)
+    return out
+
+
 _GENERATORS = {
     "payment_receipt":    payment_receipt,
     "urdu_pleading":      urdu_pleading,
@@ -1818,6 +2167,7 @@ _GENERATORS = {
     "guardianship_petition":  guardianship_petition,
     "wakalatnama_checklist":  wakalatnama_checklist,
     "lawyer_draft":           lawyer_draft,
+    "edited_document":        edited_document,
 }
 
 

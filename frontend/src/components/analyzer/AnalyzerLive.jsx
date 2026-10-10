@@ -19,8 +19,8 @@
  * sent as headers the server checks before it accepts the file.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useT } from "@/components/client/theme.js";
-import { Btn, Card, Label } from "@/components/client/documents/ui.jsx";
+import { useT } from "@/components/shared/ui/theme.js";
+import { Btn, Card, Icon, Label } from "@/components/lawyer/ui.jsx";
 import DraftingReview from "@/components/analyzer/DraftingReview.jsx";
 import MaskingNote from "@/components/analyzer/MaskingNote.jsx";
 import PiiConfirmation, { PII_REVIEW_REASONS } from "@/components/analyzer/PiiConfirmation.jsx";
@@ -700,17 +700,34 @@ export default function AnalyzerLive({ attestation, onShowDemo }) {
                 <input type="checkbox" checked={attested} onChange={e => setAttested(e.target.checked)} data-attest />
                 <span>I confirm this document is synthetic (made up for testing) and contains no real client or confidential information.</span>
             </label>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                <input ref={fileRef} type="file" accept={ACCEPT} disabled={!attested} onChange={choose}
-                    aria-label="Choose a synthetic document" />
-                <select aria-label="Your side" value={side} onChange={e => setSide(e.target.value)}>
-                    <option value="tenant">Tenant</option>
-                    <option value="landlord">Landlord</option>
-                    <option value="neutral">Neutral</option>
-                </select>
-                <Btn kind="primary" disabled={!attested || !file || busy} onClick={upload}>{busy ? "Uploading…" : "Read this document"}</Btn>
-            </div>
-            <div style={{ fontSize: 12, color: t.textMuted }}>PDF, DOCX, JPG or PNG · up to 10 MB · up to 40 pages · English only</div>
+            {/* Laid out after the approved analyzer design ("Upload a Legal Document"),
+                with the real limits; no drag & drop, which is not built. */}
+            <Card data-upload-card style={{ padding: 18, display: "flex", gap: 18, flexWrap: "wrap", alignItems: "stretch" }}>
+                <div style={{ flex: "0 0 240px", display: "flex", flexDirection: "column", gap: 8 }}>
+                    <span aria-hidden="true" style={{ width: 40, height: 40, borderRadius: 11, background: "linear-gradient(135deg, #1f8a5b, #0f7f73)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>{Icon.upload}</span>
+                    <h2 style={{ margin: "4px 0 0", fontSize: 17, fontWeight: 700, color: t.text }}>Upload a legal document</h2>
+                    <p style={{ margin: 0, fontSize: 13, color: t.textMuted, lineHeight: 1.55 }}>A synthetic test document only. Tick the confirmation above first.</p>
+                </div>
+                <div style={{ position: "relative", flex: "1 1 320px", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 18, borderRadius: 12, border: `1.5px dashed ${t.border}`, background: t.inputBg, textAlign: "center" }}>
+                    <input ref={fileRef} type="file" accept={ACCEPT} disabled={!attested} onChange={choose}
+                        aria-label="Choose a synthetic document"
+                        style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", pointerEvents: "none" }} />
+                    <div data-chosen-file style={{ fontSize: 14.5, fontWeight: 600, color: file ? t.text : t.textMuted, overflowWrap: "anywhere" }}>
+                        {file ? file.name : "No file chosen"}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
+                        <Btn disabled={!attested || busy} onClick={() => fileRef.current?.click()}>{file ? "Replace file" : "Select file"}</Btn>
+                        <select aria-label="Your side" value={side} onChange={e => setSide(e.target.value)}
+                            style={{ height: 38, borderRadius: 9, padding: "0 8px", border: `1px solid ${t.border}`, background: t.inputBg, color: t.text }}>
+                            <option value="tenant">Tenant</option>
+                            <option value="landlord">Landlord</option>
+                            <option value="neutral">Neutral</option>
+                        </select>
+                        <Btn kind="primary" disabled={!attested || !file || busy} onClick={upload}>{busy ? "Uploading…" : "Read this document"}</Btn>
+                    </div>
+                    <div style={{ fontSize: 12, color: t.textMuted }}>PDF, DOCX, JPG or PNG · up to 10 MB · up to 40 pages · English only</div>
+                </div>
+            </Card>
             {issue && <div role="alert" style={{ color: t.danger || "#c0392b", fontSize: 13 }}>{issue}</div>}
 
             <section aria-label="Your analyses">

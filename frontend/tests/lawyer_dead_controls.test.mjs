@@ -27,7 +27,7 @@ const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const api = await import("./support/api-stub.mjs");
 const { AuthProvider } = await import("../src/context/AuthContext.jsx");
-const { ToastCtx } = await import("../src/components/shared/Toast.jsx");
+const { ToastCtx } = await import("../src/components/lawyer/Toast.jsx");
 const { CaseCtx, NotifCtx } = await import("../src/components/lawyer/theme.js");
 const h = React.createElement;
 
@@ -129,7 +129,7 @@ test("3.4 Appointments: no View Details button that does nothing", async () => {
 
 /* ── 3.5 AI Assistant ─────────────────────────────────────────────────── */
 
-test("3.5 AI Assistant: the clock reopens history; inert globe, mic, Pro and Upgrade are gone", async () => {
+test("3.5 AI Assistant: the history sidebar folds and reopens; inert globe, Pro and Upgrade are gone", async () => {
     api.__respond("listCases", { data: { items: [] }, error: null });
     api.__respond("listResearchConversations", { data: { conversations: [], next_cursor: null }, error: null });
     api.__respond("createResearchConversation", { data: { session_id: "s1" }, error: null });
@@ -140,14 +140,16 @@ test("3.5 AI Assistant: the clock reopens history; inert globe, mic, Pro and Upg
     assert.ok(!texts.includes("Search"), "the inert Search globe is still offered");
     assert.doesNotMatch(view.container.textContent, /\bPro\b/);
 
-    const sidebar = () => view.container.querySelector('input[placeholder="Search research"]').closest('div[style*="width"]');
-    const collapse = [...view.container.querySelectorAll("button")].find(b => b.textContent.trim() === "Collapse");
+    // The round button on the sidebar's edge folds it; "Open history" brings it back.
+    const sidebar = () => view.container.querySelector('section[aria-label="Conversations"]');
+    const collapse = view.container.querySelector('button[aria-label="Collapse history"]');
+    assert.ok(collapse, "no collapse button");
     await act(async () => { collapse.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     await settle();
     assert.equal(sidebar().style.width, "0px");
-    const clock = view.container.querySelector('button[aria-label="Conversation history"]');
-    assert.ok(clock, "no history button");
-    await act(async () => { clock.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    const reopen = view.container.querySelector('button[aria-label="Open history"]');
+    assert.ok(reopen, "no history button");
+    await act(async () => { reopen.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     await settle();
     assert.equal(sidebar().style.width, "200px");
     await view.unmount();
@@ -255,16 +257,18 @@ test("3.9 Case workspace: no browser-only Documents/Timeline tabs or hearing edi
     api.__respond("listEngagements", { data: [], error: null });
     const { CasesPage } = await import("../src/components/lawyer/CasesPage.jsx");
     const view = await mountPage(CasesPage, { caseCtx: { openCaseId: CASE.case_number, activeCase: null } });
-    const tabs = buttonTexts(view.container).filter(t => /Overview|Documents|Timeline|Messages|Tasks/.test(t));
-    assert.deepEqual(tabs, ["🏠 Overview", "💬 Messages", "✅ Tasks"]);
+    // Documents is back as a SERVER-backed tab (GET /documents/case/{id});
+    // Timeline, which only ever lived in browser state, stays gone.
+    const tabs = [...view.container.querySelectorAll('[role="tab"]')].map(b => b.textContent.replace(/\d+$/, "").trim());
+    assert.deepEqual(tabs, ["Overview", "Schedule", "Messages", "Tasks", "Documents"]);
     assert.doesNotMatch(view.container.textContent, /Recent Documents|Recent Activity|Full Timeline/);
 
-    const manage = [...view.container.querySelectorAll("button")].find(b => b.textContent.includes("Manage →"));
-    await act(async () => { manage.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    const schedule = [...view.container.querySelectorAll('[role="tab"]')].find(b => b.textContent.startsWith("Schedule"));
+    await act(async () => { schedule.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     await settle();
     const texts = buttonTexts(view.container);
     assert.ok(texts.some(t => t.includes("Schedule Hearing")), "scheduling must stay");
-    assert.ok(texts.some(t => t.includes("Add Outcome")), "outcome recording must stay");
+    assert.ok(texts.some(t => t.includes("Record outcome")), "outcome recording must stay");
     assert.ok(!texts.some(t => /Edit|🗑/.test(t)), "local-only hearing edit/delete is still offered");
     await view.unmount();
 });

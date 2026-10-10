@@ -133,7 +133,8 @@ async function mountLawyer(items) {
     return {
         container,
         text: () => container.textContent,
-        buttons: () => [...container.querySelectorAll("button")]
+        // Row actions only: the status filter tabs share labels ("No Show").
+        buttons: () => [...container.querySelectorAll('button:not([role="tab"])')]
             .map(b => b.textContent.trim()),
         // Status badges only, identified structurally: the tab strip and the
         // stat cards render the same words, and a whole-page text scan would
@@ -152,16 +153,11 @@ async function mountLawyer(items) {
          * counted it.
          */
         stat: (label) => {
-            // A StatCard renders its label then its value, so its whole text
-            // is "Today3" — or "Today (loaded)3" while the list is still
-            // paging, since the card says so rather than passing a partial
-            // count off as the day's complete agenda.
-            const pattern = new RegExp("^" + label + "[^0-9]*([0-9]+)$");
-            const hit = [...container.querySelectorAll("div")]
-                .map(el => el.textContent.trim().match(pattern))
-                .find(Boolean);
-            assert.ok(hit, `no stat card labelled ${label}`);
-            return Number(hit[1]);
+            // An overview card marks itself `data-stat` and its number
+            // `data-value` ("Today" -> the meetings-booked count).
+            const el = container.querySelector(`[data-stat="${label.toLowerCase()}"] [data-value]`);
+            assert.ok(el, `no overview card for ${label}`);
+            return Number(el.textContent.trim());
         },
         unmount: async () => { await act(async () => root.unmount()); },
     };
@@ -220,7 +216,7 @@ test("an expired request is filterable rather than only under All", async () => 
     // every filtered view the moment it is set.
     const ui = await mountLawyer([appointment({ status: "expired" })]);
 
-    const tabs = ui.buttons();
+    const tabs = [...ui.container.querySelectorAll('[role="tab"]')].map(b => b.textContent.trim());
     assert.ok(tabs.some(label => label.startsWith("Expired")),
               `no Expired filter tab: ${JSON.stringify(tabs)}`);
     await ui.unmount();

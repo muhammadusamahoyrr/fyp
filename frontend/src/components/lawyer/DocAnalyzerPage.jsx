@@ -4,12 +4,13 @@
  * lawyer's tool (2026-10-03). The client dashboard has none, and the server
  * refuses every analyzer endpoint to a client account.
  *
- * The workspace reads the app theme through the client ThemeCtx (`useT`).
- * Both dashboards build their themes from the same DARK/LIGHT objects, so this
+ * The workspace reads the app theme through the role-neutral ThemeCtx (`useT`,
+ * components/shared/ui/theme.js) -- never the client's. Both dashboards build
+ * their themes from the same DARK/LIGHT objects, so this
  * page hands it the lawyer dashboard's current theme and the analyzer follows
  * the lawyer's light/dark toggle. */
 import React from "react";
-import { ThemeCtx as WorkspaceThemeCtx } from "@/components/client/theme.js";
+import { ThemeCtx as WorkspaceThemeCtx } from "@/components/shared/ui/theme.js";
 import AnalyzerWorkspace from "@/components/analyzer/AnalyzerWorkspace.jsx";
 import { useCase, useTheme } from "./theme.js";
 

@@ -967,7 +967,10 @@ test("a lawyer can find documents they saved earlier", () => {
     // They were reachable only by id, in the session that created them.
     assert.match(myDocs, /myDocumentsV2\(\{ cursor: after \}\)/);
     assert.match(myDocs, /My Documents/);
-    assert.match(automation, /<MyDocuments t=\{t\} \/>/);
+    // On the drafter's template home (DraftingHome.jsx since 2026-10-09).
+    const home = readFileSync(new URL("../src/components/lawyer/DraftingHome.jsx", import.meta.url), "utf8");
+    assert.match(automation, /<DraftingHome\b/);
+    assert.match(home, /<MyDocuments t=\{t\} \/>/);
 });
 
 test("the list is paginated rather than fetching everything", () => {
@@ -1101,4 +1104,15 @@ test("no V2 path ends in a slash the dev proxy would redirect away", () => {
         .map(m => m[1]);
     assert.ok(paths.includes("/documents/v2"), "create no longer posts to the collection");
     for (const p of paths) assert.ok(!p.endsWith("/"), `${p} ends in a slash`);
+});
+
+test("a decision re-reads the queue and tells the shell its badge is stale (2026-10-09)", () => {
+    // Patching the one row left it under the tab it had left, with the old
+    // counts, and the sidebar badge unchanged until the lawyer changed page.
+    const fn = lawyer.slice(lawyer.indexOf("const handleDecide"));
+    const body = fn.slice(0, fn.indexOf("\n    };"));
+    assert.match(body, /\bload\(\)/, "the queue is not reloaded after a decision");
+    assert.match(body, /attorney:review-decided/);
+    const app = readFileSync(new URL("../src/components/lawyer/App.jsx", import.meta.url), "utf8");
+    assert.match(app, /addEventListener\("attorney:review-decided"/, "the sidebar badge does not listen");
 });

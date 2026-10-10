@@ -478,3 +478,21 @@ async def test_submitting_for_review_is_still_client_only(enabled):
         params = inspect.signature(endpoint).parameters
         assert params["current_user"].default.dependency is require_client, (
             f"{endpoint.__name__} no longer requires the client role")
+
+
+async def test_the_queue_tells_the_lawyer_when_the_client_edited_the_wording(enabled):
+    """A document whose submitted revision is the client's edited TEXT must not
+    read as the template's reviewed wording (2026-10-08)."""
+    edited, plain = await _document(title="Edited"), await _document(title="Plain")
+    for doc, template in ((edited, "edited_document"), (plain, "legal_notice")):
+        revision_id = secrets.token_urlsafe(12)
+        await get_document_revisions_col().insert_one({
+            "_id": revision_id, "document_id": doc["id"], "version": 1, "status": "generated",
+            "template_type": template, "idempotency_key": key(), "fields": {}})
+        await get_documents_col().update_one({"_id": doc["id"]}, {"$set": {
+            "submitted_to": LAWYER["_id"], "review_status": "submitted",
+            "submitted_revision_id": revision_id}})
+    queue = await v2api.review_queue_v2(status="submitted", cursor=None, limit=25, current_user=LAWYER)
+    flags = {r["id"]: r.get("text_edited") for r in queue["items"]}
+    assert flags[edited["id"]] is True
+    assert flags[plain["id"]] is False

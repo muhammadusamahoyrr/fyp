@@ -1,5 +1,6 @@
 import React, { createContext, useContext } from "react";
-import { DARK, LIGHT } from "../admin/themes.js";
+// The lawyer's OWN palette (a copy): restyling it never recolours a client screen.
+import { DARK, LIGHT } from "./palette.js";
 
 export { DARK, LIGHT };
 

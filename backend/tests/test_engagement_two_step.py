@@ -224,6 +224,31 @@ async def test_a_lawyer_can_withdraw_terms_they_proposed(parties):
     assert case["lawyer_id"] is None
 
 
+async def test_withdrawn_terms_are_called_withdrawn_not_declined(parties):
+    """The client was told "Engagement request declined" when the lawyer
+    pulled back terms already sent. Same transition, named truthfully."""
+    from app.db.collections import get_notifications_col
+
+    eid = await _accepted_terms_pending(parties)
+    declined = await engagement_service.decline_engagement(eid, parties["lawyer_id"], "Conflict")
+    assert declined["terms_withdrawn"] is True
+    note = await get_notifications_col().find_one(
+        {"user_id": parties["client_id"], "payload.engagement_id": eid, "type": "engagement_declined"})
+    assert note["title"] == "Terms withdrawn"
+    assert "withdrew the terms they proposed" in note["body"]
+
+
+async def test_declining_a_plain_request_is_still_a_decline(parties):
+    from app.db.collections import get_notifications_col
+
+    eid = await _request(parties)
+    declined = await engagement_service.decline_engagement(eid, parties["lawyer_id"], None)
+    assert declined["terms_withdrawn"] is False
+    note = await get_notifications_col().find_one(
+        {"user_id": parties["client_id"], "payload.engagement_id": eid, "type": "engagement_declined"})
+    assert note["title"] == "Engagement request declined"
+
+
 # ── the guard that must not regress ─────────────────────────────────────────
 
 async def test_an_outstanding_proposal_blocks_a_request_to_another_lawyer(parties):

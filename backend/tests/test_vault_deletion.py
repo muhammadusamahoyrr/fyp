@@ -236,9 +236,12 @@ async def test_the_routes_end_to_end_and_trash_is_never_a_document_id(http):
     assert (await client.get(f"/documents/v2/{doc_id}")).status_code == 200
 
 
-async def test_routes_are_404_with_the_feature_off_and_403_for_a_lawyer(http, monkeypatch):
+async def test_routes_are_404_with_the_feature_off_and_owner_roles_only(http, monkeypatch):
     client, actor = http
+    # A lawyer's own Vault has Recently deleted too (2026-10-09); an admin's does not.
     actor["role"] = "lawyer"
+    assert (await client.get("/documents/v2/trash")).status_code == 200
+    actor["role"] = "admin"
     assert (await client.get("/documents/v2/trash")).status_code == 403
     monkeypatch.setattr(settings, "documents_v2", False)
     for method, path in [("GET", "/documents/v2/trash"), ("DELETE", "/documents/v2/x"),

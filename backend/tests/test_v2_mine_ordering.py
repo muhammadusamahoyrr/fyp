@@ -358,3 +358,22 @@ async def test_the_row_carries_the_exact_revision_and_hash(enabled, monkeypatch)
     assert row["revision_id"] == rev_id
     assert row["pdf_sha256"] == "b" * 64
     assert row["downloadable"] is True
+
+
+async def test_case_narrows_to_one_case_and_never_widens_ownership(enabled):
+    """`case` (2026-10-09) is the client's case Tracking page: that case's
+    documents, and still only the caller's own."""
+    mine_c1 = await _doc(created_at=BASE)
+    mine_c2 = await _doc(created_at=BASE + timedelta(minutes=1))
+    theirs_c1 = await _doc(created_at=BASE + timedelta(minutes=2), owner=OTHER)
+    await get_documents_col().update_many({"_id": {"$in": [mine_c1, theirs_c1]}},
+                                          {"$set": {"case_id": "case-1"}})
+    await get_documents_col().update_one({"_id": mine_c2}, {"$set": {"case_id": "case-2"}})
+
+    page = await v2api.my_documents_v2(cursor=None, limit=25, case="case-1",
+                                       current_user=CLIENT)
+    assert [r["id"] for r in page["items"]] == [mine_c1]
+    assert page["items"][0]["case_id"] == "case-1"
+
+    everything = await v2api.my_documents_v2(cursor=None, limit=25, current_user=CLIENT)
+    assert {r["id"] for r in everything["items"]} == {mine_c1, mine_c2}

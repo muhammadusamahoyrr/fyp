@@ -9,6 +9,8 @@ from app.schemas.case import (
     CaseUpdate,
     HearingAdd,
     HearingOutcome,
+    HearingReschedule,
+    WalkInCaseCreate,
     MessageAdd,
     MessageOut,
     MilestoneAdd,
@@ -29,6 +31,15 @@ async def create_case(
     current_user: dict = Depends(get_current_user),
 ):
     return await case_service.create_case(current_user["_id"], body.model_dump())
+
+
+@router.post("/walk-in", response_model=CaseOut, status_code=201)
+async def create_walk_in_case(
+    body: WalkInCaseCreate,
+    current_user: dict = Depends(require_lawyer),
+):
+    """A lawyer opens a case for a client who is not on the platform."""
+    return await case_service.create_walk_in_case(current_user["_id"], body.model_dump())
 
 
 @router.get("", response_model=PaginatedResponse[CaseOut])
@@ -139,6 +150,20 @@ async def record_hearing_outcome(
     notified in plain language and the next date is auto-scheduled."""
     return await case_service.record_hearing_outcome(
         case_id, hearing_id, body.model_dump(exclude_none=True), current_user["_id"]
+    )
+
+
+@router.patch("/{case_id}/hearings/{hearing_id}/reschedule", response_model=CaseOut)
+async def reschedule_hearing(
+    case_id: str,
+    hearing_id: str,
+    body: HearingReschedule,
+    current_user: dict = Depends(require_lawyer),
+):
+    """Move an upcoming hearing to a new date; the client is notified and the
+    old date is kept on the hearing's reschedule history."""
+    return await case_service.reschedule_hearing(
+        case_id, hearing_id, body.model_dump(), current_user["_id"]
     )
 
 

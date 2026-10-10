@@ -880,3 +880,124 @@ test("a case-bound consultation offers only its own case", async () => {
     assert.deepEqual(options, ["C2"]);
     await ui.unmount();
 });
+
+/* ── booking form: typing keeps focus; only an offered time can be booked ── */
+
+async function openBookingFor(ui) {
+    await openProfile(ui);
+    const book = [...ui.container.querySelectorAll("button")].find(b => b.textContent.trim() === "Book Appointment");
+    assert.ok(book, "no Book Appointment button");
+    await act(async () => { book.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+    await ui.settle(80);
+    // TOMORROW, not the default "today": a slot earlier than the current
+    // PKT time is (correctly) refused as past, which made these tests depend
+    // on the hour they ran at.
+    const { pktToday } = await import("../src/lib/bookingTime.js");
+    const d = new Date(`${pktToday()}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1);
+    const dateInput = dom.window.document.body.querySelector('input[type="date"]');
+    if (dateInput) {
+        setNativeValue(dateInput, d.toISOString().slice(0, 10));
+        await act(async () => { dateInput.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
+        await ui.settle(60);
+    }
+    return dom.window.document.body;
+}
+const slotsFor = (times) => ({ data: { configured: true, enforced: false, days: [{ date: "x", slots: times.map(t => ({ start: `s-${t}`, local_time: t })) }] }, error: null });
+
+test("typing in the booking notes keeps focus (the form is not remounted per key)", async () => {
+    api.__respond("searchLawyers", { data: { items: [lawyer("L1")] } });
+    api.__respond("getBookableSlots", slotsFor(["11:00"]));
+    const ui = await mountLawyers();
+    const body = await openBookingFor(ui);
+    const box = [...body.querySelectorAll("textarea")].at(-1);
+    assert.ok(box, "no notes box");
+    box.focus();
+    for (const ch of "Rent") {
+        const current = [...body.querySelectorAll("textarea")].at(-1);
+        setNativeValue(current, current.value + ch);
+        await act(async () => { current.dispatchEvent(new dom.window.Event("input", { bubbles: true })); });
+    }
+    const after = [...body.querySelectorAll("textarea")].at(-1);
+    assert.equal(after, box, "the notes box was replaced by a new element while typing");
+    assert.equal(after.value, "Rent");
+    assert.equal(dom.window.document.activeElement, box, "focus was lost while typing");
+    await ui.unmount();
+});
+
+test("booking sends only a time the client picked from the offered slots", async () => {
+    api.__respond("searchLawyers", { data: { items: [lawyer("L1")] } });
+    api.__respond("getBookableSlots", slotsFor(["11:00", "11:30"]));
+    api.__respond("bookAppointment", { data: { id: "a1", status: "pending" }, error: null });
+    const ui = await mountLawyers();
+    const body = await openBookingFor(ui);
+    const confirm = () => [...body.querySelectorAll("button")].find(b => b.textContent.includes("Confirm Appointment"));
+
+    // Nothing picked yet: no default 10:00 is sent.
+    await act(async () => { confirm().dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+    await ui.settle();
+    assert.equal(api.__calls("bookAppointment").length, 0, "a time the client never chose was booked");
+
+    const slot = [...body.querySelectorAll("button")].find(b => b.textContent.trim() === "11:30");
+    await act(async () => { slot.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+    await act(async () => { confirm().dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+    await ui.settle();
+    const sent = api.__calls("bookAppointment");
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].args[0].scheduled_at, /T06:30:00/, "11:30 PKT is 06:30 UTC");
+    await ui.unmount();
+});
+
+test("a lawyer with no published hours cannot be booked at a guessed time", async () => {
+    api.__respond("searchLawyers", { data: { items: [lawyer("L1")] } });
+    api.__respond("getBookableSlots", { data: { configured: false, enforced: false, days: [] }, error: null });
+    const ui = await mountLawyers();
+    const body = await openBookingFor(ui);
+    const confirm = [...body.querySelectorAll("button")].find(b => b.textContent.includes("Confirm Appointment"));
+    await act(async () => { confirm.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+    await ui.settle();
+    assert.equal(api.__calls("bookAppointment").length, 0);
+    await ui.unmount();
+});
+
+test("a sent booking is reported as a request, and the real appointments are re-read", async () => {
+    // It used to add a timeline milestone saying the consultation was
+    // "confirmed" (the lawyer had not accepted anything) plus a second,
+    // browser-only notice next to the one the server already sends.
+    api.__respond("searchLawyers", { data: { items: [lawyer("L1")] } });
+    api.__respond("getBookableSlots", slotsFor(["11:00"]));
+    api.__respond("bookAppointment", { data: { id: "a1", status: "pending" }, error: null });
+    const ui = await mountLawyers();
+    const body = await openBookingFor(ui);
+    const before = api.__calls("listAppointments").length;
+    const slot = [...body.querySelectorAll("button")].find(b => b.textContent.trim() === "11:00");
+    await act(async () => { slot.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+    const confirm = [...body.querySelectorAll("button")].find(b => b.textContent.includes("Confirm Appointment"));
+    await act(async () => { confirm.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+    await ui.settle(60);
+    assert.equal(api.__calls("bookAppointment").length, 1);
+    assert.match(body.textContent, /Request sent/);
+    assert.doesNotMatch(body.textContent, /Appointment booked!/);
+    assert.ok(api.__calls("listAppointments").length > before, "the appointments were not re-read after booking");
+    await ui.unmount();
+});
+
+test("declined and ended engagements stay visible, with the reason", async () => {
+    api.__respond("searchLawyers", { data: { items: [lawyer("L1")] } });
+    api.__respond("listEngagements", { data: [
+        { id: "E1", status: "declined", declined_by: "lawyer", decline_reason: "Conflict of interest",
+          lawyer_name: "Adv Sana", case_title: "Rent dispute", updated_at: "2026-10-01T05:00:00Z" },
+        { id: "E2", status: "terminated", termination_reason: "Moved to another city",
+          lawyer_name: "Adv Bilal", case_title: "Land case", updated_at: "2026-10-03T05:00:00Z" },
+        { id: "E3", status: "requested", lawyer_name: "Adv Omar", case_title: "Fee case" },
+    ] });
+    const ui = await mountLawyers();
+    const past = ui.container.querySelector("[data-ended-engagements]");
+    assert.ok(past, "ended engagements are not shown");
+    const text = past.textContent;
+    assert.match(text, /Adv Sana declined this request\. Reason: Conflict of interest/);
+    assert.match(text, /The engagement was ended\. Reason: Moved to another city/);
+    assert.ok(text.indexOf("Adv Bilal") < text.indexOf("Adv Sana"), "newest first");
+    assert.doesNotMatch(text, /Adv Omar/, "a live request is not history");
+    await ui.unmount();
+});

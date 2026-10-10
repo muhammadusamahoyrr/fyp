@@ -279,3 +279,39 @@ test("no hire link, no hire form", async () => {
     assert.equal(api.__calls("listHireConsultations").length, 0);
     await ui.unmount();
 });
+
+/* ── which cases can be sent: open negotiations, read fresh ─────────────── */
+//
+// The picker counted only `requested` engagements as pending, so a case with
+// terms already proposed was offered again (the server refuses it: both are
+// open). And the cases were read once per visit, so after an engagement
+// changed the picker still showed the old answer.
+
+const caseOptions = (ui) => [...(ui.field("Case *")?.querySelectorAll("option") || [])]
+    .map(o => o.value).filter(Boolean);
+
+test("a case with terms proposed is not offered again", async () => {
+    api.__respond("listEngagements", { data: [{ id: "E9", case_id: "C1", status: "terms_proposed", lawyer_id: "L2" }] });
+    const ui = await mountLawyersFromLink([consult("A1")], { hire: "L1", hire_name: "Adv Ayesha Khan", appointment: "A1" });
+    assert.match(ui.text(), /Request to Hire/);
+    assert.deepEqual(caseOptions(ui), ["C2"]);
+    await ui.unmount();
+});
+
+test("opening the hire form re-reads engagements, and refuses when every case is now taken", async () => {
+    let reads = 0;
+    api.__respond("listEngagements", () => {
+        reads += 1;
+        // At page load nothing is pending; by the time the form opens, both
+        // cases are under negotiation with someone.
+        return { data: reads === 1 ? [] : [
+            { id: "E1", case_id: "C1", status: "requested", lawyer_id: "L2" },
+            { id: "E2", case_id: "C2", status: "terms_proposed", lawyer_id: "L3" },
+        ] };
+    });
+    const ui = await mountLawyersFromLink([consult("A1")], { hire: "L1", hire_name: "Adv Ayesha Khan", appointment: "A1" });
+    assert.ok(reads >= 2, "engagements were not re-read when the form opened");
+    assert.ok(!/Send Hire Request/.test(ui.text()), "the form opened on cases that can no longer be sent");
+    assert.match(ui.text(), /already have a lawyer or a pending request/);
+    await ui.unmount();
+});

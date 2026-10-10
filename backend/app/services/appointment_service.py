@@ -1068,6 +1068,8 @@ async def list_appointments(
     status: str | None,
     page: int,
     page_size: int,
+    starts_from: datetime | None = None,
+    starts_before: datetime | None = None,
 ) -> dict:
     # Stated per role, for the same reason the single-fetch rule is. An admin
     # used to fall into the `else` and be listed their OWN lawyer appointments,
@@ -1076,9 +1078,9 @@ async def list_appointments(
     # this endpoint has no scoped query for. An empty success is the worst
     # possible answer, because it looks like data.
     if user_role == "client":
-        result = await appt_repo.find_for_client(user_id, status, page, page_size)
+        result = await appt_repo.find_for_client(user_id, status, page, page_size, starts_from, starts_before)
     elif user_role == "lawyer":
-        result = await appt_repo.find_for_lawyer(user_id, status, page, page_size)
+        result = await appt_repo.find_for_lawyer(user_id, status, page, page_size, starts_from, starts_before)
     else:
         raise ForbiddenError(
             "Listing appointments requires a client or lawyer account.")

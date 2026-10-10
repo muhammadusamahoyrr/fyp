@@ -120,7 +120,13 @@ async function mountLawyer() {
 
     return {
         container,
-        text: () => container.textContent,
+        // The list's text, not the overview cards above it: the pending
+        // card repeats a few requests, which would double-count rows here.
+        text: () => {
+            const copy = container.cloneNode(true);
+            copy.querySelectorAll("[data-overview]").forEach(el => el.remove());
+            return copy.textContent;
+        },
         byText,
         // Tab buttons carry a count badge inside them, so their text is
         // "Completed·" rather than "Completed".
@@ -266,7 +272,9 @@ test("clicking Load more twice does not request the same page twice", async () =
     ui.clickNoSettle("Load more appointments");
     await ui.settle(60);
 
-    const pagesAsked = calls.filter(c => c.page === 2).length;
+    // The list's own requests only: the overview separately reads every
+    // appointment (page_size 50), which is not a Load-more click.
+    const pagesAsked = calls.filter(c => c.page === 2 && c.page_size !== 50).length;
     assert.equal(pagesAsked, 1, `page 2 was requested ${pagesAsked} times`);
     await ui.unmount();
 });
@@ -434,7 +442,7 @@ test("the dashboard total comes from the server, not the first page", async () =
     await act(async () => root.unmount());
 });
 
-test("the dashboard labels its agenda as a preview", async () => {
+test("the dashboard reads its agenda by date, not from the first page", async () => {
     const { DashboardPage } =
         await import("../src/components/lawyer/DashboardPage.jsx");
     const { NotifCtx, CaseCtx } = await import("../src/components/lawyer/theme.js");
@@ -459,8 +467,10 @@ test("the dashboard labels its agenda as a preview", async () => {
     });
     await act(async () => { await new Promise(r => realSetTimeout(r, 80)); });
 
-    assert.match(container.textContent, /Preview/i,
-                 "a bounded agenda was presented as the complete one");
+    // The first page is the OLDEST fifty; the agenda asks for today instead.
+    const calls = api.__calls("listAppointments").map(c => c.args[0] || {});
+    assert.ok(calls.some(a => a.starts_from && a.starts_before), "today's agenda was not asked for by date");
+    assert.ok(!calls.some(a => !a.status && !a.starts_from && a.page_size === 50), "the agenda still reads the first page");
     await act(async () => root.unmount());
 });
 

@@ -20,7 +20,7 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const api = await import("./support/api-stub.mjs");
-const { ToastCtx } = await import("../src/components/shared/Toast.jsx");
+const { ToastCtx } = await import("../src/components/lawyer/Toast.jsx");
 const { default: DocsAnalyzer } = await import("../src/components/analyzer/AnalyzerWorkspace.jsx");
 const live = await import("../src/components/analyzer/AnalyzerLive.jsx");
 
@@ -102,8 +102,14 @@ test("the file picker is disabled until the synthetic confirmation is ticked", a
     const input = p.container.querySelector('input[type="file"]');
     assert.equal(input.disabled, true);
     assert.equal(input.accept, ".pdf,.docx,.jpg,.jpeg,.png");
+    // The styled "Select file" button follows the same gate as the hidden input.
+    const pick = () => [...p.container.querySelectorAll("button")].find(b => b.textContent === "Select file");
+    assert.equal(pick().disabled, true);
+    assert.ok(p.container.querySelector("[data-upload-card]"));
+    assert.notEqual(p.container.querySelector('select[aria-label="Your side"]').style.color, "", "the side select must be themed (readable)");
     await tick(p.container.querySelector("[data-attest]"));
     assert.equal(p.container.querySelector('input[type="file"]').disabled, false);
+    assert.equal(pick().disabled, false);
     await p.unmount();
 });
 

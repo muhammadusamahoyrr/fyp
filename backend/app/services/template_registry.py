@@ -42,6 +42,7 @@ keys within them are that object's shape, not things a form submits separately.
 from __future__ import annotations
 
 from app.services.pdf_generator import _GENERATORS
+from app.services import extraction_profile
 
 # ── Categories ────────────────────────────────────────────────────────────────
 # Grouping for the picker only. Nothing branches on these.
@@ -108,6 +109,9 @@ FIELDS: dict[str, frozenset[str]] = {
     }),
     "lawyer_draft": frozenset({
         "author_name", "body_html", "date", "title",
+    }),
+    "edited_document": frozenset({
+        "body_html", "source_template", "title",
     }),
     "legal_notice": frozenset({
         "date", "demand", "notice_body", "recipient_address",
@@ -271,6 +275,11 @@ _META: dict[str, tuple[str, str, str]] = {
     "payment_receipt": (
         "Payment Receipt", PLATFORM,
         "A receipt for a platform payment. Issued by the system, not drafted."),
+    "edited_document": (
+        "Edited Document", DRAFTING,
+        "A named template whose wording its owner edited as text. The text no "
+        "longer follows the template's fields, so no statutory completeness "
+        "check applies to it — only the citation existence check over its text."),
     "lawyer_draft": (
         "Lawyer Draft", DRAFTING,
         "Free prose written by a lawyer on the drafting page. Names no "
@@ -292,6 +301,17 @@ SYSTEM_ISSUED = frozenset({"payment_receipt"})
 # drafting page, where that is exactly what the lawyer is doing.
 LAWYER_AUTHORED = frozenset({"lawyer_draft"})
 
+# What a named template becomes once its owner edits the wording as text.
+#
+# Never offered and never created directly: it is reached only by editing a
+# template's text in the workspace, so it is held out of the picker and out of
+# document creation. A document keeps its own template_type (what it began as);
+# its revisions carry this one from the first text edit on.
+TEXT_EDITED = frozenset({"edited_document"})
+
+# Both kinds are edited as rich text rather than through fields.
+FREEFORM = LAWYER_AUTHORED | TEXT_EDITED
+
 
 # ── Queries ───────────────────────────────────────────────────────────────────
 
@@ -310,6 +330,21 @@ def label_for(template_type: str) -> str:
     return meta[0] if meta else template_type
 
 
+def text_editable(template_type: str) -> bool:
+    """Can this template's wording be read and edited as text?
+
+    A composable named template whose words are all prose. Not one with a
+    calculated part (shares, dues): its tables are computed and must stay so.
+    Not a non-Latin one: its text is shaped for print and the citation check
+    cannot read it. Not a receipt: nobody composes it.
+    """
+    return (known(template_type)
+            and template_type not in SYSTEM_ISSUED
+            and template_type not in FREEFORM
+            and not STRUCTURED.get(template_type)
+            and extraction_profile.profile_for(template_type) == extraction_profile.PROFILE_LATIN)
+
+
 def spec(template_type: str) -> dict | None:
     """One catalogue entry, or None if no builder exists for it."""
     if not known(template_type):
@@ -326,6 +361,8 @@ def spec(template_type: str) -> dict | None:
         "structured_fields": sorted(structured),
         "system_issued": template_type in SYSTEM_ISSUED,
         "lawyer_authored": template_type in LAWYER_AUTHORED,
+        "text_edited": template_type in TEXT_EDITED,
+        "text_editable": text_editable(template_type),
     }
 
 
@@ -345,7 +382,8 @@ def listing(include_system: bool = False,
     items = [spec(t) for t in sorted(_GENERATORS)]
     return [i for i in items if i
             and (include_system or not i["system_issued"])
-            and (include_lawyer_authored or not i["lawyer_authored"])]
+            and (include_lawyer_authored or not i["lawyer_authored"])
+            and not i["text_edited"]]
 
 
 # ── Shape report ──────────────────────────────────────────────────────────────

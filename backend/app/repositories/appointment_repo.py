@@ -11,6 +11,17 @@ from app.schemas.common import PaginatedResponse
 _ACTIVE = [AppointmentStatus.PENDING.value, AppointmentStatus.CONFIRMED.value]
 
 
+def _window(q: dict, starts_from, starts_before) -> None:
+    """Restrict a listing to appointments starting in [starts_from, starts_before)."""
+    rng = {}
+    if starts_from is not None:
+        rng["$gte"] = starts_from.astimezone(timezone.utc)
+    if starts_before is not None:
+        rng["$lt"] = starts_before.astimezone(timezone.utc)
+    if rng:
+        q["scheduled_at"] = rng
+
+
 class AppointmentRepository(BaseRepository):
     def __init__(self):
         super().__init__(get_appointments_col)
@@ -44,10 +55,13 @@ class AppointmentRepository(BaseRepository):
         status: str | None,
         page: int,
         page_size: int,
+        starts_from: datetime | None = None,
+        starts_before: datetime | None = None,
     ) -> PaginatedResponse:
         q: dict = {"client_id": client_id}
         if status:
             q["status"] = status
+        _window(q, starts_from, starts_before)
         return await self.paginate(
             q, page=page, page_size=page_size,
             sort=[("scheduled_at", DESCENDING)],
@@ -59,10 +73,13 @@ class AppointmentRepository(BaseRepository):
         status: str | None,
         page: int,
         page_size: int,
+        starts_from: datetime | None = None,
+        starts_before: datetime | None = None,
     ) -> PaginatedResponse:
         q: dict = {"lawyer_id": lawyer_id}
         if status:
             q["status"] = status
+        _window(q, starts_from, starts_before)
         return await self.paginate(
             q, page=page, page_size=page_size,
             sort=[("scheduled_at", ASCENDING)],

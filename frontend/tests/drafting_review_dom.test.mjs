@@ -27,7 +27,7 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const api = await import("./support/api-stub.mjs");
-const { ToastCtx } = await import("../src/components/shared/Toast.jsx");
+const { ToastCtx } = await import("../src/components/lawyer/Toast.jsx");
 const review = await import("../src/components/analyzer/DraftingReview.jsx");
 const live = await import("../src/components/analyzer/AnalyzerLive.jsx");
 

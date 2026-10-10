@@ -106,7 +106,7 @@ async function mountAppointments(items) {
             .filter(txt => ["Upcoming", "Pending", "Completed",
                             "Cancelled", "No Show"].includes(txt)),
         click: async (label) => {
-            const btn = [...container.querySelectorAll("button")]
+            const btn = [...container.querySelectorAll('button:not([role="tab"])')]
                 .find(b => b.textContent.trim() === label);
             assert.ok(btn, `no button labelled ${label!== undefined ? JSON.stringify(label) : label}`);
             await act(async () => {
@@ -181,7 +181,7 @@ function started(over = {}) {
 test("a confirmed appointment that has started offers the No Show action", async () => {
     const ui = await mountAppointments([started()]);
 
-    const noShow = [...ui.container.querySelectorAll("button")]
+    const noShow = [...ui.container.querySelectorAll('button:not([role="tab"])')]
         .find(b => b.textContent.trim() === "No Show");
     assert.ok(noShow, "no No Show control on a started confirmed appointment");
     assert.equal(noShow.disabled, false, "it must be usable, not merely present");
@@ -194,7 +194,7 @@ test("No Show is offered but disabled before the appointment starts", async () =
     // that is always there and always fails.
     const ui = await mountAppointments([appointment({ status: "confirmed" })]);
 
-    const noShow = [...ui.container.querySelectorAll("button")]
+    const noShow = [...ui.container.querySelectorAll('button:not([role="tab"])')]
         .find(b => b.textContent.trim() === "No Show");
     assert.ok(noShow, "the action should still be visible");
     assert.equal(noShow.disabled, true,
@@ -246,7 +246,7 @@ test("a completed appointment offers no No Show action", async () => {
     // elsewhere would present an action the API would refuse.
     const ui = await mountAppointments([appointment({ status: "completed" })]);
 
-    const labels = [...ui.container.querySelectorAll("button")]
+    const labels = [...ui.container.querySelectorAll('button:not([role="tab"])')]
         .map(b => b.textContent.trim());
     assert.ok(!labels.includes("No Show"),
               `No Show offered on a completed appointment; buttons: ${labels}`);

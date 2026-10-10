@@ -21,7 +21,7 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const api = await import("./support/api-stub.mjs");
-const { ToastCtx } = await import("../src/components/shared/Toast.jsx");
+const { ToastCtx } = await import("../src/components/lawyer/Toast.jsx");
 const lawyerTheme = await import("../src/components/lawyer/theme.js");
 const { DocAnalyzerPage } = await import("../src/components/lawyer/DocAnalyzerPage.jsx");
 const nav = await import("../src/lib/documentsNav.js");
@@ -56,7 +56,7 @@ test("the old client analyzer URL redirects to Documents", () => {
 // ── the lawyer dashboard: the same workspace ────────────────────────────────
 
 test("the lawyer dashboard lists the Document Analyzer and routes to it", () => {
-    assert.match(src("components/lawyer/layout.jsx"), /\{ id: "doc-analyzer", label: "Document Analyzer"/);
+    assert.match(src("components/lawyer/layout.jsx"), /\{ id: "doc-analyzer", label: "Document [Aa]nalyzer"/);
     assert.match(src("components/lawyer/App.jsx"), /"doc-analyzer": DocAnalyzerPage/);
     assert.match(src("app/lawyer/documents/analyzer/page.jsx"), /<App initialPage="doc-analyzer" \/>/);
 });

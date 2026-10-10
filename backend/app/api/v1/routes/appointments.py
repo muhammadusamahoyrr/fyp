@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import AwareDatetime
 
 from app.core.constants import AppointmentStatus
 from app.core.rate_limit import limiter
@@ -66,6 +67,10 @@ async def list_appointments(
     status: AppointmentStatus | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=50),
+    # Optional window on the start time, e.g. one day for "today". Both are
+    # instants with an offset; omitted, the listing is exactly as before.
+    starts_from: AwareDatetime | None = Query(default=None),
+    starts_before: AwareDatetime | None = Query(default=None),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -78,6 +83,8 @@ async def list_appointments(
         status=status.value if status else None,
         page=page,
         page_size=page_size,
+        starts_from=starts_from,
+        starts_before=starts_before,
     )
 
 

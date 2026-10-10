@@ -166,12 +166,11 @@ async function ask(container, question) {
     await settle(100);
 }
 
+// The sidebar has no search box any more: a thread is opened from the list.
 async function openSearchHit(container, title) {
-    await typeInto(container.querySelector('input[placeholder="Search research"]'), "wall");
-    await settle(500);   // the search is debounced
-    const hit = [...container.querySelectorAll("div")]
-        .find(d => d.children.length === 0 && d.textContent.trim() === title);
-    assert.ok(hit, `search hit "${title}" was not rendered`);
+    await settle(300);
+    const hit = container.querySelector(`.cv[title="${title}"]`);
+    assert.ok(hit, `history row "${title}" was not rendered`);
     await act(async () => { hit.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     await settle(100);
 }
@@ -184,11 +183,11 @@ test("a slow case list does not leave an empty general conversation behind", asy
     await view.unmount();
 });
 
-test("opening a search hit from another case adopts that case, and the next question stays in that thread", async () => {
+test("opening a listed thread from another case adopts that case, and the next question stays in that thread", async () => {
     stubServer({ cases: [CASE, CASE_B] });
     bindings.sB = CASE_B._id;
-    api.__respond("searchResearchConversations",
-        { data: { results: [{ session_id: "sB", title: "Wall thread", snippet: "the wall" }] }, error: null });
+    api.__respond("listResearchConversations",
+        { data: { conversations: [{ session_id: "sB", title: "Wall thread", updated_at: new Date().toISOString() }] }, error: null });
 
     const view = await mountWithCaseState(CASE.case_number);
     await openSearchHit(view.container, "Wall thread");
@@ -203,11 +202,11 @@ test("opening a search hit from another case adopts that case, and the next ques
     await view.unmount();
 });
 
-test("a search hit whose case is not loaded shows an explicit notice instead of switching silently", async () => {
+test("a listed thread whose case is not loaded shows an explicit notice instead of switching silently", async () => {
     stubServer();
     bindings.sX = "665f0000000000000000dead";
-    api.__respond("searchResearchConversations",
-        { data: { results: [{ session_id: "sX", title: "Other thread", snippet: "the wall" }] }, error: null });
+    api.__respond("listResearchConversations",
+        { data: { conversations: [{ session_id: "sX", title: "Other thread", updated_at: new Date().toISOString() }] }, error: null });
 
     const view = await mountWithCaseState(CASE.case_number);
     await openSearchHit(view.container, "Other thread");

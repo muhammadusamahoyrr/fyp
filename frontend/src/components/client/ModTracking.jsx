@@ -3,9 +3,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { DARK, LIGHT, useT } from "./theme.js";
 import { useLang, useIsMobile } from "@/lib/i18n.jsx";
 import { useCase } from "./CaseContext.jsx";
-import { confirmedCases } from "@/lib/caseStatus.js";
-import { listCases, getCaseTimeline, listAppointments, cancelAppointment as apiCancelAppointment, getAppointment as apiGetAppointment, rescheduleAppointment as apiRescheduleAppointment, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, listPayments, startCheckout, mockPay, downloadReceipt, openAppointmentDispute, listAppointmentDisputes } from "@/lib/api.js";
+import { confirmedCases, caseStatusLabel } from "@/lib/caseStatus.js";
+import { listCases, getCaseTimeline, listAppointments, cancelAppointment as apiCancelAppointment, getAppointment as apiGetAppointment, rescheduleAppointment as apiRescheduleAppointment, listMessages as apiListMessages, sendMessage as apiSendMessage, listDocuments as apiListDocuments, downloadDocument as apiDownloadDocument, fetchDocumentPreviewUrl, myDocumentsV2, fetchRevisionPreview, downloadDocumentFile, listPayments, startCheckout, mockPay, downloadReceipt, openAppointmentDispute, listAppointmentDisputes, getBookableSlots } from "@/lib/api.js";
 import { formatPkt, pktToday, pktDayKey, pktHourMinute, pktSlotToUtcISO, isPktSlotPast } from "@/lib/bookingTime.js";
+import { onNotification } from "@/lib/notificationTarget.js";
+import { documentStatusView } from "@/lib/documentStatus.js";
 
 // ─── DATA ─────────────────────────────────────────────────────────────────────
 // Nothing is hardcoded here on purpose. This block used to hold five arrays of
@@ -18,28 +20,46 @@ import { formatPkt, pktToday, pktDayKey, pktHourMinute, pktSlotToUtcISO, isPktSl
 // an honest empty state when that is nothing.
 
 // ─── API MAPPERS ──────────────────────────────────────────────────────────────
+/** The hearing to show as "next": the earliest one with no outcome whose
+ *  Pakistan day is today or later. Not `hearing_dates[0]`, which is the
+ *  OLDEST by insertion and never moved on after an adjournment, a reschedule
+ *  or a new date. */
+export function nextHearingOf(hearings = []) {
+    const today = pktToday();
+    return hearings
+        .filter(h => h && !h.outcome && h.date && pktDayKey(h.date) >= today)
+        .sort((x, y) => new Date(x.date) - new Date(y.date))[0] || null;
+}
+
+function hearingLabel(h) {
+    if (!h) return "—";
+    const day = formatPkt(h.date, { month: "short", day: "numeric", year: "numeric" });
+    return h.time ? `${day}, ${h.time}` : day;
+}
+
 function mapApiCase(c) {
     const hearings = c.hearing_dates || [];
     const milestones = c.milestones || [];
     const completedCount = milestones.filter(m => m.completed).length;
-    const total = milestones.length || 5;
+    // The real number of milestones: no invented "out of 5".
+    const total = milestones.length;
     const pct = total > 0 ? Math.round(completedCount / total * 100) : 0;
-    const nextHearing = hearings[0]?.date
-        ? new Date(hearings[0].date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) + ", " +
-        new Date(hearings[0].date).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
-        : "—";
+    const next = nextHearingOf(hearings);
+    // The court and judge from the hearing that matters now, else the latest.
+    const ref = next || [...hearings].sort((x, y) => new Date(y.date) - new Date(x.date))[0];
     return {
         id: c._id || c.id,
         title: c.title || "Case",
         status: c.status || "pending",
         type: c.case_type || "civil",
-        filed: c.created_at ? new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",
-        court: hearings[0]?.court || "—",
-        judge: hearings[0]?.judge || "—",
+        filed: c.created_at ? formatPkt(c.created_at, { month: "short", day: "numeric", year: "numeric" }) : "—",
+        court: ref?.court || "—",
+        judge: ref?.judge || "—",
         lawyer: c.lawyer_id ? c.lawyer_id.slice(-6) : "—",
+        lawyerAssigned: !!c.lawyer_id,
         progress: completedCount,
         total,
-        nextHearing,
+        nextHearing: hearingLabel(next),
         pct,
     };
 }
@@ -55,6 +75,28 @@ function mapApiMilestone(m, idx) {
         desc: m.description || "",
         tag: m.completed ? "complete" : "pending",
         milestoneId: `m${idx + 1}`,
+    };
+}
+
+/** A hearing as a timeline entry, so the Hearings tab has real rows. The
+ *  outcome (what the lawyer recorded) is the court's instruction to show. */
+export function mapApiHearing(h, idx) {
+    // The court moved it: say from when, and why, as the lawyer recorded it.
+    // Only the notification said so before, and that scrolls away.
+    const moved = Array.isArray(h.reschedules) && h.reschedules.length ? h.reschedules[h.reschedules.length - 1] : null;
+    const movedText = moved
+        ? `Moved from ${formatPkt(moved.from_date, { month: "short", day: "numeric" })}${moved.reason ? ` — ${moved.reason}` : ""}`
+        : null;
+    return {
+        id: `h-${h._id || idx}`,
+        status: h.outcome ? "done" : "pending",
+        event: h.purpose || "Hearing",
+        date: formatPkt(h.date, { month: "short", day: "numeric" }),
+        time: h.time || "",
+        sortAt: new Date(h.date).getTime() || 0,
+        desc: [h.court, movedText, h.outcome_label, h.outcome_note].filter(Boolean).join(" · "),
+        tag: "hearing",
+        milestoneId: `h-${h._id || idx}`,
     };
 }
 
@@ -564,7 +606,7 @@ function PageOverview({ setPage, activeCase, feed, hearings, milestones = [] }) 
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
                         <div style={{ flex: 1 }}>
                             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                                <Badge variant="success" t={t}>● In Progress</Badge>
+                                <Badge variant={["closed", "dismissed"].includes(activeCase.status) ? "gray" : "success"} t={t}>● {caseStatusLabel(activeCase.status)}</Badge>
                                 <Badge variant="warn" t={t}>{activeCase.type}</Badge>
                             </div>
                             <div style={{ fontSize: 26, fontWeight: 800, color: t.text, letterSpacing: "-0.4px", marginBottom: 4 }}>{activeCase.title}</div>
@@ -590,7 +632,7 @@ function PageOverview({ setPage, activeCase, feed, hearings, milestones = [] }) 
                         { icon: "🗂", label: "CASE ID", val: activeCase.id, color: t.primary },
                         { icon: "✅", label: "PROGRESS", val: `${activeCase.progress}/${activeCase.total} Steps`, color: t.success },
                         { icon: "📅", label: "NEXT HEARING", val: activeCase.nextHearing, color: t.danger },
-                        { icon: "👤", label: "ASSIGNED", val: activeCase.lawyer, color: t.info },
+                        { icon: "👤", label: "LAWYER", val: activeCase.lawyerAssigned ? "Assigned" : "Not yet", color: t.info },
                     ].map((s, i) => (
                         <div key={s.label} style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 10, borderRight: i < 3 ? `1px solid ${t.border}` : "none" }}>
                             <div style={{
@@ -663,7 +705,7 @@ function PageOverview({ setPage, activeCase, feed, hearings, milestones = [] }) 
                 {/* Timeline with "you are here" */}
                 <Card t={t} onClick={() => setPage("timeline")}>
                     <SH icon="🕐" title="Case Timeline" desc="Milestones, hearings & court instructions"
-                        badge={<Badge variant="success" t={t}>3/5 Done</Badge>} t={t} />
+                        badge={activeCase.total ? <Badge variant="success" t={t}>{activeCase.progress}/{activeCase.total} done</Badge> : null} t={t} />
                     <div style={{ padding: "16px 20px" }}>
                         {activeM && (
                             <div style={{
@@ -769,9 +811,15 @@ function PageOverview({ setPage, activeCase, feed, hearings, milestones = [] }) 
 // ─── PAGE: TIMELINE ───────────────────────────────────────────────────────────
 // Accepts the milestones prop: the case timeline from the API plus any
 // appointment milestones written by ModLawyers via CaseContext.
-function PageTimeline({ milestones: propMilestones }) {
+function PageTimeline({ milestones: propMilestones, hearings = [] }) {
     const t = useT();
-    const allMilestones = propMilestones || [];
+    const milestoneRows = propMilestones || [];
+    const hearingRows = hearings.map(mapApiHearing);
+    const allMilestones = [...milestoneRows, ...hearingRows];
+    // Real counts, from the milestones the lawyer marks (no invented "/5").
+    const doneCount = milestoneRows.filter(m => m.status === "done").length;
+    const pendingCount = milestoneRows.length - doneCount;
+    const outcomes = hearings.filter(h => h.outcome).sort((x, y) => new Date(y.date) - new Date(x.date));
     const [tab, setTab] = useState("all");
     const [addNote, setAddNote] = useState(null);
     const [noteText, setNoteText] = useState("");
@@ -868,14 +916,15 @@ function PageTimeline({ milestones: propMilestones }) {
                     <Card t={t}>
                         <SH icon="📊" title="Progress" desc="Milestone completion" t={t} />
                         <div style={{ padding: 16 }}>
-                            {[{ l: "Completed", c: 3, col: t.success }, { l: "In Progress", c: 1, col: t.primary }, { l: "Pending", c: 1, col: t.textFaint }].map(item => (
+                            {milestoneRows.length === 0 && <div style={{ fontSize: 12, color: t.textMuted, marginBottom: 10 }}>Your lawyer has not added milestones yet.</div>}
+                            {milestoneRows.length > 0 && [{ l: "Completed", c: doneCount, col: t.success }, { l: "Pending", c: pendingCount, col: t.textFaint }].map(item => (
                                 <div key={item.l} style={{ marginBottom: 14 }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
                                         <span style={{ fontSize: 12, color: t.textDim, fontWeight: 500 }}>{item.l}</span>
-                                        <span style={{ fontSize: 11, color: item.col, fontWeight: 700 }}>{item.c}/5</span>
+                                        <span style={{ fontSize: 11, color: item.col, fontWeight: 700 }}>{item.c}/{milestoneRows.length}</span>
                                     </div>
                                     <div style={{ height: 5, background: t.accent, borderRadius: 3, overflow: "hidden" }}>
-                                        <div style={{ height: "100%", width: `${(item.c / 5) * 100}%`, background: item.col, borderRadius: 3 }} />
+                                        <div style={{ height: "100%", width: `${(item.c / milestoneRows.length) * 100}%`, background: item.col, borderRadius: 3 }} />
                                     </div>
                                 </div>
                             ))}
@@ -885,15 +934,14 @@ function PageTimeline({ milestones: propMilestones }) {
                         </div>
                     </Card>
                     <Card t={t}>
-                        <SH icon="📋" title="Court Instructions" t={t} />
+                        <SH icon="📋" title="What the court decided" t={t} />
                         <div style={{ padding: 14 }}>
-                            {[
-                                { color: t.warn, label: "⚖ Feb 14 Hearing", text: "Both parties to submit discovery docs by Feb 20." },
-                                { color: t.textFaint, label: "📋 Pending", text: "Awaiting court instruction for trial schedule." },
-                            ].map((c, i) => (
-                                <div key={i} style={{ background: t.cardHi, border: `1px solid ${t.border}`, borderRadius: 10, padding: 12, marginBottom: i === 0 ? 10 : 0 }}>
-                                    <div style={{ fontSize: 10, color: c.color, fontWeight: 700, marginBottom: 4 }}>{c.label}</div>
-                                    <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.5 }}>{c.text}</div>
+                            {outcomes.length === 0 && <div style={{ fontSize: 12, color: t.textMuted }}>No hearing outcomes recorded yet.</div>}
+                            {outcomes.map((h, i) => (
+                                <div key={h._id || i} style={{ background: t.cardHi, border: `1px solid ${t.border}`, borderRadius: 10, padding: 12, marginBottom: i < outcomes.length - 1 ? 10 : 0 }}>
+                                    <div style={{ fontSize: 10, color: t.warn, fontWeight: 700, marginBottom: 4 }}>⚖ {formatPkt(h.date, { month: "short", day: "numeric", year: "numeric" })} · {h.outcome_label || h.outcome}</div>
+                                    {h.outcome_note && <div style={{ fontSize: 12, color: t.textDim, lineHeight: 1.5 }}>{h.outcome_note}</div>}
+                                    {h.outcome_meaning && <div style={{ fontSize: 11.5, color: t.textMuted, lineHeight: 1.5, marginTop: 4 }}>{h.outcome_meaning}</div>}
                                 </div>
                             ))}
                         </div>
@@ -915,131 +963,191 @@ function _mapApiDoc(d) {
         id: d._id || d.id,
         name: d.title || DOC_TYPE_LABELS[d.template_type] || (d.template_type || "Document"),
         type: "PDF",
-        date: d.created_at ? new Date(d.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",
+        date: d.created_at ? formatPkt(d.created_at, { month: "short", day: "numeric", year: "numeric" }) : "—",
+        at: d.created_at ? new Date(d.created_at).getTime() || 0 : 0,
         category: DOC_TYPE_LABELS[d.template_type] || "Document",
-        size: "—",
-        version: 1,
-        seenByLawyer: false,
         _raw: d,
     };
 }
 
+/* A V2 document on this case (2026-10-09). The legacy case listing drops V2
+ * rows by design ("V2 rows are listed by the V2 routes"), and nothing here
+ * asked the V2 routes, so a client's drafted -- even approved -- documents
+ * never appeared on their case. These carry the exact revision and hash, so
+ * Open and Download serve the bytes the row names. */
+function _mapV2Doc(d) {
+    const row = _mapApiDoc(d);
+    return {
+        ...row, v2: true,
+        status: documentStatusView(d).label,
+        revisionId: d.revision_id || null,
+        pdfSha256: d.pdf_sha256 || null,
+        downloadable: d.downloadable !== false,
+    };
+}
+
+const DOC_SORTS = {
+    date: (x, y) => y.at - x.at,
+    name: (x, y) => x.name.localeCompare(y.name),
+    type: (x, y) => x.category.localeCompare(y.category) || y.at - x.at,
+};
+
 // ─── PAGE: DOCUMENTS ──────────────────────────────────────────────────────────
-function PageDocuments({ activeCaseId, milestones = [] }) {
+// The case's documents, from the server. What was here and did nothing has
+// been made to work or removed: Open and Download had no handler, Sort was
+// ignored, a "Seen by lawyer" label was always "Not yet seen" (nothing records
+// it), a version history always showed one version with a dead ↓, and a
+// failed read showed "0 Files".
+function PageDocuments({ activeCaseId }) {
     const t = useT();
     const [filter, setFilter] = useState("All");
     const [search, setSearch] = useState("");
     const [sort, setSort] = useState("date");
-    const [expandedId, setExpandedId] = useState(null);
-    const [apiDocs, setApiDocs] = useState(null); // null = loading
+    const [apiDocs, setApiDocs] = useState(null);   // null = loading
+    const [loadError, setLoadError] = useState(null);
+    const [busy, setBusy] = useState(null);         // `${id}:open|download`
+    const [docError, setDocError] = useState({});   // id -> message
 
-    useEffect(() => {
-        if (!activeCaseId) { setApiDocs([]); return; }
-        apiListDocuments(activeCaseId).then(({ data, error }) => {
-            setApiDocs(!error && Array.isArray(data) ? data.map(_mapApiDoc) : []);
+    const load = useCallback(() => {
+        if (!activeCaseId) { setApiDocs([]); setLoadError(null); return () => {}; }
+        let off = false;
+        setApiDocs(null);
+        setLoadError(null);
+        Promise.all([
+            apiListDocuments(activeCaseId),
+            // Off (feature_disabled) or failing, V2 adds nothing: the legacy
+            // list still stands on its own.
+            myDocumentsV2({ caseId: activeCaseId, limit: 100 }).catch(() => ({ data: null })),
+        ]).then(([legacy, v2]) => {
+            if (off) return;
+            const v2Rows = Array.isArray(v2?.data?.items) ? v2.data.items.map(_mapV2Doc) : [];
+            const legacyRows = !legacy.error && Array.isArray(legacy.data) ? legacy.data.map(_mapApiDoc) : null;
+            if (!legacyRows && !v2Rows.length) {
+                setLoadError(legacy.error?.message || "Could not load this case's documents.");
+                setApiDocs([]);
+                return;
+            }
+            const seen = new Set(v2Rows.map(d => d.id));
+            setApiDocs([...v2Rows, ...(legacyRows || []).filter(d => !seen.has(d.id))]);
         });
+        return () => { off = true; };
     }, [activeCaseId]);
+    useEffect(() => load(), [load]);
 
-    const docSource = apiDocs ?? [];   // null means still loading
-    const cats = ["All", "PDF", "Plaint", "Written Statement", "Legal Notice", "NDA / Contract", "Document"];
-    const filtered = docSource.filter(d =>
-        (filter === "All" || d.type === filter || d.category === filter) &&
-        (!search || d.name.toLowerCase().includes(search.toLowerCase()))
-    );
-    const dm = (type) => ({
-        PDF: { icon: "📄", color: t.danger, bg: `${t.danger}18`, border: `${t.danger}33` },
-        DOCX: { icon: "📝", color: t.primary, bg: t.primaryGlow2, border: `${t.primary}33` },
-        IMG: { icon: "🖼", color: t.success, bg: `${t.success}18`, border: `${t.success}33` },
-    }[type] || { icon: "📎", color: t.textMuted, bg: t.inputBg, border: t.border });
+    const openDoc = async (doc) => {
+        setBusy(`${doc.id}:open`);
+        setDocError(p => ({ ...p, [doc.id]: null }));
+        let url = null, error = null;
+        if (doc.v2) {
+            const res = await fetchRevisionPreview(doc.id, { revisionId: doc.revisionId, expectedPdfSha256: doc.pdfSha256 });
+            url = res.data?.url || null;
+            error = res.error?.message || res.error || null;
+        } else {
+            ({ data: url, error } = await fetchDocumentPreviewUrl(doc.id));
+        }
+        setBusy(null);
+        if (error || !url) { setDocError(p => ({ ...p, [doc.id]: error || "Could not open this document." })); return; }
+        // Not the "noopener" feature: with it window.open always returns null,
+        // and a blocked tab could not be told apart from an opened one.
+        const win = window.open(url, "_blank");
+        if (win) win.opener = null;
+        else setDocError(p => ({ ...p, [doc.id]: "Your browser blocked the new tab. Use Download instead." }));
+        // The tab has loaded the bytes by then; the object URL is not needed after.
+        setTimeout(() => URL.revokeObjectURL?.(url), 60000);
+    };
+    const download = async (doc) => {
+        setBusy(`${doc.id}:download`);
+        setDocError(p => ({ ...p, [doc.id]: null }));
+        const safe = doc.name.replace(/[\\/:*?"<>|]+/g, " ").trim() || "document";
+        const res = doc.v2
+            ? await downloadDocumentFile(doc.id, `${safe}.pdf`, { revisionId: doc.revisionId, expectedPdfSha256: doc.pdfSha256 })
+            : await apiDownloadDocument(doc.id, `${safe}.pdf`);
+        setBusy(null);
+        if (res?.error) setDocError(p => ({ ...p, [doc.id]: res.error }));
+    };
+
+    const docSource = apiDocs ?? [];
+    const cats = ["All", ...Array.from(new Set(docSource.map(d => d.category)))];
+    const filtered = docSource
+        .filter(d => (filter === "All" || d.category === filter)
+            && (!search || d.name.toLowerCase().includes(search.toLowerCase())))
+        .sort(DOC_SORTS[sort] || DOC_SORTS.date);
+    const btn = (on) => ({
+        padding: "5px 12px", borderRadius: 8, border: `1px solid ${t.border}`, background: "transparent",
+        color: t.textMuted, fontSize: 11, fontWeight: 600, cursor: on ? "wait" : "pointer", fontFamily: "inherit",
+    });
 
     return (
         <div>
             <Card t={t}>
-                <SH icon="📁" title="Uploaded Documents" desc="View, open & download case documents"
-                    badge={<Badge variant="primary" t={t}>{apiDocs === null ? "…" : filtered.length} Files</Badge>} t={t} />
+                <SH icon="📁" title="Case documents" desc="Open or download the documents on this case"
+                    badge={<Badge variant="primary" t={t}>{apiDocs === null ? "…" : `${filtered.length} file${filtered.length === 1 ? "" : "s"}`}</Badge>} t={t} />
                 <div style={{ padding: "14px 20px", borderBottom: `1px solid ${t.border}` }}>
                     <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
                         <div style={{ flex: 1, position: "relative" }}>
                             <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: t.textMuted }}>🔍</span>
                             <Inp placeholder="Search documents…" value={search} onChange={setSearch} t={t} style={{ paddingLeft: 36 }} />
                         </div>
-                        <select value={sort} onChange={e => setSort(e.target.value)}
+                        <select aria-label="Sort documents" value={sort} onChange={e => setSort(e.target.value)}
                             style={{ background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "0 14px", color: t.textDim, fontSize: 12, fontWeight: 600, outline: "none", cursor: "pointer" }}>
-                            {["date", "name", "type", "size"].map(s => <option key={s} value={s}>Sort: {s[0].toUpperCase() + s.slice(1)}</option>)}
+                            <option value="date">Sort: Newest</option>
+                            <option value="name">Sort: Name</option>
+                            <option value="type">Sort: Type</option>
                         </select>
                     </div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {cats.map(c => (
-                            <button key={c} onClick={() => setFilter(c)}
-                                style={{
-                                    padding: "5px 12px", borderRadius: 20, border: `1px solid ${filter === c ? t.primary : t.border}`,
-                                    background: filter === c ? t.primaryGlow2 : "transparent", color: filter === c ? t.primary : t.textMuted,
-                                    fontSize: 11, fontWeight: 700, cursor: "pointer", transition: "all 0.15s"
-                                }}>{c}</button>
-                        ))}
-                    </div>
+                    {cats.length > 2 && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            {cats.map(c => (
+                                <button key={c} type="button" onClick={() => setFilter(c)} aria-pressed={filter === c}
+                                    style={{
+                                        padding: "5px 12px", borderRadius: 20, border: `1px solid ${filter === c ? t.primary : t.border}`,
+                                        background: filter === c ? t.primaryGlow2 : "transparent", color: filter === c ? t.primary : t.textMuted,
+                                        fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                                    }}>{c}</button>
+                            ))}
+                        </div>
+                    )}
                 </div>
                 <div style={{ padding: 20 }}>
-                    {filtered.map(doc => {
-                        const d = dm(doc.type);
-                        const ms = milestones.find(m => m.milestoneId === doc.milestoneId);
-                        const isExpanded = expandedId === doc.id;
-                        return (
-                            <div key={doc.id} style={{ borderRadius: 12, border: `1px solid ${t.border}`, marginBottom: 8, background: t.cardHi, overflow: "hidden" }}>
-                                <div onClick={() => setExpandedId(isExpanded ? null : doc.id)}
-                                    style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 14px", cursor: "pointer" }}
-                                    onMouseEnter={e => { e.currentTarget.style.background = t.card; }}
-                                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
-                                    <div style={{
-                                        width: 38, height: 44, borderRadius: 8, background: d.bg, border: `1px solid ${d.border}`,
-                                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0
-                                    }}>{d.icon}</div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-                                            <span style={{ fontSize: 13, fontWeight: 700, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.name}</span>
-                                            {doc.version > 1 && <Badge variant="warn" t={t} sm>v{doc.version} Updated</Badge>}
-                                            <span style={{ fontSize: 10, color: doc.seenByLawyer ? t.success : t.textFaint, fontWeight: 600 }}>
-                                                {doc.seenByLawyer ? "✓✓ Seen by lawyer" : "● Not yet seen"}
-                                            </span>
-                                        </div>
-                                        <div style={{ display: "flex", gap: 10, fontSize: 11, color: t.textMuted, flexWrap: "wrap" }}>
-                                            <span style={{ color: d.color, fontWeight: 700 }}>{doc.type}</span>
-                                            <span>{doc.date}</span><span>{doc.category}</span><span>{doc.size}</span>
-                                            {ms && <span style={{ color: t.primary, fontWeight: 600 }}>● {ms.event}</span>}
-                                        </div>
-                                    </div>
-                                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                                        {["↗ Open", "↓ Download"].map(a => (
-                                            <button key={a} onClick={e => e.stopPropagation()}
-                                                style={{
-                                                    padding: "5px 12px", borderRadius: 8, border: `1px solid ${t.border}`, background: "transparent",
-                                                    color: t.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all 0.15s"
-                                                }}
-                                                onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}
-                                                onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}>{a}</button>
-                                        ))}
+                    {apiDocs === null && <div style={{ fontSize: 13, color: t.textMuted }}>Loading documents…</div>}
+                    {loadError && (
+                        <div role="alert" style={{ fontSize: 13, color: t.danger }}>
+                            {loadError}{" "}
+                            <button type="button" onClick={load} style={{ background: "none", border: "none", color: t.primary, cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>Retry</button>
+                        </div>
+                    )}
+                    {apiDocs !== null && !loadError && filtered.length === 0 && (
+                        <div style={{ fontSize: 13, color: t.textMuted }}>
+                            {docSource.length ? "No documents match." : "No documents on this case yet."}
+                        </div>
+                    )}
+                    {filtered.map(doc => (
+                        <div key={doc.id} data-doc={doc.id} style={{ borderRadius: 12, border: `1px solid ${t.border}`, marginBottom: 8, background: t.cardHi, padding: "12px 14px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                                <div style={{
+                                    width: 38, height: 44, borderRadius: 8, background: `${t.danger}18`, border: `1px solid ${t.danger}33`,
+                                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0,
+                                }}>📄</div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 3 }}>{doc.name}</div>
+                                    <div style={{ display: "flex", gap: 10, fontSize: 11, color: t.textMuted, flexWrap: "wrap" }}>
+                                        <span style={{ color: t.danger, fontWeight: 700 }}>{doc.type}</span>
+                                        <span>{doc.date}</span><span>{doc.category}</span>
+                                        {doc.status && <span data-doc-status style={{ fontWeight: 700, color: t.text }}>{doc.status}</span>}
                                     </div>
                                 </div>
-                                {/* Version history expand */}
-                                {isExpanded && (
-                                    <div style={{ padding: "0 14px 14px", borderTop: `1px solid ${t.border}` }}>
-                                        <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", margin: "10px 0 8px" }}>Version History</div>
-                                        {Array.from({ length: doc.version }, (_, i) => doc.version - i).map(v => (
-                                            <div key={v} style={{
-                                                display: "flex", alignItems: "center", gap: 10, padding: "6px 0",
-                                                borderBottom: `1px solid ${t.border}`, opacity: v === doc.version ? 1 : 0.5
-                                            }}>
-                                                <span style={{ fontSize: 11, fontWeight: 700, color: v === doc.version ? t.primary : t.textMuted }}>v{v}</span>
-                                                <span style={{ fontSize: 11, color: t.textMuted, flex: 1 }}>{v === doc.version ? "Current version" : "Previous version"}</span>
-                                                {v === doc.version && <Badge variant="success" t={t} sm>Latest</Badge>}
-                                                <button style={{ fontSize: 11, color: t.textMuted, background: "transparent", border: "none", cursor: "pointer" }}>↓</button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
+                                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                                    <button type="button" onClick={() => openDoc(doc)} disabled={!!busy || doc.downloadable === false} title={doc.downloadable === false ? "This version has no PDF yet" : undefined} style={btn(busy === `${doc.id}:open`)}>
+                                        {busy === `${doc.id}:open` ? "Opening…" : "↗ Open"}
+                                    </button>
+                                    <button type="button" onClick={() => download(doc)} disabled={!!busy || doc.downloadable === false} style={btn(busy === `${doc.id}:download`)}>
+                                        {busy === `${doc.id}:download` ? "Downloading…" : "↓ Download"}
+                                    </button>
+                                </div>
                             </div>
-                        );
-                    })}
+                            {docError[doc.id] && <div role="alert" style={{ fontSize: 12, color: t.danger, marginTop: 8 }}>{docError[doc.id]}</div>}
+                        </div>
+                    ))}
                 </div>
             </Card>
         </div>
@@ -1242,220 +1350,141 @@ function PageNotifications({ feed, onMarkDone, onMarkAllDone, milestones = [] })
 }
 
 // ─── PAGE: COMMUNICATION ──────────────────────────────────────────────────────
-function PageCommunication({ caseId, milestones: propMilestones }) {
+// The case conversation with the lawyer, from the server and nothing else.
+// What used to be here and was not real has been removed: a hardcoded
+// "Atty. Ahmad Raza — Online" badge and sender name, a fixed "1 Awaiting"
+// count, two invented questions, milestone notes and "tag lawyer" that lived
+// only in this browser (the lawyer never saw them), and a document picker that
+// read a variable that did not exist and crashed the page.
+function PageCommunication({ caseId, activeCase }) {
     const t = useT();
     const [msgs, setMsgs] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(null);
     const [sending, setSending] = useState(false);
+    const [sendError, setSendError] = useState(null);
     const [input, setInput] = useState("");
-    const [tab, setTab] = useState("messages");
-    const [selMilestone, setSelMilestone] = useState("");
-    const [selDoc, setSelDoc] = useState("");
-    const [noteInput, setNoteInput] = useState("");
-    const [tagL, setTagL] = useState(false);
-    const [noteMilestone, setNoteMilestone] = useState("");
-    const [notes, setNotes] = useState([]);
     const endRef = useRef(null);
-    useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
+    useEffect(() => { endRef.current?.scrollIntoView?.({ behavior: "smooth" }); }, [msgs]);
 
-    const milestoneList = propMilestones || [];
+    const toMsg = (m) => ({
+        id: m._id,
+        from: m.sender_role === "lawyer" ? "lawyer" : "client",
+        name: m.sender_name || "",
+        text: m.text,
+        date: m.created_at ? new Date(m.created_at).toLocaleString("en-US", { timeZone: "Asia/Karachi", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—",
+    });
 
-    useEffect(() => {
-        if (!caseId) { setLoading(false); return; }
+    const load = useCallback(() => {
+        if (!caseId) { setLoading(false); setMsgs([]); return () => {}; }
+        let off = false;
+        setLoading(true);
         apiListMessages(caseId).then(({ data, error }) => {
-            if (!error && data) {
-                setMsgs(data.map(m => ({
-                    id: m._id,
-                    from: m.sender_role === "lawyer" ? "lawyer" : "client",
-                    text: m.text,
-                    date: m.created_at ? new Date(m.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—",
-                    seenByLawyer: m.sender_role === "lawyer",
-                    milestoneId: m.milestone_id || selMilestone,
-                    milestoneName: m.milestone_name || "",
-                })));
+            if (off) return;
+            if (error || !Array.isArray(data)) {
+                // Not "no messages": the read failed, and saying so matters.
+                setLoadError(error?.message || "Could not load messages.");
+                setMsgs([]);
+            } else {
+                setLoadError(null);
+                setMsgs(data.map(toMsg));
             }
             setLoading(false);
         });
+        return () => { off = true; };
     }, [caseId]);
+    useEffect(() => load(), [load]);
 
-    const canSend = input.trim();
+    // The lawyer replies while this page is open: show it.
+    useEffect(() => onNotification((n) => {
+        if (n.type === "case_message" && n.payload?.case_id === caseId) load();
+    }), [caseId, load]);
+
     const send = async () => {
-        if (!canSend || sending) return;
+        const text = input.trim();
+        if (!text || sending || !caseId) return;
         setSending(true);
-        const realCaseId = caseId;
-        const { data, error } = (!realCaseId || realCaseId.startsWith("C-"))
-            ? { data: null, error: "no real case" }
-            : await apiSendMessage(realCaseId, input);
-        if (!error && data) {
-            setMsgs(p => [...p, {
-                id: data._id,
-                from: "client",
-                text: data.text,
-                date: "Just now",
-                seenByLawyer: false,
-                milestoneId: selMilestone,
-                milestoneName: milestoneList.find(m => m.milestoneId === selMilestone)?.event || "",
-            }]);
-        } else if (error && error !== "no real case") {
-            // Optimistic local add if API unavailable
-            setMsgs(p => [...p, { id: Date.now(), from: "client", text: input, date: "Just now", status: "pending", seenByLawyer: false }]);
-        } else {
-            setMsgs(p => [...p, { id: Date.now(), from: "client", text: input, date: "Just now", status: "pending", seenByLawyer: false }]);
-        }
-        setInput(""); setSelMilestone(""); setSelDoc("");
+        setSendError(null);
+        const { data, error } = await apiSendMessage(caseId, text);
         setSending(false);
+        if (error || !data) {
+            // Nothing was delivered: keep the text and say why.
+            setSendError(error?.message || "Your message was not sent. Try again.");
+            return;
+        }
+        setMsgs(p => [...p, toMsg(data)]);
+        setInput("");
     };
-    const saveNote = () => {
-        if (!noteInput.trim() || !noteMilestone) return;
-        setNotes(p => [...p, { id: Date.now(), milestone: milestoneList.find(m => m.milestoneId === noteMilestone)?.event || noteMilestone, note: noteInput, tagged: tagL, date: "Just now" }]);
-        setNoteInput(""); setTagL(false); setNoteMilestone("");
-    };
+
+    const lawyerName = [...msgs].reverse().find(m => m.from === "lawyer" && m.name)?.name;
+    const hasLawyer = !!activeCase?.lawyerAssigned;
+    const closed = ["closed", "dismissed"].includes(activeCase?.status);
+    // Client messages after the lawyer's last reply: what is still waiting.
+    const lastLawyer = msgs.map(m => m.from).lastIndexOf("lawyer");
+    const waiting = msgs.slice(lastLawyer + 1).filter(m => m.from === "client");
 
     return (
         <div>
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-                <Badge variant="success" t={t}>● Atty. Ahmad Raza — Online</Badge>
+                <Badge variant={hasLawyer ? "success" : "warn"} t={t}>
+                    {hasLawyer ? `● ${lawyerName || "Your lawyer"}` : "No lawyer assigned yet"}
+                </Badge>
             </div>
             <div className="rgrid" style={{ display: "grid", gridTemplateColumns: "1fr 290px", gap: 16 }}>
                 <Card t={t} style={{ display: "flex", flexDirection: "column" }}>
-                    <SH icon="💬" title="Client–Lawyer Communication" desc="Messages, Q&A & milestone notes"
-                        badge={<Badge variant="warn" t={t}>1 Awaiting</Badge>} t={t} />
-                    <Tabs tabs={[
-                        { key: "messages", label: "Messages & Q&A" },
-                        { key: "notes", label: "Milestone Notes", count: notes.length },
-                    ]} active={tab} onChange={setTab} t={t} />
-
-                    {tab === "messages" ? (
-                        <>
-                            <div style={{ flex: 1, padding: "16px 20px", overflowY: "auto", maxHeight: 340 }}>
-                                {msgs.map(m => (
-                                    <div key={m.id} style={{
-                                        display: "flex", flexDirection: "column",
-                                        alignItems: m.from === "client" ? "flex-end" : "flex-start", marginBottom: 16
-                                    }}>
-                                        <div style={{ fontSize: 10, color: t.textFaint, marginBottom: 4, fontWeight: 600 }}>
-                                            {m.from === "lawyer" ? "Atty. Ahmad Raza Khan" : "You"} · {m.date}
-                                            {m.milestoneName && <span style={{ marginLeft: 8, color: t.primary }}>● {m.milestoneName}</span>}
-                                        </div>
-                                        <div style={{
-                                            maxWidth: "82%", padding: "10px 14px", borderRadius: 12,
-                                            background: m.from === "client" ? t.primaryGlow2 : t.cardHi,
-                                            border: `1px solid ${m.from === "client" ? t.primary + "44" : t.border}`,
-                                            color: t.text, fontSize: 13, lineHeight: 1.6
-                                        }}>
-                                            {m.text}
-                                            {m.status && (
-                                                <div style={{ marginTop: 6 }}>
-                                                    <Badge variant={m.status === "answered" ? "success" : "warn"} t={t} sm>
-                                                        {m.status === "answered" ? "✓ Answered" : "⏳ Awaiting Response"}
-                                                    </Badge>
-                                                </div>
-                                            )}
-                                        </div>
-                                        {m.from === "client" && (
-                                            <div style={{ fontSize: 10, color: m.seenByLawyer ? t.success : t.textFaint, marginTop: 3, fontWeight: 600 }}>
-                                                {m.seenByLawyer ? "✓✓ Seen by lawyer" : "✓ Sent"}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                                <div ref={endRef} />
+                    <SH icon="💬" title="Messages with your lawyer" desc="Every message stays inside this case"
+                        badge={waiting.length ? <Badge variant="warn" t={t}>{waiting.length} awaiting reply</Badge> : null} t={t} />
+                    <div style={{ flex: 1, padding: "16px 20px", overflowY: "auto", maxHeight: 380 }}>
+                        {loading && <div style={{ fontSize: 13, color: t.textMuted }}>Loading messages…</div>}
+                        {!loading && loadError && (
+                            <div role="alert" style={{ fontSize: 13, color: t.danger || "#e8526a" }}>
+                                {loadError} <button type="button" onClick={load} style={{ marginLeft: 8, background: "none", border: "none", color: t.primary, cursor: "pointer", fontWeight: 700 }}>Retry</button>
                             </div>
-                            {/* Context-required send panel */}
-                            <div style={{ padding: "12px 20px", borderTop: `1px solid ${t.border}` }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
-                                    Link to context before sending
+                        )}
+                        {!loading && !loadError && msgs.length === 0 && (
+                            <div style={{ fontSize: 13, color: t.textMuted }}>No messages yet.{hasLawyer ? " Ask your lawyer anything about this case." : ""}</div>
+                        )}
+                        {msgs.map(m => (
+                            <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: m.from === "client" ? "flex-end" : "flex-start", marginBottom: 16 }}>
+                                <div style={{ fontSize: 10, color: t.textFaint, marginBottom: 4, fontWeight: 600 }}>
+                                    {m.from === "lawyer" ? (m.name || "Your lawyer") : "You"} · {m.date}
                                 </div>
-                                <div className="rgrid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                                    <select value={selMilestone} onChange={e => setSelMilestone(e.target.value)}
-                                        style={{
-                                            background: t.inputBg, border: `1px solid ${selMilestone ? t.primary : t.border}`, borderRadius: 10,
-                                            padding: "8px 12px", color: selMilestone ? t.text : t.textFaint, fontSize: 12, outline: "none", boxSizing: "border-box"
-                                        }}>
-                                        <option value="">— Milestone (required) —</option>
-                                        {milestoneList.map(m => <option key={m.id} value={m.milestoneId}>{m.event}</option>)}
-                                    </select>
-                                    <select value={selDoc} onChange={e => setSelDoc(e.target.value)}
-                                        style={{
-                                            background: t.inputBg, border: `1px solid ${selDoc ? t.primary : t.border}`, borderRadius: 10,
-                                            padding: "8px 12px", color: selDoc ? t.text : t.textFaint, fontSize: 12, outline: "none", boxSizing: "border-box"
-                                        }}>
-                                        <option value="">
-                                            {documents.length ? "— Document (optional) —" : "— No documents on this case —"}
-                                        </option>
-                                        {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                    </select>
-                                </div>
-                                <div style={{ display: "flex", gap: 8 }}>
-                                    <div style={{ flex: 1 }}>
-                                        <Inp placeholder="Ask your lawyer a question…" value={input} onChange={setInput} t={t} />
-                                    </div>
-                                    <Btn t={t} variant="primary" onClick={send} disabled={!canSend}>Send ↗</Btn>
-                                </div>
-                                {!selMilestone && input.trim() && (
-                                    <div style={{ fontSize: 11, color: t.warn, marginTop: 6 }}>⚠ Please link to a milestone before sending</div>
-                                )}
+                                <div style={{
+                                    maxWidth: "82%", padding: "10px 14px", borderRadius: 12,
+                                    background: m.from === "client" ? t.primaryGlow2 : t.cardHi,
+                                    border: `1px solid ${m.from === "client" ? t.primary + "44" : t.border}`,
+                                    color: t.text, fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere",
+                                }}>{m.text}</div>
                             </div>
-                        </>
-                    ) : (
-                        <div style={{ padding: "16px 20px" }}>
-                            {notes.map(n => (
-                                <div key={n.id} style={{ background: t.cardHi, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                                        <span style={{ fontSize: 11, color: t.primary, fontWeight: 700 }}>● {n.milestone}</span>
-                                        {n.tagged && <Badge variant="info" t={t} sm>👤 Lawyer Tagged</Badge>}
-                                        <span style={{ marginLeft: "auto", fontSize: 10, color: t.textFaint }}>{n.date}</span>
-                                    </div>
-                                    <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.5 }}>{n.note}</div>
+                        ))}
+                        <div ref={endRef} />
+                    </div>
+                    <div style={{ padding: "12px 20px", borderTop: `1px solid ${t.border}` }}>
+                        {closed ? (
+                            <div style={{ fontSize: 12.5, color: t.textMuted }}>This case is closed, so no new messages can be sent.</div>
+                        ) : !hasLawyer ? (
+                            <div style={{ fontSize: 12.5, color: t.textMuted }}>You can message once a lawyer has taken your case.</div>
+                        ) : (<>
+                            <div style={{ display: "flex", gap: 8 }}>
+                                <div style={{ flex: 1 }}>
+                                    <Inp placeholder="Ask your lawyer a question…" value={input} onChange={v => { setInput(v); setSendError(null); }} t={t} />
                                 </div>
-                            ))}
-                        </div>
-                    )}
+                                <Btn t={t} variant="primary" onClick={send} disabled={!input.trim() || sending}>{sending ? "Sending…" : "Send ↗"}</Btn>
+                            </div>
+                            {sendError && <div role="alert" style={{ fontSize: 12, color: t.danger || "#e8526a", marginTop: 6 }}>{sendError}</div>}
+                        </>)}
+                    </div>
                 </Card>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                     <Card t={t}>
-                        <SH icon="📌" title="Add Note to Milestone" t={t} />
-                        <div style={{ padding: 16 }}>
-                            <div style={{ marginBottom: 10 }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Milestone</div>
-                                <select value={noteMilestone} onChange={e => setNoteMilestone(e.target.value)}
-                                    style={{
-                                        width: "100%", background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 10,
-                                        padding: "9px 12px", color: t.text, fontSize: 13, outline: "none", boxSizing: "border-box"
-                                    }}>
-                                    <option value="">— Select —</option>
-                                    {milestoneList.map(m => <option key={m.id} value={m.milestoneId}>{m.event}</option>)}
-                                </select>
-                            </div>
-                            <div style={{ marginBottom: 10 }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: t.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Note</div>
-                                <textarea value={noteInput} onChange={e => setNoteInput(e.target.value)} placeholder="Add note or comment…"
-                                    style={{
-                                        width: "100%", minHeight: 70, background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 10,
-                                        padding: "9px 12px", color: t.text, fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box"
-                                    }} />
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                                <Toggle value={tagL} onChange={setTagL} t={t} />
-                                <span style={{ fontSize: 12, color: t.textDim }}>Tag lawyer for review</span>
-                            </div>
-                            <Btn t={t} variant="primary" full onClick={saveNote}>Save Note</Btn>
-                        </div>
-                    </Card>
-                    <Card t={t}>
-                        <SH icon="❓" title="Question Status" t={t} />
+                        <SH icon="❓" title="Waiting for a reply" t={t} />
                         <div style={{ padding: "0 16px 16px" }}>
-                            {[
-                                { q: "What does Exhibit C cover?", s: "answered", ms: "Discovery Documents" },
-                                { q: "In person or virtual for Feb 25?", s: "pending", ms: "Court Hearing" },
-                            ].map((q, i) => (
-                                <div key={i} style={{ padding: "10px 0", borderBottom: i === 0 ? `1px solid ${t.border}` : "none" }}>
-                                    <div style={{ fontSize: 11, color: t.primary, fontWeight: 600, marginBottom: 4 }}>● {q.ms}</div>
-                                    <div style={{ fontSize: 12, fontWeight: 600, color: t.text, marginBottom: 6 }}>{q.q}</div>
-                                    <Badge variant={q.s === "answered" ? "success" : "warn"} t={t} sm>
-                                        {q.s === "answered" ? "✓ Answered" : "⏳ Awaiting Response"}
-                                    </Badge>
+                            {waiting.length === 0 && <div style={{ fontSize: 12.5, color: t.textMuted }}>Nothing is waiting. Your lawyer has replied to everything.</div>}
+                            {waiting.map((m, i) => (
+                                <div key={m.id} style={{ padding: "10px 0", borderBottom: i < waiting.length - 1 ? `1px solid ${t.border}` : "none" }}>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: t.text, marginBottom: 4, overflowWrap: "anywhere" }}>{m.text.length > 120 ? m.text.slice(0, 119) + "…" : m.text}</div>
+                                    <div style={{ fontSize: 10.5, color: t.textFaint }}>Sent {m.date}</div>
                                 </div>
                             ))}
                         </div>
@@ -1659,13 +1688,6 @@ const CLIENT_CANCELLABLE = new Set(["pending", "confirmed"]);
 // lawyer instead, and one who does not just meets a refusal they cannot act on.
 const CANCEL_CUTOFF_HOURS = 2;
 
-// The half-hour grid the server enforces. A time off this grid is refused with
-// a 422, because alignment is what makes the unique slot index able to detect
-// an overlap at all — so the picker offers only times that can be booked.
-const PKT_SLOT_TIMES = Array.from({ length: 48 }, (_, i) => {
-    const h = String(Math.floor(i / 2)).padStart(2, "0");
-    return `${h}:${i % 2 ? "30" : "00"}`;
-});
 
 // Stored statuses in words. `no_show` in particular must not reach a client as
 // "no_show", and "completed" versus "cancelled" is the difference between a
@@ -1702,6 +1724,42 @@ function RescheduleAppointment({ appt, t, onReload, error, setError }) {
     const [busy, setBusy] = useState(false);
     const [date, setDate] = useState("");
     const [time, setTime] = useState("");
+    // The lawyer's FREE times on the chosen day, from the server: their
+    // working hours minus other bookings, court hearings and diary entries.
+    // This offered all 48 half-hours of the day, including 03:00 and times the
+    // lawyer was already booked, which the client could only learn by failing.
+    const [slots, setSlots] = useState({ state: "idle", times: [] });
+    const currentDay = pktDayKey(appt.scheduled_at);
+    const currentTime = pktHourMinute(appt.scheduled_at);
+
+    useEffect(() => {
+        if (!open || !date) { setSlots({ state: "idle", times: [] }); return undefined; }
+        let off = false;
+        setSlots({ state: "loading", times: [] });
+        getBookableSlots(appt.lawyer_id, { from: date, duration_minutes: appt.duration_minutes })
+            .then(({ data, error: err }) => {
+                if (off) return;
+                if (err || !data || !Array.isArray(data.days)) { setSlots({ state: "error", times: [] }); return; }
+                if (!data.configured) { setSlots({ state: "unconfigured", times: [] }); return; }
+                const day = data.days.find(d => d.date === date) || data.days[0];
+                setSlots({ state: "ready", times: (day?.slots || []).map(x => x.local_time).filter(Boolean) });
+            })
+            .catch(() => { if (!off) setSlots({ state: "error", times: [] }); });
+        return () => { off = true; };
+    }, [open, date, appt.lawyer_id, appt.duration_minutes]);
+
+    // The request's own time stays listed on its own day (it is what the form
+    // opens with), marked as the current one; it is not "free" because this
+    // request is holding it.
+    const keepsCurrent = date === currentDay && !!currentTime;
+    const offered = slots.state === "ready" ? slots.times.filter(x => x !== currentTime || !keepsCurrent) : [];
+
+    // A time that is not offered on the new day is cleared, not carried over.
+    useEffect(() => {
+        if (slots.state !== "ready" || !time) return;
+        if (!offered.includes(time) && !(keepsCurrent && time === currentTime)) setTime("");
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [slots]);
 
     if (!CLIENT_RESCHEDULABLE.has(appt.status)) return null;
 
@@ -1723,6 +1781,14 @@ function RescheduleAppointment({ appt, t, onReload, error, setError }) {
         if (busy) return;
         if (!date || !time) {
             setError(appt.id, "Choose both a date and a time.");
+            return;
+        }
+        if (date === currentDay && time === currentTime) {
+            setError(appt.id, "That is already the time of this request. Choose a different one.");
+            return;
+        }
+        if (!offered.includes(time)) {
+            setError(appt.id, "Choose one of the times your lawyer has free.");
             return;
         }
         if (isPktSlotPast(date, time)) {
@@ -1864,14 +1930,24 @@ function RescheduleAppointment({ appt, t, onReload, error, setError }) {
                 <label style={{ flex: "1 1 150px", display: "flex", flexDirection: "column", gap: 4 }}>
                     <span style={{ fontSize: 11, color: t.textMuted, fontWeight: 600 }}>Time (PKT)</span>
                     <select value={time} onChange={e => setTime(e.target.value)}
-                        disabled={busy} style={field}>
-                        <option value="">Select…</option>
-                        {PKT_SLOT_TIMES.map(slot => (
+                        disabled={busy || slots.state === "loading"} style={field}>
+                        <option value="">{slots.state === "loading" ? "Loading…" : "Select…"}</option>
+                        {keepsCurrent && <option value={currentTime}>{currentTime} (current)</option>}
+                        {offered.map(slot => (
                             <option key={slot} value={slot}>{slot}</option>
                         ))}
                     </select>
                 </label>
             </div>
+            {slots.state === "ready" && offered.length === 0 && (
+                <div style={{ marginBottom: 10, fontSize: 12, color: t.textMuted }}>No free times on this day. Try another date.</div>
+            )}
+            {slots.state === "unconfigured" && (
+                <div style={{ marginBottom: 10, fontSize: 12, color: t.textMuted }}>This lawyer has not set their working hours, so a new time cannot be chosen here. Cancel the request and contact them.</div>
+            )}
+            {slots.state === "error" && (
+                <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: t.danger }}>Could not load this lawyer's free times. Change the date to try again.</div>
+            )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
                     type="button"
@@ -2487,7 +2563,11 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
     };
     const modeIcon = { video: "📹", in_person: "🏛", phone: "📞" };
 
-    if (loading) return (
+    // The spinner is for the FIRST read only. Re-reads (after a cancel, a
+    // reschedule, a live notification) used to swap the whole list for it,
+    // unmounting every card and wiping any dispute or reschedule form the
+    // client was typing into.
+    if (loading && !appointments.length) return (
         <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
             <div style={{ width: 32, height: 32, border: `3px solid ${t.primary}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
         </div>
@@ -2551,6 +2631,9 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                     </button>
                 </div>
             )}
+            {loading && (
+                <div aria-live="polite" style={{ fontSize: 12, color: t.textMuted }}>Refreshing…</div>
+            )}
             {appointments.map(appt => {
                 // NOT `|| statusStyle.pending`. Defaulting an unrecognised
                 // status to "Pending Confirmation" told the client their
@@ -2607,7 +2690,10 @@ function PageAppointments({ appointments, loading, t, onReload, cancelErrors, se
                             <CancellationDetail appt={appt} t={t} />
                             <ExpiryDetail appt={appt} t={t} />
                             <ReportIssue appt={appt} t={t} />
-                            {appt.meeting_link ? (
+                            {/* Only a confirmed consultation that has not ended can be joined.
+                                The link used to stay on cancelled, expired, no-show and finished
+                                ones, sending the client into an empty room. */}
+                            {appt.meeting_link && appt.status === "confirmed" && !(appt.end_at && new Date(appt.end_at).getTime() <= Date.now()) ? (
                                 <div style={{ marginTop: 10 }}>
                                     <a href={appt.meeting_link} target="_blank" rel="noreferrer"
                                         style={{ fontSize: 12, color: t.primary, fontWeight: 700, textDecoration: "none" }}>
@@ -2793,6 +2879,12 @@ export default function Module7({ isDark }) {
         }
     }, []);
 
+    // The lawyer confirms, declines or completes while this page is open:
+    // re-read, so the card shows it without a manual refresh.
+    useEffect(() => onNotification((n) => {
+        if (String(n.type || "").startsWith("appointment_")) reloadAppointments();
+    }), [reloadAppointments]);
+
     /** Append the next page of appointments.
      *
      * A FAILED LATER PAGE CHANGES NOTHING ALREADY ON SCREEN. Those rows were
@@ -2844,9 +2936,18 @@ export default function Module7({ isDark }) {
     }, [page, reloadAppointments]);
 
     // Load timeline when the active case changes
+    //
+    // Only the answer for the case still selected may land: switching cases
+    // while a slow read was in flight used to let the PREVIOUS case's hearings
+    // and milestones arrive last and show under the new case. Cleared on the
+    // switch too, so the old case's dates are not shown meanwhile.
     useEffect(() => {
-        if (!activeCaseId) return;
+        if (!activeCaseId) return undefined;
+        let off = false;
+        setApiMilestones([]);
+        setApiHearings([]);
         getCaseTimeline(activeCaseId).then(({ data }) => {
+            if (off) return;
             if (data?.milestones?.length) {
                 setApiMilestones(data.milestones.map(mapApiMilestone));
             } else {
@@ -2854,6 +2955,7 @@ export default function Module7({ isDark }) {
             }
             setApiHearings(data?.hearing_dates || []);
         });
+        return () => { off = true; };
     }, [activeCaseId]);
 
     // No fallbacks. An empty list renders an empty state, not invented cases.
@@ -2888,13 +2990,13 @@ export default function Module7({ isDark }) {
             onLoadMore={loadMoreAppointments} loadingMore={apptLoadingMore}
             moreError={apptMoreError} total={apptTotal}
             complete={apptPages !== null && apptPage >= apptPages} />,
-        timeline: (props) => <PageTimeline      {...props} milestones={allMilestones} />,
-        documents: (props) => <PageDocuments     {...props} activeCaseId={activeCaseId} milestones={allMilestones} />,
+        timeline: (props) => <PageTimeline      {...props} milestones={allMilestones} hearings={apiHearings} />,
+        documents: (props) => <PageDocuments     {...props} activeCaseId={activeCaseId} />,
         payments: (props) => <PagePayments      {...props} />,
         notifications: (props) => <PageNotifications {...props} feed={feed} milestones={allMilestones}
             onMarkDone={markNotificationDone}
             onMarkAllDone={markAllNotificationsDone} />,
-        communication: (props) => <PageCommunication {...props} caseId={activeCaseId} milestones={allMilestones} />,
+        communication: (props) => <PageCommunication {...props} caseId={activeCaseId} activeCase={activeCase} />,
         reminders: (props) => <PageReminders     {...props} feed={feed} setFeed={setFeed} milestones={allMilestones} />,
     };
     // CALLED, not rendered as a component.

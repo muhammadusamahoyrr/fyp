@@ -61,23 +61,23 @@ test.beforeEach(() => {
     api.__respond("listAppointments", { data: { items: [], total: 0, pages: 0 }, error: null });
 });
 
-test("Cases shows each backend status by name, with filters and cards that can match", async () => {
+test("Cases shows each backend status by name, and closed cases under History", async () => {
     const view = await mount(CasesPage);
     const text = view.container.textContent;
     assert.doesNotMatch(text, /Under Hearing|Filed/, "a label with no backend status is still shown");
 
-    const badges = [...view.container.querySelectorAll("td span")].map(s => s.textContent.trim());
-    for (const label of ["In Progress", "Awaiting Lawyer", "Open", "Closed"]) {
-        assert.ok(badges.includes(label), `no "${label}" badge`);
+    const pills = () => [...view.container.querySelectorAll("span")].map(s => s.textContent.trim());
+    for (const label of ["In Progress", "Awaiting Lawyer", "Open"]) {
+        assert.ok(pills().includes(label), `no "${label}" status shown`);
     }
-    const options = [...view.container.querySelectorAll("select option")].map(o => o.value);
-    assert.deepEqual(options, ["All", "Open", "In Progress", "Awaiting Lawyer", "Closed", "Dismissed"]);
+    assert.equal(pills().filter(l => l === "In Progress").length, 2, "both in_progress cases are not shown");
 
-    // The "In Progress" card counts both in_progress cases.
-    const card = [...view.container.querySelectorAll("div")]
-        .find(d => d.children.length === 0 && d.textContent.trim() === "In Progress"
-                   && d.parentElement.textContent.includes("2"));
-    assert.ok(card, "the In Progress card does not count in_progress cases");
+    // Closed cases are not mixed into the live list; History shows them.
+    assert.ok(!pills().includes("Closed"), "a closed case is listed with the live ones");
+    const history = [...view.container.querySelectorAll("button")].find(b => b.textContent.startsWith("History"));
+    assert.match(history.textContent, /Closed 1/);
+    await act(async () => { history.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    assert.ok(pills().includes("Closed"), "History does not show the closed case");
     await view.unmount();
 });
 

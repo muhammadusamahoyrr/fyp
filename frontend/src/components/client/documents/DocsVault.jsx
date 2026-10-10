@@ -9,29 +9,26 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../theme.js";
 import { useToast } from "@/components/shared/Toast.jsx";
-import { myDocumentsV2, downloadDocumentFile, getDocumentV2, listReviewRequests } from "@/lib/api.js";
-import { useMyDocuments, rowActions } from "@/lib/useMyDocuments.js";
+import { myDocumentsV2, downloadDocumentFile, listReviewRequests, getDocumentV2 } from "@/lib/api.js";
+import { linkOpenDocument, unlinkOpenDocument } from "@/lib/documentsNav.js";
+import { useMyDocuments, rowActions, DOCUMENTS_UNAVAILABLE } from "@/lib/useMyDocuments.js";
 import { documentStatusView } from "@/lib/documentStatus.js";
-import { restoreStateFromDocument } from "@/lib/documentResume.js";
 import { humanise } from "@/lib/fieldReview.js";
 import { useIsMobile } from "@/lib/i18n.jsx";
-import { Btn, IconBtn, Pill, Card, Icon, fieldStyle } from "./ui.jsx";
+import { Btn, IconBtn, Pill, Icon, DOCS_FONT } from "./ui.jsx";
 import ReviewRequestDialog from "./ReviewRequestDialog.jsx";
 import ReviewRequestsPanel from "./ReviewRequestsPanel.jsx";
 import { DeleteDocumentDialog, RecentlyDeleted } from "./VaultTrash.jsx";
+import VaultPreview from "./VaultPreview.jsx";
 
 const TONE = { info: "info", ok: "low", warn: "medium", danger: "high", muted: "muted" };
 // Same face as the analyzer: Nunito Sans, a free near-match for Avenir.
-const VAULT_FONT = "'Nunito Sans', 'Avenir Next', Avenir, system-ui, sans-serif";
+const VAULT_FONT = DOCS_FONT;   // the module's typeface, defined in ui.jsx
 
-export function formatWhen(value, now = new Date()) {
-    if (!value) return "—";
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "—";
-    const sameDay = d.toDateString() === now.toDateString();
-    if (sameDay) return "Today";
-    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
+// Kept as an export of this screen for its client callers; defined, role-neutral,
+// in features/documents so the lawyer Review Queue need not import this screen.
+import { formatWhen } from "@/features/documents/formatWhen.js";
+export { formatWhen };
 
 /* Is the review-request feature switched on? Asked once, by the cheapest real
  * call: every review-request route answers 404 `feature_disabled` while
@@ -41,9 +38,16 @@ export function reviewRequestsAvailable(res) {
     return Boolean(res && !res.error && res.data);
 }
 
-/* Who can see a document right now, in the vault's words. */
+/* Who can see a document right now, in the vault's words.
+ *
+ * "Private" was wrong once a lawyer had decided: the reviewer keeps read access
+ * to the version they reviewed (documents_v2._readable_scoped). So a decided
+ * document says a lawyer has seen it; only a never-shared one is private. */
+const REVIEWED = new Set(["approved", "returned", "rejected", "needs_reapproval"]);
 export function accessOf(row) {
-    return row?.review_status === "submitted" ? "With lawyer" : "Private";
+    const status = row?.review_status;
+    if (status === "submitted") return "With lawyer";
+    return REVIEWED.has(status) ? "Lawyer reviewed" : "Private";
 }
 
 /* How many documents were created in the last seven days. */
@@ -81,14 +85,28 @@ const I = {
     trash: <><path d="M4 7h16M10 11v6M14 11v6" /><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></>,
 };
 
-export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
+/* `onEdit(documentId)` opens a document for editing in the AI drafting
+ * workspace -- the one place a document is edited. The Vault itself only
+ * lists, previews, downloads and manages. */
+/* `previewId`, when given, opens that document's preview at once -- the
+ * address named it (a refresh of an open preview). */
+export function rowFromDetail(detail) {
+    const rev = detail?.current_revision || null;
+    return {
+        id: detail.id, title: detail.title, template_type: detail.template_type,
+        review_status: detail.review_status, version: detail.current_version || 0,
+        revision_id: rev?.revision_id || null, pdf_sha256: rev?.pdf_sha256 || null,
+        downloadable: Boolean(rev?.revision_id && rev?.pdf_sha256 && (rev.status ?? "generated") === "generated"),
+        updated_at: detail.updated_at, created_at: detail.created_at,
+    };
+}
+
+export default function DocsVault({ onBack, onEdit, reviewLink = null, previewId = null }) {
     const t = useT();
     const toast = useToast();
     const isMobile = useIsMobile();
     const [tab, setTab] = useState("all");
     const [query, setQuery] = useState("");
-    const [newFolder, setNewFolder] = useState(false);
-    const [busyId, setBusyId] = useState(null);
     // null = the server's own order (newest created first); a choice from
     // the sort menu replaces it.
     const [sort, setSort] = useState(null);
@@ -125,7 +143,6 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
     const sortRef = useRef(null);
     const fetchPage = useCallback(({ cursor, limit }) => myDocumentsV2({ cursor, limit }), []);
     const docs = useMyDocuments({ fetchPage, pageSize: 25 });
-    const notYet = what => () => toast.show(`${what} isn't connected yet — coming soon.`, "warn", 3000);
 
     useEffect(() => {
         if (!sortOpen) return;
@@ -144,14 +161,20 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
     }, [docs.items, query, sort]);
     const week = addedThisWeek(docs.items);
 
-    const open = async row => {
-        setBusyId(row.id);
-        const { data, error } = await getDocumentV2(row.id);
-        setBusyId(null);
-        const restored = !error && data ? restoreStateFromDocument(data) : null;
-        if (!restored) { toast.show("Could not open that document. Try again.", "danger", 3500); return; }
-        onOpen(restored);
-    };
+    // The row on preview, or null for the list.
+    const [viewing, setViewing] = useState(null);
+    const open = row => { setViewing(row); linkOpenDocument(row.id, { preview: true }); };
+    const closePreview = () => { setViewing(null); unlinkOpenDocument(); };
+    useEffect(() => {
+        if (!previewId) return undefined;
+        let live = true;
+        getDocumentV2(previewId).then(({ data, error }) => {
+            if (!live) return;
+            if (error || !data?.id) { unlinkOpenDocument(); return; }
+            setViewing(rowFromDetail(data));
+        });
+        return () => { live = false; };
+    }, [previewId]);
     const download = async row => {
         const a = rowActions(row);
         const res = await downloadDocumentFile(row.id, `${row.title || "document"}.pdf`,
@@ -177,6 +200,9 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
             </div>
 
             <div style={{ padding: isMobile ? "8px 14px 24px" : "18px 30px 30px", display: "flex", flexDirection: "column", gap: 20 }}>
+                {viewing ? (
+                    <VaultPreview row={viewing} onBack={closePreview} onEdit={onEdit} onDownload={download} />
+                ) : (<>
                 {/* Breadcrumb, heading, actions */}
                 <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
                     <div style={{ flex: 1, minWidth: 260 }}>
@@ -191,25 +217,18 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
                         </p>
                     </div>
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        <button type="button" onClick={() => { setNewFolder(true); setTab("folders"); }}
-                            style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 40, padding: "0 16px", borderRadius: 11, border: `1px solid ${panelBorder}`, background: panel, color: t.text, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: VAULT_FONT }}>
-                            {svg(I.folder, 16)} Create Folder
-                        </button>
-                        <button type="button" onClick={notYet("Uploading files")}
-                            style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 40, padding: "0 16px", borderRadius: 11, border: "1px solid #2fa36b", background: "linear-gradient(135deg, #1f8a5b, #0f7f73)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: VAULT_FONT }}>
-                            {svg(I.cloud, 17)} Upload File
-                        </button>
+                        {/* In the approved design, but neither has a backend yet: shown disabled
+                            and labelled, never as a working action (2026-10-07). */}
+                        {[[I.folder, 16, "Create Folder", "Folders"], [I.cloud, 17, "Upload File", "Uploading files"]].map(([icon, size, label, what]) => (
+                            <button key={label} type="button" disabled data-vault-soon={label}
+                                title={`${what} isn't connected yet — coming soon.`}
+                                style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 40, padding: "0 16px", borderRadius: 11, border: `1px solid ${panelBorder}`, background: panel, color: t.textMuted, fontSize: 14, fontWeight: 700, cursor: "not-allowed", fontFamily: VAULT_FONT }}>
+                                {svg(icon, size)} {label}
+                                <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 999, border: `1px solid ${panelBorder}`, color: t.textMuted }}>Soon</span>
+                            </button>
+                        ))}
                     </div>
                 </div>
-
-                {newFolder && (
-                    <Card style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 14px", borderColor: t.primary }}>
-                        <label htmlFor="vault-folder" style={{ fontSize: 14, color: t.text }}>New folder</label>
-                        <input id="vault-folder" placeholder="e.g. Property papers" style={fieldStyle(t, { flex: 1, width: "auto", minWidth: 180 })} />
-                        <Btn kind="primary" onClick={() => { setNewFolder(false); notYet("Folders")(); }}>Create</Btn>
-                        <Btn onClick={() => setNewFolder(false)}>Cancel</Btn>
-                    </Card>
-                )}
 
                 {/* Search */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, maxWidth: 1000, padding: "0 18px", minHeight: 50, borderRadius: 14, background: panel, border: `1px solid ${query ? t.primary : panelBorder}` }}>
@@ -277,7 +296,7 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
                         </div>
                     ) : docs.error ? (
                         <div role="alert" style={{ padding: 28, display: "flex", alignItems: "center", gap: 12, color: t.text, fontSize: 15 }}>
-                            Could not load your documents. <Btn onClick={docs.reload}>Try again</Btn>
+                            {docs.unavailable ? DOCUMENTS_UNAVAILABLE : <>Could not load your documents. <Btn onClick={docs.reload}>Try again</Btn></>}
                         </div>
                     ) : !docs.loaded ? (
                         <div aria-busy="true" style={{ padding: 34, textAlign: "center", color: t.textMuted, fontSize: 15 }}>Loading your documents…</div>
@@ -307,11 +326,11 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
                                             </span>
                                             <span style={{ color: t.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.template_type ? humanise(row.template_type) : "—"}</span>
                                             <span style={{ color: t.textMuted }}>—</span>
-                                            <span><Pill tone={accessOf(row) === "With lawyer" ? "info" : "muted"}>{accessOf(row)}</Pill></span>
+                                            <span title={accessOf(row) === "Lawyer reviewed" ? "The lawyer who reviewed it can still read the version they reviewed." : undefined}><Pill tone={accessOf(row) === "Private" ? "muted" : "info"}>{accessOf(row)}</Pill></span>
                                             <span><Pill tone={TONE[status.tone] || "muted"}>{status.label}</Pill></span>
                                             <span style={{ color: t.textMuted }}>{formatWhen(row.updated_at || row.created_at)}</span>
                                             <span style={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
-                                                <IconBtn label={`Open ${row.title || "document"}`} onClick={() => open(row)} disabled={busyId === row.id} style={{ border: "none" }}>{Icon.eye}</IconBtn>
+                                                <IconBtn label={`Preview ${row.title || "document"}`} onClick={() => open(row)} style={{ border: "none" }}>{Icon.eye}</IconBtn>
                                                 <IconBtn label={a.canDownload ? `Download ${row.title || "document"}` : a.reason} onClick={() => a.canDownload && download(row)} disabled={!a.canDownload} style={{ border: "none", opacity: a.canDownload ? 1 : 0.4 }}>{Icon.download}</IconBtn>
                                                 <IconBtn label={`Delete ${row.title || "document"}`} data-delete-document={row.id}
                                                     onClick={() => setDeleting(row)} style={{ border: "none" }}>{svg(I.trash, 17)}</IconBtn>
@@ -335,6 +354,7 @@ export default function DocsVault({ onBack, onOpen, reviewLink = null }) {
                         </div>
                     )}
                 </section>
+                </>)}
             </div>
             {deleting && (
                 <DeleteDocumentDialog row={deleting}

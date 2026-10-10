@@ -12,7 +12,7 @@
  * before it was sent -- not proof that a provider deleted anything, and a
  * recorded attempt is not proof of delivery. */
 import React, { useState } from "react";
-import { Btn, Card } from "@/components/client/documents/ui.jsx";
+import { Btn, Card } from "@/components/lawyer/ui.jsx";
 import { getProcessingReceipt } from "@/lib/api.js";
 
 export const STAGE_TEXT = { ai_report: "AI drafting notes", hypothesis_review: "Drafting-question review" };
