@@ -41,11 +41,23 @@ def acct(monkeypatch):
 
     import app.db.collections as dbc
     monkeypatch.setattr(dbc, "get_engagements_col", lambda: _Col(state["engagements"]))
+    # Open walk-in cases (a lawyer obligation); none unless a test sets one.
+    state["walk_ins"] = 0
+    monkeypatch.setattr(dbc, "get_cases_col", lambda: _Col(state["walk_ins"]))
     monkeypatch.setattr(dbc, "get_payments_col", lambda: _Col(state["payments"]))
 
     class _BL:
         async def insert_one(self, doc): state["blocked"] = True
     monkeypatch.setattr(dbc, "get_refresh_blocklist_col", lambda: _BL())
+
+    state["diary_deleted"] = []
+
+    class _Diary:
+        async def delete_many(self, q):
+            # Recorded with the user write's state at the moment of deletion,
+            # so a test can tell which happened first.
+            state["diary_deleted"].append({"query": q, "closed_yet": state["update"] is not None})
+    monkeypatch.setattr(dbc, "get_lawyer_events_col", lambda: _Diary())
     return state
 
 
@@ -132,6 +144,22 @@ class TestItActuallyErases:
 
         await us.close_account("U1", "correct")
         assert acct["update"][TOKENS_VALID_FROM] is not None
+
+    async def test_a_lawyers_private_diary_is_erased_before_the_closure_write(self, acct):
+        acct["user"]["role"] = "lawyer"
+        acct["user"]["lawyer_profile"] = {"kyc_verified": True}
+        await us.close_account("U1", "correct")
+        assert acct["diary_deleted"] == [{"query": {"lawyer_id": "U1"}, "closed_yet": False}]
+
+    async def test_a_clients_closure_touches_no_diary(self, acct):
+        await us.close_account("U1", "correct")
+        assert acct["diary_deleted"] == []
+
+    async def test_a_blocked_closure_erases_nothing(self, acct):
+        acct["user"]["role"] = "lawyer"; acct["engagements"] = 1
+        with pytest.raises(Exception):
+            await us.close_account("U1", "correct")
+        assert acct["diary_deleted"] == []
 
     async def test_a_lawyer_is_delisted(self, acct):
         acct["user"]["role"] = "lawyer"

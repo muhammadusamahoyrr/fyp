@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pymongo.errors import DuplicateKeyError
 
 from app.core.constants import CaseStatus
+from app.core.pkt import pkt_date, pkt_day_start_utc, pkt_today
 from app.core.exceptions import (
     AppValidationError,
     ConflictError,
@@ -18,6 +19,26 @@ logger = logging.getLogger(__name__)
 
 case_repo = CaseRepository()
 user_repo = UserRepository()
+
+
+def _hearing_fingerprint(hearing: dict) -> str:
+    """The details a hearing request id is bound to, canonicalised.
+
+    Dates are compared as UTC instants (the stored value comes back naive,
+    the request's may carry an offset), and absent and empty are the same.
+    """
+    import hashlib
+    import json
+
+    d = hearing.get("date")
+    if isinstance(d, datetime):
+        d = (d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d.astimezone(timezone.utc)).isoformat()
+    canon = {"date": d, **{k: (hearing.get(k) or None) for k in ("court", "judge", "notes", "purpose", "time")}}
+    return hashlib.sha256(json.dumps(canon, sort_keys=True, default=str).encode()).hexdigest()
+
+
+class _NoClient(Exception):
+    """Internal: skip a client notice on a case with no client account."""
 
 
 def _gen_case_number() -> str:
@@ -37,6 +58,12 @@ def _public_case(case: dict | None) -> dict | None:
     if not case:
         return case
     case = dict(case)
+    # Messages and tasks are served by their own routes, which apply who-may-
+    # see-what. Inline on the case they reached every reader: a client got the
+    # lawyer's private tasks, and a newly engaged lawyer got the previous
+    # lawyer's whole conversation.
+    case.pop("messages", None)
+    case.pop("tasks", None)
     case.pop("case_embedding", None)
     case.pop("intake_conversion_owner", None)
     case.pop("intake_conversion_epoch", None)
@@ -55,6 +82,47 @@ def _is_intake_collision(exc: DuplicateKeyError) -> bool:
     if "uniq_case_per_intake" in str(details.get("errmsg", "")):
         return True
     return "intake_id" in (details.get("keyPattern") or {})
+
+
+async def create_walk_in_case(lawyer_id: str, data: dict) -> dict:
+    """A case the lawyer opens for a client who has no account here.
+
+    Owned by the lawyer from the start (`lawyer_id`), with no `client_id`: the
+    client's name and phone are stored on the case as plain record fields.
+    IN_PROGRESS, because the lawyer has already taken it. No engagement exists
+    (there is nobody to agree terms with), so fee requests are not possible on
+    it, and no notification is ever addressed to a client.
+    """
+    now = datetime.now(timezone.utc)
+    doc = {
+        "_id": secrets.token_urlsafe(16),
+        "client_id": None,
+        "lawyer_id": lawyer_id,
+        "walk_in": True,
+        "client_name": data["client_name"],
+        "client_phone": data.get("client_phone") or None,
+        "court": data.get("court") or None,
+        "court_case_number": data.get("court_case_number") or None,
+        "case_type": data["case_type"],
+        "province": data["province"],
+        "status": CaseStatus.IN_PROGRESS.value,
+        "title": data["title"],
+        "description": data.get("description") or "",
+        "milestones": [],
+        "hearing_dates": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    for _ in range(5):
+        doc["case_number"] = _gen_case_number()
+        try:
+            await case_repo.insert(doc)
+            break
+        except DuplicateKeyError:
+            continue
+    else:
+        raise ConflictError("Could not create the case. Please try again.")
+    return _public_case(doc)
 
 
 async def create_case(client_id: str, data: dict,
@@ -326,6 +394,8 @@ async def update_case(
     if not case:
         raise NotFoundError("Case")
     _assert_access(case, requester_id, requester_role)
+    # A closed or dismissed case is a record: no field changes, from anyone.
+    _assert_open(case)
 
     # Defense-in-depth: the schema already excludes them, but never allow
     # assignment/status writes through the generic PATCH.
@@ -333,13 +403,21 @@ async def update_case(
     if not updates:
         return _public_case(case)
 
-    # A category change is a client overriding the pipeline's verified
-    # classification, so it is recorded rather than silently applied. Without
-    # this the AI's answer would be overwritten in place and the case would
-    # claim a classification the pipeline never made.
+    # A category change overrides the pipeline's verified classification, so
+    # it is recorded rather than silently applied. Without this the AI's
+    # answer would be overwritten in place and the case would claim a
+    # classification the pipeline never made.
     new_type = updates.get("case_type")
     if new_type is not None and new_type != case.get("case_type"):
-        updates["case_type_source"]     = "client"
+        # Once a lawyer is working the case, the type is theirs to correct:
+        # the client changing it underneath them would re-label a matter the
+        # lawyer has already scoped. Title and description stay editable.
+        if requester_role == "client" and case.get("lawyer_id"):
+            raise ConflictError(
+                "The case type can't be changed while a lawyer is working on the case. "
+                "Ask your lawyer to change it.")
+        # Who actually made the change (it was always recorded as the client).
+        updates["case_type_source"]     = requester_role
         updates["case_type_changed_by"] = requester_id
         updates["case_type_changed_at"] = datetime.now(timezone.utc)
         # Only on the FIRST override. `ai_case_type` means "what the pipeline
@@ -368,6 +446,7 @@ async def add_milestone(case_id: str, milestone: dict, lawyer_id: str) -> dict:
         raise NotFoundError("Case")
     if case.get("lawyer_id") != lawyer_id:
         raise ForbiddenError("Only the assigned lawyer can add milestones")
+    _assert_open(case)
 
     milestone["completed"] = False
     milestone["completed_at"] = None
@@ -381,13 +460,38 @@ async def add_hearing(case_id: str, hearing: dict, lawyer_id: str) -> dict:
         raise NotFoundError("Case")
     if case.get("lawyer_id") != lawyer_id:
         raise ForbiddenError("Only the assigned lawyer can schedule hearings")
+    _assert_open(case)
 
     hearing["_id"] = secrets.token_urlsafe(8)
     hearing["created_at"] = datetime.now(timezone.utc)
-    await case_repo.add_hearing(case_id, hearing)
+    rid = hearing.get("request_id") or None
+    if rid:
+        hearing["request_fingerprint"] = _hearing_fingerprint(hearing)
+    else:
+        hearing.pop("request_id", None)       # never store a null id
+    if not await case_repo.add_hearing_once(case_id, hearing):
+        # Not added. With a known request id this is a repeat (double click,
+        # retry after a lost reply): return the hearing created the first time.
+        # The same id for DIFFERENT details is a client bug, not a retry.
+        current = await case_repo.find_by_id(case_id)
+        if current:
+            _assert_open(current)             # closed since it was read
+        existing = next((h for h in (current or {}).get("hearing_dates") or []
+                         if rid and h.get("request_id") == rid), None)
+        if existing is None:
+            raise NotFoundError("Case")
+        if existing.get("request_fingerprint") != hearing.get("request_fingerprint"):
+            raise ConflictError("This request was already used for a different hearing. Reload and try again.")
+        case, hearing = current, existing
+        # Fall through: make sure the notice exists. Its event id is the
+        # hearing's, so this is a no-op when the first attempt already sent it,
+        # and restores it when that attempt failed after the write.
 
-    # Tell the client — hearing dates are the #1 thing clients ask about
+    # Tell the client — hearing dates are the #1 thing clients ask about.
+    # A walk-in case has no client account: nobody to notify.
     try:
+        if not case.get("client_id"):
+            raise _NoClient()
         from app.core.constants import NotificationType
         from app.services import notification_service
         date_str = hearing["date"].strftime("%d %b %Y") if hasattr(hearing.get("date"), "strftime") else str(hearing.get("date", ""))[:10]
@@ -398,9 +502,15 @@ async def add_hearing(case_id: str, hearing: dict, lawyer_id: str) -> dict:
             f"{case.get('title', 'Your case')}: hearing on {date_str}"
             + (f" at {hearing['court']}" if hearing.get("court") else ""),
             payload={"case_id": case_id, "hearing_id": hearing["_id"]},
+            # One notice per hearing, however often the request is repeated.
+            logical_event_id=f"hearing-scheduled:{case_id}:{hearing['_id']}",
         )
+    except _NoClient:
+        pass
     except Exception:
-        pass  # notification failure must not block scheduling
+        # Must not block scheduling, but must not vanish either: the client
+        # was not told about a hearing, and that needs to be findable.
+        logger.exception("hearing-scheduled notification failed for case %s", case_id)
 
     return _public_case(await case_repo.find_by_id(case_id))
 
@@ -455,6 +565,7 @@ async def record_hearing_outcome(
         raise NotFoundError("Case")
     if case.get("lawyer_id") != lawyer_id:
         raise ForbiddenError("Only the assigned lawyer can record hearing outcomes")
+    _assert_open(case)
 
     outcome_key = data["outcome"]
     info = HEARING_OUTCOMES.get(outcome_key)
@@ -469,16 +580,14 @@ async def record_hearing_outcome(
         "outcome_meaning_ur":  info["meaning_ur"],
         "outcome_recorded_at": datetime.now(timezone.utc),
     }
-    updated = await case_repo.update_hearing(case_id, hearing_id, fields)
-    if not updated:
-        raise NotFoundError("Hearing")
-
-    # Auto-schedule the next hearing if a next date was given
+    # The next hearing, if a next date was given, is written TOGETHER with
+    # the outcome (one atomic write), never as a second step.
     next_hearing = None
     if data.get("next_date"):
         prev = next((h for h in case.get("hearing_dates", []) if h.get("_id") == hearing_id), {})
         next_hearing = {
             "_id":        secrets.token_urlsafe(8),
+            "request_id": f"next-{hearing_id}",
             "date":       data["next_date"],
             "court":      prev.get("court", ""),
             "judge":      prev.get("judge"),
@@ -488,10 +597,24 @@ async def record_hearing_outcome(
             "outcome":    None,
             "created_at": datetime.now(timezone.utc),
         }
-        await case_repo.add_hearing(case_id, next_hearing)
 
-    # Plain-language update to the client
+    if not await case_repo.record_outcome_once(case_id, hearing_id, fields, next_hearing):
+        # Nothing written. Either the hearing does not exist, or it already has
+        # an outcome (another tab, a retry after a lost reply, or a concurrent
+        # request that won). The recorded one is never overwritten, and no
+        # next hearing or notice follows.
+        current = await case_repo.find_by_id(case_id)
+        if current:
+            _assert_open(current)             # closed since it was read
+        h = next((x for x in (current or {}).get("hearing_dates") or [] if x.get("_id") == hearing_id), None)
+        if h is None:
+            raise NotFoundError("Hearing")
+        raise ConflictError("An outcome is already recorded for this hearing.")
+
+    # Plain-language update to the client (none on a walk-in case)
     try:
+        if not case.get("client_id"):
+            raise _NoClient()
         from app.core.constants import NotificationType
         from app.services import notification_service
         body = f"{case.get('title', 'Your case')}: {info['label']}."
@@ -507,9 +630,111 @@ async def record_hearing_outcome(
             "Hearing update",
             body,
             payload={"case_id": case_id, "hearing_id": hearing_id, "outcome": outcome_key},
+            logical_event_id=f"hearing-outcome:{case_id}:{hearing_id}",
         )
-    except Exception:
+    except _NoClient:
         pass
+    except Exception:
+        logger.exception("hearing-outcome notification failed for case %s", case_id)
+
+    return _public_case(await case_repo.find_by_id(case_id))
+
+
+async def reschedule_hearing(
+    case_id: str, hearing_id: str, data: dict, lawyer_id: str
+) -> dict:
+    """Move an upcoming hearing to a new date; the client is told.
+
+    Only a hearing with no outcome can move: once an outcome is recorded the
+    next date belongs to that outcome. Each move is kept on the hearing
+    (`reschedules`), so the old date is never silently lost."""
+    case = await case_repo.find_by_id(case_id)
+    if not case:
+        raise NotFoundError("Case")
+    if case.get("lawyer_id") != lawyer_id:
+        raise ForbiddenError("Only the assigned lawyer can reschedule hearings")
+    _assert_open(case)
+
+    hearing = next((h for h in case.get("hearing_dates", []) if h.get("_id") == hearing_id), None)
+    if hearing is None:
+        raise NotFoundError("Hearing")
+    if hearing.get("outcome"):
+        # 409, like the same refusal when the outcome lands mid-request: it is
+        # a conflict with the hearing's state, and the page re-reads on 409.
+        raise ConflictError(
+            "This hearing already has an outcome. Set the next date from its outcome instead."
+        )
+
+    # Days are compared on the PAKISTAN calendar. It used UTC dates and allowed
+    # one day back, so it accepted yesterday — and between 00:00 and 05:00
+    # PKT, two days back. The new day is stored the way every reader expects a
+    # hearing day: midnight UTC of the Pakistan date.
+    new_day = pkt_date(data["date"])
+    if new_day < pkt_today(datetime.now(timezone.utc)):
+        raise AppValidationError("Pick a date from today onwards")
+    new_date = pkt_day_start_utc(new_day)
+
+    old_date = hearing.get("date")
+    old_time = hearing.get("time")
+    new_time = data.get("time") or old_time
+    old_day = pkt_date(old_date) if isinstance(old_date, datetime) else str(old_date)[:10]
+    if str(old_day) == str(new_day) and old_time == new_time:
+        raise AppValidationError("That is already the hearing's date and time")
+
+    entry = {
+        "from_date": old_date,
+        "from_time": old_time,
+        "to_date": new_date,
+        "to_time": new_time,
+        "reason": (data.get("reason") or "").strip() or None,
+        "at": datetime.now(timezone.utc),
+    }
+    # One conditional write: only if the hearing is still where it was read
+    # (same date and time, still no outcome). The old code rebuilt the history
+    # from that read and wrote it all back, so a concurrent move lost an entry
+    # and a concurrent outcome could be moved; and it notified regardless.
+    moved = await case_repo.move_hearing(
+        case_id, hearing_id, expect_date=old_date, expect_time=old_time,
+        new_date=new_date, new_time=new_time, history_entry=entry)
+    if not moved:
+        current = await case_repo.find_by_id(case_id)
+        if current:
+            _assert_open(current)             # closed since it was read
+        h = next((x for x in (current or {}).get("hearing_dates") or [] if x.get("_id") == hearing_id), None)
+        if h is None:
+            raise ConflictError("This hearing was removed meanwhile. Reload the case.")
+        if h.get("outcome"):
+            raise ConflictError("An outcome was recorded for this hearing meanwhile, so it can no longer be moved.")
+        raise ConflictError("This hearing was changed meanwhile. Reload the case and try again.")
+    history = [entry]
+
+    # Tell the client: a moved date is exactly what they plan travel around.
+    # A walk-in case has no client account to tell.
+    try:
+        if not case.get("client_id"):
+            raise _NoClient()
+        from app.core.constants import NotificationType
+        from app.services import notification_service
+
+        def _day(d):
+            return d.strftime("%d %b %Y") if hasattr(d, "strftime") else str(d)[:10]
+        body = (f"{case.get('title', 'Your case')}: hearing moved from {_day(old_date)} "
+                f"to {_day(new_date)}" + (f" at {new_time}" if new_time else "") + ".")
+        if history[-1]["reason"]:
+            body += f" Reason: {history[-1]['reason']}"
+        await notification_service.create_notification(
+            case["client_id"],
+            NotificationType.CASE_UPDATE,
+            "Hearing rescheduled",
+            body,
+            payload={"case_id": case_id, "hearing_id": hearing_id},
+            logical_event_id=f"hearing-rescheduled:{case_id}:{hearing_id}:{entry['at'].isoformat()}",
+        )
+    except _NoClient:
+        pass
+    except Exception:
+        # Must not undo the move, but the client was not told: log it.
+        logger.exception("hearing-rescheduled notification failed for case %s", case_id)
 
     return _public_case(await case_repo.find_by_id(case_id))
 
@@ -521,15 +746,22 @@ async def send_message(
     if not case:
         raise NotFoundError("Case")
     _assert_access(case, sender_id, sender_role)
+    _assert_open(case)
+    if not case.get("client_id"):
+        # A walk-in client has no account: a message here would reach nobody.
+        raise ConflictError("This client is not on Attorney.AI, so messages cannot be sent on this case.")
     msg = {
         "_id": secrets.token_urlsafe(8),
+        # The engagement this message belongs to (None while unassigned).
+        "lawyer_id": case.get("lawyer_id"),
         "sender_id": sender_id,
         "sender_role": sender_role,
         "sender_name": sender_name,
         "text": text,
         "created_at": datetime.now(timezone.utc),
     }
-    await case_repo.add_message(case_id, msg)
+    if not await case_repo.add_message(case_id, msg):
+        await _refuse_unwritten(case_id)
 
     # Tell the other side. Without this the message is stored and surfaced only
     # if they happen to reopen the case — so a lawyer asking for a document, or
@@ -574,7 +806,7 @@ async def list_messages(case_id: str, requester_id: str, requester_role: str) ->
     if not case:
         raise NotFoundError("Case")
     _assert_access(case, requester_id, requester_role)
-    return list(case.get("messages", []))
+    return [m for m in case.get("messages", []) if _thread_visible(m, requester_id, requester_role)]
 
 
 async def add_task(case_id: str, task_data: dict, lawyer_id: str) -> dict:
@@ -583,8 +815,10 @@ async def add_task(case_id: str, task_data: dict, lawyer_id: str) -> dict:
         raise NotFoundError("Case")
     if case.get("lawyer_id") != lawyer_id:
         raise ForbiddenError("Only the assigned lawyer can add tasks")
+    _assert_open(case)
     task = {
         "_id": secrets.token_urlsafe(8),
+        "lawyer_id": lawyer_id,
         "title": task_data["title"],
         "due": task_data.get("due"),
         "priority": task_data.get("priority", "medium"),
@@ -593,7 +827,8 @@ async def add_task(case_id: str, task_data: dict, lawyer_id: str) -> dict:
         "completed_at": None,
         "created_at": datetime.now(timezone.utc),
     }
-    await case_repo.add_task(case_id, task)
+    if not await case_repo.add_task(case_id, task):
+        await _refuse_unwritten(case_id)
     return task
 
 
@@ -601,8 +836,11 @@ async def list_tasks(case_id: str, requester_id: str, requester_role: str) -> li
     case = await case_repo.find_by_id(case_id)
     if not case:
         raise NotFoundError("Case")
+    # Tasks are the lawyer's working notes, never shown to the client.
+    if requester_role == "client":
+        raise ForbiddenError("Tasks are private to the lawyer")
     _assert_access(case, requester_id, requester_role)
-    return list(case.get("tasks", []))
+    return [t for t in case.get("tasks", []) if _thread_visible(t, requester_id, requester_role)]
 
 
 async def toggle_task(case_id: str, task_id: str, done: bool, lawyer_id: str) -> dict:
@@ -611,8 +849,67 @@ async def toggle_task(case_id: str, task_id: str, done: bool, lawyer_id: str) ->
         raise NotFoundError("Case")
     if case.get("lawyer_id") != lawyer_id:
         raise ForbiddenError("Only the assigned lawyer can update tasks")
-    await case_repo.toggle_task(case_id, task_id, done)
+    _assert_open(case)
+    task = next((t for t in case.get("tasks", []) if t.get("_id") == task_id), None)
+    if task is None or not _thread_visible(task, lawyer_id, "lawyer"):
+        raise NotFoundError("Task")
+    if not await case_repo.toggle_task(case_id, task_id, done):
+        # Nothing changed: already in that state, or closed since it was read.
+        current = await case_repo.find_by_id(case_id)
+        if current:
+            _assert_open(current)
     return _public_case(await case_repo.find_by_id(case_id))
+
+
+CLOSED_STATUSES = (CaseStatus.CLOSED.value, CaseStatus.DISMISSED.value)
+
+
+async def _refuse_unwritten(case_id: str) -> None:
+    """A guarded write matched nothing: say why (closed meanwhile, or gone)."""
+    current = await case_repo.find_by_id(case_id)
+    if current:
+        _assert_open(current)
+    raise NotFoundError("Case")
+
+
+def _assert_open(case: dict) -> None:
+    """A closed or dismissed case is a record, not a workspace: no new
+    hearings, outcomes, tasks or messages, and no notifications to a client
+    about a matter that has ended."""
+    if case.get("status") in CLOSED_STATUSES:
+        raise ConflictError("This case is closed, so it can no longer be changed.")
+
+
+def _thread_visible(item: dict, requester_id: str, requester_role: str) -> bool:
+    """Whether one message or task belongs to this reader.
+
+    Every message and task records the lawyer whose engagement it belongs to
+    (`lawyer_id`, None while no lawyer is engaged). A lawyer sees only their
+    own; the client and admins see every message. A row with no `lawyer_id`
+    KEY predates this rule: it is the current lawyer's, because ending an
+    engagement stamps every such row with the departing lawyer
+    (`seal_threads_for`)."""
+    if requester_role != "lawyer":
+        return True
+    if "lawyer_id" not in item:
+        return True
+    return item.get("lawyer_id") == requester_id
+
+
+async def seal_threads_for(case_id: str, lawyer_id: str, session=None) -> None:
+    """Stamp a departing lawyer onto the case's untagged messages and tasks,
+    so the next lawyer engaged does not inherit them. Called inside the
+    engagement-termination transaction."""
+    from app.db.collections import get_cases_col
+    col = get_cases_col()
+    for field in ("messages", "tasks"):
+        # The array must exist for an array-filtered update; skip it if not.
+        await col.update_one(
+            {"_id": case_id, field: {"$type": "array"}},
+            {"$set": {f"{field}.$[x].lawyer_id": lawyer_id}},
+            array_filters=[{"x.lawyer_id": {"$exists": False}}],
+            session=session,
+        )
 
 
 def _assert_access(case: dict, user_id: str, role: str) -> None:

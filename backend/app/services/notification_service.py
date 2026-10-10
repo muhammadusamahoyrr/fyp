@@ -82,8 +82,26 @@ async def create_notification(
     return doc
 
 
+# Unread notifications are always listed (up to this bound), however old.
+# The list was the newest 30 of ALL notifications, so an unread one behind 30
+# newer read ones was never shown and never counted on any badge.
+MAX_UNREAD_LISTED = 100
+RECENT_LISTED = 30
+
+
 async def get_notifications(user_id: str) -> list[dict]:
-    return await notification_repo.find_all_for_user(user_id)
+    recent = await notification_repo.find_all_for_user(user_id, limit=RECENT_LISTED)
+    unread = await notification_repo.find_many(
+        {"user_id": user_id, "read": False},
+        sort=[("created_at", -1)], limit=MAX_UNREAD_LISTED)
+    merged = {n["_id"]: n for n in recent}
+    for n in unread:
+        merged.setdefault(n["_id"], n)
+    # (has a date, the date): rows without one sort last and are never
+    # compared with a datetime.
+    return sorted(merged.values(),
+                  key=lambda n: (n.get("created_at") is not None, n.get("created_at") or 0),
+                  reverse=True)
 
 
 async def mark_read(notification_id: str, user_id: str) -> bool:

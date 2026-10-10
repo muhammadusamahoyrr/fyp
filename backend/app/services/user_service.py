@@ -231,6 +231,18 @@ async def _open_obligations(user_id: str, role: str) -> list[str]:
     if live_payments:
         reasons.append(f"you have {live_payments} unsettled payment(s)")
 
+    # A walk-in case has no engagement, so the check above never saw it: a
+    # lawyer could close their account with live matters for clients who have
+    # no account to be told. They must be closed first, never silently moved.
+    if role == "lawyer":
+        from app.db.collections import get_cases_col
+        walk_ins = await get_cases_col().count_documents({
+            "lawyer_id": user_id, "walk_in": True,
+            "status": {"$nin": ["closed", "dismissed"]},
+        })
+        if walk_ins:
+            reasons.append(f"you have {walk_ins} walk-in case(s) still open (close them first)")
+
     return reasons
 
 
@@ -320,6 +332,14 @@ async def _close_account_record(user: dict, *, reason: str) -> dict:
         from app.services import kyc_documents
         kyc_tombstone = kyc_documents.closure_tombstone(user["lawyer_profile"])
         updates.update(kyc_tombstone)
+
+    # The lawyer's own diary (meetings and events) is private notes nobody
+    # else ever saw, with client names in them: erased, not retained. BEFORE
+    # the closure write, so a failure here leaves the account open to retry
+    # rather than closed with the diary still present.
+    if user.get("role") == "lawyer":
+        from app.db.collections import get_lawyer_events_col
+        await get_lawyer_events_col().delete_many({"lawyer_id": user_id})
 
     await user_repo.update_one({"_id": user_id}, {"$set": updates, "$unset": unsets})
     await auth_sessions.revoke_all_best_effort(

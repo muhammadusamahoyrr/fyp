@@ -6,6 +6,11 @@ from app.core.constants import TERMINAL_CASE_STATUSES, CaseStatus
 from app.db.collections import get_cases_col
 from app.repositories.base import BaseRepository
 
+# Part of every conditional hearing, message and task write: a case closed
+# between the caller's read and the write takes no new hearing, outcome, move,
+# message or task change.
+_OPEN = {"status": {"$nin": sorted(TERMINAL_CASE_STATUSES)}}
+
 
 class CaseRepository(BaseRepository):
     def __init__(self):
@@ -72,6 +77,72 @@ class CaseRepository(BaseRepository):
             },
         )
 
+    async def add_hearing_once(self, case_id: str, hearing: dict) -> bool:
+        """Push a hearing unless one with the same `request_id` is already there.
+
+        One conditional update on one document, so it is atomic: of two
+        concurrent requests with the same id exactly one matches the `$ne`
+        filter. A case closed since the caller read it matches nothing either.
+        Returns whether this call added it.
+        """
+        flt: dict = {"_id": case_id, **_OPEN}
+        rid = hearing.get("request_id")
+        if rid:
+            flt["hearing_dates.request_id"] = {"$ne": rid}
+        result = await self.col.update_one(
+            flt,
+            {"$push": {"hearing_dates": hearing},
+             "$set": {"updated_at": datetime.now(timezone.utc)}},
+        )
+        return result.modified_count > 0
+
+    async def record_outcome_once(self, case_id: str, hearing_id: str, fields: dict,
+                                  next_hearing: dict | None = None) -> bool:
+        """Record an outcome, and append its next hearing, in ONE write.
+
+        Applied only if the hearing exists and has no outcome yet (the
+        condition is in the query, so a non-matching call changes nothing at
+        all, not even `updated_at`). One pipeline update on one document is
+        atomic: of concurrent attempts exactly one wins, and the outcome can
+        never be stored without the next hearing it set (the old code wrote
+        them in two steps).
+
+        Every value goes in as `$literal`: a lawyer's note that starts with
+        "$" must be stored as text, not evaluated as a field path.
+        """
+        merged = {k: {"$literal": v} for k, v in fields.items()}
+        mapped = {"$map": {
+            "input": "$hearing_dates", "as": "h",
+            "in": {"$cond": [{"$eq": ["$$h._id", {"$literal": hearing_id}]},
+                             {"$mergeObjects": ["$$h", merged]}, "$$h"]},
+        }}
+        new_dates = {"$concatArrays": [mapped, {"$literal": [next_hearing]}]} if next_hearing else mapped
+        result = await self.col.update_one(
+            {"_id": case_id, **_OPEN, "hearing_dates": {"$elemMatch": {"_id": hearing_id, "outcome": None}}},
+            [{"$set": {"hearing_dates": new_dates,
+                       "updated_at": {"$literal": datetime.now(timezone.utc)}}}],
+        )
+        return result.modified_count > 0
+
+    async def move_hearing(self, case_id: str, hearing_id: str, *, expect_date, expect_time,
+                           new_date, new_time, history_entry: dict) -> bool:
+        """Move a hearing only if it is still where the caller saw it.
+
+        Conditioned on the hearing still having no outcome and the date and time
+        the caller read (an optimistic version): a concurrent move or outcome
+        makes this match nothing instead of overwriting it. The history entry
+        is APPENDED (`$push`), never rebuilt from a stale copy.
+        """
+        result = await self.col.update_one(
+            {"_id": case_id, **_OPEN, "hearing_dates": {"$elemMatch": {
+                "_id": hearing_id, "outcome": None, "date": expect_date, "time": expect_time}}},
+            {"$set": {"hearing_dates.$[h].date": new_date, "hearing_dates.$[h].time": new_time,
+                      "updated_at": datetime.now(timezone.utc)},
+             "$push": {"hearing_dates.$[h].reschedules": history_entry}},
+            array_filters=[{"h._id": hearing_id}],
+        )
+        return result.modified_count > 0
+
     async def update_hearing(self, case_id: str, hearing_id: str, fields: dict) -> bool:
         """Set fields on one hearing inside the hearing_dates array."""
         set_fields = {f"hearing_dates.$[h].{k}": v for k, v in fields.items()}
@@ -85,7 +156,7 @@ class CaseRepository(BaseRepository):
 
     async def add_message(self, case_id: str, msg: dict) -> bool:
         return await self.update_one(
-            {"_id": case_id},
+            {"_id": case_id, **_OPEN},
             {
                 "$push": {"messages": msg},
                 "$set": {"updated_at": datetime.now(timezone.utc)},
@@ -94,7 +165,7 @@ class CaseRepository(BaseRepository):
 
     async def add_task(self, case_id: str, task: dict) -> bool:
         return await self.update_one(
-            {"_id": case_id},
+            {"_id": case_id, **_OPEN},
             {
                 "$push": {"tasks": task},
                 "$set": {"updated_at": datetime.now(timezone.utc)},
@@ -105,7 +176,7 @@ class CaseRepository(BaseRepository):
         from datetime import datetime, timezone as _tz
         completed_at = datetime.now(_tz.utc) if done else None
         return await self.update_one(
-            {"_id": case_id, "tasks._id": task_id},
+            {"_id": case_id, **_OPEN, "tasks._id": task_id},
             {"$set": {"tasks.$.done": done, "tasks.$.completed_at": completed_at}},
         )
 
