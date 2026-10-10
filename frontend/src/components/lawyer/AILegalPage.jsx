@@ -1,7 +1,8 @@
 'use client';
 // Lawyer AI Legal Page — paste your code here
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useTheme } from "./theme.js";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useTheme, ThemeCtx } from "./theme.js";
+import { DRAFTING_TOKENS_CSS, draftingMode, themeOnTokens } from "./draftingTheme.js";
 import { useCase } from "./theme.js";
 import { Icon, I } from "./icons.jsx";
 import {
@@ -283,9 +284,228 @@ function researchErrorText(e) {
     }
 }
 
+/* The AI Assistant on the lawyer document theme (2026-10-09), like Cases and
+ * Appointments: type, ground and neutral colours from draftingTheme.js;
+ * layout and behaviour as they were. */
+export const AI_THEME_CSS = `[data-ai-ws]{height:100%;min-height:0;display:flex;flex-direction:column;color:var(--ink);font-family:"Hanken Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased;background:radial-gradient(900px 360px at 25% -80px,var(--glow),transparent 70%) no-repeat,var(--bg)}
+[data-ai-ws] > div:not(style){flex:1;min-height:0}
+[data-ai-ws] .serif{font-family:"Literata",Georgia,serif!important;letter-spacing:-.01em}
+[data-ai-ws] input,[data-ai-ws] select,[data-ai-ws] textarea,[data-ai-ws] button{font-family:inherit}
+[data-ai-ws]{--well:#0F2429;--input:#16323A;--teal-line:rgba(150,215,220,.16);--line-strong:rgba(150,215,220,.22);--faint:#93A4A8;--mint:#5EE6B0;--grad:linear-gradient(135deg,#3EE0A1,#2EC4D6);--on-grad:#04212A}
+[data-ai-ws][data-mode="light"]{--well:#EEF4F5;--input:#F3F8F8;--teal-line:#CFDFE2;--line-strong:#C5D0D3;--faint:#6E7F85;--mint:#0E7A55;--grad:linear-gradient(135deg,#0E8A5F,#0B7A8C);--on-grad:#fff}
+[data-ai-ws] .ai-convs{position:relative;flex-shrink:0;overflow:hidden;display:flex;flex-direction:column;background:var(--surface);border:0;border-right:1px solid var(--line);border-radius:0;transition:width .3s cubic-bezier(.4,0,.2,1),min-width .3s cubic-bezier(.4,0,.2,1)}
+[data-ai-ws] .cv-top{padding:14px 12px 12px;border-bottom:1px solid var(--line);min-width:200px}
+[data-ai-ws] .ai-new{width:100%;height:38px;display:flex;align-items:center;justify-content:center;gap:7px;border-radius:999px;border:0;background:var(--grad);color:var(--on-grad);font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 8px 18px -10px rgba(46,196,214,.6);transition:filter .15s,transform .15s}
+[data-ai-ws] .ai-new:hover{filter:brightness(1.08);transform:translateY(-1px)}
+[data-ai-ws] .cv-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 8px 6px 14px;min-width:200px}
+[data-ai-ws] .cv-head b{font-size:16px;font-weight:700;color:var(--ink)}
+[data-ai-ws] .cv-head b small{font-size:12px;font-weight:600;color:var(--faint)}
+[data-ai-ws] .ai-icon{width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:8px;background:none;color:var(--ink);cursor:pointer}
+[data-ai-ws] .ai-icon:hover{color:var(--hover-ink);background:var(--hover-tint)}
+[data-ai-ws] .ai-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:190px;padding:4px;display:flex;flex-direction:column;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:0 18px 36px -12px rgba(0,0,0,.6)}
+[data-ai-ws] .ai-menu button{text-align:left;padding:8px 10px;border:0;border-radius:7px;background:none;color:var(--ink);font-size:13px;cursor:pointer}
+[data-ai-ws] .ai-menu button:hover{background:var(--well)}
+[data-ai-ws] .proj{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;border:1px solid var(--teal-line);background:var(--well)}
+[data-ai-ws] .proj .ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--input);color:var(--mint);flex:none}
+[data-ai-ws] .proj b{display:block;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-ai-ws] .proj small{display:block;font-size:11.5px;color:var(--faint)}
+[data-ai-ws] .newchat{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font-weight:600;font-size:13.5px;width:100%;cursor:pointer}
+[data-ai-ws] .newchat:hover{border-color:rgba(62,224,161,.55);color:var(--hover-ink);background:var(--hover-tint)}
+[data-ai-ws] .cv-search{margin:0 14px 6px;min-width:192px;display:flex;align-items:center;gap:8px;height:36px;padding:0 10px;border-radius:10px;background:var(--input);border:1px solid var(--teal-line);color:var(--faint)}
+[data-ai-ws] .cv-search:focus-within{border-color:var(--mint)}
+[data-ai-ws] .cv-search input{flex:1;min-width:0;border:0;background:none;outline:none;font-size:13px;color:var(--ink)}
+[data-ai-ws] .cv-search input::placeholder{color:var(--faint)}
+[data-ai-ws] .cv-list{flex:1;overflow:auto;padding:6px 8px 10px;min-width:200px;scrollbar-width:thin}
+[data-ai-ws] .cv-g{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:600;padding:12px 8px 6px}
+[data-ai-ws] .cv{display:flex;align-items:center;gap:4px;padding:8px 9px;border-radius:10px;border:1px solid transparent;margin-bottom:2px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer}
+[data-ai-ws] .cv:hover{background:var(--hover-tint);color:var(--ink)}
+[data-ai-ws] .cv.on{background:var(--well);border-color:var(--teal-line);color:var(--ink)}
+[data-ai-ws] .cv-more{flex:none;width:24px;height:24px;display:grid;place-items:center;border:0;border-radius:7px;background:none;color:var(--faint);cursor:pointer;opacity:0}
+[data-ai-ws] .cv:hover .cv-more,[data-ai-ws] .cv.on .cv-more,[data-ai-ws] .cv-more[aria-expanded="true"]{opacity:1}
+[data-ai-ws] .cv-more:hover,[data-ai-ws] .cv-more[aria-expanded="true"]{background:var(--input);color:var(--ink)}
+[data-ai-ws] .cv-menu{z-index:60;width:max-content;min-width:0;padding:3px;border-radius:9px}
+[data-ai-ws] .cv-menu button{display:flex;align-items:center;gap:7px;padding:5px 12px 5px 8px;font-size:12.5px;border-radius:6px}
+[data-ai-ws] .cv-menu button svg{width:13px;height:13px}
+[data-ai-ws] .cv-menu button svg{color:var(--faint)}
+[data-ai-ws] .cv-menu button.danger,[data-ai-ws] .cv-menu button.danger svg{color:#F28B80}
+[data-ai-ws] .cv-empty{padding:6px 8px;font-size:14px;color:var(--faint)}
+[data-ai-ws] .cv-empty .ic{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--well);border:1px solid var(--teal-line);color:var(--mint)}
+[data-ai-ws] .cv-empty b{font-size:14px;color:var(--ink)}
+[data-ai-ws] .cv-empty p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.55}
+[data-ai-ws] .cv-foot{padding:10px 12px 10px;font-size:11.5px!important;border-top:1px solid var(--line);font-size:12px;color:var(--faint);display:flex;justify-content:space-between;min-width:200px;white-space:nowrap}
+[data-ai-ws] .ai-edge{position:absolute;bottom:14px;z-index:20;width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:50%;background:var(--grad);color:var(--on-grad);cursor:pointer;box-shadow:0 0 0 3px var(--bg),0 8px 18px -10px rgba(46,196,214,.6);transition:left .3s cubic-bezier(.4,0,.2,1),filter .15s}
+[data-ai-ws] .ai-edge:hover{filter:brightness(1.1)}
+[data-ai-ws] .ch-head{display:flex;align-items:center;gap:12px;padding:4px 10px 10px;flex-wrap:wrap;flex-shrink:0}
+[data-ai-ws] .ch-head h1{margin:0;font-family:"Literata",Georgia,serif;font-size:21px;font-weight:600;color:var(--ink);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 200px}
+[data-ai-ws] .scope{display:flex;gap:6px;flex-wrap:wrap}
+[data-ai-ws] .chipbtn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px;border-radius:999px;border:1px solid var(--teal-line);background:var(--well);color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+[data-ai-ws] .chipbtn:hover{border-color:rgba(62,224,161,.55);color:var(--hover-ink)}
+[data-ai-ws] .chipbtn b{color:var(--ink);font-weight:600}
+[data-ai-ws] .chipbtn.case b{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;color:var(--mint)}
+[data-ai-ws] .chipbtn .x{color:var(--faint);margin-left:2px}
+[data-ai-ws] .ai-welcome{width:100%;max-width:1000px;display:grid;gap:4px;text-align:left}
+[data-ai-ws] .ai-welcome .hi{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:9px}
+[data-ai-ws] .ai-welcome .hi i{width:8px;height:8px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 4px color-mix(in srgb,var(--mint) 18%,transparent)}
+[data-ai-ws] .ai-welcome h2{margin:2px 0 0;font-family:"Literata",Georgia,serif;font-weight:600;font-size:clamp(28px,3.2vw,40px);line-height:1.15;color:var(--ink)}
+[data-ai-ws] .ai-welcome h2 span{color:var(--mint)}
+[data-ai-ws] .ai-box{width:100%;max-width:1000px;box-sizing:border-box;padding:10px 12px 8px 16px;border-radius:18px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:0 30px 60px -30px rgba(0,0,0,.8)}
+[data-ai-ws] .ai-box:focus-within{border-color:color-mix(in srgb,var(--mint) 55%,transparent)}
+[data-ai-ws] .ai-box input::placeholder{color:var(--faint)}
+[data-ai-ws] .ai-chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:999px;background:var(--well);border:1px solid var(--teal-line);color:var(--ink);font-size:13px;font-weight:600}
+[data-ai-ws] .lang{display:flex;padding:3px;border-radius:9px;background:var(--well);border:1px solid var(--teal-line)}
+[data-ai-ws] .lang button{height:26px;padding:0 9px;border:0;border-radius:6px;background:none;font-size:12px;font-weight:700;color:var(--faint);cursor:pointer}
+[data-ai-ws] .lang button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+[data-ai-ws] .ai-send{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;border:1px solid var(--teal-line);background:var(--well);color:var(--faint);cursor:default;transition:background .15s,color .15s}
+[data-ai-ws] .ai-send.on{border-color:transparent;background:var(--grad);color:var(--on-grad);cursor:pointer;box-shadow:0 8px 18px -10px rgba(46,196,214,.6)}
+[data-ai-ws] .disc{max-width:1000px;margin:8px auto 0;font-size:11.5px;color:var(--faint);text-align:center}
+[data-ai-ws] .ai-start{width:100%;max-width:1000px;margin:auto 0;display:grid;gap:26px;padding:12px 0}
+[data-ai-ws] .ai-below{width:100%;display:grid;gap:12px}
+[data-ai-ws] .ai-scroll,[data-ai-ws] .cv-list{scrollbar-width:none;-ms-overflow-style:none}
+[data-ai-ws] .ai-scroll::-webkit-scrollbar,[data-ai-ws] .cv-list::-webkit-scrollbar{display:none}
+[data-ai-ws] .ai-sources{width:300px;flex-shrink:0;margin:14px 0;display:flex;flex-direction:column;min-height:0;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:14px;animation:aiSrcIn .2s ease-out}
+@keyframes aiSrcIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}
+[data-ai-ws] .src-h{padding:12px 12px 12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+[data-ai-ws] .src-h h3{margin:0;font-size:15px;font-weight:700;color:var(--ink);display:flex;gap:8px;align-items:center}
+[data-ai-ws] .src-h .n{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;padding:0 7px;border-radius:999px;background:var(--well);color:var(--muted)}
+[data-ai-ws] .src-list{flex:1;overflow:auto;padding:10px;display:grid;gap:8px;align-content:start;scrollbar-width:none}
+[data-ai-ws] .src-list::-webkit-scrollbar{display:none}
+[data-ai-ws] .src{padding:11px 12px;border-radius:10px;background:var(--well);border:1px solid var(--teal-line);display:grid;gap:5px;transition:border-color .15s}
+[data-ai-ws] .src.hl{border-color:var(--mint)}
+[data-ai-ws] .src .top{display:flex;gap:8px;align-items:center}
+[data-ai-ws] .src .num{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;color:var(--mint);min-width:20px;height:18px;display:grid;place-items:center;border-radius:5px;border:1px solid var(--teal-line)}
+[data-ai-ws] .src .kind{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:700}
+[data-ai-ws] .src .dead{margin-left:auto;font-size:10.5px;font-weight:700;color:#F28B80}
+[data-ai-ws] .src b{font-size:13.5px;font-weight:600;color:var(--ink)}
+[data-ai-ws] .src p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.5}
+[data-ai-ws] .src p.where{font-size:11.5px;color:var(--faint);word-break:break-all}
+[data-ai-ws] .src p.dead-note{color:#F28B80}
+[data-ai-ws] .src-acts{display:flex;flex-wrap:wrap;gap:12px;margin-top:2px}
+[data-ai-ws] .src-acts a,[data-ai-ws] .src-acts button{background:none;border:0;padding:0;font-size:12px;font-weight:600;color:var(--mint);text-decoration:none;cursor:pointer;font-family:inherit}
+[data-ai-ws] .src-acts a:hover,[data-ai-ws] .src-acts button:hover{text-decoration:underline}
+[data-ai-ws] .ai-mic{width:34px;height:34px;display:grid;place-items:center;border:1px solid transparent;border-radius:50%;background:none;color:var(--faint);cursor:pointer;transition:color .15s,background .15s}
+[data-ai-ws] .ai-mic:hover{border-color:var(--line-strong);color:var(--hover-ink)}
+[data-ai-ws] .ai-mic.on{color:#F28B80;background:rgba(242,139,128,.14);border-color:rgba(242,139,128,.45);animation:aiMic 1.2s ease-in-out infinite}
+@keyframes aiMic{0%,100%{box-shadow:0 0 0 0 rgba(242,139,128,.35)}50%{box-shadow:0 0 0 6px rgba(242,139,128,0)}}
+[data-ai-ws] .ai-attach{width:32px;height:32px;display:grid;place-items:center;border:1px solid transparent;border-radius:9px;background:none;color:var(--faint);cursor:pointer}
+[data-ai-ws] .ai-attach:hover{border-color:var(--line-strong);color:var(--hover-ink)}
+[data-ai-ws] .ctx-h{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);font-weight:600}
+[data-ai-ws] .ctx-h button{background:none;border:0;padding:0;color:var(--mint);font-size:12.5px;letter-spacing:0;text-transform:none;font-weight:600;cursor:pointer}
+[data-ai-ws] .ctx{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+[data-ai-ws] .cx{display:grid;gap:8px;align-content:start;padding:14px;border-radius:14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);text-align:left;cursor:pointer;transition:border-color .15s,transform .15s}
+[data-ai-ws] .cx:hover{border-color:rgba(62,224,161,.55);transform:translateY(-1px)}
+[data-ai-ws] .cx .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+[data-ai-ws] .cx .when{font-size:11.5px;font-weight:700}
+[data-ai-ws] .cx .case{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;color:var(--mint);padding:1px 6px;border-radius:5px;border:1px solid var(--teal-line);white-space:nowrap}
+[data-ai-ws] .cx b{font-size:13.5px;font-weight:600;line-height:1.35}
+[data-ai-ws] .cx small{font-size:12px;color:var(--faint);text-transform:capitalize}
+[data-ai-ws] .pop{display:flex;gap:10px;align-items:center;font-size:12.5px;color:var(--faint);min-width:0}
+[data-ai-ws] .pop > span{flex:none}
+[data-ai-ws] .pop-rail{flex:1;min-width:0;display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 40px),transparent)}
+[data-ai-ws] .pop-rail::-webkit-scrollbar{display:none}
+[data-ai-ws] .pop-rail button{flex:none;white-space:nowrap}
+[data-ai-ws] .pop button{height:30px;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:none;color:var(--muted);font-size:12.5px;cursor:pointer}
+[data-ai-ws] .pop button:hover{border-color:rgba(62,224,161,.55);color:var(--hover-ink)}
+`;
+
+/* Dictation into the question box, using the browser's speech recognition
+   (Chrome / Edge). Where the browser has none the button is not shown — a mic
+   that does nothing would be worse than no mic. */
+function VoiceButton({ onText }) {
+    // Looked up after mount, so the server render and the first client render agree.
+    const [Rec, setRec] = useState(null);
+    useEffect(() => { setRec(() => window.SpeechRecognition || window.webkitSpeechRecognition || null); }, []);
+    const recRef = useRef(null);
+    const [on, setOn] = useState(false);
+    const [err, setErr] = useState("");
+    useEffect(() => () => { try { recRef.current?.abort(); } catch { /* already stopped */ } }, []);
+    if (!Rec) return null;
+    const toggle = () => {
+        if (on) { recRef.current?.stop(); return; }
+        setErr("");
+        const rec = new Rec();
+        rec.lang = "en-PK";
+        rec.interimResults = true;
+        rec.continuous = false;
+        rec.onresult = (e) => {
+            const text = Array.from(e.results).map(r => r[0].transcript).join(" ").trim();
+            if (text) onText(text);
+        };
+        rec.onerror = (e) => {
+            setErr(e.error === "not-allowed" ? "Microphone permission was refused" : "Could not hear that — try again");
+        };
+        rec.onend = () => setOn(false);
+        recRef.current = rec;
+        try { rec.start(); setOn(true); } catch { setOn(false); }
+    };
+    return (
+        <button type="button" className={`ai-mic${on ? " on" : ""}`} onClick={toggle}
+            aria-pressed={on} aria-label={on ? "Stop dictation" : "Dictate your question"}
+            title={err || (on ? "Listening… click to stop" : "Speak your question")}>
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+        </button>
+    );
+}
+
+function PromptRail({ prompts, onPick }) {
+    const ref = useRef(null);
+    const paused = useRef(false);
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return undefined;
+        if (typeof requestAnimationFrame !== "function") return undefined;   // no animation frames (tests)
+        if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return undefined;
+        let raf = 0, pos = el.scrollLeft;
+        const step = () => {
+            if (!paused.current && el.scrollWidth > el.clientWidth) {
+                pos += 0.35;
+                const half = el.scrollWidth / 2;          // the list is drawn twice
+                if (pos >= half) pos -= half;
+                el.scrollLeft = pos;
+            } else {
+                pos = el.scrollLeft;
+            }
+            raf = requestAnimationFrame(step);
+        };
+        raf = requestAnimationFrame(step);
+        return () => cancelAnimationFrame(raf);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [prompts.join("|")]);
+    const stop = () => { paused.current = true; };
+    const go = () => { paused.current = false; };
+    const onWheel = (e) => {
+        const el = ref.current;
+        if (el && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY;
+    };
+    return (
+        <div className="pop">
+            <span>Try:</span>
+            <div className="pop-rail" ref={ref} onMouseEnter={stop} onMouseLeave={go} onFocus={stop} onBlur={go} onWheel={onWheel}>
+                {[...prompts, ...prompts].map((p, i) => (
+                    <button type="button" key={i} tabIndex={i < prompts.length ? 0 : -1}
+                        aria-hidden={i < prompts.length ? undefined : true} onClick={() => onPick(p)}>{p}</button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 function AILegalPage() {
     const { t } = useTheme();
-    const { activeCase, setActiveCase } = useCase();
+    const themed = useMemo(() => themeOnTokens(t), [t]);
+    return (
+        <ThemeCtx.Provider value={themed}>
+            <div data-ai-ws data-drafting-theme data-mode={draftingMode(t)}>
+                <style>{`${DRAFTING_TOKENS_CSS}
+${AI_THEME_CSS}`}</style>
+                <AILegalScreen />
+            </div>
+        </ThemeCtx.Provider>
+    );
+}
+
+function AILegalScreen() {
+    const { t } = useTheme();
+    const { activeCase, setActiveCase, setPage } = useCase();
     const { user } = useAuth();
     const firstName = user?.full_name?.split(" ")[0] || "Counselor";
     const [apiCases, setApiCases] = useState([]);
@@ -325,9 +545,16 @@ function AILegalPage() {
     const apiCasesRef = useRef(apiCases);
     apiCasesRef.current = apiCases;
     const [query, setQuery] = useState("");
+    // A question typed on the dashboard arrives once, ready to send.
+    useEffect(() => {
+        try {
+            const q = sessionStorage.getItem("attorney:ai-prefill");
+            if (q) { sessionStorage.removeItem("attorney:ai-prefill"); setQuery(q); }
+        } catch { /* storage off */ }
+    }, []);
     const [loading, setLoading] = useState(false);
     const [sideOpen, setSideOpen] = useState(true);
-    const [lang, setLang] = useState("EN");
+    const [lang] = useState("EN");
     // Real research conversations from the server, grouped by recency. The
     // previous list held the raw text of past questions and clicking one only
     // refilled the input box, because nothing was stored to reopen.
@@ -964,81 +1191,86 @@ function AILegalPage() {
     }, []);
 
     const hasMessages = msgs.length > 0;
+    // The "…" menu holds the less-used history actions.
+    const [histMenu, setHistMenu] = useState(false);
+    const [histOpen, setHistOpen] = useState(true);   // ^ folds the list
+    // The Sources panel on the right: one answer's citations, one in focus.
+    const [srcPanel, setSrcPanel] = useState(null);   // { list, focus }
+    useEffect(() => { setSrcPanel(null); }, [sessionId]);
+    // Hands a citation to the Legal library (Case Law), which runs it as a search.
+    const openInLibrary = (c) => {
+        const term = (c.label || "").replace(/§\s*/g, "section ").trim();
+        try { sessionStorage.setItem("attorney:caselaw-query", term); } catch { /* storage off */ }
+        setPage?.("caselaw");
+    };
+    // One thread's "…" menu: { item, x, y } within the sidebar card.
+    const [rowMenu, setRowMenu] = useState(null);
+    useEffect(() => {
+        if (!rowMenu) return undefined;
+        const close = (e) => { if (!e.target.closest?.("[data-row-menu]")) setRowMenu(null); };
+        const esc = (e) => { if (e.key === "Escape") setRowMenu(null); };
+        document.addEventListener("mousedown", close);
+        document.addEventListener("keydown", esc);
+        return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
+    }, [rowMenu]);
+    // Cases with a hearing coming up, soonest first: the "From your cases"
+    // cards. Dates are the case's own next unheard hearing, nothing invented.
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const weekKey = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+    const upcoming = apiCases
+        .filter(c => c.nextHearing !== "TBD" && c.nextHearing >= todayKey)
+        .sort((a, b) => a.nextHearing.localeCompare(b.nextHearing));
+    const hearingsThisWeek = upcoming.filter(c => c.nextHearing <= weekKey).length;
+    const caseCards = (upcoming.length ? upcoming : apiCases).slice(0, 3);
+    const whenLabel = (d) => {
+        if (!d || d === "TBD") return { text: "No hearing set", c: "var(--faint)" };
+        const days = Math.round((new Date(d) - new Date(todayKey)) / 864e5);
+        if (days === 0) return { text: "Hearing today", c: "var(--amber, #F2C35E)" };
+        if (days === 1) return { text: "Tomorrow", c: "var(--amber, #F2C35E)" };
+        return { text: new Date(d).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }), c: "#3CCFE0" };
+    };
+    const threadTitle = hasMessages ? (rows.find(r => r.session_id === sessionId)?.title || "Research") : "New research";
 
     return (
-        <div style={{ display: "flex", flex: 1, overflow: "hidden", borderRadius: 0, border: "none", background: t.card, boxShadow: "none" }}>
+        <div className="ai-shell" style={{ display: "flex", flex: 1, overflow: "hidden", gap: 14, padding: "0 14px 0 0", position: "relative" }}>
 
             {/* ── SIDEBAR ── */}
-            <div style={{
-                width: sideOpen ? 200 : 0, minWidth: sideOpen ? 200 : 0, flexShrink: 0, overflow: "hidden",
-                transition: "width .3s cubic-bezier(.4,0,.2,1),min-width .3s cubic-bezier(.4,0,.2,1)",
-                background: t.surface, borderRight: `1px solid ${t.border}`, display: "flex", flexDirection: "column"
+            <section aria-label="Conversations" className="ai-convs" style={{
+                width: sideOpen ? 200 : 0, minWidth: sideOpen ? 200 : 0, borderWidth: sideOpen ? 1 : 0,
             }}>
 
-                {/* New Chat button */}
-                <div style={{ padding: "14px 12px 10px" }}>
-                    <button
-                        onClick={() => startConversation(
-                            activeCaseObj ? (activeCaseObj._id || null) : null)}
-                        title={activeCaseObj
-                            ? `Start a new thread for ${activeCaseObj.id}`
-                            : "Start a new general research thread"}
-                        style={{
-                        width: "100%", padding: "9px 14px", borderRadius: 50,
-                        background: t.primary, color: t.mode === "dark" ? "#111B1F" : "#fff",
-                        border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
-                        boxShadow: `0 4px 14px ${t.primaryGlow}`, transition: "opacity .2s", whiteSpace: "nowrap"
-                    }}
-                        onMouseEnter={e => e.currentTarget.style.opacity = ".85"}
-                        onMouseLeave={e => e.currentTarget.style.opacity = "1"}>
-                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></svg>
+                <div className="cv-top">
+                    <button type="button" className="ai-new"
+                        onClick={() => startConversation(activeCaseObj ? (activeCaseObj._id || null) : null)}
+                        title={activeCaseObj ? `Start a new thread for ${activeCaseObj.id}` : "Start a new general research thread"}>
+                        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-13.5 7.8L3 21l1.2-4.5A9 9 0 1 1 21 12z" /><path d="M8 10.5h8M8 14h5" /></svg>
                         New Chat
                     </button>
                 </div>
-
-                {/* History header */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 14px 4px" }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>
-                        {activeCaseObj ? "Case research" : "General research"}
-                    </span>
-                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                        <button
-                            onClick={() => startConversation(activeCaseObj ? (activeCaseObj._id || null) : null)}
-                            title={activeCaseObj
-                                ? `New research thread for ${activeCaseObj.id}`
-                                : "New general research thread"}
-                            style={{ background: "none", border: `1px solid ${t.border}`, cursor: "pointer", padding: "2px 7px", borderRadius: 7, color: t.textMuted, fontSize: 11 }}>
-                            + New
+                <div className="cv-head">
+                    <b>History{showArchived && <small> · Archived</small>}</b>
+                    <div style={{ display: "flex", gap: 2, alignItems: "center", position: "relative" }}>
+                        <button type="button" className="ai-icon" aria-expanded={histOpen}
+                            aria-label={histOpen ? "Fold history" : "Show history"} title={histOpen ? "Fold history" : "Show history"}
+                            onClick={() => setHistOpen(v => !v)}>
+                            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+                                style={{ transform: histOpen ? "none" : "rotate(180deg)", transition: "transform .2s" }}><path d="m6 15 6-6 6 6" /></svg>
                         </button>
-                        <button
-                            onClick={() => setShowArchived(v => !v)}
-                            title={showArchived ? "Hide archived threads" : "Show archived threads"}
-                            style={{ background: showArchived ? t.cardHi : "none", border: `1px solid ${t.border}`, cursor: "pointer", padding: "2px 7px", borderRadius: 7, color: t.textMuted, fontSize: 11 }}>
-                            🗄
+                        <button type="button" className="ai-icon" aria-haspopup="menu" aria-expanded={histMenu}
+                            aria-label="History options" title="History options" onClick={() => setHistMenu(v => !v)}>
+                            <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle cx="19" cy="12" r="1.9" /></svg>
                         </button>
+                        {histMenu && (
+                            <div role="menu" className="ai-menu" onMouseLeave={() => setHistMenu(false)}>
+                                <button type="button" role="menuitem"
+                                    title={showArchived ? "Hide archived threads" : "Show archived threads"}
+                                    onClick={() => { setHistMenu(false); setShowArchived(v => !v); }}>
+                                    {showArchived ? "Hide archived threads" : "Show archived threads"}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
-
-                {/* Search. Matches the thread title and the question that
-                    named it — not message bodies, which live in another
-                    collection. A search covering some of a thread's text but
-                    not the rest would be worse than one whose scope is
-                    obvious. */}
-                <div style={{ padding: "0 12px 6px" }}>
-                    <input
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        placeholder="Search research"
-                        aria-label="Search research conversations"
-                        style={{
-                            width: "100%", padding: "6px 10px", fontSize: 12,
-                            borderRadius: 8, background: t.card,
-                            border: `1px solid ${t.border}`, color: t.text,
-                            outline: "none",
-                        }} />
-                </div>
-
                 {/* Found in what was SAID.
                     Separate from the list above because it carries the
                     sentence that matched, which is the only part that tells a
@@ -1090,16 +1322,10 @@ function AILegalPage() {
                 )}
 
                 {/* History list */}
-                <div style={{ flex: 1, overflowY: "auto", padding: "4px 8px 8px" }}>
+                <div className="cv-list" style={{ display: histOpen ? "block" : "none" }}>
                     {history.map((g, gi) => (
                         <div key={gi} style={{ marginBottom: 12 }}>
-                            <div style={{
-                                fontSize: 10, fontWeight: 700, color: t.textMuted, padding: "5px 6px 3px",
-                                textTransform: "uppercase", letterSpacing: "0.07em", display: "flex", alignItems: "center", gap: 4
-                            }}>
-                                <svg width={9} height={9} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
-                                {g.group}
-                            </div>
+                            <div className="cv-g">{g.group}</div>
                             {/* Real conversations. Clicking one reopens it with its
                                 messages and any question it was waiting on. */}
                             {g.items.map((item) => {
@@ -1108,15 +1334,7 @@ function AILegalPage() {
                                     <div key={item.session_id}
                                         onClick={() => openConversation(item.session_id, { adopt: true })}
                                         title={item.title}
-                                        style={{
-                                            padding: "7px 9px", borderRadius: 9, fontSize: 12,
-                                            color: active ? t.text : t.textMuted, cursor: "pointer",
-                                            marginBottom: 2, transition: "all .15s",
-                                            background: active ? t.cardHi : "transparent",
-                                            display: "flex", alignItems: "center", gap: 5,
-                                        }}
-                                        onMouseEnter={e => { e.currentTarget.style.background = t.cardHi; }}
-                                        onMouseLeave={e => { e.currentTarget.style.background = active ? t.cardHi : "transparent"; }}>
+                                        className={`cv${active ? " on" : ""}`}>
                                         {/* A thread that stopped on a question, not an answer. */}
                                         {item.awaiting_clarification && (
                                             <span title="Waiting on your answer" style={{ color: "#f59e0b", fontSize: 10 }}>?</span>
@@ -1124,45 +1342,22 @@ function AILegalPage() {
                                         <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                             {item.title}
                                         </span>
-                                        <button title="Rename" onClick={(e) => {
-                                            e.stopPropagation();
-                                            const next = window.prompt("Rename this research thread", item.title);
-                                            if (next && next.trim()) {
-                                                renameResearchConversation(item.session_id, next.trim())
-                                                    .then(({ error }) => {
-                                                        if (error) setConversationError(error.message || "Could not rename the thread.");
-                                                        refreshHistory();
-                                                    });
-                                            }
-                                        }} style={{ border: "none", background: "transparent", cursor: "pointer", color: t.textFaint, fontSize: 11, padding: "0 1px" }}>✎</button>
-                                        {/* Archive keeps the thread and its messages and
-                                            drops it out of the default list — closing a
-                                            file rather than shredding it. */}
-                                        <button title={item.archived ? "Unarchive" : "Archive"} onClick={(e) => {
-                                            e.stopPropagation();
-                                            archiveResearchConversation(item.session_id, !item.archived)
-                                                .then(({ error }) => {
-                                                    if (error) setConversationError(error.message || "Could not update the thread.");
-                                                    refreshHistory();
-                                                });
-                                        }} style={{ border: "none", background: "transparent", cursor: "pointer", color: t.textFaint, fontSize: 11, padding: "0 1px" }}>
-                                            {item.archived ? "↩" : "🗄"}
+                                        <button type="button" className="cv-more" title="More actions"
+                                            aria-label={`Actions for ${item.title}`} aria-haspopup="menu"
+                                            aria-expanded={rowMenu?.item.session_id === item.session_id}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                // Placed inside the sidebar card, under the button
+                                                // (or above it near the bottom).
+                                                const r = e.currentTarget.getBoundingClientRect();
+                                                const box = e.currentTarget.closest(".ai-convs").getBoundingClientRect();
+                                                const below = r.bottom - box.top + 4;
+                                                const y = below + 92 > box.height ? r.top - box.top - 92 : below;
+                                                setRowMenu(m => m?.item.session_id === item.session_id ? null
+                                                    : { item, x: r.right - box.left - 112, y });
+                                            }}>
+                                            <svg width={15} height={15} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
                                         </button>
-                                        <button title="Delete" onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (!window.confirm("Delete this thread and its messages?")) return;
-                                            deleteResearchConversation(item.session_id).then(async ({ error }) => {
-                                                if (error) {
-                                                    setConversationError(error.message || "Could not delete the thread.");
-                                                    return;
-                                                }
-                                                if (item.session_id === sessionIdRef.current) {
-                                                    writeActiveSession("research", user?._id, null);
-                                                    await startConversation(activeCaseObj ? (activeCaseObj._id || null) : null);
-                                                }
-                                                refreshHistory();
-                                            });
-                                        }} style={{ border: "none", background: "transparent", cursor: "pointer", color: t.textFaint, fontSize: 11, padding: "0 1px" }}>🗑</button>
                                     </div>
                                 );
                             })}
@@ -1187,62 +1382,113 @@ function AILegalPage() {
                         </button>
                     )}
                     {!listMore && !listLoading && rows.length === 0 && (
-                        <div style={{
-                            padding: "10px 6px", fontSize: 11.5, color: t.textFaint,
-                        }}>
-                            {search ? "No threads match that search."
-                                    : "No research threads yet."}
-                        </div>
+                        search ? (
+                            <div style={{ padding: "10px 8px", fontSize: 13, color: "var(--faint)" }}>No threads match that search.</div>
+                        ) : (
+                            <div className="cv-empty">{showArchived ? "No archived chats." : "Your chat history is empty."}</div>
+                        )
                     )}
                 </div>
-
-                {/* Sidebar footer */}
-                <div style={{ padding: "8px 12px 12px", borderTop: `1px solid ${t.border}` }}>
-                    <button onClick={() => setSideOpen(false)} style={{
-                        width: "100%", padding: "8px", borderRadius: 9, fontSize: 12,
-                        background: "transparent", border: `1px solid ${t.border}`, color: t.textMuted, cursor: "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center", gap: 5, transition: "all .2s"
-                    }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; }}>
-                        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
-                        Collapse
-                    </button>
-                </div>
-            </div>
+                {rowMenu && (() => {
+                    const item = rowMenu.item;
+                    return (
+                        <div role="menu" data-row-menu className="ai-menu cv-menu"
+                            style={{ position: "absolute", left: Math.max(8, rowMenu.x), top: Math.max(8, rowMenu.y), right: "auto" }}>
+                            <button type="button" role="menuitem" title="Rename" onClick={() => {
+                                setRowMenu(null);
+                                const next = window.prompt("Rename this research thread", item.title);
+                                if (next && next.trim()) {
+                                    renameResearchConversation(item.session_id, next.trim())
+                                        .then(({ error }) => {
+                                            if (error) setConversationError(error.message || "Could not rename the thread.");
+                                            refreshHistory();
+                                        });
+                                }
+                            }}>
+                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+                                Rename
+                            </button>
+                            {/* Archive keeps the thread and its messages and
+                                drops it out of the default list — closing a
+                                file rather than shredding it. */}
+                            <button type="button" role="menuitem" title={item.archived ? "Unarchive" : "Archive"} onClick={() => {
+                                setRowMenu(null);
+                                archiveResearchConversation(item.session_id, !item.archived)
+                                    .then(({ error }) => {
+                                        if (error) setConversationError(error.message || "Could not update the thread.");
+                                        refreshHistory();
+                                    });
+                            }}>
+                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" /></svg>
+                                {item.archived ? "Unarchive" : "Archive"}
+                            </button>
+                            <button type="button" role="menuitem" title="Delete" className="danger" onClick={() => {
+                                setRowMenu(null);
+                                if (!window.confirm("Delete this thread and its messages?")) return;
+                                deleteResearchConversation(item.session_id).then(async ({ error }) => {
+                                    if (error) {
+                                        setConversationError(error.message || "Could not delete the thread.");
+                                        return;
+                                    }
+                                    if (item.session_id === sessionIdRef.current) {
+                                        writeActiveSession("research", user?._id, null);
+                                        await startConversation(activeCaseObj ? (activeCaseObj._id || null) : null);
+                                    }
+                                    refreshHistory();
+                                });
+                            }}>
+                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
+                                Delete
+                            </button>
+                        </div>
+                    );
+                })()}
+                <div className="cv-foot"><span>Chats are private to you</span><span>{rows.length}{listMore ? "+" : ""} chat{rows.length === 1 ? "" : "s"}</span></div>
+            </section>
+            {/* Fold or open the sidebar: one round button on its edge. */}
+            <button type="button" className="ai-edge" onClick={() => setSideOpen(v => !v)}
+                aria-label={sideOpen ? "Collapse history" : "Open history"} title={sideOpen ? "Hide history" : "Show history"}
+                style={{ left: sideOpen ? 200 - 16 : 8 }}>
+                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d={sideOpen ? "M15 18l-6-6 6-6" : "M9 18l6-6-6-6"} />
+                </svg>
+            </button>
 
             {/* ── MAIN CHAT AREA ── */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
 
-                {/* Floating top bar */}
-                <div style={{
-                    position: "absolute", top: 0, left: 0, right: 0, zIndex: 10,
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "14px 20px 0", pointerEvents: "none"
-                }}>
-                    {/* Left: expand btn + Chat label */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, pointerEvents: "auto" }}>
-                        {!sideOpen && (
-                            <button onClick={() => setSideOpen(true)} style={{
-                                width: 34, height: 34, borderRadius: "50%",
-                                background: t.primary, border: "none", display: "flex", alignItems: "center", justifyContent: "center",
-                                cursor: "pointer", boxShadow: `0 4px 14px ${t.primaryGlow}`, transition: "opacity .2s"
-                            }}
-                                onMouseEnter={e => e.currentTarget.style.opacity = ".85"}
-                                onMouseLeave={e => e.currentTarget.style.opacity = "1"}>
-                                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={t.mode === "dark" ? "#111B1F" : "#fff"} strokeWidth="2.5"><path d="M9 18l6-6-6-6" /></svg>
+                <div className="ch-head" style={{ paddingTop: 14, paddingLeft: sideOpen ? 10 : 40 }}>
+                    {!sideOpen && (
+                        <button type="button" className="chipbtn" onClick={() => setSideOpen(true)} aria-label="Open history">
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>
+                            History
+                        </button>
+                    )}
+                    <h1 title={threadTitle}>{threadTitle}</h1>
+                    <div className="scope">
+                        <span className="chipbtn" title="Answers come from the statutes and reported judgments in the library">Sources <b>Statutes &amp; case law</b></span>
+                        {activeCaseObj ? (
+                            <button type="button" className="chipbtn case" onClick={() => setActiveCase?.(null)} title="Unlink this case (starts a general thread)">
+                                Case <b>{activeCaseObj.id}</b><span className="x" aria-hidden="true">×</span>
                             </button>
+                        ) : apiCases.length > 0 && (
+                            <label className="chipbtn" style={{ position: "relative" }}>
+                                + Link case
+                                <select aria-label="Link a case" value="" onChange={e => e.target.value && setActiveCase?.(e.target.value)}
+                                    style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}>
+                                    <option value="">Link a case</option>
+                                    {apiCases.map(c => <option key={c._id} value={c.id}>{c.id} — {c.title}</option>)}
+                                </select>
+                            </label>
                         )}
-                        <span className="serif" style={{ fontSize: 17, fontWeight: 700, color: t.text }}>Chat</span>
                     </div>
                 </div>
 
                 {/* Messages / Welcome */}
-                <div style={{
-                    flex: 1, overflowY: "auto",
+                <div className="ai-scroll" style={{
+                    flex: 1, minHeight: 0, overflowY: "auto",
                     display: "flex", flexDirection: "column", alignItems: "center",
-                    justifyContent: hasMessages ? "flex-start" : "center",
-                    padding: hasMessages ? "68px 24px 16px" : "0 24px"
+                    padding: "8px 24px 16px"
                 }}>
 
                     {conversationError && (
@@ -1268,45 +1514,45 @@ function AILegalPage() {
 
                     {!hasMessages ? (
                         /* Welcome screen */
-                        <div style={{ textAlign: "center", maxWidth: 640, width: "100%", padding: "0 16px" }}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 16 }}>
-                                <span style={{ fontSize: 42 }}>{greetEmoji}</span>
-                                <h2 className="serif" style={{ fontSize: 26, fontWeight: 700, color: t.text, margin: 0 }}>{greetWord}, {firstName}!</h2>
-                            </div>
-                            {/* Active case context pill */}
-                            {activeCaseObj && (
-                                <div style={{
-                                    display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 50,
-                                    background: t.primaryGlow, border: `1px solid ${t.primary}40`, marginBottom: 16
-                                }}>
-                                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: t.primary }} />
-                                    <span style={{ fontSize: 12, color: t.primary, fontWeight: 600 }}>Context: {activeCaseObj.id} — {activeCaseObj.title}</span>
-                                </div>
-                            )}
-                            <p className="serif" style={{ fontSize: activeCaseObj ? 22 : 30, fontWeight: 700, color: t.text, marginBottom: 32, lineHeight: 1.35 }}>{greetSub}</p>
-                            {/* Quick prompt chips — case-aware when active */}
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                                {(activeCaseObj ? [
-                                    `What sections apply to ${activeCaseObj.type} cases in Pakistan?`,
-                                    `Key arguments for ${activeCaseObj.title}`,
-                                    `Documents needed for next hearing at ${activeCaseObj.court}`,
-                                    `Recent precedents for ${activeCaseObj.type} law`
-                                ] : [
-                                    "Relevant sections for property dispute",
-                                    "PPC sections for cheque bounce",
-                                    "Bail conditions under CrPC 1898",
-                                    "Contempt of court procedure in Pakistan"
-                                ]).map((p, i) => (
-                                    <button key={i} onClick={() => setQuery(p)} style={{
-                                        padding: "9px 16px", borderRadius: 50,
-                                        border: `1px solid ${t.border}`, background: t.cardHi, color: t.textMuted, cursor: "pointer",
-                                        fontSize: 12, fontWeight: 500, transition: "all .15s", textAlign: "left"
-                                    }}
-                                        onMouseEnter={e => { e.currentTarget.style.borderColor = t.primary; e.currentTarget.style.color = t.primary; e.currentTarget.style.background = t.primaryGlow2; }}
-                                        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textMuted; e.currentTarget.style.background = t.cardHi; }}>
-                                        {p}
-                                    </button>
-                                ))}
+                        <div className="ai-start">
+                        <div className="ai-welcome">
+                            <div className="hi"><i aria-hidden="true" />{greetWord.charAt(0) + greetWord.slice(1).toLowerCase()}, {firstName}{hearingsThisWeek > 0 ? ` · ${hearingsThisWeek} case${hearingsThisWeek === 1 ? "" : "s"} with a hearing this week` : ""}</div>
+                            <h2>{activeCaseObj
+                                ? <>Research for <span>{activeCaseObj.id}</span></>
+                                : <>Ask anything about <span>Pakistani law</span></>}</h2>
+                        </div>
+                            <div className="ai-below">
+                                {caseCards.length > 0 && (
+                                    <>
+                                        <div className="ctx-h">
+                                            <span>From your cases</span>
+                                        </div>
+                                        <div className="ctx">
+                                            {caseCards.map(c => {
+                                                const w = whenLabel(c.nextHearing);
+                                                return (
+                                                    <button type="button" key={c._id} className="cx"
+                                                        title={`Research for ${c.id}`}
+                                                        onClick={() => { setActiveCase?.(c.id); setQuery(`Key arguments and authorities for ${c.title}`); }}>
+                                                        <span className="top"><span className="when" style={{ color: w.c }}>{w.text}</span><span className="case">{c.id}</span></span>
+                                                        <b>{c.title}</b>
+                                                        <small>{[c.type, c.client].filter(Boolean).join(" · ")}</small>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </>
+                                )}
+                                <PromptRail onPick={setQuery} prompts={activeCaseObj ? [
+                                        `What sections apply to ${activeCaseObj.type} cases in Pakistan?`,
+                                        `Key arguments for ${activeCaseObj.title}`,
+                                        `Recent precedents for ${activeCaseObj.type} law`,
+                                    ] : [
+                                        "PPC sections for cheque dishonour",
+                                        "Bail conditions under CrPC 1898",
+                                        "Eviction grounds, Punjab Rent Act 2009",
+                                        "Contempt of court procedure",
+                                    ]} />
                             </div>
                         </div>
                     ) : (
@@ -1516,13 +1762,15 @@ function AILegalPage() {
                                                                             ? (repealNote(c) || "repealed")
                                                                             : [c.province, c.source, c.chunkId].filter(Boolean).join(" · ");
                                                                         const text = `${icon} ${c.label}${chipDead ? " — repealed" : ""}`;
-                                                                        if (c.href) {
-                                                                            return <a key={ci} href={c.href} target="_blank" rel="noopener noreferrer" style={chipStyle} title={`${title}${title ? " · " : ""}opens the judgment`}>{text} ↗</a>;
-                                                                        }
-                                                                        if (c.sourceUrl) {
-                                                                            return <SourceChip key={ci} citation={c} text={text} style={chipStyle} title={title} />;
-                                                                        }
-                                                                        return <span key={ci} style={chipStyle} title={title}>{text}</span>;
+                                                                        const on = srcPanel?.focus === c;
+                                                                        return (
+                                                                            <button key={ci} type="button"
+                                                                                style={{ ...chipStyle, cursor: "pointer", fontFamily: "inherit", outline: on ? "2px solid var(--mint)" : "none", outlineOffset: 1 }}
+                                                                                title={`${title}${title ? " · " : ""}show in Sources`}
+                                                                                onClick={() => setSrcPanel({ list: m.citations, focus: c })}>
+                                                                                {text}
+                                                                            </button>
+                                                                        );
                                                                     })}
                                                                 </div>
                                                             </div>
@@ -1698,13 +1946,8 @@ function AILegalPage() {
                 </div>
 
                 {/* ── Rich input box ── */}
-                <div style={{ padding: "0 24px 18px", display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
-                    <div style={{
-                        width: "100%", maxWidth: 800,
-                        background: t.mode === "dark" ? "rgba(20,42,50,0.97)" : t.surface,
-                        border: `1.5px solid ${t.border}`, borderRadius: 18,
-                        padding: "13px 15px 11px 18px", boxShadow: t.shadowCard
-                    }}>
+                <div style={{ padding: "0 24px 10px", display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                    <div className="ai-box">
 
                         {/* Text input */}
                         <input value={query} onChange={e => setQuery(e.target.value)}
@@ -1712,60 +1955,85 @@ function AILegalPage() {
                             placeholder="Ask Attorney AI..."
                             style={{
                                 width: "100%", background: "transparent", border: "none", outline: "none",
-                                color: t.text, fontSize: 14, padding: "3px 0 10px", lineHeight: 1.6
+                                color: t.text, fontSize: 15, padding: "2px 2px 8px", lineHeight: 1.5
                             }} />
 
                         {/* Toolbar row */}
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
-                            {/* A "Search" globe button sat here with no handler. */}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                            {/* What answers: the research assistant, on the corpus. */}
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            {setPage && (
+                                <button type="button" className="ai-attach" onClick={() => setPage("doc-analyzer")}
+                                    aria-label="Attach a document" title="Attach a document (opens Document review)">
+                                    <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></svg>
+                                </button>
+                            )}
+                            <span className="ai-chip" title="Answers from Pakistani statutes and case law in the library">
+                                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 5.5A2.5 2.5 0 0 1 4.5 3H10v16H4.5A2.5 2.5 0 0 0 2 21.5zM22 5.5A2.5 2.5 0 0 0 19.5 3H14v16h5.5a2.5 2.5 0 0 1 2.5 2.5z" /></svg>
+                                AttorneyAI
+                            </span>
+                            </span>
 
                             {/* Right controls */}
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                {/* Clock: opens the conversation history sidebar. */}
-                                <button title="Conversation history" aria-label="Conversation history" onClick={() => setSideOpen(true)}
-                                    style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, color: t.textMuted, display: "flex", transition: "all .15s" }}
-                                    onMouseEnter={e => { e.currentTarget.style.background = t.cardHi; e.currentTarget.style.color = t.primary; }}
-                                    onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = t.textMuted; }}>
-                                    <Icon d={I.clock} size={16} />
-                                </button>
-
-
-                                {/* EN / UR language toggle */}
-                                <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${t.border}`, background: t.inputBg }}>
-                                    {["EN", "UR"].map(l => (
-                                        <button key={l} onClick={() => setLang(l)}
-                                            style={{
-                                                padding: "4px 11px", fontSize: 11, fontWeight: 700, border: "none", cursor: "pointer",
-                                                background: lang === l ? t.primary : "transparent",
-                                                color: lang === l ? (t.mode === "dark" ? "#111B1F" : "#fff") : t.textMuted,
-                                                transition: "all .15s"
-                                            }}>
-                                            {l}
-                                        </button>
-                                    ))}
-                                </div>
+                                {/* Voice: dictates into the box; the lawyer still reads and sends. */}
+                                <VoiceButton onText={setQuery} />
 
 
                                 {/* Send button */}
-                                <button onClick={send} style={{
-                                    width: 36, height: 36, borderRadius: 10,
-                                    background: query.trim() ? t.primary : t.inputBg,
-                                    border: `1.5px solid ${query.trim() ? t.primary : t.border}`,
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    cursor: query.trim() ? "pointer" : "default",
-                                    transition: "all .2s", transform: "rotate(45deg)",
-                                    boxShadow: query.trim() ? `0 4px 12px ${t.primaryGlow}` : "none"
-                                }}>
-                                    <Icon d={I.send} size={15} style={{ color: query.trim() ? (t.mode === "dark" ? "#111B1F" : "#fff") : t.textMuted }} />
+                                <button onClick={send} aria-label="Send" className={`ai-send${query.trim() ? " on" : ""}`}>
+                                    <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
                                 </button>
                             </div>
                         </div>
                     </div>
-                    <div style={{ marginTop: 7, fontSize: 11, color: t.textFaint, textAlign: "center" }}>
-                        Authentic citations only. Verify applicability before use.
-                    </div>
+                    <p className="disc">Answers cite Pakistani statutes and reported judgments. Check the cited text before relying on it in court.</p>
                 </div>
             </div>
+
+            {/* ── SOURCES ── one answer's citations; opened from a chip. */}
+            {srcPanel && (
+                <aside className="ai-sources" aria-label="Sources">
+                    <div className="src-h">
+                        <h3>Sources <span className="n">{srcPanel.list.length}</span></h3>
+                        <button type="button" className="ai-icon" aria-label="Hide sources" title="Close" onClick={() => setSrcPanel(null)}>
+                            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                        </button>
+                    </div>
+                    <div className="src-list">
+                        {srcPanel.list.map((c, i) => {
+                            const dead = c.currency === REPEALED;
+                            const where = [c.province, c.source].filter(Boolean).join(" · ");
+                            const status = CITATION_GROUPS.find(g => g.key === (c.status || "retrieved"));
+                            return (
+                                <div key={i} className={`src${srcPanel.focus === c ? " hl" : ""}`}
+                                    ref={el => { if (el && srcPanel.focus === c) el.scrollIntoView({ block: "nearest" }); }}>
+                                    <div className="top">
+                                        <span className="num">{i + 1}</span>
+                                        <span className="kind">{c.judgment ? "Judgment" : "Statute"}</span>
+                                        {dead && <span className="dead">Repealed</span>}
+                                    </div>
+                                    <b>{c.label}</b>
+                                    {status && <p>{status.lawyer}</p>}
+                                    {dead && repealNote(c) && <p className="dead-note">{repealNote(c)}</p>}
+                                    {where && <p className="where">{where}</p>}
+                                    <div className="src-acts">
+                                        {c.href && (
+                                            <a href={c.href} target="_blank" rel="noopener noreferrer">Court PDF ↗</a>
+                                        )}
+                                        {!c.href && c.sourceUrl && (
+                                            <SourceChip citation={c} text="Open document" style={{ background: "none", border: 0, padding: 0, color: "var(--mint)", fontSize: 12, fontWeight: 600 }} title={where} />
+                                        )}
+                                        {setPage && (
+                                            <button type="button" onClick={() => openInLibrary(c)}>Open in Legal library →</button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </aside>
+            )}
         </div>
     );
 }
