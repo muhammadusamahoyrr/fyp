@@ -337,7 +337,13 @@ async def submit(
         "submitted_revision_id": doc["current_revision_id"],
         "submitted_version": expected_version,
         "submitted_pdf_sha256": expected_pdf_sha256,
-        "submitted_at": now, "urgency": urgency, "review_note": note,
+        "submitted_at": now, "urgency": urgency,
+        # The CLIENT's note to the lawyer lives in its own field. It used to be
+        # written to `review_note`, which the lawyer's decision then overwrote:
+        # the client's instruction was lost and the lawyer's own note came back
+        # labelled as the client's. `review_note` now holds only a lawyer's
+        # note, so it is cleared for the new cycle.
+        "client_note": note, "review_note": None,
         "approval_history": {"$concatArrays": [
             {"$ifNull": ["$approval_history", []]},
             {"$cond": [{"$eq": ["$review_status", "approved"]},
@@ -434,6 +440,8 @@ def _cycle(*, reviewer_id: str, action: str, new_status: str,
         "pdf_sha256": "$submitted_pdf_sha256",
         "version": "$submitted_version",
         "submitted_at": "$submitted_at",
+        # What the client asked, kept with the decision it was answered by.
+        "client_note": "$client_note",
         "decided_at": decided_at,
         # The note THIS lawyer wrote. `review_note` on the document holds only
         # the most recent one, so a second reviewer's note would otherwise be
@@ -799,6 +807,7 @@ QUEUE_PROJECTION = {
     # decided row could not be previewed or downloaded at all.
     "reviewer_id": 1, "reviewed_revision_id": 1, "reviewed_pdf_sha256": 1,
     "reviewed_version": 1, "reviewed_at": 1, "review_note": 1,
+    "client_note": 1,
     # The durable per-cycle binding. Fetched whole because a lawyer may hold
     # several cycles on one document, and filtered to theirs in `_project_row`
     # before anything is returned.
@@ -983,6 +992,9 @@ def _project_row(row: dict, lawyer_id: str, status: str) -> dict:
     if status == "submitted" or (status == QUEUE_ALL and pending_for_me):
         # Live: keep the submission pointers, drop any decided-side fields.
         row["queue_role"] = "pending"
+        # Submissions made before `client_note` existed kept it in review_note.
+        row["client_note"] = row.get("client_note") or row.get("review_note")
+        row["review_note"] = None
         for field in ("reviewed_revision_id", "reviewed_pdf_sha256",
                       "reviewed_version", "reviewer_id"):
             row.pop(field, None)
@@ -1017,6 +1029,8 @@ def _project_row(row: dict, lawyer_id: str, status: str) -> dict:
     row["reviewed_at"] = (latest or {}).get("decided_at") or row.get("reviewed_at")
     row["reviewed_action"] = (latest or {}).get("action")
     row["review_note"] = (latest or {}).get("note")
+    # The client's note FOR THAT CYCLE, not whatever the document holds now.
+    row["client_note"] = (latest or {}).get("client_note")
     row["display_revision_id"] = row["reviewed_revision_id"]
     row["display_pdf_sha256"] = row["reviewed_pdf_sha256"]
     return row

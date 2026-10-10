@@ -396,3 +396,68 @@ async def test_two_decisions_of_one_kind_still_count_one_document(enabled):
     counts = await tx.queue_counts(LAWYER["_id"])
     assert counts["returned"] == 1
     assert counts["all"] == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# The client's note and the lawyer's are different notes (2026-10-09)
+#
+# Both used to live in `review_note`: the decision overwrote the client's note,
+# so the client's instruction was lost and the lawyer's inbox showed the
+# lawyer's own words under "Client Note".
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def test_a_decision_keeps_the_clients_note_apart_from_the_lawyers(enabled):
+    doc_id = await _new_doc()
+    v1 = await _generate(doc_id, "first")
+    await v2api.submit_document(
+        doc_id,
+        v2api.SubmitBody(expected_version=v1["version"],
+                         expected_pdf_sha256=v1["pdf_sha256"],
+                         lawyer_id=LAWYER["_id"], note="urgent, filing Monday"),
+        idempotency_key=key(), current_user=CLIENT)
+
+    pending = await tx.review_queue(LAWYER["_id"], status="submitted", limit=50)
+    row = next(r for r in pending["items"] if r["id"] == doc_id)
+    assert row["client_note"] == "urgent, filing Monday"
+    assert row["review_note"] is None
+
+    stored = await get_documents_col().find_one({"_id": doc_id})
+    assert stored["client_note"] == "urgent, filing Monday"
+    assert stored.get("review_note") is None, "the client's note read as the lawyer's"
+
+    await _decide(doc_id, v1, "return", note="fix para 3")
+
+    stored = await get_documents_col().find_one({"_id": doc_id})
+    assert stored["client_note"] == "urgent, filing Monday"
+    assert stored["review_note"] == "fix para 3"
+
+    returned = await tx.review_queue(LAWYER["_id"], status="returned", limit=50)
+    row = next(r for r in returned["items"] if r["id"] == doc_id)
+    assert row["client_note"] == "urgent, filing Monday"
+    assert row["review_note"] == "fix para 3"
+
+
+async def test_each_cycle_keeps_its_own_client_note(enabled):
+    doc_id = await _new_doc()
+    v1 = await _generate(doc_id, "first")
+    await v2api.submit_document(
+        doc_id, v2api.SubmitBody(expected_version=v1["version"],
+                                 expected_pdf_sha256=v1["pdf_sha256"],
+                                 lawyer_id=LAWYER["_id"], note="first ask"),
+        idempotency_key=key(), current_user=CLIENT)
+    await _decide(doc_id, v1, "return", note="please fix the dates")
+
+    v2 = await _generate(doc_id, "second")
+    await v2api.submit_document(
+        doc_id, v2api.SubmitBody(expected_version=v2["version"],
+                                 expected_pdf_sha256=v2["pdf_sha256"],
+                                 lawyer_id=LAWYER["_id"], note="dates fixed"),
+        idempotency_key=key(), current_user=CLIENT)
+    await _decide(doc_id, v2, "approve", note="this one is fine")
+
+    returned = await tx.review_queue(LAWYER["_id"], status="returned", limit=50)
+    approved = await tx.review_queue(LAWYER["_id"], status="approved", limit=50)
+    r_row = next(r for r in returned["items"] if r["id"] == doc_id)
+    a_row = next(r for r in approved["items"] if r["id"] == doc_id)
+    assert (r_row["client_note"], r_row["review_note"]) == ("first ask", "please fix the dates")
+    assert (a_row["client_note"], a_row["review_note"]) == ("dates fixed", "this one is fine")

@@ -298,7 +298,8 @@ def _public(doc: dict) -> dict:
         # not fully carry over needs to say what happened and what to do about
         # it; the wording comes from the migration policy so every surface says
         # the same thing. None on a healthy document.
-        "recovery": migration.recovery_for(doc.get("review_status")),
+        "recovery": migration.recovery_for(doc.get("review_status"),
+                                           doc.get("reapproval_reason")),
         "current_version": doc.get("current_version", 0),
         "current_revision_id": doc.get("current_revision_id"),
         "rev_seq": doc.get("rev_seq", 0),
@@ -308,6 +309,7 @@ def _public(doc: dict) -> dict:
         "submitted_version": doc.get("submitted_version"),
         "urgency": doc.get("urgency"),
         "review_note": doc.get("review_note"),
+        "client_note": doc.get("client_note"),
         "reviewed_at": doc.get("reviewed_at"),
         "created_at": doc.get("created_at"),
         "updated_at": doc.get("updated_at"),
@@ -837,13 +839,15 @@ def _decode_mine_cursor(cursor: str) -> tuple[datetime | None, str]:
                                "from the first page."})
 
 MINE_PROJECTION = {
-    "_id": 1, "title": 1, "template_type": 1, "case_id": 1,
+    "_id": 1, "title": 1, "template_type": 1, "case_id": 1, "folder_id": 1,
     "review_status": 1, "current_revision_id": 1, "current_version": 1,
+    "reapproval_reason": 1,
     "created_at": 1, "updated_at": 1, "submitted_at": 1, "reviewed_at": 1,
 }
 
 
-def mine_page_query(owner_id: str, cursor: str | None) -> tuple[dict, dict]:
+def mine_page_query(owner_id: str, cursor: str | None, folder: str | None = None,
+                    case: str | None = None) -> tuple[dict, dict]:
     """Filter and projection for one page of a caller's own documents.
 
     Keyed on `(created_at DESC, _id ASC)` — the order the caller is promised,
@@ -852,6 +856,16 @@ def mine_page_query(owner_id: str, cursor: str | None) -> tuple[dict, dict]:
     repeats a document across the page boundary; anything tighter skips one.
     """
     query: dict = {"client_id": owner_id, "schema_version": 2}
+    # A lawyer's Vault folder (services/document_folders.py): "none" is the
+    # documents in no folder; an id, that folder's. Absent: every document.
+    if folder == "none":
+        query["folder_id"] = None
+    elif folder:
+        query["folder_id"] = folder
+    # One case's documents (the client's case Tracking page). Still only the
+    # caller's OWN documents: this narrows ownership, it never widens it.
+    if case:
+        query["case_id"] = case
     if cursor:
         created, doc_id = _decode_mine_cursor(cursor)
         if created is None:
@@ -886,9 +900,15 @@ def mine_page_query(owner_id: str, cursor: str | None) -> tuple[dict, dict]:
 async def my_documents_v2(
     cursor: str | None = None,
     limit: int = 25,
+    folder: str | None = None,
+    case: str | None = None,
     current_user: dict = Depends(get_current_user),
 ):
     """Documents this caller owns, newest first, cursor-paginated.
+
+    `folder` narrows the list to one Vault folder ("none": no folder), and
+    `case` to one case's documents. The cursor of a narrowed list is only
+    valid with the same `folder` and `case`.
 
     WHY THIS EXISTS
 
@@ -917,7 +937,7 @@ async def my_documents_v2(
     owner_id = str(current_user["_id"])
     limit = max(1, min(int(limit), 100))
 
-    query, projection = mine_page_query(owner_id, cursor)
+    query, projection = mine_page_query(owner_id, cursor, folder, case)
     rows = await (get_documents_col()
                   .find(query, projection)
                   .sort(MINE_SORT).limit(limit + 1)
@@ -950,8 +970,10 @@ async def my_documents_v2(
             "title": row.get("title"),
             "template_type": row.get("template_type"),
             "case_id": row.get("case_id"),
+            "folder_id": row.get("folder_id"),
             "review_status": row.get("review_status", "none"),
-            "recovery": migration.recovery_for(row.get("review_status")),
+            "recovery": migration.recovery_for(row.get("review_status"),
+                                               row.get("reapproval_reason")),
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
             "submitted_at": row.get("submitted_at"),

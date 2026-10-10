@@ -170,6 +170,17 @@ async def repoint_document(document_id: str, revision_id: str, version: int) -> 
                     "$review_status",
                 ]
             },
+            # WHY it needs approval again. Here the reason is an edit: the
+            # client changed an approved document. The migration's own
+            # needs_reapproval (approved file lost) leaves this unset, and the
+            # two must not share an explanation (document_migration.recovery_for).
+            "reapproval_reason": {
+                "$cond": [
+                    {"$eq": ["$review_status", "approved"]},
+                    "edited_after_approval",
+                    "$reapproval_reason",
+                ]
+            },
             # The old submit path archived an approval only when the next
             # submit still observed status=approved.  Repointing now correctly
             # invalidates that status immediately, so preserve its exact-byte

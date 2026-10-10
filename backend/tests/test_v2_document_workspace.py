@@ -199,6 +199,25 @@ async def test_editing_approved_bytes_requires_a_new_approval(enabled):
     assert fresh["current_revision_id"] == saved["revision_id"]
     assert fresh["review_status"] == "needs_reapproval"
 
+    # ...and it is explained as an EDIT (2026-10-09). It used to show the
+    # migration's wording, "the approved file is no longer available", which
+    # told a client who changed one word that their approval was lost.
+    assert fresh["reapproval_reason"] == "edited_after_approval"
+    public = await api.get_document_v2(doc["_id"], current_user=CLIENT)
+    assert public["recovery"]["headline"] == "Edited after approval"
+    assert "no longer available" not in public["recovery"]["explanation"]
+    mine = await api.my_documents_v2(cursor=None, limit=25, current_user=CLIENT)
+    row = next(r for r in mine["items"] if r["id"] == doc["_id"])
+    assert row["recovery"]["headline"] == "Edited after approval"
+
+
+async def test_the_migrations_lost_approval_keeps_its_own_explanation():
+    from app.services import document_migration as migration
+    lost = migration.recovery_for("needs_reapproval")
+    assert "no longer available" in lost["explanation"]
+    assert migration.recovery_for("needs_reapproval", "edited_after_approval")["headline"]         == "Edited after approval"
+    assert migration.recovery_for("approved", "edited_after_approval") is None
+
 
 async def test_workspace_is_hidden_when_v2_is_disabled(enabled, monkeypatch):
     doc, _ = await seed()

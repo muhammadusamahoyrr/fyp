@@ -29,6 +29,7 @@ from app.api.v1.routes import (
     documents,
     documents_v2,
     documents_v2_trash,
+    documents_v2_folders,
     document_analyses,
     document_draft_plans,
     engagements,
@@ -624,6 +625,8 @@ app.include_router(documents.router, prefix=API_PREFIX)
 app.include_router(document_draft_plans.router, prefix=API_PREFIX)
 # BEFORE documents_v2: `/documents/v2/trash` must not be read as a document id.
 app.include_router(documents_v2_trash.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
+# Also BEFORE documents_v2: `/documents/v2/folders` must not be read as a document id.
+app.include_router(documents_v2_folders.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(documents_v2.router, prefix=API_PREFIX)  # inert while DOCUMENTS_V2 is off
 app.include_router(inheritance.router, prefix=API_PREFIX)
 app.include_router(agreements.router, prefix=API_PREFIX)

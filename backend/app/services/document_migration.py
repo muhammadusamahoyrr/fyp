@@ -176,8 +176,32 @@ RECOVERY_STATES = {
 }
 
 
-def recovery_for(review_status) -> dict | None:
-    """The recovery description for a status, or None for a healthy document."""
+# An approved document that was then EDITED (revision_repo.repoint_document).
+# Same status and the same next step as the migration's needs_reapproval, but
+# not the same story: nothing was lost, the client changed the wording, and an
+# approval belongs to the exact bytes the lawyer read. Telling this client
+# "the approved file is no longer available" would be false and alarming.
+REAPPROVAL_EDITED = {
+    "state": STATUS_NEEDS_REAPPROVAL,
+    "reason": "edited_after_approval",
+    "headline": "Edited after approval",
+    "explanation": (
+        "You changed this document after your lawyer approved it. An approval "
+        "covers the exact version the lawyer read, so this new version needs "
+        "their approval again. The approved version is still on record. Send "
+        "this version for review when it is ready."),
+    "next_action": "regenerate_and_resubmit",
+    "blocks_use": True,
+}
+
+
+def recovery_for(review_status, reason: str | None = None) -> dict | None:
+    """The recovery description for a status, or None for a healthy document.
+
+    `reason` is the document's `reapproval_reason`: an edit after approval is
+    explained as an edit, not as the migration's lost approval."""
+    if review_status == STATUS_NEEDS_REAPPROVAL and reason == "edited_after_approval":
+        return REAPPROVAL_EDITED
     return RECOVERY_STATES.get(review_status)
 
 BINDING_LEGACY_UNVERIFIED = "legacy_unverified"
