@@ -26,6 +26,7 @@ const { createRoot } = await import("react-dom/client");
 const api = await import("./support/api-stub.mjs");
 const { ToastCtx } = await import("../src/components/lawyer/Toast.jsx");
 const { CaseCtx } = await import("../src/components/lawyer/theme.js");
+const { AuthProvider } = await import("../src/context/AuthContext.jsx");
 const { ProfilePage } = await import("../src/components/lawyer/ProfilePage.jsx");
 const { CasesPage } = await import("../src/components/lawyer/CasesPage.jsx");
 const h = React.createElement;
@@ -40,7 +41,9 @@ async function mount(el) {
     const root = createRoot(container);
     await act(async () => { root.render(el); });
     await settle();
-    return { container, unmount: async () => { await act(async () => root.unmount()); container.remove(); } };
+    // Queries run from <body>: the page's dialogs render there (a portal), not
+    // inside the page's own container.
+    return { container: document.body, unmount: async () => { await act(async () => root.unmount()); container.remove(); } };
 }
 const button = (root, text) => [...root.querySelectorAll("button")].find(b => b.textContent.includes(text));
 async function click(el) {
@@ -56,7 +59,9 @@ test("Profile: a 422 on save shows the server's message, not [object Object]", a
     api.__respond("updateMe", { data: {}, error: null, status: 200 });
     api.__respond("updateLawyerProfile", unprocessable);
     const toasts = [];
-    const view = await mount(h(ToastCtx.Provider, { value: { show: (m) => toasts.push(m) } }, h(ProfilePage)));
+    api.__respond("bootstrapAuth", true);
+    // The page now offers sign-out actions (password change, account deletion), so it needs the auth context.
+    const view = await mount(h(AuthProvider, null, h(ToastCtx.Provider, { value: { show: (m) => toasts.push(m) } }, h(ProfilePage))));
     await click(button(view.container, "Save Changes"));
     assert.deepEqual(toasts, ["❌ Bar_number: String should match pattern"]);
     await view.unmount();
@@ -76,8 +81,8 @@ test("Cases: a failed outcome shows the server's message", async () => {
                                              docs: {}, setDocs: () => {}, setPage: () => {} } }, h(CasesPage));
     }
     const view = await mount(h(Host));
-    await click(button(view.container, "Manage →"));
-    await click(button(view.container, "Add Outcome"));
+    await click([...view.container.querySelectorAll('[role="tab"]')].find(b => b.textContent.startsWith("Schedule")));
+    await click(button(view.container, "Record outcome"));
     await click(button(view.container, "Record & Notify Client"));
     assert.match(view.container.textContent, /Outcome: not a recognised outcome/);
     assert.doesNotMatch(view.container.textContent, /\[object Object\]/);

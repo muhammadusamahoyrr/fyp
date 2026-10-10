@@ -40,6 +40,11 @@ async function mount() {
             h(ToastCtx.Provider, { value: { show: () => {} } }, h(SettingsPage))));
     });
     await settle(80);
+    // Settings shows one section at a time (2026-10-09); sign-out and closure
+    // live under "Sign out & delete" in the section list.
+    const section = [...container.querySelectorAll("button")].find(b => b.textContent.trim() === "Sign out & delete");
+    await act(async () => { section.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await settle();
     return { container, unmount: async () => { await act(async () => root.unmount()); container.remove(); } };
 }
 const button = (root, text) => [...root.querySelectorAll("button")].find(b => b.textContent.trim() === text);
@@ -59,6 +64,35 @@ test.beforeEach(() => {
     api.__reset();
     api.__respond("bootstrapAuth", true);
     api.__respond("getMe", { data: { _id: "l1", role: "lawyer" }, error: null });
+});
+
+test("the danger card can rerender without conflicting border styles", async () => {
+    const errors = [];
+    const realError = console.error;
+    let view;
+    console.error = (...args) => errors.push(args.map(String).join(" "));
+    try {
+        view = await mount();
+        const dangerCard = view.container.querySelector(".s4");
+        assert.ok(dangerCard, "danger card not found");
+        await act(async () => {
+            dangerCard.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        });
+        const signOut = button(view.container, "Sign Out");
+        assert.ok(signOut, "sign-out button not found");
+        await act(async () => {
+            signOut.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        });
+        await settle();
+        assert.equal(
+            errors.some(message => /conflicting property.*borderColor|style property.*border/i.test(message)),
+            false,
+            errors.join("\n"),
+        );
+    } finally {
+        if (view) await view.unmount();
+        console.error = realError;
+    }
 });
 
 test("Delete Account asks for the password and sends nothing without it", async () => {

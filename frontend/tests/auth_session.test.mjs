@@ -82,6 +82,25 @@ test("a cold load distinguishes an unavailable backend from a signed-out session
 });
 
 
+test("a rejected login keeps the backend's credential error", async () => {
+    globalThis.BroadcastChannel = undefined;
+    globalThis.fetch = async (url) => {
+        assert.match(url, /\/auth\/login$/);
+        return new Response(JSON.stringify({ detail: "Incorrect email or password" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+        });
+    };
+
+    const api = await import(`../src/lib/api.js?auth-login-401=${Date.now()}`);
+    const result = await api.authLogin("lawyer@example.com", "wrong-password");
+
+    assert.equal(result.status, 401);
+    assert.equal(result.error.message, "Incorrect email or password");
+    assert.doesNotMatch(result.error.message, /different URL|signed out/i);
+});
+
+
 test("an explicit rejected refresh still clears an expired access token", async () => {
     globalThis.BroadcastChannel = undefined;
     globalThis.fetch = async (url) => {
