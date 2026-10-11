@@ -36,7 +36,7 @@ from app.services import artifact_store
 from app.services import document_transitions as tx
 from app.services import document_v2_service as v2
 from app.services import document_workspace_assist
-from app.services.document_service import _clean_draft_html
+from app.services.document_service import _clean_draft_html, visible_text
 from app.services import template_registry
 from app.services.pdf_generator import template_html
 
@@ -138,10 +138,13 @@ def _lawyer_revisions(doc: dict, user_id: str) -> set[str]:
             and doc.get("submitted_revision_id")):
         seen.add(doc["submitted_revision_id"])
 
-    # Everything they have decided, across every cycle.
+    # Everything they have decided, across every cycle -- and the revision of
+    # their own wording, when they returned it with edits.
     for cycle in doc.get("review_cycles") or []:
         if str(cycle.get("lawyer_id") or "") == user_id and cycle.get("revision_id"):
             seen.add(cycle["revision_id"])
+            if cycle.get("edited_revision_id"):
+                seen.add(cycle["edited_revision_id"])
 
     # Decided before review_cycles existed: the single stamp is all there is.
     if not seen and str(doc.get("reviewer_id") or "") == user_id:
@@ -338,6 +341,9 @@ def _revision_public(rev: dict) -> dict:
         # dropped in silence, which is how a safety finding disappears from
         # every response while the record still carries it.
         "field_shape": rev.get("field_shape"),
+        # Set when the reviewing lawyer wrote this revision's wording (a return
+        # with edits), so it is never shown as the client's own text.
+        "edited_by": rev.get("edited_by"),
         "created_at": rev.get("created_at"),
     }
 
@@ -1227,6 +1233,172 @@ async def review_document(
         expected_version=body.expected_version,
         expected_pdf_sha256=body.expected_pdf_sha256, note=body.note,
         idempotency_key=key))
+
+
+# ── the reviewing lawyer's edits ─────────────────────────────────────────────
+#
+# A lawyer reviewing a document may change its wording and hand it back. The
+# edit is a PROPOSAL: it becomes a new revision, marked as the lawyer's, and the
+# document is RETURNED to the client with it. The decision is recorded against
+# the client's submitted bytes, exactly as any return is; nothing is approved
+# here. The client reads the lawyer's version, sends it again if they accept
+# it, and only then can it be approved -- so an approval is still always of a
+# version the client chose to submit.
+
+def _editable_html(rev: dict) -> str | None:
+    """The revision's wording as editor HTML, or None if it has none."""
+    template_type = rev.get("template_type")
+    if template_type in template_registry.FREEFORM:
+        return _clean_draft_html(str((rev.get("fields") or {}).get("body_html") or "")) or None
+    return _text_view(template_type, rev.get("fields") or {})
+
+
+async def _open_review(doc_id: str, current_user: dict) -> tuple[dict, dict]:
+    """The document and its submitted revision, if it is with THIS lawyer now."""
+    doc = await _readable(doc_id, current_user)
+    if (str(doc.get("submitted_to") or "") != str(current_user["_id"])
+            or doc.get("review_status") != "submitted"):
+        raise HTTPException(status_code=409, detail={
+            "code": "not_under_your_review",
+            "message": "Only a document waiting for your decision can be edited.",
+        })
+    rev = await revision_repo.find_by_id(doc.get("submitted_revision_id"))
+    if not rev or rev.get("document_id") != doc_id:
+        raise _not_found()
+    return doc, rev
+
+
+@router.get("/{doc_id}/review/text")
+async def review_text_v2(
+    doc_id: str,
+    current_user: dict = Depends(require_lawyer),
+):
+    """The submitted revision's wording, for the reviewing lawyer to edit."""
+    _require_enabled()
+    doc, rev = await _open_review(doc_id, current_user)
+    html = await asyncio.to_thread(_editable_html, rev)
+    if not html:
+        raise HTTPException(status_code=409, detail={
+            "code": "text_not_editable",
+            "message": ("This document's wording can't be edited as text. "
+                        "Return it with a note instead."),
+        })
+    return {
+        "document_id": doc_id,
+        "body_html": html,
+        "revision_id": rev["_id"],
+        "version": doc.get("submitted_version"),
+        "pdf_sha256": doc.get("submitted_pdf_sha256"),
+    }
+
+
+class ReturnWithEditsBody(BaseModel):
+    body_html: str = Field(min_length=1, max_length=MAX_WORKSPACE_HTML)
+    note: str | None = Field(default=None, max_length=2000)
+    expected_version: int
+    expected_pdf_sha256: str
+
+
+DEFAULT_EDIT_NOTE = "I have edited the wording. Please read my changes and send it back to me."
+
+
+@router.post("/{doc_id}/review/return-with-edits")
+async def return_with_edits_v2(
+    doc_id: str, body: ReturnWithEditsBody,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: dict = Depends(require_lawyer),
+):
+    """Save the lawyer's wording as a new revision and return the document.
+
+    Two steps, each idempotent under its own key derived from the request's:
+    a retry after either one completes the rest and answers with the same
+    result, rather than editing or deciding twice.
+    """
+    _require_enabled()
+    key = _require_key(idempotency_key)
+    if len(key) > 180:
+        raise HTTPException(status_code=422, detail={
+            "code": "invalid_idempotency_key",
+            "message": "Idempotency-Key must be at most 180 characters here."})
+    lawyer_id = str(current_user["_id"])
+    edit_key, return_key = f"{key}.edit", f"{key}.return"
+    note = (body.note or "").strip() or DEFAULT_EDIT_NOTE
+
+    # A retry: the edit was already saved. Finish the return (or, if that went
+    # through too, have its receipt answer) -- never save the edit twice.
+    doc = await get_documents_col().find_one({"_id": doc_id, "schema_version": 2})
+    if doc is None or _access(doc, current_user) is None:
+        raise _not_found()
+    done = await revision_repo.find_by_idempotency(doc_id, edit_key)
+    if done and done.get("status") == "generated":
+        result = await _run(tx.review(
+            document_id=doc_id, reviewer_id=lawyer_id, action="return",
+            expected_version=body.expected_version,
+            expected_pdf_sha256=body.expected_pdf_sha256, note=note,
+            idempotency_key=return_key, edited_revision_id=done["_id"]))
+        return {"revision": _revision_public(done), "review": result}
+
+    doc, base = await _open_review(doc_id, current_user)
+    if (doc.get("submitted_version") != body.expected_version
+            or doc.get("submitted_pdf_sha256") != body.expected_pdf_sha256):
+        raise HTTPException(status_code=409, detail={
+            "code": "stale_review",
+            "message": "This document changed since you opened it. Reload it before editing.",
+        })
+    html = _clean_draft_html(body.body_html)
+    if not visible_text(html).strip():
+        raise HTTPException(status_code=422, detail={
+            "code": "invalid_workspace_content",
+            "message": "The document can't be sent back empty.",
+        })
+
+    template_type = base.get("template_type")
+    base_fields = dict(base.get("fields") or {})
+    if template_type in template_registry.FREEFORM:
+        fields = {**base_fields, "body_html": html}
+    elif template_registry.text_editable(template_type):
+        fields = {"title": doc.get("title") or "Legal Document",
+                  "source_template": template_type, "body_html": html}
+        template_type = "edited_document"
+    else:
+        raise HTTPException(status_code=409, detail={
+            "code": "text_not_editable",
+            "message": "This document's wording can't be edited as text. Return it with a note instead.",
+        })
+
+    # Based on the SUBMITTED revision, and only while it is still the current
+    # one. If the client has generated a private draft since, editing here
+    # would either overwrite it or be built on bytes the lawyer never saw.
+    if doc.get("current_revision_id") != base["_id"]:
+        raise HTTPException(status_code=409, detail={
+            "code": "client_has_newer_draft",
+            "message": ("The client has changed this document since sending it. "
+                        "Return it with a note instead of editing."),
+        })
+    rev = await _run(v2.generate_revision(
+        document_id=doc_id, template_type=template_type, fields=fields,
+        idempotency_key=edit_key,
+        expected_revision_id=base["_id"],
+        expected_version=doc.get("current_version", 0),
+        expected_content_epoch=doc.get("content_epoch", 0),
+    ))
+    if rev.get("status") != "generated":
+        raise HTTPException(status_code=503, detail={
+            "code": "generation_failed",
+            "message": "Your edits could not be saved. Try again.",
+        })
+    edited_by = {"role": "lawyer", "user_id": lawyer_id,
+                 "name": str(current_user.get("full_name") or "").strip() or None}
+    await get_document_revisions_col().update_one(
+        {"_id": rev["_id"]}, {"$set": {"edited_by": edited_by}})
+    rev["edited_by"] = edited_by
+
+    result = await _run(tx.review(
+        document_id=doc_id, reviewer_id=lawyer_id, action="return",
+        expected_version=body.expected_version,
+        expected_pdf_sha256=body.expected_pdf_sha256, note=note,
+        idempotency_key=return_key, edited_revision_id=rev["_id"]))
+    return {"revision": _revision_public(rev), "review": result}
 
 
 @router.post("/{doc_id}/withdraw")

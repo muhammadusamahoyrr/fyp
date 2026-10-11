@@ -145,6 +145,39 @@ def is_unreviewed_template(body_html: str) -> bool:
 # `body_format` is stamped on every row so a future rich-HTML mode is a
 # different declared format rather than a silent reinterpretation of old rows.
 BODY_FORMAT_PLAIN_TEXT = "plain_text"
+# The rich format (2026-10-11): sanitised HTML from the builder's editor. See
+# `agreement_html` for why the body must already be canonical when it is sent.
+BODY_FORMAT_HTML = "html"
+BODY_FORMATS = (BODY_FORMAT_PLAIN_TEXT, BODY_FORMAT_HTML)
+
+
+def canonical_html_or_refuse(body: str) -> str:
+    """A rich body exactly as it will be hashed, or a refusal.
+
+    Refused, not quietly cleaned, when sanitising would change it: the creator
+    signs in this same request, and must be bound to the text they reviewed --
+    which the builder took from `preview_body`, so a body that came from there
+    always passes.
+    """
+    from app.services import agreement_html
+
+    clean = agreement_html.sanitise(body)
+    if clean != body:
+        raise AppValidationError(
+            "The agreement's formatting changed when it was checked. Go back to "
+            "Review, look at the text again, and send it from there."
+        )
+    if not agreement_html.visible_text(clean):
+        raise AppValidationError("The agreement has no text.")
+    return clean
+
+
+def preview_body(body_html: str) -> dict:
+    """The canonical form of a rich body, for the builder's Review step."""
+    from app.services import agreement_html
+
+    clean = agreement_html.sanitise(normalise_body(body_html))
+    return {"body_html": clean, "has_text": bool(agreement_html.visible_text(clean))}
 
 # Everything in C0 except tab (\x09) and newline (\x0a), plus DEL. Carriage
 # return is absent deliberately: it is normalised away below rather than
@@ -875,7 +908,7 @@ async def create_user_agreement(
 
 def _send_fingerprint(*, title: str, body_sha256: str, parties: list[str],
                       case_id: str | None, signature_data: str,
-                      consent: bool) -> str:
+                      consent: bool, body_format: str = BODY_FORMAT_PLAIN_TEXT) -> str:
     """Canonical fingerprint of a create-and-send request.
 
     The same idea as `_draft_fingerprint`, for a request that has no draft to
@@ -885,7 +918,7 @@ def _send_fingerprint(*, title: str, body_sha256: str, parties: list[str],
     """
     from app.services import document_transitions as tx
 
-    return tx.canonical_body_hash({
+    payload = {
         "title": title,
         "body_sha256": body_sha256,
         "parties": sorted(parties),
@@ -893,7 +926,12 @@ def _send_fingerprint(*, title: str, body_sha256: str, parties: list[str],
         "signature_sha256": hashlib.sha256(
             (signature_data or "").encode("utf-8")).hexdigest(),
         "consent": bool(consent),
-    })
+    }
+    # Only when rich, so every plain-text fingerprint already recorded stays
+    # valid: the same characters as text and as HTML are different documents.
+    if body_format != BODY_FORMAT_PLAIN_TEXT:
+        payload["body_format"] = body_format
+    return tx.canonical_body_hash(payload)
 
 
 def _idempotent_agreement_id(creator_id: str, idempotency_key: str) -> str:
@@ -933,6 +971,7 @@ async def create_and_send_agreement(
     case_id: str | None = None,
     ip_address: str | None = None,
     ip_verifiable: bool = False,
+    body_format: str = BODY_FORMAT_PLAIN_TEXT,
 ) -> dict:
     """Create, sign as the creator, and send -- ONE transaction, or nothing.
 
@@ -999,11 +1038,15 @@ async def create_and_send_agreement(
     if method not in {m.value for m in SignatureMethod}:
         raise AppValidationError("Unknown signature method.")
 
+    if body_format not in BODY_FORMATS:
+        raise AppValidationError("Unknown body format.")
     body = normalise_body(body_html)
+    if body_format == BODY_FORMAT_HTML:
+        body = canonical_html_or_refuse(body)
     digest = body_digest(body)
     agreement_id = _idempotent_agreement_id(creator_id, idempotency_key)
     fingerprint = _send_fingerprint(
-        title=title, body_sha256=digest,
+        title=title, body_sha256=digest, body_format=body_format,
         parties=party_ids + [f"email:{e['email'].strip().lower()}"
                              for e in external_specs],
         case_id=case_id,
@@ -1052,7 +1095,7 @@ async def create_and_send_agreement(
         "_id": agreement_id,
         "title": title,
         "body_html": body,
-        "body_format": BODY_FORMAT_PLAIN_TEXT,
+        "body_format": body_format,
         "body_sha256": digest,
         "eto_classification": eto,
         "case_id": case_id,
@@ -1969,6 +2012,8 @@ async def agreement_by_invitation(token: str) -> dict:
         "id": agreement["_id"],
         "title": agreement.get("title"),
         "body_html": agreement.get("body_html"),
+        # Old rows carry no format: they are plain text.
+        "body_format": agreement.get("body_format") or BODY_FORMAT_PLAIN_TEXT,
         "body_sha256": agreement.get("body_sha256"),
         "status": agreement.get("status"),
         "you": {

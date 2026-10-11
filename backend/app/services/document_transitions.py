@@ -235,7 +235,11 @@ async def submit(
     *, document_id: str, actor_id: str, expected_version: int,
     expected_pdf_sha256: str, lawyer_id: str, urgency: str = "normal",
     note: str | None = None, idempotency_key: str,
+    quick_review_id: str | None = None,
 ) -> dict:
+    """`quick_review_id`: set ONLY by quick_review.accept, never by a route. The
+    lawyer's acceptance of that request authorises this one submission in place
+    of an engagement."""
     validate_idempotency_key(idempotency_key)
     doc = await get_documents_col().find_one({"_id": document_id})
     if not doc:
@@ -326,9 +330,19 @@ async def submit(
                 "go to the lawyer engaged on it.")
 
     # D1: the relationship authorises the submission, case or no case.
-    from app.services.document_sharing import require_accepted_engagement
-    await require_accepted_engagement(client_id=actor_id, lawyer_id=lawyer_id,
-                                      case_id=doc.get("case_id"))
+    # A quick review stands in for the engagement -- but only an ACCEPTED one,
+    # by this lawyer, of this document, being accepted right now.
+    if quick_review_id:
+        from app.db.mongodb import get_database
+        qr = await get_database()["quick_review_requests"].find_one({
+            "_id": quick_review_id, "doc_id": document_id, "client_id": actor_id,
+            "lawyer_id": str(lawyer_id), "status": "accepting"})
+        if not qr:
+            raise ForbiddenError("This review request does not authorise this submission.")
+    else:
+        from app.services.document_sharing import require_accepted_engagement
+        await require_accepted_engagement(client_id=actor_id, lawyer_id=lawyer_id,
+                                          case_id=doc.get("case_id"))
 
     now = _now()
     # If resubmitting after an approval, preserve the old approval in history.
@@ -344,6 +358,9 @@ async def submit(
         # labelled as the client's. `review_note` now holds only a lawyer's
         # note, so it is cleared for the new cycle.
         "client_note": note, "review_note": None,
+        # Which quick review this submission came from, if any -- the lawyer's
+        # inbox marks it, since there is no engagement behind it.
+        "quick_review_id": quick_review_id,
         "approval_history": {"$concatArrays": [
             {"$ifNull": ["$approval_history", []]},
             {"$cond": [{"$eq": ["$review_status", "approved"]},
@@ -428,9 +445,18 @@ MAX_REVIEW_CYCLES = 64
 
 
 def _cycle(*, reviewer_id: str, action: str, new_status: str,
-           decided_at, logical_event_id: str, note: str | None) -> dict:
+           decided_at, logical_event_id: str, note: str | None,
+           edited_revision_id: str | None = None) -> dict:
     """The durable record of one completed review."""
+    extra = {}
+    if edited_revision_id:
+        # A return the lawyer made WITH EDITS: the revision holding their
+        # wording. The decision itself stays bound to the client's submitted
+        # bytes above -- the edit is a proposal handed back, not what was
+        # reviewed.
+        extra["edited_revision_id"] = edited_revision_id
     return {
+        **extra,
         "lawyer_id": reviewer_id,
         "action": action,
         "review_status": new_status,
@@ -466,10 +492,13 @@ _REVIEWED_STAMP = {
 async def review(
     *, document_id: str, reviewer_id: str, action: str, expected_version: int,
     expected_pdf_sha256: str, note: str | None = None, idempotency_key: str,
+    edited_revision_id: str | None = None,
 ) -> dict:
     validate_idempotency_key(idempotency_key)
     if action not in _DECISIONS:
         raise AppValidationError("action must be approve, return or reject")
+    if edited_revision_id and action != "return":
+        raise AppValidationError("Only a return can carry the lawyer's edits")
     if action == "reject" and not (note or "").strip():
         raise AppValidationError("A reason is required when rejecting a document")
 
@@ -517,6 +546,7 @@ async def review(
         {"$ifNull": ["$review_cycles", []]},
         [_cycle(reviewer_id=reviewer_id, action=action, new_status=new_status,
                 decided_at=now, note=note,
+                edited_revision_id=edited_revision_id,
                 logical_event_id=logical_event_id(document_id,
                                                   idempotency_key))],
     ]}
@@ -537,6 +567,8 @@ async def review(
             "submitted_version": None, "submitted_pdf_sha256": None,
         }
 
+    if edited_revision_id:
+        verb = "returned your document with their edits"
     notif = _notif(doc["client_id"], ntype, {"approve": "Document approved",
                                              "return": "Changes requested",
                                              "reject": "Document rejected"}[action],
@@ -812,6 +844,7 @@ QUEUE_PROJECTION = {
     # several cycles on one document, and filtered to theirs in `_project_row`
     # before anything is returned.
     "review_cycles": 1, "submitted_to": 1,
+    "quick_review_id": 1,
 }
 
 
@@ -985,6 +1018,9 @@ def _project_row(row: dict, lawyer_id: str, status: str) -> dict:
     """
     cycles = _my_cycles(row, lawyer_id)
     row.pop("review_cycles", None)
+    # Only the live submission says whether it came from a quick review; on a
+    # decided row the field may describe somebody else's later submission.
+    quick = row.pop("quick_review_id", None)
 
     pending_for_me = (row.get("submitted_to") == lawyer_id
                       and row.get("review_status") == "submitted")
@@ -992,6 +1028,7 @@ def _project_row(row: dict, lawyer_id: str, status: str) -> dict:
     if status == "submitted" or (status == QUEUE_ALL and pending_for_me):
         # Live: keep the submission pointers, drop any decided-side fields.
         row["queue_role"] = "pending"
+        row["quick_review"] = bool(quick)
         # Submissions made before `client_note` existed kept it in review_note.
         row["client_note"] = row.get("client_note") or row.get("review_note")
         row["review_note"] = None

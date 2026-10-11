@@ -15,6 +15,8 @@ from app.schemas.agreement import (
     DraftUpdate,
     AgreementDecline,
     AgreementOut,
+    BodyPreview,
+    BodyPreviewOut,
     SignatureSubmit,
 )
 from app.services import agreement_service
@@ -64,6 +66,7 @@ async def create_agreement(
     return await agreement_service.create_and_send_agreement(
         title=body.title,
         body_html=body.body_html,
+        body_format=body.body_format,
         parties=[p.model_dump() for p in body.party_ids],
         creator_id=current_user["_id"],
         method=body.method.value,
@@ -74,6 +77,14 @@ async def create_agreement(
         ip_address=client_ip(request),
         ip_verifiable=ip_is_verifiable(request),
     )
+
+
+@router.post("/body-preview", response_model=BodyPreviewOut)
+async def preview_body(body: BodyPreview, current_user: dict = Depends(get_current_user)):
+    """The canonical form of a rich agreement body, for the builder's Review
+    step: what is shown there is what will be hashed and signed. Writes
+    nothing. Declared before every `/{agreement_id}` route."""
+    return agreement_service.preview_body(body.body_html)
 
 
 @router.get("", response_model=PaginatedResponse[AgreementListItem])

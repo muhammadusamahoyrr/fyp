@@ -216,6 +216,8 @@ async def test_a_pipeline_failure_still_reports_a_request_id(run_intake, monkeyp
     assert analysis["provenance_request_id"]
     assert analysis["law_citations"] == []
     assert analysis["evidence_chunk_ids"] == []
+    # 2026-10-11: nothing assessed the risk, so no risk level is claimed.
+    assert analysis["risk_level"] is None
 
 
 async def test_an_unparseable_answer_is_a_pipeline_failure(run_intake):

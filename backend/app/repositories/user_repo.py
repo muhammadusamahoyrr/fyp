@@ -51,8 +51,12 @@ class UserRepository(BaseRepository):
         q: str | None = None,
         bar_number: str | None = None,
         sort: str | None = None,
+        specialization: str | None = None,
     ) -> PaginatedResponse:
         """Verified, active lawyers, optionally narrowed.
+
+        `specialization` is one practice area the lawyer lists (property,
+        corporate, tax…); with `case_type` too, the lawyer must list both.
 
         `include_federal` makes the province filter match what the MATCHER
         means by province, rather than what a directory filter means. It is off
@@ -104,8 +108,11 @@ class UserRepository(BaseRepository):
             query["province"] = (
                 {"$in": [province, "federal"]} if include_federal else province
             )
-        if case_type:
-            query["lawyer_profile.specializations"] = case_type
+        areas = [a for a in (case_type, specialization) if a]
+        if len(areas) == 1:
+            query["lawyer_profile.specializations"] = areas[0]
+        elif areas:
+            query["lawyer_profile.specializations"] = {"$all": areas}
         if availability is not None:
             query["lawyer_profile.availability"] = availability
 

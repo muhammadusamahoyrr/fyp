@@ -275,6 +275,13 @@ class NotificationType(str, Enum):
     REVIEW_REQUEST_ACCEPTED = "review_request_accepted"
     REVIEW_REQUEST_DECLINED = "review_request_declined"
     REVIEW_REQUEST_CANCELLED = "review_request_cancelled"
+    # Quick document review: a one-off review by a lawyer the client has not
+    # hired (services/quick_review.py).
+    QUICK_REVIEW_REQUESTED = "quick_review_requested"
+    QUICK_REVIEW_ACCEPTED = "quick_review_accepted"
+    QUICK_REVIEW_DECLINED = "quick_review_declined"
+    QUICK_REVIEW_EXPIRED = "quick_review_expired"
+    QUICK_REVIEW_CANCELLED = "quick_review_cancelled"
     AGREEMENT_CREATED = "agreement_created"
     AGREEMENT_SIGNED = "agreement_signed"
     AGREEMENT_EXECUTED = "agreement_executed"
@@ -340,3 +347,9 @@ class AppointmentMode(str, Enum):
     VIDEO = "video"
     IN_PERSON = "in_person"
     PHONE = "phone"
+
+# The practice areas a lawyer can list on their profile (the lawyer Profile
+# page's choices). The client directory filters by one of them.
+PRACTICE_AREAS = ("civil", "criminal", "family", "constitutional", "property",
+                  "corporate", "banking", "tax", "labour", "cyber")
+SPECIALIZATION_PATTERN = "^(" + "|".join(PRACTICE_AREAS) + ")$"

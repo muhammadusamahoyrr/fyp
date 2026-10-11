@@ -315,3 +315,33 @@ async def test_conversion_creates_the_case_as_a_draft(converted):
     await intake_service.convert_to_case(TOKEN, CLIENT)
     await asyncio.sleep(0)
     assert converted["case_status"] == "draft"
+
+
+# ── 2026-10-11: a re-sent answer after DONE must not open a new round ────────
+#
+# Before /convert the client re-sends its last answer in case the call that
+# carried it was lost. When the model had said DONE after fewer than four
+# rounds, nothing was outstanding, and the service asked the model for another
+# question -- appending an unanswered round the client never saw.
+
+async def test_a_resent_answer_after_done_asks_no_new_question(spy_llms, monkeypatch):
+    qa = [{"q": "When did it happen?", "a": "March 2023"},
+          {"q": "Do you have the lease?", "a": "Yes"}]
+    repo = FakeIntakeRepo(_doc(clarification_qa=qa))
+    monkeypatch.setattr(intake_service, "intake_repo", repo)
+
+    result = await intake_service.get_clarification(TOKEN, CLIENT, "Yes")
+
+    assert result == {"question": None, "done": True, "round": 2}
+    assert spy_llms["llm"] == 0, "a re-sent answer reached the model for a new question"
+    assert repo.saved_qa is None, "a re-sent answer rewrote the stored Q&A"
+
+
+async def test_an_answer_to_an_outstanding_question_is_still_saved(spy_llms, monkeypatch):
+    qa = [{"q": "When did it happen?", "a": None}]
+    repo = FakeIntakeRepo(_doc(clarification_qa=qa))
+    monkeypatch.setattr(intake_service, "intake_repo", repo)
+
+    await intake_service.get_clarification(TOKEN, CLIENT, "March 2023")
+
+    assert repo.saved_qa[0]["a"] == "March 2023"
